@@ -2,9 +2,12 @@
 
 ## Status
 
-Accepted 2026-09-29 (FIG-4031). It pins the contract for one clean cutover.
-Nothing below describes current behaviour unless it cites today's code. Six
-implementation lanes build it against this record (§8).
+Accepted and implemented 2026-09-29 (FIG-4031). It pins the contract for one
+clean cutover. Nothing below describes current behaviour unless it cites
+today's code. Six implementation lanes built it against this record (§8), and
+it landed on main in one integration. Two acceptance pieces are follow-ups:
+the PostgreSQL leg of the RLM evidence suite (FIG-4066) and the by-name start
+and CAS halves of case 12 (FIG-4067).
 
 It supersedes the ownership half of
 [ADR 0093](0093-artifact-lifetimes-use-exact-owner-edges.md): the
@@ -1172,24 +1175,34 @@ These go in the cutover, with no shim.
 
 ### 6. FIG-3116 part 1 on this contract
 
-`processes.create({ source, dialect })` is an ordinary journaled tool on the
-process-controls plugin (`crates/lash-plugin-process-controls/src/declarations.rs`).
-It returns a definition value, the same `ProcessDefinitionRef` shape
-`processes.start` takes. Inside its journaled effect, before it records its
-result, it:
+`processes.create({ source, dialect })` is an ordinary leaf tool on the
+lashlang engine's tool surface, beside `triggers.register`
+(`crates/lash-lashlang-runtime/src/process_create_tool.rs`, registered by the
+RLM plugins). It returns a definition value, the same `ProcessDefinitionRef`
+shape `processes.start` takes. Under ADR 0116 its body drives nothing, so the
+two writes move from the body to realization:
 
-1. compiles the module (pure, ADR 0093);
-2. publishes it under `Execution(the call's journal)`, which arms that guard;
-3. acquires `FrameEnvironment(S, F)` for the frame the calling turn was
-   admitted on.
+1. The attempt compiles the module (pure, ADR 0093): the dialect lowers the
+   source, and it links against the catalog the attempt was dispatched with.
+   It answers the definition value of the module's one process and declares a
+   `RegisterProcessDefinition` intent with no name that carries the module's
+   store bytes.
+2. Realization publishes those bytes under `Execution(the realizing
+   execution's journal)`, which arms that guard, and resolves the definition
+   through its engine. No registry slot is written. A redrive publishes the
+   same content-addressed bytes again and changes nothing.
+3. The cell that binds the value acquires `FrameEnvironment(S, F)` for its
+   module at the cell's end (§3.1). Intents drain before the call's output
+   reaches the cell, so the module is published by then.
 
-A redrive that re-executes the effect repeats both writes idempotently. A
-replay that reads the recorded result touches no store. There is no lifetime
-argument, no plugin lifetime policy, and no new referrer kind.
+There is no lifetime argument, no plugin lifetime policy, and no new referrer
+kind. A host front door has no frame to hold a created definition, so it
+refuses an unnamed registration.
 
 The value then lives in the frame's globals and holds F's edge (I-frame). It
 survives a switch only when a `continue_as` seed passes it, because
-`frame_switch_carries` finds its module. Starting it acquires `Start(key)`
+`frame_switch_carries` finds its module, and session deletion ends F and
+reclaims it. Starting it acquires `Start(key)`
 and then `ProcessRecord(id)` (§3.3) and consumes nothing. Registering it by
 name acquires a `DefinitionRevision` (§3.6). Start lifetime stays ADR 0108's.
 FIG-3116's `triggers.register` half rides §3.4 unchanged.
@@ -1211,7 +1224,9 @@ RLM-level cases live in `crates/lash/tests/artifact_referrers_evidence.rs`
 and on PostgreSQL when `LASH_POSTGRES_DATABASE_URL` is set. They fail rather
 than skip under `LASH_REQUIRE_POSTGRES=1`, the pattern of
 `crates/lash-restate/src/tests/postgres_ingress.rs:74-76`. The PostgreSQL half
-runs under `scripts/ci/with-service.sh pg16`.
+runs under `scripts/ci/with-service.sh pg16`. At integration it has none: the
+Restate double has no PostgreSQL-backed store set, and FIG-4066 builds one and
+adds the leg.
 
 Every case asserts the exact edge set after each step, eventual reclamation
 after the relay drains, and that a second relay pass changes nothing.
@@ -1265,7 +1280,9 @@ after the relay drains, and that a second relay pass changes nothing.
     name, then `continue_as` without carrying it. The frame edge goes after
     the gate. The `DefinitionRevision` edge keeps the module, and a new turn
     starts it by name. Replacing the name ends the old revision after its
-    creator settles.
+    creator settles. At integration the suite proves the first two sentences
+    and that the name still resolves to the kept module; no public path starts
+    a process by name or replaces a name by CAS yet, so FIG-4067 adds the rest.
 13. **Fork of a live and an ended frame** (conformance). A fork inside a live
     frame copies the frame's edges to the fork's own id. A fork at a pinned
     point whose frame was switched inherits no execution-state components.
@@ -1285,10 +1302,12 @@ after the relay drains, and that a second relay pass changes nothing.
 16. **Retry idempotency** (conformance). Run every delivery twice, including
     after a claim lapses mid-delivery. The edge sets, fences and reclaimed
     rows are identical.
-17. **Journal verdict** (`//crates/lash-restate:lash-restate__unit_test`). A
-    wait retirement alone answers `MayReplay`. A completed root drive, a
-    terminal process with no held segment run, and a quiescent runtime
-    operation answer `Settled`.
+17. **Journal verdict** (`//crates/lash-restate-test:journal_verdict__test`,
+    on the in-process double beside the other double suites). A wait
+    retirement alone answers `MayReplay`. A completed root drive, a terminal
+    process with no held segment run, and a quiescent runtime operation answer
+    `Settled`. A pruned process stands for the terminal one; the completed
+    root drive is case 1's wait.
 
 ### 8. Lanes and file ownership
 
@@ -1485,3 +1504,46 @@ orchestrator.
   deterministic trigger incarnations, and the `RuntimeErrorCode` rename.
   Old catalogs are refused and recreated. A journal in flight at the cutover
   deploy drains on the build that wrote it (ADR 0106).
+
+## Lane G amendment
+
+Amended 2026-09-29 (FIG-4031, lane G). §3.1 ended one frame per commit, and
+only when a turn's final commit or a compaction attached a `FrameTransition`.
+Two frames therefore kept their edges until session deletion:
+
+- a frame opened only in resident state (a direct `open_agent_frame`) and
+  switched away from by the same commit, after an earlier committed frame:
+  the transition could end only the head frame;
+- the frame left by a direct `open_agent_frame` committed by a park or a
+  session command, which attaches no transition.
+
+**Rule.** A commit ends every frame it leaves. The frames it leaves are the
+prior head's frame, then each frame whose `FrameOpen` the commit appends, in
+graph order, except the frame the new head holds
+(`lash_core_store::store::frames_left_by_commit`). The store derives this
+chain inside the session commit transaction, from the head it has locked and
+the commit's own nodes, and ends each frame in it: its fence, and its
+`Ended { carries: [] }` record. The executor names no chain, so no commit
+path can leave a frame unended, whatever its origin.
+
+**`FrameTransition` keeps its shape.** It now says only what the store
+cannot know: the carries, the frame they leave, and the gate.
+
+- `ended` names the frame whose edges hold the carries: the frame the
+  switching turn was admitted on. It must be one of the frames the commit
+  leaves (the head's frame, or one this commit opens); otherwise the commit
+  is refused. This replaces lane S's first-commit rule (c2540bbff8), which
+  is the case where the chain holds only an appended frame.
+- The carry check of §3.1 step 1 is unchanged: each carry needs an edge of
+  `ended`, or the commit fails `ArtifactCarryMissing`. A `continue_as` seed
+  naming a module its frame does not hold fails closed.
+- `gate` gates the cleanup of every frame in the chain.
+
+A commit that leaves frames with no transition (a park or a session command
+that persists a direct frame open) ends them ungated: no execution is
+running on the session, and the turns that read those frames have already
+committed. This is the reasoning session deletion uses.
+
+**Locks.** On PostgreSQL the commit takes the referrer locks of every ended
+frame and of the successor, sorted by key, then the carried artifacts' locks,
+as §2.3 orders them. SQLite serializes on its one writer.

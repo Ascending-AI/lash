@@ -269,7 +269,7 @@ impl crate::StoreSet for StoreLawStores {
     }
 
     fn module_artifacts(&self) -> Arc<dyn crate::ModuleArtifactStore> {
-        Self::no_second_substrate("Lashlang artifact store")
+        Arc::new(UnavailableModuleArtifacts)
     }
 
     fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
@@ -287,7 +287,143 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("obligation ledger")
     }
 
+    fn artifact_cleanup(&self) -> Arc<dyn crate::store::ArtifactCleanupLedger> {
+        Arc::new(UnavailableArtifactCleanup)
+    }
+
     fn session_delete_ledger(&self) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger> {
         Self::no_second_substrate("session delete ledger")
+    }
+}
+
+// Host construction captures these ports even in store-only laws. Any use of
+// them still fails at the boundary the law intentionally does not provide.
+struct UnavailableModuleArtifacts;
+
+#[async_trait::async_trait]
+impl crate::ModuleArtifactStore for UnavailableModuleArtifacts {
+    async fn publish_module_artifact(
+        &self,
+        _: &crate::ReferrerClaim,
+        _: &str,
+        _: &[u8],
+    ) -> Result<(), crate::ArtifactStoreError> {
+        StoreLawStores::no_second_substrate("Lashlang artifact store")
+    }
+
+    async fn acquire_module_artifact(
+        &self,
+        _: &crate::ReferrerClaim,
+        _: &str,
+    ) -> Result<(), crate::ArtifactStoreError> {
+        StoreLawStores::no_second_substrate("Lashlang artifact store")
+    }
+
+    async fn end_module_referrer(
+        &self,
+        _: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError> {
+        StoreLawStores::no_second_substrate("Lashlang artifact store")
+    }
+
+    async fn get_module_artifact(
+        &self,
+        _: &str,
+    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
+        StoreLawStores::no_second_substrate("Lashlang artifact store")
+    }
+}
+
+struct UnavailableArtifactCleanup;
+
+#[async_trait::async_trait]
+impl crate::store::ObligationLedger for UnavailableArtifactCleanup {
+    fn kind(&self) -> crate::store::ObligationKind {
+        crate::store::ObligationKind::ArtifactCleanup
+    }
+
+    async fn arm(
+        &self,
+        _: &crate::store::ObligationKey,
+        _: u64,
+    ) -> Result<Option<crate::store::ObligationId>, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+
+    async fn claim_due(
+        &self,
+        _: u64,
+        _: u64,
+        _: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::store::ClaimedObligation>, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+
+    async fn claim(
+        &self,
+        _: &crate::store::ObligationId,
+        _: u64,
+        _: u64,
+    ) -> Result<Option<crate::store::ClaimedObligation>, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+
+    async fn settle(
+        &self,
+        _: &crate::store::ObligationId,
+        _: &crate::store::ClaimToken,
+        _: crate::store::ObligationSettlement,
+        _: u64,
+    ) -> Result<crate::store::SettleOutcome, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+
+    async fn rearm(
+        &self,
+        _: &crate::store::ObligationId,
+        _: u64,
+    ) -> Result<bool, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+
+    async fn list_stalled(
+        &self,
+        _: Option<&crate::store::ObligationId>,
+        _: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::store::StalledObligation>, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+
+    async fn count_stalled(&self) -> Result<u64, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+
+    async fn standing(
+        &self,
+        _: &crate::store::ObligationId,
+    ) -> Result<Option<crate::store::ObligationStanding>, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::store::ArtifactCleanupLedger for UnavailableArtifactCleanup {
+    async fn arm_cleanup(
+        &self,
+        _: &crate::ArtifactCleanup,
+        _: u64,
+    ) -> Result<crate::store::ObligationId, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+
+    async fn nudge(&self, _: &crate::ArtifactReferrer, _: u64) -> Result<bool, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+
+    async fn load_cleanup(
+        &self,
+        _: &crate::store::ObligationId,
+    ) -> Result<Option<crate::ArtifactCleanup>, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
     }
 }

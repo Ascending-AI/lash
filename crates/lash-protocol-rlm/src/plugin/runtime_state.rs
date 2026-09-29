@@ -354,6 +354,14 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
         self.state.execution_state_dirty()
     }
 
+    async fn frame_switch_carries(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+        initial_nodes: &[lash_core::SessionAppendNode],
+    ) -> Result<Vec<lash_core::ArtifactName>, SessionError> {
+        Ok(frame_switch_carries(initial_nodes))
+    }
+
     fn executable_generation(&self) -> Option<lash_core::ExecutableGeneration> {
         Some(lash_lashlang_runtime::lashlang_cell_generation())
     }
@@ -409,6 +417,38 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
     ) -> Result<(), SessionError> {
         self.state.settle_code_execution(disposition).await
     }
+}
+
+/// The module artifacts a frame switch carries (ADR 0113 §3.1): every module
+/// a value in the switch's seed and globals events references. Only these
+/// survive into the successor frame; the ended frame's other modules are
+/// severed once the switching turn settles.
+fn frame_switch_carries(nodes: &[lash_core::SessionAppendNode]) -> Vec<lash_core::ArtifactName> {
+    let mut modules = BTreeSet::new();
+    for node in nodes {
+        let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node else {
+            continue;
+        };
+        let values = match decode_rlm_protocol_event(event) {
+            Some(RlmProtocolEvent::RlmSeed(seed)) => serde_json::to_value(&seed),
+            Some(RlmProtocolEvent::RlmGlobalsPatch(patch)) => serde_json::to_value(&patch),
+            _ => continue,
+        };
+        // Both bodies are JSON maps, so encoding them cannot fail; a body
+        // that did would carry nothing.
+        if let Ok(values) = values {
+            modules.extend(lashlang::referenced_module_refs(
+                &crate::projection::json_to_flow_value(values),
+            ));
+        }
+    }
+    modules
+        .into_iter()
+        .map(|module_ref| lash_core::ArtifactName {
+            store: lash_core::ArtifactStoreId::LashlangModule,
+            artifact_ref: module_ref.to_string(),
+        })
+        .collect()
 }
 
 pub(crate) fn reject_reserved_projected_binding_names(
@@ -1169,5 +1209,57 @@ mod tests {
                     serde_json::json!("committed")
                 );
             });
+    }
+
+    /// A process definition value naming a module built from `source`.
+    fn definition_json(source: &str) -> (String, serde_json::Value) {
+        let module_ref = lashlang::ModuleRef::new(&lashlang::ContentHash::new(source));
+        let identity = lashlang::ProcessDefinitionIdentity::new(
+            module_ref.clone(),
+            lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new("host")),
+            lashlang::ProcessRef::new(lashlang::ContentHash::new("component"), 0),
+            "run",
+        );
+        (module_ref.to_string(), identity.to_process_value())
+    }
+
+    #[test]
+    fn a_frame_switch_carries_exactly_the_modules_its_seed_references() {
+        let (carried, carried_value) = definition_json("carried");
+        let (projected, projected_value) = definition_json("projected");
+        let mut seed = crate::projection::RlmSeed::from_seed_value(&serde_json::json!({
+            "plain": 1,
+            "nested": { "list": [carried_value.clone(), carried_value] },
+        }))
+        .expect("seed value");
+        seed.projected.push(
+            "projected_definition".to_string(),
+            lash_rlm_types::RlmProjectedSeedEntry::Materialized(projected_value),
+        );
+        let mut nodes = crate::projection::rlm_seed_initial_nodes(seed);
+        // A globals patch in the initial nodes is replayed into the new
+        // frame too, so what it names is carried.
+        let (patched, patched_value) = definition_json("patched");
+        nodes.push(lash_core::SessionAppendNode::protocol_event(
+            crate::projection::rlm_protocol_event(RlmProtocolEvent::RlmGlobalsPatch(
+                RlmGlobalsPatchPluginBody {
+                    set_default: serde_json::Map::from_iter([(
+                        "patched".to_string(),
+                        patched_value,
+                    )]),
+                },
+            )),
+        ));
+
+        let mut expected = [carried, projected, patched]
+            .into_iter()
+            .map(|artifact_ref| lash_core::ArtifactName {
+                store: lash_core::ArtifactStoreId::LashlangModule,
+                artifact_ref,
+            })
+            .collect::<Vec<_>>();
+        expected.sort();
+        assert_eq!(frame_switch_carries(&nodes), expected);
+        assert!(frame_switch_carries(&[]).is_empty());
     }
 }

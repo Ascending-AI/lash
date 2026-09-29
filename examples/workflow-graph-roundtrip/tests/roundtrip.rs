@@ -2185,29 +2185,6 @@ async fn new_call_without_receiver_expression_returns_typed_error() {
             .is_some_and(|message| message.contains("needs a receiver call"))
     );
 
-    let mut document = select_workflow(&client, &base, "blank").await;
-    let comprehension = new_flow_node(
-        "new:empty-comprehension",
-        "container",
-        Some("comprehension"),
-        "list comprehension",
-    );
-    append_process_node(&mut document, comprehension);
-    let response = client
-        .post(format!("{base}/workflow"))
-        .json(&document)
-        .send()
-        .await
-        .expect("save empty comprehension");
-    assert_eq!(response.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
-    let body: Value = response.json().await.expect("typed error response");
-    assert_eq!(body["error"]["code"], "invalid_node_payload");
-    assert!(
-        body["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("container body cannot be empty"))
-    );
-
     server.abort();
 }
 
@@ -2401,7 +2378,6 @@ fn new_flow_node(id: &str, kind: &str, subkind: Option<&str>, title: &str) -> Fl
             expression: None,
             condition: None,
             iterable: None,
-            clauses: Vec::new(),
             source: None,
             children: Vec::new(),
             available_vars: Vec::new(),

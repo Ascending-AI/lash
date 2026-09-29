@@ -68,7 +68,7 @@ impl TurnAttach for RestateTurnAttach {
             .name();
         let resolution = self
             .ingress
-            .call_workflow_json::<_, Resolution>(
+            .call_lash_workflow::<_, Resolution>(
                 &service,
                 &workflow_key,
                 "await_resolution",

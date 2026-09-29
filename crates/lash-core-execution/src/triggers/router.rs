@@ -273,19 +273,15 @@ fn project_trigger_process_input(
             definition_key,
             create_request: _,
             turn_input: _,
-            output_contract,
+            result,
         } => {
             identity.tag(3);
             identity.string(definition_key);
-            match output_contract {
-                crate::ToolOutputContract::Static => identity.tag(1),
-                crate::ToolOutputContract::FromInputSchema {
-                    input_field,
-                    default_schema,
-                } => {
+            match result {
+                crate::SessionTurnResult::Turn => identity.tag(1),
+                crate::SessionTurnResult::FinalValue { schema } => {
                     identity.tag(2);
-                    identity.string(input_field);
-                    identity.optional(default_schema.as_ref(), project_process_schema_leaf);
+                    identity.optional(schema.as_ref(), project_process_schema_leaf);
                 }
             }
         }
@@ -438,6 +434,12 @@ impl TriggerRouter {
 
     pub(crate) fn store(&self) -> Arc<dyn TriggerStore> {
         Arc::clone(&self.store)
+    }
+
+    /// The env store a trigger registration intent publishes its draft's env
+    /// through, when this router was wired with one (FIG-3116).
+    pub(crate) fn process_env_store(&self) -> Option<Arc<dyn crate::ProcessExecutionEnvStore>> {
+        self.process_env_store.as_ref().map(Arc::clone)
     }
 
     /// Emits a recorded [`crate::ToolIntent::EmitTrigger`] declaration and

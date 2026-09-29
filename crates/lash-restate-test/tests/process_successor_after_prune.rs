@@ -49,6 +49,28 @@ impl lash_core::ProcessEngine for RecordingEngine {
         ENGINE_KIND
     }
 
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &lash_core::ResolvedArtifactCleanup,
+    ) -> Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &lash_core::ReferrerClaim,
+        _artifact_ref: &str,
+    ) -> Result<(), lash_core::PluginError> {
+        unreachable!("the recording engine stores no artifacts")
+    }
+
     async fn run(
         &self,
         context: lash_core::ProcessEngineRunContext<'_>,

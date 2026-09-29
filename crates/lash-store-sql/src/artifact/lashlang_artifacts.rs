@@ -8,8 +8,8 @@
 //! carries it or two — which is what stops the next call site inventing a
 //! fourth column subset (FIG-3387).
 //!
-//! `artifact_owners` holds the edges into it, and the two are read under one
-//! advisory-lock order; see [`super::owners`].
+//! `artifact_referrer_edges` holds the edges into it, and the two are read
+//! under one advisory-lock order; see [`super::referrer_edges`].
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "lashlang_artifacts";

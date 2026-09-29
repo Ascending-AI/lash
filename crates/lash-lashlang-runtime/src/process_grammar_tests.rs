@@ -18,21 +18,18 @@ pub(crate) async fn run_sleep_process()
         LashlangAbilities::default().with_sleep(),
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "process pause() -> null { finish await sleep_until(0) }",
+        source: "process pause() -> null { finish await sleep_for(0) }",
         program: process_module(
             "pause",
             Vec::new(),
             lashlang::TypeExpr::Null,
-            b::sleep_until(b::num(0.0)),
+            b::sleep_for(b::num(0.0)),
         ),
         environment: &environment,
     })
     .expect("sleep process compiles");
     store
-        .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("sleep-fixture"),
-            &output.artifact,
-        )
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &output.artifact)
         .await
         .expect("sleep process artifact publishes");
     let input = LashlangProcessInput {

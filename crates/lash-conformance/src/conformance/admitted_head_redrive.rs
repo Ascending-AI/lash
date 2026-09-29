@@ -125,6 +125,14 @@ impl lash_core::plugin::CodeExecutorPlugin for CountingExecutionProtocol {
         }))
     }
 
+    async fn frame_switch_carries(
+        &self,
+        _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
+        _initial_nodes: &[crate::SessionAppendNode],
+    ) -> Result<Vec<crate::ArtifactName>, crate::SessionError> {
+        Ok(Vec::new())
+    }
+
     async fn restore_execution_state(
         &self,
         _ctx: lash_core::plugin::ProtocolSessionContext<'_>,

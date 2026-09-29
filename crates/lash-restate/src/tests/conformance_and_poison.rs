@@ -149,10 +149,7 @@ impl HttpTransport for ConformanceProcessWaitTransport {
             1 => Ok(HttpResponse {
                 status: 200,
                 headers: vec![("content-type".to_string(), "application/json".to_string())],
-                body: HttpResponseBody::buffered(
-                    serde_json::to_string(&self.terminal)
-                        .expect("serialize conformance process terminal"),
-                ),
+                body: HttpResponseBody::buffered(crate::wire::reply_json(&self.terminal)),
             }),
             _ => Err(LlmTransportError::new(
                 "conformance process wait exceeded one reattachment",
@@ -1812,7 +1809,7 @@ pub(super) fn session_turn_registration() -> ProcessRegistration {
                 lash_core::PluginOptions::default(),
             )),
             turn_input: Box::new(lash_core::TurnInput::text("test child turn")),
-            output_contract: lash_core::ToolOutputContract::Static,
+            result: lash_core::SessionTurnResult::Turn,
         },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,

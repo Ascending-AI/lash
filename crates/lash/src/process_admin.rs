@@ -533,7 +533,13 @@ impl Processes {
             Some(cursor) => cursor,
             None => {
                 let (epoch, position) = self.core.process_observation_hub.route(process_id);
-                crate::process_observation::ProcessCursor::new(
+                let version = registry
+                    .fleet_format()
+                    .writer_version(lash_core::surface_format!(
+                        lash_sansio::PROCESS_CURSOR_VERSION
+                    ));
+                crate::process_observation::ProcessCursor::at_version(
+                    version,
                     epoch,
                     lash_sansio::ProcessCursorReference::for_process(process_id),
                     position,
@@ -792,52 +798,6 @@ impl Processes {
                 return Err(err.into());
             }
         };
-        // The registry transaction stores the exact release inputs beside the
-        // tombstone before deleting each process row. Drain every pending job,
-        // including jobs left by an earlier process or host incarnation, and
-        // acknowledge only after all configured artifact stores have severed
-        // the process owner. Thus a failure at either store is resumable by the
-        // next prune call even when this call has no newly eligible rows.
-        for cleanup in registry.pending_process_artifact_cleanup().await? {
-            // The start's staging owner is keyed by its start key (ADR 0107);
-            // the durable cleanup job carries the key past the row's prune. A
-            // process registered without a key staged nothing under a key, and
-            // the keyless owner is shared by every such start, so it is never
-            // fenced here.
-            if let Some(staging_owner) = cleanup.start_staging_owner() {
-                self.core
-                    .env
-                    .core
-                    .durability
-                    .process_env_store
-                    .retire_process_execution_env_owner(&staging_owner)
-                    .await?;
-                self.core
-                    .host_process_engines
-                    .retire_artifact_owner(&staging_owner)
-                    .await?;
-            }
-            let owner = lash_core::ArtifactOwner::process(cleanup.process_id.clone());
-            if let Some(env_ref) = cleanup.env_ref.as_ref() {
-                self.core
-                    .env
-                    .core
-                    .durability
-                    .process_env_store
-                    .release_process_execution_env(&owner, env_ref)
-                    .await?;
-            }
-            self.core
-                .host_process_engines
-                .release_pruned_process_artifacts(&cleanup)
-                .await?;
-            let acknowledgement = registry
-                .complete_process_artifact_cleanup(&cleanup.process_id)
-                .await?;
-            report
-                .artifact_cleanup_acknowledgements
-                .push(acknowledgement);
-        }
         let trigger_store = self.core.env.core.trigger_store();
         let retention = match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
             registry.as_ref(),

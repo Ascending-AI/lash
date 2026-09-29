@@ -142,26 +142,18 @@ fn the_published_ddl_seeds_every_required_row() {
         .lines()
         .next()
         .expect("the DDL artifact must have a header line")
-        .strip_prefix("-- lash-postgres-store schema, component version ")
-        .expect("the DDL header must declare the component version")
-        .strip_suffix(".")
-        .expect("the DDL header version must end with a period")
+        .strip_prefix("-- lash-postgres-store schema, DDL revision ")
+        .expect("the DDL header must declare its revision")
+        .strip_suffix("; compatibility stamp 1/1.")
+        .expect("the DDL header must declare the compatibility stamp")
         .parse()
-        .expect("the DDL header version must be an integer");
-    let seed_version: i32 = ddl
+        .expect("the DDL revision must be an integer");
+    let seed = ddl
         .lines()
         .find(|line| line.starts_with(&format!("VALUES ('{SCHEMA_COMPONENT}', ")))
-        .expect("the DDL artifact must seed the component version row")
-        .trim_start_matches(&format!("VALUES ('{SCHEMA_COMPONENT}', "))
-        .strip_suffix(")")
-        .expect("the component version seed row must end with a closing paren")
-        .parse()
-        .expect("the seeded component version must be an integer");
-    assert_eq!(
-        [header_version, seed_version, SCHEMA_VERSION],
-        [SCHEMA_VERSION; 3],
-        "the published DDL header, seed row, and compiled schema version must agree"
-    );
+        .expect("the DDL artifact must seed the compatibility stamp");
+    assert_eq!(header_version, SCHEMA_VERSION);
+    assert_eq!(seed, format!("VALUES ('{SCHEMA_COMPONENT}', 1, 1)"));
     for (table, _) in SEED_ROWS {
         assert!(
             ddl.contains(&format!("INSERT INTO {table} ")),
@@ -169,8 +161,8 @@ fn the_published_ddl_seeds_every_required_row() {
         );
     }
     assert!(
-        ddl.contains(&format!("VALUES ('{SCHEMA_COMPONENT}', {SCHEMA_VERSION})")),
-        "the DDL artifact must stamp the component version this build implements"
+        ddl.contains(&format!("VALUES ('{SCHEMA_COMPONENT}', 1, 1)")),
+        "the DDL artifact must stamp compatibility version 1 and floor 1"
     );
     // Every seed is re-applied on each lash-managed open, so each must be a
     // no-op the second time.
@@ -521,7 +513,7 @@ async fn a_freshly_provisioned_scratch_schema_is_conformant() {
         Some(scratch.as_str()),
         "the check must report the schema it actually resolved, not `public`"
     );
-    assert_eq!(report.found_version, Some(SCHEMA_VERSION));
+    assert_eq!(report.found_version, Some(1));
     drop_scratch_schema(connection, &scratch).await;
 }
 

@@ -8,12 +8,16 @@ use serde::{Deserialize, Serialize};
 use crate::plugin::PluginError;
 
 mod mutation;
+mod revision_referrer;
 mod router;
 #[cfg(test)]
 mod tests;
 
 use crate::runtime::process::identity_projection::project_process_payload_leaf;
-pub use mutation::{evaluate_trigger_mutation, evaluate_trigger_mutation_with_incarnation};
+pub use mutation::{
+    evaluate_trigger_mutation, evaluate_trigger_mutation_with_incarnation, trigger_incarnation,
+};
+pub use revision_referrer::RevisionReferrerTriggerStore;
 use router::default_enabled;
 pub use router::*;
 use router::{project_trigger_actor, project_trigger_draft, project_trigger_owner};
@@ -1113,6 +1117,26 @@ pub struct TriggerMutationReceipt {
     pub record_snapshot: TriggerSubscriptionRecord,
 }
 
+/// The trigger handle a mutation answers with: the receipt record plus the
+/// `type`/`id` pair every holder of the handle reads (FIG-3116). Shared by the
+/// host-operation adapter and the registration intent's realized result so
+/// both routes answer the same shape.
+pub fn trigger_handle_outcome_value(
+    receipt: &TriggerMutationReceipt,
+) -> Result<serde_json::Value, PluginError> {
+    let mut value = serde_json::to_value(receipt)
+        .map_err(|err| PluginError::Session(format!("failed to encode trigger receipt: {err}")))?;
+    let object = value.as_object_mut().ok_or_else(|| {
+        PluginError::Session("trigger mutation receipt must encode as a record".to_string())
+    })?;
+    object.insert("type".to_string(), serde_json::json!("trigger_handle"));
+    object.insert(
+        "id".to_string(),
+        serde_json::json!(receipt.subscription_key),
+    );
+    Ok(value)
+}
+
 impl TriggerMutationReceipt {
     fn from_record(record: TriggerSubscriptionRecord, disposition: TriggerMutationOutcome) -> Self {
         Self {
@@ -1442,7 +1466,10 @@ pub fn evaluate_trigger_prune(
             subscription_key: record.subscription_key.clone(),
             expected_revision: record.revision,
         };
-        match evaluate_trigger_mutation(Some(record), command, now)?? {
+        // A delete keeps the row's incarnation and writes none.
+        let incarnation = record.incarnation.clone();
+        match evaluate_trigger_mutation_with_incarnation(Some(record), command, now, incarnation)??
+        {
             TriggerCommandOutcome::Mutation { receipt } => receipts.push(*receipt),
             TriggerCommandOutcome::List { .. } | TriggerCommandOutcome::Prune { .. } => {
                 unreachable!("delete mutation always returns one receipt")

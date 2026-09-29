@@ -1,62 +1,73 @@
-//! Process Prune carries a keyed start's staging owner past the pruned row.
+//! FIG-4028's keyed-start fence law under the referrer model.
 
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
-/// FIG-4028, ADR 0107: a start stages its artifacts under the staging owner
-/// its start key names, and a start that registered its process and stopped
-/// before settling leaves them there. Pruning that process records the key in
-/// the artifact cleanup the prune leaves behind — exactly the record
-/// [`ProcessArtifactCleanup::from_record`](crate::ProcessArtifactCleanup::from_record)
-/// derives from the pruned row — so the cleanup drain retires the staging
-/// owner: what it held is reclaimed, and a late publication under it is
-/// refused.
-///
-/// Red on PostgreSQL before the fix, whose prune assembled the cleanup record
-/// in SQL without the start key, so the drain never learned the owner.
-///
-/// Integrator class (ADR 0051): **conformance-suite embedders** run this law
-/// against custom process registries and process-environment stores.
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
+    reason = "conformance law validates each setup and transition"
 )]
-pub async fn process_prune_retires_the_start_staging_owner(
+pub async fn prune_and_late_transfer_fences(
     registry: Arc<dyn crate::ProcessRegistry>,
     env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
 ) {
-    let key = crate::StartKey::for_host(crate::StartKeyOwner::HOST, "prune-retires-start-staging");
-    let staging_owner =
-        crate::ArtifactOwner::process_start(&crate::ProcessCommand::start_effect_id(Some(&key)));
-    let env_spec = crate::ProcessExecutionEnvSpec::new(
+    let key = crate::StartKey::for_host(crate::StartKeyOwner::HOST, "prune-referrer-fences");
+    let starter = crate::ExecutionScope::runtime_operation("prune-referrer-fences")
+        .journal_identity()
+        .expect("starter journal");
+    let start = crate::ArtifactReferrer::Start(key.clone());
+    let start_claim = crate::ReferrerClaim::guarded(
+        start.clone(),
+        crate::ArtifactCleanupPlan::AwaitStart { starter },
+    )
+    .expect("start claim");
+    let spec = crate::ProcessExecutionEnvSpec::new(
         crate::PluginOptions::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     );
-    let env_ref = env_spec.stable_ref().expect("stable env ref");
-    let env_bytes = env_spec.to_store_bytes().expect("encode env spec");
-
-    // The start staged its environment and registered its process, then
-    // stopped before settling the environment onto the process.
+    let env_ref = spec.stable_ref().expect("stable env ref");
+    let bytes = spec.to_store_bytes().expect("encode env");
     env_store
-        .publish_process_execution_env(&staging_owner, &env_ref, &env_bytes)
+        .publish_process_execution_env(&start_claim, &env_ref, &bytes)
         .await
-        .expect("stage the start's environment");
+        .expect("stage under start");
     let registered = registry
         .register_process(
             crate::ProcessRegistration::new(
                 crate::ProcessInput::Engine {
-                    kind: "test-engine".to_string(),
+                    kind: "test-engine".to_owned(),
                     payload: serde_json::Value::Null,
                 },
                 crate::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
-            .with_start_key(Some(key.clone()))
+            .with_start_key(Some(key))
             .with_execution_env_ref(Some(env_ref.clone())),
         )
         .await
-        .expect("register the keyed process");
-
+        .expect("register keyed process");
+    let process = crate::ArtifactReferrer::ProcessRecord(registered.id.clone());
+    let start_cleanup = crate::ResolvedArtifactCleanup {
+        referrer: start.clone(),
+        carries: vec![crate::ArtifactCarry {
+            artifact: crate::ArtifactName {
+                store: crate::ArtifactStoreId::ProcessEnv,
+                artifact_ref: env_ref.as_str().to_owned(),
+            },
+            to: process.clone(),
+        }],
+    };
+    env_store
+        .end_process_env_referrer(&start_cleanup)
+        .await
+        .expect("settle start");
+    assert_eq!(
+        env_store
+            .get_process_execution_env(&env_ref)
+            .await
+            .expect("load process env"),
+        Some(bytes.clone())
+    );
     let terminal = registry
         .complete_process(
             &registered.id,
@@ -66,7 +77,7 @@ pub async fn process_prune_retires_the_start_staging_owner(
             crate::ProcessCompletionAuthority::workflow_key(registered.id.to_string()),
         )
         .await
-        .expect("complete the keyed process");
+        .expect("complete process");
     let report = registry
         .prune_terminal_processes(
             terminal.updated_at_ms.saturating_add(1),
@@ -74,58 +85,45 @@ pub async fn process_prune_retires_the_start_staging_owner(
             crate::ProjectionWatermark::NoProjector,
         )
         .await
-        .expect("prune the keyed process");
-    assert_eq!(report.pruned_processes, 1, "the keyed process is prunable");
-
-    let pending = registry
-        .pending_process_artifact_cleanup()
-        .await
-        .expect("read the prune's cleanup record");
-    assert_eq!(
-        pending,
-        vec![crate::ProcessArtifactCleanup::from_record(&terminal)],
-        "the prune records the cleanup its pruned row derives"
-    );
-    let cleanup = &pending[0];
-    assert_eq!(
-        cleanup.start_key.as_ref(),
-        Some(&key),
-        "the cleanup record carries the start key"
-    );
-
-    // The drain half the facade runs for the environment store.
-    let retired = cleanup
-        .start_staging_owner()
-        .expect("a keyed process's cleanup names its start's staging owner");
-    assert_eq!(retired, staging_owner);
+        .expect("prune process");
+    assert_eq!(report.pruned_processes, 1);
     env_store
-        .retire_process_execution_env_owner(&retired)
+        .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+            referrer: process.clone(),
+            carries: Vec::new(),
+        })
         .await
-        .expect("retire the start's staging owner");
+        .expect("apply process cleanup");
     assert_eq!(
-        registry
-            .complete_process_artifact_cleanup(&cleanup.process_id)
-            .await
-            .expect("acknowledge the cleanup"),
-        crate::ProcessArtifactCleanupAck::Acknowledged {
-            process_id: registered.id.clone(),
-        }
-    );
-
-    assert!(
         env_store
             .get_process_execution_env(&env_ref)
             .await
-            .expect("read the staged environment after the drain")
-            .is_none(),
-        "retiring the staging owner reclaims what only it held"
+            .expect("read reclaimed env"),
+        None
     );
-    let refusal = env_store
-        .publish_process_execution_env(&staging_owner, &env_ref, &env_bytes)
+    for referrer in [start, process] {
+        let claim = match referrer.clone() {
+            crate::ArtifactReferrer::Start(_) => start_claim.clone(),
+            _ => crate::ReferrerClaim::unguarded(referrer.clone()).expect("process claim"),
+        };
+        let refusal = env_store
+            .publish_process_execution_env(&claim, &env_ref, &bytes)
+            .await
+            .expect_err("ended referrer is fenced");
+        assert!(matches!(
+            refusal,
+            crate::ArtifactStoreError::ReferrerEnded { referrer: ended } if ended == referrer
+        ));
+    }
+    env_store
+        .end_process_env_referrer(&start_cleanup)
         .await
-        .expect_err("the pruned start's staging owner is fenced");
-    assert!(
-        lash_core::runtime::artifact_owner_is_permanently_retired(&refusal),
-        "the fence refusal carries the typed retirement reason, got {refusal}"
+        .expect("late carry skips fenced process");
+    assert_eq!(
+        env_store
+            .get_process_execution_env(&env_ref)
+            .await
+            .expect("read"),
+        None
     );
 }

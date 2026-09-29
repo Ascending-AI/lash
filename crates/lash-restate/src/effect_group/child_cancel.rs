@@ -99,7 +99,7 @@ impl lash_core::GroupChildCancelWatch for IngressChildCancelWatch {
         let resolution = loop {
             match self
                 .ingress
-                .call_workflow_json::<_, Resolution>(
+                .call_lash_workflow::<_, Resolution>(
                     &self
                         .namespace
                         .stable(crate::LashService::DurableWaitWorkflow)

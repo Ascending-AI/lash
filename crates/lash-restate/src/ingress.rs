@@ -15,6 +15,8 @@ use lash_http_transport::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 
+mod lash_calls;
+
 const DEFAULT_CONTROL_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_ATTACH_CEILING_MS: u64 = 6 * 60 * 60 * 1_000;
 
@@ -660,33 +662,6 @@ impl RestateIngressClient {
         Ok(())
     }
 
-    pub(crate) async fn call_object_empty_json<R>(
-        &self,
-        object: &crate::services::ServiceRoute,
-        object_key: &str,
-        handler: &str,
-    ) -> Result<R, RestateHttpError>
-    where
-        R: DeserializeOwned,
-    {
-        let object = restate_path_component(&object.name());
-        let object_key = restate_path_component(object_key);
-        let handler = restate_path_component(handler);
-        let path = format!("{object}/{object_key}/{handler}");
-        let url = format_restate_url(self.connection.ingress_url(), &path);
-        let response = send_request(
-            &self.connection,
-            RestateRequestClass::Control,
-            "Restate object call",
-            HttpRequest::post(&url, ""),
-        )
-        .await?;
-        if !response.is_success() {
-            return Err(status_error("Restate object call", url, response).await);
-        }
-        decode_response("Restate object call", &url, response).await
-    }
-
     pub async fn send_service_json<T: Serialize + ?Sized>(
         &self,
         service: &str,
@@ -889,6 +864,14 @@ pub(crate) struct RestateServiceRegistration {
     pub(crate) deployment_id: String,
     #[serde(default)]
     pub(crate) metadata: std::collections::BTreeMap<String, String>,
+}
+
+/// One deployment as the admin API lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RestateDeployment {
+    pub(crate) id: String,
+    pub(crate) uri: Option<String>,
+    pub(crate) services: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -1211,12 +1194,64 @@ impl RestateAdminClient {
             .map(|deployment| deployment.uri)
     }
 
-    /// Register the endpoint at `uri` as a deployment, replacing any
-    /// deployment already registered at the same URI (`force`).
-    pub(crate) async fn register_deployment(&self, uri: &str) -> Result<(), RestateHttpError> {
+    /// Every deployment the server holds: its id, the URI it was registered
+    /// at, and the service names it serves.
+    pub(crate) async fn deployments(&self) -> Result<Vec<RestateDeployment>, RestateHttpError> {
+        const OPERATION: &str = "Restate deployment listing";
+        #[derive(serde::Deserialize)]
+        struct Listing {
+            deployments: Vec<Listed>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Listed {
+            id: String,
+            #[serde(default)]
+            uri: Option<String>,
+            #[serde(default)]
+            services: Vec<ListedService>,
+        }
+        #[derive(serde::Deserialize)]
+        struct ListedService {
+            name: String,
+        }
+        let url = format_restate_url(self.connection.ingress_url(), "deployments");
+        let response = send_request(
+            &self.connection,
+            RestateRequestClass::Control,
+            OPERATION,
+            HttpRequest::new(HttpMethod::Get, &url, ""),
+        )
+        .await?;
+        if !response.is_success() {
+            return Err(status_error(OPERATION, url, response).await);
+        }
+        let listing: Listing = decode_response(OPERATION, &url, response).await?;
+        Ok(listing
+            .deployments
+            .into_iter()
+            .map(|listed| RestateDeployment {
+                id: listed.id,
+                uri: listed.uri,
+                services: listed
+                    .services
+                    .into_iter()
+                    .map(|service| service.name)
+                    .collect(),
+            })
+            .collect())
+    }
+
+    /// Register the endpoint at `uri` as a deployment. `force` replaces a
+    /// deployment already registered at the same URI; the caller decides it
+    /// from what that deployment serves (ADR 0115 §3.5).
+    pub(crate) async fn register_deployment(
+        &self,
+        uri: &str,
+        force: bool,
+    ) -> Result<(), RestateHttpError> {
         const OPERATION: &str = "Restate deployment registration";
         let url = format_restate_url(self.connection.ingress_url(), "deployments");
-        let body = serde_json::to_vec(&serde_json::json!({ "uri": uri, "force": true })).map_err(
+        let body = serde_json::to_vec(&serde_json::json!({ "uri": uri, "force": force })).map_err(
             |source| RestateHttpError::Encode {
                 operation: OPERATION,
                 url: url.clone(),

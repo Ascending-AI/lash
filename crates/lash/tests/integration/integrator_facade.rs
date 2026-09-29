@@ -70,6 +70,14 @@ struct Executor;
 
 #[async_trait::async_trait]
 impl CodeExecutorPlugin for Executor {
+    async fn frame_switch_carries(
+        &self,
+        _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
+        _initial_nodes: &[lash_core::SessionAppendNode],
+    ) -> Result<Vec<lash_core::ArtifactName>, SessionError> {
+        Ok(Vec::new())
+    }
+
     async fn execute_code(
         &self,
         _ctx: RuntimeExecutionContext<'_>,

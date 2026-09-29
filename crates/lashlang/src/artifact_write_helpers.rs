@@ -28,32 +28,6 @@ pub(super) fn write_resource_ref(writer: &mut HashWriter, resource: &ResourceRef
     writer.atom(resource.alias.as_str());
 }
 
-pub(super) fn write_unary_op(writer: &mut HashWriter, op: UnaryOp) {
-    writer.atom(match op {
-        UnaryOp::Negate => "negate",
-        UnaryOp::Not => "not",
-    });
-}
-
-pub(super) fn write_binary_op(writer: &mut HashWriter, op: BinaryOp) {
-    writer.atom(match op {
-        BinaryOp::Add => "add",
-        BinaryOp::Subtract => "subtract",
-        BinaryOp::Multiply => "multiply",
-        BinaryOp::Divide => "divide",
-        BinaryOp::Modulo => "modulo",
-        BinaryOp::Equal => "equal",
-        BinaryOp::NotEqual => "not-equal",
-        BinaryOp::Less => "less",
-        BinaryOp::LessEqual => "less-equal",
-        BinaryOp::Greater => "greater",
-        BinaryOp::GreaterEqual => "greater-equal",
-        BinaryOp::In => "in",
-        BinaryOp::And => "and",
-        BinaryOp::Or => "or",
-    });
-}
-
 pub(super) fn write_structural_role(writer: &mut HashWriter, role: &crate::ast::StructuralRole) {
     writer.atom(role.name());
     if let crate::ast::StructuralRole::CollectionTransform { operation } = role {

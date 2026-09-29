@@ -494,24 +494,31 @@ impl RestateTestBackend {
 
     /// Wait until the engine has no drive of `session` in flight: every
     /// `LashSession` invocation for it has completed, with the roots it
-    /// awaited. A send's handle answers at its root's final commit, before
-    /// the drive closes the root's scope and answers its next admission
-    /// (FIG-3979), so a test that reads what the drive leaves behind, or
-    /// sends the session's next input from another core, settles the drive
-    /// first: while a drive runs it admits what the session is sent, on the
-    /// driver it started on.
+    /// awaited, and so has every scope close those roots owed. A send's
+    /// handle answers at its root's final commit, before the root's scope
+    /// closes (FIG-3979), and the root's scope closes on its `LashTurn`'s
+    /// `close` handler beside the drive's next admission (FIG-4035), so a
+    /// test that reads what the drive leaves behind, or sends the session's
+    /// next input from another core, settles the drive first: while a drive
+    /// runs it admits what the session is sent, on the driver it started on.
     pub async fn settle_session_drive(&self, session: &lash_core::SessionId) {
-        let prefix = format!(
+        let drives = format!(
             "{}/{}/",
             self.service_name(SESSION_DRIVER_SERVICE),
             session.as_str()
         );
-        while self
-            .server
-            .invocations()
-            .iter()
-            .any(|view| view.target.starts_with(&prefix) && view.status != "completed")
-        {
+        // A `LashTurn` key is `{len}:{session}{root}`
+        // (`lash_restate::turn_workflow_key`).
+        let roots = format!(
+            "{}/{}:{}",
+            self.service_name(TURN_DRIVER_SERVICE),
+            session.as_str().len(),
+            session.as_str()
+        );
+        while self.server.invocations().iter().any(|view| {
+            (view.target.starts_with(&drives) || view.target.starts_with(&roots))
+                && view.status != "completed"
+        }) {
             tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
     }

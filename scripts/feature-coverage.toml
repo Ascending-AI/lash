@@ -391,6 +391,64 @@ commands = [
   ["cargo", "check", "-p", "lash-perf", "--all-targets", "--no-default-features", "--features", "dhat-heap", "--locked"],
 ]
 
+# Phase A's synthetic N+1 (ADR 0115 §6): `lash-upgrade-harness` forwards
+# `synthetic-next` to the crates whose blocks it moves, and `just e2e-rolling`
+# builds the node binary both ways.
+[[lane]]
+name = "upgrade-harness-synthetic-next"
+features = [
+  "lash-upgrade-harness/synthetic-next:on",
+  "lash-upgrade-harness/synthetic-next:off",
+  "lash-runtime/synthetic-next:on",
+  "lash-runtime/synthetic-next:off",
+  "lash-internal-core/synthetic-next:on",
+  "lash-internal-core/synthetic-next:off",
+  "lash-internal-core-store/synthetic-next:on",
+  "lash-internal-core-store/synthetic-next:off",
+  "lash-internal-lashlang/synthetic-next:on",
+  "lash-internal-lashlang/synthetic-next:off",
+  "lash-internal-remote-protocol/synthetic-next:on",
+  "lash-internal-remote-protocol/synthetic-next:off",
+  "lash-internal-postgres-store/synthetic-next:on",
+  "lash-internal-postgres-store/synthetic-next:off",
+  "lash-internal-sqlite-store/synthetic-next:on",
+  "lash-internal-sqlite-store/synthetic-next:off",
+  "lash-internal-restate/synthetic-next:on",
+  "lash-internal-restate/synthetic-next:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-core-store", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-store", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-lashlang", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-lashlang", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-remote-protocol", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-remote-protocol", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-postgres-store", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-postgres-store", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sqlite-store", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sqlite-store", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-restate", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-restate", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-upgrade-harness", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-upgrade-harness", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+]
+
+# The operator binary used by Phase A must carry the same N+1 Restate epoch.
+[[lane]]
+name = "lashctl-synthetic-next"
+features = [
+  "lashctl/synthetic-next:on",
+  "lashctl/synthetic-next:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lashctl", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lashctl", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+]
+
 [[lane]]
 name = "regress-stable-features"
 features = [

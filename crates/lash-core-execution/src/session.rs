@@ -15,10 +15,11 @@ mod settlement_incorporation_tests;
 pub(crate) mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
+pub use execution_context::resolve_trigger_owner_scope;
 pub use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutionTracing};
 pub(crate) use execution_context::{
     attach_process_invocation_correlation, attach_process_lineage,
-    clear_process_invocation_correlation, process_lineage_of,
+    clear_process_invocation_correlation, execution_claim_of, process_lineage_of,
 };
 pub use opener_groups::{OpenerGroupRegistry, OpenerGroupsClosed, OpenerState, OpenerWorkBound};
 pub use settlement_incorporation::{
@@ -811,6 +812,7 @@ impl Session {
             turn_context: turn_context.clone(),
             clock: Arc::clone(&self.services.clock),
             process_lineage: process_lineage_of(&turn_context),
+            process_originator: None,
         });
         Ok(RuntimeExecutionContext::new(
             SessionId::from(session_id.to_string()),

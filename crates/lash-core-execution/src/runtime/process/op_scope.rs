@@ -7,6 +7,9 @@ pub struct ProcessOpScope<'scope> {
     /// The lineage of the process this operation runs inside, when it runs
     /// inside one: what a start made here records above its starter.
     pub process_lineage: Option<crate::ProcessLineage>,
+    /// The parked call a start made here registers its child under, when the
+    /// start is a call's declared start (ADR 0116 §3.6).
+    pub consumer_hold: Option<crate::ConsumerHold>,
 }
 
 impl<'scope> ProcessOpScope<'scope> {
@@ -21,7 +24,14 @@ impl<'scope> ProcessOpScope<'scope> {
             agent_frame_id: None,
             turn_cancellation: None,
             process_lineage: None,
+            consumer_hold: None,
         }
+    }
+
+    /// Registers a start made under this operation with a parked call's hold.
+    pub fn with_consumer_hold(mut self, consumer_hold: Option<crate::ConsumerHold>) -> Self {
+        self.consumer_hold = consumer_hold;
+        self
     }
 
     /// Sets the lineage of the process this operation runs inside.

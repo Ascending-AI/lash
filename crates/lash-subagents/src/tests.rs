@@ -633,7 +633,7 @@ try {
     assert!(
         value["ok"] == json!(false)
             && value["error"].as_str().is_some_and(|message| message
-                .starts_with("subagent task result did not match the declared output schema:")),
+                .starts_with("the child's final value did not match the declared output schema:")),
         "unexpected boundary rejection: {value}"
     );
 }

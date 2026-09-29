@@ -1,0 +1,30 @@
+error[E0308]: mismatched types
+ --> tests/ui/pending_start_cannot_carry_intents.rs:7:53
+  |
+7 |     let _from_intents = DeclaredStart::new(context, ToolIntents::default());
+  |                         ------------------          ^^^^^^^^^^^^^^^^^^^^^^ expected `StartProcessIntent`, found `ToolIntents`
+  |                         |
+  |                         arguments to this function are incorrect
+  |
+note: associated function defined here
+ --> $WORKSPACE/crates/lash-core-execution/src/tool_result.rs
+  |
+  |     pub fn new(
+  |            ^^^
+
+error[E0061]: this function takes 2 arguments but 3 arguments were supplied
+ --> tests/ui/pending_start_cannot_carry_intents.rs:8:23
+  |
+8 |     let _two_starts = DeclaredStart::new(context, first, second);
+  |                       ^^^^^^^^^^^^^^^^^^                 ------ unexpected argument #3 of type `StartProcessIntent`
+  |
+note: associated function defined here
+ --> $WORKSPACE/crates/lash-core-execution/src/tool_result.rs
+  |
+  |     pub fn new(
+  |            ^^^
+help: remove the extra argument
+  |
+8 -     let _two_starts = DeclaredStart::new(context, first, second);
+8 +     let _two_starts = DeclaredStart::new(context, first);
+  |

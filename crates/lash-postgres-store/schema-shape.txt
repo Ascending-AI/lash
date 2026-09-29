@@ -19,17 +19,32 @@
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
 version 141
-table lash_artifact_owner_retirements
-  column owner_id text not-null
-  column owner_kind text not-null
-  primary-key (owner_kind, owner_id)
-table lash_artifact_owners
+table lash_artifact_cleanup_obligations
+  column cleanup_json text not-null
+  column obligation_attempts integer not-null default
+  column obligation_claim_token text nullable
+  column obligation_due_at_ms bigint nullable
+  column obligation_id text not-null
+  column obligation_last_error text nullable
+  column obligation_settled_at_ms bigint nullable
+  column obligation_stall_reason text nullable
+  column obligation_state text not-null default
+  column referrer_id text not-null
+  column referrer_kind text not-null
+  unique (obligation_id)
+  primary-key (referrer_kind, referrer_id)
+table lash_artifact_referrer_edges
   column artifact_ref text not-null
   column namespace text not-null
-  column owner_id text not-null
-  column owner_kind text not-null
-  primary-key (namespace, artifact_ref, owner_kind, owner_id)
+  column referrer_id text not-null
+  column referrer_kind text not-null
+  primary-key (namespace, artifact_ref, referrer_kind, referrer_id)
   foreign-key (namespace, artifact_ref) references lash_lashlang_artifacts (namespace, artifact_ref) on delete cascade
+table lash_artifact_referrer_fences
+  column ended_at_ms bigint not-null
+  column referrer_id text not-null
+  column referrer_kind text not-null
+  primary-key (referrer_kind, referrer_id)
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -176,11 +191,6 @@ table lash_pending_turn_inputs
   unique (obligation_id)
   unique (session_id, source_key)
   primary-key (session_id, enqueue_seq)
-table lash_process_artifact_cleanup
-  column cleanup_json text not-null
-  column process_id text not-null
-  primary-key (process_id)
-  foreign-key (process_id) references lash_process_tombstones (process_id) on delete restrict
 table lash_process_change_clock
   column current_seq bigint not-null
   column singleton boolean not-null default
@@ -262,6 +272,9 @@ table lash_process_wake_deliveries
 table lash_processes
   column cancel_requested_at_ms bigint nullable
   column change_seq bigint not-null
+  column consumer_hold_key text nullable
+  column consumer_hold_scope_id text nullable
+  column consumer_hold_scope_kind text nullable
   column created_at_ms bigint not-null
   column identity_kind text not-null
   column identity_label text nullable
@@ -360,6 +373,7 @@ table lash_runtime_turn_commits
   primary-key (session_id, turn_id)
 table lash_schema_versions
   column component text not-null
+  column min_reader integer not-null
   column version integer not-null
   primary-key (component)
 table lash_session_ingress_sequence

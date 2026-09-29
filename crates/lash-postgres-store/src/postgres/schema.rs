@@ -27,14 +27,35 @@ pub(crate) const SCHEMA_ADVISORY_LOCK_KEY: (i32, i32) = (715421, 907001);
 /// renderer rewrites a table name wherever the token appears, so registering
 /// it would rewrite that column too. Provisioning owns the stamp; the schema
 /// artifacts are its declared home.
-#[cfg(feature = "testing")]
-pub(crate) const SELECT_COMPONENT_VERSION: &str =
-    "SELECT version FROM lash_schema_versions WHERE component = $1";
-
-/// Whether a stamped component version is inside the supported range
-/// [MIN_SUPPORTED_SCHEMA_VERSION, SCHEMA_VERSION] (FIG-3797).
-pub(crate) fn supported_version(version: Option<i32>) -> bool {
-    version.is_some_and(|v| (MIN_SUPPORTED_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&v))
+pub(crate) async fn read_compat_stamp<'e, E>(
+    executor: E,
+    populated: bool,
+) -> lash_core_execution::compat::StampRead
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    use lash_core_execution::compat::{CompatStamp, StampRead};
+    match sqlx::query_as::<_, (i32, i32)>(
+        "SELECT version, min_reader FROM lash_schema_versions WHERE component = $1",
+    )
+    .bind(SCHEMA_COMPONENT)
+    .fetch_optional(executor)
+    .await
+    {
+        Ok(Some((version, min_reader))) => {
+            match (u32::try_from(version), u32::try_from(min_reader)) {
+                (Ok(version), Ok(min_reader)) => StampRead::Present(CompatStamp {
+                    version,
+                    min_reader,
+                }),
+                _ => StampRead::Unreadable(format!(
+                    "version {version}, min_reader {min_reader} is negative"
+                )),
+            }
+        }
+        Ok(None) => StampRead::Absent { populated },
+        Err(error) => StampRead::Unreadable(error.to_string()),
+    }
 }
 
 /// Verifies the database is in the state this build admits and returns the
@@ -53,7 +74,7 @@ pub(crate) fn supported_version(version: Option<i32>) -> bool {
 pub(crate) async fn ensure_schema(
     pool: &PgPool,
     check: SchemaCheck,
-    writable: std::ops::RangeInclusive<u32>,
+    writable: lash_core_execution::compat::VersionRange,
 ) -> Result<(String, lash_core_execution::FleetFormat), StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
     // Serializes lash's own openers with each other and with a `lash migrate`
@@ -69,21 +90,68 @@ pub(crate) async fn ensure_schema(
         .map_err(store_sqlx_error)?;
 
     let report = verify_schema_shape(&mut tx).await?;
-    // The two-sided supported range is unconditional (FIG-3797): a stamp below
-    // the minimum is an older or skipped compatibility release, one above the
-    // latest is a newer build's catalog. `SchemaCheck` governs the structural
-    // comparison only; letting `WarnOnly` downgrade this would silently run one
-    // build against another schema generation.
-    if !supported_version(report.found_version) {
-        record_schema_gate_decision(&report, check, "denied_version");
-        let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
-        return Err(version_mismatch_error(
-            report.schema.as_deref(),
-            report.found_version,
-            writing_release.as_deref(),
-        ));
+    let descriptor =
+        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+            .ok_or_else(|| {
+                StoreError::Backend("missing PostgreSQL compatibility descriptor".into())
+            })?;
+    let stamp = if report.schema.is_some() {
+        read_compat_stamp(&mut *tx, true).await
+    } else {
+        lash_core_execution::compat::StampRead::Absent { populated: false }
+    };
+    #[cfg(feature = "synthetic-next")]
+    let synthetic_expanded = matches!(
+        &stamp,
+        lash_core_execution::compat::StampRead::Present(stamp)
+            if stamp.version == descriptor.writes.max()
+    );
+    #[cfg(not(feature = "synthetic-next"))]
+    let synthetic_expanded = false;
+    let admission = lash_core_execution::compat::admit(descriptor, stamp)
+        .map_err(|refusal| StoreError::Incompatible { refusal })?;
+    if matches!(
+        admission,
+        lash_core_execution::compat::CompatAdmission::Provision
+    ) {
+        return Err(StoreError::Incompatible {
+            refusal: lash_core_execution::compat::CompatRefusal::Unstamped {
+                component: descriptor.component.as_str().to_owned(),
+            },
+        });
     }
-    let admitted_as = match (report.is_conformant(), check) {
+    if matches!(
+        admission,
+        lash_core_execution::compat::CompatAdmission::Expanded { .. }
+    ) || synthetic_expanded
+    {
+        #[cfg(feature = "synthetic-next")]
+        let findings = if synthetic_expanded {
+            crate::schema_shape::synthetic_next_findings(&mut tx, &report).await?
+        } else {
+            crate::schema_shape::expanded_findings(&mut tx, &report).await?
+        };
+        #[cfg(not(feature = "synthetic-next"))]
+        let findings = crate::schema_shape::expanded_findings(&mut tx, &report).await?;
+        if !findings.is_empty() {
+            record_schema_gate_decision(&report, check, "denied_shape");
+            return Err(StoreError::Incompatible {
+                refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused {
+                    component: descriptor.component.as_str().to_owned(),
+                    findings,
+                },
+            });
+        }
+    }
+    let admitted_as = match (
+        report.is_conformant()
+            || synthetic_expanded
+            || matches!(
+                admission,
+                lash_core_execution::compat::CompatAdmission::Expanded { .. }
+            ),
+        check,
+    ) {
         (true, _) => "allowed",
         (false, SchemaCheck::Enforce) => {
             record_schema_gate_decision(&report, check, "denied_shape");
@@ -346,16 +414,17 @@ pub(crate) fn version_mismatch_error(
         Some(release) => format!(" This database was last written by lash release {release}."),
         None => String::new(),
     };
-    StoreError::SchemaVersionOutOfRange {
-        component: SCHEMA_COMPONENT.to_string(),
-        found,
-        supported_min: MIN_SUPPORTED_SCHEMA_VERSION,
-        supported_latest: SCHEMA_VERSION,
-        message: format!(
-            "Postgres schema component `{SCHEMA_COMPONENT}` {stamp}, expected {SCHEMA_VERSION} \
+    StoreError::Incompatible {
+        refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused {
+            component: lash_core_execution::compat::ComponentId::POSTGRES
+                .as_str()
+                .to_owned(),
+            findings: vec![format!(
+                "Postgres schema component `{SCHEMA_COMPONENT}` {stamp}, expected {SCHEMA_VERSION} \
              (supported range {range}). {explanation} This gate is unconditional; \
              SchemaCheck::WarnOnly does not relax it.{release_clause}"
-        ),
+            )],
+        },
     }
 }
 

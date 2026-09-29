@@ -310,6 +310,37 @@ pub(crate) async fn end_lost_root_tx(
     target: &lash_core_execution::engine::RootRef,
     at_ms: u64,
 ) -> Result<Option<RootTerminal>, StoreError> {
+    end_unanswered_root_tx(tx, target, at_ms, |cancelled_by| {
+        RootTerminalCause::SubstrateLost { cancelled_by }
+    })
+    .await
+}
+
+/// The root's run met a typed refusal no retry can change (FIG-4018): the
+/// same transaction as a lost root's, ending it with the refusal.
+pub(crate) async fn end_refused_root_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target: &lash_core_execution::engine::RootRef,
+    refusal: &lash_core_execution::RuntimeError,
+    at_ms: u64,
+) -> Result<Option<RootTerminal>, StoreError> {
+    end_unanswered_root_tx(tx, target, at_ms, |_| RootTerminalCause::Refused {
+        code: refusal.code.clone(),
+        message: refusal.message.clone(),
+        refusal_cause: refusal.cause.clone(),
+    })
+    .await
+}
+
+/// End a root no commit answered, with the cause `cause` makes of the
+/// root's recorded cancellation request, if any. A root that already has
+/// terminal evidence, or no row, is left as it is.
+async fn end_unanswered_root_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target: &lash_core_execution::engine::RootRef,
+    at_ms: u64,
+    cause: impl FnOnce(Option<String>) -> RootTerminalCause,
+) -> Result<Option<RootTerminal>, StoreError> {
     let session = &target.session;
     let root = &target.root;
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session).await?;
@@ -339,10 +370,7 @@ pub(crate) async fn end_lost_root_tx(
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    let cancelled_by = request.map(|row| row.0);
-    let cause = RootTerminalCause::SubstrateLost {
-        cancelled_by: cancelled_by.clone(),
-    };
+    let cause = cause(request.map(|row| row.0));
     let terminal = RootTerminal {
         session_id: session.clone(),
         root: root.clone(),
@@ -486,6 +514,26 @@ pub(crate) async fn root_binding_conn(
         .await
         .map_err(store_sqlx_error)
         .map(|root| root.map(TurnId::from))
+}
+
+/// Bind `input` to `root` in the caller's transaction, set-if-absent: the
+/// commit that applies a checkpoint-admitted input records the root that
+/// applied it. A root admission already wrote the same binding for its own
+/// inputs, so the insert is a no-op for them.
+pub(crate) async fn bind_applied_input_tx(
+    conn: &mut PgConnection,
+    session_id: &SessionId,
+    input: &InputId,
+    root: &TurnId,
+) -> Result<(), StoreError> {
+    sqlx::query(session_roots_sql().inputs.insert.sql())
+        .bind(session_id.as_str())
+        .bind(input.as_str())
+        .bind(root.as_str())
+        .execute(&mut *conn)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(())
 }
 
 /// Bind each of `inputs` to `root`, set-if-absent, and open `root`'s row, in
@@ -908,13 +956,35 @@ impl RootStore for PostgresStore {
         root_terminal_conn(&mut connection, session_id, root).await
     }
 
+    async fn end_refused_root(
+        &self,
+        session_id: &SessionId,
+        root: &TurnId,
+        refusal: &lash_core_execution::RuntimeError,
+        at_ms: u64,
+    ) -> Result<Option<RootTerminal>, StoreError> {
+        lash_core_execution::store::validate_session_id(session_id)?;
+        let target = lash_core_execution::engine::RootRef {
+            session: session_id.clone(),
+            root: root.clone(),
+        };
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = sqlx::Connection::begin(&mut *connection)
+            .await
+            .map_err(store_sqlx_error)?;
+        let terminal = end_refused_root_tx(&mut tx, &target, refusal, at_ms).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(terminal)
+    }
+
     async fn root_of_input(
         &self,
         session_id: &SessionId,
         input: &InputId,
     ) -> Result<Option<TurnId>, StoreError> {
-        // An input's root is its binding: the admission that took it, or
-        // the fork that rebound it.
+        // An input's root is its binding: the admission that took it, the
+        // commit whose checkpoint delivery applied it, or the fork that
+        // rebound it.
         self.root_binding(session_id, input).await
     }
 
@@ -925,6 +995,21 @@ impl RootStore for PostgresStore {
     ) -> Result<Option<TurnId>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         root_binding_conn(&mut connection, session_id, input).await
+    }
+
+    async fn bound_turn_scopes(
+        &self,
+        session_id: &SessionId,
+        root: &TurnId,
+    ) -> Result<Vec<TurnId>, StoreError> {
+        let scopes: Vec<String> =
+            sqlx::query_scalar(session_roots_sql().inputs.bound_turn_scopes.sql())
+                .bind(session_id.as_str())
+                .bind(root.as_str())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(store_sqlx_error)?;
+        Ok(scopes.into_iter().map(TurnId::from).collect())
     }
 
     async fn bind_root_inputs(

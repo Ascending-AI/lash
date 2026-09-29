@@ -541,7 +541,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         &authority_lease,
         authority_root,
         crate::store::AdmittedHead::Batch(authority_rows[0].batch_id.clone()),
-        crate::testing::queued_work_claim_policy(10),
+        crate::testing::queued_work_admission_policy(10),
     )
     .await;
     let authority_claim = authority_admission
@@ -1369,7 +1369,7 @@ async fn settle_queued_batch(
         &lease,
         &root,
         crate::store::AdmittedHead::Batch(head.batch_id.clone()),
-        crate::testing::queued_work_claim_policy(1),
+        crate::testing::queued_work_admission_policy(1),
     )
     .await;
     assert_eq!(

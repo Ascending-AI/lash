@@ -548,6 +548,7 @@ finish(result);"#,
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="typescript"
         root         tool      tool.start              name="spawn_agent" call=call-001
+        root         tool      tool.intent             call=call-001 kind="start_process" status="executed"
         root         tool      tool.result             name="spawn_agent" outcome=failure call=call-001
         root         exec      cell.failed             calls=1 failure="program" error="`?` unwrapped failed module operation: child boom --> line 2, column 22 …"
         root         commit    checkpoint.commit       rev=0->1
@@ -586,7 +587,7 @@ finish(result);"#,
             })
             .expect("the failed spawn keeps its typed tool projection");
         assert_eq!(spawn_failure.class, lash_core::ToolFailureClass::Execution);
-        assert_eq!(spawn_failure.code, "tool_error");
+        assert_eq!(spawn_failure.code, "process_session_turn_tool_error");
         // FIG-2975: the child's own reason is what the parent reads. Before the
         // runner carried it, every stopped child collapsed onto one sentence.
         assert_eq!(spawn_failure.message, "child boom");

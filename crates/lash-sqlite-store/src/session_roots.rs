@@ -319,6 +319,35 @@ pub(crate) fn end_lost_root_conn(
     target: &lash_core_execution::engine::RootRef,
     at_ms: u64,
 ) -> Result<Option<RootTerminal>, StoreError> {
+    end_unanswered_root_conn(tx, target, at_ms, |cancelled_by| {
+        RootTerminalCause::SubstrateLost { cancelled_by }
+    })
+}
+
+/// The root's run met a typed refusal no retry can change (FIG-4018): the
+/// same transaction as a lost root's, ending it with the refusal.
+pub(crate) fn end_refused_root_conn(
+    tx: &Connection,
+    target: &lash_core_execution::engine::RootRef,
+    refusal: &lash_core_execution::RuntimeError,
+    at_ms: u64,
+) -> Result<Option<RootTerminal>, StoreError> {
+    end_unanswered_root_conn(tx, target, at_ms, |_| RootTerminalCause::Refused {
+        code: refusal.code.clone(),
+        message: refusal.message.clone(),
+        refusal_cause: refusal.cause.clone(),
+    })
+}
+
+/// End a root no commit answered, with the cause `cause` makes of the
+/// root's recorded cancellation request, if any. A root that already has
+/// terminal evidence, or no row, is left as it is.
+fn end_unanswered_root_conn(
+    tx: &Connection,
+    target: &lash_core_execution::engine::RootRef,
+    at_ms: u64,
+    cause: impl FnOnce(Option<String>) -> RootTerminalCause,
+) -> Result<Option<RootTerminal>, StoreError> {
     let session = &target.session;
     let root = &target.root;
     if root_terminal_conn(tx, session, root)?.is_some() {
@@ -337,12 +366,11 @@ pub(crate) fn end_lost_root_conn(
         return Ok(None);
     }
     let record = crate::persistence::turn_cancel::load_turn_cancel_request_conn(tx, session, root)?;
-    let cancelled_by = record
-        .as_ref()
-        .map(|record| record.request.request_id.clone());
-    let cause = RootTerminalCause::SubstrateLost {
-        cancelled_by: cancelled_by.clone(),
-    };
+    let cause = cause(
+        record
+            .as_ref()
+            .map(|record| record.request.request_id.clone()),
+    );
     let terminal = RootTerminal {
         session_id: session.clone(),
         root: root.clone(),
@@ -501,6 +529,25 @@ pub(crate) fn root_binding_conn(
     .optional()
     .map_err(sqlite_error)
     .map(|root| root.map(TurnId::from))
+}
+
+/// Bind `input` to `root` in the caller's transaction, set-if-absent: the
+/// commit that applies a checkpoint-admitted input records the root that
+/// applied it. A root admission already wrote the same binding for its own
+/// inputs, so the insert is a no-op for them.
+pub(crate) fn bind_applied_input_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    input: &InputId,
+    root: &TurnId,
+) -> Result<(), StoreError> {
+    crate::conn::cached_execute(
+        tx,
+        session_roots_sql().inputs.insert.sql(),
+        params![session_id.as_str(), input.as_str(), root.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
 }
 
 /// Bind each of `inputs` to `root`, set-if-absent, and open `root`'s row, in
@@ -964,13 +1011,33 @@ impl RootStore for crate::SqliteStore {
             .map_err(sqlite_error)?
     }
 
+    async fn end_refused_root(
+        &self,
+        session_id: &SessionId,
+        root: &TurnId,
+        refusal: &lash_core_execution::RuntimeError,
+        at_ms: u64,
+    ) -> Result<Option<RootTerminal>, StoreError> {
+        lash_core_execution::store::validate_session_id(session_id)?;
+        let target = lash_core_execution::engine::RootRef {
+            session: session_id.clone(),
+            root: root.clone(),
+        };
+        let refusal = refusal.clone();
+        self.conn
+            .write_flow(move |tx| commit(end_refused_root_conn(tx, &target, &refusal, at_ms)))
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn root_of_input(
         &self,
         session_id: &SessionId,
         input: &InputId,
     ) -> Result<Option<TurnId>, StoreError> {
-        // An input's root is its binding: the admission that took it, or
-        // the fork that rebound it.
+        // An input's root is its binding: the admission that took it, the
+        // commit whose checkpoint delivery applied it, or the fork that
+        // rebound it.
         self.root_binding(session_id, input).await
     }
 
@@ -985,6 +1052,28 @@ impl RootStore for crate::SqliteStore {
             .call(move |conn| Ok(root_binding_conn(conn, &session_id, &input)))
             .await
             .map_err(sqlite_error)?
+    }
+
+    async fn bound_turn_scopes(
+        &self,
+        session_id: &SessionId,
+        root: &TurnId,
+    ) -> Result<Vec<TurnId>, StoreError> {
+        let session_id = session_id.clone();
+        let root = root.clone();
+        let scopes = self
+            .conn
+            .call(move |conn| {
+                let mut stmt =
+                    conn.prepare_cached(session_roots_sql().inputs.bound_turn_scopes.sql())?;
+                stmt.query_map(params![session_id.as_str(), root.as_str()], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(scopes.into_iter().map(TurnId::from).collect())
     }
 
     async fn bind_root_inputs(

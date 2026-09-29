@@ -1,5 +1,6 @@
 pub mod attachment;
 pub mod causal;
+mod compat;
 pub mod core_support;
 mod effect_group;
 mod effect_identity;
@@ -77,6 +78,7 @@ pub use attachment::{
     InvalidMediaType, MediaType,
 };
 pub use causal::CausalRef;
+pub use compat::{VersionRange, VersionRangeError};
 pub use effect_group::GroupWakePolicy;
 pub use effect_identity::{
     EffectAddress, EffectIdentityError, EffectJournalIdentity, ExecutionScope,

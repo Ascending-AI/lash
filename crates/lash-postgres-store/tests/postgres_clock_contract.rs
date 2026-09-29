@@ -336,7 +336,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         &root,
         AdmittedHead::Batch(batch.batch_id.clone()),
     );
-    request.policy = lash_core_execution::testing::queued_work_claim_policy(1);
+    request.policy = lash_core_execution::testing::queued_work_admission_policy(1);
     let admission = store
         .admit_root(&request)
         .await
@@ -360,7 +360,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
             checkpoint: CheckpointKind::AfterWork,
             step: "clock-contract-checkpoint".to_string(),
             max_inputs: 1,
-            policy: lash_core_execution::testing::queued_work_claim_policy(1),
+            policy: lash_core_execution::testing::queued_work_admission_policy(1),
         })
         .await
         .expect("the checkpoint admission must validate against PostgreSQL time");
@@ -377,12 +377,27 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
             .iter()
             .map(|read| (read.input.input_id.as_str(), read.status.clone()))
             .collect::<Vec<_>>(),
-        vec![(
-            next_input.input_id.as_str(),
-            PendingTurnInputReadStatus::Open
-        )],
-        "an input a checkpoint admitted is accepted into its turn and leaves the pending \
-         read model; the rest stay open"
+        vec![
+            (
+                active_input.input_id.as_str(),
+                PendingTurnInputReadStatus::Admitted { root: root.clone() }
+            ),
+            (
+                next_input.input_id.as_str(),
+                PendingTurnInputReadStatus::Open
+            ),
+        ],
+        "an input a checkpoint admitted is listed admitted to its root until the root settles \
+         it; the rest stay open"
+    );
+    assert_eq!(
+        store
+            .pending_turn_input(&session, &active_input.input_id)
+            .await
+            .expect("read the admitted input by id against PostgreSQL time")
+            .map(|read| read.status),
+        Some(PendingTurnInputReadStatus::Admitted { root: root.clone() }),
+        "the admitted input reads by id as the list reads it"
     );
     let cancel = store
         .cancel_pending_turn_inputs(
@@ -448,6 +463,24 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         .commit_runtime_state(commit)
         .await
         .expect("the root's final commit must validate against PostgreSQL time");
+    assert!(
+        store
+            .list_pending_turn_inputs(&session)
+            .await
+            .expect("list pending inputs after the root settles")
+            .is_empty(),
+        "the root's commit completes the input it admitted at its checkpoint, which leaves \
+         the pending read model"
+    );
+    assert_eq!(
+        store
+            .pending_turn_input(&session, &active_input.input_id)
+            .await
+            .expect("read the completed input by id")
+            .map(|read| read.status),
+        None,
+        "a completed input no longer reads by id"
+    );
 
     let final_next_input = store
         .enqueue_pending_turn_input(PendingTurnInputDraft::new(

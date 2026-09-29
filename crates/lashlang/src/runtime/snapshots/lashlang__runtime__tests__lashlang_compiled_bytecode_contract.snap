@@ -1,17 +1,23 @@
 ---
 source: crates/lashlang/src/runtime/tests.rs
-assertion_line: 509
-expression: compiled_program_snapshot(GOLDEN_CONTRACT_SOURCE)
+expression: compiled_program_snapshot(golden_contract_program())
 ---
-compile_stats: total=1 const_folded=1 dynamic=0 refs=0
 slots: [source, history, beta_index, matches, counts, token, Payload]
-names: [beta_index, matches, counts]
+names: [type, anyOf, items, beta_index, matches, counts, properties, required, additionalProperties, $lash_type]
 constants:
   c0: ","
   c1: "beta"
   c2: "beta"
   c3: ","
-  c4: {"$lash_type":{"additionalProperties":false,"properties":{"beta_index":{"anyOf":[{"type":"integer"},{"type":"null"}]},"counts":{"type":"object"},"matches":{"items":{"type":"object"},"type":"array"}},"required":["beta_index","matches","counts"],"type":"object"}}
+  c4: "object"
+  c5: "integer"
+  c6: "null"
+  c7: "array"
+  c8: "object"
+  c9: "object"
+  c10: "beta_index"
+  c11: "matches"
+  c12: "counts"
 code:
   0000: load_name 1:history
   0001: push_const c0 ","
@@ -31,17 +37,43 @@ code:
   0015: push_const c3 ","
   0016: intrinsic split argc=2
   0017: begin_iter 5:token
-  0018: iter_next 22
+  0018: iter_next 28
   0019: observe_step
-  0020: add_assign_index_slot_number 4:counts 5:token 1
-  0021: jump 18
-  0022: end_iter
-  0023: push_const c4 {"$lash_type":{"additionalProperties":false,"properties":{"beta_index":{"anyOf":[{"type":"integer"},{"type":"null"}]},"counts":{"type":"object"},"matches":{"items":{"type":"object"},"type":"array"}},"required":["beta_index","matches","counts"],"type":"object"}}
-  0024: store_name 6:Payload
-  0025: load_name 2:beta_index
-  0026: load_name 3:matches
-  0027: load_name 4:counts
-  0028: build_heap_record [beta_index, matches, counts]
-  0029: load_name 6:Payload
-  0030: intrinsic validate argc=2
-  0031: finish
+  0020: load_name 5:token
+  0021: load_name 4:counts
+  0022: load_name 5:token
+  0023: index
+  0024: push_number 1
+  0025: javascript_binary Add
+  0026: heap_path_assign 4:counts [dynamic]
+  0027: jump 18
+  0028: end_iter
+  0029: push_const c4 "object"
+  0030: push_const c5 "integer"
+  0031: build_heap_record [type]
+  0032: push_const c6 "null"
+  0033: build_heap_record [type]
+  0034: build_heap_list 2
+  0035: build_heap_record [anyOf]
+  0036: push_const c7 "array"
+  0037: push_const c8 "object"
+  0038: build_heap_record [type]
+  0039: build_heap_record [type, items]
+  0040: push_const c9 "object"
+  0041: build_heap_record [type]
+  0042: build_heap_record [beta_index, matches, counts]
+  0043: push_const c10 "beta_index"
+  0044: push_const c11 "matches"
+  0045: push_const c12 "counts"
+  0046: build_heap_list 3
+  0047: push_bool false
+  0048: build_heap_record [type, properties, required, additionalProperties]
+  0049: build_heap_record [$lash_type]
+  0050: store_name 6:Payload
+  0051: load_name 2:beta_index
+  0052: load_name 3:matches
+  0053: load_name 4:counts
+  0054: build_heap_record [beta_index, matches, counts]
+  0055: load_name 6:Payload
+  0056: intrinsic validate argc=2
+  0057: finish

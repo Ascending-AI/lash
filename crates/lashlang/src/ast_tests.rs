@@ -157,9 +157,23 @@ fn process_signature_decode_refuses_missing_duplicate_unknown_and_legacy_fields(
 
 #[test]
 fn unknown_process_type_is_refused_in_program_ir() {
-    let program = Program::block(vec![Expr::TypeLiteral(Box::new(TypeExpr::Process(
-        ProcessType::unknown(),
-    )))]);
+    let program = Program {
+        declarations: vec![Declaration::Process(ProcessDecl {
+            name: "p".into(),
+            params: vec![ProcessParam {
+                name: "x".into(),
+                ty: TypeExpr::Process(ProcessType::unknown()),
+            }],
+            signals: Vec::new(),
+            return_ty: None,
+            label: None,
+            origin: ProcessOrigin::Declared,
+            body: Expr::Null,
+        })],
+        main: Expr::Null,
+        private_bindings: Default::default(),
+        spans: Default::default(),
+    };
     assert!(matches!(
         validate_ast(&program),
         Err(InvalidAst::UnknownProcessSignature)
@@ -263,7 +277,6 @@ fn children_yields_leaves_as_empty() {
         Expr::WaitSignal {
             name: "ready".into(),
         },
-        Expr::TypeLiteral(Box::new(TypeExpr::Str)),
     ] {
         let children: Vec<_> = leaf.children().collect();
         assert!(children.is_empty(), "{leaf:?} should have no children");
@@ -298,9 +311,9 @@ fn children_yields_composite_subexpressions_in_order() {
     };
     assert_eq!(child_vars(&receiver), ["recv", "arg0", "arg1"]);
 
-    let binary = Expr::Binary {
+    let binary = Expr::JavaScriptBinary {
         left: Box::new(var("left")),
-        op: BinaryOp::Add,
+        op: JavaScriptBinaryOp::Add,
         right: Box::new(var("right")),
     };
     assert_eq!(child_vars(&binary), ["left", "right"]);

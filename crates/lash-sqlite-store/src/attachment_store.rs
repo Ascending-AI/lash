@@ -9,7 +9,7 @@
 //! up, in `SessionAttachmentStore` and the manifest, exactly as they do over a
 //! file or S3 backend.
 //!
-//! The store reaches the catalog through the connection of the [`Store`] it is
+//! The store reaches the catalog through the connection of the [`SqliteStore`] it is
 //! built from, so it lives wherever that store lives: a file catalog or an
 //! in-memory one. Its declared persistence follows: a file catalog is
 //! [`AttachmentStorePersistence::Durable`], an in-memory one is
@@ -76,7 +76,7 @@ pub(crate) fn attachment_blob_sql() -> &'static AttachmentBlobSqliteStatements {
 
 /// The [`AttachmentStore`] over a SQLite durable-core catalog.
 ///
-/// Build it from the [`Store`] open on the catalog with
+/// Build it from the [`SqliteStore`] open on the catalog with
 /// [`SqliteAttachmentStore::for_store`]. Blobs are keyed by the attachment
 /// content id, so identical bytes put from any session are one row, and each
 /// row carries the freshness stamp mark-and-sweep GC ages it by, read from the

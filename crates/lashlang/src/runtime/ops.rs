@@ -7,11 +7,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use crate::ast::BinaryOp;
-
-pub(crate) use super::fuel::{
-    binary_op_work_units, deep_proportional_units, proportional_units, sorting_work,
-};
+pub(crate) use super::fuel::{deep_proportional_units, proportional_units, sorting_work};
 use super::instruction::Name;
 use super::*;
 
@@ -379,8 +375,7 @@ pub(crate) fn execute_intrinsic(
         IntrinsicOp::ValidateCompiled(_)
         | IntrinsicOp::PushAssign(_)
         | IntrinsicOp::FormatCompiled(_)
-        | IntrinsicOp::FormatCompiledSlotNumber { .. }
-        | IntrinsicOp::FormatCompiledSlotNumberBinary { .. } => {
+        | IntrinsicOp::FormatCompiledSlotNumber { .. } => {
             unreachable!("compiled-only intrinsic reached generic executor")
         }
         IntrinsicOp::InvalidArity { name, argc } => {
@@ -758,20 +753,6 @@ pub(crate) fn execute_contains_direct(
     }
 }
 
-pub(crate) fn execute_membership_direct(
-    haystack: &Value,
-    needle: &Value,
-) -> Result<bool, RuntimeError> {
-    match (haystack, needle) {
-        (Value::String(haystack), Value::String(needle)) => Ok(haystack.contains(needle.as_str())),
-        (Value::Tuple(items), needle) => Ok(items.contains(needle)),
-        (Value::List(items), needle) => Ok(items.contains(needle)),
-        (Value::Record(record), Value::String(needle)) => Ok(record.get(needle.as_str()).is_some()),
-        (Value::Null, _) => Ok(false),
-        _ => Err(RuntimeError::InUnsupported),
-    }
-}
-
 pub(crate) fn execute_find_builtin(values: &[Value]) -> Result<Value, RuntimeError> {
     if !(values.len() == 2 || values.len() == 3) {
         return Err(RuntimeError::InvalidArgumentCount {
@@ -1100,141 +1081,6 @@ fn as_integer_div_arg(
     Ok(*number)
 }
 
-pub(crate) fn eval_binary_values(
-    left: Value,
-    op: BinaryOp,
-    right: Value,
-) -> Result<Value, RuntimeError> {
-    match op {
-        BinaryOp::Add => add_values(left, right),
-        BinaryOp::Subtract => numeric_binary_values(left, right, |a, b| a - b),
-        BinaryOp::Multiply => numeric_binary_values(left, right, |a, b| a * b),
-        BinaryOp::Divide => numeric_binary_values(left, right, |a, b| a / b),
-        BinaryOp::Modulo => numeric_binary_values(left, right, |a, b| a % b),
-        BinaryOp::Equal => Ok(Value::Bool(left == right)),
-        BinaryOp::NotEqual => Ok(Value::Bool(left != right)),
-        BinaryOp::Less => compare_ordered(left, right, |a, b| a < b, |a, b| a < b),
-        BinaryOp::LessEqual => compare_ordered(left, right, |a, b| a <= b, |a, b| a <= b),
-        BinaryOp::Greater => compare_ordered(left, right, |a, b| a > b, |a, b| a > b),
-        BinaryOp::GreaterEqual => compare_ordered(left, right, |a, b| a >= b, |a, b| a >= b),
-        BinaryOp::In => execute_membership_direct(&right, &left).map(Value::Bool),
-        BinaryOp::And | BinaryOp::Or => unreachable!("logical ops are compiled with jumps"),
-    }
-}
-
-pub(crate) fn eval_number_binary_values(left: f64, op: BinaryOp, right: f64) -> Value {
-    match op {
-        BinaryOp::Add
-        | BinaryOp::Subtract
-        | BinaryOp::Multiply
-        | BinaryOp::Divide
-        | BinaryOp::Modulo => Value::Number(eval_number_numeric_binary_value(left, op, right)),
-        BinaryOp::Equal => Value::Bool(left == right),
-        BinaryOp::NotEqual => Value::Bool(left != right),
-        BinaryOp::Less => Value::Bool(left < right),
-        BinaryOp::LessEqual => Value::Bool(left <= right),
-        BinaryOp::Greater => Value::Bool(left > right),
-        BinaryOp::GreaterEqual => Value::Bool(left >= right),
-        BinaryOp::In => unreachable!("membership is not numeric"),
-        BinaryOp::And | BinaryOp::Or => unreachable!("logical ops are compiled with jumps"),
-    }
-}
-
-pub(crate) fn eval_number_numeric_binary_value(left: f64, op: BinaryOp, right: f64) -> f64 {
-    match op {
-        BinaryOp::Add => left + right,
-        BinaryOp::Subtract => left - right,
-        BinaryOp::Multiply => left * right,
-        BinaryOp::Divide => left / right,
-        BinaryOp::Modulo => left % right,
-        _ => unreachable!("non-numeric op in fused numeric branch"),
-    }
-}
-
-pub(crate) fn eval_number_compare_values(left: f64, op: BinaryOp, right: f64) -> bool {
-    match op {
-        BinaryOp::Equal => left == right,
-        BinaryOp::NotEqual => left != right,
-        BinaryOp::Less => left < right,
-        BinaryOp::LessEqual => left <= right,
-        BinaryOp::Greater => left > right,
-        BinaryOp::GreaterEqual => left >= right,
-        BinaryOp::In => unreachable!("membership is not a numeric comparison"),
-        _ => unreachable!("non-comparison op in fused slot branch"),
-    }
-}
-
-pub(crate) fn is_comparison_binary_op(op: BinaryOp) -> bool {
-    matches!(
-        op,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-    )
-}
-
-pub(crate) fn is_numeric_binary_op(op: BinaryOp) -> bool {
-    matches!(
-        op,
-        BinaryOp::Add
-            | BinaryOp::Subtract
-            | BinaryOp::Multiply
-            | BinaryOp::Divide
-            | BinaryOp::Modulo
-    )
-}
-
-pub(crate) fn eval_compare_values(
-    left: Value,
-    op: BinaryOp,
-    right: Value,
-) -> Result<bool, RuntimeError> {
-    match (left, right) {
-        (Value::Number(left), Value::Number(right)) => {
-            Ok(eval_number_compare_values(left, op, right))
-        }
-        (left, right) => match op {
-            BinaryOp::Equal => Ok(left == right),
-            BinaryOp::NotEqual => Ok(left != right),
-            BinaryOp::Less => {
-                compare_ordered(left, right, |a, b| a < b, |a, b| a < b).map(expect_bool_value)
-            }
-            BinaryOp::LessEqual => {
-                compare_ordered(left, right, |a, b| a <= b, |a, b| a <= b).map(expect_bool_value)
-            }
-            BinaryOp::Greater => {
-                compare_ordered(left, right, |a, b| a > b, |a, b| a > b).map(expect_bool_value)
-            }
-            BinaryOp::GreaterEqual => {
-                compare_ordered(left, right, |a, b| a >= b, |a, b| a >= b).map(expect_bool_value)
-            }
-            BinaryOp::In => unreachable!("membership is not a fused comparison"),
-            _ => unreachable!("non-comparison op in fused branch"),
-        },
-    }
-}
-
-pub(crate) fn expect_bool_value(value: Value) -> bool {
-    match value {
-        Value::Bool(value) => value,
-        _ => unreachable!("comparison produced non-bool value"),
-    }
-}
-
-pub(crate) fn numeric_binary_values(
-    left: Value,
-    right: Value,
-    op: impl FnOnce(f64, f64) -> f64,
-) -> Result<Value, RuntimeError> {
-    match (left, right) {
-        (Value::Number(left), Value::Number(right)) => Ok(Value::Number(op(left, right))),
-        (left, right) => Ok(Value::Number(op(as_number(&left)?, as_number(&right)?))),
-    }
-}
-
 pub(crate) fn as_number(value: &Value) -> Result<f64, RuntimeError> {
     match value {
         Value::Number(value) => Ok(*value),
@@ -1309,62 +1155,6 @@ fn as_non_negative_char_index(
         });
     }
     Ok(number as usize)
-}
-
-pub(crate) fn compare_numbers(
-    left: Value,
-    right: Value,
-    cmp: impl FnOnce(f64, f64) -> bool,
-) -> Result<Value, RuntimeError> {
-    match (left, right) {
-        (Value::Number(left), Value::Number(right)) => Ok(Value::Bool(cmp(left, right))),
-        (left, right) => Ok(Value::Bool(cmp(as_number(&left)?, as_number(&right)?))),
-    }
-}
-
-pub(crate) fn compare_ordered(
-    left: Value,
-    right: Value,
-    number_cmp: impl FnOnce(f64, f64) -> bool,
-    string_cmp: impl FnOnce(&str, &str) -> bool,
-) -> Result<Value, RuntimeError> {
-    match (&left, &right) {
-        (Value::String(left), Value::String(right)) => Ok(Value::Bool(string_cmp(left, right))),
-        _ => compare_numbers(left, right, number_cmp),
-    }
-}
-
-pub(crate) fn add_values(left: Value, right: Value) -> Result<Value, RuntimeError> {
-    match (left, right) {
-        (Value::Number(a), Value::Number(b)) => Ok(Value::Number(a + b)),
-        (Value::String(a), Value::String(b)) => {
-            Ok(Value::String(StringValue::concatenated(&a, &b)))
-        }
-        (Value::String(mut a), other) => {
-            a.push_str(&stringify_value(&other)?);
-            Ok(Value::String(a))
-        }
-        (other, Value::String(b)) => {
-            let text = stringify_value(&other)?;
-            Ok(Value::String(StringValue::concatenated(&text, &b)))
-        }
-        (Value::List(a), Value::List(b)) => {
-            let mut values = Vec::with_capacity(a.len() + b.len());
-            values.extend(a.iter().cloned());
-            values.extend(b.iter().cloned());
-            Ok(Value::List(values.into()))
-        }
-        (Value::Tuple(a), Value::Tuple(b)) => {
-            let mut values = Vec::with_capacity(a.len() + b.len());
-            values.extend(a.iter().cloned());
-            values.extend(b.iter().cloned());
-            Ok(Value::Tuple(values.into()))
-        }
-        (Value::List(_), Value::Tuple(_)) | (Value::Tuple(_), Value::List(_)) => {
-            Err(RuntimeError::IncompatibleSequenceConcatenation)
-        }
-        (left, right) => Ok(Value::Number(as_number(&left)? + as_number(&right)?)),
-    }
 }
 
 pub(crate) fn is_truthy(value: &Value) -> Result<bool, RuntimeError> {

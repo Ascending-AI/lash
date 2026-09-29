@@ -22,6 +22,7 @@ mod runner;
 mod work_engine;
 mod worker;
 
+use crate::perf_support::dhat;
 pub(crate) use provider::LatencyProviderKind;
 use runner::{CaseSpec, Topology};
 use work_engine::AwaitDriveMode;
@@ -34,6 +35,9 @@ pub const GATE_OVERHEAD_P99_MS: f64 = 250.0;
 pub const GATE_MIN_SAMPLES: usize = 10_000;
 /// The case the budget binds.
 pub const GATE_CASE: &str = "fast";
+/// Why `--dhat-out` is refused by a build without the dhat allocator.
+const DHAT_FEATURE_ERROR: &str =
+    "latency --dhat-out requires a lash-perf build with --features dhat-heap";
 
 /// The default case table. `fast` is the gate; every other case is measured
 /// and reported but not gated.
@@ -152,6 +156,11 @@ pub struct LatencyRun {
     pub lanes: usize,
     /// When set, scale every non-gated case's sample count down for dev runs.
     pub scale_down: bool,
+    /// Where a dhat heap profile of the measured cases lands; `None` runs
+    /// without one. Only a `dhat-heap` build can honour it.
+    pub dhat_out: Option<std::path::PathBuf>,
+    /// Trim dhat backtraces to this many frames.
+    pub dhat_frames: Option<usize>,
 }
 
 /// The `lash-perf latency-worker` side: the second process a cross-worker
@@ -169,6 +178,9 @@ pub struct LatencyWorkerArgs {
 /// raw sample ledger, print the human summary, and exit non-zero when the
 /// gated case is over budget.
 pub async fn run(run: LatencyRun) -> anyhow::Result<i32> {
+    if std::env::var_os("LASH_SQLITE_GATE_TIMING").is_some() {
+        lash_sqlite_store::enable_gate_timings();
+    }
     let mut specs = default_cases(run.fast_samples, run.lanes);
     let known: std::collections::BTreeSet<&'static str> =
         specs.iter().map(|spec| spec.name).collect();
@@ -189,14 +201,47 @@ pub async fn run(run: LatencyRun) -> anyhow::Result<i32> {
         }
     }
 
+    // Refused before a server is spawned, not after.
+    anyhow::ensure!(
+        run.dhat_out.is_none() || cfg!(feature = "dhat-heap"),
+        DHAT_FEATURE_ERROR
+    );
+    dhat::ensure_dhat_parent(run.dhat_out.as_ref())?;
     let env = runner::LatencyEnv::open(&run.store_dir).await?;
+    // The profile covers the measured cases only, and ends while the server
+    // and stores are still open, so its end-of-run heap is what the cases left
+    // retained, not teardown.
+    let profiler =
+        dhat::start_dhat_profiler(run.dhat_out.clone(), run.dhat_frames, DHAT_FEATURE_ERROR)?;
     let mut reports = Vec::new();
     let mut samples = Vec::new();
     for spec in &specs {
         let (report, case_samples) = runner::run_case(spec, &env).await?;
         reports.push(report);
         samples.extend(case_samples);
+        let gate_timings = lash_sqlite_store::take_gate_timings();
+        if !gate_timings.is_empty() {
+            let waits: Vec<f64> = gate_timings
+                .iter()
+                .map(|(wait, _)| *wait as f64 / 1000.0)
+                .collect();
+            let holds: Vec<f64> = gate_timings
+                .iter()
+                .map(|(_, hold)| *hold as f64 / 1000.0)
+                .collect();
+            let waits = crate::perf_support::metrics::percentile_summary(waits);
+            let holds = crate::perf_support::metrics::percentile_summary(holds);
+            println!(
+                "sqlite gate {} writes: wait p50={:.3} p99={:.3} ms; hold p50={:.3} p99={:.3} ms",
+                gate_timings.len(),
+                waits.p50,
+                waits.p99,
+                holds.p50,
+                holds.p99
+            );
+        }
     }
+    dhat::finish_dhat_profiler(profiler);
     let report = runner::build_report(env.describe(), reports);
     if let Some(parent) = run.out.parent() {
         std::fs::create_dir_all(parent)?;
@@ -269,4 +314,31 @@ fn print_summary(report: &runner::LatencyReport) {
 /// over the shared store directory until the host kills the process.
 pub async fn run_worker(args: LatencyWorkerArgs) -> anyhow::Result<()> {
     worker::run(args).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(not(feature = "dhat-heap"))]
+    #[tokio::test]
+    async fn a_build_without_dhat_refuses_a_heap_profile_before_serving() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let run = LatencyRun {
+            out: dir.path().join("latency.json"),
+            samples_out: None,
+            store_dir: dir.path().join("stores"),
+            cases: vec![GATE_CASE.to_string()],
+            fast_samples: 1,
+            lanes: 1,
+            scale_down: false,
+            dhat_out: Some(dir.path().join("dhat.json")),
+            dhat_frames: None,
+        };
+
+        let error = super::run(run).await.expect_err("refused");
+
+        assert_eq!(error.to_string(), DHAT_FEATURE_ERROR);
+        assert!(!dir.path().join("stores").exists());
+    }
 }

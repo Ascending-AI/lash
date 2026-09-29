@@ -45,6 +45,12 @@ pub(crate) struct LostRootPass {
 /// Visit the store's open roots in stable pages and end only those whose
 /// authoritative Restate workflow run failed terminally. A live or paused
 /// run in any generation lane keeps its root.
+///
+/// A run that recorded an outcome is skipped: it is not lost. It committed
+/// its root, or it met a refusal no retry changes and ended the root in the
+/// store before it recorded `Released` (FIG-4018), so the refused run is the
+/// one writer of that root's terminal and this pass writes only for a run
+/// that recorded nothing.
 pub(crate) async fn end_lost_root_runs(
     admin: &RestateAdminClient,
     ingress: &RestateIngressClient,
@@ -98,7 +104,7 @@ pub(crate) async fn end_lost_root_runs(
                 continue;
             }
             let outcome: Option<lash_core::engine::RootOutcome> = match ingress
-                .call_workflow_json(
+                .call_lash_workflow(
                     &run.target_service_name,
                     &turn_workflow_key(&target.session, &target.root),
                     "outcome",

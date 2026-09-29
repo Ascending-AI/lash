@@ -41,6 +41,8 @@
 use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 mod namespace;
+#[cfg(feature = "perf-witness")]
+pub use conn::{enable_gate_timings, take_gate_timings};
 #[cfg(test)]
 mod process_lifecycle_sql_tests;
 #[cfg(test)]
@@ -104,7 +106,7 @@ fn commit_count_entropy_seed() -> u64 {
 }
 mod backend;
 mod catalog;
-mod fleet_format;
+mod compat;
 mod forks;
 mod generation_drain;
 mod graph;
@@ -171,11 +173,10 @@ use pending_turn_inputs::*;
 use queued_work::*;
 use schema::{apply_pragmas, ensure_versioned_schema};
 
-/// The SQLite durable-core session schema version stamped in `PRAGMA user_version`.
+/// The pre-1.0 durable-core DDL revision retained for schema artifacts.
 ///
-/// Hosts can use this constant for compatibility stamps. It moves whenever the
-/// SQLite session-store format changes; it does not cover the process, trigger,
-/// or effect schemas.
+/// Compatibility admission uses [`SqliteDatabase::expected_version`] and the
+/// `lash_compat` row in each physical database.
 pub const SESSION_SCHEMA_VERSION: i32 = schema::SCHEMA_VERSION;
 
 pub use process_definitions::SqliteProcessDefinitionRegistry;
@@ -198,13 +199,6 @@ pub struct SqliteStore {
     /// opened on a memory backend keeps its database alive.
     location: DatabaseLocation,
     turn_cancel_closure_owner: Mutex<Option<lash_core_execution::TurnCancelClosureOwnerBinding>>,
-    effect_host: Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>,
-    artifact_stores: Mutex<
-        Option<(
-            Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
-            lash_core_execution::ProcessEngineRegistry,
-        )>,
-    >,
     process_registry: Option<DatabaseTarget>,
     readers: Vec<SqliteConnection>,
     next_reader: AtomicU64,
@@ -246,7 +240,7 @@ impl SqliteStore {
 
 /// SQLite-backed process registry for one configured runtime deployment.
 ///
-/// It is intentionally separate from [`Store`]: the durable-core catalog
+/// It is intentionally separate from [`SqliteStore`]: the durable-core catalog
 /// persists conversations, while this registry persists background process
 /// state and handle visibility across all sessions sharing the registry.
 pub struct SqliteProcessRegistry {
@@ -598,7 +592,8 @@ pub struct StoreOptions {
 /// never disagree with the row that names it (FIG-1949).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct StoredBlobEnvelope {
-    compression: BlobCompression,
+    version: u32,
+    compression: String,
     #[serde(with = "serde_bytes")]
     content: Vec<u8>,
 }

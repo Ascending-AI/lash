@@ -154,6 +154,7 @@ macro_rules! drive_admission_tests {
 
     (cancel_of_a_parked_root_writes_cancelled_settles_its_input_and_drains_the_next, "s7b-1"),
     (no_row_stays_bound_after_a_roots_verb_close_or_lost_end, "root-verb-unbinds"),
+    (a_refused_root_ends_once_and_its_next_input_admits_a_new_root, "refused-root-end"),
     (fork_releases_the_old_owner_before_the_new_root_drives_in_original_order_on_a_fresh_journal, "s7b-2"),
     (verbs_are_park_id_cas, "s7b-3"),
     (redrive_under_the_same_build_reparks_the_same_park_with_attempts_plus_one, "s7b-4"),
@@ -190,6 +191,7 @@ macro_rules! drive_admission_tests {
             (a_root_whose_admission_a_successor_sealed_commits_nothing, "drive-root-superseded"),
             (a_command_roots_redrive_replays_its_recorded_outcome, "drive-command-root-redrive"),
             (a_root_end_closes_its_turn_scope_in_the_process_registry, "drive-root-registry-close"),
+            (a_joined_inputs_turn_scope_closes_with_its_admitting_root, "drive-joined-scope-close"),
             (an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind, "drive-idle-turn-lane-order"),
             (a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind, "drive-turn-lane-contiguous"),
         ]);
@@ -531,7 +533,7 @@ macro_rules! tool_child_invocation_tests {
 }
 
 /// Register the live-fault laws (FIG-3575): a store fault while a tool child
-/// resolves its environment is never its recorded outcome, and a park is.
+/// resolves its environment is never its recorded outcome.
 ///
 /// The fixture is [`tool_child_invocation_tests!`]'s. Registered by an
 /// engine that re-runs a child whose run hit a live fault.
@@ -541,8 +543,6 @@ macro_rules! tool_child_live_fault_tests {
         $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
             (a_process_env_store_fault_is_never_the_childs_recorded_outcome,
              "tool-child-env-store-fault"));
-        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
-            (a_divergent_child_settles_with_its_park, "tool-child-divergent-park"));
     };
 }
 

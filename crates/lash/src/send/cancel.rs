@@ -2,7 +2,7 @@
 //! withdrawn; an input whose root runs has the root cancelled cooperatively
 //! through its cancellation gate (ADR 0039).
 
-use lash_core::drive::{physical_turn_of, root_of_physical_turn};
+use lash_core::drive::physical_turn_of;
 use lash_core::facade_support::{
     TurnAddress, TurnCancelDisposition, TurnCancelMode, TurnCancelRequest, TurnWorkDriver,
 };
@@ -64,11 +64,13 @@ async fn cancel_input(
             }),
         )),
         PendingTurnInputCancelOutcome::NotFound => Ok(CancelReceipt::NotFound),
+        PendingTurnInputCancelOutcome::AlreadyAdmitted { root, .. } => {
+            cancel_root(parts, &root, request_id, request).await
+        }
         // A completed input was applied by a committed turn, which is not
         // the root's end: a root that switched frames runs on in its
         // follow-on turns, so its root answers whether it settled.
-        PendingTurnInputCancelOutcome::AlreadyCompleted(_)
-        | PendingTurnInputCancelOutcome::AlreadyAdmitted { .. } => {
+        PendingTurnInputCancelOutcome::AlreadyCompleted(_) => {
             let root = root_of_input(parts, input).await?;
             cancel_root(parts, &root, request_id, request).await
         }
@@ -76,22 +78,15 @@ async fn cancel_input(
 }
 
 /// The root that took `input`, from its durable binding: the admission binds
-/// it before any turn commits, so a cancel reaches the consuming root even
-/// before the input has application evidence.
+/// it before any turn commits, and the commit that applied a checkpoint
+/// delivery binds it, so a cancel reaches the consuming root by one point
+/// read.
 async fn root_of_input(parts: &SendParts, input: &InputId) -> Result<TurnId> {
-    if let Some(root) = parts.store.root_of_input(input).await? {
-        return Ok(root);
-    }
-    resolve::applications(parts)
-        .await?
-        .into_iter()
-        .find(|application| application.input_id == *input)
-        .map(|application| root_of_physical_turn(&application.turn_id).0)
-        .ok_or_else(|| {
-            EmbedError::from(crate::SendError::Unresolved {
-                input_id: input.clone(),
-            })
+    parts.store.root_of_input(input).await?.ok_or_else(|| {
+        EmbedError::from(crate::SendError::Unresolved {
+            input_id: input.clone(),
         })
+    })
 }
 
 async fn cancel_root(

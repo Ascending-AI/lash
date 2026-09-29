@@ -1615,8 +1615,13 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
     // handler next journals that step, then the resolution call, then the
     // settled outcome. Each prefix stacks the commands every interruption
     // added, completing the runs they proposed and, once answered, the call.
-    let call_completion = serde_json::to_value(ResolveOutcome::Accepted)
-        .expect("serialize durable-wait resolution outcome");
+    // The index answers in the Reply every lash handler answers with
+    // (ADR 0115).
+    let call_completion = serde_json::to_value(crate::Reply::at(
+        crate::compat::RESTATE_WIRE_VERSION,
+        ResolveOutcome::Accepted,
+    ))
+    .expect("serialize durable-wait resolution outcome");
     let stack = |outputs: &[&[u8]], answer_call: bool| {
         encode_recorded_commands_replay(TOOL_INTENT_CORPUS_KEY, &(), outputs, |command| {
             (answer_call && command.message_type == 0x040D).then(|| call_completion.clone())

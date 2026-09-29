@@ -1165,9 +1165,18 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         let metrics = factory.metrics();
         (Arc::new(factory), metrics)
     };
-    let backend: lash::Backend = PerfBackend::over_restate(&restate)
-        .with_catalog(Arc::clone(&store_factory))
-        .into();
+    let backend = PerfBackend::over_restate(&restate);
+    let backend = if scenario.is_queued_work_contention() {
+        // The scenario's workers fence and admit the seeded batches at the
+        // store themselves, so no engine drive may run: the backend's
+        // wall-clock reconcile interval would claim the batches' armed
+        // ingress obligations and race a competing drive's epoch seal and
+        // admissions into the measured window.
+        backend.with_session_work(restate.explicit_reconcile_session_work())
+    } else {
+        backend
+    };
+    let backend: lash::Backend = backend.with_catalog(Arc::clone(&store_factory)).into();
     let effect_host = backend.effect_host();
     for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
         plugin_stack.push(factory);

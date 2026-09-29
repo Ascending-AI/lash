@@ -62,6 +62,7 @@ dependencies = [
  "futures-util",
  "http",
  "http-body-util",
+ "lash-internal-core-execution",
  "lash-internal-http-transport",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
@@ -2290,6 +2291,7 @@ dependencies = [
  "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-tool-support",
  "lash-internal-trace",
  "serde",
  "serde_json",
@@ -2387,7 +2389,6 @@ dependencies = [
 name = "lash-internal-postgres-store"
 version = "0.0.0-dev"
 dependencies = [
- "anyhow",
  "async-trait",
  "fastrand",
  "lash-internal-conformance",
@@ -2583,6 +2584,7 @@ dependencies = [
  "hyper-util",
  "lash-internal-conformance",
  "lash-internal-core",
+ "lash-internal-core-store",
  "lash-internal-core-worker",
  "lash-internal-http-transport",
  "lash-internal-lashlang",
@@ -2690,6 +2692,7 @@ dependencies = [
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-execution",
+ "lash-internal-core-store",
  "lash-internal-lashlang",
  "lash-internal-restate-test",
  "lash-internal-sansio",
@@ -2726,7 +2729,6 @@ dependencies = [
  "lash-internal-restate-test",
  "lash-internal-rlm-types",
  "lash-internal-sansio",
- "lash-internal-sqlite-store",
  "lash-internal-tool-support",
  "lash-internal-typescript",
  "serde",
@@ -2794,6 +2796,7 @@ dependencies = [
  "futures-util",
  "lash-internal-conformance",
  "lash-internal-core",
+ "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
  "lash-internal-llm-tools",
  "lash-internal-plugin-process-controls",
@@ -2807,7 +2810,9 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-subagents",
+ "lash-internal-typescript",
  "lash-runtime",
+ "libc",
  "reqwest 0.13.4",
  "restate-sdk",
  "serde",
@@ -2868,6 +2873,7 @@ dependencies = [
  "insta",
  "lash-internal-conformance",
  "lash-internal-core",
+ "lash-internal-core-store",
  "lash-internal-core-worker",
  "lash-internal-http-transport",
  "lash-internal-lashlang",
@@ -2947,6 +2953,45 @@ dependencies = [
  "sqlx",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "lash-upgrade-harness"
+version = "0.0.0-dev"
+dependencies = [
+ "anyhow",
+ "clap",
+ "lash-internal-core",
+ "lash-internal-core-store",
+ "lash-internal-postgres-store",
+ "lash-internal-remote-protocol",
+ "lash-internal-restate",
+ "lash-internal-sqlite-store",
+ "lash-runtime",
+ "reqwest 0.13.4",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "lashctl"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-internal-core-execution",
+ "lash-internal-core-store",
+ "lash-internal-postgres-store",
+ "lash-internal-remote-protocol",
+ "lash-internal-restate",
+ "lash-runtime",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

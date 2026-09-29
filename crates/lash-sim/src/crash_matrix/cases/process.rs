@@ -52,6 +52,10 @@ pub(super) async fn stage_start(point: CrashPoint, seed: u64) -> Result<Staged, 
     let registration = request.into_registration(None);
     let registry = world.backend().process_registry();
     let env_store = world.backend().process_env_store();
+    let starter =
+        lash_core::ExecutionScope::runtime_operation(format!("crash-matrix-process-start-{seed}"))
+            .journal_identity()
+            .map_err(|error| format!("start journal identity: {error}"))?;
     let started = lash_core::runtime::register_process_start(
         &lash_core::runtime::ProcessStartStores {
             registry: registry.as_ref(),
@@ -59,6 +63,7 @@ pub(super) async fn stage_start(point: CrashPoint, seed: u64) -> Result<Staged, 
             engines: None,
             engines_required: false,
             executor: "process start crash matrix",
+            starter: &starter,
         },
         registration,
         &[],
@@ -171,7 +176,10 @@ pub(crate) async fn publish_process(
     .map_err(|error| format!("link the process: {error:?}"))?;
     lashlang::LashlangArtifacts::new(world.backend().module_artifacts())
         .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("crash-matrix"),
+            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+                lash_core::HostArtifactPin::mint(),
+            ))
+            .map_err(|error| format!("host pin claim: {error}"))?,
             &linked.artifact,
         )
         .await
@@ -388,9 +396,9 @@ async fn stage_caller_killed(world: CrashWorld) -> Result<Staged, String> {
             PROCESS_WORKFLOW,
             process.as_str(),
             "await_terminal",
-            &lash_restate::RestateProcessAwaitRequest {
+            &lash_restate::Call::new(lash_restate::RestateProcessAwaitRequest {
                 process_id: process.clone(),
-            },
+            }),
         )
         .await
         .map_err(|error| format!("arm the engine waiter: {error}"))?
@@ -474,9 +482,9 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
             PROCESS_WORKFLOW,
             process.as_str(),
             "await_terminal",
-            &lash_restate::RestateProcessAwaitRequest {
+            &lash_restate::Call::new(lash_restate::RestateProcessAwaitRequest {
                 process_id: process.clone(),
-            },
+            }),
         )
         .await
         .map_err(|error| format!("arm the engine waiter: {error}"))?

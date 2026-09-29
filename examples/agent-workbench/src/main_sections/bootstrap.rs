@@ -269,17 +269,19 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     ));
     let attachment_store = stores.stores.attachment_store();
 
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(rlm_channel)
-            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-            .build()
-            .with_lashlang_abilities(workbench_lashlang_abilities()),
-        &backend.clone().into(),
-    )
-    .with_deferred_tool_resolver(deferred_tools.resolver())
-    .with_lashlang_execution_sink(Arc::clone(&lashlang_execution_sink));
+    let mut rlm_config = lash::rlm::RlmProtocolPluginConfig::builder()
+        .channel(rlm_channel)
+        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+        .build()
+        .with_lashlang_abilities(workbench_lashlang_abilities());
+    if let Some(warn_tokens) = continue_as_warn_tokens_from_environment(context_window_tokens)? {
+        rlm_config.continue_as_soft_warn_tokens = Some(warn_tokens);
+    }
+    let factory =
+        lash_protocol_rlm::RlmProtocolPluginFactory::new(rlm_config, &backend.clone().into())
+            .with_deferred_tool_resolver(deferred_tools.resolver())
+            .with_lashlang_execution_sink(Arc::clone(&lashlang_execution_sink));
     // FIG-1407: the workbench used to run `TurnBudget::Unbounded` with no
     // second bound, so a turn whose cells never committed re-called the
     // provider until someone noticed — one measured send bought 1,223 calls.
@@ -499,10 +501,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         )
         .route(
             "/api/observations",
-            get(move |state, query| {
+            get(move |state, query, headers| {
                 session_observations_with_shutdown(
                     state,
                     query,
+                    headers,
                     Some(observation_stream_shutdown.subscribe()),
                 )
             }),
@@ -699,6 +702,38 @@ pub(crate) fn context_window_tokens_from_environment() -> AnyhowResult<usize> {
     context_window_tokens_from(|name| std::env::var(name))
 }
 
+pub(crate) fn continue_as_warn_tokens_from_environment(
+    context_window_tokens: usize,
+) -> AnyhowResult<Option<usize>> {
+    continue_as_warn_tokens_from(context_window_tokens, |name| std::env::var(name))
+}
+
+pub(crate) fn continue_as_warn_tokens_from(
+    context_window_tokens: usize,
+    read_env: impl FnOnce(&str) -> Result<String, std::env::VarError>,
+) -> AnyhowResult<Option<usize>> {
+    let raw = match read_env(AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS_ENV) {
+        Ok(raw) => raw,
+        Err(std::env::VarError::NotPresent) => return Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(anyhow!(
+                "agent-workbench: {AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS_ENV} is not valid Unicode"
+            ));
+        }
+    };
+    let warn_tokens = raw.trim().parse::<usize>().map_err(|_| {
+        anyhow!(
+            "agent-workbench: {AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS_ENV} must be a positive integer below the context window"
+        )
+    })?;
+    if warn_tokens == 0 || warn_tokens >= context_window_tokens {
+        return Err(anyhow!(
+            "agent-workbench: {AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS_ENV} must be a positive integer below the context window"
+        ));
+    }
+    Ok(Some(warn_tokens))
+}
+
 pub(crate) fn context_window_tokens_from(
     read_env: impl FnOnce(&str) -> Result<String, std::env::VarError>,
 ) -> AnyhowResult<usize> {
@@ -744,6 +779,36 @@ pub(crate) fn workbench_context_window_tokens() -> usize {
 #[cfg(test)]
 mod startup_tests {
     use super::*;
+
+    #[test]
+    fn continue_as_warning_override_accepts_a_bounded_threshold() {
+        assert_eq!(
+            continue_as_warn_tokens_from(41_000, |name| {
+                assert_eq!(name, AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS_ENV);
+                Ok("21000".to_string())
+            })
+            .expect("valid warning override"),
+            Some(21_000)
+        );
+        assert_eq!(
+            continue_as_warn_tokens_from(41_000, |_| Err(std::env::VarError::NotPresent))
+                .expect("unset warning override"),
+            None
+        );
+    }
+
+    #[test]
+    fn continue_as_warning_override_rejects_values_outside_the_context_window() {
+        for value in ["0", "41000", "invalid"] {
+            let error = continue_as_warn_tokens_from(41_000, |_| Ok(value.to_string()))
+                .expect_err("invalid warning override");
+            assert!(
+                error
+                    .to_string()
+                    .contains("must be a positive integer below the context window")
+            );
+        }
+    }
 
     #[test]
     fn startup_honors_context_window_environment_override() {

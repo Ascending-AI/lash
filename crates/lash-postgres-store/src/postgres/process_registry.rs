@@ -239,6 +239,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         observers.sort();
         observers.dedup();
         let wake_session_id = registration.wake_session_id.clone();
+        let consumer_hold = registration.consumer_hold.clone();
         let start_key = registration.start_key.clone();
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         // While the process minted for a key is retained, a start under the
@@ -321,6 +322,9 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             .bind(record.lifetime.storage_label())
             .bind(cancel_requested_at_ms(&record))
             .bind(record_json)
+            .bind(consumer_hold.as_ref().map(|hold| hold.key.clone()))
+            .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))
+            .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_id()))
             .execute(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -1008,25 +1012,6 @@ impl lash_core_execution::ProcessWakeOutbox for PostgresProcessRegistry {
 }
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
-    async fn pending_process_artifact_cleanup(
-        &self,
-    ) -> Result<Vec<lash_core_execution::ProcessArtifactCleanup>, PluginError> {
-        let rows: Vec<String> = sqlx::query_scalar(process_sql().cleanup.list_pending.sql())
-            .fetch_all(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        rows.into_iter()
-            .map(|json| serde_json::from_str(&json).map_err(process_decode_error))
-            .collect()
-    }
-
-    async fn complete_process_artifact_cleanup(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<lash_core_execution::ProcessArtifactCleanupAck, PluginError> {
-        prune_api::complete_process_artifact_cleanup(self, process_id).await
-    }
-
     async fn compact_process_park_feed(
         &self,
         through: lash_core_execution::store::ParkFeedCursor,
@@ -1113,6 +1098,20 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         watermark: lash_core_execution::ProjectionWatermark,
     ) -> Result<Vec<ProcessId>, PluginError> {
         prune_api::prunable_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
+    }
+
+    async fn release_consumer_hold(
+        &self,
+        process_id: &ProcessId,
+        key: &str,
+    ) -> Result<(), PluginError> {
+        sqlx::query(process_sql().process.release_consumer_hold.sql())
+            .bind(process_id.as_str())
+            .bind(key)
+            .execute(&self.pool)
+            .await
+            .map(drop)
+            .map_err(plugin_sqlx_error)
     }
 }
 impl lash_core_execution::ProcessClockRebind for PostgresProcessRegistry {

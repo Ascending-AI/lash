@@ -38,6 +38,9 @@ use crate::effect_group::{
 };
 use crate::{LashService, RestateAuthorityId, RestateConnection, RestateIngressClient};
 
+mod journal_verdict;
+pub use journal_verdict::RestateJournalAuthority;
+
 /// Deployment-level Restate effect host for long-lived Lash cores.
 ///
 /// Restate's real effect execution requires a handler context, so this host is
@@ -61,6 +64,11 @@ pub struct RestateEffectHost {
     tool_children: Arc<OnceLock<Arc<ToolChildHost>>>,
     turn_attach: Arc<crate::turn::RestateTurnAttach>,
     turn_control_binding_id: Arc<str>,
+    /// What [`EffectHost::journal_replay`] reads, bound once by the engine
+    /// that owns the store set. Unbound, every live journal answers
+    /// `MayReplay`: the cleanup executor waits rather than sever what a
+    /// replay may still read.
+    journal_authority: Arc<OnceLock<RestateJournalAuthority>>,
 }
 
 impl RestateEffectHost {
@@ -112,7 +120,14 @@ impl RestateEffectHost {
                 namespace,
             )),
             turn_control_binding_id,
+            journal_authority: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// Bind the reads [`EffectHost::journal_replay`] answers from, once; a
+    /// later binding is ignored, like the host's other get-or-init cells.
+    pub fn bind_journal_authority(&self, authority: RestateJournalAuthority) {
+        let _ = self.journal_authority.set(authority);
     }
 
     #[cfg(test)]
@@ -299,7 +314,7 @@ impl EffectHost for RestateEffectHost {
         let await_event_ingress = &self.controller.await_event_ingress;
         await_event_ingress
             .ingress
-            .call_object_json::<_, ()>(
+            .call_lash_object::<_, ()>(
                 &await_event_ingress.service(LashService::DurableWaitRegistry),
                 session_id,
                 "retire_root",
@@ -332,14 +347,16 @@ impl EffectHost for RestateEffectHost {
             .controller
             .await_event_ingress
             .ingress
-            .call_object_empty_json(
+            .call_lash_object(
                 &self
                     .controller
                     .await_event_ingress
                     .namespace
-                    .stable(LashService::DurableWaitRegistry),
+                    .stable(LashService::DurableWaitRegistry)
+                    .name(),
                 session_id,
                 "outstanding",
+                &(),
             )
             .await
             .map_err(|err| {
@@ -451,6 +468,15 @@ impl EffectHost for RestateEffectHost {
         Ok(0)
     }
 
+    /// Restate's verdict on one journal (ADR 0113 §2.5); see
+    /// [`journal_verdict`].
+    async fn journal_replay(
+        &self,
+        journal: &lash_sansio::EffectJournalIdentity,
+    ) -> Result<lash_core::JournalReplay, RuntimeError> {
+        journal_verdict::journal_replay(self, journal).await
+    }
+
     async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
         self.controller.reinstate_await_event_scope(scope).await
     }
@@ -536,7 +562,7 @@ fn ingress_group_error(
     operation: &str,
     error: crate::RestateHttpError,
 ) -> RuntimeEffectControllerError {
-    if let Some(refusal) = ingress_stored_format_refusal(&error) {
+    if let Some(refusal) = crate::object_state::ingress_stored_format_refusal(&error) {
         return refusal;
     }
     let service_unregistered = error.is_service_unregistered();
@@ -546,22 +572,6 @@ fn ingress_group_error(
     } else {
         group_shape_error(message)
     }
-}
-
-/// The typed stored-format refusal an index handler answered an ingress call
-/// with, recovered from the terminal error's message in the response body.
-pub(crate) fn ingress_stored_format_refusal(
-    error: &crate::RestateHttpError,
-) -> Option<RuntimeEffectControllerError> {
-    let crate::RestateHttpError::Status { body, .. } = error else {
-        return None;
-    };
-    let message = serde_json::from_str::<serde_json::Value>(body)
-        .ok()?
-        .get("message")?
-        .as_str()?
-        .to_owned();
-    crate::object_state::stored_format_error_in(&message)
 }
 
 #[async_trait::async_trait]
@@ -616,12 +626,13 @@ impl AwaitEventResolver for RestateEffectHostController {
         let workflow_key = RestateDurableWaitAddress::for_key(key).workflow_key;
         ingress
             .ingress
-            .call_workflow_empty::<Option<Resolution>>(
+            .call_lash_workflow::<_, Option<Resolution>>(
                 &self
                     .await_event_ingress
                     .service(LashService::DurableWaitWorkflow),
                 &workflow_key,
                 "peek",
+                &(),
             )
             .await
             .map_err(|err| {
@@ -688,7 +699,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         let index_key = durable_wait_index_key_for_scope(scope);
         self.await_event_ingress
             .ingress
-            .call_object_json::<_, bool>(
+            .call_lash_object::<_, bool>(
                 &self
                     .await_event_ingress
                     .service(LashService::DurableWaitRegistry),
@@ -756,7 +767,7 @@ impl RestateEffectHostController {
         let admitted = self
             .await_event_ingress
             .ingress
-            .call_object_json::<_, bool>(
+            .call_lash_object::<_, bool>(
                 &self
                     .await_event_ingress
                     .service(LashService::DurableWaitRegistry),
@@ -798,7 +809,7 @@ impl RestateEffectHostController {
         let index_key = durable_wait_index_key_for_scope(scope);
         self.await_event_ingress
             .ingress
-            .call_object_json::<_, ()>(
+            .call_lash_object::<_, ()>(
                 &self
                     .await_event_ingress
                     .service(LashService::DurableWaitRegistry),
@@ -875,7 +886,7 @@ impl RestateEffectHostController {
         let index_key = durable_wait_index_key_for_scope(scope);
         self.await_event_ingress
             .ingress
-            .call_object_json::<_, bool>(
+            .call_lash_object::<_, bool>(
                 &self
                     .await_event_ingress
                     .service(LashService::DurableWaitRegistry),
@@ -922,13 +933,15 @@ impl RestateEffectHostController {
             self.build_generation.as_ref(),
         );
         let probe = ingress
-            .call_object_empty_json::<EffectGroupProbeResponse>(
+            .call_lash_object::<_, EffectGroupProbeResponse>(
                 &self
                     .await_event_ingress
                     .namespace
-                    .stable(LashService::EffectGroupState),
+                    .stable(LashService::EffectGroupState)
+                    .name(),
                 &group_key,
                 "probe",
+                &(),
             )
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/probe", error))?;
@@ -940,7 +953,7 @@ impl RestateEffectHostController {
             && let Some(position) = match local {
                 found @ Some(_) => found,
                 None => ingress
-                    .call_workflow_json::<_, Option<usize>>(
+                    .call_lash_workflow::<_, Option<usize>>(
                         &dispatch_lane.name(),
                         &group_key,
                         "preflight",
@@ -969,7 +982,7 @@ impl RestateEffectHostController {
         // response reports — a reopen's retained route wins over this one.
         let dispatch_route = dispatch_lane.name().into_owned();
         let opened = ingress
-            .call_object_json::<_, EffectGroupOpenResponse>(
+            .call_lash_object::<_, EffectGroupOpenResponse>(
                 &self
                     .await_event_ingress
                     .service(LashService::EffectGroupState),
@@ -987,7 +1000,7 @@ impl RestateEffectHostController {
             EffectGroupOpenResponse::OpenedFresh { dispatch_route }
             | EffectGroupOpenResponse::ReopenedPreparing { dispatch_route } => {
                 ingress
-                    .send_workflow_json(
+                    .send_lash_workflow(
                         &dispatch_route,
                         &group_key,
                         "run",
@@ -1000,7 +1013,7 @@ impl RestateEffectHostController {
                 let request = ready_wait_request(&shape.wait_scope, &group_key)?;
                 let address = RestateDurableWaitAddress::for_key(&request.key);
                 let resolution = ingress
-                    .call_workflow_json::<_, Resolution>(
+                    .call_lash_workflow::<_, Resolution>(
                         &self
                             .await_event_ingress
                             .service(LashService::DurableWaitWorkflow),
@@ -1141,7 +1154,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             group_shape_error(format!("effect group rank does not fit u64: {error}"))
         })?;
         let mut read = ingress
-            .call_object_json::<_, EffectGroupReadRankResponse>(
+            .call_lash_object::<_, EffectGroupReadRankResponse>(
                 &self
                     .await_event_ingress
                     .service(LashService::EffectGroupState),
@@ -1161,7 +1174,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             let wait_service = self
                 .await_event_ingress
                 .service(LashService::DurableWaitWorkflow);
-            let wait = ingress.call_workflow_json::<_, Resolution>(
+            let wait = ingress.call_lash_workflow::<_, Resolution>(
                 &wait_service,
                 &address.workflow_key,
                 "await_resolution",
@@ -1204,7 +1217,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 }
             }
             read = ingress
-                .call_object_json::<_, EffectGroupReadRankResponse>(
+                .call_lash_object::<_, EffectGroupReadRankResponse>(
                     &self
                         .await_event_ingress
                         .service(LashService::EffectGroupState),
@@ -1250,13 +1263,15 @@ impl RuntimeEffectController for RestateEffectHostController {
             EffectGroupSettlementTerminal::StoredPayload
         ) {
             match ingress
-                .call_object_empty_json::<EffectGroupPayloadGetResponse>(
+                .call_lash_object::<_, EffectGroupPayloadGetResponse>(
                     &self
                         .await_event_ingress
                         .namespace
-                        .stable(LashService::EffectGroupPayload),
+                        .stable(LashService::EffectGroupPayload)
+                        .name(),
                     &payload_key(handle.group_key(), record.position),
                     "get",
+                    &(),
                 )
                 .await
                 .map_err(|error| ingress_group_error("EffectGroupPayload/get", error))?
@@ -1298,7 +1313,7 @@ impl RuntimeEffectController for RestateEffectHostController {
     ) -> Result<Option<lash_core::RankedGroupSettlement>, RuntimeEffectControllerError> {
         let ingress = &self.await_event_ingress.ingress;
         let read = ingress
-            .call_object_json::<_, EffectGroupReadRankResponse>(
+            .call_lash_object::<_, EffectGroupReadRankResponse>(
                 &self
                     .await_event_ingress
                     .service(LashService::EffectGroupState),
@@ -1335,13 +1350,15 @@ impl RuntimeEffectController for RestateEffectHostController {
             EffectGroupSettlementTerminal::StoredPayload
         ) {
             match ingress
-                .call_object_empty_json::<EffectGroupPayloadGetResponse>(
+                .call_lash_object::<_, EffectGroupPayloadGetResponse>(
                     &self
                         .await_event_ingress
                         .namespace
-                        .stable(LashService::EffectGroupPayload),
+                        .stable(LashService::EffectGroupPayload)
+                        .name(),
                     &payload_key(group_key, record.position),
                     "get",
+                    &(),
                 )
                 .await
                 .map_err(|error| ingress_group_error("EffectGroupPayload/get", error))?
@@ -1378,7 +1395,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         let response = self
             .await_event_ingress
             .ingress
-            .call_object_json::<_, EffectGroupCloseResponse>(
+            .call_lash_object::<_, EffectGroupCloseResponse>(
                 &self
                     .await_event_ingress
                     .service(LashService::EffectGroupState),
@@ -1435,7 +1452,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         let ingress = &self.await_event_ingress.ingress;
         let index_key = durable_wait_index_key_for_scope(&scope);
         let membership: Option<String> = ingress
-            .call_object_json::<_, Option<String>>(
+            .call_lash_object::<_, Option<String>>(
                 &self
                     .await_event_ingress
                     .service(LashService::DurableWaitRegistry),
@@ -1453,7 +1470,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             return Ok(Outcome::Ungrouped);
         };
         let response = ingress
-            .call_object_json::<_, crate::effect_group::EffectGroupCommitChildResponse>(
+            .call_lash_object::<_, crate::effect_group::EffectGroupCommitChildResponse>(
                 &self
                     .await_event_ingress
                     .service(LashService::EffectGroupState),
@@ -1514,7 +1531,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         // parks on each one's durable drained wake instead of polling.
         let ingress = &self.await_event_ingress.ingress;
         let (wait_scope, positions) = match ingress
-            .call_object_json::<_, crate::effect_group::EffectGroupDrainBlockersResponse>(
+            .call_lash_object::<_, crate::effect_group::EffectGroupDrainBlockersResponse>(
                 &self
                     .await_event_ingress
                     .service(LashService::EffectGroupState),
@@ -1535,7 +1552,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             let request = drained_wait_request(&wait_scope, group_key, position)?;
             let address = RestateDurableWaitAddress::for_key(&request.key);
             let resolution = ingress
-                .call_workflow_json::<_, Resolution>(
+                .call_lash_workflow::<_, Resolution>(
                     &self
                         .await_event_ingress
                         .service(LashService::DurableWaitWorkflow),
@@ -1601,139 +1618,4 @@ impl RuntimeEffectController for RestateEffectHostController {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::durable_wait::restate_await_event_key;
-
-    fn service_call_error(status: u16) -> crate::RestateHttpError {
-        crate::RestateHttpError::Status {
-            operation: "Restate object call",
-            url: "https://restate.invalid/EffectGroupIndex/group/probe".to_string(),
-            status,
-            body: "not found".to_string(),
-        }
-    }
-
-    #[test]
-    fn effect_group_ingress_404_is_restate_service_unregistered() {
-        let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(404));
-
-        assert_eq!(error.code, RuntimeErrorCode::EngineServiceUnregistered);
-        assert!(error.message.contains("EffectGroupIndex/probe"));
-    }
-
-    #[test]
-    fn effect_group_ingress_non_registration_failure_stays_a_shape_error() {
-        let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(503));
-
-        assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectGroupShape);
-    }
-
-    /// Eight threads registering different resolvers on one host: exactly one
-    /// wins, and every loser is refused rather than silently dropped
-    /// (FIG-1578's law, re-pinned on the engine host after the SQL effect
-    /// engine's deletion — FIG-3928).
-    ///
-    /// The `OnceLock` race is what [`OnceLock::set`] arbitrates: a
-    /// `get`-then-`set` pair leaves a window in which two threads both read
-    /// `None`, both write, and the loser is told `Ok` while its resolver went
-    /// nowhere, so the endpoint's dispatch would route a journaled child
-    /// through a resolver its wiring code did not register.
-    #[test]
-    fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
-        const REGISTRARS: usize = 8;
-
-        /// A resolver that routes nothing: this law is about which
-        /// registration wins, not about what a child does.
-        struct NoChildRuns;
-
-        impl GroupExecutors for NoChildRuns {
-            fn executor_for(
-                &self,
-                _envelope: &RuntimeEffectEnvelope,
-            ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-                None
-            }
-        }
-
-        let host = Arc::new(RestateEffectHost::new_for_test(RestateConnection::new(
-            "https://restate.invalid",
-        )));
-
-        let barrier = Arc::new(std::sync::Barrier::new(REGISTRARS));
-        let outcomes: Vec<_> = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..REGISTRARS)
-                .map(|_| {
-                    let host = Arc::clone(&host);
-                    let barrier = Arc::clone(&barrier);
-                    scope.spawn(move || {
-                        // A distinct allocation per thread, so the
-                        // same-resolver no-op cannot be mistaken for a
-                        // winner.
-                        let executors = Arc::new(NoChildRuns) as Arc<dyn GroupExecutors>;
-                        barrier.wait();
-                        host.register_group_executors(executors)
-                    })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|handle| handle.join().expect("a registrar thread"))
-                .collect()
-        });
-
-        assert_eq!(
-            outcomes.iter().filter(|outcome| outcome.is_ok()).count(),
-            1,
-            "exactly one of {REGISTRARS} different resolvers may be this host's \
-             answer to what runs a journaled grouped child"
-        );
-        for refusal in outcomes.iter().filter_map(|outcome| outcome.as_ref().err()) {
-            assert_eq!(
-                refusal.code,
-                RuntimeErrorCode::RuntimeEffectGroupShape,
-                "a loser learns its resolver is not the host's"
-            );
-        }
-
-        // The winner's registration stands: re-registering the resolver the
-        // host now holds is the same-resolver no-op, and a ninth different
-        // resolver still meets the conflict answer.
-        let held = Arc::clone(
-            host.controller
-                .group_executors
-                .get()
-                .expect("one registrar won"),
-        );
-        assert!(
-            host.register_group_executors(held).is_ok(),
-            "re-registering the held resolver is a no-op"
-        );
-        assert_eq!(
-            host.register_group_executors(Arc::new(NoChildRuns))
-                .expect_err("a later different resolver still loses")
-                .code,
-            RuntimeErrorCode::RuntimeEffectGroupShape,
-        );
-    }
-
-    #[test]
-    fn session_administrative_read_rejects_non_session_scope_aliases() {
-        for scope in [
-            ExecutionScope::process(lash_core::ProcessId::fixture("alias-process")),
-            ExecutionScope::runtime_operation("alias-operation"),
-        ] {
-            let alias = SessionId::from(durable_wait_index_key_for_scope(&scope));
-            let key = restate_await_event_key(
-                &scope,
-                AwaitEventWaitIdentity::tool_completion("alias-wait"),
-            )
-            .expect("derive non-session wait key");
-
-            assert!(
-                outstanding_owned_by_session(&alias, vec![key]).is_empty(),
-                "a non-session wait indexed at `{alias}` must not be advertised as session-owned"
-            );
-        }
-    }
-}
+mod tests;

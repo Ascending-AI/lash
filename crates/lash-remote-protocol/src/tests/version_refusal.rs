@@ -5,7 +5,7 @@ struct EmptyEnvelopeBody {}
 
 pub(super) fn decode_empty_envelope(protocol_version: u32) -> Result<(), RemoteProtocolError> {
     let wire = serde_json::json!({ "protocol_version": protocol_version }).to_string();
-    Envelope::<EmptyEnvelopeBody>::decode_json(wire.as_bytes()).map(drop)
+    Envelope::<EmptyEnvelopeBody>::decode_json(wire.as_bytes(), crate::REMOTE_PROTOCOL).map(drop)
 }
 
 /// Captured by main's Envelope writer at 11f6b0eb40f6; no hand-edited wire bytes.
@@ -16,11 +16,8 @@ fn historical_remote_protocol_generation_61_is_refused() {
     assert_eq!(predecessor["protocol_version"], 61);
     assert_eq!(61 + 1, 62, "historical generation adjacency pin");
     assert!(matches!(
-        Envelope::<EmptyEnvelopeBody>::decode_json(bytes),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 61,
-            expected: REMOTE_PROTOCOL_VERSION
-        })
+        Envelope::<EmptyEnvelopeBody>::decode_json(bytes, crate::REMOTE_PROTOCOL),
+        Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(61) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
 }
 
@@ -32,11 +29,8 @@ fn immediate_predecessor_remote_protocol_generation_62_is_refused() {
     assert_eq!(predecessor["protocol_version"], 62);
     assert_eq!(62 + 1, 63, "historical generation adjacency pin");
     assert!(matches!(
-        Envelope::<EmptyEnvelopeBody>::decode_json(bytes),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 62,
-            expected: REMOTE_PROTOCOL_VERSION
-        })
+        Envelope::<EmptyEnvelopeBody>::decode_json(bytes, crate::REMOTE_PROTOCOL),
+        Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(62) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
 }
 
@@ -48,16 +42,13 @@ fn historical_remote_protocol_generation_63_is_refused() {
     let bytes = include_bytes!("../../tests/fixtures/remote-envelope-v63.json");
     let predecessor: serde_json::Value = serde_json::from_slice(bytes).unwrap();
     assert_eq!(predecessor["protocol_version"], PREDECESSOR);
-    let error = match Envelope::<EmptyEnvelopeBody>::decode_json(bytes) {
+    let error = match Envelope::<EmptyEnvelopeBody>::decode_json(bytes, crate::REMOTE_PROTOCOL) {
         Ok(_) => panic!("generation-63 remote envelope must be refused"),
         Err(error) => error,
     };
     assert!(matches!(
         error,
-        RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: PREDECESSOR,
-            expected: REMOTE_PROTOCOL_VERSION,
-        }
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(PREDECESSOR) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
 }
 
@@ -69,16 +60,13 @@ fn historical_remote_protocol_generation_64_is_refused() {
     let bytes = include_bytes!("../../tests/fixtures/remote-envelope-v64.json");
     let predecessor: serde_json::Value = serde_json::from_slice(bytes).unwrap();
     assert_eq!(predecessor["protocol_version"], PREDECESSOR);
-    let error = match Envelope::<EmptyEnvelopeBody>::decode_json(bytes) {
+    let error = match Envelope::<EmptyEnvelopeBody>::decode_json(bytes, crate::REMOTE_PROTOCOL) {
         Ok(_) => panic!("generation-64 remote envelope must be refused"),
         Err(error) => error,
     };
     assert!(matches!(
         error,
-        RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: PREDECESSOR,
-            expected: REMOTE_PROTOCOL_VERSION,
-        }
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(PREDECESSOR) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
 }
 
@@ -90,16 +78,13 @@ fn historical_remote_protocol_generation_65_is_refused() {
     let bytes = include_bytes!("../../tests/fixtures/remote-envelope-v65.json");
     let predecessor: serde_json::Value = serde_json::from_slice(bytes).unwrap();
     assert_eq!(predecessor["protocol_version"], PREDECESSOR);
-    let error = match Envelope::<EmptyEnvelopeBody>::decode_json(bytes) {
+    let error = match Envelope::<EmptyEnvelopeBody>::decode_json(bytes, crate::REMOTE_PROTOCOL) {
         Ok(_) => panic!("generation-65 remote envelope must be refused"),
         Err(error) => error,
     };
     assert!(matches!(
         error,
-        RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: PREDECESSOR,
-            expected: REMOTE_PROTOCOL_VERSION,
-        }
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(PREDECESSOR) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
 }
 
@@ -110,16 +95,13 @@ fn historical_remote_protocol_generation_67_is_refused() {
     let bytes = include_bytes!("../../tests/fixtures/remote-envelope-v67.json");
     let predecessor: serde_json::Value = serde_json::from_slice(bytes).unwrap();
     assert_eq!(predecessor["protocol_version"], PREDECESSOR);
-    let error = match Envelope::<EmptyEnvelopeBody>::decode_json(bytes) {
+    let error = match Envelope::<EmptyEnvelopeBody>::decode_json(bytes, crate::REMOTE_PROTOCOL) {
         Ok(_) => panic!("generation-67 remote envelope must be refused"),
         Err(error) => error,
     };
     assert!(matches!(
         error,
-        RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: PREDECESSOR,
-            expected: REMOTE_PROTOCOL_VERSION,
-        }
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(PREDECESSOR) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
 }
 
@@ -134,10 +116,9 @@ fn retired_and_unlanded_remote_protocol_generations_are_refused() {
         assert!(
             matches!(
                 decode_empty_envelope(predecessor),
-                Err(RemoteProtocolError::UnsupportedProtocolVersion {
-                    actual,
-                    expected: REMOTE_PROTOCOL_VERSION,
-                }) if actual == predecessor
+                Err(RemoteProtocolError::Unsupported { peer, local })
+                    if peer == crate::VersionRange::exactly(predecessor)
+                        && local == crate::REMOTE_PROTOCOL
             ),
             "generation {predecessor} must be refused"
         );

@@ -17,7 +17,7 @@ struct FailingArtifactStore;
 impl lash_core::ModuleArtifactStore for FailingArtifactStore {
     async fn publish_module_artifact(
         &self,
-        _owner: &lash_core::ArtifactOwner,
+        _claim: &lash_core::ReferrerClaim,
         _module_ref: &str,
         _bytes: &[u8],
     ) -> Result<(), lash_core::ArtifactStoreError> {
@@ -26,9 +26,9 @@ impl lash_core::ModuleArtifactStore for FailingArtifactStore {
         ))
     }
 
-    async fn retain_module_artifact(
+    async fn acquire_module_artifact(
         &self,
-        _owner: &lash_core::ArtifactOwner,
+        _claim: &lash_core::ReferrerClaim,
         _module_ref: &str,
     ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(lash_core::ArtifactStoreError::Backend(
@@ -36,30 +36,9 @@ impl lash_core::ModuleArtifactStore for FailingArtifactStore {
         ))
     }
 
-    async fn transfer_module_artifact(
+    async fn end_module_referrer(
         &self,
-        _from: &lash_core::ArtifactOwner,
-        _to: &lash_core::ArtifactOwner,
-        _module_ref: &str,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        Err(lash_core::ArtifactStoreError::Backend(
-            "injected artifact store failure".to_string(),
-        ))
-    }
-
-    async fn release_module_artifact(
-        &self,
-        _owner: &lash_core::ArtifactOwner,
-        _module_ref: &str,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        Err(lash_core::ArtifactStoreError::Backend(
-            "injected artifact store failure".to_string(),
-        ))
-    }
-
-    async fn retire_module_artifact_owner(
-        &self,
-        _owner: &lash_core::ArtifactOwner,
+        _cleanup: &lash_core::ResolvedArtifactCleanup,
     ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(lash_core::ArtifactStoreError::Backend(
             "injected artifact store failure".to_string(),
@@ -1568,11 +1547,14 @@ pub(super) async fn execute_with_host_environment(
         .open_handler(crate::testing::default_cell_scope())
         .await
         .expect("open the cell's handler");
-    let ctx = lash_core::testing::code_execution_context_with_trigger_store(
+    let artifact_store = crate::testing::fresh_memory_artifact_store().await;
+    let ctx = super::triggers::trigger_tool_context(
         crate::testing::double_ports(&double, &handler),
         crate::testing::memory_trigger_store().await,
-        crate::testing::memory_process_registry().await,
-    );
+        &artifact_store,
+        None,
+    )
+    .await;
     let surface = LashlangSurface::new(
         abilities,
         lashlang::LashlangLanguageFeatures::default(),
@@ -1584,7 +1566,7 @@ pub(super) async fn execute_with_host_environment(
         ExecRequest {
             code: code.to_string(),
         },
-        crate::testing::fresh_memory_artifact_store().await,
+        artifact_store,
         surface,
         None,
         RlmProjectedBindings::default(),
@@ -1741,6 +1723,6 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
         assert_eq!(second_stats.hits, 1);
         assert_eq!(second_stats.misses, 1);
         assert_eq!(second_stats.entries, 1);
-        assert!(state.stored_lashlang_modules.is_empty());
+        assert!(state.frame_held_module_refs().next().is_none());
     });
 }

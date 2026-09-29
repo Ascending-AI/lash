@@ -1,25 +1,41 @@
-//! Versioned values in Restate object state (ADR 0106 §3, FIG-3814).
+//! Versioned values in Restate object state (ADR 0106 §3, FIG-3814; ADR 0115
+//! §3.2–3.3).
 //!
 //! Every value a Lash Restate object retains — the durable-wait index's
 //! metadata, wait, resolution, marker and membership rows, the effect-group
 //! index record, and the effect-group payload's bytes and retirement fence —
 //! is stored under an explicit [`StampedValue`] envelope. Readers dispatch on
-//! the `format` stamp: the current format decodes directly, a stamp one
+//! the `format` stamp: the newest format decodes directly, a stamp one
 //! format behind goes through the family's N-1 upcaster hook, and any other
-//! stamp — including unstamped pre-format state — is refused before the
-//! handler acts, with a typed terminal error Restate does not retry.
+//! stamp is refused before the handler acts, with a typed terminal error
+//! Restate does not retry. Writers stamp the format the fleet selects
+//! ([`StoredValueFormats::writer`]), never simply the newest one this build
+//! knows: before a finalize, a newer build writes what the older one reads.
 //!
 //! The stamp lives in the value, not in the key: object keys and service
 //! names stay stable across format changes, and a format move is an in-place
 //! lazy upcast (a sweep is the operator's lever, not the type system's).
+//!
+//! Beside its values every object keeps one [`ObjectCompat`] record under
+//! [`COMPAT_KEY`], which every handler reads first ([`admit_exclusive`],
+//! [`admit_shared`]): it names the oldest family formats a build must read
+//! to read the object, or write to mutate it. The record is never
+//! enveloped, and clearing an object keeps it.
 
-use lash_core::{RuntimeEffectControllerError, RuntimeErrorCode};
+use std::sync::Arc;
+
+use lash_core::{
+    FleetFormat, FleetFormatStore, RuntimeEffectControllerError, RuntimeErrorCode, SurfaceFormat,
+};
+use lash_core_store::compat::{CompatRefusal, ComponentId, descriptor};
 use restate_sdk::context::{
     ContextReadState, ContextWriteState, ObjectContext, SharedObjectContext,
 };
 use restate_sdk::errors::TerminalError;
 use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+
+use crate::compat::{COMPAT_KEY, ObjectCompat};
 
 /// The field a stamped object-state value carries its format under.
 const FORMAT_FIELD: &str = "format";
@@ -30,26 +46,266 @@ const BODY_FIELD: &str = "body";
 /// `{ "format": F, "body": <the value> }`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct StampedValue<T> {
-    pub(crate) format: u16,
+    pub(crate) format: u32,
     pub(crate) body: T,
 }
 
 /// An N-1 upcaster: the stored `body` of a value written under a registered
-/// previous format goes in, and the body the current format expects comes
+/// previous format goes in, and the body the newest format expects comes
 /// out. No upcaster is registered anywhere yet — the first stamped layout is
 /// the 1.0 baseline — but the slot is where each lands when a format moves.
 pub(crate) type Upcast = fn(serde_json::Value) -> Result<serde_json::Value, TerminalError>;
 
 /// A family's `(format, upcaster)` table.
-pub(crate) type UpcastTable = [(u16, Upcast)];
+pub(crate) type UpcastTable = [(u32, Upcast)];
 
-/// The stored formats one object-state family admits: the `current` stamp
-/// every write carries, plus `upcast_n1`, the N-1 upcaster hooks for values
-/// one format behind. `what` names the family in refusals an operator reads.
+/// The stored formats one family of stamped values admits: the registered
+/// `surface` whose constant is the newest format this build knows, plus
+/// `upcast_n1`, the N-1 upcaster hooks for values one format behind. `what`
+/// names the family in refusals an operator reads.
 pub(crate) struct StoredValueFormats {
     pub what: &'static str,
-    pub current: u16,
+    pub surface: SurfaceFormat,
     pub upcast_n1: &'static UpcastTable,
+}
+
+/// One Restate object family: the component its `_compat` record is
+/// admitted against, and the formats its values are stamped with.
+pub(crate) struct ObjectFamily {
+    pub component: ComponentId,
+    pub formats: &'static StoredValueFormats,
+}
+
+impl StoredValueFormats {
+    /// The newest format this build reads natively.
+    pub(crate) fn newest(&self) -> u32 {
+        self.surface.build_newest()
+    }
+
+    /// The writer the fleet selects for this family: the format `fleet`
+    /// pins the family's surface to, with the family's down-converters (none
+    /// at 1.0).
+    pub(crate) fn writer(&self, fleet: FleetFormat) -> StoredValueWriter {
+        StoredValueWriter {
+            format: fleet.writer_version(self.surface),
+        }
+    }
+}
+
+/// The format one handler invocation writes a family's values at, as the
+/// fleet selected it ([`StoredValueFormats::writer`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StoredValueWriter {
+    format: u32,
+}
+
+/// Where a deployment's object handlers read the fleet epoch `F` from: the
+/// deployment store's last observed `F` (ADR 0115 §2.3, §3.3). A view over
+/// no store — a handler a test binds by itself — answers this build's own
+/// epoch, the only one a store without a row could record.
+#[derive(Clone, Default)]
+pub(crate) struct FleetView(Option<Arc<dyn FleetFormatStore>>);
+
+impl FleetView {
+    pub(crate) fn of(store: Arc<dyn FleetFormatStore>) -> Self {
+        Self(Some(store))
+    }
+
+    /// The epoch this invocation writes under.
+    pub(crate) fn fleet_format(&self) -> FleetFormat {
+        self.0
+            .as_ref()
+            .map_or_else(FleetFormat::current, |store| store.fleet_format())
+    }
+}
+
+impl std::fmt::Debug for FleetView {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("FleetView")
+            .field(&self.fleet_format())
+            .finish()
+    }
+}
+
+/// An object an exclusive handler admitted: the writer its values are
+/// stamped with, and the `_compat` record it keeps.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct AdmittedObject {
+    pub(crate) writer: StoredValueWriter,
+    compat: ObjectCompat,
+}
+
+impl AdmittedObject {
+    /// Clear every value the object holds and keep its `_compat` record: a
+    /// cleared or retired object's record is what fences a stale handler
+    /// from recreating its state.
+    pub(crate) fn clear_all(&self, ctx: &ObjectContext<'_>) {
+        ctx.clear_all();
+        ctx.set(COMPAT_KEY, Json(self.compat));
+    }
+}
+
+/// Whether `key` names a value of the object's family, not its `_compat`
+/// record.
+pub(crate) fn is_value_key(key: &str) -> bool {
+    key != COMPAT_KEY
+}
+
+/// The `_compat` gate of an exclusive handler (ADR 0115 §3.2), run after the
+/// wire selection and before any other state is read.
+///
+/// The record must admit this build as a reader and a writer. An object with
+/// no record and no other keys is fresh: the handler stamps it at the format
+/// the fleet selects and proceeds. A populated object without one is
+/// `Unstamped`. A refusal is terminal and changes nothing.
+///
+/// The record and the key listing are two reads, and they agree: the
+/// handler holds the object's lock across every attempt, so no other
+/// invocation writes between them, whichever attempt made each.
+pub(crate) async fn admit_exclusive(
+    ctx: &ObjectContext<'_>,
+    family: &ObjectFamily,
+    fleet: FleetFormat,
+) -> Result<AdmittedObject, TerminalError> {
+    let writer = family.formats.writer(fleet);
+    let compat = match read_compat(ctx.get::<Vec<u8>>(COMPAT_KEY).await?, family)? {
+        Some(compat) => {
+            check_compat(compat, family, Access::Write).map_err(crate::wire::incompatible)?;
+            compat
+        }
+        None => {
+            if !ctx.get_keys().await?.is_empty() {
+                return Err(unstamped(family));
+            }
+            let compat = ObjectCompat::fresh(writer.format);
+            ctx.set(COMPAT_KEY, Json(compat));
+            compat
+        }
+    };
+    Ok(AdmittedObject { writer, compat })
+}
+
+/// The `_compat` gate of an exclusive handler that writes nothing: it runs
+/// exclusive only to order its read against the object's writers. The
+/// record must admit this build as a reader, as on a shared handler, and a
+/// fresh object stays unstamped, so the read changes no state. Its two
+/// reads agree as [`admit_exclusive`]'s do.
+pub(crate) async fn admit_exclusive_read(
+    ctx: &ObjectContext<'_>,
+    family: &ObjectFamily,
+) -> Result<(), TerminalError> {
+    match read_compat(ctx.get::<Vec<u8>>(COMPAT_KEY).await?, family)? {
+        Some(compat) => {
+            check_compat(compat, family, Access::Read).map_err(crate::wire::incompatible)
+        }
+        None if ctx.get_keys().await?.is_empty() => Ok(()),
+        None => Err(unstamped(family)),
+    }
+}
+
+/// The `_compat` gate of a shared handler: the record must admit this build
+/// as a reader. A shared handler never writes, so a fresh object stays
+/// unstamped; a populated object without a record is `Unstamped`.
+///
+/// A shared handler holds no lock, so an exclusive writer runs beside it,
+/// and its two state reads are two views: each read is journaled with the
+/// value it saw, and an attempt that replays answers a recorded read from
+/// the attempt that made it and a new read from its own, newer snapshot.
+/// `Unstamped` is therefore decided on the one key listing: value keys
+/// without `_compat` in the same view. Every writer stamps `_compat` before
+/// its first value and keeps it until it clears the whole object, so no view
+/// of a stamped object shows values without the record. The record is read
+/// only once the listing names it; if it is gone by then, a clear emptied
+/// the object in between, and an empty object is admitted.
+pub(crate) async fn admit_shared(
+    ctx: &SharedObjectContext<'_>,
+    family: &ObjectFamily,
+) -> Result<(), TerminalError> {
+    let keys = ctx.get_keys().await?;
+    if !keys.iter().any(|key| key == COMPAT_KEY) {
+        return if keys.iter().any(|key| is_value_key(key)) {
+            Err(unstamped(family))
+        } else {
+            Ok(())
+        };
+    }
+    match read_compat(ctx.get::<Vec<u8>>(COMPAT_KEY).await?, family)? {
+        Some(compat) => {
+            check_compat(compat, family, Access::Read).map_err(crate::wire::incompatible)
+        }
+        None => Ok(()),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Access {
+    Read,
+    Write,
+}
+
+fn unstamped(family: &ObjectFamily) -> TerminalError {
+    crate::wire::incompatible(CompatRefusal::Unstamped {
+        component: family.component.as_str().to_owned(),
+    })
+}
+
+fn read_compat(
+    bytes: Option<Vec<u8>>,
+    family: &ObjectFamily,
+) -> Result<Option<ObjectCompat>, TerminalError> {
+    bytes
+        .map(|bytes| {
+            serde_json::from_slice::<ObjectCompat>(&bytes).map_err(|error| {
+                crate::wire::incompatible(CompatRefusal::MalformedStamp {
+                    component: family.component.as_str().to_owned(),
+                    detail: format!("`{COMPAT_KEY}` does not decode: {error}"),
+                })
+            })
+        })
+        .transpose()
+}
+
+/// Whether `compat` admits this build to read, or to mutate, an object of
+/// `family`.
+fn check_compat(
+    compat: ObjectCompat,
+    family: &ObjectFamily,
+    access: Access,
+) -> Result<(), CompatRefusal> {
+    let component = || family.component.as_str().to_owned();
+    if compat.format == 0 || compat.min_reader == 0 || compat.min_writer == 0 {
+        return Err(CompatRefusal::MalformedStamp {
+            component: component(),
+            detail: format!(
+                "format {}, reader floor {} and writer floor {} must each be at least 1",
+                compat.format, compat.min_reader, compat.min_writer
+            ),
+        });
+    }
+    let Some(declared) = descriptor(family.component) else {
+        return Err(CompatRefusal::MalformedStamp {
+            component: component(),
+            detail: "this build declares no descriptor for the component".to_owned(),
+        });
+    };
+    if compat.min_reader > declared.reads.max() {
+        return Err(CompatRefusal::ReaderFloorAbove {
+            component: component(),
+            found: compat.format,
+            min_reader: compat.min_reader,
+            reads: declared.reads,
+        });
+    }
+    if access == Access::Write && compat.min_writer > declared.writes.max() {
+        return Err(CompatRefusal::WriterFloorAbove {
+            component: component(),
+            found: compat.format,
+            min_writer: compat.min_writer,
+            writes: declared.writes,
+        });
+    }
+    Ok(())
 }
 
 /// Read and decode one stamped object-state value, or `None` when the key
@@ -86,109 +342,10 @@ where
         .transpose()
 }
 
-/// Refuse an object that carries any value without the stamped envelope — the
-/// object-level gate for a family that must never write beside pre-stamp
-/// state (an old identity marker, or a row written before the envelope
-/// existed). `retired_keys` name markers a pre-stamp deployment wrote that
-/// must refuse even when their bytes happen to look stamped. A fresh object
-/// holds no keys and passes; the per-key reads that follow decide whether
-/// each stamp is one this build reads.
-pub(crate) async fn gate_stamped_object_state(
-    ctx: &ObjectContext<'_>,
-    formats: &StoredValueFormats,
-    retired_keys: &[&'static str],
-) -> Result<(), TerminalError> {
-    for key in ctx.get_keys().await? {
-        if retired_keys.contains(&key.as_str()) {
-            return Err(stored_format_terminal(&key, None, formats));
-        }
-        if let Some(bytes) = ctx.get::<Vec<u8>>(&key).await?
-            && !carries_format_stamp(&bytes)
-        {
-            return Err(stored_format_terminal(&key, None, formats));
-        }
-    }
-    Ok(())
-}
-
-/// The stamped-state gate for a family whose `marker` row is written only
-/// once the object passed [`gate_stamped_object_state`]: it answers the
-/// decoded marker, or `None` for an object that holds none yet.
-///
-/// A marker in the current envelope means the whole object was gated before
-/// the marker was first written, and every row since was written stamped, so
-/// the full gate — a read of every value the object holds — runs only for an
-/// object without one. An object that keeps rows for its whole life (the
-/// durable-wait index retains one resolution fence per retired wait) would
-/// otherwise pay a read per retained row on every call (FIG-3843). The
-/// retired markers are still refused by name, and a marker without the
-/// envelope refuses typed like any other unstamped value.
-pub(crate) async fn gate_marked_object_state<T>(
-    ctx: &ObjectContext<'_>,
-    formats: &StoredValueFormats,
-    retired_keys: &[&'static str],
-    marker: &'static str,
-) -> Result<Option<T>, TerminalError>
-where
-    T: DeserializeOwned + 'static,
-{
-    for key in retired_keys {
-        if ctx.get::<Vec<u8>>(key).await?.is_some() {
-            return Err(stored_format_terminal(key, None, formats));
-        }
-    }
-    if let Some(marker) = get_stamped::<T>(ctx, marker, formats).await? {
-        return Ok(Some(marker));
-    }
-    gate_stamped_object_state(ctx, formats, retired_keys).await?;
-    Ok(None)
-}
-
-/// [`gate_marked_object_state`] for a shared handler's read-only context: the
-/// same refusals, read without taking the object's exclusive lock.
-pub(crate) async fn gate_marked_object_state_shared<T>(
-    ctx: &SharedObjectContext<'_>,
-    formats: &StoredValueFormats,
-    retired_keys: &[&'static str],
-    marker: &'static str,
-) -> Result<Option<T>, TerminalError>
-where
-    T: DeserializeOwned + 'static,
-{
-    for key in retired_keys {
-        if ctx.get::<Vec<u8>>(key).await?.is_some() {
-            return Err(stored_format_terminal(key, None, formats));
-        }
-    }
-    if let Some(marker) = get_stamped_shared::<T>(ctx, marker, formats).await? {
-        return Ok(Some(marker));
-    }
-    for key in ctx.get_keys().await? {
-        if let Some(bytes) = ctx.get::<Vec<u8>>(&key).await?
-            && !carries_format_stamp(&bytes)
-        {
-            return Err(stored_format_terminal(&key, None, formats));
-        }
-    }
-    Ok(None)
-}
-
-/// Whether `bytes` carry a format stamp at all. The version dispatch that
-/// follows decides whether the stamp is one this build reads.
-fn carries_format_stamp(bytes: &[u8]) -> bool {
-    serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()
-        .is_some_and(|raw| {
-            raw.get(FORMAT_FIELD)
-                .and_then(serde_json::Value::as_u64)
-                .is_some()
-        })
-}
-
-/// Decode one raw object-state value: bytes that are not JSON predate the
+/// Decode one raw stamped value: bytes that are not JSON predate the
 /// envelope and are the typed "unstamped" refusal, never an SDK
 /// deserialization trap.
-fn decode_stamped_bytes<T: DeserializeOwned>(
+pub(crate) fn decode_stamped_bytes<T: DeserializeOwned>(
     key: &str,
     bytes: &[u8],
     formats: &StoredValueFormats,
@@ -198,19 +355,16 @@ fn decode_stamped_bytes<T: DeserializeOwned>(
     decode_stamped_value(key, raw, formats)
 }
 
-/// Write one stamped object-state value under the family's current format.
-pub(crate) fn set_stamped<T>(
-    ctx: &ObjectContext<'_>,
-    key: &str,
-    formats: &StoredValueFormats,
-    body: T,
-) where
+/// Write one stamped value at the format the fleet selected.
+pub(crate) fn set_stamped<'ctx, C, T>(ctx: &C, key: &str, writer: StoredValueWriter, body: T)
+where
+    C: ContextWriteState<'ctx>,
     T: Serialize + 'static,
 {
     ctx.set(
         key,
         Json(StampedValue {
-            format: formats.current,
+            format: writer.format,
             body,
         }),
     );
@@ -231,7 +385,7 @@ pub(crate) fn decode_stamped_value<T: DeserializeOwned>(
         .cloned()
         .unwrap_or(serde_json::Value::Null);
     let body = match stamp {
-        Some(stamp) if stamp == u64::from(formats.current) => body,
+        Some(stamp) if stamp == u64::from(formats.newest()) => body,
         Some(stamp) => match formats
             .upcast_n1
             .iter()
@@ -245,7 +399,8 @@ pub(crate) fn decode_stamped_value<T: DeserializeOwned>(
     serde_json::from_value(body).map_err(|error| {
         TerminalError::new(format!(
             "{} state {key} does not decode under stored format {}: {error}",
-            formats.what, formats.current
+            formats.what,
+            formats.newest()
         ))
     })
 }
@@ -268,7 +423,7 @@ pub(crate) fn stored_format_error(
         format!(
             "{what} state {key} carries {found}; this deployment reads stored \
              format {} and refuses the value before any effect",
-            formats.current
+            formats.newest()
         ),
     )
 }
@@ -283,20 +438,47 @@ pub(crate) fn stored_format_terminal(
 }
 
 /// The typed stored-format refusal a handler's terminal error carries, if
-/// that is what `message` is.
+/// that is what `message` is: a stored value's stamp this build does not
+/// read, or an object whose `_compat` record refuses it (ADR 0115).
 pub(crate) fn stored_format_error_in(message: &str) -> Option<RuntimeEffectControllerError> {
+    if let Some(crate::wire::RestateCompatError::Incompatible { refusal }) =
+        crate::wire::restate_compat_error_in(message)
+    {
+        return Some(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EngineObjectStateFormatUnsupported,
+            refusal.to_string(),
+        ));
+    }
     serde_json::from_str::<RuntimeEffectControllerError>(message)
         .ok()
         .filter(|error| error.code == RuntimeErrorCode::EngineObjectStateFormatUnsupported)
+}
+
+/// The typed stored-format refusal an index handler answered an ingress call
+/// with, recovered from the terminal error's message in the response body.
+pub(crate) fn ingress_stored_format_refusal(
+    error: &crate::RestateHttpError,
+) -> Option<RuntimeEffectControllerError> {
+    let crate::RestateHttpError::Status { body, .. } = error else {
+        return None;
+    };
+    let message = serde_json::from_str::<serde_json::Value>(body)
+        .ok()?
+        .get("message")?
+        .as_str()?
+        .to_owned();
+    stored_format_error_in(&message)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const TEST_OBJECT_FORMAT_VERSION: u32 = 2;
+
     const FORMATS: StoredValueFormats = StoredValueFormats {
         what: "test-object",
-        current: 2,
+        surface: lash_core::surface_format!(TEST_OBJECT_FORMAT_VERSION),
         upcast_n1: &[(1, upcast_v1_body)],
     };
 
@@ -309,7 +491,7 @@ mod tests {
         Ok(serde_json::Value::Object(object))
     }
 
-    fn stamped(format: u16, body: serde_json::Value) -> serde_json::Value {
+    fn stamped(format: u32, body: serde_json::Value) -> serde_json::Value {
         serde_json::to_value(StampedValue { format, body }).expect("stamp a value")
     }
 

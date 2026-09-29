@@ -94,7 +94,10 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
     .expect("link the process");
     lashlang::LashlangArtifacts::new(restate.lash_backend().module_artifacts())
         .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("substrate-lost-zombie"),
+            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+                lash_core::HostArtifactPin::mint(),
+            ))
+            .expect("host pin claim"),
             &linked.artifact,
         )
         .await
@@ -265,8 +268,9 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
     // The recovery: a fresh invocation of the segment finds the start the
     // killed execution recorded and ends the process SubstrateLost, unless a
     // terminal is already stored, which it publishes instead.
+    // The recorded input is the Call the process was started with.
     let ingress = restate.ingress();
-    let fresh = ingress.call_workflow_json::<_, serde_json::Value>(
+    let fresh = ingress.call_workflow_json::<_, lash_restate::Reply<serde_json::Value>>(
         "LashProcessWorkflow",
         process_id.as_str(),
         "run",
@@ -275,7 +279,8 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
     let recovered = tokio::time::timeout(Duration::from_secs(20), fresh)
         .await
         .expect("the fresh invocation ends")
-        .expect("the fresh invocation's output");
+        .expect("the fresh invocation's output")
+        .body;
     let zombie = match zombie {
         Some(zombie) => zombie,
         None => zombie_writes_its_terminal(&restate, &process_id).await,

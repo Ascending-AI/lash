@@ -18,11 +18,9 @@
 //! tables are not is rejected at open with a per-object diff rather than
 //! failing at the first query — or silently losing a guard, which is what a
 //! dropped unique index or a dropped cascade does. [`SchemaCheck`] controls
-//! whether a structural mismatch is fatal. The component-version stamp is a
-//! separate, unconditional gate: open admits a stamp inside the supported
-//! range [min supported, latest] and refuses anything outside it with a typed
-//! [`StoreError::SchemaVersionOutOfRange`] naming the found version and the
-//! range — no [`SchemaCheck`] relaxes it (FIG-3797).
+//! whether a structural mismatch is fatal. The compatibility row is a
+//! separate, unconditional gate: open admits its version and reader floor
+//! through the component descriptor and returns a typed refusal when needed.
 //! [`PostgresStorage::verify_schema_for`] exposes the same check against a bare
 //! pool so a host can gate its own migration CI on it. See ADR 0052.
 //!
@@ -621,6 +619,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // queued-work head is admitted as an ordinary root (FIG-3927, changed in
 // place under the version freeze). A catalog provisioned before the change
 // fails the open-time shape check and is recreated.
+//
+// Version 141 also admits process-definition and trigger registration in the
+// tool-intent submission ledger's kind constraint (FIG-4057, changed in place
+// under the version freeze). A catalog provisioned before the change rejects
+// both kinds; recreate it.
 const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
@@ -645,12 +648,6 @@ pub struct PostgresStorage {
     fleet_format: lash_core_execution::FleetFormat,
 }
 
-type BoundArtifactStores = (
-    Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
-    lash_core_execution::ProcessEngineRegistry,
-);
-type SharedArtifactStores = Arc<std::sync::Mutex<Option<BoundArtifactStores>>>;
-
 #[derive(Clone)]
 pub struct PostgresStore {
     #[cfg(any(test, feature = "testing"))]
@@ -664,8 +661,6 @@ pub struct PostgresStore {
     clock: Arc<dyn lash_core_execution::Clock>,
     turn_cancel_closure_owner:
         Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
-    effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
-    artifact_stores: SharedArtifactStores,
     #[cfg(any(test, feature = "testing"))]
     decoded_graph_node_bodies: Arc<std::sync::atomic::AtomicU64>,
     #[cfg(any(test, feature = "testing"))]
@@ -841,7 +836,7 @@ impl PostgresStorage {
         let (catalog_id, fleet_format) = ensure_schema(
             &pool,
             config.schema_check,
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
         )
         .await?;
         Ok(Self {
@@ -913,7 +908,7 @@ impl PostgresStorage {
         let (catalog_id, fleet_format) = ensure_schema(
             &pool,
             config.schema_check,
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
         )
         .await?;
         Ok(Self {
@@ -936,7 +931,7 @@ impl PostgresStorage {
     pub async fn from_pool_with_fleet_writable_range_for_testing(
         pool: PgPool,
         config: PostgresStoreConfig,
-        writable: std::ops::RangeInclusive<u32>,
+        writable: lash_core_execution::compat::VersionRange,
     ) -> Result<Self, StoreError> {
         let (catalog_id, fleet_format) =
             ensure_schema(&pool, config.schema_check, writable).await?;
@@ -956,15 +951,15 @@ impl PostgresStorage {
     /// data precondition; only structural verification is skipped.
     #[cfg(feature = "testing")]
     pub async fn from_preverified_pool_for_testing(pool: PgPool) -> Result<Self, StoreError> {
-        let found_version: Option<i32> =
-            sqlx::query_scalar(crate::schema::SELECT_COMPONENT_VERSION)
-                .bind(SCHEMA_COMPONENT)
-                .fetch_optional(&pool)
-                .await
-                .map_err(store_sqlx_error)?;
-        if !crate::schema::supported_version(found_version) {
-            return Err(version_mismatch_error(None, found_version, None));
-        }
+        let descriptor = lash_core_execution::compat::descriptor(
+            lash_core_execution::compat::ComponentId::POSTGRES,
+        )
+        .ok_or_else(|| StoreError::Backend("missing PostgreSQL compatibility descriptor".into()))?;
+        lash_core_execution::compat::admit(
+            descriptor,
+            crate::schema::read_compat_stamp(&pool, true).await,
+        )
+        .map_err(|refusal| StoreError::Incompatible { refusal })?;
         let catalog_id = crate::schema::read_catalog_id(&pool)
             .await
             .map_err(store_sqlx_error)?
@@ -1018,22 +1013,14 @@ impl PostgresStorage {
         TEARDOWN_DDL
     }
 
-    /// The component schema version this build implements, as stamped in
-    /// `lash_schema_versions` — the newest version the supported range admits.
-    ///
-    /// Open refuses a stamp outside
-    /// `[Self::min_supported_schema_version, Self::schema_version]` with a
-    /// typed [`StoreError::SchemaVersionOutOfRange`], whichever direction it
-    /// differs in (FIG-3797).
+    /// The pre-1.0 DDL revision used by the migration ledger and shape artifact.
+    /// Compatibility admission reads the version and floor in
+    /// `lash_schema_versions` through the PostgreSQL descriptor.
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION
     }
 
-    /// The oldest component schema version this build admits at open
-    /// (FIG-3797).
-    ///
-    /// For 1.0 the supported range is the single current version; a
-    /// compatibility release widens the floor when it declares one.
+    /// The pre-1.0 DDL planning floor, retained for the migration ledger.
     pub fn min_supported_schema_version() -> i32 {
         MIN_SUPPORTED_SCHEMA_VERSION
     }
@@ -1185,8 +1172,6 @@ impl PostgresStorage {
             fault_injector: None,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
-            effect_host: Arc::new(std::sync::Mutex::new(None)),
-            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
             #[cfg(any(test, feature = "testing"))]
             decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(any(test, feature = "testing"))]
@@ -1216,8 +1201,6 @@ impl PostgresStorage {
             fault_injector: None,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
-            effect_host: Arc::new(std::sync::Mutex::new(None)),
-            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
             #[cfg(any(test, feature = "testing"))]
             decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(any(test, feature = "testing"))]
@@ -1308,6 +1291,13 @@ impl PostgresStorage {
         }
         Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
             kind,
+            self.pool.clone(),
+        ))
+    }
+
+    pub fn artifact_cleanup(&self) -> Arc<dyn lash_core_execution::store::ArtifactCleanupLedger> {
+        Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
+            lash_core_execution::store::ObligationKind::ArtifactCleanup,
             self.pool.clone(),
         ))
     }
@@ -1456,6 +1446,9 @@ mod root_verbs;
 mod runtime_persistence;
 #[path = "postgres/schema.rs"]
 mod schema;
+#[cfg(test)]
+#[path = "postgres/schema_compat_tests.rs"]
+mod schema_compat_tests;
 #[path = "postgres/schema_shape.rs"]
 mod schema_shape;
 #[path = "postgres/session_blob_reclaim.rs"]

@@ -1,41 +1,23 @@
 use super::*;
 
-/// The supported range is two-sided (FIG-3797): for the 1.0 cut it is the
-/// single current version, so every other stamp is refused, but the admission
-/// predicate and its refusal are range-shaped so a compatibility release can
-/// widen the floor without touching the gate again.
-#[test]
-fn supported_version_is_the_two_sided_range() {
-    assert_eq!(
-        MIN_SUPPORTED_SCHEMA_VERSION, SCHEMA_VERSION,
-        "the 1.0 supported range is the single current component version"
-    );
-    assert!(supported_version(Some(SCHEMA_VERSION)));
-    assert!(!supported_version(Some(SCHEMA_VERSION - 1)));
-    assert!(!supported_version(Some(SCHEMA_VERSION + 1)));
-    assert!(!supported_version(None));
-}
-
 /// The supported-range refusal is typed: the found stamp and both range ends
 /// ride as fields so a caller can classify without parsing text, while the
 /// rendered message still names them for the operator.
 #[test]
 fn version_refusal_is_typed_and_names_found_and_range() {
     let error = version_mismatch_error(Some("public"), Some(SCHEMA_VERSION - 1), None);
-    let StoreError::SchemaVersionOutOfRange {
-        component,
-        found,
-        supported_min,
-        supported_latest,
-        message,
+    let StoreError::Incompatible {
+        refusal:
+            lash_core_execution::compat::CompatRefusal::ShapeRefused {
+                component,
+                findings,
+            },
     } = &error
     else {
         panic!("the version refusal must be the typed range error: {error:?}")
     };
-    assert_eq!(component, SCHEMA_COMPONENT);
-    assert_eq!(*found, Some(SCHEMA_VERSION - 1));
-    assert_eq!(*supported_min, MIN_SUPPORTED_SCHEMA_VERSION);
-    assert_eq!(*supported_latest, SCHEMA_VERSION);
+    assert_eq!(component, "postgres");
+    let message = findings.join("; ");
     assert!(
         message.contains(&format!("has version {}", SCHEMA_VERSION - 1))
             && message.contains(&format!(

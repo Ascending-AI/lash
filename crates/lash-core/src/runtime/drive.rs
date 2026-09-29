@@ -13,10 +13,12 @@
 //! The root's claim body repairs orphaned inputs before it claims the admitted
 //! head. A separate `InspectAdmittedHead` step records whether that head is
 //! ready, ceded, or divergent. A redrive reads both outcomes from its journal
-//! and issues no second repair. It revalidates a `Ready` verdict under its
-//! current drive epoch before any turn effect: a root whose claim lost
-//! authority while the handler was down can only cede or park. This check
-//! cannot select new work or change the claim's recorded base (ADR 0105 §2).
+//! and issues no second repair. The inspection's body is the drive's one live
+//! head check, and it runs only when that step is the attempt's live
+//! frontier; a redrive honours the recorded verdict at every position
+//! (FIG-4058), and the turn's fenced commit meets a head that moved since as
+//! a typed refusal. The check cannot select new work or change the claim's
+//! recorded base (ADR 0105 §2).
 //! Rule 6 of the substrate lint pins direct store calls and the orphan-repair
 //! helper in the drive.
 //!
@@ -113,7 +115,8 @@ pub struct SettledRoot<'r> {
 /// final commit and that commit's `TurnPersisted` delivery are done, before
 /// the root's recorded scope close. The runtime passed is the one that ran
 /// the root, holding its commit. Nothing a sink does decides anything, and
-/// the drive waits for it before the close, so a sink returns at once.
+/// the drive waits for it before it closes the scope or hands the close to
+/// the engine, so a sink returns at once.
 #[async_trait::async_trait]
 pub trait RootSettledSink: Send + Sync {
     async fn settled(&self, runtime: &LashRuntime, root: SettledRoot<'_>);
@@ -154,16 +157,8 @@ pub(crate) struct DriveRootRun {
 
 impl DriveRootRun {
     fn sealed(admitted: &Admitted, fence: crate::store::DriveFence) -> Self {
-        let root = match admitted.work() {
-            crate::engine::AdmittedWork::FollowOn { follow_on, .. } => {
-                crate::store::PhysicalTurn::split_turn_id(follow_on).0
-            }
-            crate::engine::AdmittedWork::Input { .. }
-            | crate::engine::AdmittedWork::Queued { .. }
-            | crate::engine::AdmittedWork::Commands { .. } => admitted.root().clone(),
-        };
         Self {
-            root,
+            root: evidence_root(admitted),
             fence,
             journal_generation: admitted.admitted_generation().clone(),
             terminal_written: false,
@@ -214,6 +209,20 @@ impl DriveRootRun {
 
     pub(crate) fn mark_terminal_written(&mut self) {
         self.terminal_written = true;
+    }
+}
+
+/// The logical root whose terminal evidence `admitted`'s run writes: the
+/// admitted root, except for a follow-on recovery, whose evidence names the
+/// root that owed the follow-on.
+fn evidence_root(admitted: &Admitted) -> TurnId {
+    match admitted.work() {
+        crate::engine::AdmittedWork::FollowOn { follow_on, .. } => {
+            crate::store::PhysicalTurn::split_turn_id(follow_on).0
+        }
+        crate::engine::AdmittedWork::Input { .. }
+        | crate::engine::AdmittedWork::Queued { .. }
+        | crate::engine::AdmittedWork::Commands { .. } => admitted.root().clone(),
     }
 }
 
@@ -449,7 +458,8 @@ fn retired_root_outcome(
 /// Run `admitted`'s root to its terminal through `controller`, which must
 /// serve [`drive_root_scope`](crate::engine::drive_root_scope) for the root:
 /// the recorded `SealDriveAdmission` step, then the root's turns (a frame
-/// switch's follow-on turns included) and their commits.
+/// switch's follow-on turns included) and their commits, then, for a root
+/// that ended, its recorded scope close in the same journal.
 pub async fn run_admitted_root(
     runtime: &mut LashRuntime,
     controller: &ScopedEffectController<'_>,
@@ -466,9 +476,53 @@ pub async fn run_admitted_root_with(
     admitted: Admitted,
     sinks: DriveSinks<'_>,
 ) -> Result<RootOutcome, DriveAbort> {
-    Box::pin(runtime.run_engine_root(controller, admitted, &sinks))
+    Box::pin(runtime.run_engine_root(controller, admitted, &sinks, RootClose::Inline))
         .await
         .map(|run| run.outcome)
+}
+
+/// [`run_admitted_root_with`] for an engine that closes the root's scope in
+/// a journal of its own (FIG-4035): the run returns once the root's report
+/// is handed over, naming in [`RootRunEnd::owed_close`] the root whose close
+/// the engine then runs through [`close_admitted_root`]. The session's next
+/// admission never waits on that close.
+///
+/// [`RootRunEnd::owed_close`]: crate::engine::RootRunEnd::owed_close
+#[doc(hidden)]
+pub async fn run_admitted_root_owing_close(
+    runtime: &mut LashRuntime,
+    controller: &ScopedEffectController<'_>,
+    admitted: Admitted,
+    sinks: DriveSinks<'_>,
+) -> crate::engine::RootRunEnd {
+    let mut owed_close = None;
+    let result = Box::pin(runtime.run_engine_root(
+        controller,
+        admitted,
+        &sinks,
+        RootClose::Owed(&mut owed_close),
+    ))
+    .await
+    .map(|run| run.outcome);
+    crate::engine::RootRunEnd { result, owed_close }
+}
+
+/// Close the lifetime scope of `root` of `session` that a root's run owed
+/// ([`run_admitted_root_owing_close`]): the root's recorded `CloseRootScope`
+/// step through `controller`, which serves the
+/// [`drive_root_scope`](crate::engine::drive_root_scope) of the admitted
+/// root whose run owed it. It needs no runtime of the session, only `host`'s
+/// catalog, scope owner and obligation ledger, so it runs beside the
+/// session's next root.
+#[doc(hidden)]
+pub async fn close_admitted_root(
+    host: &crate::RuntimeHostConfig,
+    controller: &ScopedEffectController<'_>,
+    session: &crate::SessionId,
+    root: &TurnId,
+) -> Result<(), DriveAbort> {
+    let terminals: Arc<dyn crate::store::RuntimeStore> = host.session_store_factory();
+    Box::pin(emit_close_step(host, terminals, controller, session, root)).await
 }
 
 /// Discard what a failed root attempt left on `runtime` (FIG-3825): a driver
@@ -513,7 +567,7 @@ pub async fn run_admitted_root_reporting(
     admitted: Admitted,
     sinks: DriveSinks<'_>,
 ) -> Result<RootReport, DriveAbort> {
-    Box::pin(runtime.run_engine_root(controller, admitted, &sinks))
+    Box::pin(runtime.run_engine_root(controller, admitted, &sinks, RootClose::Inline))
         .await
         .map(RootReport::from)
 }
@@ -698,8 +752,14 @@ impl LashRuntime {
                 break stop;
             }
             let work = admitted.work().clone();
-            let run =
-                Box::pin(self.run_admitted_root_step(controller, admitted, sinks, live)).await?;
+            let run = Box::pin(self.run_admitted_root_step(
+                controller,
+                admitted,
+                sinks,
+                live,
+                RootClose::Inline,
+            ))
+            .await?;
             let stop = rules.after(&work, &run.outcome);
             let finished = done(&run);
             let root = run.outcome.root().clone();
@@ -778,25 +838,77 @@ impl LashRuntime {
     /// (FIG-3984), so whoever locks the runtime next, the engine's next
     /// attempt or a host's read, finds it as a redrive in a fresh process
     /// would (FIG-3982).
+    ///
+    /// An attempt that ends with a refusal no retry changes ends its root in
+    /// the store before it returns (FIG-4018): the engine records that
+    /// refusal as the run's outcome and never runs the root again, so
+    /// nothing else would end it, and the session's next admission would
+    /// name it again instead of the work behind it.
     async fn run_engine_root(
         &mut self,
         controller: &ScopedEffectController<'_>,
         admitted: Admitted,
         sinks: &DriveSinks<'_>,
+        close: RootClose<'_>,
     ) -> Result<RootRun, DriveAbort> {
+        let root = evidence_root(&admitted);
         let mut attempt = EngineAttempt::enter(self);
         let run = Box::pin(
             attempt
                 .runtime
-                .run_admitted_root_step(controller, admitted, sinks, None),
+                .run_admitted_root_step(controller, admitted, sinks, None, close),
         )
         .await;
         attempt.returned = true;
         drop(attempt);
-        run.map_err(|abort| match abort {
+        let run = run.map_err(|abort| match abort {
             DriveAbort::Retry(error) if !engine_retries(&error) => DriveAbort::Refused(error),
             abort => abort,
-        })
+        });
+        if let Err(DriveAbort::Refused(error)) = &run
+            && !error.is_retryable()
+        {
+            self.end_refused_root(&root, error).await?;
+        }
+        run
+    }
+
+    /// Write the end of `root`, whose run met `refusal`, to the store.
+    ///
+    /// The write is the refused run's own, made before the engine records
+    /// the run's outcome, so the recorded outcome always has its terminal
+    /// behind it and the engine's lost-root recovery, which ends only runs
+    /// that recorded nothing, never writes a second one. It is an
+    /// idempotent store write rather than a recorded step, like the commit
+    /// and the park (ADR 0105 §9): a root that already has terminal
+    /// evidence is left as it is, so a replay that meets the refusal again
+    /// writes nothing more. A store that cannot write it fails the attempt
+    /// as a live fault, and the engine's retry meets the refusal again.
+    async fn end_refused_root(
+        &self,
+        root: &TurnId,
+        refusal: &RuntimeError,
+    ) -> Result<(), DriveAbort> {
+        let store = self.drive_store()?;
+        match store
+            .end_refused_root(root, refusal, self.host.core.clock.timestamp_ms())
+            .await
+        {
+            Ok(Some(_)) => {
+                tracing::info!(
+                    session_id = %self.state.session_id,
+                    root = %root,
+                    code = %refusal.code,
+                    event = "root.refused_ended",
+                    "a root whose run met a refusal no retry changes is ended"
+                );
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(error) => Err(DriveAbort::Retry(
+                crate::runtime::runtime_error_from_store_commit(error),
+            )),
+        }
     }
 
     /// Discard what an earlier root's attempt left on this runtime (its
@@ -820,13 +932,16 @@ impl LashRuntime {
     /// `live` carries the live `TurnContext` of an in-process caller whose
     /// accepted input the root may drive (a child session turn's process
     /// correlation and lineage): it cannot cross the durable boundary, so it
-    /// is re-attached when the root's admission drives that input.
+    /// is re-attached when the root's admission drives that input. `close`
+    /// says where the root's scope close runs once its terminal evidence is
+    /// durable.
     pub(crate) async fn run_admitted_root_step(
         &mut self,
         controller: &ScopedEffectController<'_>,
         admitted: Admitted,
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &crate::TurnInput)>,
+        close: RootClose<'_>,
     ) -> Result<RootRun, DriveAbort> {
         let store = self.drive_store()?;
         let root = admitted.root().clone();
@@ -908,8 +1023,8 @@ impl LashRuntime {
         // A committed root's report is handed over before its scope closes
         // (FIG-3979): the close is a recorded step, and the terminal
         // transaction armed its `ScopeClose` obligation, so an execution
-        // that dies between the two still closes the scope on its redrive
-        // or through the obligation's relay.
+        // that dies between the two still closes the scope on its redrive,
+        // on the engine's close, or through the obligation's relay.
         if let Ok(run) = &result
             && let RootOutcome::Committed { root, .. } = &run.outcome
             && let Some(turn) = run.run.as_ref().and_then(AgentFrameRun::final_turn)
@@ -932,59 +1047,22 @@ impl LashRuntime {
         if ran.is_some_and(|ran| ran.terminal_written)
             && self.host.core.control.scope_close.owns_scopes()
         {
-            Box::pin(self.close_root_scope(&root_controller, admitted.session(), &evidence_root))
-                .await?;
+            match close {
+                RootClose::Inline => {
+                    let terminals = Arc::clone(self.drive_store()?.store());
+                    Box::pin(emit_close_step(
+                        &self.host.core,
+                        terminals,
+                        &root_controller,
+                        admitted.session(),
+                        &evidence_root,
+                    ))
+                    .await?;
+                }
+                RootClose::Owed(owed) => *owed = Some(evidence_root),
+            }
         }
         result
-    }
-
-    /// The recorded `CloseRootScope` step of `root`, after its terminal
-    /// evidence: under the root's scope at
-    /// [`drive_close_root_replay_key`](crate::engine::drive_close_root_replay_key),
-    /// so a redrive of a root that already closed replays the close, and one
-    /// that crashed before it closes the root again.
-    async fn close_root_scope(
-        &self,
-        root_controller: &ScopedEffectController<'_>,
-        session: &crate::SessionId,
-        root: &TurnId,
-    ) -> Result<(), DriveAbort> {
-        let store = self.drive_store()?;
-        let invocation = RuntimeEffectInvocation::new(
-            EffectAddress::new(
-                root_controller.execution_scope().clone(),
-                crate::engine::drive_close_root_replay_key(root),
-            )
-            .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
-            RuntimeAttribution::for_turn_admission(session.clone(), root.clone()),
-            format!("{root}.drive-close"),
-        );
-        root_controller
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    invocation,
-                    RuntimeEffectCommand::CloseRootScope { root: root.clone() },
-                ),
-                RuntimeEffectLocalExecutor::owned_runner(
-                    Box::new(close::CloseRootScopeRunner {
-                        store,
-                        session: session.clone(),
-                        root: root.clone(),
-                        sink: Arc::clone(&self.host.core.control.scope_close),
-                        relay: Arc::new(scope_close::ScopeCloseRelay::over_backend(
-                            self.host.core.backend(),
-                            self.host.core.session_store_factory(),
-                            Arc::clone(&self.host.core.control.scope_close),
-                        )),
-                        clock: Arc::clone(&self.host.core.clock),
-                    }),
-                    None,
-                ),
-            )
-            .await
-            .and_then(crate::RuntimeEffectOutcome::into_close_root_scope)
-            .map(|_| ())
-            .map_err(|error| controller_abort(Some(root), error))
     }
 
     fn drive_store(&self) -> Result<crate::store::SessionStore, DriveAbort> {
@@ -998,6 +1076,70 @@ impl LashRuntime {
                 ))
             })
     }
+}
+
+/// Where a root's scope close runs once its terminal evidence is durable
+/// (FIG-4035).
+pub(crate) enum RootClose<'o> {
+    /// As the root's own recorded step, after its report is handed over and
+    /// before its run returns: the in-process drive admits nothing else in
+    /// between.
+    Inline,
+    /// Owed to the engine, which runs it through [`close_admitted_root`] in
+    /// a journal of its own: the root's run names the root to close here and
+    /// returns, so the session's next admission does not wait on the close.
+    Owed(&'o mut Option<TurnId>),
+}
+
+/// The recorded `CloseRootScope` step of `root`, after its terminal
+/// evidence: under `controller`'s root scope at
+/// [`drive_close_root_replay_key`](crate::engine::drive_close_root_replay_key),
+/// so a redrive of a root that already closed replays the close, and one
+/// that crashed before it closes the root again. The body delivers the
+/// root's `ScopeClose` obligation, which settles once however many
+/// executions deliver it (ADR 0109 §3).
+async fn emit_close_step(
+    host: &crate::RuntimeHostConfig,
+    terminals: Arc<dyn crate::store::RuntimeStore>,
+    controller: &ScopedEffectController<'_>,
+    session: &crate::SessionId,
+    root: &TurnId,
+) -> Result<(), DriveAbort> {
+    let invocation = RuntimeEffectInvocation::new(
+        EffectAddress::new(
+            controller.execution_scope().clone(),
+            crate::engine::drive_close_root_replay_key(root),
+        )
+        .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
+        RuntimeAttribution::for_turn_admission(session.clone(), root.clone()),
+        format!("{root}.drive-close"),
+    );
+    controller
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                invocation,
+                RuntimeEffectCommand::CloseRootScope { root: root.clone() },
+            ),
+            RuntimeEffectLocalExecutor::owned_runner(
+                Box::new(close::CloseRootScopeRunner {
+                    terminals,
+                    session: session.clone(),
+                    root: root.clone(),
+                    sink: Arc::clone(&host.control.scope_close),
+                    relay: Arc::new(scope_close::ScopeCloseRelay::over_backend(
+                        host.backend(),
+                        host.session_store_factory(),
+                        Arc::clone(&host.control.scope_close),
+                    )),
+                    clock: Arc::clone(&host.clock),
+                }),
+                None,
+            ),
+        )
+        .await
+        .and_then(crate::RuntimeEffectOutcome::into_close_root_scope)
+        .map(|_| ())
+        .map_err(|error| controller_abort(Some(root), error))
 }
 
 /// Draw this execution's start marker in the root's own journal, then seal

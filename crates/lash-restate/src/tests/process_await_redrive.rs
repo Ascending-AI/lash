@@ -52,8 +52,8 @@ impl Fig790TurnObservationPublisher for Fig790TurnObservationPublisherImpl {
     ) -> HandlerResult<Json<()>> {
         let request: restate_sdk::context::Request<
             '_,
-            Json<RestateProcessAwaitRequest>,
-            Json<ProcessAwaitOutput>,
+            crate::Call<RestateProcessAwaitRequest>,
+            crate::Reply<ProcessAwaitOutput>,
         > = ContextClient::request(
             &ctx,
             RequestTarget::workflow(
@@ -61,12 +61,12 @@ impl Fig790TurnObservationPublisher for Fig790TurnObservationPublisherImpl {
                 input.process_id.clone(),
                 "await_terminal",
             ),
-            Json(RestateProcessAwaitRequest {
+            crate::Call::new(RestateProcessAwaitRequest {
                 process_id: input.process_id,
             }),
         );
         let mut run_future = Box::pin(async move {
-            let Json(_output) = request.call().await?;
+            let _output = request.call().await?;
             Ok::<(), TerminalError>(())
         });
         let (observer, mut observations) = tokio::sync::mpsc::unbounded_channel();
@@ -1437,6 +1437,16 @@ pub(super) fn fig1943_encode_message(message_type: u16, payload: &[u8]) -> Bytes
     Bytes::from(encoded)
 }
 
+/// The `_compat` record an object this build created at family `format`
+/// carries, for a fixture that seeds the object's state directly.
+pub(super) fn fresh_compat_record(format: impl Into<u32>) -> (String, Vec<u8>) {
+    (
+        crate::compat::COMPAT_KEY.to_string(),
+        serde_json::to_vec(&crate::compat::ObjectCompat::fresh(format.into()))
+            .expect("encode a compat record"),
+    )
+}
+
 pub(super) fn fig1943_invocation_with_state<T: Serialize>(
     object_key: &str,
     input: &T,
@@ -1455,7 +1465,9 @@ pub(super) fn fig1943_invocation_with_state<T: Serialize>(
     }
     fig1943_put_len_field(&mut start, 6, object_key.as_bytes());
 
-    let input = serde_json::to_vec(input).expect("serialize FIG-1943 handler input");
+    // Every lash handler takes its input in a `Call` (ADR 0115 §3.1).
+    let input =
+        serde_json::to_vec(&crate::Call::new(input)).expect("serialize FIG-1943 handler input");
     let mut input_value = Vec::new();
     fig1943_put_len_field(&mut input_value, 1, &input);
     let mut input_command = Vec::new();
@@ -1675,14 +1687,18 @@ pub(super) async fn durable_wait_index_rejects_an_inconsistent_key_preimage_befo
             .contains("inconsistent durable-wait key preimage"),
         "terminal error must name the key-preimage inconsistency"
     );
-    assert!(state.is_empty(), "terminal rejection must not write state");
+    assert_eq!(
+        state.keys().collect::<Vec<_>>(),
+        [crate::compat::COMPAT_KEY],
+        "terminal rejection writes no state but the fresh object's compat record"
+    );
 }
 
 /// FIG-3814: a wait-registry object a pre-stamp deployment left refuses typed
-/// at the stamped-state gate, before any write. Each seed is exactly what
-/// that deployment wrote: the `wait-index/v2/identity-epoch` marker (refused
-/// by name whatever its bytes), an unstamped metadata row, and a wait row of
-/// raw non-JSON bytes.
+/// before any write. Each seed is exactly what that deployment wrote: the
+/// `wait-index/v2/identity-epoch` marker, an unstamped metadata row, and a
+/// wait row of raw non-JSON bytes. None carries a `_compat` record, so the
+/// object is refused unstamped (ADR 0115) whatever its rows hold.
 #[tokio::test]
 pub(super) async fn pre_stamp_wait_registry_state_refuses_typed_before_any_write() {
     let endpoint = Endpoint::builder()
@@ -1736,11 +1752,16 @@ pub(super) async fn pre_stamp_wait_registry_state_refuses_typed_before_any_write
         let message = restate_output_failure_message(&output)
             .or_else(|| restate_error_message(&output))
             .unwrap_or_else(|| panic!("{name}: pre-stamp state must fail the invocation"));
-        let typed = crate::object_state::stored_format_error_in(&message)
+        let typed = crate::wire::restate_compat_error_in(&message)
             .unwrap_or_else(|| panic!("{name}: the refusal is typed: {message}"));
-        assert_eq!(
-            typed.code,
-            lash_core::RuntimeErrorCode::EngineObjectStateFormatUnsupported
+        assert!(
+            matches!(
+                typed,
+                crate::wire::RestateCompatError::Incompatible {
+                    refusal: lash_core_store::compat::CompatRefusal::Unstamped { .. }
+                }
+            ),
+            "{name}: an object without a compat record is refused unstamped: {typed:?}"
         );
         fig1943_apply_state_commands(&mut state, &output);
         assert_eq!(state, before, "{name}: the refusal writes no state");
@@ -1782,7 +1803,7 @@ pub(super) async fn a_gated_wait_registry_call_reads_no_row_per_retained_fence()
     let object_key = "fig3843-session";
     let stamped = |body: serde_json::Value| {
         serde_json::to_vec(&StampedValue {
-            format: crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION,
+            format: u32::from(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION),
             body,
         })
         .expect("encode a stamped registry row")
@@ -1794,10 +1815,13 @@ pub(super) async fn a_gated_wait_registry_call_reads_no_row_per_retained_fence()
 
     let mut reads = Vec::new();
     for fences in [1_usize, 64] {
-        let mut state = BTreeMap::from([(
-            crate::durable_wait::DURABLE_WAIT_INDEX_METADATA_KEY.to_string(),
-            stamped(metadata.clone()),
-        )]);
+        let mut state = BTreeMap::from([
+            fresh_compat_record(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION),
+            (
+                crate::durable_wait::DURABLE_WAIT_INDEX_METADATA_KEY.to_string(),
+                stamped(metadata.clone()),
+            ),
+        ]);
         for index in 0..fences {
             state.insert(
                 format!("wait-index/v2/resolution/fence-{index:03}"),
@@ -1827,14 +1851,14 @@ pub(super) async fn a_gated_wait_registry_call_reads_no_row_per_retained_fence()
 }
 
 /// FIG-3814: the payload object's pre-stamp rows — the raw payload bytes and
-/// the bare `retired` bool — refuse typed before a write lands beside them,
-/// on the exclusive handlers through the object gate and on the shared read
-/// through the stamped decode.
+/// the bare `retired` bool — refuse typed before a write lands beside them:
+/// the object carries no `_compat` record, which every handler, exclusive or
+/// shared, reads first (ADR 0115).
 #[tokio::test]
 pub(super) async fn pre_stamp_effect_group_payload_state_refuses_typed_before_any_write() {
     let endpoint = Endpoint::builder()
         .bind(crate::effect_group::EffectGroupPayload::serve(
-            crate::effect_group::EffectGroupPayloadImpl,
+            crate::effect_group::EffectGroupPayloadImpl::default(),
         ))
         .build();
     let object_key = "fig3814-group-payload";
@@ -1886,11 +1910,16 @@ pub(super) async fn pre_stamp_effect_group_payload_state_refuses_typed_before_an
         let message = restate_output_failure_message(&output)
             .or_else(|| restate_error_message(&output))
             .unwrap_or_else(|| panic!("{name}: pre-stamp state must fail the invocation"));
-        let typed = crate::object_state::stored_format_error_in(&message)
+        let typed = crate::wire::restate_compat_error_in(&message)
             .unwrap_or_else(|| panic!("{name}: the refusal is typed: {message}"));
-        assert_eq!(
-            typed.code,
-            lash_core::RuntimeErrorCode::EngineObjectStateFormatUnsupported
+        assert!(
+            matches!(
+                typed,
+                crate::wire::RestateCompatError::Incompatible {
+                    refusal: lash_core_store::compat::CompatRefusal::Unstamped { .. }
+                }
+            ),
+            "{name}: an object without a compat record is refused unstamped: {typed:?}"
         );
         fig1943_apply_state_commands(&mut state, &output);
         assert_eq!(state, before, "{name}: the refusal writes no state");

@@ -595,19 +595,23 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         "each worker must observe the controller drive epoch"
     );
 
-    let claim_wait = &result.metric_samples_ms["durable_contention.root_admission_wait_ms"];
+    let root_admission_wait =
+        &result.metric_samples_ms["durable_contention.root_admission_wait_ms"];
     let service = &result.metric_samples_ms["durable_contention.service_ms"];
     assert_eq!(
-        claim_wait.len(),
+        root_admission_wait.len(),
         service.len(),
-        "claim-wait and service samples must describe the same completed units"
+        "root admission wait and service samples must describe the same completed units"
     );
     assert!(
-        claim_wait.len() >= completed as usize,
+        root_admission_wait.len() >= completed as usize,
         "latency samples must cover every completed batch: samples={}, completed_batches={completed}",
-        claim_wait.len()
+        root_admission_wait.len()
     );
-    for (metric, samples) in [("claim_wait_ms", claim_wait), ("service_ms", service)] {
+    for (metric, samples) in [
+        ("root_admission_wait_ms", root_admission_wait),
+        ("service_ms", service),
+    ] {
         assert!(
             samples
                 .iter()

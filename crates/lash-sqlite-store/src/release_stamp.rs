@@ -1,6 +1,6 @@
 //! Which lash release wrote this SQLite deployment.
 //!
-//! The three `PRAGMA user_version` integers say what *this* build requires. They
+//! The three `lash_compat` rows say what *this* build requires. They
 //! never say which build produced the rows, so the only way a host could learn
 //! that was to upgrade crates, open the store, and read the refusal — which
 //! names schema integers, not releases. The stamp closes that gap with one row
@@ -97,21 +97,6 @@ pub(crate) fn read(conn: &Connection) -> rusqlite::Result<StoreReleaseState> {
         schema_versions,
         written_at_epoch_ms,
     }))
-}
-
-/// The writing release alone, for a refusal message that has one to name.
-///
-/// Best effort by construction: the refusal it decorates is raised over a
-/// database this build has already declined to read, so anything other than a
-/// readable stamp yields `None` and the message simply says less.
-pub(crate) fn read_release(conn: &Connection) -> Option<String> {
-    match read(conn) {
-        Ok(StoreReleaseState::Stamped(stamp)) => Some(stamp.release),
-        // Anything else — an absent stamp, an unreadable one, a failed read, or
-        // a state a later build adds — names no release, and a refusal that
-        // cannot name one says less rather than guessing.
-        Ok(_) | Err(_) => None,
-    }
 }
 
 /// Apply the update rule inside the open transaction that just provisioned or

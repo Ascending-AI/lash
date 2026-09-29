@@ -1,4 +1,4 @@
-//! [`DriveEpochStore`] for [`Store`]: the storage half of the admission seal
+//! [`DriveEpochStore`] for [`SqliteStore`]: the storage half of the admission seal
 //! that raises a session's drive epoch, and the drive-fence checks every
 //! fenced commit runs in its own transaction (ADR 0105 §2).
 //!

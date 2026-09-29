@@ -90,25 +90,18 @@ pub struct RemoteSessionObservationEvent {
 }
 
 impl RemoteSessionObservationEvent {
-    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
-        crate::Envelope::new(self).encode_json()
+    pub fn encode_json(
+        &self,
+        negotiated: &crate::Negotiated,
+    ) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::at(negotiated, self).encode_json()
     }
 
     /// Decodes one JSON observation after refusing a mismatched protocol
     /// version, before the flattened event vocabulary is deserialized.
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        Self::decode_json_expecting_protocol_version(bytes, crate::REMOTE_PROTOCOL_VERSION)
-    }
-
-    pub(crate) fn decode_json_expecting_protocol_version(
-        bytes: &[u8],
-        expected_version: u32,
-    ) -> Result<Self, RemoteProtocolError> {
-        let event = crate::Envelope::<Self>::decode_json_expecting_protocol_version(
-            bytes,
-            expected_version,
-        )?
-        .into_body();
+        let event =
+            crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?.into_body();
         event.validate()?;
         Ok(event)
     }
@@ -226,12 +219,16 @@ pub struct RemoteProcessObservationRequest {
 }
 
 impl RemoteProcessObservationRequest {
-    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
-        crate::Envelope::new(self).encode_json()
+    pub fn encode_json(
+        &self,
+        negotiated: &crate::Negotiated,
+    ) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::at(negotiated, self).encode_json()
     }
 
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        let request = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        let request =
+            crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?.into_body();
         request.validate()?;
         Ok(request)
     }
@@ -412,12 +409,15 @@ pub enum RemoteProcessObservationItem {
 }
 
 impl RemoteProcessObservationItem {
-    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
-        crate::Envelope::new(self).encode_json()
+    pub fn encode_json(
+        &self,
+        negotiated: &crate::Negotiated,
+    ) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::at(negotiated, self).encode_json()
     }
 
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        let item = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        let item = crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?.into_body();
         item.validate()?;
         Ok(item)
     }

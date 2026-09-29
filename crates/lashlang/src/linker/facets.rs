@@ -64,10 +64,6 @@ impl<'module> Linker<'module> {
     pub(super) fn prepare_for_workflow_analysis(&mut self) {
         for declaration in &self.program.declarations {
             match declaration {
-                Declaration::Type(declaration) => {
-                    self.type_defs
-                        .insert(declaration.name.to_string(), declaration.ty.clone());
-                }
                 Declaration::Process(_) => {}
                 Declaration::Function(function) => {
                     self.function_signatures
@@ -347,7 +343,7 @@ fn collect_expected_slots(
                 );
             }
         }
-        Expr::List(items) | Expr::Tuple(items) => {
+        Expr::List(items) => {
             for (index, item) in items.iter().enumerate() {
                 let mut item_slot = slot.clone();
                 item_slot.push(crate::WorkflowSlotPathSegment::Index(index as u32));

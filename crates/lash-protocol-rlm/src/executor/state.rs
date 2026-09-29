@@ -544,7 +544,10 @@ pub struct RlmExecutionState {
     pub(super) rlm: FlowState,
     pub(super) scratch: ExecutionScratch,
     pub(super) linked_programs: lashlang::LinkedProgramCache,
-    pub(super) stored_lashlang_modules: BTreeSet<lashlang::ModuleRef>,
+    /// The modules the current frame holds an edge of (ADR 0113 §3.1). A
+    /// cache for one frame: a module first bound in a new frame acquires
+    /// that frame's edge, and a cold restore starts it empty and re-acquires.
+    frame_held_modules: Option<(lash_core::FrameEnvironmentId, BTreeSet<lashlang::ModuleRef>)>,
     /// Active-link record of deferred tool resolutions, keyed by Lashlang
     /// call-path. Snapshotted/restored with the rest of the execution state so
     /// a re-driven or recovered link replays the recorded grants and
@@ -583,7 +586,7 @@ impl RlmExecutionState {
             rlm: FlowState::new(),
             scratch: ExecutionScratch::new(),
             linked_programs: lashlang::LinkedProgramCache::new(),
-            stored_lashlang_modules: BTreeSet::new(),
+            frame_held_modules: None,
             deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord::default(),
             deferred_trigger_resolutions:
                 lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
@@ -597,6 +600,42 @@ impl RlmExecutionState {
             execution_response_returned: false,
             #[cfg(test)]
             encoded_globals_in_last_snapshot: 0,
+        }
+    }
+
+    /// Whether `frame` is known to hold an edge of `module_ref`.
+    pub(super) fn frame_holds(
+        &self,
+        frame: &lash_core::FrameEnvironmentId,
+        module_ref: &lashlang::ModuleRef,
+    ) -> bool {
+        self.frame_held_modules
+            .as_ref()
+            .is_some_and(|(held_frame, modules)| {
+                held_frame == frame && modules.contains(module_ref)
+            })
+    }
+
+    /// The modules the current frame is known to hold.
+    #[cfg(test)]
+    pub(super) fn frame_held_module_refs(&self) -> impl Iterator<Item = &lashlang::ModuleRef> {
+        self.frame_held_modules
+            .iter()
+            .flat_map(|(_, modules)| modules.iter())
+    }
+
+    /// Record that `frame` holds an edge of `module_ref`, forgetting what an
+    /// earlier frame held.
+    pub(super) fn record_frame_hold(
+        &mut self,
+        frame: &lash_core::FrameEnvironmentId,
+        module_ref: lashlang::ModuleRef,
+    ) {
+        match &mut self.frame_held_modules {
+            Some((held_frame, modules)) if held_frame == frame => {
+                modules.insert(module_ref);
+            }
+            held => *held = Some((frame.clone(), BTreeSet::from([module_ref]))),
         }
     }
 

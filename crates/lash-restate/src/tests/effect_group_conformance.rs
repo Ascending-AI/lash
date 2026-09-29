@@ -644,6 +644,7 @@ impl LiveConformanceHarness {
                     "effect-group-conformance",
                 ),
             namespace: crate::RestateNamespace::default(),
+            fleet: crate::object_state::FleetView::default(),
             },
         )
         .bind(ScopeLivenessProbeImpl.serve())
@@ -957,10 +958,13 @@ impl LiveConformanceHarness {
             )
         );
         let probe = ingress
-            .call_object_empty_json::<crate::EffectGroupProbeResponse>(
-                &crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupState),
+            .call_lash_object::<_, crate::EffectGroupProbeResponse>(
+                &crate::services::DEFAULT_NAMESPACE
+                    .stable(crate::LashService::EffectGroupState)
+                    .name(),
                 &operation,
                 "probe",
+                &(),
             )
             .await
             .expect("probe the group index");
@@ -1002,7 +1006,7 @@ impl LiveConformanceHarness {
         );
         let shape = witness_shape(&group_key, std::slice::from_ref(&child));
         let opened: EffectGroupOpenResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "open",
@@ -1021,7 +1025,7 @@ impl LiveConformanceHarness {
             }
         );
         let adopted: EffectGroupProbeAdoptResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "probe_and_adopt",
@@ -1039,7 +1043,7 @@ impl LiveConformanceHarness {
         // child: a finished preflight. The close's cancel of it is a no-op,
         // and no line of the child handler ever runs.
         let child_invocation = ingress
-            .send_workflow_json(
+            .send_lash_workflow(
                 "EffectGroupDispatch",
                 &format!("{group_key}-stand-in"),
                 "preflight",
@@ -1050,7 +1054,7 @@ impl LiveConformanceHarness {
             .as_str()
             .to_owned();
         let recorded: EffectGroupRecordDispatchResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "record_dispatch",
@@ -1063,7 +1067,7 @@ impl LiveConformanceHarness {
             .expect("the dispatch records the child");
         assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
         let registered: crate::EffectGroupRegisterResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "register_children",
@@ -1084,7 +1088,7 @@ impl LiveConformanceHarness {
         );
 
         let closed: crate::EffectGroupCloseResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "close",
@@ -1115,10 +1119,13 @@ impl LiveConformanceHarness {
             "a late resolution after the close is not accepted: {late:?}"
         );
         let _: EffectGroupRetireResponse = ingress
-            .call_object_empty_json(
-                &crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupState),
+            .call_lash_object(
+                &crate::services::DEFAULT_NAMESPACE
+                    .stable(crate::LashService::EffectGroupState)
+                    .name(),
                 &group_key,
                 "retire",
+                &(),
             )
             .await
             .expect("the wait group tombstones");
@@ -1153,7 +1160,7 @@ impl LiveConformanceHarness {
         );
         let shape = witness_shape(&group_key, std::slice::from_ref(&child));
         let opened: EffectGroupOpenResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "open",
@@ -1172,7 +1179,7 @@ impl LiveConformanceHarness {
             }
         );
         let _: EffectGroupProbeAdoptResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "probe_and_adopt",
@@ -1184,7 +1191,7 @@ impl LiveConformanceHarness {
             .expect("the admitting group adopts its dispatcher");
         let parked_on_admission = arm_admission_witness(&group_key);
         let child_invocation = ingress
-            .send_workflow_json(
+            .send_lash_workflow(
                 "EffectGroupDispatch",
                 &group_key,
                 "child",
@@ -1201,7 +1208,7 @@ impl LiveConformanceHarness {
             .await
             .expect("the child parks on its admission before the dispatch records it");
         let recorded: EffectGroupRecordDispatchResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "record_dispatch",
@@ -1214,7 +1221,7 @@ impl LiveConformanceHarness {
             .expect("the dispatch records the admitting child");
         assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
         let registered: crate::EffectGroupRegisterResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "register_children",
@@ -1228,7 +1235,7 @@ impl LiveConformanceHarness {
             .expect("the dispatch registers the admitting child");
         assert_eq!(registered, crate::EffectGroupRegisterResponse::Registered);
         let closed: crate::EffectGroupCloseResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "close",
@@ -1257,10 +1264,13 @@ impl LiveConformanceHarness {
             "a late resolution after the close is not accepted: {late:?}"
         );
         let _: EffectGroupRetireResponse = ingress
-            .call_object_empty_json(
-                &crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupState),
+            .call_lash_object(
+                &crate::services::DEFAULT_NAMESPACE
+                    .stable(crate::LashService::EffectGroupState)
+                    .name(),
                 &group_key,
                 "retire",
+                &(),
             )
             .await
             .expect("the admitting group tombstones");
@@ -1359,7 +1369,7 @@ impl LiveConformanceHarness {
         let before = open_invocations(&self.admin).await;
 
         let opened: EffectGroupOpenResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "open",
@@ -1378,7 +1388,7 @@ impl LiveConformanceHarness {
             }
         );
         ingress
-            .send_workflow_json(
+            .send_lash_workflow(
                 "EffectGroupDispatch",
                 &group_key,
                 "run",
@@ -1428,7 +1438,7 @@ impl LiveConformanceHarness {
         }
 
         ingress
-            .call_workflow_json::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
+            .call_lash_workflow::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
             .await
             .expect("retirement saga completes");
     }
@@ -1501,7 +1511,7 @@ impl LiveConformanceHarness {
         let workflow_key = RestateDurableWaitAddress::for_key(&retired_key).workflow_key;
         let late_workflow = lash_core::task::spawn(async move {
             ingress
-                .call_workflow_json::<_, Resolution>(
+                .call_lash_workflow::<_, Resolution>(
                     "LashDurableWaitWorkflow",
                     &workflow_key,
                     "await_resolution",
@@ -1655,7 +1665,7 @@ async fn run_design_witnesses(
     let executions = Arc::new(AtomicUsize::new(0));
     witness_executors.stage(&child, Arc::clone(&executions), "dispatcher-convergence");
     let opened: EffectGroupOpenResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupIndex",
             &group_key,
             "open",
@@ -1677,8 +1687,8 @@ async fn run_design_witnesses(
         group_key: group_key.clone(),
     };
     let (first, second) = tokio::join!(
-        ingress.send_workflow_json("EffectGroupDispatch", &group_key, "run", &request),
-        ingress.send_workflow_json("EffectGroupDispatch", &group_key, "run", &request)
+        ingress.send_lash_workflow("EffectGroupDispatch", &group_key, "run", &request),
+        ingress.send_lash_workflow("EffectGroupDispatch", &group_key, "run", &request)
     );
     let first = first.expect("first dispatcher submission is accepted");
     let second = second.expect("concurrent dispatcher submission attaches");
@@ -1700,7 +1710,7 @@ async fn run_design_witnesses(
         EffectGroupWaitResolution::Rank
     );
     let rank: EffectGroupReadRankResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupIndex",
             &group_key,
             "read_rank",
@@ -1714,7 +1724,7 @@ async fn run_design_witnesses(
     assert!(matches!(rank, EffectGroupReadRankResponse::Settled { .. }));
     assert_eq!(executions.load(Ordering::SeqCst), 1, "child runs once");
     let reopened: EffectGroupOpenResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupIndex",
             &group_key,
             "open",
@@ -1736,7 +1746,7 @@ async fn run_design_witnesses(
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .len();
     ingress
-        .call_workflow_json::<_, ()>(
+        .call_lash_workflow::<_, ()>(
             "EffectGroupDispatch",
             &format!("{group_key}:stale-dispatch-diagnostic"),
             "run",
@@ -1760,11 +1770,11 @@ async fn run_design_witnesses(
     println!("EFFECT_GROUP_WITNESS k dispatcher-probe-guard PASS");
 
     ingress
-        .call_workflow_json::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
+        .call_lash_workflow::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
         .await
         .expect("retirement saga completes");
     let payload_put: EffectGroupPayloadPutResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupPayload",
             &payload_key(&group_key, 0),
             "put",
@@ -1776,7 +1786,7 @@ async fn run_design_witnesses(
         .expect("retired payload fence answers");
     assert_eq!(payload_put, EffectGroupPayloadPutResponse::Retired);
     let late_record: EffectGroupRecordSettlementResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupIndex",
             &group_key,
             "record_settlement",
@@ -1806,7 +1816,7 @@ async fn run_design_witnesses(
     let admission_child = witness_child(&admission_group, 0);
     let admission_shape = witness_shape(&admission_group, std::slice::from_ref(&admission_child));
     let opened: EffectGroupOpenResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupIndex",
             &admission_group,
             "open",
@@ -1825,7 +1835,7 @@ async fn run_design_witnesses(
         }
     );
     let adopted: EffectGroupProbeAdoptResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupIndex",
             &admission_group,
             "probe_and_adopt",
@@ -1847,7 +1857,7 @@ async fn run_design_witnesses(
     );
     let first_admit = arm_admission_witness(&admission_group);
     let child_invocation = ingress
-        .send_workflow_json(
+        .send_lash_workflow(
             "EffectGroupDispatch",
             &admission_group,
             "child",
@@ -1864,7 +1874,7 @@ async fn run_design_witnesses(
         .await
         .expect("child reaches NotYetRecorded before dispatcher redrive");
     let recorded: EffectGroupRecordDispatchResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupIndex",
             &admission_group,
             "record_dispatch",
@@ -1900,10 +1910,13 @@ async fn run_design_witnesses(
         "the crash-before-record child executes exactly once"
     );
     let retired: EffectGroupRetireResponse = ingress
-        .call_object_empty_json(
-            &crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupState),
+        .call_lash_object(
+            &crate::services::DEFAULT_NAMESPACE
+                .stable(crate::LashService::EffectGroupState)
+                .name(),
             &admission_group,
             "retire",
+            &(),
         )
         .await
         .expect("admission witness tombstones");
@@ -1924,7 +1937,7 @@ async fn run_design_witnesses(
         "never-recorded-child",
     );
     let _: EffectGroupOpenResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupIndex",
             &gap_group,
             "open",
@@ -1937,16 +1950,19 @@ async fn run_design_witnesses(
         .await
         .expect("send-record-gap witness opens");
     let _: EffectGroupRetireResponse = ingress
-        .call_object_empty_json(
-            &crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupState),
+        .call_lash_object(
+            &crate::services::DEFAULT_NAMESPACE
+                .stable(crate::LashService::EffectGroupState)
+                .name(),
             &gap_group,
             "retire",
+            &(),
         )
         .await
         .expect("send-record-gap witness tombstones");
     let executions_before_child = gap_executions.load(Ordering::SeqCst);
     ingress
-        .call_workflow_json::<_, ()>(
+        .call_lash_workflow::<_, ()>(
             "EffectGroupDispatch",
             &gap_group,
             "child",
@@ -1985,7 +2001,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     let children = [witness_child(&group_key, 0), witness_child(&group_key, 1)];
     let shape = witness_shape(&group_key, &children);
     let opened: EffectGroupOpenResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupIndex",
             &group_key,
             "open",
@@ -2006,7 +2022,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     let mut commit_seqs = Vec::new();
     for child in &children {
         let committed: EffectGroupCommitChildResponse = ingress
-            .call_object_json(
+            .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
                 "commit_child",
@@ -2022,7 +2038,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
         commit_seqs.push(commit_seq);
     }
     let blockers: EffectGroupDrainBlockersResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupIndex",
             &group_key,
             "drain_blockers",
@@ -2052,7 +2068,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
         "child 0 never seated, so its drained wake is unresolved"
     );
     ingress
-        .call_workflow_json::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
+        .call_lash_workflow::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
         .await
         .expect("retirement saga completes");
     let released = tokio::time::timeout(Duration::from_secs(30), waiter)
@@ -2066,7 +2082,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     let stale_child = witness_child(&stale_group, 0);
     let stale_shape = witness_shape(&stale_group, std::slice::from_ref(&stale_child));
     let _: EffectGroupOpenResponse = ingress
-        .call_object_json(
+        .call_lash_object(
             "EffectGroupIndex",
             &stale_group,
             "open",
@@ -2079,7 +2095,8 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
         .await
         .expect("stale-format witness opens");
     // Rewrite the group's state as a deployment that predates the stamped
-    // envelope left it: the same record with no format stamp.
+    // envelope left it: the same record with no format stamp, and no
+    // `_compat` record, which the index refuses first (ADR 0115).
     let stale_state = serde_json::json!({
         "shape_digest": stale_shape.digest().expect("witness shape digest"),
         "lifecycle": {"type": "retired", "cleanup": {"type": "complete"}},
@@ -2088,7 +2105,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     let refused = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let probed = ingress
-                .call_object_json::<_, EffectGroupDrainBlockersResponse>(
+                .call_lash_object::<_, EffectGroupDrainBlockersResponse>(
                     "EffectGroupIndex",
                     &stale_group,
                     "drain_blockers",
@@ -2104,7 +2121,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     })
     .await
     .expect("the rewritten state reaches the index");
-    let typed = crate::effect_host::ingress_stored_format_refusal(&refused)
+    let typed = crate::object_state::ingress_stored_format_refusal(&refused)
         .unwrap_or_else(|| panic!("the refusal is typed: {refused}"));
     assert_eq!(
         typed.code,
@@ -2220,7 +2237,7 @@ async fn await_group_wait(
 ) -> EffectGroupWaitResolution {
     let address = RestateDurableWaitAddress::for_key(&request.key);
     let resolution = ingress
-        .call_workflow_json::<_, Resolution>(
+        .call_lash_workflow::<_, Resolution>(
             "LashDurableWaitWorkflow",
             &address.workflow_key,
             "await_resolution",

@@ -99,6 +99,7 @@ macro_rules! runtime_store_operations {
                 [carried batch] fn admit_pending_turn_inputs(&self, batch: crate::PendingTurnInputBatch, ingress_claim_ttl_ms: u64) -> Result<TurnInputAdmission, StoreError>;
                 [session] fn load_run_spec(&self, session_id: &SessionId, hash: &crate::run_spec::RunSpecHash) -> Result<Option<crate::run_spec::RunSpec>, StoreError>;
                 [session] fn list_pending_turn_inputs(&self, session_id: &SessionId) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
+                [session] fn pending_turn_input(&self, session_id: &SessionId, input_id: &crate::InputId) -> Result<Option<crate::PendingTurnInputRead>, StoreError>;
                 [session] fn list_turn_input_applications(&self, session_id: &SessionId) -> Result<Vec<crate::TurnInputApplication>, StoreError>;
                 [session] fn cancel_pending_turn_inputs(&self, session_id: &SessionId, targets: &[crate::PendingTurnInputCancelTarget]) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, StoreError>;
                 [session] fn cancel_pending_turn_input_suffix(&self, session_id: &SessionId, anchor: &crate::PendingTurnInputCancelTarget) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError>;
@@ -126,8 +127,10 @@ macro_rules! runtime_store_operations {
                 [carried request] fn admit_root(&self, request: &AdmitRootRequest) -> Result<Option<RootAdmission>, StoreError>;
                 [carried request] fn admit_at_checkpoint(&self, request: &CheckpointAdmissionRequest) -> Result<CheckpointAdmission, StoreError>;
                 [session] fn root_terminal(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Option<RootTerminal>, StoreError>;
+                [session] fn end_refused_root(&self, session_id: &SessionId, root: &crate::TurnId, refusal: &crate::RuntimeError, at_ms: u64) -> Result<Option<RootTerminal>, StoreError>;
                 [session] fn root_of_input(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 [session] fn root_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
+                [session] fn bound_turn_scopes(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Vec<crate::TurnId>, StoreError>;
                 [session] fn bind_root_inputs(&self, session_id: &SessionId, root: &crate::TurnId, inputs: &[crate::InputId]) -> Result<(), StoreError>;
             }
             StoreMaintenance {

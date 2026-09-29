@@ -62,15 +62,14 @@ fn linked_module_accepts_named_processes_resource_params_and_activations() {
     // finish handle
     let program = builders::module(
         vec![
-            builders::type_decl(
-                "ChangeEvent",
-                TypeExpr::Object(vec![builders::type_field("path", TypeExpr::Str, false)]),
-            ),
             builders::process(
                 "scan",
                 vec![
                     builders::param("tool", TypeExpr::Ref("Tools".into())),
-                    builders::param("event", TypeExpr::Ref("ChangeEvent".into())),
+                    builders::param(
+                        "event",
+                        TypeExpr::Object(vec![builders::type_field("path", TypeExpr::Str, false)]),
+                    ),
                 ],
                 builders::block(vec![
                     builders::assign(
@@ -684,14 +683,17 @@ fn linked_module_accepts_button_trigger_source_constructor() {
                 TypeExpr::Ref("ui.button.Pressed".into()),
             )],
             builders::block(vec![
-                builders::yield_expr(builders::record(vec![
-                    ("kind", builders::string("button_pressed")),
-                    ("button", builders::field(builders::var("event"), "button")),
-                    (
-                        "message",
-                        builders::field(builders::var("event"), "message"),
-                    ),
-                ])),
+                builders::assign(
+                    "emitted",
+                    builders::record(vec![
+                        ("kind", builders::string("button_pressed")),
+                        ("button", builders::field(builders::var("event"), "button")),
+                        (
+                            "message",
+                            builders::field(builders::var("event"), "message"),
+                        ),
+                    ]),
+                ),
                 builders::finish(builders::bool_lit(true)),
             ]),
         )],

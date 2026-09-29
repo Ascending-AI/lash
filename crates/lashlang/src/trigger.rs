@@ -23,9 +23,16 @@ pub const TRIGGER_MODULE_ALIAS: &str = TRIGGERS_ALIAS;
 pub const TRIGGER_REGISTRATION_TYPE_NAME: &str = TRIGGER_REGISTRATION_TYPE;
 pub const LASH_TRIGGER_EVENT_KEY: &str = "$lash.trigger.event";
 
+/// The tool `triggers.register` binds to: registration is an ordinary leaf
+/// tool declaring `ToolIntent::RegisterTrigger`; the rest of the `triggers`
+/// surface stays host operations on the `Triggers` resource (FIG-3116).
+pub const REGISTER_TRIGGER_TOOL_ID: &str = "tool:register_trigger";
+
+/// The operation name registration request decoders report in diagnostics.
+pub(crate) const TRIGGER_REGISTRATION_OPERATION: &str = "triggers.register";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TriggerHostOperation {
-    Register,
     List,
     Update,
     Enable,
@@ -38,7 +45,6 @@ pub enum TriggerHostOperation {
 impl TriggerHostOperation {
     pub const fn host_operation(self) -> &'static str {
         match self {
-            Self::Register => "triggers.register",
             Self::List => "triggers.list",
             Self::Update => "triggers.update",
             Self::Enable => "triggers.enable",
@@ -51,7 +57,6 @@ impl TriggerHostOperation {
 
     pub const fn receiver_method(self) -> &'static str {
         match self {
-            Self::Register => "register",
             Self::List => "list",
             Self::Update => "update",
             Self::Enable => "enable",
@@ -81,18 +86,6 @@ impl TriggerHostOperation {
     /// operation accepts, and `x-lash` is what lets it name a process.
     pub fn input_schema(self) -> Value {
         match self {
-            Self::Register => json!({
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "source": dict_schema(),
-                    "target": { X_LASH_KEYWORD: { "kind": "process_unknown" } },
-                    "inputs": dict_schema(),
-                    "name": { "type": "string" },
-                    "subscription_key": { "type": "string" }
-                },
-                "required": ["source", "target", "inputs"]
-            }),
             Self::List => json!({
                 "type": "object",
                 "additionalProperties": false,
@@ -145,12 +138,9 @@ impl TriggerHostOperation {
     /// The operation's output contract, in the same vocabulary as the input.
     pub fn output_schema(self) -> Value {
         match self {
-            Self::Register
-            | Self::Update
-            | Self::Enable
-            | Self::Disable
-            | Self::Delete
-            | Self::Revive => handle_schema(),
+            Self::Update | Self::Enable | Self::Disable | Self::Delete | Self::Revive => {
+                handle_schema()
+            }
             Self::List => json!({
                 "type": "array",
                 "items": { "$ref": TRIGGER_REGISTRATION_TYPE }
@@ -169,8 +159,7 @@ impl TriggerHostOperation {
             .expect("trigger output contracts are valid lash schemas")
     }
 
-    pub const ALL: [Self; 8] = [
-        Self::Register,
+    pub const ALL: [Self; 7] = [
         Self::List,
         Self::Update,
         Self::Enable,
@@ -190,6 +179,76 @@ fn dict_schema() -> Value {
 /// declines to describe.
 fn handle_schema() -> Value {
     json!({ X_LASH_KEYWORD: { "kind": "handle", "payload": {} } })
+}
+
+/// The registration call's input contract — the same record the retired
+/// resource operation accepted, now the `register_trigger` tool's schema.
+pub fn register_trigger_tool_input_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "source": dict_schema(),
+            "target": { X_LASH_KEYWORD: { "kind": "process_unknown" } },
+            "inputs": dict_schema(),
+            "name": { "type": "string" },
+            "subscription_key": { "type": "string" }
+        },
+        "required": ["source", "target", "inputs"]
+    })
+}
+
+/// The registration answer contract: the trigger handle the tool hands back.
+pub fn register_trigger_tool_output_schema() -> Value {
+    handle_schema()
+}
+
+/// The registration call's output type, read back out of its contract.
+#[expect(
+    clippy::expect_used,
+    reason = "the trigger handle schema is produced by this same module's schema functions and is a valid lash schema, per the message"
+)]
+pub fn register_trigger_tool_output_ty() -> TypeExpr {
+    json_schema_to_type_expr(&register_trigger_tool_output_schema())
+        .expect("trigger output contracts are valid lash schemas")
+}
+
+/// The module-operation contract a catalogue or fixture uses to declare
+/// `triggers.register` where a real tool manifest is not in play: the binding
+/// carries the registration tool's id, which is what runtime dispatch resolves
+/// it to.
+pub fn add_trigger_register_tool_binding(
+    catalog: &mut LashlangHostCatalog,
+) -> Result<(), LashlangHostCatalogError> {
+    let binding = crate::linker::ResourceOperationBinding {
+        input_ty: json_schema_to_type_expr(&register_trigger_tool_input_schema()).map_err(
+            |source| LashlangHostCatalogError::UnreadableOperationSchema {
+                operation: REGISTER_TRIGGER_TOOL_ID.to_string(),
+                source,
+            },
+        )?,
+        output_ty: register_trigger_tool_output_ty(),
+        output_from_input: None,
+    };
+    // The tool's own catalog contribution declares the same binding, so a
+    // surface that already folded it in is satisfied, not in conflict.
+    if let Some(existing) =
+        catalog.resolve_module_operation(TRIGGERS_RESOURCE_TYPE, TRIGGERS_ALIAS, "register")
+        && existing.host_operation == REGISTER_TRIGGER_TOOL_ID
+        && *existing.binding == binding
+    {
+        return Ok(());
+    }
+    catalog.add_module_operation_contract(
+        [TRIGGERS_ALIAS],
+        TRIGGERS_RESOURCE_TYPE,
+        "register",
+        REGISTER_TRIGGER_TOOL_ID,
+        &OperationContract::new(
+            register_trigger_tool_input_schema(),
+            register_trigger_tool_output_schema(),
+        ),
+    )
 }
 
 pub fn is_trigger_resource_type(resource_type: &str) -> bool {
@@ -331,16 +390,21 @@ pub struct TriggerRegistrationRequest {
 
 impl TriggerRegistrationRequest {
     pub fn decode(request: &serde_json::Value) -> Result<Self, TriggerRequestDecodeError> {
-        let operation = TriggerHostOperation::Register;
         Ok(Self {
-            source: HostDescriptor::decode(required_json_field(request, "source", operation)?)
-                .map_err(TriggerRequestDecodeError::from)?,
+            source: HostDescriptor::decode(required_json_field(
+                request,
+                "source",
+                TRIGGER_REGISTRATION_OPERATION,
+            )?)
+            .map_err(TriggerRequestDecodeError::from)?,
             target: decode_process_definition_identity(
-                required_json_field(request, "target", operation)?,
+                required_json_field(request, "target", TRIGGER_REGISTRATION_OPERATION)?,
                 "trigger target",
             )?,
             inputs: TriggerInputTemplate::decode(required_json_field(
-                request, "inputs", operation,
+                request,
+                "inputs",
+                TRIGGER_REGISTRATION_OPERATION,
             )?)?,
             name: request
                 .get("name")
@@ -351,7 +415,7 @@ impl TriggerRegistrationRequest {
                 .map(|value| {
                     value.as_str().map(ToOwned::to_owned).ok_or_else(|| {
                         TriggerRequestDecodeError::InvalidField {
-                            operation: operation.host_operation(),
+                            operation: TRIGGER_REGISTRATION_OPERATION,
                             field: "subscription_key",
                             message: "expected a string literal".to_string(),
                         }
@@ -377,7 +441,7 @@ impl TriggerInputTemplate {
         let map = value
             .as_object()
             .ok_or_else(|| TriggerRequestDecodeError::InvalidField {
-                operation: TriggerHostOperation::Register.host_operation(),
+                operation: TRIGGER_REGISTRATION_OPERATION,
                 field: "inputs",
                 message: "expected an object mapping process params to values".to_string(),
             })?;
@@ -476,18 +540,15 @@ impl TriggerListRequest {
                 }
             }
         }
+        let operation = TriggerHostOperation::List.host_operation();
         Ok(Self {
             target: request
                 .get("target")
                 .map(|value| decode_process_definition_identity(value, "triggers.list target"))
                 .transpose()?,
-            name: optional_string_filter(request, "name", TriggerHostOperation::List)?,
-            source_type: optional_string_filter(
-                request,
-                "source_type",
-                TriggerHostOperation::List,
-            )?,
-            enabled: optional_bool_filter(request, "enabled", TriggerHostOperation::List)?,
+            name: optional_string_filter(request, "name", operation)?,
+            source_type: optional_string_filter(request, "source_type", operation)?,
+            enabled: optional_bool_filter(request, "enabled", operation)?,
         })
     }
 }
@@ -499,7 +560,11 @@ pub struct TriggerPruneRequest {
 
 impl TriggerPruneRequest {
     pub fn decode(request: &serde_json::Value) -> Result<Self, TriggerRequestDecodeError> {
-        let value = required_json_field(request, "subscription_keys", TriggerHostOperation::Prune)?;
+        let value = required_json_field(
+            request,
+            "subscription_keys",
+            TriggerHostOperation::Prune.host_operation(),
+        )?;
         let values = value
             .as_array()
             .ok_or_else(|| TriggerRequestDecodeError::InvalidField {
@@ -534,14 +599,14 @@ impl TriggerPruneRequest {
 fn optional_string_filter(
     request: &serde_json::Value,
     field: &'static str,
-    operation: TriggerHostOperation,
+    operation: &'static str,
 ) -> Result<Option<String>, TriggerRequestDecodeError> {
     request
         .get(field)
         .map(|value| {
             value.as_str().map(ToOwned::to_owned).ok_or_else(|| {
                 TriggerRequestDecodeError::InvalidField {
-                    operation: operation.host_operation(),
+                    operation,
                     field,
                     message: "expected a string".to_string(),
                 }
@@ -553,7 +618,7 @@ fn optional_string_filter(
 fn optional_bool_filter(
     request: &serde_json::Value,
     field: &'static str,
-    operation: TriggerHostOperation,
+    operation: &'static str,
 ) -> Result<Option<bool>, TriggerRequestDecodeError> {
     request
         .get(field)
@@ -561,7 +626,7 @@ fn optional_bool_filter(
             value
                 .as_bool()
                 .ok_or_else(|| TriggerRequestDecodeError::InvalidField {
-                    operation: operation.host_operation(),
+                    operation,
                     field,
                     message: "expected a boolean".to_string(),
                 })
@@ -683,7 +748,7 @@ impl From<HostDescriptorError> for TriggerRequestDecodeError {
                 Self::UnknownSourceType { source_type }
             }
             HostDescriptorError::MalformedPayload { message, .. } => Self::InvalidField {
-                operation: TriggerHostOperation::Register.host_operation(),
+                operation: TRIGGER_REGISTRATION_OPERATION,
                 field: "source",
                 message,
             },
@@ -694,14 +759,11 @@ impl From<HostDescriptorError> for TriggerRequestDecodeError {
 fn required_json_field<'json>(
     request: &'json serde_json::Value,
     field: &'static str,
-    operation: TriggerHostOperation,
+    operation: &'static str,
 ) -> Result<&'json serde_json::Value, TriggerRequestDecodeError> {
     request
         .get(field)
-        .ok_or_else(|| TriggerRequestDecodeError::MissingField {
-            operation: operation.host_operation(),
-            field,
-        })
+        .ok_or(TriggerRequestDecodeError::MissingField { operation, field })
 }
 
 fn decode_process_definition_identity(

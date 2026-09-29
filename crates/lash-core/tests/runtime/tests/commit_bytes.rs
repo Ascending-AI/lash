@@ -20,6 +20,10 @@
 //! optional `source_key` field. With that field removed, each commit digests
 //! to its previous pin.
 //!
+//! Re-pinned for FIG-4037: each physical turn commit now carries its typed
+//! `outcome`. Removing that field from the masked commit reproduces each old
+//! digest; every other committed byte is unchanged.
+//!
 //! The digest is over the commit's serialized form with the values that differ
 //! between two runs of the same turn masked: worker and lease identities,
 //! random ids, wall-clock timestamps, and the hashes computed over them. Every

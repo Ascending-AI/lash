@@ -31,10 +31,9 @@ fn remote_context_overflow_stop_is_its_own_wire_tag() {
         outcome: RemoteTurnOutcome,
     }
     assert!(matches!(
-        Envelope::<OutcomeBody>::decode_json(stale.to_string().as_bytes()),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual,
-            expected: REMOTE_PROTOCOL_VERSION,
-        }) if actual == REMOTE_PROTOCOL_VERSION - 1
+        Envelope::<OutcomeBody>::decode_json(stale.to_string().as_bytes(), crate::REMOTE_PROTOCOL),
+        Err(RemoteProtocolError::Unsupported { peer, local })
+            if peer == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION - 1)
+                && local == crate::REMOTE_PROTOCOL
     ));
 }

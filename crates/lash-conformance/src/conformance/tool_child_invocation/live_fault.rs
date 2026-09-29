@@ -2,7 +2,7 @@
 //! when it is one (FIG-3575).
 //!
 //! A child resolves the environment its request records before it runs any
-//! attempt (ADR 0099 §3). Three things can stop that read, and each is a
+//! attempt (ADR 0099 §3). Two things can stop that read, and each is a
 //! different fact:
 //!
 //! - **Missing.** The recorded environment is absent, or unreadable by this
@@ -12,10 +12,6 @@
 //!   dropped connection. That is a fact about this attempt. It is never the
 //!   child's recorded outcome: nothing settles while it lasts, and the
 //!   substrate runs the child again until it settles.
-//! - **Park.** A replay this build cannot serve (FIG-3586) is refused the
-//!   same way by every run of this build, so re-running it would spin. The
-//!   park is the child's settlement, and it hands the park to the waiting
-//!   turn.
 //!
 //! The laws are written against the effect interface. They are registered on
 //! an engine that re-runs a child on a live fault, through
@@ -36,9 +32,6 @@ enum EnvRead {
     /// An opaque session-seam error: what the SQL stores report for a
     /// pool-acquire timeout or a lost connection.
     StoreFault,
-    /// A carried park: a replay this build cannot serve, typed as the
-    /// divergence a re-executed program reports (FIG-3586).
-    Divergent,
     /// Nothing is stored under the reference.
     Missing,
 }
@@ -64,60 +57,41 @@ impl FaultingEnvStore {
 impl crate::ProcessExecutionEnvStore for FaultingEnvStore {
     async fn publish_process_execution_env(
         &self,
-        owner: &crate::ArtifactOwner,
+        claim: &crate::ReferrerClaim,
         env_ref: &crate::ProcessExecutionEnvRef,
         bytes: &[u8],
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), crate::ArtifactStoreError> {
         self.inner
-            .publish_process_execution_env(owner, env_ref, bytes)
+            .publish_process_execution_env(claim, env_ref, bytes)
             .await
     }
 
-    async fn transfer_process_execution_env(
+    async fn acquire_process_execution_env(
         &self,
-        from: &crate::ArtifactOwner,
-        to: &crate::ArtifactOwner,
+        claim: &crate::ReferrerClaim,
         env_ref: &crate::ProcessExecutionEnvRef,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), crate::ArtifactStoreError> {
         self.inner
-            .transfer_process_execution_env(from, to, env_ref)
+            .acquire_process_execution_env(claim, env_ref)
             .await
     }
 
-    async fn release_process_execution_env(
+    async fn end_process_env_referrer(
         &self,
-        owner: &crate::ArtifactOwner,
-        env_ref: &crate::ProcessExecutionEnvRef,
-    ) -> Result<(), crate::PluginError> {
-        self.inner
-            .release_process_execution_env(owner, env_ref)
-            .await
-    }
-
-    async fn retire_process_execution_env_owner(
-        &self,
-        owner: &crate::ArtifactOwner,
-    ) -> Result<(), crate::PluginError> {
-        self.inner.retire_process_execution_env_owner(owner).await
+        cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError> {
+        self.inner.end_process_env_referrer(cleanup).await
     }
 
     async fn get_process_execution_env(
         &self,
         env_ref: &crate::ProcessExecutionEnvRef,
-    ) -> Result<Option<Vec<u8>>, crate::PluginError> {
+    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
         self.reads.fetch_add(1, Ordering::AcqRel);
         match self.read.load(Ordering::Acquire) {
-            read if read == EnvRead::StoreFault as u8 => Err(crate::PluginError::Session(
+            read if read == EnvRead::StoreFault as u8 => Err(crate::ArtifactStoreError::Backend(
                 "pool timed out while waiting for an open connection".to_string(),
             )),
-            read if read == EnvRead::Divergent as u8 => {
-                Err(crate::PluginError::RuntimeEffectController(
-                    crate::RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::LashlangCellReplayDivergence,
-                        "the recorded environment was written by another build",
-                    ),
-                ))
-            }
             read if read == EnvRead::Missing as u8 => Ok(None),
             _ => self.inner.get_process_execution_env(env_ref).await,
         }
@@ -301,39 +275,5 @@ pub async fn a_process_env_store_fault_is_never_the_childs_recorded_outcome(
         "the child settles with the plain leaf's output"
     );
     assert_eq!(stage.body_runs(), 1, "the settling run ran the body once");
-    stage.close(handle).await;
-}
-
-/// A child whose replay this build cannot serve settles with its park, handed
-/// to the waiting turn as the park itself, and is not run again: every run by
-/// this build would refuse the same replay (FIG-3586).
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_divergent_child_settles_with_its_park(fixture: &ToolChildLawFixture, prefix: &str) {
-    let stage = Stage::new(fixture, &format!("{prefix}-env-park"), EnvRead::Divergent).await;
-    let mut handle = stage.open(&format!("{prefix}-env-park-group")).await;
-    let parked = stage
-        .next(&mut handle)
-        .await
-        .outcome
-        .expect_err("a divergent child settles with its park");
-    assert_eq!(
-        parked.code,
-        crate::RuntimeErrorCode::LashlangCellReplayDivergence,
-        "the park is handed to the waiter as the divergence itself"
-    );
-    assert_eq!(
-        parked.turn_failure_cause(),
-        crate::TurnFailureCause::Parked,
-        "the waiting turn parks on it rather than recording a failure"
-    );
-    assert_eq!(
-        stage.env_store.reads(),
-        1,
-        "a park is not re-run: the child read its environment once"
-    );
-    assert_eq!(stage.body_runs(), 0, "a parked child runs no attempt");
     stage.close(handle).await;
 }

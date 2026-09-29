@@ -634,25 +634,61 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        // Open and admitted rows, and the rows a checkpoint accepted into a
+        // running root, read in one snapshot and listed in `enqueue_seq`
+        // order (FIG-4044). The isolation level must precede every other
+        // statement in the transaction.
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        let rows = sqlx::query(
+        let statements = &crate::turn_ingress::turn_ingress_sql().pending_inputs;
+        let mut inputs = Vec::new();
+        for sql in [
+            statements.list_undelivered.sql(),
+            statements.list_accepted.sql(),
+        ] {
+            let rows = sqlx::query(sql)
+                .bind(session_id.as_str())
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            for row in rows {
+                inputs.push(pending_turn_input_read_from_row(row)?);
+            }
+        }
+        tx.commit().await.map_err(store_sqlx_error)?;
+        inputs.sort_by_key(|read| read.input.enqueue_seq);
+        Ok(inputs)
+    }
+
+    async fn pending_turn_input(
+        &self,
+        session_id: &SessionId,
+        input_id: &lash_core_execution::InputId,
+    ) -> Result<Option<lash_core_execution::PendingTurnInputRead>, StoreError> {
+        // One point read by primary key; the list's lifecycle filter is
+        // applied to the one row here: a row is listed until it is completed
+        // or cancelled, open or admitted to its root alike.
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let row = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
-                .list_undelivered
+                .select_by_id
                 .sql(),
         )
         .bind(session_id.as_str())
-        .fetch_all(&mut *tx)
+        .bind(input_id.as_str())
+        .fetch_optional(&mut *connection)
         .await
         .map_err(store_sqlx_error)?;
-        let inputs = rows
-            .into_iter()
+        Ok(row
             .map(pending_turn_input_read_from_row)
-            .collect::<Result<Vec<_>, StoreError>>()?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(inputs)
+            .transpose()?
+            .filter(|read| !read.input.state.is_terminal()))
     }
 
     async fn list_turn_input_applications(

@@ -52,34 +52,6 @@ pub(crate) async fn record_completed_attachment_write(
         .expect("stamp attachment upload evidence");
 }
 
-/// Model the artifact-cleanup worker before asserting that a projected process
-/// tombstone is eligible for physical compaction.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub(crate) async fn acknowledge_pending_process_artifact_cleanup(
-    registry: &dyn crate::ProcessRegistry,
-) {
-    for cleanup in registry
-        .pending_process_artifact_cleanup()
-        .await
-        .expect("list pending process artifact cleanup")
-    {
-        let acknowledgement = registry
-            .complete_process_artifact_cleanup(&cleanup.process_id)
-            .await
-            .expect("acknowledge process artifact cleanup");
-        assert_eq!(
-            acknowledgement,
-            crate::ProcessArtifactCleanupAck::Acknowledged {
-                process_id: cleanup.process_id,
-            },
-            "cleanup acknowledges its exact process"
-        );
-    }
-}
-
 /// A pair of [`ProcessRegistry`] handles opened against the same durable
 /// backing store.
 pub struct ReopenableProcessRegistry {

@@ -19,7 +19,7 @@ macro_rules! durable_wait_index_methods {
                 .peek()
                 .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
             Box::pin(async move {
-                let Json(resolution) = request.call().await?;
+                let resolution = request.call().await?.into_body();
                 Ok(resolution)
             })
         }
@@ -36,11 +36,11 @@ macro_rules! durable_wait_index_methods {
             let replay_key = key.key_id.clone();
             let request = namespace
                 .durable_wait_registry(self, durable_wait_index_object_key(&address))
-                .peek_turn_gate(Json(RestateDurableWaitIndexRequest { key }))
+                .peek_turn_gate(RestateDurableWaitIndexRequest { key })
                 .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
             let call = request.call();
             Box::pin(async move {
-                let Json(peek) = call.await?;
+                let peek = call.await?.into_body();
                 Ok(peek)
             })
         }
@@ -58,9 +58,9 @@ macro_rules! durable_wait_index_methods {
                 let address = RestateDurableWaitAddress::for_key(&request.key);
                 let resolve = namespace
                     .durable_wait_registry(self, durable_wait_index_object_key(&address))
-                    .resolve(Json(request))
+                    .resolve(request)
                     .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                let Json(outcome) = resolve.call().await?;
+                let outcome = resolve.call().await?.into_body();
                 Ok(outcome)
             })
         }
@@ -77,7 +77,7 @@ macro_rules! durable_wait_index_methods {
             let address = RestateDurableWaitAddress::for_key(&request.key);
             let send = namespace
                 .durable_wait_registry(self, durable_wait_index_object_key(&address))
-                .resolve(Json(request))
+                .resolve(request)
                 .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                 .send();
             Box::pin(async move {
@@ -103,7 +103,7 @@ macro_rules! durable_wait_index_methods {
             };
             let call = request.call();
             Box::pin(async move {
-                let Json(()) = call.await?;
+                call.await?;
                 Ok(())
             })
         }
@@ -118,10 +118,10 @@ macro_rules! durable_wait_index_methods {
         {
             let request = namespace
                 .durable_wait_registry(self, session_id)
-                .is_revoked(Json(()));
+                .is_revoked();
             let call = request.call();
             Box::pin(async move {
-                let Json(revoked) = call.await?;
+                let revoked = call.await?.into_body();
                 Ok(revoked)
             })
         }

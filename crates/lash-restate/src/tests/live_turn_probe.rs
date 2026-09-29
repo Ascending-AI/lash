@@ -545,7 +545,7 @@ impl LiveTurnRunner {
         };
         tokio::spawn(async move {
             ingress
-                .call_workflow_json::<_, crate::RestateProcessWorkflowOutput>(
+                .call_lash_workflow::<_, crate::RestateProcessWorkflowOutput>(
                     crate::LashService::ProcessWorkflow.base_name(),
                     &key,
                     "run",

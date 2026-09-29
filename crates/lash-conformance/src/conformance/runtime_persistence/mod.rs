@@ -2,7 +2,7 @@
 //! [`SessionCommitStore`](crate::SessionCommitStore) (head CAS, checkpoint
 //! hydration, metadata, attachment manifest, turn-commit stamps),
 //! [`RootStore`](crate::store::RootStore) (admission binding),
-//! [`IngressStore`](crate::IngressStore), and
+//! [`TurnInputStore`](crate::TurnInputStore), and
 //! [`StoreMaintenance`](crate::StoreMaintenance).
 
 use super::*;

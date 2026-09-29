@@ -47,7 +47,6 @@ pub use engine::{
     ProcessEngineProcessContext, ProcessEngineRegistration, ProcessEngineRegistry,
     ProcessEngineRunContext, ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessInfraError,
     ProcessRunOutcome, SegmentHandover, WeakProcessEngineRegistry,
-    settle_started_process_engine_artifacts,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
@@ -62,26 +61,24 @@ pub use events::{
 };
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
-    Ancestry, ArtifactOwner, DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime,
-    LifetimeDecision, LifetimePolicy, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
-    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCompletionOutcome,
-    ProcessExecutionContext, ProcessExecutionEnvLoadError, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInput,
-    ProcessLineage, ProcessListFilter, ProcessListMode, ProcessObserverBy, ProcessOriginator,
-    ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    ProcessRegistrationDisposition, ProcessRegistrationOutcome, ProcessSessionDeleteReport,
-    ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
-    ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-    ProcessTombstone, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
-    ScopeStorageError, SessionId, SessionScope, SessionScopeId, StartCx, StartCxError, StartKey,
-    StartKeyOwner, StoreRealization, WaitKind, WaitState, artifact_destination_owner_retired_error,
-    artifact_owner_is_permanently_retired, artifact_owner_retired_error,
-    artifact_staging_edge_missing_error, artifact_staging_owner_edge_is_missing,
-    artifact_store_plugin_error, lifetime, load_process_execution_env, mint_process_id,
-    process_child_session_id, process_runtime_session_ids, publish_process_execution_env,
-    settle_started_process_execution_env,
+    Ancestry, DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime, LifetimeDecision,
+    LifetimePolicy, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
+    ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvLoadError,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
+    ProcessIdMint, ProcessIdentity, ProcessInput, ProcessLineage, ProcessListFilter,
+    ProcessListMode, ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
+    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistrationDisposition,
+    ProcessRegistrationOutcome, ProcessSessionDeleteReport, ProcessSpawnProvenance,
+    ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt,
+    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone,
+    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
+    SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StartKeyOwner, StoreRealization,
+    WaitKind, WaitState, artifact_referrer_ended, artifact_store_plugin_error, lifetime,
+    load_process_execution_env, mint_process_id, process_child_session_id,
+    process_runtime_session_ids, publish_process_execution_env,
 };
+pub use model::{ConsumerHold, SessionTurnResult};
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
     ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState, ProcessWorkObserver,
@@ -115,7 +112,10 @@ pub use registry::{
 };
 pub use scope_close::RegistryScopeClose;
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
-pub use start_staging::{ProcessStartStores, RegisteredProcessStart, register_process_start};
+pub use start_staging::{
+    ArtifactReferrerPorts, ProcessStartStores, ReferrerAcquisition, RegisteredProcessStart,
+    register_process_start,
+};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
 pub use validation::{

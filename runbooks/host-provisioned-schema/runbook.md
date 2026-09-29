@@ -38,19 +38,19 @@ for the landing commit, so alpha.113 predates it). Figments' pinned revision
 - `PostgresStorage::from_pool_with` / `connect` — the runtime open: no DDL, hard
   failure on drift or a version outside the supported range. Worker opens never
   run DDL at all (FIG-3797).
-- `lash-migrate` (FIG-3816) — the lash-owned operational step as an alternative
+- `lashctl migrate` (FIG-3816) — the lash-owned operational step as an alternative
   to host tooling: provisions a fresh database and applies pending expand-phase
   migrations under the schema advisory lock, recording each step in the
   `lash_migrations` ledger.
 - `PostgresStorage::schema_advisory_lock_key()` — the `(namespace, key)` for
   `pg_advisory_lock` host tooling takes around its own schema operations;
-  `lash migrate` and verifying opens coordinate on it.
+  `lashctl migrate` and verifying opens coordinate on it.
 
 ## Ownership and ordering
 
 - **DDL is operationally owned.** `schema.sql` is the artifact the host's migration
   tooling (Goose, in Figments) applies with a migration-privileged role — or
-  `lash-migrate` applies it and the expand catalog's steps. Worker opens never
+  `lashctl migrate` applies it and the expand catalog's steps. Worker opens never
   write schema, under any configuration.
 - **Seed data ships in the same artifact.** `schema.sql` ends with the required
   seeds: the `lash_schema_versions` component stamp, the `lash_process_change_clock`
@@ -96,7 +96,7 @@ the dropped table stays dropped and the missing seed stays missing.
    schemas, and it is non-destructive by construction.
 5. **Opens never provision.** There is no lash-managed open mode: a worker that
    finds an unprovisioned or out-of-range database refuses, and the remedies are
-   `lash migrate` or the host-applied artifact — never a runtime open that
+   `lashctl migrate` or the host-applied artifact — never a runtime open that
    repairs.
 
 ## Scorecard

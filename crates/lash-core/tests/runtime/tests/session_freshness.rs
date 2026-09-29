@@ -47,7 +47,7 @@ async fn append_history(runtime: &mut LashRuntime, depth: usize) {
 #[tokio::test(flavor = "multi_thread")]
 async fn historical_frame_switch_refuses_and_keeps_resident_config() {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     let opened = runtime
         .open_agent_frame(
             lash_core::testing::runtime_internals::OpenAgentFrameRequest::new(
@@ -148,7 +148,7 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
 async fn unchanged_session_freshness_is_independent_of_history_depth() {
     for depth in [10, 256] {
         let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
-        let (mut runtime, store) = freshness_runtime(&double).await;
+        let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
         Box::pin(append_history(&mut runtime, depth)).await;
         let head_reads_before = store.load_session_head_meta_count();
         let full_loads_before = store.load_session_count();
@@ -174,7 +174,7 @@ async fn unchanged_session_freshness_is_independent_of_history_depth() {
 #[tokio::test(flavor = "multi_thread")]
 async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
     let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let head_reads_before = store.load_session_head_meta_count();
     let full_loads_before = store.load_session_count();
@@ -202,7 +202,7 @@ async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
 #[tokio::test(flavor = "multi_thread")]
 async fn freshness_hydrates_when_revision_changed() {
     let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let head = advance_session_head(store.as_ref(), &[], |_| {}).await;
     let full_loads_before = store.load_session_count();
@@ -223,7 +223,7 @@ async fn freshness_hydrates_when_revision_changed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn resident_refresh_adopts_the_durable_head_prompt() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let command = runtime
         .add_prompt_contribution(lash_core::PromptContribution::guidance(
@@ -262,7 +262,7 @@ async fn resident_refresh_adopts_the_durable_head_prompt() {
 #[tokio::test(flavor = "multi_thread")]
 async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_path() {
     let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
 
     advance_session_head(store.as_ref(), &[], |state| {
@@ -307,7 +307,7 @@ async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_pat
 #[tokio::test(flavor = "multi_thread")]
 async fn resident_refresh_adopts_the_durable_head_model() {
     let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let settled_model = lash_core::ModelSpec::builder("settled-live-model")
         .context_window_tokens(123_456)
@@ -354,7 +354,7 @@ async fn resident_refresh_adopts_the_durable_head_model() {
 #[tokio::test(flavor = "multi_thread")]
 async fn resident_refresh_publishes_the_durable_head_subagent_context_to_live_plugins() {
     let double = kernel_double(SEED + 20, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let live_subagent = |runtime: &LashRuntime| {
         runtime
@@ -399,7 +399,7 @@ async fn resident_refresh_publishes_the_durable_head_subagent_context_to_live_pl
 #[tokio::test(flavor = "multi_thread")]
 async fn resident_refresh_adopts_the_durable_head_provider_id() {
     let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let settled_provider = TestProvider::builder()
         .kind("settled-live-provider")
@@ -441,7 +441,7 @@ async fn resident_refresh_adopts_the_durable_head_provider_id() {
 #[tokio::test(flavor = "multi_thread")]
 async fn freshness_hydrates_when_leaf_changed() {
     let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let frame_node_id = runtime.state().session_graph.nodes[0].node_id.clone();
     let mut head = session_view(store.clone(), "root")
@@ -469,7 +469,7 @@ async fn freshness_hydrates_when_leaf_changed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn freshness_hydrates_when_only_checkpoint_ref_changed() {
     let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let mut head = session_view(store.clone(), "root")
         .load_session_head_meta()
@@ -502,7 +502,7 @@ async fn freshness_hydrates_when_only_checkpoint_ref_changed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn freshness_skips_hydration_when_nothing_changed() {
     let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let resident_head = (
         runtime.state().head_revision,
@@ -537,7 +537,7 @@ fn commanded_turn_options(dialect: &str) -> lash_core::ProtocolTurnOptions {
 #[tokio::test(flavor = "multi_thread")]
 async fn protocol_turn_options_settle_through_the_commanded_write() {
     let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     let options = commanded_turn_options("commanded-durable");
 
     let command = runtime.set_protocol_turn_options(options.clone()).await;
@@ -572,7 +572,7 @@ async fn protocol_turn_options_settle_through_the_commanded_write() {
 #[tokio::test(flavor = "multi_thread")]
 async fn protocol_turn_options_set_before_invalidation_reload_survive_via_the_head() {
     let double = kernel_double(SEED + 12, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let options = commanded_turn_options("survives-invalidation-reload");
 
@@ -611,7 +611,7 @@ async fn protocol_turn_options_set_before_invalidation_reload_survive_via_the_he
 #[tokio::test(flavor = "multi_thread")]
 async fn protocol_turn_options_all_frames_setter_settles_durably() {
     let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     let options = commanded_turn_options("all-frames-commanded");
 
     let command = runtime
@@ -642,7 +642,7 @@ async fn protocol_turn_options_all_frames_setter_settles_durably() {
 #[tokio::test(flavor = "multi_thread")]
 async fn live_policy_override_then_invalidation_reload_yields_the_head_values() {
     let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let overridden_model = lash_core::ModelSpec::builder("live-override-model")
         .context_window_tokens(123_456)
@@ -792,7 +792,7 @@ fn reopen_prompt(label: &str) -> lash_core::PromptLayer {
 #[tokio::test(flavor = "multi_thread")]
 async fn reopen_seed_delayed_retry_adopts_advanced_head() {
     let double = kernel_double(SEED + 16, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let base = session_view(store.clone(), "root")
         .load_session_head_meta()
@@ -841,7 +841,7 @@ async fn reopen_seed_delayed_retry_adopts_advanced_head() {
 #[tokio::test(flavor = "multi_thread")]
 async fn reopen_seed_same_base_replay_is_idempotent() {
     let double = kernel_double(SEED + 17, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let base = session_view(store.clone(), "root")
         .load_session_head_meta()
@@ -878,7 +878,7 @@ async fn reopen_seed_same_base_replay_is_idempotent() {
 #[tokio::test(flavor = "multi_thread")]
 async fn reopen_seed_alternating_seeds_advance_without_panicking() {
     let double = kernel_double(SEED + 18, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     for label in ["a", "b", "a", "b"] {
         let base = session_view(store.clone(), "root")
@@ -915,7 +915,7 @@ async fn reopen_seed_alternating_seeds_advance_without_panicking() {
 #[tokio::test(flavor = "multi_thread")]
 async fn checkpoint_adopt_rehydrates_outstanding_usage_attempts_from_the_adopted_head() {
     let double = kernel_double(SEED + 19, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = freshness_runtime(&double).await;
+    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let model = runtime.state().effective_policy().model.id.clone();
 

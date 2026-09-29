@@ -2,6 +2,7 @@
 use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
+pub mod artifact_cleanup;
 pub mod attachment_manifest;
 pub mod catalog;
 mod checkpoint;
@@ -73,6 +74,7 @@ pub use admission_plan::{
     deferred_wake_records, plan_turn_input_admission, require_admitted_to_root,
     require_open_command, turn_input_state_after_admission,
 };
+pub use artifact_cleanup::{ArtifactCleanupLedger, CleanupUpsert};
 pub use attachment_manifest::{
     AttachmentCondemnation, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
     AttachmentCondemnationRecord, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
@@ -106,11 +108,12 @@ pub use fencing::{
     wake_delivery_claim_verdict,
 };
 pub use fleet_format::{
-    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, RECORD_UPCASTERS, ReadWindow,
-    RecordUpcaster, SurfaceFormat, WriterPin, decode_versioned_json_record,
-    decode_versioned_json_record_for_fleet, decode_versioned_msgpack_record_for_fleet,
-    ensure_supported_record_schema_version_for_fleet, ensure_supported_schema_version_for_fleet,
-    upcast_chain_covers, upcast_json_record,
+    FLEET_FORMAT_VERSION, FLEET_WRITABLE_RANGE, FleetFormat, FleetFormatState, HISTORY_FLOORS,
+    HistoryFloor, RECORD_UPCASTERS, ReadWindow, RecordUpcaster, SurfaceFormat, WriterPin,
+    decode_versioned_json_record, decode_versioned_json_record_for_fleet,
+    decode_versioned_msgpack_record_for_fleet, ensure_supported_record_schema_version_for_fleet,
+    ensure_supported_schema_version_for_fleet, history_floor, upcast_chain_covers,
+    upcast_json_record,
 };
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use history::{
@@ -161,13 +164,13 @@ pub use root::{
     decide_root_terminal_write, root_binding_conflict,
 };
 pub use runtime_commit::{
-    AppendRequestIdentity, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
+    AppendRequestIdentity, FrameTransition, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
     RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit, RuntimeCommitReceipt,
     RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
     SemanticBoundaryOperation, TurnCommitFailureCause, TurnCommitOutcome,
     decode_runtime_commit_receipt, decode_runtime_commit_receipt_for_fleet,
     ensure_supported_receipt_version, ensure_supported_receipt_version_for_fleet,
-    validate_turn_commit_outcome_code,
+    frames_left_by_commit, validate_turn_commit_outcome_code,
 };
 pub use runtime_commit_plan::{
     FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,
@@ -573,6 +576,7 @@ impl RuntimeCommit {
             drive_fence: _,
             root_terminal,
             park_root,
+            frame_transition,
             config: _,
             execution_config: _,
             current_frame_node_id: _,
@@ -606,7 +610,8 @@ impl RuntimeCommit {
                 && outcome.is_none()
                 && committed_attachment_ids.is_empty()
                 && root_terminal.is_none()
-                && park_root.is_none(),
+                && park_root.is_none()
+                && frame_transition.is_none(),
             "append-session-nodes constructor gained unrelated settlement side effects"
         );
     }
@@ -783,6 +788,7 @@ impl RuntimeCommit {
             drive_fence: None,
             root_terminal: None,
             park_root: None,
+            frame_transition: None,
             config,
             execution_config,
             current_frame_node_id,
@@ -1419,10 +1425,12 @@ pub trait TurnInputStore: Send + Sync {
 
     /// List undelivered user inputs for reconciliation or queue preview.
     ///
-    /// Completed and cancelled rows are excluded. A row a root admitted is
-    /// returned as
+    /// Completed and cancelled rows are excluded. A row a root admitted,
+    /// at the root's own admission or at one of its checkpoints, is returned
+    /// as
     /// [`PendingTurnInputReadStatus::Admitted`](crate::PendingTurnInputReadStatus::Admitted)
-    /// naming that root, and every other row as
+    /// naming that root until the root's commit completes it or its terminal
+    /// releases it, and every other row as
     /// [`Open`](crate::PendingTurnInputReadStatus::Open). An admitted row is
     /// answered by its root alone; resubmitting the same input under the same
     /// source key returns the row.
@@ -1430,6 +1438,20 @@ pub trait TurnInputStore: Send + Sync {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
+
+    /// Read one pending user input by id: the row
+    /// [`list_pending_turn_inputs`](Self::list_pending_turn_inputs) lists for
+    /// `input_id`, with the status the list gives it, or `None` once it is
+    /// completed, cancelled or unknown.
+    ///
+    /// A durable backend answers with one point read by
+    /// `(session_id, input_id)`, so a follower asking whether its own input
+    /// is still open pays no scan of the session's queue.
+    async fn pending_turn_input(
+        &self,
+        session_id: &SessionId,
+        input_id: &crate::InputId,
+    ) -> Result<Option<crate::PendingTurnInputRead>, StoreError>;
 
     /// Read canonical input applications from durable turn-commit records.
     ///

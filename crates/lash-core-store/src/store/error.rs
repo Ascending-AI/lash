@@ -201,13 +201,24 @@ pub enum StoreError {
         "session state version {found} has no conversion chain to {current}; drain sessions and recreate the store with this version"
     )]
     SessionStateVersionUnsupported { found: u32, current: u32 },
-    /// The store's fleet-format row records a generation this build's writable
-    /// range does not admit (ADR 0106 §1): a worker that opened anyway would
-    /// emit a format the fleet has retired.
+    /// A store, an epoch or a stored label this build cannot admit
+    /// (ADR 0115 §1.5). The refusal names its remedy.
+    #[error("{refusal}")]
+    Incompatible {
+        refusal: crate::compat::CompatRefusal,
+    },
+    /// The writer fence read `F` outside this build's writable range inside a
+    /// mutating transaction (ADR 0115 §2.4): a newer release finalized, and
+    /// this deployment takes no more work. The transaction wrote nothing.
     #[error(
-        "store records fleet format {recorded}, outside this build's writable range ending at {current}; run `lash admin finalize-upgrade` from a build whose range contains {recorded}, or upgrade this build"
+        "writer fenced: the fleet epoch is {recorded}, outside this build's writable range \
+         {writable}; this deployment takes no more work. Roll forward to a build whose writable \
+         range contains {recorded}; `lashctl version` prints a build's range"
     )]
-    FleetFormatOutsideWritableRange { recorded: u32, current: u32 },
+    WriterFenced {
+        recorded: u32,
+        writable: crate::compat::VersionRange,
+    },
     #[error("invalid session id: {reason}")]
     InvalidSessionId { reason: &'static str },
     #[error(
@@ -724,20 +735,23 @@ pub enum StoreError {
         /// Backend codec diagnostic describing the malformed payload.
         message: String,
     },
-    /// An artifact write named an owner a permanent retirement fence has
-    /// already closed. Carried typed so the plugin boundary classifies the
+    /// An artifact publish or acquire named a referrer that has a fence
+    /// (ADR 0113 §2.7). Carried typed so the plugin boundary classifies the
     /// refusal by code rather than by message text.
-    #[error("artifact owner has been permanently retired")]
-    ArtifactOwnerRetired,
-    /// An artifact transfer named a destination owner a permanent retirement
-    /// fence has already closed.
-    #[error("artifact destination owner has been permanently retired")]
-    ArtifactDestinationOwnerRetired,
-    /// An artifact transfer found neither the staging owner's edge nor the
-    /// destination owner's edge; `artifact` is the producer's noun phrase for
-    /// the artifact, e.g. `artifact \`env-…\`` or `module artifact \`mod-…\``.
-    #[error("{artifact} is not retained by the staging owner")]
-    ArtifactStagingEdgeMissing { artifact: String },
+    #[error("artifact referrer `{referrer}` has ended")]
+    ArtifactReferrerEnded {
+        referrer: crate::artifact_referrer::ArtifactReferrer,
+    },
+    /// An artifact acquire named bytes that are not stored.
+    #[error("artifact `{artifact_ref}` is not stored")]
+    ArtifactMissing { artifact_ref: String },
+    /// A cleanup's carry found its bytes gone: an invariant of ADR 0113 §3
+    /// was broken, and the cleanup stalls rather than papering over it.
+    #[error("artifact `{artifact_ref}` carried to `{to}` is not stored")]
+    ArtifactCarryMissing {
+        artifact_ref: String,
+        to: crate::artifact_referrer::ArtifactReferrer,
+    },
     /// A turn park feed cursor predates history `compact_turn_park_feed`
     /// removed. The consumer must perform a full relist before resuming from
     /// the reported horizon.
@@ -755,27 +769,6 @@ pub enum StoreError {
         /// Stable backend name, such as `sqlite` or `postgres`.
         backend: &'static str,
         /// Backend diagnostic for the failed storage operation.
-        message: String,
-    },
-    /// A store open found a schema component stamp outside the range of
-    /// versions this build admits (FIG-3797). `found` is `None` when the
-    /// database carries the component's relations but no readable stamp, or
-    /// no installation at all. `message` is the full operator-facing refusal —
-    /// it names the found version and the supported range — while the fields
-    /// carry the same facts for programmatic classification.
-    #[error("{message}")]
-    SchemaVersionOutOfRange {
-        /// The versioned schema component, e.g. `lash-postgres-store`.
-        component: String,
-        /// The stamped version found, or `None` for an unstamped/uninstalled
-        /// database.
-        found: Option<i32>,
-        /// The oldest component version this build admits.
-        supported_min: i32,
-        /// The newest component version this build admits.
-        supported_latest: i32,
-        /// The operator-facing refusal text, naming `found` and the supported
-        /// range.
         message: String,
     },
     #[error("store backend error: {0}")]
@@ -818,7 +811,8 @@ impl StoreError {
             Self::CursorForeignSession { .. } => "CursorForeignSession",
             Self::HistoryCursorLineageChanged { .. } => "HistoryCursorLineageChanged",
             Self::SessionStateVersionUnsupported { .. } => "SessionStateVersionUnsupported",
-            Self::FleetFormatOutsideWritableRange { .. } => "FleetFormatOutsideWritableRange",
+            Self::Incompatible { .. } => "Incompatible",
+            Self::WriterFenced { .. } => "WriterFenced",
             Self::SessionStateVersionNewerThanRuntime { .. } => {
                 "SessionStateVersionNewerThanRuntime"
             }
@@ -902,12 +896,11 @@ impl StoreError {
             Self::RecordEncodingFailed { .. } => "RecordEncodingFailed",
             Self::ExecutionStateBodiesReleased => "ExecutionStateBodiesReleased",
             Self::StoredDataCorrupt { .. } => "StoredDataCorrupt",
-            Self::ArtifactOwnerRetired => "ArtifactOwnerRetired",
-            Self::ArtifactDestinationOwnerRetired => "ArtifactDestinationOwnerRetired",
-            Self::ArtifactStagingEdgeMissing { .. } => "ArtifactStagingEdgeMissing",
+            Self::ArtifactReferrerEnded { .. } => "ArtifactReferrerEnded",
+            Self::ArtifactMissing { .. } => "ArtifactMissing",
+            Self::ArtifactCarryMissing { .. } => "ArtifactCarryMissing",
             Self::ParkFeedCursorCompacted { .. } => "ParkFeedCursorCompacted",
             Self::StorageFailure { .. } => "StorageFailure",
-            Self::SchemaVersionOutOfRange { .. } => "SchemaVersionOutOfRange",
             Self::Backend(_) => "Backend",
         }
     }

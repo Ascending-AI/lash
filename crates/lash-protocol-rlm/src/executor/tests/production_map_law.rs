@@ -436,8 +436,13 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
                 TraceContext::default(),
             )
     };
+    let module_store = Arc::clone(engine_store.store());
+    let worker_backend =
+        lash_core::testing::runtime_helpers::LayeredBackend::over(table.backend().clone())
+            .map_module_artifacts(move |_| module_store)
+            .into_backend();
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        table.backend().clone(),
+        worker_backend,
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )

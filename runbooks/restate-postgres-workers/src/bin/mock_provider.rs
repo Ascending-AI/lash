@@ -1,7 +1,7 @@
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lash_postgres_store::PostgresStorage;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use std::net::SocketAddr;
@@ -12,21 +12,22 @@ use lash_restate_postgres_workers_e2e::{
     EXPECTED_ASYNC_TEXT, EXPECTED_DURABLE_INPUT_TEXT, EXPECTED_FINAL_TEXT,
     EXPECTED_FRAME_SWITCH_CANCEL_TEXT, EXPECTED_FRAME_SWITCH_TEXT,
     EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT, EXPECTED_TOOL_BATCH_TEXT,
-    EXPECTED_WAKE_TEXT, ensure_e2e_schema, env, record_provider_call, required_env,
+    EXPECTED_WAKE_TEXT, env, witness,
 };
 
 #[derive(Clone)]
 struct AppState {
     calls: Arc<AtomicU64>,
-    pool: PgPool,
+    /// The witness ledger: every completion this provider serves is receipted
+    /// there, by this process, before the response leaves.
+    witness: PgPool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
-    let database_url = required_env("DATABASE_URL")?;
-    let storage = PostgresStorage::connect(&database_url).await?;
-    ensure_e2e_schema(storage.pool()).await?;
+    // The provider writes only to the witness database: it never opens Lash's.
+    let witness = witness::connect_witness().await?;
     let port = env("MOCK_PROVIDER_PORT", "18001");
     let addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
     let app = Router::new()
@@ -35,14 +36,17 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/responses", post(responses))
         .with_state(AppState {
             calls: Arc::new(AtomicU64::new(0)),
-            pool: storage.pool().clone(),
+            witness,
         });
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
 
-async fn chat_completion(State(state): State<AppState>, Json(request): Json<Value>) -> Json<Value> {
+async fn chat_completion(
+    State(state): State<AppState>,
+    Json(request): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
     let n = state.calls.fetch_add(1, Ordering::SeqCst) + 1;
     let request_id = format!("chatcmpl-e2e-{n}");
     let latest_user = latest_user_text(&request);
@@ -165,9 +169,11 @@ async fn chat_completion(State(state): State<AppState>, Json(request): Json<Valu
             "total_tokens": 48
         }
     });
-    if let Err(err) = record_provider_call(
-        &state.pool,
-        response["id"].as_str().unwrap_or("chatcmpl-e2e"),
+    // A completion without its receipt would be an effect the witness never
+    // saw, so a failed receipt write fails the request instead of serving it.
+    if let Err(err) = witness::record_provider_receipt(
+        &state.witness,
+        &request_id,
         scenario,
         &workflow_id,
         model,
@@ -176,7 +182,8 @@ async fn chat_completion(State(state): State<AppState>, Json(request): Json<Valu
     )
     .await
     {
-        tracing::error!(workflow_id, scenario, error = %err, "failed to record provider call");
+        tracing::error!(workflow_id, scenario, error = %err, "failed to receipt provider call");
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{err:#}")));
     }
     if scenario == "frame_switch_queued_start" {
         // Hold the first physical turn after the provider boundary is observable
@@ -184,7 +191,7 @@ async fn chat_completion(State(state): State<AppState>, Json(request): Json<Valu
         // active, before the switch commit claims anything else.
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
-    Json(response)
+    Ok(Json(response))
 }
 
 async fn responses(State(state): State<AppState>, Json(request): Json<Value>) -> Json<Value> {
@@ -792,27 +799,33 @@ finish({{
     )
 }
 
+/// The failover variant loses its worker twice (FIG-608): once inside the
+/// batch, after the witness committed `slow` and before the tool returned, and
+/// once from `crash_once` after `Promise.all` settled, so the replay that
+/// follows runs over effects that already completed.
 fn tool_batch_script(workflow_id: &str, fail_once: bool) -> String {
-    let crash = if fail_once {
-        format!(
-            r#"
+    let (lose, crash) = if fail_once {
+        (
+            ",\n    lose_after_commit: true",
+            format!(
+                r#"
 const crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }});
 "#
+            ),
         )
     } else {
-        String::new()
+        ("", String::new())
     };
     format!(
         r#"
 Exercise direct aggregate resource batching.
 
 <typescript>
-{crash}
 const [slow, fast] = await Promise.all([
   tools.batch_side_effect({{
     workflow_id: "{workflow_id}",
     key: "slow",
-    delay_ms: 75
+    delay_ms: 75{lose}
   }}),
   tools.batch_side_effect({{
     workflow_id: "{workflow_id}",
@@ -820,6 +833,7 @@ const [slow, fast] = await Promise.all([
     delay_ms: 5
   }})
 ]);
+{crash}
 const batch = {{ slow: slow, fast: fast, literal: "kept" }};
 finish({{
   workflow_id: "{workflow_id}",

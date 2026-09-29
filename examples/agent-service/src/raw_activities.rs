@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path as AxumPath, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::Response;
 use bytes::Bytes;
 use lash::rlm::RlmSendBuilderExt as _;
@@ -18,6 +18,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+use crate::remote_protocol::negotiate_remote;
 use crate::routes::{
     ChannelTurnEvents, TurnPersistenceState, TurnRefusal, answered_output,
     assistant_text_for_persistence, model_spec_for_chat_selection,
@@ -38,8 +39,10 @@ pub(crate) struct StreamRawActivitiesRequest {
 pub(crate) async fn stream_raw_activities(
     State(state): State<AppStateData>,
     AxumPath(chat_id): AxumPath<String>,
+    headers: HeaderMap,
     Json(request): Json<StreamRawActivitiesRequest>,
 ) -> AppResult<Response> {
+    let (negotiated, accept_json) = negotiate_remote(&headers)?;
     let text = request.text.trim().to_string();
     if text.is_empty() {
         return Err(AppError::bad_request("message text is required"));
@@ -75,7 +78,11 @@ pub(crate) async fn stream_raw_activities(
         .require_finish()?
         .await?;
     let (tx, rx) = mpsc::unbounded_channel::<Result<Bytes, Infallible>>();
-    let remote_events = Arc::new(RemoteTurnActivitySink::new(NdjsonChannelWriter::new(tx), 0));
+    let remote_events = Arc::new(RemoteTurnActivitySink::new(
+        NdjsonChannelWriter::new(tx),
+        0,
+        negotiated,
+    ));
     let turn_state = Arc::new(Mutex::new(TurnPersistenceState::default()));
     let persistence_events = Arc::new(ChannelTurnEvents::persistence(
         state.clone(),
@@ -126,6 +133,7 @@ pub(crate) async fn stream_raw_activities(
         .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
         .header(header::CACHE_CONTROL, "no-store")
         .header("x-lash-turn-id", turn_id.as_str())
+        .header("x-lash-protocol-accept", accept_json)
         .body(Body::from_stream(UnboundedReceiverStream::new(rx)))
         .map_err(|err| AppError::internal(format!("build streaming response: {err}")))
 }
@@ -194,6 +202,7 @@ mod tests {
         let response = stream_raw_activities(
             State(state.clone()),
             AxumPath(chat_id.clone()),
+            crate::remote_protocol::test_remote_headers(),
             Json(StreamRawActivitiesRequest {
                 text: "exercise raw activity transport".to_string(),
             }),
@@ -201,6 +210,7 @@ mod tests {
         .await
         .expect("raw activity endpoint");
         assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().contains_key("x-lash-protocol-accept"));
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
             "application/x-ndjson; charset=utf-8"

@@ -501,6 +501,7 @@ async fn fig790_process_await_context(
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
         process_lineage: None,
+        process_originator: None,
     });
     RuntimeExecutionContext::new(
         SessionId::from("fig790-session"),

@@ -61,6 +61,79 @@ async fn corrupt_non_msgpack_blob_surfaces_stored_data_corrupt_from_get_blob() {
 }
 
 #[tokio::test]
+async fn blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes() {
+    let store = crate::test_support::memory_store()
+        .await
+        .expect("open blob store");
+    for (name, version, compression) in [
+        (
+            "future-version-blob",
+            SQLITE_BLOB_ENVELOPE_VERSION + 1,
+            "None",
+        ),
+        (
+            "future-compression-blob",
+            SQLITE_BLOB_ENVELOPE_VERSION,
+            "future-codec",
+        ),
+    ] {
+        let encoded = encode_msgpack(
+            &StoredBlobEnvelope {
+                version,
+                compression: compression.to_string(),
+                content: b"kept bytes".to_vec(),
+            },
+            "future blob fixture",
+        )
+        .expect("encode future envelope");
+        let hash = name.to_string();
+        let bytes = encoded.clone();
+        store
+            .conn
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO blobs (hash, content) VALUES (?1, ?2)",
+                    params![hash, bytes],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed future blob");
+
+        let refusal = store
+            .get_blob(&BlobRef(name.to_string()))
+            .await
+            .expect_err("future blob must refuse");
+        if version != SQLITE_BLOB_ENVELOPE_VERSION {
+            assert!(matches!(
+                refusal,
+                StoreError::UnsupportedRecordSchemaVersion {
+                    record_kind: "SQLite stored blob envelope",
+                    actual,
+                    expected: SQLITE_BLOB_ENVELOPE_VERSION,
+                } if actual == version
+            ));
+        } else {
+            assert!(matches!(refusal, StoreError::Incompatible { .. }));
+        }
+        let hash = name.to_string();
+        let persisted: Vec<u8> = store
+            .conn
+            .call(move |conn| {
+                conn.query_row("SELECT content FROM blobs WHERE hash = ?1", [hash], |row| {
+                    row.get(0)
+                })
+            })
+            .await
+            .expect("read retained bytes");
+        assert_eq!(
+            persisted, encoded,
+            "refusal must leave the stored blob intact"
+        );
+    }
+}
+
+#[tokio::test]
 async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("unknown-attachment-owner.db");
@@ -84,14 +157,8 @@ async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
         .await
         .expect_err("unknown SQLite attachment owner kind must refuse");
     assert!(
-        matches!(
-            error,
-            StoreError::StoredDataCorrupt {
-                record_kind: "AttachmentManifest owner kind",
-                ref message,
-            } if message == "unknown attachment owner kind `unknown`"
-        ),
-        "SQLite must return the canonical attachment-owner corruption refusal, got {error:?}"
+        matches!(error, StoreError::Incompatible { .. }),
+        "SQLite must return the typed attachment-owner incompatibility, got {error:?}"
     );
 }
 
@@ -174,7 +241,12 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
         .expect("build module");
         store
             .publish_module_artifact(
-                &lash_core_execution::ArtifactOwner::host("readonly-test"),
+                &lash_core_execution::ReferrerClaim::unguarded(
+                    lash_core_execution::ArtifactReferrer::HostPin(
+                        lash_core_execution::HostArtifactPin::mint(),
+                    ),
+                )
+                .expect("host pin claim"),
                 module.module_ref().as_str(),
                 &module.to_store_bytes().expect("encode module"),
             )
@@ -290,7 +362,7 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
             Arc::new(lash_core_execution::facade_support::SystemClock),
             None,
             None,
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
             Some(injector.clone()),
         )
         .await

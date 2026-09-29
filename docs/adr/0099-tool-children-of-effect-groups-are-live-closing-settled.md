@@ -1327,3 +1327,28 @@ refuses before any child is claimed — re-typed by the run to
 `TOOL_BATCH_FAMILY_VERSION` 3. Both key shapes carry the opener's scope, so no
 two openers share a group row although the group table is keyed by the group
 key alone.
+
+## Amendment (FIG-3562, 2026-09-29): every tool child is an attempt
+
+[ADR 0116](0116-tools-are-opaque.md) deletes the orchestrating lane, so §2's list of coordination loses "the
+orchestrating lane", and §4's special classification of orchestrating children
+("no attempt frame of their own", classified by retained command and child
+obligations) no longer has a subject. Every tool child runs one recorded
+attempt under its driver. Two rules are added:
+
+- **Declared starts.** A child that parks on `PendingResolver::DeclaredStart`
+  seals its declaration with a launch obligation at §4's linearization point,
+  before any realization. Exactly one of the launch seal and a cancel
+  disposition commits first. The launch takes its turn in §5's final-commit
+  drain order and releases it once the receipt is recorded, before parking.
+  The child's terminal rank is allocated only when the result or the cancel
+  resolves it ([ADR 0116](0116-tools-are-opaque.md) §3.2).
+- **Cancel obligations.** A cancelled or timed-out child parked on a
+  runtime-owned resolver with `CancelHint::CancelExternalWork` records a
+  cancel obligation in the cancel disposition's commit, and drains it before
+  it settles `Cancelled` ([ADR 0116](0116-tools-are-opaque.md) §3.4). An unresolved child stays cancellable.
+
+The width ceiling quoted from `crates/lash-protocol-standard/src/lib.rs` is
+superseded: a `batch` wrapper takes at most 64 members, configurable
+downward, and the flattened group is admitted whole against the retained-work
+bound ([ADR 0116](0116-tools-are-opaque.md) §2.5).

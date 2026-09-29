@@ -2,7 +2,7 @@
 //!
 //! This crate stores attachment bytes in any S3-compatible object store,
 //! including AWS S3 and Garage. Runtime metadata and attachment manifests remain
-//! in the configured [`lash_core::RuntimePersistence`] backend.
+//! in the configured [`lash_core::RuntimeStore`] backend.
 
 use futures_util::TryStreamExt;
 use lash_core::{

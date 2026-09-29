@@ -108,6 +108,7 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
             process_lineage: None,
+            process_originator: None,
         }
     }
 
@@ -238,7 +239,10 @@ mod tests {
             );
             request.execution_env = crate::publish_process_execution_env(
                 self.env_store.as_ref(),
-                &crate::ArtifactOwner::host("tool-child-rebuild-tests"),
+                &crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
+                    crate::HostArtifactPin::mint(),
+                ))
+                .expect("host pin claim"),
                 &spec(),
             )
             .await

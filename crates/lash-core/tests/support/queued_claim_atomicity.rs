@@ -88,7 +88,7 @@ fn wake(sequence: u64, text: &str) -> lash_core::runtime::ProcessWakeDelivery {
 impl Case {
     /// Admit the case's rows through its entry point; the batch ids bound.
     pub(super) async fn admit(&self) -> Result<Vec<lash_core::BatchId>, StoreError> {
-        let policy = lash_core::testing::queued_work_claim_policy(10);
+        let policy = lash_core::testing::queued_work_admission_policy(10);
         let root = TurnId::from(ROOT);
         match self.entry {
             Entry::Root => {
@@ -130,7 +130,7 @@ impl Case {
             &TurnId::from(root),
             AdmittedHead::Batch(self.ids[0].clone()),
         );
-        request.policy = lash_core::testing::queued_work_claim_policy(10);
+        request.policy = lash_core::testing::queued_work_admission_policy(10);
         self.store.admit_root(&request).await
     }
 }

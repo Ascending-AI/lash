@@ -29,6 +29,7 @@ pub(super) struct ReferenceTurn {
     pub(super) seam: SeamLayer,
     pub(super) trace_tool: TraceTool,
     pub(super) lease_timings: crate::LeaseTimings,
+    pub(super) fail_post_commit_delivery: bool,
     pub(super) before_drive: BeforeDrive,
     /// Where an execution that ends reports its drain. A crashing turn has
     /// none: it must never end.
@@ -61,6 +62,7 @@ impl ReferenceTurn {
                 ..TraceTool::default()
             },
             lease_timings,
+            fail_post_commit_delivery: false,
             before_drive: Arc::new(|_| {}),
             reports: None,
         }
@@ -71,6 +73,11 @@ impl ReferenceTurn {
         before_drive: impl Fn(&SeamControl) + Send + Sync + 'static,
     ) -> Self {
         self.before_drive = Arc::new(before_drive);
+        self
+    }
+
+    pub(super) fn fail_post_commit_delivery(mut self) -> Self {
+        self.fail_post_commit_delivery = true;
         self
     }
 
@@ -98,13 +105,16 @@ impl ReferenceTurn {
             Box::pin(async move {
                 let store = SeamStore::wrap(Arc::clone(&turn.store), turn.seam.control.clone());
                 turn.host.route_to(&turn.seam);
-                let mut runtime = Box::pin(try_build_runtime_over_host(
+                let mut runtime = Box::pin(try_build_runtime_over_host_with_delivery_failure(
                     Arc::clone(&turn.stores),
                     store,
                     turn.seam.control.clone(),
                     turn.host.host(),
                     &turn.identity,
-                    turn.trace_tool.clone(),
+                    ReferenceRuntimeTools {
+                        trace_tool: turn.trace_tool.clone(),
+                        fail_post_commit_delivery: turn.fail_post_commit_delivery,
+                    },
                     turn.lease_timings,
                 ))
                 .await

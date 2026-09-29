@@ -9,6 +9,7 @@
 //! [`REMOTE_PROTOCOL_VERSION`]) lives at the root itself.
 
 pub mod llm;
+pub mod negotiation;
 pub mod observations;
 pub mod processes;
 pub mod prompt;
@@ -22,6 +23,7 @@ pub mod turn_result;
 pub mod usage_activity;
 
 pub use llm::*;
+pub use negotiation::{Negotiated, Negotiation, REMOTE_PROTOCOL, VersionRange, answer};
 pub use observations::*;
 pub use processes::*;
 pub use prompt::*;
@@ -326,9 +328,18 @@ pub struct Envelope<T> {
 }
 
 impl<T> Envelope<T> {
-    pub fn new(body: T) -> Self {
+    /// Encodes a request at the version selected for its connection.
+    pub fn at(negotiated: &Negotiated, body: T) -> Self {
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            protocol_version: negotiated.selected(),
+            body,
+        }
+    }
+
+    /// Encodes a response, error, or stream item at the request's version.
+    pub fn reply_to<U>(request: &Envelope<U>, body: T) -> Self {
+        Self {
+            protocol_version: request.protocol_version,
             body,
         }
     }
@@ -428,13 +439,21 @@ impl<T> Envelope<T>
 where
     T: serde::de::DeserializeOwned,
 {
-    pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        Self::decode_json_expecting_protocol_version(bytes, REMOTE_PROTOCOL_VERSION)
+    pub fn decode_json(bytes: &[u8], local: VersionRange) -> Result<Self, RemoteProtocolError> {
+        Self::decode_json_in_range(bytes, local)
     }
 
+    #[cfg(test)]
     pub(crate) fn decode_json_expecting_protocol_version(
         bytes: &[u8],
         expected_version: u32,
+    ) -> Result<Self, RemoteProtocolError> {
+        Self::decode_json_in_range(bytes, VersionRange::exactly(expected_version))
+    }
+
+    fn decode_json_in_range(
+        bytes: &[u8],
+        local: VersionRange,
     ) -> Result<Self, RemoteProtocolError> {
         #[derive(serde::Deserialize)]
         struct VersionProbe {
@@ -443,10 +462,16 @@ where
 
         let probe: VersionProbe =
             serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)?;
-        if probe.protocol_version != expected_version {
-            return Err(RemoteProtocolError::UnsupportedProtocolVersion {
-                actual: probe.protocol_version,
-                expected: expected_version,
+        if probe.protocol_version == 0 {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "Envelope",
+                message: "protocol_version must be positive".to_string(),
+            });
+        }
+        if !local.contains(probe.protocol_version) {
+            return Err(RemoteProtocolError::Unsupported {
+                local,
+                peer: VersionRange::exactly(probe.protocol_version),
             });
         }
 
@@ -476,6 +501,9 @@ pub use core_conversions::{RemoteTurnActivitySink, replay_collected_activities};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod negotiation_tests;
 
 #[cfg(test)]
 #[path = "tests/context_overflow.rs"]

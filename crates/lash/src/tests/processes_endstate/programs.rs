@@ -24,7 +24,7 @@ impl LinkedTestProcess {
         .expect("link lashlang process");
         artifact_store
             .publish_module_artifact(
-                &lash_core::ArtifactOwner::host(format!("process-test:{process_name}")),
+                &lash_core::testing::host_pin_claim_for_testing(),
                 &linked.artifact,
             )
             .await

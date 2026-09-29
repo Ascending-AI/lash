@@ -92,6 +92,109 @@ pub enum PendingResolver {
     /// wait armed against one process is never resolved by another's
     /// terminal.
     ProcessTerminal { process_id: crate::ProcessId },
+    /// The terminal of the one process this call declares resolves the wait.
+    ///
+    /// The body cannot name that process: its id is minted only when the
+    /// start registers. The runtime launches the declared start at the park,
+    /// records the realized id as the call's launch receipt, and arms the
+    /// terminal of that id, on the park and on every redrive.
+    DeclaredStart(DeclaredStart),
+}
+
+impl PendingResolver {
+    /// Whether a process terminal resolves this wait. The runtime owns that
+    /// process's wait, so a cancelled or timed-out wait may cancel it (see
+    /// [`CancelHint`]), and the resolution is the terminal itself.
+    pub fn awaits_process_terminal(&self) -> bool {
+        match self {
+            Self::ProcessTerminal { .. } | Self::DeclaredStart(_) => true,
+        }
+    }
+}
+
+/// The one process start a pending call declares, and whose terminal resolves
+/// the call.
+///
+/// A pending attempt carries no [`ToolIntents`](crate::ToolIntents), so a
+/// deferred call cannot declare a start the ordinary way. This is the one
+/// start it may declare instead. It is sealed: the only constructor validates
+/// the start against the attempt that declares it, and it holds exactly one
+/// [`StartProcessIntent`](crate::StartProcessIntent). Its intent identity is
+/// the declaring attempt's identity for index 0, so its start key is
+/// [`StartKey::for_tool_intent`](crate::StartKey::for_tool_intent) of that
+/// identity and every redrive reaches the same child.
+///
+/// Only the attempt whose `Pending` the runtime records ever launches: a
+/// retried or superseded attempt's declaration is discarded with it.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct DeclaredStart {
+    // Both boxed: a pending completion rides every recorded attempt launch.
+    start: Box<crate::StartProcessIntent>,
+    identity: Box<crate::ToolIntentIdentity>,
+}
+
+impl PartialEq for DeclaredStart {
+    fn eq(&self, other: &Self) -> bool {
+        self.identity == other.identity
+            && serde_json::to_value(&self.start).ok() == serde_json::to_value(&other.start).ok()
+    }
+}
+
+impl DeclaredStart {
+    /// Validates the one start against the attempt that declares it.
+    ///
+    /// The start must name the declaring session, and the attempt must have
+    /// a prepared call id and a completion key: the key is what the launched
+    /// child's terminal resolves, so a tool that returns a declared start
+    /// answers `attempt_may_defer` for it.
+    pub fn new(
+        context: &crate::AttemptContext<'_>,
+        start: crate::StartProcessIntent,
+    ) -> Result<Self, DeclaredStartRefused> {
+        if start.session_id.as_str() != context.session_id() {
+            return Err(DeclaredStartRefused::ForeignSession);
+        }
+        if context.tool_call_id().is_none() {
+            return Err(DeclaredStartRefused::MissingCallId);
+        }
+        if context.completion_key().is_err() {
+            return Err(DeclaredStartRefused::CompletionUnavailable);
+        }
+        let identity = context
+            .intent_identity(0)
+            .map_err(|_| DeclaredStartRefused::MissingCallId)?;
+        Ok(Self {
+            start: Box::new(start),
+            identity: Box::new(identity),
+        })
+    }
+
+    /// The declared start.
+    pub fn start(&self) -> &crate::StartProcessIntent {
+        &self.start
+    }
+
+    /// The declaring attempt's intent identity for the start.
+    pub fn identity(&self) -> &crate::ToolIntentIdentity {
+        &self.identity
+    }
+
+    /// The start request realization presents: the declaration under its
+    /// derived key.
+    pub(crate) fn request(&self) -> crate::ProcessStartRequest {
+        self.start.into_request(&self.identity)
+    }
+}
+
+/// Why [`DeclaredStart::new`] refused a start.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum DeclaredStartRefused {
+    #[error("a declared start must name the declaring session")]
+    ForeignSession,
+    #[error("a declared start needs a prepared tool call id")]
+    MissingCallId,
+    #[error("a declared start needs a completion key")]
+    CompletionUnavailable,
 }
 
 /// Configuration carried by a [`ToolOutcome::Pending`] result: how long the runtime
@@ -175,6 +278,14 @@ impl PendingCompletion {
 
     pub fn resolved_by_process_terminal(self, process_id: crate::ProcessId) -> Self {
         self.resolved_by(PendingResolver::ProcessTerminal { process_id })
+    }
+
+    /// Use it when the call's outcome is the terminal of a child it declares.
+    /// The runtime launches the start at the park and arms its terminal; a
+    /// cancelled or timed-out wait cancels the child under
+    /// [`CancelHint::CancelExternalWork`].
+    pub fn resolved_by_declared_start(self, start: DeclaredStart) -> Self {
+        self.resolved_by(PendingResolver::DeclaredStart(start))
     }
 }
 
@@ -429,8 +540,8 @@ pub fn tool_output_from_completion_resolution(
     resolution: crate::Resolution,
     resolver: Option<&crate::PendingResolver>,
 ) -> crate::ToolCallOutput {
-    if let (Some(crate::PendingResolver::ProcessTerminal { .. }), crate::Resolution::Ok(value)) =
-        (resolver, &resolution)
+    if let (Some(resolver), crate::Resolution::Ok(value)) = (resolver, &resolution)
+        && resolver.awaits_process_terminal()
         && let Ok(terminal) = serde_json::from_value::<crate::ProcessAwaitOutput>(value.clone())
     {
         return terminal.into_tool_output();
@@ -615,6 +726,65 @@ mod tests {
             matches!(parked.outcome, crate::ToolCallOutcome::Cancelled(_)),
             "a cancelled child is a cancelled await on both paths"
         );
+    }
+
+    /// A declared start's resolver is the terminal of the child it launched,
+    /// so its resolution unwraps exactly as a named terminal's does (ADR 0116
+    /// §3.7): the call answers the child's own value, never the envelope.
+    fn declared_start() -> crate::PendingResolver {
+        let start = crate::StartProcessIntent {
+            session_id: crate::SessionId::from("parent"),
+            declaration: crate::ProcessStartDeclaration::external(
+                crate::ProcessOriginator::host(),
+                serde_json::Value::Null,
+                crate::Lifetime::Detached,
+            ),
+        };
+        let identity = crate::derive_tool_intent_identity_under(
+            &crate::SessionId::from("parent"),
+            "turn-1",
+            Some("call-1"),
+            0,
+            None,
+        )
+        .expect("identity");
+        crate::PendingResolver::DeclaredStart(
+            serde_json::from_value(serde_json::json!({
+                "start": start,
+                "identity": identity,
+            }))
+            .expect("a declared start decodes"),
+        )
+    }
+
+    #[test]
+    fn a_declared_start_terminal_answers_the_childs_own_value() {
+        let terminal = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+            serde_json::json!({ "summary": "done" }),
+        ));
+        let parked = tool_output_from_completion_resolution(
+            terminal_resolution(&terminal),
+            Some(&declared_start()),
+        );
+        assert_eq!(parked, terminal.into_tool_output());
+        assert_eq!(
+            parked.value_for_projection(),
+            serde_json::json!({ "summary": "done" })
+        );
+    }
+
+    #[test]
+    fn a_declared_start_round_trips_under_the_resolver_tag() {
+        let resolver = declared_start();
+        let encoded = serde_json::to_value(&resolver).expect("encode");
+        assert_eq!(encoded["type"], serde_json::json!("declared_start"));
+        let decoded: crate::PendingResolver = serde_json::from_value(encoded).expect("decode");
+        assert_eq!(decoded, resolver);
+        let crate::PendingResolver::DeclaredStart(start) = decoded else {
+            unreachable!()
+        };
+        assert_eq!(start.identity().intent_index, 0);
+        assert!(resolver.awaits_process_terminal());
     }
 
     #[test]

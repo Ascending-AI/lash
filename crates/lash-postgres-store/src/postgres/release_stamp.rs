@@ -20,8 +20,8 @@
 use lash_core_execution::{StoreComponentVersion, StoreReleaseStamp, StoreReleaseState};
 use sqlx::{PgPool, Postgres, Transaction};
 
+use crate::SCHEMA_COMPONENT;
 use crate::session_sql::session_sql;
-use crate::{SCHEMA_COMPONENT, SCHEMA_VERSION};
 
 /// The release this build stamps into every database it writes.
 ///
@@ -35,7 +35,7 @@ pub(crate) const BUILD_RELEASE: &str = env!("CARGO_PKG_VERSION");
 pub(crate) fn build_schema_versions() -> Vec<StoreComponentVersion> {
     vec![StoreComponentVersion {
         component: SCHEMA_COMPONENT.to_string(),
-        version: i64::from(SCHEMA_VERSION),
+        version: 1,
     }]
 }
 

@@ -241,6 +241,14 @@ struct FailingCaptureExecutor {
 
 #[async_trait::async_trait]
 impl lash_core::plugin::CodeExecutorPlugin for FailingCaptureExecutor {
+    async fn frame_switch_carries(
+        &self,
+        _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
+        _initial_nodes: &[lash_core::SessionAppendNode],
+    ) -> Result<Vec<lash_core::ArtifactName>, lash_core::SessionError> {
+        Ok(Vec::new())
+    }
+
     async fn execute_code(
         &self,
         _ctx: lash_core::RuntimeExecutionContext<'_>,
@@ -548,6 +556,7 @@ impl lash_core::Clock for CancelWatchTestClock {
     }
 }
 
+mod active_input_settlement;
 mod cancel_watch;
 mod checkpoint_progress;
 mod config_patches;
@@ -557,6 +566,7 @@ mod effects_and_queue;
 mod frame_residency;
 mod lease_and_claims;
 mod turn_lifecycle;
+mod withheld_frame_switch;
 
 use effects_and_queue::*;
 use turn_lifecycle::*;

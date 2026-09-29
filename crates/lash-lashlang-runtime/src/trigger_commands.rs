@@ -47,9 +47,6 @@ pub(crate) async fn execute_trigger_operation_recording(
     recorded: &mut RecordedTriggerOutcome,
 ) -> Result<lashlang::Value, ExecutionHostError> {
     match operation {
-        TriggerHostOperation::Register => {
-            register_trigger(ctx, artifact_store, payload, effect_id, recorded).await
-        }
         TriggerHostOperation::List => list_triggers(ctx, payload, effect_id, recorded).await,
         TriggerHostOperation::Update => {
             update_trigger(ctx, artifact_store, payload, effect_id, false, recorded).await
@@ -68,29 +65,64 @@ pub(crate) async fn execute_trigger_operation_recording(
     }
 }
 
-async fn register_trigger(
-    ctx: &lash_core::RuntimeExecutionContext<'_>,
-    artifact_store: &lashlang::LashlangArtifacts,
-    payload: Value,
-    effect_id: String,
-    recorded: &mut RecordedTriggerOutcome,
-) -> Result<lashlang::Value, ExecutionHostError> {
-    let request = lashlang::TriggerRegistrationRequest::decode(&payload)
-        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-    let draft = prepare_trigger_draft(ctx, artifact_store, &request).await?;
-    let command = lash_core::TriggerCommand::Register {
-        owner_scope: trigger_owner_scope(ctx)?,
-        actor: ctx.trigger_actor(),
-        draft,
-    };
-    execute_trigger_command(ctx, effect_id, command, recorded).await
+/// The registration-decoded parts of a subscription draft: everything a
+/// registration derives from the request and the target's module artifact.
+///
+/// `env_ref` and `wake_target` are deliberately absent: which execution env a
+/// subscription names and which session it wakes belong to the caller's
+/// context, not to the registration record. The leaf tool resolves them from
+/// its attempt context and declares them; the `update`/`revive` host
+/// operations resolve them from the live runtime context (FIG-3116).
+pub(crate) struct PreparedTriggerDraft {
+    pub subscription_key: String,
+    pub name: Option<String>,
+    pub source_type: String,
+    pub source_key: String,
+    pub source: Value,
+    pub payload_schema: lash_core::LashSchema,
+    pub source_capture: lash_core::TriggerSourceCapture,
+    pub target: lash_core::ProcessInput,
+    pub target_identity: lash_core::ProcessIdentity,
+    pub event_types: Vec<lash_core::ProcessEventType>,
+    pub input_template: BTreeMap<String, lash_core::TriggerInputBinding>,
+    pub target_label: Option<String>,
 }
 
-async fn prepare_trigger_draft(
-    ctx: &lash_core::RuntimeExecutionContext<'_>,
+impl PreparedTriggerDraft {
+    /// Completes the draft under `env_ref`/`wake_target` and runs the same
+    /// validation a fully-formed draft met before this split existed.
+    pub(crate) fn into_draft(
+        self,
+        env_ref: lash_core::ProcessExecutionEnvRef,
+        wake_target: Option<lash_core::SessionScope>,
+    ) -> Result<lash_core::TriggerSubscriptionDraft, ExecutionHostError> {
+        let draft = lash_core::TriggerSubscriptionDraft {
+            subscription_key: self.subscription_key,
+            env_ref,
+            wake_target,
+            name: self.name,
+            source_type: self.source_type,
+            source_key: self.source_key,
+            source: self.source,
+            payload_schema: self.payload_schema,
+            source_capture: self.source_capture,
+            target: self.target,
+            target_identity: self.target_identity,
+            event_types: self.event_types,
+            input_template: self.input_template,
+            target_label: self.target_label,
+        };
+        draft
+            .validate()
+            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+        Ok(draft)
+    }
+}
+
+pub(crate) async fn prepare_trigger_draft(
     artifact_store: &lashlang::LashlangArtifacts,
     request: &lashlang::TriggerRegistrationRequest,
-) -> Result<lash_core::TriggerSubscriptionDraft, ExecutionHostError> {
+) -> Result<PreparedTriggerDraft, ExecutionHostError> {
     let artifact = artifact_store
         .get_module_artifact(&request.target.module_ref)
         .await
@@ -142,14 +174,8 @@ async fn prepare_trigger_draft(
         .into_iter()
         .chain(lashlang_process_signal_event_types(process))
         .collect::<Vec<_>>();
-    let env_ref = ctx
-        .captured_process_execution_env_ref(&ctx.artifact_owner())
-        .await
-        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-    let draft = lash_core::TriggerSubscriptionDraft {
+    Ok(PreparedTriggerDraft {
         subscription_key,
-        env_ref,
-        wake_target: ctx.trigger_registration_wake_target(),
         name: request.name.clone(),
         source_type: request.source.source_type.clone(),
         source_key,
@@ -163,11 +189,7 @@ async fn prepare_trigger_draft(
         event_types,
         input_template: core_trigger_input_template(&request.inputs),
         target_label: Some(request.target.process_name.clone()),
-    };
-    draft
-        .validate()
-        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-    Ok(draft)
+    })
 }
 
 /// Copies the admitted source contract and provider route out of the module
@@ -247,7 +269,18 @@ async fn update_trigger(
         .clone()
         .ok_or_else(|| ExecutionHostError::new("trigger update requires `subscription_key`"))?;
     let expected_revision = trigger_expected_revision(&payload)?;
-    let draft = prepare_trigger_draft(ctx, artifact_store, &request).await?;
+    let prepared = prepare_trigger_draft(artifact_store, &request).await?;
+    // An environment this execution captures is published under its own
+    // execution referrer; the command's journaled effect then holds it, with
+    // the target module, under the revision it commits (ADR 0113 §3.4).
+    let claim = ctx
+        .execution_claim()
+        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+    let env_ref = ctx
+        .captured_process_execution_env_ref(&claim)
+        .await
+        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+    let draft = prepared.into_draft(env_ref, ctx.trigger_registration_wake_target())?;
     let owner_scope = trigger_owner_scope(ctx)?;
     let actor = ctx.trigger_actor();
     let command = if revive {

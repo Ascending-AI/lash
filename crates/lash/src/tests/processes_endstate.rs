@@ -3,160 +3,14 @@ use lash_core::testing::RuntimeStoreTestDriveExt as _;
 
 use lashlang::testing::ast_builders as b;
 
-use lash_core::{
-    ProcessEngine as _, ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessRetention as _,
-};
+use lash_core::ProcessEventLogTestSupport as _;
 use lash_sansio::ProcessId;
 use lash_sansio::sync::MutexExt;
 use programs::{child_join_process, wait_signal_process};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use event_pages::full_events;
-
-struct FailOnceReleaseEnvStore {
-    inner: Arc<dyn lash_core::ProcessExecutionEnvStore>,
-    release_failures: std::sync::atomic::AtomicUsize,
-}
-
-#[async_trait::async_trait]
-impl lash_core::ProcessExecutionEnvStore for FailOnceReleaseEnvStore {
-    async fn publish_process_execution_env(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-        bytes: &[u8],
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner
-            .publish_process_execution_env(owner, env_ref, bytes)
-            .await
-    }
-
-    async fn transfer_process_execution_env(
-        &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner
-            .transfer_process_execution_env(from, to, env_ref)
-            .await
-    }
-
-    async fn release_process_execution_env(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        if self
-            .release_failures
-            .fetch_update(
-                std::sync::atomic::Ordering::SeqCst,
-                std::sync::atomic::Ordering::SeqCst,
-                |remaining| remaining.checked_sub(1),
-            )
-            .is_ok()
-        {
-            return Err(lash_core::PluginError::Session(
-                "injected process environment release failure".to_string(),
-            ));
-        }
-        self.inner
-            .release_process_execution_env(owner, env_ref)
-            .await
-    }
-
-    async fn retire_process_execution_env_owner(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner.retire_process_execution_env_owner(owner).await
-    }
-
-    async fn get_process_execution_env(
-        &self,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<Option<Vec<u8>>, lash_core::PluginError> {
-        self.inner.get_process_execution_env(env_ref).await
-    }
-}
-
-#[derive(Default)]
-struct PruneEngineState {
-    owners: HashSet<lash_core::ArtifactOwner>,
-    bytes_present: bool,
-}
-
-struct FailOnceReleaseEngine {
-    state: std::sync::Mutex<PruneEngineState>,
-    release_failures: std::sync::atomic::AtomicUsize,
-}
-
-impl FailOnceReleaseEngine {
-    fn retain(&self, owner: lash_core::ArtifactOwner) {
-        let mut state = self.state.lock_recover();
-        state.bytes_present = true;
-        state.owners.insert(owner);
-    }
-
-    fn snapshot(&self) -> (bool, HashSet<lash_core::ArtifactOwner>) {
-        let state = self.state.lock_recover();
-        (state.bytes_present, state.owners.clone())
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::ProcessEngine for FailOnceReleaseEngine {
-    fn kind(&self) -> &'static str {
-        "fig677-prune-engine"
-    }
-
-    async fn run(
-        &self,
-        _context: lash_core::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> std::result::Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-        unreachable!("the prune recovery fixture never runs a process")
-    }
-
-    async fn release_artifacts(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        _payload: &serde_json::Value,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        if self
-            .release_failures
-            .fetch_update(
-                std::sync::atomic::Ordering::SeqCst,
-                std::sync::atomic::Ordering::SeqCst,
-                |remaining| remaining.checked_sub(1),
-            )
-            .is_ok()
-        {
-            return Err(lash_core::PluginError::Session(
-                "injected process engine release failure".to_string(),
-            ));
-        }
-        let mut state = self.state.lock_recover();
-        state.owners.remove(owner);
-        if state.owners.is_empty() {
-            state.bytes_present = false;
-        }
-        Ok(())
-    }
-
-    async fn retire_artifact_owner(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        let mut state = self.state.lock_recover();
-        state.owners.remove(owner);
-        if state.owners.is_empty() {
-            state.bytes_present = false;
-        }
-        Ok(())
-    }
-}
 
 struct LinkedTestProcess {
     module_ref: lashlang::ModuleRef,
@@ -275,7 +129,7 @@ async fn persist_process_env_ref(
     let bytes = spec.to_store_bytes().expect("encode process env spec");
     process_env_store
         .publish_process_execution_env(
-            &lash_core::ArtifactOwner::host("process-env-test"),
+            &lash_core::testing::host_pin_claim_for_testing(),
             &env_ref,
             &bytes,
         )
@@ -344,47 +198,6 @@ async fn wait_for_terminal(
     .await
 }
 
-/// Contributes one process engine to a facade host, the way a plugin does.
-struct EnginePlugin(Arc<dyn lash_core::ProcessEngine>);
-
-impl crate::plugins::PluginFactory for EnginePlugin {
-    fn id(&self) -> &'static str {
-        "test-process-engine"
-    }
-
-    fn process_engine_contributions(
-        &self,
-        _context: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> std::result::Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError>
-    {
-        Ok(vec![lash_core::ProcessEngineRegistration::accepting(
-            Arc::clone(&self.0),
-        )])
-    }
-
-    fn build(
-        &self,
-        _context: &crate::plugins::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn crate::plugins::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(EngineSessionPlugin))
-    }
-}
-
-struct EngineSessionPlugin;
-
-impl crate::plugins::SessionPlugin for EngineSessionPlugin {
-    fn id(&self) -> &'static str {
-        "test-process-engine"
-    }
-
-    fn register(
-        &self,
-        _registrar: &mut crate::plugins::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        Ok(())
-    }
-}
-
 fn process_test_core(backend: lash_core::Backend) -> Result<LashCore> {
     let core = process_test_builder(backend).build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -420,188 +233,6 @@ fn process_test_builder(backend: lash_core::Backend) -> crate::core::LashCoreBui
     .plugin(Arc::new(
         lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
     ))
-}
-
-/// A core over `backend` whose process-env store is `env_store` (a
-/// decoration of the backend's own) and which runs `engine`.
-fn prune_recovery_core(
-    backend: lash_core::Backend,
-    env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
-    engine: Arc<FailOnceReleaseEngine>,
-) -> Result<LashCore> {
-    let provider = mock_provider();
-    let provider_id = provider.kind().to_string();
-    let backend = DecoratedBackend::over(backend).process_env_store(move |_| env_store);
-    LashCore::standard_builder(backend.into(), crate::TurnBudget::Unbounded)
-        .session_spec(
-            crate::SessionSpec::new()
-                .provider_id(provider_id)
-                .turn_budget(crate::TurnBudget::Unbounded),
-        )
-        .provider(provider)
-        .model(mock_model_spec())
-        .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
-        .plugin(Arc::new(EnginePlugin(
-            engine as Arc<dyn lash_core::ProcessEngine>,
-        )))
-        .build(crate::testing::runtime_lease_owner())
-}
-
-async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
-    let dir = tempfile::tempdir().expect("process prune recovery tempdir");
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(dir.path())
-            .await
-            .expect("open the process prune backend"),
-    );
-    let registry = backend.process_registry();
-    let env_store = Arc::new(FailOnceReleaseEnvStore {
-        inner: backend.process_env_store(),
-        release_failures: std::sync::atomic::AtomicUsize::new(usize::from(
-            failing_store == "environment",
-        )),
-    });
-    let engine = Arc::new(FailOnceReleaseEngine {
-        state: std::sync::Mutex::new(PruneEngineState::default()),
-        release_failures: std::sync::atomic::AtomicUsize::new(usize::from(
-            failing_store == "engine",
-        )),
-    });
-    let shared_owner = lash_core::ArtifactOwner::host(format!("shared-{failing_store}"));
-    let env_spec = process_env_spec();
-    let env_ref = env_spec.stable_ref().expect("stable environment ref");
-    let env_bytes = env_spec.to_store_bytes().expect("environment bytes");
-    env_store
-        .publish_process_execution_env(&shared_owner, &env_ref, &env_bytes)
-        .await?;
-    engine.retain(shared_owner.clone());
-    let registered = registry
-        .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::Engine {
-                    kind: engine.kind().to_string(),
-                    payload: serde_json::json!({"artifact_ref": "shared-bytes"}),
-                },
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(env_ref.clone())),
-        )
-        .await?;
-    let process_owner = lash_core::ArtifactOwner::process(registered.id.clone());
-    env_store
-        .publish_process_execution_env(&process_owner, &env_ref, &env_bytes)
-        .await?;
-    engine.retain(process_owner.clone());
-    registry
-        .complete_process(
-            &registered.id,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
-            lash_core::ProcessCompletionAuthority::workflow_key(registered.id.to_string()),
-        )
-        .await?;
-
-    let double =
-        lash_restate_test::backend_with(0x3861_0101, lash_restate_test::ServerConfig::default(), {
-            let backend = Arc::clone(&backend);
-            move |_| backend
-        })
-        .await
-        .expect("serve the process store with Restate");
-    let core = prune_recovery_core(
-        double.lash_backend(),
-        env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
-        Arc::clone(&engine),
-    )?;
-    assert!(Arc::ptr_eq(
-        &(env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>),
-        &core.env.core.durability.process_env_store,
-    ));
-    let first_prune = core
-        .processes()
-        .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
-        .await;
-    let pending_after_first = registry.pending_process_artifact_cleanup().await?;
-    assert!(
-        first_prune.is_err(),
-        "selected artifact release fails after durable row prune; result={first_prune:?}, pending={pending_after_first:?}, env_failures={}, engine_failures={}",
-        env_store
-            .release_failures
-            .load(std::sync::atomic::Ordering::SeqCst),
-        engine
-            .release_failures
-            .load(std::sync::atomic::Ordering::SeqCst),
-    );
-    assert!(matches!(
-        registry.get_process(&registered.id).await,
-        Err(lash_core::PluginError::ProcessNoLongerRetained { .. })
-    ));
-    assert_eq!(pending_after_first.len(), 1);
-    drop(core);
-    drop(registry);
-    drop(double);
-
-    let reopened_backend = Arc::new(
-        backend
-            .reopen()
-            .await
-            .expect("reopen the backend after release failure"),
-    );
-    let reopened = reopened_backend.process_registry();
-    let reopened_double = lash_restate_test::backend_with(
-        0x3861_0102,
-        lash_restate_test::ServerConfig::default(),
-        move |_| reopened_backend,
-    )
-    .await
-    .expect("serve the reopened process store with Restate");
-    let recovered_core = prune_recovery_core(
-        reopened_double.lash_backend(),
-        env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
-        Arc::clone(&engine),
-    )?;
-    recovered_core
-        .processes()
-        .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
-        .await?;
-    assert!(
-        reopened
-            .pending_process_artifact_cleanup()
-            .await?
-            .is_empty()
-    );
-    assert!(
-        env_store
-            .get_process_execution_env(&env_ref)
-            .await?
-            .is_some()
-    );
-    let (engine_bytes, engine_owners) = engine.snapshot();
-    assert!(engine_bytes);
-    assert_eq!(engine_owners, HashSet::from([shared_owner.clone()]));
-    env_store
-        .release_process_execution_env(&shared_owner, &env_ref)
-        .await?;
-    engine
-        .release_artifacts(&shared_owner, &serde_json::Value::Null)
-        .await?;
-    assert!(
-        env_store
-            .get_process_execution_env(&env_ref)
-            .await?
-            .is_none()
-    );
-    assert_eq!(engine.snapshot(), (false, HashSet::new()));
-    Ok(())
-}
-
-#[tokio::test]
-async fn process_prune_retries_each_artifact_release_after_registry_reopen() -> Result<()> {
-    process_prune_recovery_case("environment").await?;
-    process_prune_recovery_case("engine").await
 }
 
 #[tokio::test]
@@ -1797,6 +1428,266 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     Ok(())
 }
 
+struct CalendarTriggerSurfacePlugin;
+
+impl lash_core::facade_support::SessionPlugin for CalendarTriggerSurfacePlugin {
+    fn id(&self) -> &'static str {
+        "calendar-triggers"
+    }
+
+    fn register(
+        &self,
+        _reg: &mut lash_core::facade_support::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+}
+
+/// A resident `calendar.Changed` source: contributing it through the factory's
+/// extension points puts `calendar.Change` in both the cell's link surface and
+/// the process engine's host environment.
+struct CalendarTriggerSurfaceFactory;
+
+impl lash_core::facade_support::PluginFactory for CalendarTriggerSurfaceFactory {
+    fn id(&self) -> &'static str {
+        "calendar-triggers"
+    }
+
+    fn extension_contributions(&self) -> Vec<lash_core::plugin::PluginExtensionContribution> {
+        let mut resources = crate::rlm::LashlangHostCatalog::new();
+        resources
+            .add_trigger_source_constructor(
+                ["calendar", "Changed"],
+                crate::rlm::TypeExpr::Object(vec![]),
+                crate::rlm::NamedDataType::object(
+                    "calendar.Change",
+                    vec![crate::rlm::TypeField {
+                        name: "id".into(),
+                        ty: crate::rlm::TypeExpr::Str,
+                        optional: false,
+                    }],
+                )
+                .expect("valid calendar event type"),
+            )
+            .expect("calendar trigger source is unique");
+        vec![
+            crate::rlm::lashlang_surface_extension(&crate::rlm::LashlangSurfaceContribution::new(
+                crate::rlm::LashlangAbilities::default(),
+                crate::rlm::LashlangLanguageFeatures::default(),
+                resources,
+            ))
+            .expect("calendar surface contribution encodes"),
+        ]
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
+        Ok(Arc::new(CalendarTriggerSurfacePlugin))
+    }
+}
+
+/// FIG-3116: `triggers.register` is an ordinary declaring leaf tool now.
+/// Driven only through `send()`: the cell's recorded call is
+/// `register_trigger`, it declares a `register_trigger` intent, and the
+/// subscription installs when that intent is realized — so an occurrence
+/// emitted in a later turn still starts the lifted target and delivers the
+/// event.
+#[tokio::test]
+async fn rlm_trigger_register_is_a_leaf_tool_and_fires_in_a_later_turn() -> Result<()> {
+    let backend = double_backend().await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+        .provider(queued_text_provider(vec![
+            typescript_block(
+                r#"
+const remember = async (change: calendar.Change) => change.id;
+const handle = await triggers.register({
+  source: calendar.Changed({}),
+  target: remember,
+  inputs: (event) => ({ change: event })
+});
+finish(handle.id);
+"#,
+            ),
+            typescript_block("finish(\"second turn\");"),
+        ]))
+        .model(mock_model_spec())
+        .plugin(Arc::new(CalendarTriggerSurfaceFactory))
+        .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
+    let session = core.session("rlm-trigger-leaf").open().await?;
+
+    let events = Arc::new(RecordingEvents::default());
+    let result = session
+        .send(TurnInput::text("register the trigger"))
+        .output_into(events.as_ref())
+        .await?;
+
+    assert!(
+        matches!(result.outcome, TurnOutcome::Finished(..)),
+        "{:#?} errors={:?}",
+        result.outcome,
+        result.errors
+    );
+    let recorded = events.snapshot().await;
+    assert_eq!(
+        result.tool_calls.len(),
+        1,
+        "calls={:?} outcome={:#?} errors={:?} final={:?}",
+        result.tool_calls,
+        result.outcome,
+        result.errors,
+        result.final_value()
+    );
+    assert_eq!(result.tool_calls[0].tool, "register_trigger");
+    let intent_kinds = recorded
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::ToolIntentOutcome { outcome, .. } => outcome.kind(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        intent_kinds,
+        vec![lash_core::ToolIntentKind::RegisterTrigger],
+        "the register call must declare exactly the register_trigger intent"
+    );
+
+    let subscriptions = core
+        .triggers()
+        .subscriptions(lash_core::TriggerSubscriptionFilter::default())
+        .await?;
+    assert_eq!(subscriptions.len(), 1, "{subscriptions:?}");
+    assert_eq!(subscriptions[0].source_type.as_str(), "calendar.Changed");
+    let subscription_key = subscriptions[0].subscription_key.clone();
+    assert_eq!(
+        result.final_value(),
+        Some(&serde_json::json!(subscription_key)),
+        "the realized trigger handle answers the cell"
+    );
+
+    // The subscription outlives its declaring turn: a second turn runs, then
+    // an occurrence still starts the lifted target with the event as input.
+    session
+        .send(TurnInput::text("second turn"))
+        .output()
+        .await?;
+
+    let report = core
+        .triggers()
+        .emit(
+            lash_core::TriggerOccurrenceRequest::new(
+                "calendar.Changed",
+                subscriptions[0].source_key.clone(),
+                serde_json::json!({ "id": "change-7" }),
+                "calendar-occurrence-1",
+            )
+            .with_source(serde_json::json!({})),
+            runtime_operation_scope(&core, "calendar-emit").await,
+        )
+        .await?;
+    let started = report.started_process_ids();
+    assert_eq!(started.len(), 1, "{report:?}");
+    wait_for_terminal(&core, &started[0], lash_core::ProcessStatus::Completed).await;
+    let output = core.processes().await_output(&started[0]).await?;
+    let output = output.into_tool_output();
+    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
+        panic!("triggered process did not succeed: {output:#?}");
+    };
+    assert_eq!(value.to_json_value(), serde_json::json!("change-7"));
+    Ok(())
+}
+
+/// FIG-3116: a durable process body reaches the same leaf tool. The
+/// registration the started process declares carries the session's authority
+/// and fires the lifted target like a cell-declared one.
+#[tokio::test]
+async fn rlm_process_body_registers_a_trigger_through_the_leaf_tool() -> Result<()> {
+    let backend = double_backend().await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+    .provider(queued_text_provider(vec![typescript_block(
+        r#"
+const remember = async (change: calendar.Change) => change.id;
+const registrar = async () => {
+  const handle = await triggers.register({
+    source: calendar.Changed({}),
+    target: remember,
+    inputs: (event) => ({ change: event })
+  });
+  return handle.id;
+};
+const h = await processes.start({ definition: registrar });
+finish(await h);
+"#,
+    )]))
+    .model(mock_model_spec())
+    // ADR 0095: the `processes` module is catalogue presence, so a cell that
+    // authors `processes.start` needs this factory installed.
+    .plugin(Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+            lash_core::lifetime::session_or_starter,
+        ),
+    ))
+    .plugin(Arc::new(CalendarTriggerSurfaceFactory))
+    .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
+    let session = core.session("rlm-process-registers-trigger").open().await?;
+
+    let result = session
+        .send(TurnInput::text("run the registrar"))
+        .output()
+        .await?;
+    assert!(
+        matches!(result.result.outcome, TurnOutcome::Finished(..)),
+        "{:#?} errors={:?}",
+        result.result.outcome,
+        result.result.errors
+    );
+
+    let subscriptions = core
+        .triggers()
+        .subscriptions(lash_core::TriggerSubscriptionFilter::default())
+        .await?;
+    assert_eq!(subscriptions.len(), 1, "{subscriptions:?}");
+    assert_eq!(subscriptions[0].source_type.as_str(), "calendar.Changed");
+    assert_eq!(
+        result.final_value(),
+        Some(&serde_json::json!(subscriptions[0].subscription_key)),
+        "the process body's register call answers the realized handle"
+    );
+
+    let report = core
+        .triggers()
+        .emit(
+            lash_core::TriggerOccurrenceRequest::new(
+                "calendar.Changed",
+                subscriptions[0].source_key.clone(),
+                serde_json::json!({ "id": "change-9" }),
+                "calendar-occurrence-2",
+            )
+            .with_source(serde_json::json!({})),
+            runtime_operation_scope(&core, "calendar-emit-2").await,
+        )
+        .await?;
+    let started = report.started_process_ids();
+    assert_eq!(started.len(), 1, "{report:?}");
+    wait_for_terminal(&core, &started[0], lash_core::ProcessStatus::Completed).await;
+    let output = core
+        .processes()
+        .await_output(&started[0])
+        .await?
+        .into_tool_output();
+    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
+        panic!("triggered process did not succeed: {output:#?}");
+    };
+    assert_eq!(value.to_json_value(), serde_json::json!("change-9"));
+    Ok(())
+}
+
 #[derive(Clone, Default)]
 struct CollectingProcessEventSink {
     events: Arc<std::sync::Mutex<Vec<(String, u64)>>>,
@@ -1817,7 +1708,6 @@ impl lash_core::facade_support::ProcessEventSink for CollectingProcessEventSink 
     }
 }
 
-mod artifact_cleanup_round4;
 mod caller_departure;
 mod event_pages;
 mod lifecycle_observation;

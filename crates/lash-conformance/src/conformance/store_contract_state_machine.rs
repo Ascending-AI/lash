@@ -2040,7 +2040,6 @@ async fn assert_prune_tombstone_watermark_safety(
             && encoded.get("input").is_none(),
         "Prune/tombstone/watermark safety: tombstone retained payload"
     );
-    acknowledge_pending_process_artifact_cleanup(registry.as_ref()).await;
     registry
         .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor), None)
         .await
@@ -2116,7 +2115,6 @@ async fn assert_prune_reregister_registry_state_is_fresh(
         .processes_changed_since(terminal_cursor, 1_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    acknowledge_pending_process_artifact_cleanup(registry.as_ref()).await;
 
     let fresh_base = registry
         .register_process(
@@ -2268,7 +2266,7 @@ async fn consume_wake(
         &root,
         crate::store::AdmittedHead::Batch(batch.batch_id.clone()),
     );
-    request.policy = crate::testing::queued_work_claim_policy(1);
+    request.policy = crate::testing::queued_work_admission_policy(1);
     let Some(admission) = runtime
         .admit_root(&request)
         .await

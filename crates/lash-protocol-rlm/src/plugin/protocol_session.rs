@@ -56,7 +56,13 @@ impl RlmProtocolSession {
         let Some(threshold) = threshold else {
             return Ok(Vec::new());
         };
-        let used = ctx.state.token_usage().total().max(0) as usize;
+        // The model's budget suffix uses the prior completed prompt. The
+        // checkpoint view's token_usage is already the current turn's usage.
+        let used = ctx
+            .state
+            .last_prompt_usage()
+            .map(|usage| usage.total().max(0) as usize)
+            .unwrap_or(0);
         if used == 0 || used < threshold {
             return Ok(Vec::new());
         }
@@ -609,14 +615,19 @@ mod tests {
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
                 .build()
         });
+        let policy = lash_core::SessionPolicy {
+            model: lash_core::ModelSpec::builder("budget-unit-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model limits"),
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        };
         let state = lash_core::SessionSnapshot {
-            token_usage: lash_core::TokenUsage {
+            last_prompt_usage: Some(lash_core::TokenUsage {
                 input_tokens: 120_292,
                 ..Default::default()
-            },
-            ..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-            ))
+            }),
+            ..lash_core::SessionSnapshot::new(policy)
         };
         let directives = session
             .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
@@ -643,8 +654,51 @@ mod tests {
         assert_eq!(key, BUDGET_WARNING_STATUS);
         assert_eq!(label, "context budget");
         assert!(detail.as_deref().is_some_and(|text| {
-            text.contains("120292 tokens used") && text.contains("choose frame switch path")
+            text.contains("120292 tokens used")
+                && text.contains("warn at 100000")
+                && text.contains("choose frame switch path")
         }));
+    }
+
+    #[test]
+    fn soft_budget_warning_uses_prior_prompt_usage_instead_of_current_turn_usage() {
+        let session = test_session(RlmProtocolPluginConfig {
+            continue_as_soft_warn_tokens: Some(100),
+            ..RlmProtocolPluginConfig::builder()
+                .channel(crate::RlmChannel::Cell)
+                .instruction_limit(crate::plugin::InstructionBound::unbounded())
+                .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
+                .build()
+        });
+        let policy = lash_core::SessionPolicy {
+            model: lash_core::ModelSpec::builder("budget-unit-model")
+                .context_window_tokens(41_000)
+                .build()
+                .expect("model limits"),
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        };
+        let state = lash_core::SessionSnapshot {
+            token_usage: lash_core::TokenUsage {
+                input_tokens: 120,
+                ..Default::default()
+            },
+            last_prompt_usage: Some(lash_core::TokenUsage {
+                input_tokens: 8,
+                ..Default::default()
+            }),
+            ..lash_core::SessionSnapshot::new(policy)
+        };
+        let directives = session
+            .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
+                session_id: SessionId::from("root"),
+                checkpoint: lash_core::CheckpointKind::AfterWork,
+                state: lash_core::SessionReadView::from_snapshot(&state),
+                sessions: Arc::new(NoopPromptManager),
+                session_lifecycle: Arc::new(NoopPromptManager),
+                session_graph: Arc::new(NoopPromptManager),
+            })
+            .expect("warning directives");
+        assert!(directives.is_empty());
     }
 
     #[test]
@@ -665,10 +719,10 @@ mod tests {
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
         let state = lash_core::SessionSnapshot {
-            token_usage: lash_core::TokenUsage {
+            last_prompt_usage: Some(lash_core::TokenUsage {
                 input_tokens: 40_999,
                 ..Default::default()
-            },
+            }),
             ..lash_core::SessionSnapshot::new(policy)
         };
 

@@ -138,22 +138,23 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
         Duration::from_secs(20),
         restate
             .ingress()
-            .call_workflow_json::<_, serde_json::Value>(
+            .call_workflow_json::<_, lash_restate::Reply<serde_json::Value>>(
                 "LashProcessWorkflow",
                 &format!("{process_id}#1"),
                 "run",
-                &lash_restate::RestateProcessWorkflowInput {
+                &lash_restate::Call::new(lash_restate::RestateProcessWorkflowInput {
                     process_id: process_id.clone(),
                     registration,
                     execution_context: lash_core::ProcessExecutionContext::default(),
                     segment_ordinal: 1,
                     sender_generation: Some(restate.restate().build_generation().clone()),
-                },
+                }),
             ),
     )
     .await
     .expect("the segment's invocation ends")
-    .expect("the segment returns the process's terminal, not an invocation failure");
+    .expect("the segment returns the process's terminal, not an invocation failure")
+    .body;
     assert!(
         output.to_string().contains(CODE),
         "the segment publishes the typed failure: {output}"

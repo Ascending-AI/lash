@@ -17,7 +17,8 @@ pub const TABLE: &str = "processes";
 pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
                 wake_session_id, identity_kind, identity_label, created_at_ms, updated_at_ms,
                 last_event_sequence, change_seq, status, lifetime_scope_kind, lifetime_scope_id,
-                lifetime, cancel_requested_at_ms, record_json";
+                lifetime, cancel_requested_at_ms, record_json, consumer_hold_key,
+                consumer_hold_scope_kind, consumer_hold_scope_id";
 
 /// What the change feed reports for a live row.
 ///
@@ -46,6 +47,20 @@ crate::statements! {
         set_wake_session_id = "UPDATE processes SET wake_session_id = ?2 WHERE process_id = ?1";
 
         clear_wake_session_for_session = "UPDATE processes SET wake_session_id = NULL WHERE wake_session_id = ?1";
+
+        /// Release the consumer hold `?2` holds on `?1` (ADR 0116 §3.6): a
+        /// no-op when the row carries another hold or none.
+        release_consumer_hold = "UPDATE processes
+             SET consumer_hold_key = NULL, consumer_hold_scope_kind = NULL,
+                 consumer_hold_scope_id = NULL
+             WHERE process_id = ?1 AND consumer_hold_key = ?2";
+
+        /// Release every consumer hold owned by the scope `(?1, ?2)`: the
+        /// scope's close ends every wait its calls still hold.
+        release_consumer_holds_owned_by = "UPDATE processes
+             SET consumer_hold_key = NULL, consumer_hold_scope_kind = NULL,
+                 consumer_hold_scope_id = NULL
+             WHERE consumer_hold_scope_kind = ?1 AND consumer_hold_scope_id = ?2";
 
         /// The identity columns are absent because none of them is mutable.
         /// `?8`/`?9` are the parked projection: the live park's `since_ms`

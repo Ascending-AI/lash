@@ -1,0 +1,158 @@
+//! The Restate compatibility contract (ADR 0115 §3.1–3.2).
+//!
+//! During a roll one invocation can reach a handler another build serves, and
+//! object state is shared across deployments. Two shapes protect that, and
+//! both are frozen forever:
+//!
+//! - every cross-build request travels in a [`Call`] that states every wire
+//!   version the caller reads, and every reply in a [`Reply`] at the version
+//!   the handler selected from it;
+//! - every Lash object carries an [`ObjectCompat`] record under
+//!   [`COMPAT_KEY`], which names the oldest family formats a build must
+//!   support to read or to mutate the object.
+
+pub use lash_sansio::VersionRange;
+
+/// The one wire version of every Lash handler a build other than the
+/// caller's can serve.
+#[cfg(not(feature = "synthetic-next"))]
+pub const RESTATE_WIRE_VERSION: u32 = 1;
+
+/// The wire versions this build reads and answers.
+#[cfg(not(feature = "synthetic-next"))]
+pub const RESTATE_WIRE: VersionRange = VersionRange::exactly(RESTATE_WIRE_VERSION);
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the wire to 2 and keeps
+/// answering N's version 1, so a call from either build selects 1.
+#[cfg(feature = "synthetic-next")]
+pub const RESTATE_WIRE_VERSION: u32 = 2;
+
+/// The synthetic N+1 reads and answers N's wire and its own.
+#[cfg(feature = "synthetic-next")]
+pub const RESTATE_WIRE: VersionRange = VersionRange::between(1, RESTATE_WIRE_VERSION);
+
+/// Every cross-build request. JSON `{"wire":{"min":1,"max":1},"body":…}`;
+/// the outer shape is frozen.
+///
+/// The body is encoded at the caller's selected wire version, and `wire`
+/// states every version the caller reads, so any build in the compatibility
+/// window can read the request and answer it in a shape the caller reads.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Call<T> {
+    pub wire: VersionRange,
+    pub body: T,
+}
+
+impl<T> Call<T> {
+    /// A request from this build: it reads every version of [`RESTATE_WIRE`].
+    pub fn new(body: T) -> Self {
+        Self {
+            wire: RESTATE_WIRE,
+            body,
+        }
+    }
+
+    /// The version a handler of this build answers the call at: the highest
+    /// both sides read. `None` is the handler's terminal refusal, before it
+    /// reads or writes any state.
+    pub fn select(&self) -> Option<u32> {
+        RESTATE_WIRE.select(self.wire)
+    }
+}
+
+/// Every cross-build reply. JSON `{"wire":1,"body":…}`; frozen.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Reply<T> {
+    pub wire: u32,
+    pub body: T,
+}
+
+impl<T> Reply<T> {
+    /// A reply at the wire version the handler selected for the call.
+    pub fn at(wire: u32, body: T) -> Self {
+        Self { wire, body }
+    }
+}
+
+/// The state key every Lash object keeps its [`ObjectCompat`] record under.
+pub const COMPAT_KEY: &str = "_compat";
+
+/// An object's `_compat` record. JSON
+/// `{"format":1,"min_reader":1,"min_writer":1}`; frozen and never enveloped.
+///
+/// Every handler reads it first, after the wire selection and before any
+/// other state. Clearing or retiring an object keeps it, and only the next
+/// release's `upgrade` handler raises it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ObjectCompat {
+    /// The oldest family format any value in the object may carry.
+    pub format: u32,
+    /// The oldest family format a build must read to read the object.
+    pub min_reader: u32,
+    /// The oldest family format a build must write to mutate the object.
+    pub min_writer: u32,
+}
+
+impl ObjectCompat {
+    /// The record the first exclusive handler writes on an object with no
+    /// other keys, at the family format it selected.
+    pub const fn fresh(format: u32) -> Self {
+        Self {
+            format,
+            min_reader: format,
+            min_writer: format,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{COMPAT_KEY, Call, ObjectCompat, RESTATE_WIRE, Reply, VersionRange};
+
+    #[test]
+    fn restate_call_and_reply_json_is_frozen() {
+        let call = Call::new(serde_json::json!({"session_id": "s"}));
+        let json = serde_json::to_string(&call).expect("encode");
+        assert_eq!(
+            json,
+            r#"{"wire":{"min":1,"max":1},"body":{"session_id":"s"}}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<Call<serde_json::Value>>(&json).expect("decode"),
+            call
+        );
+
+        let reply = Reply::at(1, serde_json::json!({"outcome": "done"}));
+        let json = serde_json::to_string(&reply).expect("encode");
+        assert_eq!(json, r#"{"wire":1,"body":{"outcome":"done"}}"#);
+        assert_eq!(
+            serde_json::from_str::<Reply<serde_json::Value>>(&json).expect("decode"),
+            reply
+        );
+
+        let compat = ObjectCompat::fresh(1);
+        assert_eq!(COMPAT_KEY, "_compat");
+        assert_eq!(
+            serde_json::to_string(&compat).expect("encode"),
+            r#"{"format":1,"min_reader":1,"min_writer":1}"#
+        );
+    }
+
+    #[test]
+    fn a_call_selects_the_highest_common_wire() {
+        assert_eq!(Call::new(()).select(), Some(1));
+        let newer = Call {
+            wire: VersionRange::new(1, 2).expect("range"),
+            body: (),
+        };
+        assert_eq!(newer.select(), Some(RESTATE_WIRE.max()));
+        let disjoint = Call {
+            wire: VersionRange::new(2, 3).expect("range"),
+            body: (),
+        };
+        assert_eq!(disjoint.select(), None);
+        assert!(
+            serde_json::from_str::<Call<()>>(r#"{"wire":{"min":0,"max":1},"body":null}"#).is_err()
+        );
+    }
+}

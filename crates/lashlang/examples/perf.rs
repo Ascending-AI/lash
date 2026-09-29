@@ -253,7 +253,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
                         linked.artifact.host_requirements_ref(),
                     )
                     .expect("process cache compile should succeed");
-                std::hint::black_box(compiled.compile_stats());
+                std::hint::black_box(&compiled);
             }
             process_cache_stats = Some(cache.stats());
         }
@@ -268,7 +268,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
                         .get_or_compile_ast(key, benchmark_program(scenario), surface)
                         .expect("linked program cache compile should succeed"),
                 };
-                std::hint::black_box(compiled.compiled_program().compile_stats());
+                std::hint::black_box(&compiled);
             }
             linked_cache_stats = Some(cache.stats());
         }
@@ -413,7 +413,7 @@ fn run_phase_breakdown(
             Some(linked.spans()),
         )
         .expect("a module main entry compiles");
-        std::hint::black_box(compiled.compile_stats());
+        std::hint::black_box(&compiled);
     });
     let execute = measure_phase("execute", iterations, || {
         let mut state = seeded_state_for(scenario);

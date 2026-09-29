@@ -8,6 +8,11 @@
 //! first, so the drive's at-least-once call is idempotent per root and per
 //! session.
 //!
+//! When the session factory is installed, a root close also reads the turn
+//! scopes of inputs bound to that root. Those joined inputs never become
+//! roots, so their scopes close with the admitting root. The session close
+//! still covers turn scopes whose inputs were never admitted (FIG-3948).
+//!
 //! A sink built with a process-work port also **applies** the plan the row
 //! records (FIG-3822): it delivers `ParentEnded` to each live `Until` child
 //! through the engine before recording the child's cancel request, then
@@ -21,8 +26,8 @@ use std::sync::Arc;
 use crate::engine::ScopeCloseSink;
 use crate::store::{ControlIntentId, RootTerminal, RootTerminalCause, StoreError};
 use crate::{
-    Clock, EffectHost, ProcessRegistry, ProcessWorkSubstrate, ScopeId, SessionId, TurnId,
-    apply_parent_end_plan, end_session_roots,
+    Clock, DeploymentStore, EffectHost, ProcessRegistry, ProcessWorkSubstrate, ScopeId, SessionId,
+    TurnId, apply_parent_end_plan, end_session_roots,
 };
 
 /// Closes lifetime scopes in a process registry's scope-close ledger, and —
@@ -33,6 +38,7 @@ pub struct RegistryScopeClose {
     delivery: Option<Arc<dyn ProcessWorkSubstrate>>,
     clock: Arc<dyn Clock>,
     effect_host: Option<Arc<dyn EffectHost>>,
+    sessions: Option<Arc<dyn DeploymentStore>>,
 }
 
 impl RegistryScopeClose {
@@ -45,6 +51,7 @@ impl RegistryScopeClose {
             delivery: None,
             clock,
             effect_host: None,
+            sessions: None,
         }
     }
 
@@ -61,6 +68,7 @@ impl RegistryScopeClose {
             delivery: Some(delivery),
             clock,
             effect_host: None,
+            sessions: None,
         }
     }
 
@@ -69,6 +77,15 @@ impl RegistryScopeClose {
     #[must_use]
     pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
         self.effect_host = Some(effect_host);
+        self
+    }
+
+    /// Read the root's admitted input bindings from the session catalog when
+    /// its terminal closes. The binding identifies joined turn scopes that
+    /// never get their own root terminal.
+    #[must_use]
+    pub fn with_session_store_factory(mut self, sessions: Arc<dyn DeploymentStore>) -> Self {
+        self.sessions = Some(sessions);
         self
     }
 
@@ -137,11 +154,24 @@ async fn settle_childless_plan(
 #[async_trait::async_trait]
 impl ScopeCloseSink for RegistryScopeClose {
     async fn close_root_scope(&self, terminal: &RootTerminal) -> Result<(), StoreError> {
+        let joined = if let Some(sessions) = &self.sessions {
+            sessions
+                .bound_turn_scopes(&terminal.session_id, &terminal.root)
+                .await?
+        } else {
+            Vec::new()
+        };
         self.close(&ScopeId::turn(
             terminal.session_id.clone(),
             terminal.root.clone(),
         ))
         .await?;
+        for turn in joined {
+            if turn != terminal.root {
+                self.close(&ScopeId::turn(terminal.session_id.clone(), turn))
+                    .await?;
+            }
+        }
         let committed_turn = match &terminal.cause {
             RootTerminalCause::Committed { turn, .. } => Some(turn),
             _ => None,

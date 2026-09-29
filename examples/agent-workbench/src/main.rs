@@ -75,6 +75,7 @@ const SESSION_ROSTER_FILE_NAME: &str = "sessions.json";
 const MAX_SESSION_NAME_CHARS: usize = 80;
 const DEFAULT_CONTEXT_WINDOW_TOKENS: usize = 200_000;
 const AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV: &str = "AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS";
+const AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS_ENV: &str = "AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS";
 /// The smallest context window the workbench accepts. The workbench is an
 /// RLM host: its sessions switch frames through the model-driven
 /// `continue_as` below this window, never through standard compaction.

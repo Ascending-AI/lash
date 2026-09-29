@@ -13,7 +13,7 @@ mod tests {
         InputItem, PluginOptions, PreparedToolCall, ProcessEventAppendRequest,
         ProcessExecutionEnvRef, ProcessIdentity, ProcessObserverBy, ProcessProvenance,
         ProcessRegistration, SessionCreateRequest, SessionScope, SessionStartPoint,
-        SubagentSessionContext, ToolFailureClass, ToolOutputContract, TurnInput, WaitKind,
+        SubagentSessionContext, ToolFailureClass, TurnInput, WaitKind,
     };
     use crate::{ProcessId, ProcessRegistry, SessionId};
 
@@ -500,7 +500,7 @@ mod tests {
                     definition_key: "observation-test-session-turn:v1".to_string(),
                     create_request: Box::new(child_request),
                     turn_input: Box::new(TurnInput::items([InputItem::text("run child")])),
-                    output_contract: ToolOutputContract::Static,
+                    result: crate::SessionTurnResult::Turn,
                 },
                 "session_turn",
                 "researcher",

@@ -175,6 +175,22 @@ pub(super) async fn settled_root_held(
     }
 }
 
+/// Take the first entry whose settled root is `root` in the stores
+/// `binding` names, if this process holds one.
+pub(super) fn take_settled_root_of(
+    binding: &StoreBindingId,
+    session: &SessionId,
+    root: &TurnId,
+) -> Option<SettledRoot> {
+    let mut entries = SETTLED_ROOTS.lock_recover();
+    let position = entries
+        .iter()
+        .position(|((entry_binding, entry_session, _), settled)| {
+            entry_binding == binding && entry_session == session && settled.root == *root
+        })?;
+    entries.remove(position).map(|(_, settled)| settled)
+}
+
 /// Take `input`'s entry in the stores `binding` names, if this process
 /// holds one.
 pub(super) fn take_settled_root(

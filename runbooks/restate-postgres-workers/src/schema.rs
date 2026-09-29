@@ -1,6 +1,12 @@
 //! The Postgres schema the workers runbook's own harness tables live in.
 //!
 //! Split out of `lib.rs`, which sits at the production file-size budget.
+//!
+//! These are harness control and diagnostic tables beside Lash's own. The
+//! recovery-law evidence is not here: provider receipts, client submissions
+//! and terminals, effect attempts and commits, and injected faults live in the
+//! separate witness database (`witness.sql`), so no table in this schema is a
+//! pass/fail input to the laws `process_assertions.rs` checks.
 
 use anyhow::{Context, Result};
 use sqlx::PgPool;
@@ -101,23 +107,6 @@ pub async fn ensure_e2e_schema(pool: &PgPool) -> Result<()> {
     .execute(&mut *tx)
     .await
     .context("create e2e harness signals table")?;
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS lash_e2e_provider_calls (
-            call_id BIGSERIAL PRIMARY KEY,
-            request_id TEXT NOT NULL,
-            scenario TEXT NOT NULL,
-            workflow_id TEXT NOT NULL,
-            model TEXT NOT NULL,
-            request_json TEXT NOT NULL,
-            response_json TEXT NOT NULL,
-            created_at_ms BIGINT NOT NULL
-        )
-        "#,
-    )
-    .execute(&mut *tx)
-    .await
-    .context("create e2e provider calls table")?;
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS lash_e2e_tool_events (

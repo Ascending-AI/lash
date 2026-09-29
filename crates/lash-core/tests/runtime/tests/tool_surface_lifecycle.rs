@@ -2080,30 +2080,9 @@ async fn public_apply_tool_state_round_trip_keeps_delta_and_generation_fencing()
     );
 }
 
-/// Engine whose store-free admission function accepts exactly one payload shape.
-struct PayloadGatedEngine;
-
-const PAYLOAD_GATED_ENGINE_KIND: &str = "fig1488-payload-gated";
-
-#[async_trait::async_trait]
-impl lash_core::ProcessEngine for PayloadGatedEngine {
-    fn kind(&self) -> &'static str {
-        PAYLOAD_GATED_ENGINE_KIND
-    }
-
-    async fn run(
-        &self,
-        _context: lash_core::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-        Ok(
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                json!({"ran": true}),
-            ))
-            .into(),
-        )
-    }
-}
+#[path = "../../runtime_support/payload_gated_engine.rs"]
+mod payload_gated_engine;
+use payload_gated_engine::{PAYLOAD_GATED_ENGINE_KIND, PayloadGatedEngine};
 
 fn admit_payload_gated_engine(
     _kind: &'static str,

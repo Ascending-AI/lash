@@ -43,7 +43,7 @@ use crate::store::{
     ObligationLedger, ObligationState, SessionBlobReclaimReport, StoreError,
 };
 use crate::{
-    EffectJournalRetirement, ProcessSessionDeleteReport, RuntimeError, SessionAdministration,
+    EffectJournalRetirement, ProcessSessionDeleteReport, SessionAdministration,
     SessionDeleteContext, SessionId,
 };
 
@@ -111,9 +111,6 @@ pub enum SessionDeleteFailure {
     /// The effect host did not retire the session's effect journal.
     #[error("effect journal: {message}")]
     Journal { message: String },
-    /// An artifact owner the journal retirement queued was not retired.
-    #[error("artifact owner retirement: {message}")]
-    Artifacts { message: String },
     /// The session's storage delete stopped, with the reclaim counters it
     /// witnessed before it did (ADR 0067).
     #[error("storage: {0}")]
@@ -323,11 +320,6 @@ pub async fn physically_delete(
         .map_err(|error| SessionDeleteFailure::Journal {
             message: error.to_string(),
         })?;
-    retire_artifact_owners(administration)
-        .await
-        .map_err(|error| SessionDeleteFailure::Artifacts {
-            message: error.to_string(),
-        })?;
     let storage = administration
         .store_factory()
         .delete_session(session_id)
@@ -338,32 +330,6 @@ pub async fn physically_delete(
         storage,
         process,
     })
-}
-
-/// Retire every artifact owner a journal retirement queued.
-async fn retire_artifact_owners(
-    administration: &SessionAdministration,
-) -> Result<(), RuntimeError> {
-    let host = administration.effect_host();
-    for scope in host.pending_artifact_owner_retirements().await? {
-        let owner = crate::ArtifactOwner::execution(scope.clone());
-        administration
-            .process_env_store()
-            .retire_process_execution_env_owner(&owner)
-            .await
-            .map_err(|error| {
-                RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, error.to_string())
-            })?;
-        administration
-            .process_engines()
-            .retire_artifact_owner(&owner)
-            .await
-            .map_err(|error| {
-                RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, error.to_string())
-            })?;
-        host.complete_artifact_owner_retirement(&scope).await?;
-    }
-    Ok(())
 }
 
 /// What one delivery attempt of a session's delete did.

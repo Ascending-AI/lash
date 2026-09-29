@@ -234,14 +234,34 @@ pub struct RegisterProcessDefinitionIntent {
     pub label: Option<String>,
     /// The registered name this declaration claims. Tool input only: the
     /// durable row pins the resolved reference, never this name. `None`
-    /// refuses realization because an unnamed registration cannot be
-    /// addressed.
+    /// registers no name: the declaration only creates the definition, and
+    /// the caller holds the definition value it answered (ADR 0113 §6). A
+    /// host front door has no frame to hold one, so it refuses `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// The revision the caller last observed under `name`. `None` creates a
     /// fresh slot; a stale value conflicts with the live row (FIG-2995 CAS).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_revision: Option<u64>,
+    /// The module the definition names, when no store holds it yet: a
+    /// definition `processes.create` compiled in its attempt. The attempt
+    /// publishes nothing (ADR 0116); realization publishes these bytes under
+    /// the realizing execution's journal referrer before it resolves the
+    /// definition, and a name's revision or the caller's frame takes them
+    /// over from there (ADR 0113 §3.6, §3.7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<DeclaredModuleArtifact>,
+}
+
+/// A module artifact a declaration carries for realization to publish.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeclaredModuleArtifact {
+    /// The content-addressed reference the definition value names.
+    pub module_ref: String,
+    /// The module port's bytes for `module_ref`, exactly as its codec wrote
+    /// them. The lashlang module codec is JSON, so they travel as text and
+    /// publish byte-for-byte.
+    pub bytes: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -252,6 +272,17 @@ pub struct RegisterProcessDefinitionIntent {
 pub struct RegisterTriggerIntent {
     /// Session whose authority owns the subscription.
     pub session_id: SessionId,
+    /// The registrant scope the declaring attempt resolved, exactly as the
+    /// retired host-operation path resolved it from the live context.
+    pub owner_scope: crate::TriggerOwnerScope,
+    /// The actor the declaring attempt resolved for the registration.
+    pub actor: crate::ProcessOriginator,
+    /// The execution environment to publish under the realizing effect
+    /// scope's artifact owner, when the draft's `env_ref` names bytes not yet
+    /// durable. `None` when the attempt inherited an already-published env
+    /// ref from the process it runs inside.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_spec: Option<crate::ProcessExecutionEnvSpec>,
     pub draft: crate::TriggerSubscriptionDraft,
 }
 
@@ -588,10 +619,16 @@ mod tests {
                     label: None,
                     name: None,
                     expected_revision: None,
+                    module: None,
                 }))
             }
             ToolIntentKind::RegisterTrigger => {
                 ToolIntent::RegisterTrigger(Box::new(RegisterTriggerIntent {
+                    owner_scope: crate::TriggerOwnerScope::session(session_id.clone()),
+                    actor: crate::ProcessOriginator::session(crate::SessionScope::new(
+                        session_id.clone(),
+                    )),
+                    env_spec: None,
                     session_id,
                     draft: crate::TriggerSubscriptionDraft::for_process(
                         "subscription",

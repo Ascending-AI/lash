@@ -593,21 +593,34 @@ fn schema_report(status: &StoreSchemaStatus) -> SchemaReport {
             .databases
             .iter()
             .map(|database| {
-                let (verdict, found, reason) = match &database.verdict {
-                    StoreSchemaVerdict::Matches => ("matches", None, None),
-                    StoreSchemaVerdict::Mismatch { found } => ("mismatch", Some(*found), None),
-                    StoreSchemaVerdict::Absent => ("absent", None, None),
-                    StoreSchemaVerdict::Unreadable { reason } => {
-                        ("unreadable", None, Some(reason.clone()))
+                let (verdict, found, refusal, reason) = match &database.verdict {
+                    StoreSchemaVerdict::Matches => ("matches", None, None, None),
+                    StoreSchemaVerdict::Expanded { found } => {
+                        ("expanded", Some(*found), None, None)
                     }
-                    _ => ("unclassified", None, None),
+                    StoreSchemaVerdict::Refused { refusal } => {
+                        ("refused", None, Some(refusal.clone()), None)
+                    }
+                    StoreSchemaVerdict::Migratable { found } => {
+                        ("migratable", Some(*found), None, None)
+                    }
+                    StoreSchemaVerdict::Mismatch { found } => {
+                        ("mismatch", Some(*found), None, None)
+                    }
+                    StoreSchemaVerdict::Absent => ("absent", None, None, None),
+                    StoreSchemaVerdict::Unreadable { reason } => {
+                        ("unreadable", None, None, Some(reason.clone()))
+                    }
+                    _ => ("unclassified", None, None, None),
                 };
                 SchemaDatabaseReport {
                     name: database.name.clone(),
                     location: database.location.clone(),
                     expected: database.expected,
+                    min_reader: database.min_reader,
                     verdict,
                     found,
+                    refusal,
                     reason,
                 }
             })

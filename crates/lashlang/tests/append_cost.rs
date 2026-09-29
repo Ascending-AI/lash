@@ -25,8 +25,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use lashlang::{
-    AbilityOp, AbilityResult, AssignPathStep, AssignTarget, BinaryOp, ExecutionHost,
-    ExecutionHostError, ExecutionOutcome, Expr, Program, Snapshot, State, Value, execute,
+    AbilityOp, AbilityResult, AssignPathStep, AssignTarget, ExecutionHost, ExecutionHostError,
+    ExecutionOutcome, Expr, JavaScriptBinaryOp, Program, Snapshot, State, Value, execute,
 };
 
 #[global_allocator]
@@ -188,8 +188,8 @@ fn probe_program(body: Expr, iterations: usize) -> Program {
             bind: None,
             body: Box::new(Expr::Block(vec![body])),
         },
-        Expr::Finish(Box::new(Expr::Binary {
-            op: BinaryOp::Add,
+        Expr::Finish(Box::new(Expr::JavaScriptBinary {
+            op: JavaScriptBinaryOp::Add,
             left: Box::new(var("total")),
             right: Box::new(builtin("len", vec![var("items")])),
         })),
@@ -202,8 +202,8 @@ fn bytes_per_append(body: fn() -> Expr, iterations: usize) -> f64 {
     let (built, with_append) = run_measured(&probe_program(body(), iterations));
     let baseline = assign(
         "total",
-        Expr::Binary {
-            op: BinaryOp::Add,
+        Expr::JavaScriptBinary {
+            op: JavaScriptBinaryOp::Add,
             left: Box::new(var("total")),
             right: Box::new(var("i")),
         },
@@ -288,8 +288,8 @@ fn an_append_charges_what_the_object_measures() {
             )),
             bind: None,
             body: Box::new(Expr::Block(vec![
-                index_append(Expr::Binary {
-                    op: BinaryOp::Add,
+                index_append(Expr::JavaScriptBinary {
+                    op: JavaScriptBinaryOp::Add,
                     left: Box::new(Expr::String("member-".into())),
                     right: Box::new(builtin("to_string", vec![var("i")])),
                 }),

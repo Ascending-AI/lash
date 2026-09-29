@@ -189,7 +189,93 @@ fn an_admission_candidate_scan_seeks_the_open_row_index() {
         &statements.admission_candidates_active_turn_after_work,
         &statements.admission_candidates_active_turn_before_completion,
     ] {
-        assert_uses(&conn, statement, "idx_pending_turn_inputs_open");
+        assert_uses(&conn, statement, "idx_pending_turn_inputs_open_state");
+    }
+}
+
+#[test]
+fn every_open_input_read_seeks_the_state_index() {
+    let conn = catalog();
+    let sql = turn_ingress_sql();
+    for statement in [
+        &sql.pending_inputs.list_undelivered,
+        &sql.pending_inputs.earliest_next_turn_candidate_seq,
+        &sql.family.has_claimable_work,
+        &sql.family.pending_session_work_ordering,
+        &sql.family_sqlite.checkpoint_work_pending_after_work,
+        &sql.family_sqlite.checkpoint_work_pending_before_completion,
+    ] {
+        assert_uses(&conn, statement, "idx_pending_turn_inputs_open_state");
+    }
+}
+
+#[test]
+fn every_open_queued_work_read_seeks_the_admission_index() {
+    let conn = catalog();
+    let sql = turn_ingress_sql();
+    for statement in [
+        &sql.queued_batches.list_open,
+        &sql.queued_batches_sqlite.admission_candidates_idle,
+        &sql.queued_batches_sqlite.admission_candidates_turn_lane,
+        &sql.queued_batches_sqlite.admission_candidates_boundary,
+    ] {
+        assert_uses(&conn, statement, "idx_queued_work_admission_order");
+    }
+}
+
+#[test]
+fn reopening_replaces_obsolete_ingress_indexes() {
+    let conn = catalog();
+    conn.execute_batch(
+        "CREATE INDEX idx_queued_work_admitted
+             ON queued_work_batches(session_id, admitted_root);
+         CREATE INDEX idx_pending_turn_inputs_session
+             ON pending_turn_inputs(session_id, state, enqueue_seq);
+         CREATE INDEX idx_pending_turn_input_order
+             ON pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq);
+         CREATE INDEX idx_pending_turn_inputs_open
+             ON pending_turn_inputs(session_id, state, enqueue_seq)
+             WHERE admitted_root IS NULL
+               AND state IN ('pending_active', 'deferred_next_turn');
+         CREATE INDEX idx_pending_turn_inputs_admitted
+             ON pending_turn_inputs(session_id, admitted_root);",
+    )
+    .expect("install the previous index set");
+    conn.execute_batch(crate::schema::SCHEMA)
+        .expect("reopen applies the current index set");
+    let mut names = conn
+        .prepare(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'index'
+               AND tbl_name IN ('queued_work_batches', 'pending_turn_inputs')",
+        )
+        .expect("inspect ingress indexes");
+    let names = names
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("list ingress indexes")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("decode ingress indexes");
+    for old in [
+        "idx_queued_work_admitted",
+        "idx_pending_turn_inputs_session",
+        "idx_pending_turn_input_order",
+        "idx_pending_turn_inputs_open",
+        "idx_pending_turn_inputs_admitted",
+    ] {
+        assert!(
+            !names.iter().any(|name| name == old),
+            "old index remains: {old}"
+        );
+    }
+    for current in [
+        "idx_queued_work_admission_order",
+        "idx_pending_turn_inputs_open_state",
+        "idx_pending_turn_inputs_bound_root",
+    ] {
+        assert!(
+            names.iter().any(|name| name == current),
+            "current index is missing: {current}"
+        );
     }
 }
 
@@ -203,12 +289,12 @@ fn a_root_release_seeks_the_admission_index() {
     assert_uses(
         &conn,
         &sql.pending_inputs.release_root,
-        "idx_pending_turn_inputs_admitted",
+        "idx_pending_turn_inputs_bound_root",
     );
     assert_uses(
         &conn,
         &sql.queued_batches.release_root,
-        "idx_queued_work_admitted",
+        "idx_queued_work_admission_order",
     );
 }
 
@@ -237,7 +323,7 @@ mod byte_identity {
     fn a_state_token_renders_to_the_predicate_its_generator_spells() {
         // A `{{term(column)}}` token is only worth having if it renders to
         // exactly what the generator produces: the enum stays the one source of
-        // the vocabulary, and `idx_pending_turn_inputs_open` is only usable by
+        // the vocabulary, and `idx_pending_turn_inputs_open_state` is only usable by
         // a predicate that repeats its own terms.
         let sql = turn_ingress_sql();
         assert!(

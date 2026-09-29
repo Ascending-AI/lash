@@ -168,12 +168,15 @@ pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutio
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     );
     let bytes = spec.to_store_bytes().expect("encode test environment");
-    let owner = crate::ArtifactOwner::host("hostile-input-test");
+    let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
+        crate::HostArtifactPin::mint(),
+    ))
+    .expect("host pin claim");
     for raw in ["", "nul\0reference"] {
         let reference = crate::ProcessExecutionEnvRef::new(raw);
         assert!(
             store
-                .publish_process_execution_env(&owner, &reference, &bytes)
+                .publish_process_execution_env(&claim, &reference, &bytes)
                 .await
                 .is_err(),
             "malformed environment reference must not reach blob mutation"
@@ -191,7 +194,7 @@ pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutio
         assert!(
             store
                 .publish_process_execution_env(
-                    &owner,
+                    &claim,
                     &crate::ProcessExecutionEnvRef::new(raw),
                     &bytes,
                 )

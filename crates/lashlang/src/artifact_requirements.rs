@@ -17,24 +17,14 @@ enum RequirementBinding {
 pub(super) struct RequirementsCollector<'program> {
     program: &'program Program,
     resource_catalog: Option<&'program LashlangHostCatalog>,
-    type_names: BTreeSet<String>,
     requirements: HostRequirements,
 }
 
 impl<'program> RequirementsCollector<'program> {
     pub(super) fn new(program: &'program Program) -> Self {
-        let type_names = program
-            .declarations
-            .iter()
-            .filter_map(|declaration| match declaration {
-                Declaration::Type(type_decl) => Some(type_decl.name.to_string()),
-                Declaration::Process(_) | Declaration::Function(_) => None,
-            })
-            .collect();
         Self {
             program,
             resource_catalog: None,
-            type_names,
             requirements: HostRequirements::default(),
         }
     }
@@ -47,7 +37,6 @@ impl<'program> RequirementsCollector<'program> {
     pub(super) fn collect(mut self) -> HostRequirements {
         for declaration in &self.program.declarations {
             match declaration {
-                Declaration::Type(type_decl) => self.collect_type(&type_decl.ty),
                 // A function needs no host ability, so it contributes only the
                 // named data types its signature mentions. Its body cannot
                 // reach a global either — the linker binds nothing but the
@@ -73,7 +62,6 @@ impl<'program> RequirementsCollector<'program> {
                     for param in &process.params {
                         self.collect_type(&param.ty);
                         if let TypeExpr::Ref(name) = &param.ty
-                            && !self.type_names.contains(name.as_str())
                             && self.is_resource_type_name(name)
                         {
                             self.requirements
@@ -130,10 +118,7 @@ impl<'program> RequirementsCollector<'program> {
                 }
             }
             TypeExpr::TriggerHandle(event) => self.collect_type(event),
-            TypeExpr::Ref(name)
-                if !self.type_names.contains(name.as_str())
-                    && self.is_host_data_type_name(name) =>
-            {
+            TypeExpr::Ref(name) if self.is_host_data_type_name(name) => {
                 let data_type = self
                     .resource_catalog
                     .and_then(|catalog| catalog.resolve_named_data_type(name.as_str()))
@@ -144,9 +129,7 @@ impl<'program> RequirementsCollector<'program> {
                     .require_named_data_type(data_type)
                     .expect("host data type requirement came from host catalog");
             }
-            TypeExpr::Ref(name)
-                if !self.type_names.contains(name.as_str()) && self.is_resource_type_name(name) =>
-            {
+            TypeExpr::Ref(name) if self.is_resource_type_name(name) => {
                 self.requirements
                     .resources
                     .ensure_resource_type(name.to_string());
@@ -204,41 +187,9 @@ impl<'program> RequirementsCollector<'program> {
                     Some(RequirementBinding::Value)
                 }
             },
-            Expr::Tuple(items) => {
-                for item in items {
-                    self.collect_expr(item, scope);
-                }
-                Some(RequirementBinding::Value)
-            }
             Expr::List(items) => {
                 for item in items {
                     self.collect_expr(item, scope);
-                }
-                Some(RequirementBinding::Value)
-            }
-            Expr::ListComprehension { element, clauses } => {
-                let mut previous = Vec::new();
-                for clause in clauses {
-                    match clause {
-                        ListComprehensionClause::For { binding, iterable } => {
-                            self.collect_expr(iterable, scope);
-                            previous.push((
-                                binding.to_string(),
-                                scope.insert(binding.to_string(), RequirementBinding::Value),
-                            ));
-                        }
-                        ListComprehensionClause::If { condition } => {
-                            self.collect_expr(condition, scope);
-                        }
-                    }
-                }
-                self.collect_expr(element, scope);
-                for (binding, previous) in previous.into_iter().rev() {
-                    if let Some(previous) = previous {
-                        scope.insert(binding, previous);
-                    } else {
-                        scope.remove(binding.as_str());
-                    }
                 }
                 Some(RequirementBinding::Value)
             }
@@ -352,18 +303,13 @@ impl<'program> RequirementsCollector<'program> {
                 }
                 Some(RequirementBinding::Value)
             }
-            Expr::SleepFor(expr) | Expr::SleepUntil(expr) => {
+            Expr::SleepFor(expr) => {
                 self.requirements.abilities.sleep = true;
                 self.collect_expr(expr, scope);
                 Some(RequirementBinding::Value)
             }
             Expr::WaitSignal { .. } => Some(RequirementBinding::Value),
-            Expr::Await(expr)
-            | Expr::ResultUnwrap(expr)
-            | Expr::Print(expr)
-            | Expr::Yield(expr)
-            | Expr::Fail(expr)
-            | Expr::Unary { expr, .. } => {
+            Expr::Await(expr) | Expr::ResultUnwrap(expr) | Expr::Print(expr) | Expr::Fail(expr) => {
                 self.collect_expr(expr, scope);
                 Some(RequirementBinding::Value)
             }
@@ -481,15 +427,10 @@ impl<'program> RequirementsCollector<'program> {
                 self.collect_expr(index, scope);
                 Some(RequirementBinding::Value)
             }
-            Expr::Binary { left, right, .. }
-            | Expr::JavaScriptBinary { left, right, .. }
+            Expr::JavaScriptBinary { left, right, .. }
             | Expr::JavaScriptLogical { left, right, .. } => {
                 self.collect_expr(left, scope);
                 self.collect_expr(right, scope);
-                Some(RequirementBinding::Value)
-            }
-            Expr::TypeLiteral(ty) => {
-                self.collect_type(ty);
                 Some(RequirementBinding::Value)
             }
             Expr::Null

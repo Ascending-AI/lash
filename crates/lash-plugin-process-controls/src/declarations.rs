@@ -457,6 +457,7 @@ pub fn execute_process_register_tool_call(
                 label: Some(name.to_string()),
                 name: Some(name.to_string()),
                 expected_revision: None,
+                module: None,
             },
         ))]),
     )

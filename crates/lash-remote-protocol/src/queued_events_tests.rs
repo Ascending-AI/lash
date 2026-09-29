@@ -54,16 +54,15 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
             correlation_id: "correlation".into(),
             event,
         };
-        let wire = activity.encode_json().unwrap();
+        let wire = activity
+            .encode_json(&crate::negotiation::test_negotiated())
+            .unwrap();
         assert_eq!(RemoteTurnActivity::decode_json(&wire).unwrap(), activity);
         let mut old: serde_json::Value = serde_json::from_slice(&wire).unwrap();
         old["protocol_version"] = serde_json::json!(52);
         assert!(matches!(
             RemoteTurnActivity::decode_json(&serde_json::to_vec(&old).unwrap()),
-            Err(RemoteProtocolError::UnsupportedProtocolVersion {
-                actual: 52,
-                expected: 100
-            })
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(52) && local == crate::VersionRange::exactly(100)
         ));
     }
 }

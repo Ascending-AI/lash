@@ -179,7 +179,7 @@ impl TestTurnDrive for LashRuntime {
                 AdmitVerdict::Admit(admitted) => admitted,
                 AdmitVerdict::Parked(park) => {
                     return Err(aborted(RuntimeError::new(
-                        RuntimeErrorCode::QueuedRunPending,
+                        RuntimeErrorCode::SessionRootPending,
                         format!(
                             "accepted turn input `{}` waits behind parked root `{}` (park {})",
                             accepted.input_id, park.root, park.park

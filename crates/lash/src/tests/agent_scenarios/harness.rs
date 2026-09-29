@@ -893,7 +893,7 @@ impl AgentSessionTurnProcessScenario {
                 definition_key: "agent-scenario-session-turn:v1".to_string(),
                 create_request: Box::new(self.child_create_request()),
                 turn_input: Box::new(TurnInput::text("run child session turn")),
-                output_contract: lash_core::ToolOutputContract::Static,
+                result: lash_core::SessionTurnResult::Turn,
             },
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,

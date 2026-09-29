@@ -97,29 +97,45 @@ async fn ledger_rows(url: &str) -> Vec<(String, String, Option<i32>, i32)> {
     rows
 }
 
-async fn stamped_version(url: &str) -> i32 {
+/// The 1.0 compatibility stamp this build writes, as `(version, min_reader)`
+/// (ADR 0115 §1.2, §7): what open admits by. The pre-1.0 DDL revision is the
+/// migration ledger's, never the stamp's.
+const COMPAT_STAMP: (i32, i32) = (1, 1);
+
+/// The component's compatibility stamp, as `(version, min_reader)`.
+async fn compat_stamp(url: &str) -> (i32, i32) {
     let mut connection = PgConnection::connect(url)
         .await
         .expect("connect to read the component stamp");
-    let version = sqlx::query_scalar::<_, i32>(
-        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    let stamp = sqlx::query_as::<_, (i32, i32)>(
+        "SELECT version, min_reader FROM lash_schema_versions
+         WHERE component = 'lash-postgres-store'",
     )
     .fetch_one(&mut connection)
     .await
     .expect("read the component stamp");
     connection.close().await.expect("close stamp read");
-    version
+    stamp
 }
 
 /// Provisions a scratch schema from the committed artifact, then rewinds it
-/// to stand in for the previous component: the stamp steps back one and the
-/// ledger records the predecessor's own bootstrap, the row a catalog that was
-/// provisioned at that generation carries. The objects the newest generation
-/// adds stay: every expand step is idempotent, so a catalog that already has
-/// the step's output proves the same thing — what the predecessor lacks is
-/// the stamp, not the bytes.
+/// to stand in for the previous component: the ledger records the
+/// predecessor's own bootstrap, the row a catalog that was provisioned at that
+/// DDL revision carries, and nothing records this build's. The compatibility
+/// stamp stays this build's, because pre-1.0 revisions change the DDL in
+/// place under one stamp. The objects the newest generation adds stay: every
+/// expand step is idempotent, so a catalog that already has the step's output
+/// proves the same thing — what the predecessor lacks is the ledger row, not
+/// the bytes.
 async fn rewind_to_previous_component(database_url: &str, schema: &str) {
     let predecessor = PostgresStorage::schema_version() - 1;
+    record_component(database_url, schema, predecessor).await;
+}
+
+/// Provisions a scratch schema from the committed artifact and records it in
+/// the ledger as provisioned at DDL revision `version`: a catalog that build
+/// provisioned, as far as the migrate planner can tell.
+async fn record_component(database_url: &str, schema: &str, version: i32) {
     let mut admin = PgConnection::connect(database_url)
         .await
         .expect("connect scratch provisioner");
@@ -136,41 +152,11 @@ async fn rewind_to_previous_component(database_url: &str, schema: &str) {
                                       from_version, to_version, started_at_ms)
          VALUES ('expand', $1, 'predecessor', 'applied', NULL, $2, 0)",
     )
-    .bind(format!("bootstrap-{predecessor}"))
-    .bind(predecessor)
+    .bind(format!("bootstrap-{version}"))
+    .bind(version)
     .execute(&mut admin)
     .await
-    .expect("record the predecessor's bootstrap in the ledger");
-    sqlx::query("UPDATE lash_schema_versions SET version = $1 WHERE component = $2")
-        .bind(predecessor)
-        .bind("lash-postgres-store")
-        .execute(&mut admin)
-        .await
-        .expect("stamp the scratch schema at the predecessor component");
-    admin.close().await.expect("close scratch provisioner");
-}
-
-/// Provisions a scratch schema from the committed artifact, then stamps it at
-/// component `version`: a catalog that build provisioned, as far as the
-/// version gate and the migrate planner can tell.
-async fn stamp_component(database_url: &str, schema: &str, version: i32) {
-    let mut admin = PgConnection::connect(database_url)
-        .await
-        .expect("connect scratch provisioner");
-    sqlx::query(&format!("SET search_path TO {schema}"))
-        .execute(&mut admin)
-        .await
-        .expect("point the provisioner at the scratch schema");
-    sqlx::raw_sql(PostgresStorage::schema_ddl())
-        .execute(&mut admin)
-        .await
-        .expect("provision the scratch schema from schema.sql");
-    sqlx::query("UPDATE lash_schema_versions SET version = $1 WHERE component = $2")
-        .bind(version)
-        .bind("lash-postgres-store")
-        .execute(&mut admin)
-        .await
-        .expect("stamp the scratch schema at the older component");
+    .expect("record the older component's bootstrap in the ledger");
     admin.close().await.expect("close scratch provisioner");
 }
 
@@ -215,8 +201,9 @@ async fn migrate_on_a_fresh_schema_creates_the_schema_and_the_ledger() {
         "the ledger records the bootstrap"
     );
     assert_eq!(
-        stamped_version(&url).await,
-        PostgresStorage::schema_version()
+        compat_stamp(&url).await,
+        COMPAT_STAMP,
+        "the bootstrap writes this build's compatibility stamp"
     );
 
     // And the provisioned catalog is openable: the gate a worker takes passes.
@@ -307,13 +294,16 @@ async fn migrate_advances_a_stamped_predecessor_component() {
     rewind_to_previous_component(&database_url, &schema).await;
     let predecessor = PostgresStorage::schema_version() - 1;
 
-    // The predecessor catalog is below the open gate's supported range: a
-    // worker must refuse it, which is why migrate exists.
-    let refused = PostgresStorage::connect(&url).await;
-    assert!(
-        refused.is_err(),
-        "a predecessor-stamped catalog must not open directly"
-    );
+    // Open admits by the compatibility stamp and the shape, never by the
+    // ledger (ADR 0115 §1.3): the predecessor carries this build's stamp and,
+    // one vocabulary-only revision behind, this build's shape, so a worker
+    // opens it Native. What the ledger still owes it is migrate's to apply.
+    PostgresStorage::connect(&url)
+        .await
+        .expect("a predecessor under this build's stamp and shape opens")
+        .pool()
+        .close()
+        .await;
 
     // The plan's answer is the catalog's: whatever step the build declares
     // carries the predecessor to this build's component.
@@ -341,9 +331,9 @@ async fn migrate_advances_a_stamped_predecessor_component() {
     assert_eq!(step.phase, MigrationPhase::Expand.name());
     assert_eq!(step.from_version, Some(predecessor));
     assert_eq!(step.to_version, PostgresStorage::schema_version());
-    // Planning changed nothing: the stamp is still the predecessor's, the
-    // ledger rows are exactly what the rewind left, and no DDL ran.
-    assert_eq!(stamped_version(&url).await, predecessor);
+    // Planning changed nothing: the stamp is still the one the rewind left,
+    // the ledger rows are exactly what the rewind left, and no DDL ran.
+    assert_eq!(compat_stamp(&url).await, COMPAT_STAMP);
     assert_eq!(
         ledger_rows(&url).await,
         ledger_before,
@@ -377,8 +367,9 @@ async fn migrate_advances_a_stamped_predecessor_component() {
         "the ledger keeps the predecessor's row and records the step"
     );
     assert_eq!(
-        stamped_version(&url).await,
-        PostgresStorage::schema_version()
+        compat_stamp(&url).await,
+        COMPAT_STAMP,
+        "an expand step keeps the stamp and its reader floor"
     );
     PostgresStorage::connect(&url)
         .await
@@ -390,8 +381,9 @@ async fn migrate_advances_a_stamped_predecessor_component() {
 }
 
 /// Component 139 (FIG-3607) re-keys the process relations, which no expand
-/// step can do, so the expand catalog has no step from 138: a catalog stamped
-/// 138 is a recreate boundary. Planning and migrating it refuse with the typed
+/// step can do, so the expand catalog has no step from 138: a catalog at DDL
+/// revision 138 is a recreate boundary. It lacks what 139 and 140 added, so
+/// open refuses its shape; planning and migrating it refuse with the typed
 /// range error, and the refused run writes nothing — no ledger row, no stamp
 /// move.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -403,11 +395,24 @@ async fn a_component_without_an_expand_step_is_refused() {
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
     let found = 138;
-    stamp_component(&database_url, &schema, found).await;
+    record_component(&database_url, &schema, found).await;
+    // A 138 catalog predates the logical-root family component 140 added.
+    let mut admin = PgConnection::connect(&database_url)
+        .await
+        .expect("connect scratch provisioner");
+    sqlx::query(&format!(
+        "DROP TABLE {schema}.lash_session_root_inputs, {schema}.lash_session_roots,
+                    {schema}.lash_control_intents CASCADE"
+    ))
+    .execute(&mut admin)
+    .await
+    .expect("remove the tables component 140 added");
+    admin.close().await.expect("close scratch provisioner");
+    let ledger_before = ledger_rows(&url).await;
 
     assert!(
         PostgresStorage::connect(&url).await.is_err(),
-        "a catalog stamped 138 must not open directly"
+        "a catalog at DDL revision 138 must not open directly"
     );
     for (what, refused) in [
         (
@@ -435,9 +440,10 @@ async fn a_component_without_an_expand_step_is_refused() {
             "the {what} refusal names the missing migration path: {rendered}"
         );
     }
-    assert_eq!(stamped_version(&url).await, found);
-    assert!(
-        ledger_rows(&url).await.is_empty(),
+    assert_eq!(compat_stamp(&url).await, COMPAT_STAMP);
+    assert_eq!(
+        ledger_rows(&url).await,
+        ledger_before,
         "a refused migrate records no step"
     );
     drop_scratch_schema(&database_url, &schema).await;

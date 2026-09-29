@@ -1504,7 +1504,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
         .await;
         handler.close().await.expect("close the cell's handler");
         assert!(first.error.is_none(), "{:?}", first.error);
-        assert_eq!(state.stored_lashlang_modules.len(), 1);
+        assert_eq!(state.frame_held_module_refs().count(), 1);
 
         let double =
             crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -1527,7 +1527,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
         .await;
         handler.close().await.expect("close the cell's handler");
         assert!(second.error.is_none(), "{:?}", second.error);
-        assert_eq!(state.stored_lashlang_modules.len(), 1);
+        assert_eq!(state.frame_held_module_refs().count(), 1);
         let stats = state.linked_programs.stats();
         assert_eq!(stats.hits, 1);
         assert_eq!(stats.misses, 1);
@@ -1573,8 +1573,7 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
         handler.close().await.expect("close the cell's handler");
         assert!(response.error.is_none(), "{:?}", response.error);
         let module_ref = state
-            .stored_lashlang_modules
-            .iter()
+            .frame_held_module_refs()
             .next()
             .expect("stored process module");
         let artifact =
@@ -1814,9 +1813,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
             Some(spec) => Some(
                 lash_core::testing::publish_process_execution_env_for_testing(
                     self.env_store.as_ref(),
-                    &lash_core::ArtifactOwner::process_start(
-                        &lash_core::ProcessCommand::start_effect_id(request.start_key.as_ref()),
-                    ),
+                    &fixture_start_claim(),
                     &spec,
                 )
                 .await?,
@@ -1946,9 +1943,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         {
             let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
                 self.env_store.as_ref(),
-                &lash_core::ArtifactOwner::process_start(
-                    &lash_core::ProcessCommand::start_effect_id(registration.start_key.as_ref()),
-                ),
+                &fixture_start_claim(),
                 spec,
             )
             .await?;
@@ -2456,4 +2451,15 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         .expect("inspected process id");
     assert_eq!(finish_id, recorded_pid);
     handler.close().await.expect("close the cell handler");
+}
+
+/// The claim a fixture that registers directly publishes a start's
+/// environment under. It stands in for the journaled start's own `Start`
+/// referrer, which only the runtime's start command arms, so it is a host
+/// pin the fixture never releases.
+fn fixture_start_claim() -> lash_core::ReferrerClaim {
+    lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+        lash_core::HostArtifactPin::mint(),
+    ))
+    .expect("a host pin is an unguarded referrer")
 }

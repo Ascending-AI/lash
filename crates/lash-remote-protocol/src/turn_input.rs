@@ -49,6 +49,13 @@ pub struct RemoteTurnInput {
     pub items: Vec<RemoteInputItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_turn_id: Option<TurnId>,
+    /// The one field Phase A's synthetic N+1 adds at its newer protocol
+    /// version (ADR 0115 §6). It travels only at that version: the encoder
+    /// of N's version drops it, and a message at N's version never carries
+    /// it.
+    #[cfg(feature = "synthetic-next")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synthetic_next_note: Option<String>,
 }
 
 impl RemoteTurnInput {
@@ -56,18 +63,40 @@ impl RemoteTurnInput {
         Self {
             items: vec![RemoteInputItem::Text { text: text.into() }],
             trace_turn_id: None,
+            #[cfg(feature = "synthetic-next")]
+            synthetic_next_note: None,
         }
     }
 
     /// Nested turn input remains a bare body.
-    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
-        crate::Envelope::new(self).encode_json()
+    pub fn encode_json(
+        &self,
+        negotiated: &crate::Negotiated,
+    ) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::at(negotiated, self.at_version(negotiated.selected())).encode_json()
     }
 
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        let input = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        let envelope = crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?;
+        let version = envelope.protocol_version();
+        let input = envelope.into_body().at_version(version).into_owned();
         input.validate()?;
         Ok(input)
+    }
+
+    /// This input as `version` carries it: the synthetic N+1's added field
+    /// exists only above N's version (ADR 0115 §6), so N's encoder and
+    /// decoder drop it.
+    fn at_version(&self, version: u32) -> std::borrow::Cow<'_, Self> {
+        #[cfg(feature = "synthetic-next")]
+        if version <= crate::REMOTE_PROTOCOL_VERSION && self.synthetic_next_note.is_some() {
+            return std::borrow::Cow::Owned(Self {
+                synthetic_next_note: None,
+                ..self.clone()
+            });
+        }
+        let _ = version;
+        std::borrow::Cow::Borrowed(self)
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
@@ -118,14 +147,30 @@ pub struct RemoteTurnRequest {
 }
 
 impl RemoteTurnRequest {
-    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
-        crate::Envelope::new(self).encode_json()
+    pub fn encode_json(
+        &self,
+        negotiated: &crate::Negotiated,
+    ) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::at(negotiated, self.at_version(negotiated.selected())).encode_json()
     }
 
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        let request = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        let envelope = crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?;
+        let version = envelope.protocol_version();
+        let request = envelope.into_body().at_version(version).into_owned();
         request.validate()?;
         Ok(request)
+    }
+
+    /// This request as `version` carries it: its input at that version.
+    fn at_version(&self, version: u32) -> std::borrow::Cow<'_, Self> {
+        match self.input.at_version(version) {
+            std::borrow::Cow::Borrowed(_) => std::borrow::Cow::Borrowed(self),
+            std::borrow::Cow::Owned(input) => std::borrow::Cow::Owned(Self {
+                input,
+                ..self.clone()
+            }),
+        }
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {

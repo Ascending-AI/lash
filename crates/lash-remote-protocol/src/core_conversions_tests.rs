@@ -698,10 +698,9 @@ fn process_start_requests_round_trip_core_values() {
                 .with_session_id("child-session"),
             ),
             turn_input: Box::new(lash_core::TurnInput::text("hello child")),
-            output_contract: lash_core::ToolOutputContract::from_input_schema(
-                "schema",
-                Some(serde_json::json!({ "type": "object" })),
-            ),
+            result: lash_core::SessionTurnResult::FinalValue {
+                schema: Some(serde_json::json!({ "type": "object" })),
+            },
         },
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
@@ -1240,7 +1239,9 @@ fn assert_terminal_call_record_converts_and_validates(
     activity
         .validate()
         .expect("ModelCallRecorded conversion validates");
-    let activity_json = activity.encode_json().expect("encode activity envelope");
+    let activity_json = activity
+        .encode_json(&crate::negotiation::test_negotiated())
+        .expect("encode activity envelope");
     RemoteTurnActivity::decode_json(&activity_json).expect("activity decoder validates");
 
     let turn = lash_core::facade_support::AssembledTurn {
@@ -1618,7 +1619,8 @@ fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
         .cloned()
         .enumerate()
         .map(|(sequence, activity)| {
-            serde_json::to_string(&Envelope::new(
+            serde_json::to_string(&Envelope::at(
+                &crate::negotiation::test_negotiated(),
                 RemoteTurnActivity::from_core(sequence as u64, activity)
                     .expect("remote turn activity"),
             ))
@@ -1633,7 +1635,11 @@ fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("test runtime");
-        let sink = RemoteTurnActivitySink::new(FlushTrackingWriter::default(), 0);
+        let sink = RemoteTurnActivitySink::new(
+            FlushTrackingWriter::default(),
+            0,
+            crate::negotiation::test_negotiated(),
+        );
         runtime.block_on(async {
             for activity in activities {
                 lash_core::facade_support::TurnActivitySink::emit(&sink, activity).await;
@@ -1661,9 +1667,10 @@ fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
         .collect::<Vec<_>>();
     assert_eq!(lines.len(), 2);
     for line in lines {
-        let activity = Envelope::<RemoteTurnActivity>::decode_json(line.as_bytes())
-            .expect("each NDJSON line is one remote activity envelope")
-            .into_body();
+        let activity =
+            Envelope::<RemoteTurnActivity>::decode_json(line.as_bytes(), crate::REMOTE_PROTOCOL)
+                .expect("each NDJSON line is one remote activity envelope")
+                .into_body();
         activity.validate().expect("valid remote activity body");
     }
 }
@@ -1721,7 +1728,11 @@ fn remote_turn_activity_sink_records_write_error_and_continues_with_later_events
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("test runtime");
-        let sink = RemoteTurnActivitySink::new(FailFirstWriter::default(), 0);
+        let sink = RemoteTurnActivitySink::new(
+            FailFirstWriter::default(),
+            0,
+            crate::negotiation::test_negotiated(),
+        );
         runtime.block_on(async {
             for activity in activities {
                 lash_core::facade_support::TurnActivitySink::emit(&sink, activity).await;
@@ -1792,7 +1803,11 @@ fn remote_turn_activity_sink_records_flush_error() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("test runtime");
-        let sink = RemoteTurnActivitySink::new(FailFlushWriter::default(), 0);
+        let sink = RemoteTurnActivitySink::new(
+            FailFlushWriter::default(),
+            0,
+            crate::negotiation::test_negotiated(),
+        );
         runtime.block_on(async {
             lash_core::facade_support::TurnActivitySink::emit(&sink, activity).await;
         });

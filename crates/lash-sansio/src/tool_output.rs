@@ -149,6 +149,14 @@ pub enum ToolIntentRefusalReason {
         expected: String,
         recorded: String,
     },
+    ForeignTriggerOwnerScope {
+        expected: String,
+        recorded: String,
+    },
+    ForeignTriggerActor {
+        expected: String,
+        recorded: String,
+    },
     CommandFailed {
         code: String,
         message: String,
@@ -169,6 +177,8 @@ impl ToolIntentRefusalReason {
             Self::CanonicalByteBudgetExceeded { .. } => "canonical_byte_budget_exceeded",
             Self::PerKindBudgetExceeded { .. } => "per_kind_budget_exceeded",
             Self::SessionMismatch { .. } => "session_mismatch",
+            Self::ForeignTriggerOwnerScope { .. } => "foreign_trigger_owner_scope",
+            Self::ForeignTriggerActor { .. } => "foreign_trigger_actor",
             Self::CommandFailed { .. } => "command_failed",
             Self::MintingGroupChildCancelled => "minting_group_child_cancelled",
         }

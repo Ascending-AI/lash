@@ -102,6 +102,7 @@ use lash_conformance::{
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
+use lash_core_execution::compat::CompatRefusal;
 use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
 use lash_core_execution::{
     AttachmentManifest as _, DeploymentStore, ProcessExecutionEnvStore, ProcessRegistry,
@@ -125,7 +126,7 @@ mod wake_delivery;
 
 use injectors::{PostgresFenceIntegrityInjector, PostgresLineageConformanceInjector};
 use occurrence_listing::PostgresTriggerOccurrenceRetentionFaultInjector;
-use support::{SharedDatabaseLock, database_url, reset};
+use support::{IsolatedSchema, SharedDatabaseLock, database_url, reset};
 
 lash_conformance::lineage_tests!({
     let Some((database_lock, handles)) = postgres_lineage_handles().await else {
@@ -649,6 +650,51 @@ lash_conformance::artifact_store_reopenable_tests!({
     let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres artifact-store conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let storage = Arc::new(storage);
+    let database_url = database_url().expect("configured Postgres database URL");
+    (database_lock, move || {
+        let storage = Arc::clone(&storage);
+        let database_url = database_url.clone();
+        sync_await(async move {
+            reset(storage.pool()).await;
+            let open_storage = PostgresStorage::connect(&database_url)
+                .await
+                .expect("open first Postgres artifact pool");
+            let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
+                artifacts: Arc::new(open_storage.lashlang_artifact_store())
+                    as Arc<dyn lash_core::ModuleArtifactStore>,
+                process_env: Arc::new(open_storage.process_env_store())
+                    as Arc<dyn ProcessExecutionEnvStore>,
+            };
+            let reopen_url = database_url.clone();
+            lash_conformance::fused_artifact_store::ReopenableArtifactStore {
+                open,
+                reopen: Arc::new(move || {
+                    let reopen_url = reopen_url.clone();
+                    let reopened = sync_await(async move {
+                        PostgresStorage::connect(&reopen_url)
+                            .await
+                            .expect("construct post-write Postgres artifact pool")
+                    });
+                    lash_conformance::fused_artifact_store::ArtifactStoreHandles {
+                        artifacts: Arc::new(reopened.lashlang_artifact_store())
+                            as Arc<dyn lash_core::ModuleArtifactStore>,
+                        process_env: Arc::new(reopened.process_env_store())
+                            as Arc<dyn ProcessExecutionEnvStore>,
+                    }
+                }),
+            }
+        })
+    })
+});
+
+lash_conformance::artifact_referrer_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres artifact-referrer conformance: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
@@ -1262,14 +1308,88 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
 
     let error = result.expect_err("unknown Postgres attachment owner kind must refuse");
     assert!(
-        matches!(
-            error,
-            StoreError::StoredDataCorrupt {
-                record_kind: "AttachmentManifest owner kind",
-                ref message,
-            } if message == "unknown attachment owner kind `unknown`"
-        ),
-        "Postgres must return the canonical attachment-owner corruption refusal, got {error:?}"
+        matches!(error, StoreError::Incompatible { .. }),
+        "Postgres must return the typed attachment-owner incompatibility, got {error:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gc_keeps_an_attachment_whose_owner_does_not_decode() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping PostgreSQL GC owner test: database URL is not set");
+        return;
+    };
+    reset(storage.pool()).await;
+    sqlx::query(
+        "ALTER TABLE lash_attachment_manifest
+         DROP CONSTRAINT IF EXISTS ck_attachment_manifest_owner_kind,
+         DROP CONSTRAINT IF EXISTS ck_lash_attachment_manifest_owner_identity",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("allow future owner fixture");
+    sqlx::query(
+        "INSERT INTO lash_attachment_manifest
+         (attachment_id, session_id, canonical_uri, intent_at_ms, owner_kind, owner_id)
+         VALUES ('future-owner-root', 'future-owner-session', 'uri', 1, 'future', 'opaque'),
+                ('invalid-process-root', 'future-owner-session', 'uri', 1, 'process', 'p_invalid')",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("seed undecodable owners");
+    sqlx::query("INSERT INTO lash_deleted_sessions (session_id) VALUES ('future-owner-session')")
+        .execute(storage.pool())
+        .await
+        .expect("seed deleted session");
+
+    let factory = storage.session_store_factory_with_shared_process_registry();
+    let mut rooted = Vec::new();
+    for name in ["future-owner-root", "invalid-process-root"] {
+        let id = lash_core_execution::AttachmentId::parse(name).expect("attachment id");
+        rooted.push(
+            lash_core_execution::AttachmentRootSet::has_live_attachment_ref(&factory, &id, 100)
+                .await
+                .expect("probe unknown owner"),
+        );
+    }
+    let refs = lash_core_execution::AttachmentRootSet::live_attachment_refs(&factory, 100)
+        .await
+        .expect("reconcile roots");
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_attachment_manifest
+         WHERE session_id = 'future-owner-session'",
+    )
+    .fetch_one(storage.pool())
+    .await
+    .expect("count retained roots");
+
+    sqlx::query("DELETE FROM lash_attachment_manifest WHERE session_id = 'future-owner-session'")
+        .execute(storage.pool())
+        .await
+        .expect("remove fixture");
+    sqlx::query("DELETE FROM lash_deleted_sessions WHERE session_id = 'future-owner-session'")
+        .execute(storage.pool())
+        .await
+        .expect("remove deleted session");
+    sqlx::query(
+        "ALTER TABLE lash_attachment_manifest
+         ADD CONSTRAINT ck_attachment_manifest_owner_kind
+             CHECK (owner_kind IN ('turn', 'process')),
+         ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity
+             CHECK (
+                 (owner_kind IS NULL AND owner_id IS NULL)
+                 OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL)
+             )",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("restore owner checks");
+
+    assert_eq!(rooted, vec![true, true]);
+    assert_eq!(count, 2, "reconciliation must retain both roots");
+    assert!(refs.contains(&lash_core_execution::AttachmentId::parse("future-owner-root").unwrap()));
+    assert!(
+        refs.contains(&lash_core_execution::AttachmentId::parse("invalid-process-root").unwrap())
     );
 }
 
@@ -1441,36 +1561,27 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     assert_eq!(turn_stamp as u64, NOW_MS);
 }
 
-// Blocker 1: `from_pool` must enforce the same component schema-version gate as
-// `connect`/`connect_with`. Writing the immediately preceding version into
-// `lash_schema_versions` and then constructing over the pool must fail loudly
-// with the mismatch error, so a pre-cutover database can never be adopted.
+// `from_pool` and `connect` must both reject a reader floor above this build.
+// The altered stamp lives in a scratch schema so no failed assertion can affect
+// another conformance case.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some(url) = database_url() else {
         eprintln!("skipping Postgres from_pool gate test: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    let pool = storage.pool().clone();
+    let scratch = IsolatedSchema::provision(&url).await;
+    let pool = scratch.pool.clone();
     let current_version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
     )
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    // Derive the expected version from the compiled store instead of pinning a
-    // literal, which would only add a second, staler copy of the number that
-    // reds trunk on every schema bump that reaches main before the pin is
-    // advanced. This assertion keeps the real invariant: the live database
-    // must record the version the compiled store expects.
-    assert_eq!(
-        current_version,
-        PostgresStorage::schema_version(),
-        "live component version must match the compiled store schema version"
-    );
+    assert_eq!(current_version, 1, "the 1.0 compatibility stamp changed");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
-         WHERE table_schema = 'public'
+         WHERE table_schema = current_schema()
            AND table_name = 'lash_usage_deltas'
            AND column_name = 'payload_hash'",
     )
@@ -1480,7 +1591,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     assert_eq!(payload_hash_nullable, "NO");
     let payload_encoding_version_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
-         WHERE table_schema = 'public'
+         WHERE table_schema = current_schema()
            AND table_name = 'lash_usage_deltas'
            AND column_name = 'payload_encoding_version'",
     )
@@ -1503,81 +1614,54 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
         ),
         "usage identity uniqueness must include the payload encoding version and canonical hash: {usage_identity_constraint}"
     );
-    let stale_version = current_version - 1;
-    // Force the recorded component version to a stale value.
+    let newer_version = current_version + 1;
+    // A newer catalog whose floor passed this build must refuse adoption.
     sqlx::query(
-        "INSERT INTO lash_schema_versions (component, version) VALUES ('lash-postgres-store', $1)
-         ON CONFLICT (component) DO UPDATE SET version = EXCLUDED.version",
+        "UPDATE lash_schema_versions SET version = $1, min_reader = $1
+         WHERE component = 'lash-postgres-store'",
     )
-    .bind(stale_version)
+    .bind(newer_version)
     .execute(&pool)
     .await
-    .expect("write stale schema version");
+    .expect("raise reader floor");
 
     let result = PostgresStorage::from_pool(pool.clone()).await;
-
-    // Restore the correct version BEFORE asserting so a failed assert never leaves
-    // the shared database wedged for other cases.
-    sqlx::query(
-        "UPDATE lash_schema_versions SET version = $1 WHERE component = 'lash-postgres-store'",
-    )
-    .bind(current_version)
-    .execute(&pool)
-    .await
-    .expect("restore schema version");
-
-    let message = match result {
-        Ok(_) => panic!("from_pool must reject a stale schema version"),
-        Err(err) => err.to_string(),
-    };
-    assert!(
-        message.contains(&format!("version {stale_version}"))
-            && message.contains(&format!("expected {current_version}")),
-        "expected a schema-version mismatch error, got: {message}"
-    );
+    scratch.cleanup().await;
+    assert!(matches!(
+        result,
+        Err(StoreError::Incompatible {
+            refusal: CompatRefusal::ReaderFloorAbove {
+                found: 2,
+                min_reader: 2,
+                ..
+            }
+        })
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some(url) = database_url() else {
         eprintln!(
             "skipping Postgres unstamped-schema gate test: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
-    let pool = storage.pool().clone();
-    let current_version: i32 = sqlx::query_scalar(
-        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("read current schema version");
+    let scratch = IsolatedSchema::provision(&url).await;
+    let pool = scratch.pool.clone();
     sqlx::query("DELETE FROM lash_schema_versions WHERE component = 'lash-postgres-store'")
         .execute(&pool)
         .await
         .expect("remove component version stamp");
 
     let result = PostgresStorage::from_pool(pool.clone()).await;
-
-    sqlx::query(
-        "INSERT INTO lash_schema_versions (component, version)
-         VALUES ('lash-postgres-store', $1)
-         ON CONFLICT (component) DO UPDATE SET version = EXCLUDED.version",
-    )
-    .bind(current_version)
-    .execute(&pool)
-    .await
-    .expect("restore component version stamp");
-
-    let message = match result {
-        Ok(_) => panic!("from_pool must reject an unstamped existing Lash schema"),
-        Err(err) => err.to_string(),
-    };
-    assert!(
-        message.contains("has no version stamp")
-            && message.contains(&format!("expected {current_version}")),
-        "expected an unstamped-schema error, got: {message}"
-    );
+    scratch.cleanup().await;
+    assert!(matches!(
+        result,
+        Err(StoreError::Incompatible {
+            refusal: CompatRefusal::Unstamped { .. }
+        })
+    ));
 }
 
 lash_conformance::process_registry_reopenable_tests!({
@@ -1837,11 +1921,13 @@ mod root_control {
     (redrive_under_a_restored_build_completes_once_and_clears_the_park, "s7b-9"),
     (a_stale_redrive_is_fenced_by_a_later_cancel, "s7b-10"),
     (root_scope_close_runs_after_terminal_evidence_at_least_once_never_for_parked, "s7b-11"),
+    (a_joined_inputs_turn_scope_closes_with_its_admitting_root, "drive-joined-scope-close"),
     (a_root_crashed_at_its_report_handover_still_closes_its_scope, "s7b-11b"),
     (cancel_fork_and_close_raise_the_drive_epoch_and_redrive_does_not, "s7b-12"),
 
     (cancel_of_a_parked_root_writes_cancelled_settles_its_input_and_drains_the_next, "s7b-1"),
     (no_row_stays_bound_after_a_roots_verb_close_or_lost_end, "root-verb-unbinds"),
+    (a_refused_root_ends_once_and_its_next_input_admits_a_new_root, "refused-root-end"),
     (fork_releases_the_old_owner_before_the_new_root_drives_in_original_order_on_a_fresh_journal, "s7b-2"),
     (verbs_are_park_id_cas, "s7b-3"),
     (redrive_under_the_same_build_reparks_the_same_park_with_attempts_plus_one, "s7b-4"),

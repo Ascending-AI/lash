@@ -160,12 +160,20 @@ pub struct AttemptContext<'run> {
     /// running inside one, and the child takes the declaring session's own.
     process_spawn_provenance: Option<crate::ProcessSpawnProvenance>,
     process_lineage: Option<crate::ProcessLineage>,
+    /// The execution-environment reference this attempt inherits from the
+    /// durable process it runs inside — already published under a durable
+    /// owner, so a declaration carrying it publishes nothing at realization.
+    /// `None` outside a process execution, where the spec must be published.
+    inherited_process_execution_env_ref: Option<crate::ProcessExecutionEnvRef>,
     replay_key: Option<String>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     completion_key: Option<crate::AwaitEventKey>,
     completion_support: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     tool_execution_route: ToolExecutionRoute,
+    /// The catalog the attempt was dispatched against. `None` outside a
+    /// runtime dispatch.
+    tool_catalog: Option<Arc<crate::ToolCatalog>>,
 }
 
 impl<'run> AttemptContext<'run> {
@@ -227,12 +235,20 @@ impl<'run> AttemptContext<'run> {
                 .as_ref()
                 .and_then(|runtime| runtime.process_spawn_provenance()),
             process_lineage: context.process_lineage(),
+            inherited_process_execution_env_ref: context
+                .runtime_execution_context
+                .as_ref()
+                .and_then(|runtime| runtime.inherited_process_execution_env_ref()),
             replay_key: context.replay_key.clone(),
             execution_env_spec: context.execution_env_spec.clone(),
             completion_key,
             completion_support,
             phase_probe,
             tool_execution_route: context.tool_execution_route.clone(),
+            tool_catalog: context
+                .runtime_dispatch
+                .as_ref()
+                .map(|dispatch| Arc::clone(&dispatch.tool_catalog)),
         }
     }
 
@@ -259,6 +275,12 @@ impl<'run> AttemptContext<'run> {
     /// Integrator class 3 controller-free process reads for this attempt.
     pub fn processes(&self) -> AttemptProcessReads {
         self.processes.clone()
+    }
+    /// Integrator class 3 read of the tool catalog this attempt was dispatched
+    /// against: the tools its caller can call. A body that compiles a program
+    /// links it against them (FIG-3116). `None` outside a runtime dispatch.
+    pub fn tool_catalog(&self) -> Option<&Arc<crate::ToolCatalog>> {
+        self.tool_catalog.as_ref()
     }
     /// Integrator class 3 cooperative cancellation token supplied by the attempt host.
     pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
@@ -332,6 +354,14 @@ impl<'run> AttemptContext<'run> {
     /// rebuilding it from mutable host state.
     pub fn process_execution_env_spec(&self) -> crate::ProcessExecutionEnvSpec {
         self.execution_env_spec.clone()
+    }
+    /// The execution-environment reference this attempt inherits when it runs
+    /// inside a durable process (FIG-3116): a registration declaring that env
+    /// needs no publication because the reference already names durable bytes.
+    /// `None` means the declaration's env must be published from
+    /// [`Self::process_execution_env_spec`] at realization.
+    pub fn inherited_process_execution_env_ref(&self) -> Option<crate::ProcessExecutionEnvRef> {
+        self.inherited_process_execution_env_ref.clone()
     }
     /// Integrator class 3 decode of the sealed payload into a provider-owned type.
     pub fn decode_prepared_payload<T>(&self) -> Result<T, serde_json::Error>

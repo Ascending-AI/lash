@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use lash_core_execution::{
     ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactStore,
+    ReferrerClaim,
 };
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
@@ -20,13 +21,13 @@ mod requirements;
 mod write_helpers;
 use requirements::RequirementsCollector;
 use write_helpers::{
-    write_binary_op, write_label_metadata, write_process_origin, write_resource_ref,
-    write_structural_role, write_unary_expr, write_unary_op,
+    write_label_metadata, write_process_origin, write_resource_ref, write_structural_role,
+    write_unary_expr,
 };
 
 use crate::ast::{
-    AssignPathStep, BinaryOp, Declaration, Expr, LabelMetadata, ListComprehensionClause, MethodKey,
-    ProcessDecl, Program, ResourceRefExpr, TypeExpr, UnaryOp,
+    AssignPathStep, Declaration, Expr, LabelMetadata, MethodKey, ProcessDecl, Program,
+    ResourceRefExpr, TypeExpr,
 };
 use crate::linker::{
     LashlangAbilities, LashlangHostCatalog, LashlangLanguageFeatures, ResourceOperationBinding,
@@ -276,26 +277,10 @@ impl ModuleArtifact {
             .find_map(|(name, candidate)| (candidate == process_ref).then_some(name.as_str()))
     }
 
-    /// Resolves aliases and host named-data references using this artifact's
-    /// immutable requirements snapshot.
+    /// Resolves host named-data references using this artifact's immutable
+    /// requirements snapshot.
     pub fn resolve_type(&self, ty: &TypeExpr) -> TypeExpr {
-        let aliases = self
-            .ir
-            .declarations
-            .iter()
-            .filter_map(|declaration| match declaration {
-                Declaration::Type(declaration) => {
-                    Some((declaration.name.to_string(), declaration.ty.clone()))
-                }
-                Declaration::Process(_) | Declaration::Function(_) => None,
-            })
-            .collect::<BTreeMap<_, _>>();
-        resolve_artifact_type(
-            ty,
-            &aliases,
-            &self.host_requirements.resources,
-            &mut BTreeSet::new(),
-        )
+        resolve_artifact_type(ty, &self.host_requirements.resources, &mut BTreeSet::new())
     }
 
     pub fn process_type(&self, process_name: &str) -> Option<TypeExpr> {
@@ -395,31 +380,29 @@ impl ModuleArtifact {
 )]
 fn resolve_artifact_type(
     ty: &TypeExpr,
-    aliases: &BTreeMap<String, TypeExpr>,
     resources: &LashlangHostCatalog,
     seen: &mut BTreeSet<String>,
 ) -> TypeExpr {
     match ty {
         TypeExpr::Ref(name) if seen.insert(name.to_string()) => {
-            let resolved = if let Some(ty) = aliases.get(name.as_str()) {
-                resolve_artifact_type(ty, aliases, resources, seen)
-            } else if let Some(data_type) = resources.resolve_named_data_type(name.as_str()) {
-                resolve_artifact_type(data_type.ty(), aliases, resources, seen)
+            let resolved = if let Some(data_type) = resources.resolve_named_data_type(name.as_str())
+            {
+                resolve_artifact_type(data_type.ty(), resources, seen)
             } else {
                 ty.clone()
             };
             seen.remove(name.as_str());
             resolved
         }
-        TypeExpr::List(item) => TypeExpr::List(Box::new(resolve_artifact_type(
-            item, aliases, resources, seen,
-        ))),
+        TypeExpr::List(item) => {
+            TypeExpr::List(Box::new(resolve_artifact_type(item, resources, seen)))
+        }
         TypeExpr::Object(fields) => TypeExpr::Object(
             fields
                 .iter()
                 .map(|field| crate::TypeField {
                     name: field.name.clone(),
-                    ty: resolve_artifact_type(&field.ty, aliases, resources, seen),
+                    ty: resolve_artifact_type(&field.ty, resources, seen),
                     optional: field.optional,
                 })
                 .collect(),
@@ -427,7 +410,7 @@ fn resolve_artifact_type(
         TypeExpr::Union(items) => TypeExpr::union(
             items
                 .iter()
-                .map(|item| resolve_artifact_type(item, aliases, resources, seen))
+                .map(|item| resolve_artifact_type(item, resources, seen))
                 .collect(),
         ),
         TypeExpr::Process(process) => match process.as_signature() {
@@ -439,17 +422,17 @@ fn resolve_artifact_type(
                         .iter()
                         .map(|param| crate::ProcessParam {
                             name: param.name.clone(),
-                            ty: resolve_artifact_type(&param.ty, aliases, resources, seen),
+                            ty: resolve_artifact_type(&param.ty, resources, seen),
                         })
                         .collect(),
-                    resolve_artifact_type(signature.output(), aliases, resources, seen),
+                    resolve_artifact_type(signature.output(), resources, seen),
                 )
                 .expect("resolved checked process signature remains valid"),
             )),
         },
-        TypeExpr::TriggerHandle(event) => TypeExpr::TriggerHandle(Box::new(resolve_artifact_type(
-            event, aliases, resources, seen,
-        ))),
+        TypeExpr::TriggerHandle(event) => {
+            TypeExpr::TriggerHandle(Box::new(resolve_artifact_type(event, resources, seen)))
+        }
         _ => ty.clone(),
     }
 }
@@ -551,8 +534,8 @@ impl From<ModuleArtifactError> for ArtifactStoreError {
 /// and never decodes them; this view encodes a [`ModuleArtifact`] on publish
 /// and decodes and verifies it on read. Modules are content-addressed and
 /// immutable, so a decoded module is cached by its reference, and a read
-/// returns the cached module only once the port confirms the module is still
-/// retained. Cloning shares the port and the cache.
+/// returns the cached module only once the port confirms a referrer still
+/// holds it. Cloning shares the port and the cache.
 #[derive(Clone)]
 pub struct LashlangArtifacts {
     store: Arc<dyn ModuleArtifactStore>,
@@ -589,17 +572,18 @@ impl LashlangArtifacts {
         self.store.durability_tier()
     }
 
-    /// Publish an immutable module and retain it for one exact owner.
+    /// Publish an immutable module and add the claim's edge to it (ADR 0113
+    /// §2.1): refused `ReferrerEnded` when the claim's referrer has a fence.
     pub async fn publish_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         artifact: &ModuleArtifact,
     ) -> Result<(), ArtifactStoreError> {
         let bytes = artifact
             .to_store_bytes()
             .map_err(|err| ArtifactStoreError::Encode(err.to_string()))?;
         self.store
-            .publish_module_artifact(owner, artifact.module_ref().as_str(), &bytes)
+            .publish_module_artifact(claim, artifact.module_ref().as_str(), &bytes)
             .await?;
         self.decoded
             .lock_recover()
@@ -607,55 +591,21 @@ impl LashlangArtifacts {
         Ok(())
     }
 
-    /// Add an owner edge to an already published module.
-    pub async fn retain_module_artifact(
+    /// Add the claim's edge to a module already stored: refused
+    /// `ArtifactMissing` when it is not, and `ReferrerEnded` when the claim's
+    /// referrer has a fence.
+    pub async fn acquire_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         module_ref: &ModuleRef,
     ) -> Result<(), ArtifactStoreError> {
         self.store
-            .retain_module_artifact(owner, module_ref.as_str())
+            .acquire_module_artifact(claim, module_ref.as_str())
             .await
     }
 
-    /// Atomically add `to` and sever `from` for one module artifact.
-    pub async fn transfer_module_artifact(
-        &self,
-        from: &lash_core_execution::ArtifactOwner,
-        to: &lash_core_execution::ArtifactOwner,
-        module_ref: &ModuleRef,
-    ) -> Result<(), ArtifactStoreError> {
-        self.store
-            .transfer_module_artifact(from, to, module_ref.as_str())
-            .await
-    }
-
-    /// Sever one exact owner edge and reclaim the module when it was the last.
-    pub async fn release_module_artifact(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &ModuleRef,
-    ) -> Result<(), ArtifactStoreError> {
-        self.store
-            .release_module_artifact(owner, module_ref.as_str())
-            .await?;
-        self.decoded.lock_recover().remove(module_ref);
-        Ok(())
-    }
-
-    /// Permanently fence an execution owner against late publication and sever
-    /// every module edge it still owns.
-    pub async fn retire_module_artifact_owner(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), ArtifactStoreError> {
-        self.store.retire_module_artifact_owner(owner).await?;
-        self.decoded.lock_recover().clear();
-        Ok(())
-    }
-
-    /// The module published under `module_ref`, decoded and verified, if it is
-    /// retained.
+    /// The module published under `module_ref`, decoded and verified, if a
+    /// referrer holds it.
     pub async fn get_module_artifact(
         &self,
         module_ref: &ModuleRef,
@@ -699,8 +649,30 @@ pub(crate) struct InMemoryLashlangArtifactStore {
 #[derive(Default)]
 struct InMemoryArtifactState {
     modules: BTreeMap<String, Vec<u8>>,
-    owners: Vec<(String, lash_core_execution::ArtifactOwner)>,
-    retired_owners: Vec<lash_core_execution::ArtifactOwner>,
+    /// `(module_ref, referrer)` edges.
+    edges: BTreeSet<(String, String)>,
+    /// Ended referrers, by their stored pair.
+    fences: BTreeSet<String>,
+}
+
+#[cfg(test)]
+fn stored_pair(referrer: &lash_core_execution::ArtifactReferrer) -> String {
+    format!("{}:{}", referrer.kind(), referrer.canonical_id())
+}
+
+#[cfg(test)]
+impl InMemoryArtifactState {
+    fn check_open(
+        &self,
+        referrer: &lash_core_execution::ArtifactReferrer,
+    ) -> Result<(), ArtifactStoreError> {
+        if self.fences.contains(&stored_pair(referrer)) {
+            return Err(ArtifactStoreError::ReferrerEnded {
+                referrer: referrer.clone(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -721,7 +693,7 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
 
     async fn publish_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         module_ref: &str,
         bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
@@ -735,120 +707,73 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
             pause.pause().await;
         }
         let mut state = self.state.lock_recover();
-        if state.retired_owners.contains(owner) {
-            return Err(ArtifactStoreError::OwnerRetired);
-        }
+        state.check_open(claim.referrer())?;
         if let Some(existing) = state.modules.get(module_ref)
             && existing.as_slice() != bytes
         {
-            return Err(ArtifactStoreError::Backend(format!(
-                "module artifact `{module_ref}` is immutable"
-            )));
+            return Err(ArtifactStoreError::Immutable {
+                artifact_ref: module_ref.to_string(),
+            });
         }
         state
             .modules
             .entry(module_ref.to_string())
             .or_insert_with(|| bytes.to_vec());
-        let edge = (module_ref.to_string(), owner.clone());
-        if !state.owners.contains(&edge) {
-            state.owners.push(edge);
-        }
+        state
+            .edges
+            .insert((module_ref.to_string(), stored_pair(claim.referrer())));
         Ok(())
     }
 
-    async fn retain_module_artifact(
+    async fn acquire_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
-        if state.retired_owners.contains(owner) {
-            return Err(ArtifactStoreError::OwnerRetired);
-        }
+        state.check_open(claim.referrer())?;
         if !state.modules.contains_key(module_ref) {
-            return Err(ArtifactStoreError::Backend(format!(
-                "missing module artifact `{module_ref}`"
-            )));
-        }
-        let edge = (module_ref.to_string(), owner.clone());
-        if !state.owners.contains(&edge) {
-            state.owners.push(edge);
-        }
-        Ok(())
-    }
-
-    async fn transfer_module_artifact(
-        &self,
-        from: &lash_core_execution::ArtifactOwner,
-        to: &lash_core_execution::ArtifactOwner,
-        module_ref: &str,
-    ) -> Result<(), ArtifactStoreError> {
-        let mut state = self.state.lock_recover();
-        if state.retired_owners.contains(to) {
-            return Err(ArtifactStoreError::DestinationOwnerRetired);
-        }
-        let from_edge = (module_ref.to_string(), from.clone());
-        if !state.owners.contains(&from_edge) {
-            if state.owners.contains(&(module_ref.to_string(), to.clone())) {
-                return Ok(());
-            }
-            return Err(ArtifactStoreError::StagingEdgeMissing {
-                artifact: format!("module artifact `{module_ref}`"),
+            return Err(ArtifactStoreError::ArtifactMissing {
+                artifact_ref: module_ref.to_string(),
             });
         }
-        let to_edge = (module_ref.to_string(), to.clone());
-        if !state.owners.contains(&to_edge) {
-            state.owners.push(to_edge);
-        }
-        state.owners.retain(|edge| edge != &from_edge);
+        state
+            .edges
+            .insert((module_ref.to_string(), stored_pair(claim.referrer())));
         Ok(())
     }
 
-    async fn release_module_artifact(
+    async fn end_module_referrer(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &str,
+        cleanup: &lash_core_execution::ResolvedArtifactCleanup,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
-        let edge = (module_ref.to_string(), owner.clone());
-        state.owners.retain(|candidate| candidate != &edge);
-        if !state
-            .owners
+        let ended = stored_pair(&cleanup.referrer);
+        state.fences.insert(ended.clone());
+        for carry in &cleanup.carries {
+            let to = stored_pair(&carry.to);
+            if state.fences.contains(&to) {
+                continue;
+            }
+            if !state.modules.contains_key(&carry.artifact.artifact_ref) {
+                return Err(ArtifactStoreError::CarryArtifactMissing {
+                    artifact_ref: carry.artifact.artifact_ref.clone(),
+                    to: carry.to.clone(),
+                });
+            }
+            state
+                .edges
+                .insert((carry.artifact.artifact_ref.clone(), to));
+        }
+        let severed: Vec<String> = state
+            .edges
             .iter()
-            .any(|(candidate, _)| candidate == module_ref)
-        {
-            state.modules.remove(module_ref);
-        }
-        Ok(())
-    }
-
-    async fn retire_module_artifact_owner(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), ArtifactStoreError> {
-        if !matches!(owner, lash_core_execution::ArtifactOwner::Execution(_)) {
-            return Err(ArtifactStoreError::Backend(
-                "only execution artifact owners can be retired".to_string(),
-            ));
-        }
-        let mut state = self.state.lock_recover();
-        if !state.retired_owners.contains(owner) {
-            state.retired_owners.push(owner.clone());
-        }
-        let affected = state
-            .owners
-            .iter()
-            .filter_map(|(module_ref, candidate)| {
-                (candidate == owner).then_some(module_ref.clone())
-            })
-            .collect::<Vec<_>>();
-        state.owners.retain(|(_, candidate)| candidate != owner);
-        for module_ref in affected {
-            if !state
-                .owners
-                .iter()
-                .any(|(candidate, _)| candidate == &module_ref)
-            {
+            .filter(|(_, referrer)| *referrer == ended)
+            .map(|(module_ref, _)| module_ref.clone())
+            .collect();
+        state.edges.retain(|(_, referrer)| *referrer != ended);
+        for module_ref in severed {
+            if !state.edges.iter().any(|(held, _)| *held == module_ref) {
                 state.modules.remove(&module_ref);
             }
         }
@@ -1026,11 +951,6 @@ fn write_program(writer: &mut HashWriter, program: &Program) {
 
 fn write_declaration(writer: &mut HashWriter, declaration: &Declaration) {
     match declaration {
-        Declaration::Type(type_decl) => {
-            writer.atom("type-decl");
-            writer.atom(type_decl.name.as_str());
-            write_type(writer, &type_decl.ty);
-        }
         Declaration::Process(process) => write_process(writer, process),
         Declaration::Function(function) => write_function(writer, function),
     }
@@ -1190,37 +1110,12 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
             writer.atom("variable");
             write_name(writer, name.as_str());
         }
-        Expr::Tuple(items) => {
-            writer.atom("tuple");
-            writer.usize(items.len());
-            for item in items {
-                write_expr(writer, item);
-            }
-        }
         Expr::List(items) => {
             writer.atom("list");
             writer.usize(items.len());
             for item in items {
                 write_expr(writer, item);
             }
-        }
-        Expr::ListComprehension { element, clauses } => {
-            writer.atom("list-comprehension");
-            writer.usize(clauses.len());
-            for clause in clauses {
-                match clause {
-                    ListComprehensionClause::For { binding, iterable } => {
-                        writer.atom("for");
-                        write_name(writer, binding.as_str());
-                        write_expr(writer, iterable);
-                    }
-                    ListComprehensionClause::If { condition } => {
-                        writer.atom("if");
-                        write_expr(writer, condition);
-                    }
-                }
-            }
-            write_expr(writer, element);
         }
         Expr::Record(entries) => {
             writer.atom("record");
@@ -1316,14 +1211,12 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
         }
         Expr::Await(expr) => write_unary_expr(writer, "await", expr),
         Expr::SleepFor(expr) => write_unary_expr(writer, "sleep-for", expr),
-        Expr::SleepUntil(expr) => write_unary_expr(writer, "sleep-until", expr),
         Expr::WaitSignal { name } => {
             writer.atom("wait-signal");
             writer.atom(name.as_str());
         }
         Expr::ResultUnwrap(expr) => write_unary_expr(writer, "unwrap", expr),
         Expr::Print(expr) => write_unary_expr(writer, "print", expr),
-        Expr::Yield(expr) => write_unary_expr(writer, "yield", expr),
         Expr::Finish(expr) => write_unary_expr(writer, "finish", expr),
         Expr::Fail(expr) => write_unary_expr(writer, "fail", expr),
         Expr::BuiltinCall { name, args } => {
@@ -1450,17 +1343,6 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
             write_expr(writer, target);
             write_expr(writer, index);
         }
-        Expr::Unary { op, expr } => {
-            writer.atom("unary");
-            write_unary_op(writer, *op);
-            write_expr(writer, expr);
-        }
-        Expr::Binary { left, op, right } => {
-            writer.atom("binary");
-            write_binary_op(writer, *op);
-            write_expr(writer, left);
-            write_expr(writer, right);
-        }
         Expr::JavaScriptUnary { op, expr } => {
             writer.atom("javascript:unary");
             writer.atom(&format!("{op:?}"));
@@ -1477,10 +1359,6 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
             writer.atom(&format!("{op:?}"));
             write_expr(writer, left);
             write_expr(writer, right);
-        }
-        Expr::TypeLiteral(ty) => {
-            writer.atom("type-literal");
-            write_type(writer, ty);
         }
     }
 }

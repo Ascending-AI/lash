@@ -143,9 +143,11 @@ pub fn decode_attachment_owner(
             .map(|process_id| Some(AttachmentOwner::Process { process_id }))
             .map_err(|error| corrupt(error.to_string())),
         (Some(unknown), _) if AttachmentOwnerKind::from_wire_str(unknown).is_none() => {
-            Err(StoreError::StoredDataCorrupt {
-                record_kind: "AttachmentManifest owner kind",
-                message: format!("unknown attachment owner kind `{unknown}`"),
+            Err(StoreError::Incompatible {
+                refusal: crate::compat::CompatRefusal::UnknownVocabulary {
+                    surface: "AttachmentManifest owner kind".to_string(),
+                    label: unknown.to_string(),
+                },
             })
         }
         (kind, id) => Err(corrupt(format!(

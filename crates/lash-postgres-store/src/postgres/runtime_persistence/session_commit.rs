@@ -1,6 +1,156 @@
 use super::*;
 use crate::session_sql::session_sql;
 
+/// End every frame in `left` (the frames the commit leaves) in the commit's
+/// transaction: fence it and upsert its `Ended` cleanup with no carries
+/// (ADR 0113 §3.1, Lane G amendment). A transition first carries its
+/// artifacts out of its `ended` frame, one of `left`, into the successor,
+/// and gates every cleanup on its execution; without one the cleanups are
+/// ungated. The referrer locks of every ended frame and the successor are
+/// taken in key order (§2.3).
+async fn end_frames_left_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    transition: Option<&lash_core_execution::store::FrameTransition>,
+    left: &[lash_core_execution::FrameNodeId],
+    now_ms: u64,
+) -> Result<(), StoreError> {
+    use lash_core_execution::{ArtifactReferrer, FrameEnvironmentId};
+    let ended_frames = left
+        .iter()
+        .map(|frame| {
+            ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
+                session_id.clone(),
+                frame.clone(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    let mut referrers = ended_frames.clone();
+    referrers.extend(
+        transition
+            .map(|transition| ArtifactReferrer::FrameEnvironment(transition.successor.clone())),
+    );
+    let mut keys = referrers
+        .iter()
+        .map(|referrer| {
+            (
+                format!(
+                    "lash-artifact-referrer:{}:{}",
+                    referrer.kind().as_str(),
+                    referrer.canonical_id()
+                ),
+                referrer,
+            )
+        })
+        .collect::<Vec<_>>();
+    keys.sort_by(|left, right| left.0.cmp(&right.0));
+    keys.dedup_by(|left, right| left.0 == right.0);
+    for (_, referrer) in keys {
+        crate::artifact_store::lock_referrer_tx(tx, referrer)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    if let Some(transition) = transition {
+        carry_into_successor_tx(tx, transition).await?;
+    }
+    let sql = crate::artifact_store::artifact_sql();
+    let gate = transition.map(|transition| transition.gate.clone());
+    for ended in ended_frames {
+        sqlx::query(sql.fences.insert_fence.sql())
+            .bind(ended.kind().as_str())
+            .bind(ended.canonical_id())
+            .bind(crate::support::clamp_epoch_ms(now_ms))
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        crate::obligation_ledger::arm_cleanup_tx(
+            tx,
+            &lash_core_execution::ArtifactCleanup::ended(ended, Vec::new(), gate.clone()),
+            now_ms,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Carry the transition's artifacts out of its `ended` frame into the
+/// successor, under referrer locks the caller already holds.
+async fn carry_into_successor_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transition: &lash_core_execution::store::FrameTransition,
+) -> Result<(), StoreError> {
+    use lash_core_execution::{ArtifactReferrer, ArtifactStoreId};
+    let ended = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
+    let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
+    let sql = crate::artifact_store::artifact_sql();
+    let successor_fenced: bool = sqlx::query_scalar(sql.fences.select_is_fenced.sql())
+        .bind(successor.kind().as_str())
+        .bind(successor.canonical_id())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    if successor_fenced {
+        return Err(StoreError::ArtifactReferrerEnded {
+            referrer: successor,
+        });
+    }
+    let mut carries = transition
+        .carries
+        .iter()
+        .map(|artifact| {
+            let namespace = match &artifact.store {
+                ArtifactStoreId::LashlangModule => {
+                    Ok(crate::artifact_store::MODULE_ARTIFACT_NAMESPACE)
+                }
+                ArtifactStoreId::ProcessEnv => Ok(crate::artifact_store::PROCESS_ENV_NAMESPACE),
+                ArtifactStoreId::Engine(_) => Err(StoreError::Backend(
+                    "frame carry names an engine artifact".into(),
+                )),
+            }?;
+            Ok((namespace, artifact.artifact_ref.as_str()))
+        })
+        .collect::<Result<Vec<_>, StoreError>>()?;
+    carries.sort_unstable();
+    carries.dedup();
+    for (namespace, artifact_ref) in &carries {
+        let key = format!("lash-artifact:{namespace}:{artifact_ref}");
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_text
+                .sql(),
+        )
+        .bind(key)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    }
+    for (namespace, artifact_ref) in carries {
+        let source_edge: bool = sqlx::query_scalar(sql.edges.select_edge_exists.sql())
+            .bind(namespace)
+            .bind(artifact_ref)
+            .bind(ended.kind().as_str())
+            .bind(ended.canonical_id())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        if !source_edge {
+            return Err(StoreError::ArtifactCarryMissing {
+                artifact_ref: artifact_ref.to_owned(),
+                to: successor,
+            });
+        }
+        sqlx::query(sql.edges.insert_edge.sql())
+            .bind(namespace)
+            .bind(artifact_ref)
+            .bind(successor.kind().as_str())
+            .bind(successor.canonical_id())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl SessionCommitStore for PostgresStore {
     async fn committed_turn_exists(
@@ -623,6 +773,26 @@ impl SessionCommitStore for PostgresStore {
                 })?;
         }
         let meta = plan.head_meta(checkpoint_ref.clone());
+        // The head row is locked by the publication verdict above. The
+        // earlier head payload is stable under the session advisory lock.
+        let left = lash_core_execution::store::frames_left_by_commit(
+            existing
+                .as_ref()
+                .and_then(|head| head.current_frame_node_id.as_ref()),
+            &commit.graph,
+            meta.current_frame_node_id.as_ref(),
+        );
+        if let Some(transition) = &commit.frame_transition
+            && (transition.ended.session_id() != commit.session_id
+                || transition.successor.session_id() != commit.session_id
+                || !left.contains(transition.ended.frame_node_id())
+                || meta.current_frame_node_id.as_ref()
+                    != Some(transition.successor.frame_node_id()))
+        {
+            return Err(StoreError::Backend(
+                "frame transition does not match the committed head".into(),
+            ));
+        }
         // The revision predicate stays on the upsert as the backstop, and it
         // is the ONLY statement-level guard for a concurrent *first* commit,
         // where the placeholder row above is created inside this transaction.
@@ -680,6 +850,14 @@ impl SessionCommitStore for PostgresStore {
                 actual: actual_now,
             });
         }
+        end_frames_left_tx(
+            &mut tx,
+            &commit.session_id,
+            commit.frame_transition.as_ref(),
+            &left,
+            now,
+        )
+        .await?;
         sqlx::query(session_sql().meta.touch_last_commit.sql())
             .bind(commit.session_id.as_str())
             .bind(i64::try_from(now).unwrap_or(i64::MAX))

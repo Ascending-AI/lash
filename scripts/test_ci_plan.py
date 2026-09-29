@@ -1367,6 +1367,52 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
     return needs
 
 
+class RollingUpgradeSelectionTests(unittest.TestCase):
+    """`rolling_upgrade` selects Phase A's two-build gate (ADR 0115 §6).
+
+    ADR 0115 requires `just e2e-rolling` on every pull request that touches a
+    registered versioned surface, so the selector reads the surface registry
+    rather than a second table.
+    """
+
+    def plan(self, *paths: str) -> dict[str, str]:
+        return ci_plan.classify([("M", path) for path in paths])
+
+    def test_the_registry_derives_the_surface_files(self) -> None:
+        paths = ci_plan.versioned_surface_paths()
+        self.assertIn("crates/lash-restate/src/process/admission.rs", paths)
+        self.assertIn("crates/lash-postgres-store/src/lib.rs", paths)
+        self.assertIn("crates/lash-sqlite-store/src/schema.rs", paths)
+
+    def test_a_surface_file_or_the_harness_selects_the_gate(self) -> None:
+        for path in (
+            "crates/lash-restate/src/process/admission.rs",
+            "crates/lash-postgres-store/src/lib.rs",
+            "crates/lash-sqlite-store/src/schema.rs",
+            "crates/lash-upgrade-harness/src/node.rs",
+            "crates/lash-upgrade-harness/Cargo.toml",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual("true", self.plan(path)["rolling_upgrade"])
+
+    def test_docs_and_unrelated_paths_do_not_select_it(self) -> None:
+        for path in (
+            "docs/guide.md",
+            "runbooks/rolling-upgrade/runbook.md",
+            "crates/lash-core/src/runtime/assembly.rs",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual("false", self.plan(path)["rolling_upgrade"])
+
+    def test_an_unreadable_registry_fails_open(self) -> None:
+        with mock.patch.object(
+            ci_plan, "versioned_surface_paths", side_effect=OSError("gone")
+        ):
+            plan = self.plan("crates/lash-core/src/runtime/assembly.rs")
+        self.assertEqual("true", plan["fail_open"])
+        self.assertEqual("true", plan["rolling_upgrade"])
+
+
 class ConclusionTests(unittest.TestCase):
     def test_trusted_pr_requires_preflight_and_defers_full_tail_to_queue(self) -> None:
         needs = apply_event_deferrals(successful_needs(), "pull_request")

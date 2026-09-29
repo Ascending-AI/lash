@@ -32,10 +32,9 @@
 //!   pins the ruling that Lashlang-native aggregates wait for every result and
 //!   report their first *written* rejection (ADR 0099 §10 L7).
 //!
-//! The compile-time aggregate paths (`Instruction::ResourceOperationBatch`
-//! and `Instruction::ResourceOperationListBatch`) have had no authored
-//! spelling since ADR 0096 retired the second dialect, so they are stated
-//! separately, at the IR, rather than through the bridge.
+//! The compile-time aggregate path (`Instruction::ResourceOperationBatch`)
+//! has had no authored spelling since ADR 0096 retired the second dialect, so
+//! it is stated separately, at the IR, rather than through the bridge.
 //!
 //! ## Registering another tier
 //!
@@ -1305,17 +1304,12 @@ async fn sqlite_an_aggregate_leafs_declared_intent_is_realized() -> Result<()> {
 // The compile-time aggregate paths, stated at the IR
 // ---------------------------------------------------------------------------
 //
-// `Instruction::ResourceOperationBatch` and
-// `Instruction::ResourceOperationListBatch` are formed by the compiler from
-// `Expr::Await` over a list or a comprehension. ADR 0096 retired the dialect
-// that spelled those, so neither is reachable from an authored cell and
-// neither can be stated through the bridge above. They are stated here, at the
-// IR, because FIG-3397 changes both and a landing that only re-points the
-// bridge cases would move these silently.
-//
-// The two paths disagreed before FIG-3397: the literal-array batch selected by
-// the reported settlement order and the list-comprehension batch in written
-// order. The ruling puts both on the written-order rule (ADR 0099 §10 L7).
+// `Instruction::ResourceOperationBatch` is formed by the compiler from
+// `Expr::Await` over a list or a record. ADR 0096 retired the dialect that
+// spelled those, so it is not reachable from an authored cell and cannot be
+// stated through the bridge above. It is stated here, at the IR, because
+// FIG-3397 changed it and a landing that only re-points the bridge cases would
+// move it silently. The written-order ruling is ADR 0099 §10 L7.
 
 /// A host that records every batch it is handed and answers each leaf with a
 /// rejection. It runs its leaves in reverse, so a selection that followed the
@@ -1420,20 +1414,21 @@ async fn a_literal_array_batch_reports_the_first_written_rejection() {
     );
 }
 
-/// `await [tools.step(id)? for id in [0, 1]]` — the standalone list-batch path.
+/// `await [tools.step(0)?, tools.step(1)?]` — the standalone list-batch path.
 fn list_batch_program() -> lashlang::Program {
     use lashlang::testing::ast_builders as b;
-    b::program(vec![b::finish(b::await_expr(b::comprehension(
+    b::program(vec![b::finish(b::await_expr(b::list(vec![
         b::unwrap(b::receiver_call(
             b::resource(&["tools"]),
             "step",
-            vec![b::var("id")],
+            vec![b::num(0.0)],
         )),
-        vec![b::comprehension_for(
-            "id",
-            b::list(vec![b::num(0.0), b::num(1.0)]),
-        )],
-    )))])
+        b::unwrap(b::receiver_call(
+            b::resource(&["tools"]),
+            "step",
+            vec![b::num(1.0)],
+        )),
+    ])))])
 }
 
 /// The standalone list-batch path keeps its all-results wait and reports the
@@ -1451,7 +1446,7 @@ async fn the_standalone_list_batch_still_selects_the_first_written_rejection() {
     assert_eq!(
         host.batches.lock_recover().as_slice(),
         [2],
-        "the comprehension forms one batch of two leaves"
+        "the list forms one batch of two leaves"
     );
     let rendered = error.to_string();
     assert!(
@@ -1469,36 +1464,34 @@ async fn the_standalone_list_batch_still_selects_the_first_written_rejection() {
     );
 }
 
-/// `await [[tools.step(y)? for y in ys] for x in xs]` — a comprehension whose
-/// element is itself a comprehension.
-fn nested_comprehension_program() -> lashlang::Program {
+/// `await [[tools.step(0)?, tools.step(1)?]]` — a list whose element is
+/// itself a list.
+fn nested_list_program() -> lashlang::Program {
     use lashlang::testing::ast_builders as b;
-    let inner = b::comprehension(
+    let inner = b::list(vec![
         b::unwrap(b::receiver_call(
             b::resource(&["tools"]),
             "step",
-            vec![b::var("inner")],
+            vec![b::num(0.0)],
         )),
-        vec![b::comprehension_for(
-            "inner",
-            b::list(vec![b::num(0.0), b::num(1.0)]),
-        )],
-    );
-    b::program(vec![b::finish(b::await_expr(b::comprehension(
-        inner,
-        vec![b::comprehension_for("outer", b::list(vec![b::num(0.0)]))],
-    )))])
+        b::unwrap(b::receiver_call(
+            b::resource(&["tools"]),
+            "step",
+            vec![b::num(1.0)],
+        )),
+    ]);
+    b::program(vec![b::finish(b::await_expr(b::list(vec![inner])))])
 }
 
-/// The nested-comprehension law: the whole nest is one batch, and it keeps the
+/// The nested-list law: the whole nest is one batch, and it keeps the
 /// Lashlang-native written rejection order (ADR 0099 §10 L7).
 ///
 /// One host batch of two leaves, and the written-first rejection is the one
 /// reported, even though the host ran the other leaf first.
 #[tokio::test]
-async fn a_nested_comprehension_is_one_batch_that_keeps_written_rejection_order() {
+async fn a_nested_list_is_one_batch_that_keeps_written_rejection_order() {
     let host = AllResultsHost::new();
-    let compiled = lashlang::testing::harness::try_compile_program(&nested_comprehension_program())
+    let compiled = lashlang::testing::harness::try_compile_program(&nested_list_program())
         .expect("compile the nested shape");
     let error = lashlang::execute(&compiled, &mut lashlang::State::new(), &host)
         .await
@@ -1507,7 +1500,7 @@ async fn a_nested_comprehension_is_one_batch_that_keeps_written_rejection_order(
     assert_eq!(
         host.batches.lock_recover().as_slice(),
         [2],
-        "the nest is one batch, not one batch per inner comprehension"
+        "the nest is one batch, not one batch per inner list"
     );
     let rendered = error.to_string();
     assert!(

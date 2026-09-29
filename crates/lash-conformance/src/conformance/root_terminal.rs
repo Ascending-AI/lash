@@ -1074,10 +1074,10 @@ pub async fn a_root_end_closes_its_turn_scope_in_the_process_registry(
 ) {
     let mut parts = DriveParts::new(prefix, "root-registry-close", &effect_host, &stores, 8).await;
     let registry = stores.process_registry();
-    parts.host.control.scope_close = Arc::new(crate::RegistryScopeClose::new(
-        Arc::clone(&registry),
-        stores.clock(),
-    ));
+    parts.host.control.scope_close = Arc::new(
+        crate::RegistryScopeClose::new(Arc::clone(&registry), stores.clock())
+            .with_session_store_factory(stores.session_store_factory()),
+    );
     let root = TurnId::from("root-registry-close");
     let turn = lash_core::ScopeId::turn(parts.session_id.clone(), root.clone());
     let registration = || {
@@ -1144,4 +1144,68 @@ pub async fn a_root_end_closes_its_turn_scope_in_the_process_registry(
             "a {what} start the ended root would make is refused"
         );
     }
+}
+
+/// A root's admission takes a second input whose source key names a turn
+/// scope that will never become a root. Ending the admitted root closes that
+/// scope and delivers its ParentEnd obligation while the session stays open.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the stores answer their own writes"
+)]
+pub async fn a_joined_inputs_turn_scope_closes_with_its_admitting_root(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts = DriveParts::new(prefix, "joined-scope-close", &effect_host, &stores, 8).await;
+    let registry = stores.process_registry();
+    parts.host.control.scope_close = Arc::new(
+        crate::RegistryScopeClose::new(Arc::clone(&registry), stores.clock())
+            .with_session_store_factory(stores.session_store_factory()),
+    );
+    let root = TurnId::from("joined-scope-root");
+    let joined = TurnId::from("joined-scope-input");
+    let child = until_root(&registry, &parts.session_id, &joined).await;
+    parts.enqueue("head", Some(root.as_str())).await;
+    let joined_input = parts.enqueue("joined", Some(joined.as_str())).await;
+
+    let outcome = drive(&runner, &parts, "joined-scope-drive").await;
+    assert!(
+        matches!(&outcome.ran[..], [RootOutcome::Committed { root: ran, .. }] if *ran == root),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        parts
+            .store
+            .root_binding(&parts.session_id, &joined_input)
+            .await
+            .expect("read the admission binding"),
+        Some(root.clone()),
+        "the ending root took the joined input"
+    );
+    assert!(terminal(&parts, &root).await.is_some(), "the root ended");
+    assert!(
+        registry
+            .get_parent_end_plan(&lash_core::ScopeId::session(parts.session_id.clone()))
+            .await
+            .expect("read the session scope")
+            .is_none(),
+        "the session remains open"
+    );
+    let joined_scope = lash_core::ScopeId::turn(parts.session_id.clone(), joined.clone());
+    assert!(
+        registry
+            .get_parent_end_plan(&joined_scope)
+            .await
+            .expect("read the joined scope")
+            .is_some(),
+        "the root's close records the joined scope's end"
+    );
+    recovery_pass(&stores).await;
+    assert!(
+        owes_cancel(&registry, &child.id).await,
+        "the joined scope's child is reaped before session close"
+    );
 }

@@ -104,6 +104,22 @@ impl TypescriptDialect {
     pub(crate) fn renderer(&self) -> crate::render::CodeRendererSlot {
         self.services.code_renderer.clone()
     }
+    /// The module-artifact store the dialect's tools resolve trigger targets
+    /// and process definitions against.
+    pub(crate) fn artifact_store(&self) -> lashlang::LashlangArtifacts {
+        self.services.artifact_store.clone()
+    }
+    /// The lashlang host surface a cell of this dialect links against.
+    pub(crate) fn surface(&self) -> LashlangSurface {
+        self.surface.clone()
+    }
+    /// The dialect's front end as a plain parser: the rendered refusal on
+    /// failure. `processes.create` lowers its source through it.
+    pub(crate) fn parse_source(source: &str) -> Result<lashlang::Program, String> {
+        TypeScript
+            .parse(source)
+            .map_err(|diagnostic| diagnostic.rendered)
+    }
     pub(crate) fn new(surface: LashlangSurface, services: RlmDialectServices) -> Self {
         Self { surface, services }
     }
@@ -147,41 +163,24 @@ impl PromptOnlyArtifactStore {
 impl lash_core::ModuleArtifactStore for PromptOnlyArtifactStore {
     async fn publish_module_artifact(
         &self,
-        _owner: &lash_core::ArtifactOwner,
+        _claim: &lash_core::ReferrerClaim,
         _module_ref: &str,
         _bytes: &[u8],
     ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(Self::refusal())
     }
 
-    async fn retain_module_artifact(
+    async fn acquire_module_artifact(
         &self,
-        _owner: &lash_core::ArtifactOwner,
+        _claim: &lash_core::ReferrerClaim,
         _module_ref: &str,
     ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(Self::refusal())
     }
 
-    async fn transfer_module_artifact(
+    async fn end_module_referrer(
         &self,
-        _from: &lash_core::ArtifactOwner,
-        _to: &lash_core::ArtifactOwner,
-        _module_ref: &str,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        Err(Self::refusal())
-    }
-
-    async fn release_module_artifact(
-        &self,
-        _owner: &lash_core::ArtifactOwner,
-        _module_ref: &str,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        Err(Self::refusal())
-    }
-
-    async fn retire_module_artifact_owner(
-        &self,
-        _owner: &lash_core::ArtifactOwner,
+        _cleanup: &lash_core::ResolvedArtifactCleanup,
     ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(Self::refusal())
     }
@@ -1158,6 +1157,8 @@ mod tests {
         // nothing about the shapes it names.
         lashlang::add_trigger_resource_operations(&mut resources)
             .expect("valid trigger operations");
+        lashlang::add_trigger_register_tool_binding(&mut resources)
+            .expect("trigger register tool binding is unique");
         let host =
             lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all());
         // Identifiers that exist only in Lashlang's surface. A model reading

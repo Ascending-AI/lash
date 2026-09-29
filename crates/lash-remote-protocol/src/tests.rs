@@ -39,10 +39,7 @@ fn immediate_predecessor_remote_protocol_generation_99_is_refused() {
         .expect_err("generation-99 remote envelope must be refused");
     assert!(matches!(
         error,
-        RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: PREDECESSOR,
-            expected: REMOTE_PROTOCOL_VERSION,
-        }
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(PREDECESSOR) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
 }
 
@@ -86,8 +83,8 @@ fn v37_llm_decode_refuses_v36_and_v35_before_new_or_malformed_vocabulary() {
 
             assert!(matches!(
                 RemoteLlmRequest::decode_json(wire.as_bytes()),
-                Err(RemoteProtocolError::UnsupportedProtocolVersion { actual, expected })
-                    if actual == peer_version && expected == REMOTE_PROTOCOL_VERSION
+                Err(RemoteProtocolError::Unsupported { peer: actual, local: expected })
+                    if actual == crate::VersionRange::exactly(peer_version) && expected == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
             ));
         }
     }
@@ -281,7 +278,11 @@ fn remote_llm_response_json_round_trips() {
     };
 
     response.validate().expect("valid response");
-    let value = serde_json::to_value(Envelope::new(&response)).expect("serialize envelope");
+    let value = serde_json::to_value(Envelope::at(
+        &crate::negotiation::test_negotiated(),
+        &response,
+    ))
+    .expect("serialize envelope");
     assert_eq!(
         value["generation_disposition"],
         serde_json::json!({
@@ -320,6 +321,8 @@ fn remote_turn_request_json_round_trips() {
                 },
             ],
             trace_turn_id: Some(TurnId::from("trace")),
+            #[cfg(feature = "synthetic-next")]
+            synthetic_next_note: None,
         },
         protocol_turn_options: Some(RemoteProtocolTurnOptions {
             payload: serde_json::json!({ "answer": "raw" }),
@@ -331,7 +334,7 @@ fn remote_turn_request_json_round_trips() {
     request.validate().expect("valid request");
     let value: serde_json::Value = serde_json::from_slice(
         &request
-            .encode_json()
+            .encode_json(&crate::negotiation::test_negotiated())
             .expect("serialize turn request envelope"),
     )
     .expect("envelope json");
@@ -424,7 +427,7 @@ fn remote_turn_result_json_round_trips() {
     result.validate().expect("valid result");
     let value: serde_json::Value = serde_json::from_slice(
         &result
-            .encode_json()
+            .encode_json(&crate::negotiation::test_negotiated())
             .expect("serialize turn report envelope"),
     )
     .expect("envelope json");
@@ -481,7 +484,11 @@ fn turn_started_has_pinned_wire_shape_and_non_empty_identity() {
     };
 
     assert_eq!(
-        serde_json::to_value(Envelope::new(activity.clone())).expect("serialize turn start"),
+        serde_json::to_value(Envelope::at(
+            &crate::negotiation::test_negotiated(),
+            activity.clone()
+        ))
+        .expect("serialize turn start"),
         serde_json::json!({
             "protocol_version": REMOTE_PROTOCOL_VERSION,
             "sequence": 0,
@@ -512,7 +519,11 @@ fn model_attempt_reset_has_pinned_wire_shape() {
     };
 
     assert_eq!(
-        serde_json::to_value(Envelope::new(activity)).expect("serialize model attempt reset"),
+        serde_json::to_value(Envelope::at(
+            &crate::negotiation::test_negotiated(),
+            activity
+        ))
+        .expect("serialize model attempt reset"),
         serde_json::json!({
             "protocol_version": REMOTE_PROTOCOL_VERSION,
             "sequence": 3,
@@ -565,7 +576,9 @@ fn remote_turn_result_derives_status_from_its_outcome() {
         },
     };
     assert_eq!(result.status(), RemoteTurnStatus::Answered);
-    let wire = result.encode_json().unwrap();
+    let wire = result
+        .encode_json(&crate::negotiation::test_negotiated())
+        .unwrap();
     assert_eq!(RemoteTurnReport::decode_json(&wire).unwrap(), result);
 }
 
@@ -764,14 +777,12 @@ fn remote_trigger_dtos_json_round_trip() {
     version_57["manifest_membership"] = serde_json::json!("present_in_current_artifact");
     let error = Envelope::<RemoteTriggerRegistration>::decode_json(
         &serde_json::to_vec(&version_57).expect("serialize version-57 registration envelope"),
+        crate::REMOTE_PROTOCOL,
     )
     .expect_err("version-57 trigger registration must be refused before body decoding");
     assert!(matches!(
         error,
-        RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 57,
-            expected: 100,
-        }
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(57) && local == crate::VersionRange::exactly(100)
     ));
 
     let cause = RemoteCausalRef::TriggerOccurrence {
@@ -830,20 +841,19 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
             "session_id": "session-blue",
         })
     );
-    let error = Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(&wire)
-        .expect_err("version-62 session spelling must be refused");
+    let error =
+        Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(&wire, crate::REMOTE_PROTOCOL)
+            .expect_err("version-62 session spelling must be refused");
     assert!(matches!(
         error,
-        RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 62,
-            expected: 100,
-        }
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(62) && local == crate::VersionRange::exactly(100)
     ));
 
     assert_eq!(
-        serde_json::to_value(Envelope::new(RemoteTriggerSubscriptionFilter::for_session(
-            "session-blue",
-        )))
+        serde_json::to_value(Envelope::at(
+            &crate::negotiation::test_negotiated(),
+            RemoteTriggerSubscriptionFilter::for_session("session-blue")
+        ))
         .expect("serialize canonical version-100 filter"),
         serde_json::json!({
             "protocol_version": 100,
@@ -855,8 +865,9 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
 #[test]
 fn remote_protocol_92_session_filter_refuses_retired_session_id() {
     let wire = br#"{"protocol_version":100,"session_id":"session-blue"}"#;
-    let error = Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(wire)
-        .expect_err("current-version filter must reject the retired session_id field");
+    let error =
+        Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(wire, crate::REMOTE_PROTOCOL)
+            .expect_err("current-version filter must reject the retired session_id field");
     assert!(matches!(error, RemoteProtocolError::MessageDecode(_)));
     assert!(error.to_string().contains("session_id"), "{error}");
 }
@@ -869,7 +880,7 @@ fn remote_protocol_92_session_filter_refuses_nested_duplicate_fields() {
     // rejection inside a typed DTO — is pinned on the process-list filter's
     // typed originator selector instead.
     let wire = br#"{"protocol_version":100,"originator":{"type":"host","scope":"a","scope":"b"}}"#;
-    let error = Envelope::<RemoteProcessListFilter>::decode_json(wire)
+    let error = Envelope::<RemoteProcessListFilter>::decode_json(wire, crate::REMOTE_PROTOCOL)
         .expect_err("current-version envelope must preserve nested duplicate-field rejection");
     assert!(matches!(error, RemoteProtocolError::MessageDecode(_)));
     assert!(
@@ -890,8 +901,11 @@ fn session_scoped_trigger_occurrence_has_pinned_wire_shape() {
     .for_session("session-blue");
 
     assert_eq!(
-        serde_json::to_value(Envelope::new(request))
-            .expect("serialize session-scoped trigger occurrence"),
+        serde_json::to_value(Envelope::at(
+            &crate::negotiation::test_negotiated(),
+            request
+        ))
+        .expect("serialize session-scoped trigger occurrence"),
         serde_json::json!({
             "protocol_version": REMOTE_PROTOCOL_VERSION,
             "source_type": "ui.button.pressed",
@@ -1001,9 +1015,9 @@ impl Protocol41ObservationEnvelope {
 
         let probe: VersionProbe = serde_json::from_slice(bytes)?;
         if probe.protocol_version != 41 {
-            return Err(RemoteProtocolError::UnsupportedProtocolVersion {
-                actual: probe.protocol_version,
-                expected: 41,
+            return Err(RemoteProtocolError::Unsupported {
+                local: crate::VersionRange::exactly(41),
+                peer: crate::VersionRange::exactly(probe.protocol_version),
             });
         }
         Ok(serde_json::from_slice(bytes)?)
@@ -1062,7 +1076,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
         cursor: "resident-cursor".to_string(),
         event: RemoteSessionObservationEventPayload::ResidentChanged,
     };
-    let wire = Envelope::new(resident)
+    let wire = Envelope::at(&crate::negotiation::test_negotiated(), resident)
         .encode_json()
         .expect("serialize complete current-version envelope");
     assert_eq!(
@@ -1082,10 +1096,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
         .expect_err("version 41 reader must reject a complete current-version envelope");
     assert!(matches!(
         error,
-        RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 100,
-            expected: 41,
-        }
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(100) && local == crate::VersionRange::exactly(41)
     ));
     assert!(
         !PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.load(std::sync::atomic::Ordering::SeqCst),
@@ -1115,14 +1126,12 @@ fn protocol_51_process_reference_is_refused() {
     });
     let error = Envelope::<RemoteProcessAwaitRequest>::decode_json(
         &serde_json::to_vec(&predecessor).expect("serialize version-51 request"),
+        crate::REMOTE_PROTOCOL,
     )
     .expect_err("version-51 process request must be refused");
     assert!(matches!(
         error,
-        RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 51,
-            expected: REMOTE_PROTOCOL_VERSION,
-        }
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(51) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
 }
 
@@ -1623,10 +1632,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
     assert!(
         matches!(
             decode_empty_envelope(37),
-            Err(RemoteProtocolError::UnsupportedProtocolVersion {
-                actual: 37,
-                expected: 100,
-            })
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(37) && local == crate::VersionRange::exactly(100)
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
     );
@@ -1659,10 +1665,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
     assert!(
         matches!(
             decode_empty_envelope(38),
-            Err(RemoteProtocolError::UnsupportedProtocolVersion {
-                actual: 38,
-                expected: 100,
-            })
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(38) && local == crate::VersionRange::exactly(100)
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
     );
@@ -1714,10 +1717,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
     assert!(
         matches!(
             decode_empty_envelope(39),
-            Err(RemoteProtocolError::UnsupportedProtocolVersion {
-                actual: 39,
-                expected: 100,
-            })
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(39) && local == crate::VersionRange::exactly(100)
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
     );
@@ -1746,10 +1746,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
     assert!(
         matches!(
             decode_empty_envelope(40),
-            Err(RemoteProtocolError::UnsupportedProtocolVersion {
-                actual: 40,
-                expected: 100,
-            })
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(40) && local == crate::VersionRange::exactly(100)
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
     );
@@ -1794,8 +1791,8 @@ fn protocol_35_peer_rejects_protocol_36_tool_intent_activity_before_variant_deco
 
     assert!(matches!(
         RemoteTurnActivity::decode_json_expecting_protocol_version(wire.to_string().as_bytes(), 35),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion { actual, expected })
-            if actual == 36 && expected == 35
+        Err(RemoteProtocolError::Unsupported { peer: actual, local: expected })
+            if actual == crate::VersionRange::exactly(36) && expected == crate::VersionRange::exactly(35)
     ));
 }
 

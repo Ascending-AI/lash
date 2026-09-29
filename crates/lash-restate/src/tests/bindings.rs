@@ -35,7 +35,7 @@ impl HostTurnWorkflow for HostTurnWorkflowImpl {
 /// The discovery document `endpoint` serves the Restate runtime. It asks
 /// for manifest v4, as the runtime does: only v4 can carry a turn handler's
 /// retry policy.
-async fn discovery_document(endpoint: &Endpoint) -> serde_json::Value {
+pub(super) async fn discovery_document(endpoint: &Endpoint) -> serde_json::Value {
     let request = http::Request::builder()
         .uri("/discover")
         .header(
@@ -83,7 +83,7 @@ fn lash_service_names() -> BTreeSet<String> {
 }
 
 /// The generation the bindings backend's build runs.
-fn bindings_generation() -> lash_core::engine::BuildGeneration {
+pub(super) fn bindings_generation() -> lash_core::engine::BuildGeneration {
     lash_core::engine::BuildGeneration::for_test("bindings")
 }
 
@@ -102,8 +102,8 @@ fn lash_lane_names() -> BTreeSet<String> {
 
 /// A Restate backend over a memory store set, and the process worker of a
 /// core built over it: what a host hands `endpoint_builder`.
-async fn backend_and_process_worker() -> (Arc<RestateEngine>, lash_core_worker::DurableProcessWorker)
-{
+pub(super) async fn backend_and_process_worker()
+-> (Arc<RestateEngine>, lash_core_worker::DurableProcessWorker) {
     let backend = Arc::new(RestateEngine::new(
         Arc::new(
             lash_sqlite_store::SqliteStoreSet::memory()

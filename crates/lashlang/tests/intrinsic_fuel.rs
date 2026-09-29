@@ -552,7 +552,10 @@ const AST_CASES: &[AstCase] = &[
         program: |_| {
             vec![Expr::Finish(Box::new(call(
                 "validate",
-                vec![var("input"), Expr::TypeLiteral(Box::new(TypeExpr::Any))],
+                vec![
+                    var("input"),
+                    lashlang::testing::ast_builders::type_literal(TypeExpr::Any),
+                ],
             )))]
         },
     },

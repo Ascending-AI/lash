@@ -25,6 +25,7 @@ workspace = true
 perf-witness = ["lash-core-execution/perf-witness"]
 # Test/performance-only seams. Production builds cannot bypass the schema gate.
 testing = ["lash-core-execution/testing"]
+synthetic-next = []
 
 [dependencies]
 lash-store-sql = { workspace = true }
@@ -38,14 +39,6 @@ sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync", "macros"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
-
-# The migrate binary wraps the library's runner; anyhow is the CLI-facing
-# error type, matching the runbook binaries' convention.
-anyhow = { workspace = true }
-
-[[bin]]
-name = "lash-migrate"
-path = "src/bin/lash_migrate.rs"
 
 [dev-dependencies]
 lash-conformance = { workspace = true, features = ["lashlang"] }

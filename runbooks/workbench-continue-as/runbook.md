@@ -12,14 +12,10 @@
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
-> **Standard-compaction gates retired (FIG-4029).** The standard-compaction plugin serves
-> standard-protocol sessions only, and the workbench — an RLM host — no longer registers it,
-> so it emits no `compaction_needed` or other standard-compaction trace event. Every gate
-> below that waits on or scores those events (golden rules 5–6, the Phase 0 context-window
-> proof, Phase 1's stop condition, `01-standard-compaction.json`, and the two scorecard
-> rows marked retired) is out of force until this runbook re-bases pressure on the RLM
-> context-budget warning. Until then, bound pressure by marker-turn count alone: 2–6 turns,
-> never filling the window until provider rejection.
+**Automated check.** `just workbench-continue-as-budget-gate` runs a scripted RLM session
+without a browser or provider network call. It proves the typed context-budget warning, the
+warning in the next model request, and the `continue_as` frame boundary. Run it under
+`kiln gate lash <fork-name> -- just workbench-continue-as-budget-gate`.
 
 **Purpose.** Referee an RLM agent-initiated `control.continue_as({ task, seed })` tail-call
 through the workbench browser surface. The scenario proves that one logical composer turn
@@ -37,8 +33,9 @@ would each tell a different and incorrect story.
 
 **Real tokens.** This scenario uses OpenRouter. Model prose and whether pressure alone makes
 the agent choose `continue_as` are nondeterministic. Keep the pressure bounded: use a 41,000
-token context window, short assistant answers, and no more than six synthetic pressure
-turns. Gate the switch and compaction on typed durable and trace evidence, never on prose.
+token context window, a 21,000-token RLM warning threshold, short assistant answers, and no
+more than six synthetic pressure turns. Gate the warning and switch on provider-request,
+typed runtime-event, durable-graph, and trace evidence, never on prose.
 Only the two post-switch competence probes are judged.
 
 ## Boundary-rendering answer key — state this before observing
@@ -91,31 +88,27 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
    transcript snapshot before submitting the switching turn. Compare it to the observed
    post-switch DOM, API/current read model, product log, raw graph, and trace without editing
    the expected file afterwards.
-5. **Pressure is bounded and trace-gated.** Submit several distinctive marker turns (at
-   least two, no more than six),
-   each with enough deterministic filler to approach the 21,000-token compaction threshold.
-   Stop adding pressure as soon as `compaction_needed` appears. Never exceed
-   six pressure turns and never fill the window until provider rejection.
-6. **Record both standard-compaction decision events by scope.** The first
-   `compaction_needed` must report `max_context_tokens == 41000`,
-   `threshold_tokens == 21000`, and `used_tokens >= threshold_tokens`.
-   The event must be turn-scoped. Missing or incorrectly parented decision evidence is a FAIL.
-   The decision consumes the prior completed prompt's usage: if the sixth bounded prompt is
-   the first to cross 21,000 tokens, submit one short marker-only probe (no more filler) and
-   require the events on that probe.
-
-   `compaction_started` and `compaction_completed` are
-   intentionally out of scope here. They describe host-invoked `compact_context` lifecycle
-   work in standard mode, covered by the slack-clone variant-B compaction runbook and core
-   standard-compaction regression tests. The workbench is the RLM-only reference host: its
-   durable context transition is the agent-driven `control.continue_as` frame switch that
-   this runbook exercises, not a host-invoked standard-mode compaction.
+5. **Pressure is bounded by the RLM warning.** Submit two to six distinctive marker turns,
+   each with enough inert filler to approach the 21,000-token warning threshold. Stop adding
+   filler when the first `rlm_context_budget_warning` status appears. Never fill the
+   41,000-token window until provider rejection.
+6. **Prove the warning reached the model.** Record the first session-scoped
+   `/api/observations` `plugin_runtime` event whose `event.kind` is `status` and whose
+   `event.key` is `rlm_context_budget_warning`. Its detail must say
+   `warn at 21000` and report at least 21,000 tokens used. Preserve the completed
+   prompt usage that crossed the threshold and the following `llm_call_started.request`.
+   That request must
+   contain the RLM prompt suffix `Past the frame switch threshold` and
+   `control.continue_as`; a status badge or assistant prose alone does not pass. If the
+   sixth bounded prompt first crosses the threshold, submit one short marker-only probe
+   without filler to expose the next model-facing request. Missing warning or request
+   evidence is a FAIL.
 7. **Exercise a real tool before switching.** At least one pressure turn must produce paired
    successful `tool_call_started` / `tool_call_completed` records for the same call id. Pick a
    read-only tool from the session's advertised catalog: prefer the Parallel web-search MCP
    tool when it is present, otherwise use any other advertised read-only tool. A
    `<typescript>` cell without a tool call does not satisfy this gate.
-8. **Try the organic lever once, then guide explicitly.** After compaction pressure exists,
+8. **Try the organic lever once, then guide explicitly.** After the RLM warning appears,
    first ask the agent to continue the marker-retention task without naming the tool and
    inspect the trace. If it switches, record `pressure/organic`. If it does not, submit one
    explicit instruction: `use control.continue_as to start fresh, seed what you need`, and
@@ -133,6 +126,7 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
 - Require `OPENROUTER_API_KEY` from the checkout's gitignored `.env`. Boot only on port
   `3200` with:
   `AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS=41000`,
+  `AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS=21000`,
   `AGENT_WORKBENCH_DATA_DIR=/workspace/tmp/fig992a-run/data`, a fresh
   `AGENT_WORKBENCH_RUN_DIR`, `AGENT_WORKBENCH_OPEN=0`, and `RESTATE_AUTHORITY_ID=<stable-id>`.
   `RESTATE_AUTHORITY_ID` is required and must stay stable for one Restate state; without it
@@ -161,9 +155,15 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
   `product-events.json`, and all non-tombstoned `<S>` rows from
   `lash-sessions/durable-core.db.graph_nodes`. Decode `node_json`; reconstruct the active
   ancestry and both frame-scoped read models rather than treating all raw nodes as visible.
-- **Layer 3 — trace:** filter `trace.jsonl` by `context.session_id == <S>`. Preserve full
-  records for standard-compaction events, tool calls, and `turn_completed`, including graph and
-  parent ids. The browser's work rail calls `/api/work` during hydration and on its polling
+- **Layer 3 — trace and runtime stream:** filter `trace.jsonl` and
+  `GET /api/observations?session_id=<S>` by session `<S>`. Preserve the
+  `rlm_context_budget_warning` `plugin_runtime` event,
+  the threshold-crossing prompt's `llm_call_completed` usage, the following
+  `llm_call_started` request, tool calls,
+  and `turn_completed`, including graph and parent ids. Open the observation stream before
+  the first pressure send and save it as it arrives; opening it afterward starts at the
+  current cursor. The browser's work rail calls
+  `/api/work` during hydration and on its polling
   interval; those reads legitimately emit session-scoped `agent_workbench.api.work.response`
   custom records even before the first turn. Preserve them, but do not count them as runtime
   conversation activity or require a literally empty session-scoped trace at baseline.
@@ -182,16 +182,17 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
 Start from a nonexistent data directory. Boot with the exact environment above, gate
 `/healthz`, and open the scoped URL. Require the composer, empty transcript, rendered session
 id `<S>`, `/api/state.settings.session_id == <S>`, idle, and no active turns. Require zero
-session-scoped graph rows and zero session-scoped turn, standard-compaction, or tool-call trace
-records. Passive `agent_workbench.api.work.response` records with an empty result are expected
+session-scoped graph rows and zero session-scoped turn, RLM warning, or tool-call records.
+Passive `agent_workbench.api.work.response` records with an empty result are expected
 from the rendered browser surface and must be recorded separately from that activity gate.
 Record the workbench PID, Restate container id and `StartedAt`, model, and exact
-`AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS` launch value; the first Phase 1
-`compaction_needed.max_context_tokens` is the runtime proof that the session
-policy delivered that value to the hook. Screenshot `00-scoped-empty.png`; save
+`AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS` and
+`AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS` launch values. The Phase 1 status and
+model-facing request prove the RLM session used the warning threshold. Screenshot
+`00-scoped-empty.png`; save
 `00-identities.json`, `00-state.json`, and `00-trace.json`.
 
-## Phase 1 — Build distinctive context and reach compaction pressure
+## Phase 1 — Build distinctive context and reach the RLM warning
 
 Submit several bounded turns. Each establishes one literal marker fact and asks for a short
 acknowledgement; deterministic inert filler may make each prompt roughly 4,000–6,000 tokens.
@@ -204,12 +205,12 @@ explicitly label
 
 After every send, gate the relevant `turn_completed`, idle, empty active turns, and stable
 row/message counts, then run the three-layer cross-check. Poll the trace after each turn and
-stop pressure immediately when `compaction_needed` appears; FAIL if it has
+stop filler immediately when `rlm_context_budget_warning` appears; FAIL if it has
 not appeared after the sixth pressure turn plus the permitted short threshold probe from
-golden rule 6. Gate the payloads and scope/parentage in golden rule 6, and the successful
+golden rule 6. Gate the status and model request in golden rule 6, and the successful
 paired tool records in golden rule 7. Screenshot
 `01-pressure-ready.png`; save `01-pressure-{dom,state,store,trace}.json`,
-`01-standard-compaction.json`, and `01-tool-call.json`.
+`01-rlm-budget-warning.json`, `01-warned-model-request.json`, and `01-tool-call.json`.
 
 ## Phase 2 — Drive and prove `continue_as`
 
@@ -291,7 +292,7 @@ then settle by stability.
 Require the post-reload row multiset to equal the pre-restart multiset exactly. Require the
 same current frame node id; the same `continue_as` reason and previous-frame link; the same
 seed event; and the independently resolved pre-switch/new-frame pair to retain its Phase 3
-shapes. Earlier compaction frames may also exist and must not be discarded.
+shapes. Any earlier frames must also remain durable.
 Screenshot `06-after-restart-reload.png`; save `06-restart-identities.json`,
 `06-reload-multiset.json`, `06-frame-graph.json`, and `06-crosscheck.json`.
 
@@ -304,8 +305,8 @@ extracts first, then remove `/workspace/tmp/fig992a-run/data` and confirm it is 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Boot/scope | `/healthz` 200; exact 41,000-token launch; rendered/API session `<S>`; DOM/API/graph and runtime-activity trace empty (passive empty work-poll records allowed and retained) | | `00-scoped-empty.png`, `00-identities.json`, `00-state.json`, `00-trace.json` |
-| Bounded pressure | 2–6 marker turns; `compaction_needed` has 41000/21000 budget fields (retired, FIG-4029: marker-turn count only) | | `01-pressure-ready.png`, `01-standard-compaction.json` |
-| Standard-compaction scope (retired, FIG-4029) | `compaction_needed` is turn-scoped with its typed payload retained; host-invoked standard-mode started/completed lifecycle is out of scope | | `01-standard-compaction.json` |
+| RLM pressure | 2–6 marker turns; one `rlm_context_budget_warning` status reports at least 21,000 tokens used and `warn at 21000` | | `01-pressure-ready.png`, `01-rlm-budget-warning.json` |
+| Model warning | The next model request contains `Past the frame switch threshold` and `control.continue_as` | | `01-warned-model-request.json` |
 | Real tool turn | paired successful tool start/completion with one call id | | `01-tool-call.json` |
 | Switch lever | organic pressure tried once; actual lever recorded honestly | | `02-lever.json` |
 | Frame switch | matching trace switch + `frame_open{reason:"continue_as"}`; follow frame completed coherently | | `02-frame-graph.json`, `02-switch-trace.json` |
@@ -317,7 +318,7 @@ extracts first, then remove `/workspace/tmp/fig992a-run/data` and confirm it is 
 | Restart/reload identity | identical row multiset and identical durable pre-switch/new-frame pair plus seed | | `06-after-restart-reload.png`, `06-*.json` |
 | Teardown | process/container gone; port closed; state directory removed | | command log |
 
-**Aggregate:** did a real workbench RLM agent, under bounded standard-compaction pressure, tail-call
+**Aggregate:** did a real workbench RLM agent, after a model-visible RLM budget warning, tail-call
 through `control.continue_as` into a structurally proven clean frame, carry exactly its seed,
 render the frame boundary according to the predeclared asymmetric answer key, demonstrate
 seeded competence without leaking a deliberately omitted fact, and preserve that truth across

@@ -3,7 +3,7 @@
 use lash_sansio::profile::ProfileMark;
 use std::sync::Arc;
 
-use crate::ast::{BinaryOp, JavaScriptBinaryOp, JavaScriptUnaryOp, UnaryOp};
+use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
 use crate::span::Span;
 use crate::{LashlangExecutionObservation, LashlangExecutionSite, ProcessBranchSelection};
 use rustc_hash::FxHashMap;
@@ -51,7 +51,7 @@ pub use javascript_regexp::{
 };
 
 use super::heap::same_value_zero;
-use super::host::{ExecutionMode, ProcessEventKind, SleepKind};
+use super::host::{ExecutionMode, SleepKind};
 use super::record::{Record, record_with_capacity};
 use super::schema::{
     ValidationPlan, compile_schema_value, execute_validate_builtin, execute_validation_plan,
@@ -61,19 +61,16 @@ use super::{
     BuiltinFunction, Chunk, ClosureParameterModel, CompiledProgram,
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, ExecutionHost, ExecutionOutcome, ExecutionScratch, Heap,
     HeapId, HeapObject, ImageValue, Instruction, InstructionProfileTag, IntrinsicOp,
-    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name,
-    PersistedRoots, ProfileAccumulator, ProfileReport, ProjectedBindings, RegExpMatchObject,
-    ResourceHandle, RuntimeError, State, Value, add_assign_index_number, add_values, as_number,
-    assign_path, binary_op_work_units, charge_collection_work, deep_proportional_units,
-    eval_binary_values, eval_compare_values, eval_javascript_binary, eval_javascript_unary,
-    eval_number_binary_values, eval_number_compare_values, eval_number_numeric_binary_value,
-    execute_compiled_format, execute_compiled_format_direct,
-    execute_compiled_format_one_number_compact_direct, execute_intrinsic, execute_push_builtin,
-    heap_inherited_builtin, inline_inherited_builtin, is_truthy, iterable_values, javascript_join,
-    javascript_split, materialize_value, proportional_units, range_bounds, range_bounds_projected,
-    read_javascript_field_direct, read_javascript_heap_field, read_javascript_heap_index,
-    read_javascript_index_direct_with_key, regexp_string, sorting_work, unwrap_tool_result,
-    unwrap_type_value,
+    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, ListValue, Name, PersistedRoots,
+    ProfileAccumulator, ProfileReport, ProjectedBindings, RegExpMatchObject, ResourceHandle,
+    RuntimeError, State, Value, assign_path, charge_collection_work, deep_proportional_units,
+    eval_javascript_binary, eval_javascript_unary, execute_compiled_format,
+    execute_compiled_format_direct, execute_compiled_format_one_number_compact_direct,
+    execute_intrinsic, execute_push_builtin, heap_inherited_builtin, inline_inherited_builtin,
+    is_truthy, iterable_values, javascript_join, javascript_split, materialize_value,
+    proportional_units, range_bounds, range_bounds_projected, read_javascript_field_direct,
+    read_javascript_heap_field, read_javascript_heap_index, read_javascript_index_direct_with_key,
+    regexp_string, sorting_work, unwrap_tool_result, unwrap_type_value,
 };
 
 #[derive(Clone)]
@@ -358,57 +355,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 )?;
                 self.last_value = Some(value);
             }
-            Instruction::BuildTuple(len) => {
-                let values = self.pop_n(len)?;
-                self.stack.push(Value::Tuple(values.into()));
-            }
-            Instruction::BuildList(len) => {
-                let values = self.pop_n(len)?;
-                self.stack.push(Value::List(values.into()));
-            }
             Instruction::BuildHeapList(len) => {
                 let values = self.pop_n(len)?;
                 self.stack.push(self.heap.allocate_list(values)?);
-            }
-            Instruction::ListAppend => {
-                if self.stack.len() < 2 {
-                    return Err(RuntimeError::VmStackUnderflow);
-                }
-                let list_index = self.stack.len() - 2;
-                if self.stack[list_index..]
-                    .iter()
-                    .any(|value| matches!(value, Value::Projected(_)))
-                {
-                    return Ok(None);
-                }
-                // This opcode only ever appends to a comprehension's own
-                // accumulator, which nothing outside the comprehension can
-                // reach, so appending into its object is unobservable — and it
-                // keeps the accumulation linear instead of rebuilding the list
-                // on every element.
-                match &self.stack[list_index] {
-                    Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::List(_))) => {
-                        let target = Value::Ref(*id);
-                        let item = self.pop_stack()?;
-                        self.heap.push_list(&target, item)?;
-                    }
-                    Value::List(_) => {
-                        let item = self.pop_stack()?;
-                        let Some(Value::List(items)) = self.stack.last_mut() else {
-                            unreachable!("list append target was checked above");
-                        };
-                        let values = items.make_mut();
-                        if values.len() == values.capacity() {
-                            values.reserve(1);
-                        }
-                        values.push(item);
-                    }
-                    _ => return Ok(None),
-                }
-            }
-            Instruction::BuildRecord(keys) => {
-                let record = self.drain_record_from_stack(keys)?;
-                self.stack.push(Value::Record(Arc::new(record)));
             }
             Instruction::BuildHeapRecord(keys) => {
                 let record = self.drain_record_from_stack(keys)?;
@@ -599,35 +548,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     });
                 }
             }
-            Instruction::Binary(op) => {
-                if self.stack.len() < 2
-                    || self.stack[self.stack.len() - 2..]
-                        .iter()
-                        .any(|value| matches!(value, Value::Projected(_)))
-                {
-                    return Ok(None);
-                }
-                let right = self.pop_stack()?;
-                let left = self.pop_stack()?;
-                let value = if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
-                    let (equal, work) = self.heap.structural_eq_with_work(&left, &right)?;
-                    self.charge_intrinsic_work(work);
-                    Value::Bool(if op == BinaryOp::Equal { equal } else { !equal })
-                } else {
-                    match (left, right) {
-                        (Value::Number(left), Value::Number(right)) if op != BinaryOp::In => {
-                            eval_number_binary_values(left, op, right)
-                        }
-                        (left, right) => {
-                            // `+` copies its result, `in` scans the haystack:
-                            // the operand sizes are the work.
-                            self.charge_intrinsic_work(binary_op_work_units(&left, op, &right));
-                            eval_binary_values(left, op, right)?
-                        }
-                    }
-                };
-                self.stack.push(value);
-            }
             Instruction::JavaScriptUnary(op) => {
                 if self.javascript_unary_needs_slow_path(op)? {
                     return Ok(None);
@@ -652,64 +572,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     value => matches!(value, Value::Null | Value::Undefined),
                 };
                 self.stack.push(Value::Bool(nullish));
-            }
-            Instruction::SlotNumberBinary { slot, op, right } => {
-                let value = match self.load_slot(slot)?.clone() {
-                    Value::Projected(_) => return Ok(None),
-                    Value::Number(left) => {
-                        Value::Number(eval_number_numeric_binary_value(left, op, right))
-                    }
-                    left => {
-                        self.charge_intrinsic_work(binary_op_work_units(
-                            &left,
-                            op,
-                            &Value::Number(right),
-                        ));
-                        eval_binary_values(left, op, Value::Number(right))?
-                    }
-                };
-                self.stack.push(value);
-            }
-            Instruction::SlotNumberCompare { slot, op, right } => {
-                let value = match self.load_slot(slot)?.clone() {
-                    Value::Projected(_) => return Ok(None),
-                    Value::Number(left) => Value::Bool(eval_number_compare_values(left, op, right)),
-                    left => {
-                        self.charge_intrinsic_work(binary_op_work_units(
-                            &left,
-                            op,
-                            &Value::Number(right),
-                        ));
-                        Value::Bool(eval_compare_values(left, op, Value::Number(right))?)
-                    }
-                };
-                self.stack.push(value);
-            }
-            Instruction::SlotNumberBinaryCompare {
-                slot,
-                binary_op,
-                binary_right,
-                compare_op,
-                compare_right,
-            } => {
-                let truthy = match self.load_slot(slot)?.clone() {
-                    Value::Projected(_) => return Ok(None),
-                    Value::Number(left) => {
-                        let value = eval_number_numeric_binary_value(left, binary_op, binary_right);
-                        eval_number_compare_values(value, compare_op, compare_right)
-                    }
-                    left => {
-                        self.charge_intrinsic_work(binary_op_work_units(
-                            &left,
-                            binary_op,
-                            &Value::Number(binary_right),
-                        ));
-                        let value =
-                            eval_binary_values(left, binary_op, Value::Number(binary_right))?;
-                        eval_compare_values(value, compare_op, Value::Number(compare_right))?
-                    }
-                };
-                self.stack.push(Value::Bool(truthy));
             }
             Instruction::ToBool => {
                 if self
@@ -746,99 +608,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     );
                 }
             }
-            Instruction::JumpIfCompareFalse { op, target } => {
-                if self.stack.len() < 2
-                    || self.stack[self.stack.len() - 2..]
-                        .iter()
-                        .any(|value| matches!(value, Value::Projected(_)))
-                {
-                    return Ok(None);
-                }
-                let right = self.pop_stack()?;
-                let left = self.pop_stack()?;
-                self.charge_intrinsic_work(binary_op_work_units(&left, op, &right));
-                if !eval_compare_values(left, op, right)? {
-                    self.observe_branch_selection(
-                        self.current_instruction_ip(),
-                        ProcessBranchSelection::Else,
-                    );
-                    self.ip = target;
-                } else {
-                    self.observe_branch_selection(
-                        self.current_instruction_ip(),
-                        ProcessBranchSelection::Then,
-                    );
-                }
-            }
-            Instruction::JumpIfSlotNumberCompareFalse {
-                slot,
-                op,
-                right,
-                target,
-            } => {
-                let truthy = match self.load_slot(slot)?.clone() {
-                    Value::Projected(_) => return Ok(None),
-                    Value::Number(left) => eval_number_compare_values(left, op, right),
-                    value => {
-                        self.charge_intrinsic_work(binary_op_work_units(
-                            &value,
-                            op,
-                            &Value::Number(right),
-                        ));
-                        eval_compare_values(value, op, Value::Number(right))?
-                    }
-                };
-                if !truthy {
-                    self.observe_branch_selection(
-                        self.current_instruction_ip(),
-                        ProcessBranchSelection::Else,
-                    );
-                    self.ip = target;
-                } else {
-                    self.observe_branch_selection(
-                        self.current_instruction_ip(),
-                        ProcessBranchSelection::Then,
-                    );
-                }
-            }
-            Instruction::JumpIfSlotNumberBinaryCompareFalse {
-                slot,
-                binary_op,
-                binary_right,
-                compare_op,
-                compare_right,
-                target,
-            } => {
-                let truthy = match self.load_slot(slot)?.clone() {
-                    Value::Projected(_) => return Ok(None),
-                    Value::Number(left) => {
-                        let value = eval_number_numeric_binary_value(left, binary_op, binary_right);
-                        eval_number_compare_values(value, compare_op, compare_right)
-                    }
-                    value => {
-                        self.charge_intrinsic_work(binary_op_work_units(
-                            &value,
-                            binary_op,
-                            &Value::Number(binary_right),
-                        ));
-                        let value =
-                            eval_binary_values(value, binary_op, Value::Number(binary_right))?;
-                        eval_compare_values(value, compare_op, Value::Number(compare_right))?
-                    }
-                };
-                if !truthy {
-                    self.observe_branch_selection(
-                        self.current_instruction_ip(),
-                        ProcessBranchSelection::Else,
-                    );
-                    self.ip = target;
-                } else {
-                    self.observe_branch_selection(
-                        self.current_instruction_ip(),
-                        ProcessBranchSelection::Then,
-                    );
-                }
-            }
             Instruction::JumpIfTrue(target) => {
                 if self
                     .stack
@@ -861,51 +630,15 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     );
                 }
             }
-            Instruction::AddAssign(slot) => {
-                let right = self.pop_stack()?;
-                self.add_assign_value(slot, right)?;
-            }
-            Instruction::AddAssignNumber { slot, right } => {
-                self.add_assign_number(slot, right)?;
-            }
-            Instruction::AddAssignSlot { slot, right } => {
-                self.add_assign_slot(slot, right)?;
-            }
             Instruction::JavaScriptAddAssign(slot) => {
                 if self.javascript_binary_needs_slow_path(JavaScriptBinaryOp::Add)? {
                     return Ok(None);
                 }
                 self.javascript_add_assign(slot)?;
             }
-            Instruction::AddAssignIndexNumber { slot, right } => {
-                let index = self.pop_stack()?;
-                if let Some(Value::Ref(id)) = self.slots.get(slot) {
-                    let target = Value::Ref(*id);
-                    let index = self.heap.export(&index)?;
-                    let value = self.heap.add_assign_index_number(&target, &index, right)?;
-                    self.last_value = Some(value);
-                } else {
-                    self.add_assign_index_number(slot, &index, right)?;
-                }
-            }
-            Instruction::AddAssignIndexSlotNumber { slot, index, right } => {
-                let index = self.load_slot(index)?.clone();
-                if let Some(Value::Ref(id)) = self.slots.get(slot) {
-                    let target = Value::Ref(*id);
-                    let index = self.heap.export(&index)?;
-                    let value = self.heap.add_assign_index_number(&target, &index, right)?;
-                    self.last_value = Some(value);
-                } else {
-                    self.add_assign_index_number(slot, &index, right)?;
-                }
-            }
-            Instruction::AppendAssign(slot) => self.append_assign(slot)?,
             Instruction::Finish => return Ok(Some(VmStep::Effect(VmEffect::Finish))),
             Instruction::SleepFor => {
                 return Ok(Some(VmStep::Effect(VmEffect::Sleep(SleepKind::For))));
-            }
-            Instruction::SleepUntil => {
-                return Ok(Some(VmStep::Effect(VmEffect::Sleep(SleepKind::Until))));
             }
             Instruction::ProcessWaitSignal { name } => {
                 if self.mode != VmMode::Process {
@@ -914,16 +647,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     });
                 }
                 return Ok(Some(VmStep::Effect(VmEffect::WaitSignal { name })));
-            }
-            Instruction::ProcessYield => {
-                if self.mode != VmMode::Process {
-                    return Err(RuntimeError::SessionProcessAdminOutsideProcess {
-                        keyword: "yield".into(),
-                    });
-                }
-                return Ok(Some(VmStep::Effect(VmEffect::ProcessEvent(
-                    ProcessEventKind::Yield,
-                ))));
             }
             Instruction::ProcessFail => {
                 if self.mode != VmMode::Process {
@@ -995,13 +718,14 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// Re-run `step_instruction_fast` after replacing the two projected stack
     /// operands the opcode consumes with their materialized values.
     ///
-    /// `step_instruction_fast` only routes the pure-arithmetic stack opcodes
-    /// (`Binary`, `JumpIfCompareFalse`) to the slow path when an operand is
-    /// `Value::Projected`. Materializing the top two operands in place — in the
+    /// `step_instruction_fast` routes the stack-pair opcodes
+    /// (`JavaScriptBinary`, `JavaScriptAddAssign`) to the slow path when an
+    /// operand is `Value::Projected`. Materializing the top two operands in
+    /// place — in the
     /// same right-then-left order the opcode pops them — and re-dispatching is
-    /// exactly equivalent to the inline `materialize_value` the slow
-    /// arm would have done, but without duplicating the eval logic. The retry
-    /// always completes because both operands are now concrete.
+    /// exactly equivalent to what the slow arm would have done, but without
+    /// duplicating the eval logic. The retry always completes because both
+    /// operands are now concrete.
     fn redispatch_with_materialized_stack_pair(
         &mut self,
         instruction: Instruction,
@@ -1020,30 +744,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         self.stack.push(left);
         self.stack.push(right);
         self.redispatch_fast(instruction)
-    }
-
-    /// Re-run `step_instruction_fast` after temporarily resolving a projected
-    /// slot operand to its materialized value.
-    ///
-    /// The fused slot arithmetic opcodes (`SlotNumberBinary`,
-    /// `SlotNumberCompare`, `SlotNumberBinaryCompare`,
-    /// `JumpIfSlotNumberCompareFalse`, `JumpIfSlotNumberBinaryCompareFalse`)
-    /// only read `slot` and never write it, so we materialize the projected
-    /// value, swap it into the slot for the (fully synchronous) re-dispatch,
-    /// then restore the original projected value. The projected binding is
-    /// re-materialized on every touch, matching the old slow arm's
-    /// per-touch `materialize_value(left.clone())`.
-    fn redispatch_with_materialized_slot(
-        &mut self,
-        slot: usize,
-        instruction: Instruction,
-    ) -> Result<VmStep, RuntimeError> {
-        let original = self.load_slot(slot)?.clone();
-        let materialized = materialize_value(original.clone())?;
-        self.slots.values[slot] = Some(materialized);
-        let result = self.redispatch_fast(instruction);
-        self.slots.values[slot] = Some(original);
-        result
     }
 
     #[inline(always)]
@@ -1065,16 +765,14 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// Projected reads themselves are synchronous descriptor calls; nothing
     /// here awaits on behalf of a `Value::Projected` alone.
     ///
-    /// The pure-arithmetic opcodes (`Binary`, `JumpIfCompareFalse`, and the
-    /// fused `SlotNumber*` / `JumpIfSlotNumber*` ops) do not duplicate the
-    /// fast-path eval here: they resolve the blocking projected operand and
-    /// re-dispatch through `step_instruction_fast` (see
-    /// `redispatch_with_materialized_stack_pair` /
-    /// `redispatch_with_materialized_slot`). Only the genuinely suspending or
-    /// projected-reading opcodes keep bespoke arms — lazy projected field/index
-    /// propagation, the `truthy`-hook bool ops, `Unary`, intrinsics, iteration,
-    /// type literals, and effects. The opcodes the fast path always completes
-    /// are unreachable here.
+    /// The stack-pair opcodes do not duplicate the fast-path eval here: they
+    /// resolve the blocking projected operand and re-dispatch through
+    /// `step_instruction_fast` (see
+    /// `redispatch_with_materialized_stack_pair`). Only the genuinely
+    /// suspending or projected-reading opcodes keep bespoke arms — lazy
+    /// projected field/index propagation, the `truthy`-hook bool ops,
+    /// intrinsics, iteration, and effects. The opcodes the fast path always
+    /// completes are unreachable here.
     fn step_instruction(&mut self, instruction: Instruction) -> Result<VmStep, RuntimeError> {
         match instruction {
             Instruction::LoadField { slot, field } => {
@@ -1138,38 +836,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::HeapPathAssign { slot, path } => {
                 self.execute_reference_path_assignment(slot, path)?;
             }
-            Instruction::ListAppend => {
-                let item = materialize_value(self.pop_stack()?)?;
-                let list = self.pop_stack()?;
-                let value = match &list {
-                    Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::List(_))) => {
-                        self.heap.push_list(&list, item)?
-                    }
-                    _ => {
-                        // The fallback copies every element the list holds.
-                        self.charge_intrinsic_work(proportional_units(&list).saturating_add(1));
-                        execute_push_builtin(list, item)?
-                    }
-                };
-                self.stack.push(value);
-            }
-            Instruction::Unary(op) => {
-                let value = self.pop_stack()?;
-                let value = match op {
-                    UnaryOp::Negate => {
-                        let value = materialize_value(value)?;
-                        Value::Number(-as_number(&value)?)
-                    }
-                    UnaryOp::Not => Value::Bool(match &value {
-                        Value::Projected(_) => !is_truthy(&value)?,
-                        _ => !self.is_truthy_for_dialect(&value)?,
-                    }),
-                };
-                self.stack.push(value);
-            }
-            Instruction::Binary(_) => {
-                return self.redispatch_with_materialized_stack_pair(instruction);
-            }
             Instruction::JavaScriptUnary(op) => {
                 return self.redispatch_javascript_unary(op);
             }
@@ -1178,11 +844,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::JavaScriptAddAssign(_) => {
                 return self.redispatch_with_materialized_stack_pair(instruction);
-            }
-            Instruction::SlotNumberBinary { slot, .. }
-            | Instruction::SlotNumberCompare { slot, .. }
-            | Instruction::SlotNumberBinaryCompare { slot, .. } => {
-                return self.redispatch_with_materialized_slot(slot, instruction);
             }
             Instruction::ToBool => {
                 let value = self.pop_stack()?;
@@ -1210,13 +871,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         ProcessBranchSelection::Then,
                     );
                 }
-            }
-            Instruction::JumpIfCompareFalse { .. } => {
-                return self.redispatch_with_materialized_stack_pair(instruction);
-            }
-            Instruction::JumpIfSlotNumberCompareFalse { slot, .. }
-            | Instruction::JumpIfSlotNumberBinaryCompareFalse { slot, .. } => {
-                return self.redispatch_with_materialized_slot(slot, instruction);
             }
             Instruction::JumpIfTrue(target) => {
                 let value = self.pop_stack()?;
@@ -1258,9 +912,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::AwaitPending => return Ok(VmStep::Effect(VmEffect::AwaitPending)),
             Instruction::ResourceOperationBatch(batch) => {
                 return Ok(VmStep::Effect(VmEffect::ResourceOperationBatch(batch)));
-            }
-            Instruction::ResourceOperationListBatch(batch) => {
-                return Ok(VmStep::Effect(VmEffect::ResourceOperationListBatch(batch)));
             }
             Instruction::AwaitHandle => {
                 return Ok(VmStep::Effect(VmEffect::AwaitHandle));
@@ -1318,26 +969,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     heapified: false,
                 });
             }
-            Instruction::ResolveTypeRef(slot) => {
-                let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
-                let value = self.slots.get(slot).cloned().ok_or_else(|| {
-                    RuntimeError::UndefinedVariable {
-                        name: slot_name.text.to_string(),
-                    }
-                })?;
-                let schema = unwrap_type_value(&value).cloned().ok_or_else(|| {
-                    RuntimeError::NotTypeValue {
-                        name: slot_name.text.to_string(),
-                    }
-                })?;
-                self.stack.push(schema);
-            }
-            Instruction::WrapTypeLiteral => {
-                let schema = self.pop_stack()?;
-                let mut wrapper = record_with_capacity(1);
-                wrapper.insert(LASH_TYPE_KEY.to_string(), schema);
-                self.stack.push(Value::Record(Arc::new(wrapper)));
-            }
             Instruction::WrapHostDescriptor(type_name) => {
                 let value = self.pop_stack()?;
                 let mut wrapper = record_with_capacity(2);
@@ -1359,23 +990,12 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::LoadName(_)
             | Instruction::Duplicate
             | Instruction::StoreName(_)
-            | Instruction::BuildTuple(_)
-            | Instruction::BuildList(_)
             | Instruction::BuildHeapList(_)
-            | Instruction::BuildRecord(_)
             | Instruction::BuildHeapRecord(_)
             | Instruction::ResultUnwrap
-            | Instruction::AddAssign(_)
-            | Instruction::AddAssignNumber { .. }
-            | Instruction::AddAssignSlot { .. }
-            | Instruction::AddAssignIndexNumber { .. }
-            | Instruction::AddAssignIndexSlotNumber { .. }
-            | Instruction::AppendAssign(_)
             | Instruction::Finish
             | Instruction::SleepFor
-            | Instruction::SleepUntil
             | Instruction::ProcessWaitSignal { .. }
-            | Instruction::ProcessYield
             | Instruction::ProcessFail
             | Instruction::ObserveStep
             | Instruction::Pop
@@ -1536,42 +1156,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                             execute_compiled_format(template, std::slice::from_ref(value))?
                         } else {
                             execute_compiled_format_direct(template, std::slice::from_ref(value))?
-                        };
-                        Value::String(value.into())
-                    }
-                };
-                if let Value::String(text) = &value {
-                    self.charge_intrinsic_work(text.len());
-                }
-                self.stack.push(value);
-            }
-            IntrinsicOp::FormatCompiledSlotNumberBinary {
-                template,
-                slot,
-                op,
-                right,
-            } => {
-                let template = &self.chunk.format_templates[template];
-                let value = match self.load_slot(slot)? {
-                    Value::Number(left) => Value::String(
-                        execute_compiled_format_one_number_compact_direct(
-                            template,
-                            eval_number_numeric_binary_value(*left, op, right),
-                        )?
-                        .into(),
-                    ),
-                    left => {
-                        let left = materialize_value(left.clone())?;
-                        self.charge_intrinsic_work(binary_op_work_units(
-                            &left,
-                            op,
-                            &Value::Number(right),
-                        ));
-                        let value = eval_binary_values(left, op, Value::Number(right))?;
-                        let value = if matches!(value, Value::Projected(_)) {
-                            execute_compiled_format(template, &[value])?
-                        } else {
-                            execute_compiled_format_direct(template, &[value])?
                         };
                         Value::String(value.into())
                     }

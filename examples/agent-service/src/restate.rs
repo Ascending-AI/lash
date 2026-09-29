@@ -155,6 +155,7 @@ mod restate_tests {
             Box::pin(send_message(
                 State(state.clone()),
                 AxumPath(chat.id.clone()),
+                crate::remote_protocol::test_remote_headers(),
                 Json(request),
             )),
         )

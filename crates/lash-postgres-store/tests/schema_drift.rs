@@ -17,6 +17,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+use lash_core_execution::{StoreError, compat::CompatRefusal};
 use lash_postgres_store::{
     ColumnValueSource, ForeignKeyAction, PostgresStorage, PostgresStoreConfig, SchemaCheck,
     SchemaFinding,
@@ -460,11 +461,10 @@ async fn an_unexpected_column_on_a_lash_table_is_rejected() {
     .await;
 }
 
-/// A version stamp naming another generation short-circuits the structural diff:
-/// the database is a different schema generation, so a per-column diff of it would
-/// be noise rather than a diagnosis. The report carries the version finding alone.
+/// The DDL revision and compatibility stamp are independent. A compatible
+/// expansion must still expose structural drift to verification and open.
 #[tokio::test]
-async fn a_mismatched_version_stamp_is_reported_without_a_column_diff() {
+async fn a_compatible_expansion_still_reports_column_drift() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping version stamp check: database URL is not set");
         return;
@@ -472,30 +472,27 @@ async fn a_mismatched_version_stamp_is_reported_without_a_column_diff() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 1 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 2, min_reader = 1
+               WHERE component = 'lash-postgres-store';
              ALTER TABLE lash_processes ALTER COLUMN status TYPE VARCHAR(64)",
         )
         .await;
     let report = PostgresStorage::verify_schema_for(&scratch.pool)
         .await
-        .expect("verify the stale-version database");
-    assert_eq!(
-        report.findings,
-        vec![SchemaFinding::VersionMismatch {
-            expected: PostgresStorage::schema_version(),
-            found: Some(1),
-        }],
-        "a version mismatch must suppress the structural diff entirely"
-    );
+        .expect("verify the expanded database");
+    assert!(report.findings.iter().any(|finding| matches!(
+        finding,
+        SchemaFinding::ColumnMismatch { table, expected, .. }
+            if table == "lash_processes" && expected.name == "status"
+    )));
     let rendered = report.to_string();
-    assert!(
-        rendered.contains("COMPONENT VERSION") && rendered.contains("is stamped version 1"),
-        "the report must name the version mismatch: {rendered}"
-    );
-    assert!(
-        !rendered.contains("COLUMN DRIFT"),
-        "a version mismatch must not emit a column diff even when one exists: {rendered}"
-    );
+    assert!(rendered.contains("COLUMN DRIFT"), "{rendered}");
+    assert!(matches!(
+        scratch.open_host_provisioned(SchemaCheck::Enforce).await,
+        Err(StoreError::Incompatible {
+            refusal: CompatRefusal::ShapeRefused { .. }
+        })
+    ));
     scratch.cleanup().await;
 }
 
@@ -693,7 +690,12 @@ async fn worker_open_rejects_an_unprovisioned_database() {
     .err()
     .expect("an unprovisioned database must not open");
     assert!(
-        error.to_string().contains("has no version stamp"),
+        matches!(
+            error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::Unstamped { .. }
+            }
+        ),
         "the error must say the database is unprovisioned: {error}"
     );
     pool.close().await;
@@ -854,14 +856,9 @@ async fn a_lash_table_shadowing_the_anchored_installation_is_reported() {
     }
 }
 
-/// The component version is the reject-and-recreate boundary and no `SchemaCheck`
-/// relaxes it. If `WarnOnly` could downgrade it, a host that adopted the valve for
-/// a structural false positive would later open silently against a pre-cutover
-/// database — process events with no completion-authority payload, manifest rows
-/// naming a blob layout that cannot be read — which is the corruption the boundary
-/// exists to prevent.
+/// A reader floor above this build is fatal in either schema-check mode.
 #[tokio::test]
-async fn a_stale_version_stamp_is_fatal_in_every_mode() {
+async fn a_raised_reader_floor_is_fatal_in_every_mode() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping version-gate universality: database URL is not set");
         return;
@@ -869,7 +866,8 @@ async fn a_stale_version_stamp_is_fatal_in_every_mode() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 1 WHERE component = 'lash-postgres-store'",
+            "UPDATE lash_schema_versions SET version = 2, min_reader = 2
+             WHERE component = 'lash-postgres-store'",
         )
         .await;
     for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
@@ -882,22 +880,26 @@ async fn a_stale_version_stamp_is_fatal_in_every_mode() {
         )
         .await
         .err()
-        .unwrap_or_else(|| panic!("{check:?} must reject a stale version stamp"));
-        let rendered = error.to_string();
+        .unwrap_or_else(|| panic!("{check:?} must reject a raised reader floor"));
         assert!(
-            rendered.contains("has version 1")
-                && rendered.contains("reject-and-recreate")
-                && rendered.contains("does not relax it"),
-            "{check:?} must name the boundary and say the valve does not relax it: {rendered}"
+            matches!(
+                error,
+                StoreError::Incompatible {
+                    refusal: CompatRefusal::ReaderFloorAbove {
+                        found: 2,
+                        min_reader: 2,
+                        ..
+                    }
+                }
+            ),
+            "{check:?}: {error}"
         );
     }
     scratch.cleanup().await;
 }
 
-/// A pre-cutover queued-work table stamped with the old component version must
-/// be refused before creation-only DDL or `WarnOnly` can admit it. This models
-/// an existing installation crossing the queued-work shape cutover, rather
-/// than merely proving that a fresh schema matches this build.
+/// A pre-cutover queued-work shape is unsafe even when its compatibility stamp
+/// declares a newer version with a reader floor this build admits.
 #[tokio::test]
 async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
     let Some(database_url) = database_url() else {
@@ -915,7 +917,7 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
                  ADD COLUMN slot_policy TEXT NOT NULL DEFAULT 'join',
                  ADD COLUMN merge_key_json TEXT NOT NULL DEFAULT '\"never\"';
              UPDATE lash_schema_versions
-                SET version = 43
+                SET version = 2, min_reader = 1
               WHERE component = 'lash-postgres-store'",
         )
         .await;
@@ -930,74 +932,73 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
     .await
     .err()
     .unwrap_or_else(|| panic!("WarnOnly must refuse the pre-cutover install"));
-    let rendered = error.to_string();
     assert!(
-        rendered.contains("has version 43")
-            && rendered.contains(&format!("expected {}", PostgresStorage::schema_version()))
-            && rendered.contains("does not relax it"),
-        "the version boundary must dominate the incompatible queued-work shape: {rendered}"
+        matches!(
+            error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::ShapeRefused { .. }
+            }
+        ),
+        "the old queued-work shape must be refused: {error}"
     );
     scratch.cleanup().await;
 }
 
-/// The retained immediate predecessor is the catalog the next hard cutover
-/// author edits. Pinning its refusal directly prevents that retained-generation
-/// update from silently targeting an older synthetic witness instead.
+/// The immediate DDL predecessor has the same 1/1 compatibility stamp. The
+/// migration ledger tracks whether its remaining step needs to run.
 #[tokio::test]
-async fn postgres_retained_prior_component_is_refused_at_open() {
+async fn postgres_retained_prior_ddl_revision_can_open_with_current_shape() {
     let retained_prior = PostgresStorage::schema_version() - 1;
     let Some(database_url) = database_url() else {
-        eprintln!("skipping retained Postgres predecessor refusal: database URL is not set");
+        eprintln!("skipping retained Postgres predecessor: database URL is not set");
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(&format!(
-            "UPDATE lash_schema_versions
-                SET version = {retained_prior}
-              WHERE component = 'lash-postgres-store'"
+            "INSERT INTO lash_migrations
+                (phase, migration, release, state, from_version, to_version,
+                 started_at_ms, finished_at_ms)
+             VALUES ('expand', 'bootstrap-{retained_prior}', 'test', 'applied',
+                     0, {retained_prior}, 0, 0)"
         ))
         .await;
-
-    let error = PostgresStorage::from_pool(scratch.pool.clone())
+    PostgresStorage::from_pool(scratch.pool.clone())
         .await
-        .err()
-        .unwrap_or_else(|| panic!("component {retained_prior} must be refused at open"));
-    let rendered = error.to_string();
-    assert!(
-        rendered.contains(&format!("version {retained_prior}"))
-            && rendered.contains(&format!("expected {}", PostgresStorage::schema_version())),
-        "the predecessor refusal must identify found and expected versions: {rendered}"
-    );
+        .expect("the current shape is readable under the 1/1 stamp");
 
     scratch.cleanup().await;
 }
 
-/// Component 114 is older than the queued-run cutover, so the current build
-/// refuses it.
+/// A compatible expansion cannot hide a missing queued-work column.
 #[tokio::test]
-async fn component_114_is_refused() {
+async fn an_expanded_stamp_cannot_hide_queued_work_drift() {
     let Some(database_url) = database_url() else {
-        eprintln!("skipping component-114 divergence refusal: database URL is not set");
+        eprintln!("skipping queued-work drift refusal: database URL is not set");
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(
             "UPDATE lash_schema_versions
-                SET version = 114
-              WHERE component = 'lash-postgres-store'",
+                SET version = 2, min_reader = 1
+              WHERE component = 'lash-postgres-store';
+             ALTER TABLE lash_queued_work_batches DROP COLUMN work_kind",
         )
         .await;
 
     let error = PostgresStorage::from_pool(scratch.pool.clone())
         .await
         .err()
-        .unwrap_or_else(|| panic!("component 114 must be refused at queued-run cutover"));
-    let rendered = error.to_string();
+        .unwrap_or_else(|| panic!("missing queued-work shape must be refused"));
     assert!(
-        rendered.contains("no applicable migration"),
-        "the hard cutover must refuse component 114: {rendered}"
+        matches!(
+            error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::ShapeRefused { .. }
+            }
+        ),
+        "{error}"
     );
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
@@ -1006,20 +1007,19 @@ async fn component_114_is_refused() {
     .await
     .expect("read the refused catalog's component stamp");
     assert_eq!(
-        version, 114,
-        "a refused pre-cutover catalog must not advance the stamp"
+        version, 2,
+        "a refused expanded catalog must retain its stamp"
     );
 
     scratch.cleanup().await;
 }
 
-/// Component 65 predates the durable vocabulary CHECKs. The destructive
-/// component-68 cutover must refuse it before either Lash-managed DDL or the
-/// schema-check valve can mutate or admit the database.
+/// A reader floor past this build refuses before open can use an old catalog
+/// without its durable vocabulary CHECKs.
 #[tokio::test]
-async fn component_65_is_rejected_without_adding_check_constraints() {
+async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
     let Some(database_url) = database_url() else {
-        eprintln!("skipping component-65 CHECK cutover law: database URL is not set");
+        eprintln!("skipping reader-floor CHECK cutover law: database URL is not set");
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
@@ -1039,7 +1039,7 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
                  DROP CONSTRAINT ck_trigger_subscriptions_lifecycle,
                  DROP CONSTRAINT ck_trigger_subscriptions_lifecycle_deleted_at;
              UPDATE lash_schema_versions
-                SET version = 65
+                SET version = 2, min_reader = 2
               WHERE component = 'lash-postgres-store'",
         )
         .await;
@@ -1054,14 +1054,19 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
         )
         .await
         .err()
-        .unwrap_or_else(|| panic!("{check:?} must refuse component 65"));
-        let rendered = error.to_string();
+        .unwrap_or_else(|| panic!("{check:?} must refuse the raised floor"));
         assert!(
-            rendered.contains("has version 65")
-                && rendered.contains(&format!("expected {}", PostgresStorage::schema_version()))
-                && rendered.contains("no applicable migration")
-                && rendered.contains("does not relax it"),
-            "the destructive version boundary was lost for {check:?}: {rendered}"
+            matches!(
+                error,
+                StoreError::Incompatible {
+                    refusal: CompatRefusal::ReaderFloorAbove {
+                        found: 2,
+                        min_reader: 2,
+                        ..
+                    }
+                }
+            ),
+            "{check:?}: {error}"
         );
     }
 
@@ -1071,7 +1076,7 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read component version after refusal");
-    assert_eq!(version, 65, "the refused open must not advance the stamp");
+    assert_eq!(version, 2, "the refused open must not advance the stamp");
 
     let installed: i64 = sqlx::query_scalar(
         "SELECT count(*)
@@ -1224,10 +1229,8 @@ async fn a_seed_table_with_mistyped_columns_reports_instead_of_aborting() {
     scratch.cleanup().await;
 }
 
-/// Same class on the version stamp itself. `read_component_version` decodes
-/// `version` as `i32`, so a `text` column would raise a decode error — and because
-/// the stamp is then unreadable rather than merely absent, the structural diff must
-/// *not* be short-circuited: the column drift is the diagnosis a host needs.
+/// A malformed compatibility stamp is refused with a typed error. The
+/// structural verifier still reports its column drift.
 #[tokio::test]
 async fn a_mistyped_version_stamp_reports_the_column_drift() {
     let Some(database_url) = database_url() else {
@@ -1236,7 +1239,10 @@ async fn a_mistyped_version_stamp_reports_the_column_drift() {
     };
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
-        .apply("ALTER TABLE lash_schema_versions ALTER COLUMN version TYPE TEXT")
+        .apply(
+            "ALTER TABLE lash_schema_versions DROP CONSTRAINT ck_lash_schema_versions_stamp;
+                ALTER TABLE lash_schema_versions ALTER COLUMN version TYPE TEXT",
+        )
         .await;
     let report = PostgresStorage::verify_schema_for(&scratch.pool)
         .await
@@ -1252,29 +1258,25 @@ async fn a_mistyped_version_stamp_reports_the_column_drift() {
         "an unreadable stamp must not suppress the column diff that explains it: {:?}",
         report.findings
     );
-    assert!(
-        report
-            .findings
-            .iter()
-            .any(|finding| matches!(finding, SchemaFinding::VersionMismatch { found: None, .. })),
-        "an undecodable stamp is also not a usable version: {:?}",
-        report.findings
-    );
     let error = scratch
         .open_host_provisioned(SchemaCheck::Enforce)
         .await
         .err()
         .expect("an unreadable version stamp must refuse the open");
     assert!(
-        error.to_string().contains("has no version stamp"),
+        matches!(
+            error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::MalformedStamp { .. }
+            }
+        ),
         "{error}"
     );
     scratch.cleanup().await;
 }
 
-/// The remedy a report prints has to be one a host can actually follow. A version
-/// mismatch is unconditional, so recommending `SchemaCheck::WarnOnly` there would
-/// send a host down a path that cannot open the database.
+/// The verifier describes DDL drift; compatibility-stamp refusal comes from
+/// the typed open gate, which remains unconditional in both modes.
 #[tokio::test]
 async fn report_remedies_match_the_finding_class() {
     let Some(database_url) = database_url() else {
@@ -1283,30 +1285,7 @@ async fn report_remedies_match_the_finding_class() {
     };
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
-        .apply(
-            "UPDATE lash_schema_versions SET version = 1 WHERE component = 'lash-postgres-store'",
-        )
-        .await;
-    let version_report = PostgresStorage::verify_schema_for(&scratch.pool)
-        .await
-        .expect("verify the stale-version database")
-        .to_string();
-    assert!(
-        version_report.contains("reject-and-recreate")
-            && version_report.contains("no `SchemaCheck` relaxes it"),
-        "a version report must give the reject-and-recreate remedy: {version_report}"
-    );
-    assert!(
-        !version_report.contains("SchemaCheck::WarnOnly"),
-        "a version report must not recommend a valve that cannot open it: {version_report}"
-    );
-
-    scratch
-        .apply(&format!(
-            "UPDATE lash_schema_versions SET version = {} WHERE component = 'lash-postgres-store';
-             DROP INDEX idx_lash_process_events_key",
-            PostgresStorage::schema_version()
-        ))
+        .apply("DROP INDEX idx_lash_process_events_key")
         .await;
     let shape_report = PostgresStorage::verify_schema_for(&scratch.pool)
         .await
@@ -1321,28 +1300,28 @@ async fn report_remedies_match_the_finding_class() {
         "a shape report must not claim the database needs recreating: {shape_report}"
     );
 
-    // The mixed case: an unreadable stamp carries a VersionMismatch *and* the column
-    // findings that explain it. A version finding dominates, so the valve must still
-    // not be offered — recreating from the artifact resolves both classes anyway.
     scratch
-        .apply("ALTER TABLE lash_schema_versions ALTER COLUMN version TYPE TEXT")
+        .apply(
+            "UPDATE lash_schema_versions SET version = 2, min_reader = 2
+                WHERE component = 'lash-postgres-store'",
+        )
         .await;
-    let mixed_report = PostgresStorage::verify_schema_for(&scratch.pool)
-        .await
-        .expect("verify the unreadable-stamp database")
-        .to_string();
-    assert!(
-        mixed_report.contains("COMPONENT VERSION") && mixed_report.contains("COLUMN DRIFT"),
-        "the mixed case must carry both finding classes: {mixed_report}"
-    );
-    assert!(
-        !mixed_report.contains("SchemaCheck::WarnOnly"),
-        "a report carrying a version finding must never recommend the valve: {mixed_report}"
-    );
-    assert!(
-        mixed_report.contains("reject-and-recreate"),
-        "the mixed case must give the reject-and-recreate remedy: {mixed_report}"
-    );
+    for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
+        let error = scratch
+            .open_host_provisioned(check)
+            .await
+            .err()
+            .expect("floor refuses");
+        assert!(
+            matches!(
+                error,
+                StoreError::Incompatible {
+                    refusal: CompatRefusal::ReaderFloorAbove { .. }
+                }
+            ),
+            "{check:?}: {error}"
+        );
+    }
     scratch.cleanup().await;
 }
 
@@ -1430,12 +1409,12 @@ async fn the_schema_gate_emits_its_decision_basis() {
         .open_host_provisioned(SchemaCheck::Enforce)
         .await
         .expect("open a conformant schema");
-    let found_version = format!("found_version=Some({})", PostgresStorage::schema_version());
+    let found_version = "found_version=Some(1)";
     assert_evidence(
         capture,
         &scratch.name,
         "allowed",
-        &[found_version.as_str(), "finding_total=0"],
+        &[found_version, "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -1474,25 +1453,26 @@ async fn the_schema_gate_emits_its_decision_basis() {
         &["UNIQUE GUARD DRIFT=1", "schema_check=WarnOnly"],
     );
 
-    // (d) denied on the version boundary, which no valve relaxes.
+    // (d) an expanded catalog with unsafe drift is refused even under WarnOnly.
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 1 WHERE component = 'lash-postgres-store'",
+            "UPDATE lash_schema_versions SET version = 2, min_reader = 1
+             WHERE component = 'lash-postgres-store'",
         )
         .await;
-    assert!(
-        scratch
-            .open_host_provisioned(SchemaCheck::WarnOnly)
-            .await
-            .is_err()
-    );
+    assert!(matches!(
+        scratch.open_host_provisioned(SchemaCheck::WarnOnly).await,
+        Err(StoreError::Incompatible {
+            refusal: CompatRefusal::ShapeRefused { .. }
+        })
+    ));
     assert_evidence(
         capture,
         &scratch.name,
-        "denied_version",
+        "denied_shape",
         &[
-            "found_version=Some(1)",
-            "COMPONENT VERSION=1",
+            "found_version=Some(2)",
+            "UNIQUE GUARD DRIFT=1",
             "schema_check=WarnOnly",
         ],
     );
@@ -1506,6 +1486,7 @@ fn assert_evidence(capture: &EventCapture, schema: &str, outcome: &str, extra: &
     let events = capture.events_for(schema);
     let event = events
         .iter()
+        .rev()
         .find(|event| event.contains(&format!("outcome={outcome} ")))
         .unwrap_or_else(|| {
             panic!(
@@ -1649,59 +1630,24 @@ async fn verification_waiting_for_the_key_sees_the_holders_committed_work() {
     scratch.cleanup().await;
 }
 
-/// `schema.sql` stamps its component version twice: in the header comment a
-/// vendoring host reads first, and in the `lash_schema_versions` seed row that
-/// stamps the provisioned database. Both are generated from `SCHEMA_VERSION`,
-/// never transcribed by hand — a stamp edited by hand drifts silently the next
-/// time the constant moves, and a vendor following a stale header provisions a
-/// database whose open is refused for reasons the artifact does not confess.
-///
-/// After a version bump, regenerate both stamps by rerunning this test with
-/// `LASH_UPDATE_SCHEMA_SQL=1`; it rewrites them from `SCHEMA_VERSION` and fails
-/// once so the diff is reviewed.
+/// The artifact keeps its pre-1.0 DDL revision separate from the 1.0
+/// compatibility stamp; a DDL edit cannot silently move the reader floor.
 #[test]
-fn the_ddl_artifacts_component_version_stamps_track_schema_version() {
-    const HEADER_PREFIX: &str = "-- lash-postgres-store schema, component version ";
-    const SEED_PREFIX: &str = "VALUES ('lash-postgres-store', ";
-
+fn the_ddl_artifact_keeps_revision_and_compat_stamp_separate() {
     let ddl = PostgresStorage::schema_ddl();
-    let version = PostgresStorage::schema_version();
-
-    let header = ddl.lines().next().expect("schema.sql is not empty");
-    let expected_header = format!("{HEADER_PREFIX}{version}.");
-
     assert_eq!(
-        ddl.matches(SEED_PREFIX).count(),
-        1,
-        "schema.sql must seed exactly one lash_schema_versions row"
+        ddl.lines().next(),
+        Some(
+            format!(
+                "-- lash-postgres-store schema, DDL revision {}; compatibility stamp 1/1.",
+                PostgresStorage::schema_version()
+            )
+            .as_str()
+        )
     );
-    let seed_digits = &ddl[ddl.find(SEED_PREFIX).expect("seed row") + SEED_PREFIX.len()..];
-    let digit_len = seed_digits.bytes().take_while(u8::is_ascii_digit).count();
-    let seeded: i32 = seed_digits[..digit_len]
-        .parse()
-        .expect("the seeded component version is numeric");
-
-    if header == expected_header && seeded == version {
-        return;
-    }
-
-    if std::env::var("LASH_UPDATE_SCHEMA_SQL").as_deref() == Ok("1") {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schema.sql");
-        let rewritten = ddl.replacen(header, &expected_header, 1).replacen(
-            &format!("{SEED_PREFIX}{seeded}"),
-            &format!("{SEED_PREFIX}{version}"),
-            1,
-        );
-        std::fs::write(&path, rewritten).expect("rewrite the schema artifact's version stamps");
-        panic!(
-            "regenerated {} -- rerun the suite to confirm",
-            path.display()
-        );
-    }
-    panic!(
-        "schema.sql's component version stamps drifted from SCHEMA_VERSION ({version}): header \
-         is {header:?}, the seed row stamps {seeded}. Regenerate them with \
-         LASH_UPDATE_SCHEMA_SQL=1 and review the diff."
+    assert_eq!(
+        ddl.matches("VALUES ('lash-postgres-store', 1, 1)").count(),
+        1
     );
 }
 

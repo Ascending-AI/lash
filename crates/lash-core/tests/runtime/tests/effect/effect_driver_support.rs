@@ -54,6 +54,14 @@ pub(super) struct EffectControllerTestCodeExecutor;
 
 #[async_trait::async_trait]
 impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor {
+    async fn frame_switch_carries(
+        &self,
+        _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
+        _initial_nodes: &[lash_core::SessionAppendNode],
+    ) -> Result<Vec<lash_core::ArtifactName>, lash_core::SessionError> {
+        Ok(Vec::new())
+    }
+
     async fn execute_code(
         &self,
         _ctx: lash_core::RuntimeExecutionContext<'_>,

@@ -43,7 +43,7 @@ use crate::{
 };
 
 /// The replay key of `root`'s config record. Keyed by the root, never by
-/// the admission (the `drive-claim:{root}` precedent): a later admission of
+/// the admission (as with `drive-admit:{root}`): a later admission of
 /// the same unfinished root replays the config its first execution recorded.
 fn turn_config_replay_key(root: &TurnId) -> String {
     format!("turn-config:{root}")

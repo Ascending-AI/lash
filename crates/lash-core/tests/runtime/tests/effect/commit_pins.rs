@@ -9,6 +9,10 @@
 //! accepted input now carries its turn id in the existing optional
 //! `source_key` field. That field is the only difference in the committed
 //! bytes.
+//!
+//! Re-pinned for FIG-4037: each physical turn commit now carries its typed
+//! `outcome`. Removing that field from the masked commit reproduces each old
+//! digest; every other committed byte is unchanged.
 
 use super::*;
 use crate::runtime_support::commit_pins::assert_commit_pins;

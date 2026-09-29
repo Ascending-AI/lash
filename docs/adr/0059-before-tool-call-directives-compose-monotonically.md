@@ -150,3 +150,10 @@ now covers bounded reinspection at both the before-tool argument seam and the
 after-tool result seam, including after-tool first-emitted replacement
 selection; the shared restrictive terminal ordering remains the safety floor.
 This ADR does not depend on any particular production tool-hook registrant.
+
+## Amendment (FIG-3562, 2026-09-29): no orchestrating tool starts sessions
+
+The parenthesis above that names an orchestrating tool spawning a
+`SessionTurn` process is historical. [ADR 0116](0116-tools-are-opaque.md) deletes orchestrating tools. A tool
+that needs a related session turn returns Pending with a `DeclaredStart` of a
+`ProcessInput::SessionTurn` ([ADR 0116](0116-tools-are-opaque.md) §3), and the runtime launches it.

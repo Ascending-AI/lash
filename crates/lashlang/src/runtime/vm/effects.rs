@@ -5,9 +5,9 @@ use crate::span::Span;
 
 use super::super::access::prototype_chain_data_key_error;
 use super::super::host::{
-    AbilityOp, AbilityResult, AggregateConsumer, ProcessEvent, ProcessEventKind, ResourceOperation,
-    ResourceOperationBatch, ResourceOperationBatchLeaf, ResourceOperationBatchResult,
-    ResourceOperationResult, Sleep, SleepKind,
+    AbilityOp, AbilityResult, AggregateConsumer, ResourceOperation, ResourceOperationBatch,
+    ResourceOperationBatchLeaf, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
+    SleepKind,
 };
 use super::super::ops::value_type_name;
 use super::super::{
@@ -30,13 +30,11 @@ pub(super) enum VmEffect {
     AwaitArray { consumer: AggregateConsumer },
     AwaitPending,
     ResourceOperationBatch(usize),
-    ResourceOperationListBatch(usize),
     AwaitHandle,
     Sleep(SleepKind),
     WaitSignal { name: usize },
     AwaitHandleUnwrap,
     Print,
-    ProcessEvent(ProcessEventKind),
     Finish,
     Fail,
 }
@@ -168,9 +166,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.resolve_resource_operation_batch(batch, instruction_ip)
                     .await?;
             }
-            VmEffect::ResourceOperationListBatch(batch) => {
-                self.resolve_resource_operation_list_batch(batch).await?;
-            }
             VmEffect::AwaitHandle => {
                 let handle = self.pop_stack()?;
                 let result = self.await_value(handle, active).await?;
@@ -215,18 +210,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let handle = self.pop_stack()?;
                 let result = self.await_value_unwrap(handle, active).await?;
                 self.stack.push(result);
-            }
-            VmEffect::ProcessEvent(kind) => {
-                let value = self.pop_stack()?;
-                self.host
-                    .perform(AbilityOp::ProcessEvent(ProcessEvent {
-                        kind,
-                        value: value.clone(),
-                    }))
-                    .await
-                    .map_err(|source| RuntimeError::ProcessEventFailed { source })?;
-                self.last_value = Some(value.clone());
-                self.stack.push(value);
             }
             VmEffect::Print => {
                 let value = self.pop_stack()?;
@@ -587,82 +570,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
             Some(errors),
         )?;
         Ok(RuntimeError::UncaughtException { value })
-    }
-
-    /// An empty comprehension never reaches the host.
-    async fn resolve_resource_operation_list_batch(
-        &mut self,
-        batch: usize,
-    ) -> Result<(), RuntimeError> {
-        let batch = &self.chunk.resource_operation_list_batches[batch];
-        let Value::List(calls) = self.pop_stack()? else {
-            return Err(RuntimeError::ResourceListBatchMalformed);
-        };
-        let operation = self.chunk.names[batch.operation].text.to_string();
-        let mut operations = Vec::with_capacity(calls.len());
-        let mut active_nodes = Vec::with_capacity(calls.len());
-        for call in calls.iter() {
-            let Value::Tuple(items) = call else {
-                return Err(RuntimeError::ResourceListBatchMalformed);
-            };
-            let mut items = items.iter();
-            let Some(receiver) = items.next() else {
-                return Err(RuntimeError::ResourceListBatchMalformed);
-            };
-            let args = items.cloned().collect::<Vec<_>>();
-            if args.len() != batch.argc {
-                return Err(RuntimeError::ResourceListBatchMalformed);
-            }
-            let active = batch
-                .site
-                .clone()
-                .map(|site| self.begin_lashlang_execution_site(site));
-            operations.push(ResourceOperationBatchLeaf::Operation(ResourceOperation {
-                receiver: receiver.clone(),
-                operation: operation.clone(),
-                args,
-                call_site: active.as_ref().map(lashlang_execution_call_site),
-            }));
-            active_nodes.push(active);
-        }
-
-        // The standalone list batch keeps its all-results wait and reports
-        // its first *written* rejection (ADR 0099 §10 L7).
-        let leaf_values = if operations.is_empty() {
-            Vec::new()
-        } else {
-            let reply = self
-                .perform_resource_operation_batch(
-                    operations,
-                    &active_nodes,
-                    AggregateConsumer::AllSettled,
-                    None,
-                )
-                .await?;
-            let ResourceOperationBatchResult::AllResults(results) = reply else {
-                return Err(self.fail_resource_operation_batch(
-                    &active_nodes,
-                    RuntimeError::ResourceBatchReply {
-                        problem: format!(
-                            "a list batch cannot be answered with {}",
-                            reply_shape_name(&reply)
-                        ),
-                    },
-                ));
-            };
-            self.settle_resource_operation_leaves(
-                std::iter::repeat_n((batch.unwrap, batch.source_span), calls.len()),
-                results,
-                &active_nodes,
-            )?
-        };
-
-        let mut value = Value::List(leaf_values.into());
-        if batch.aggregate_unwrap {
-            value = unwrap_tool_result(value)?;
-        }
-        self.stack.push(value);
-        Ok(())
     }
 
     /// The one host call an aggregate makes, with its reply validated against
@@ -1045,12 +952,11 @@ fn reply_shape_name(reply: &ResourceOperationBatchResult) -> &'static str {
 /// (ADR 0096) and which this walk therefore must not descend into.
 fn element_value_positions(shape: &CompiledAggregateAwaitShape) -> Vec<usize> {
     let elements = match shape {
-        CompiledAggregateAwaitShape::Tuple(values)
-        | CompiledAggregateAwaitShape::List(values)
+        CompiledAggregateAwaitShape::List(values)
         | CompiledAggregateAwaitShape::Record { values, .. } => values,
-        CompiledAggregateAwaitShape::Comprehension { .. }
-        | CompiledAggregateAwaitShape::BatchLeaf(_)
-        | CompiledAggregateAwaitShape::Value(_) => return Vec::new(),
+        CompiledAggregateAwaitShape::BatchLeaf(_) | CompiledAggregateAwaitShape::Value(_) => {
+            return Vec::new();
+        }
     };
     elements
         .iter()
@@ -1061,9 +967,9 @@ fn element_value_positions(shape: &CompiledAggregateAwaitShape) -> Vec<usize> {
         .collect()
 }
 
-/// Expand captured comprehension lists recursively, preserving source traversal
-/// order for both the host batch and its rejection policy. Each element uses
-/// its own packed receiver/argument values; no operation executes here.
+/// Expands each leaf's packed receiver/argument values into the flat operand
+/// list, preserving source traversal order for both the host batch and its
+/// rejection policy. No operation executes here.
 fn expand_aggregate_await_shape(
     shape: &CompiledAggregateAwaitShape,
     template: &CompiledResourceOperationBatch,
@@ -1072,31 +978,6 @@ fn expand_aggregate_await_shape(
     values: &mut Vec<Value>,
 ) -> Result<CompiledAggregateAwaitShape, RuntimeError> {
     Ok(match shape {
-        CompiledAggregateAwaitShape::Comprehension {
-            stack_index,
-            template,
-        } => {
-            let Some(Value::List(elements)) = captured.get(*stack_index) else {
-                return Err(RuntimeError::ResourceListBatchMalformed);
-            };
-            let mut shapes = Vec::with_capacity(elements.len());
-            for element in elements.iter() {
-                let Value::Tuple(packed) = element else {
-                    return Err(RuntimeError::ResourceListBatchMalformed);
-                };
-                if packed.len() != template.stack_value_count {
-                    return Err(RuntimeError::ResourceListBatchMalformed);
-                }
-                shapes.push(expand_aggregate_await_shape(
-                    &template.shape,
-                    template,
-                    packed,
-                    leaves,
-                    values,
-                )?);
-            }
-            CompiledAggregateAwaitShape::List(shapes.into_boxed_slice())
-        }
         CompiledAggregateAwaitShape::BatchLeaf(index) => {
             let leaf = &template.leaves[*index];
             let start = leaf.receiver_stack_index;
@@ -1119,12 +1000,6 @@ fn expand_aggregate_await_shape(
             values.push(value.clone());
             CompiledAggregateAwaitShape::Value(index)
         }
-        CompiledAggregateAwaitShape::Tuple(items) => CompiledAggregateAwaitShape::Tuple(
-            items
-                .iter()
-                .map(|item| expand_aggregate_await_shape(item, template, captured, leaves, values))
-                .collect::<Result<_, _>>()?,
-        ),
         CompiledAggregateAwaitShape::List(items) => CompiledAggregateAwaitShape::List(
             items
                 .iter()
@@ -1151,9 +1026,6 @@ fn build_aggregate_await_shape<H: ExecutionHost>(
     vm: &Vm<'_, H>,
 ) -> Result<Value, RuntimeError> {
     match shape {
-        CompiledAggregateAwaitShape::Comprehension { .. } => {
-            Err(RuntimeError::ResourceListBatchMalformed)
-        }
         CompiledAggregateAwaitShape::BatchLeaf(index) => leaf_values
             .get(*index)
             .cloned()
@@ -1162,11 +1034,6 @@ fn build_aggregate_await_shape<H: ExecutionHost>(
             .get(*index)
             .cloned()
             .ok_or(RuntimeError::AggregateAwaitValueOutOfRange),
-        CompiledAggregateAwaitShape::Tuple(values) => values
-            .iter()
-            .map(|value| build_aggregate_await_shape(value, stack_values, leaf_values, vm))
-            .collect::<Result<Vec<_>, _>>()
-            .map(|values| Value::Tuple(values.into())),
         CompiledAggregateAwaitShape::List(values) => values
             .iter()
             .map(|value| build_aggregate_await_shape(value, stack_values, leaf_values, vm))

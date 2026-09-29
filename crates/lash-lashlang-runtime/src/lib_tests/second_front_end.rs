@@ -163,7 +163,7 @@ impl MiniLowerer {
             } => self.attribute(object, field, |base| {
                 b::binary(
                     b::field(b::var(base), field),
-                    lashlang::BinaryOp::Add,
+                    lashlang::JavaScriptBinaryOp::Add,
                     value,
                 )
             }),
@@ -206,7 +206,7 @@ impl MiniLowerer {
                     ),
                 )
             }
-            Mini::Pause => b::sleep_until(b::num(0.0)),
+            Mini::Pause => b::sleep_for(b::num(0.0)),
             Mini::Worker { name, body } => {
                 let run_body = self.completion(body);
                 let failure = self.temporary("failure");
@@ -242,10 +242,18 @@ fn worker_body() -> Vec<Mini> {
             body: vec![
                 Mini::Let(
                     "next",
-                    b::binary(b::var("step"), lashlang::BinaryOp::Add, b::num(1.0)),
+                    b::binary(
+                        b::var("step"),
+                        lashlang::JavaScriptBinaryOp::Add,
+                        b::num(1.0),
+                    ),
                 ),
                 Mini::When {
-                    condition: b::binary(b::var("next"), lashlang::BinaryOp::Greater, b::num(2.0)),
+                    condition: b::binary(
+                        b::var("next"),
+                        lashlang::JavaScriptBinaryOp::Greater,
+                        b::num(2.0),
+                    ),
                     then: vec![Mini::SetAttr {
                         object: "tally",
                         field: "seen",
@@ -264,7 +272,11 @@ fn worker_body() -> Vec<Mini> {
             name: "doubled",
             items: b::list(vec![b::num(1.0), b::num(2.0)]),
             param: "item",
-            result: b::binary(b::var("item"), lashlang::BinaryOp::Multiply, b::num(2.0)),
+            result: b::binary(
+                b::var("item"),
+                lashlang::JavaScriptBinaryOp::Multiply,
+                b::num(2.0),
+            ),
         },
         Mini::Pause,
         Mini::Done(b::string("worked")),
@@ -284,7 +296,11 @@ fn mini_program() -> lashlang::Program {
             body: vec![
                 Mini::Show(b::var("label")),
                 Mini::When {
-                    condition: b::binary(b::var("item"), lashlang::BinaryOp::Greater, b::num(1.0)),
+                    condition: b::binary(
+                        b::var("item"),
+                        lashlang::JavaScriptBinaryOp::Greater,
+                        b::num(1.0),
+                    ),
                     then: vec![Mini::SetAttr {
                         object: "box",
                         field: "value",
@@ -452,7 +468,7 @@ async fn stored_reload(
         .await
         .expect("open the publishing store");
     LashlangArtifacts::new(Arc::new(publisher))
-        .publish_module_artifact(&lash_core::ArtifactOwner::host("mini"), artifact)
+        .publish_module_artifact(&crate::lib_tests::host_claim(), artifact)
         .await
         .expect("the mini artifact publishes");
     LashlangArtifacts::new(Arc::new(

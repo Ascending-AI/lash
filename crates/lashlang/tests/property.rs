@@ -644,7 +644,7 @@ proptest! {
         // Type literals have no TypeScript spelling (ADR 0096 keeps the type
         // language in the IR), so the program is built from the public AST.
         let program = lashlang::Program::block(vec![lashlang::Expr::Finish(Box::new(
-            lashlang::Expr::TypeLiteral(Box::new(ty.to_type_expr())),
+            lashlang::testing::ast_builders::type_literal(ty.to_type_expr()),
         ))]);
         let host = DeterministicHost;
         let mut state = State::new();

@@ -489,12 +489,14 @@ pub(super) async fn assert_failover(
     Ok(())
 }
 
+/// `pool` is the witness database: the counts are the provider's own
+/// receipts, written by the provider process.
 pub(super) async fn assert_provider_calls(
     pool: &sqlx::PgPool,
     selection: SegmentSelection,
 ) -> Result<()> {
     let bad_model: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_e2e_provider_calls WHERE model <> 'e2e-mock'",
+        "SELECT COUNT(*) FROM witness_provider_receipts WHERE model <> 'e2e-mock'",
     )
     .fetch_one(pool)
     .await
@@ -502,7 +504,7 @@ pub(super) async fn assert_provider_calls(
     anyhow::ensure!(bad_model == 0, "provider saw {bad_model} wrong-model calls");
     if selection.includes(WorkflowSegment::One) {
         let failover_calls: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM lash_e2e_provider_calls
+            "SELECT COUNT(*) FROM witness_provider_receipts
              WHERE workflow_id = 'e2e-failover' AND scenario = 'kitchen_sink'",
         )
         .fetch_one(pool)
@@ -514,7 +516,7 @@ pub(super) async fn assert_provider_calls(
         );
         for workflow_id in ["e2e-process-llm-query", "e2e-process-llm-query-replay"] {
             let direct_calls: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM lash_e2e_provider_calls
+                "SELECT COUNT(*) FROM witness_provider_receipts
                  WHERE workflow_id = $1 AND scenario = 'process_llm_query_direct'",
             )
             .bind(workflow_id)
@@ -529,7 +531,7 @@ pub(super) async fn assert_provider_calls(
     }
     if selection.includes(WorkflowSegment::Two) {
         let tool_batch_failover_calls: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM lash_e2e_provider_calls
+            "SELECT COUNT(*) FROM witness_provider_receipts
              WHERE workflow_id = 'e2e-tool-batch-failover' AND scenario = 'tool_batch'",
         )
         .fetch_one(pool)
@@ -541,7 +543,7 @@ pub(super) async fn assert_provider_calls(
         );
     }
     let scenarios: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT scenario FROM lash_e2e_provider_calls ORDER BY scenario",
+        "SELECT DISTINCT scenario FROM witness_provider_receipts ORDER BY scenario",
     )
     .fetch_all(pool)
     .await
@@ -807,6 +809,7 @@ pub(super) async fn assert_attachments_round_trip(
 
 pub(super) async fn assert_reopened_session_agrees(
     storage: &PostgresStorage,
+    witness: &sqlx::PgPool,
     mock_provider_base_url: &str,
     trace_dir: Option<PathBuf>,
     ingress_url: &str,
@@ -828,6 +831,7 @@ pub(super) async fn assert_reopened_session_agrees(
         mock_provider_base_url: mock_provider_base_url.to_string(),
         trace_dir,
         fail_once: false,
+        witness: witness.clone(),
     })?;
     let session = core.session(DEFAULT_SESSION_ID).open().await?;
     let read = storage
@@ -906,4 +910,266 @@ pub(super) async fn assert_traces(trace_dir: &Path, selection: SegmentSelection)
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     anyhow::bail!("no trace JSONL files appeared in `{}`", trace_dir.display())
+}
+
+// Recovery laws 1-4 over the witness ledgers (FIG-608): the pure row
+// checkers live in `recovery_laws.rs` and are exposed from here; this module
+// adds the snapshot loader and the scope the e2e run claims.
+#[path = "recovery_laws.rs"]
+mod recovery_laws;
+pub(crate) use recovery_laws::*;
+
+/// Read every witness ledger in one read-only repeatable-read snapshot.
+pub(super) async fn load_witness_history(pool: &sqlx::PgPool) -> Result<WitnessHistory> {
+    let mut tx = pool.begin().await.context("open the witness snapshot")?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await
+        .context("make the witness snapshot repeatable")?;
+    let snapshot_at_us: i64 = sqlx::query_scalar("SELECT witness_clock_us()")
+        .fetch_one(&mut *tx)
+        .await
+        .context("read the witness clock")?;
+    let submissions = sqlx::query_as::<_, (String, String, i64)>(
+        "SELECT workflow_id, request_digest, recorded_at_us
+         FROM witness_submissions ORDER BY submission_id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .context("load witnessed submissions")?
+    .into_iter()
+    .map(|(workflow_id, request_digest, at_us)| SubmissionRow {
+        workflow_id,
+        request_digest,
+        at_us,
+    })
+    .collect();
+    let acks = sqlx::query_as::<_, (String, i64)>(
+        "SELECT workflow_id, recorded_at_us FROM witness_acknowledgements ORDER BY ack_id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .context("load witnessed acknowledgements")?
+    .into_iter()
+    .map(|(workflow_id, at_us)| AckRow { workflow_id, at_us })
+    .collect();
+    let terminals = sqlx::query_as::<_, (String, String, Vec<u8>, i64)>(
+        "SELECT workflow_id, phase, output_bytes, recorded_at_us
+         FROM witness_client_terminals ORDER BY observation_id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .context("load witnessed client terminals")?
+    .into_iter()
+    .map(|(workflow_id, phase, output, at_us)| TerminalRow {
+        workflow_id,
+        phase,
+        output,
+        at_us,
+    })
+    .collect();
+    let nemesis = sqlx::query_as::<_, (String, String, i64)>(
+        "SELECT kind, subject, recorded_at_us FROM witness_nemesis ORDER BY nemesis_id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .context("load witnessed nemesis events")?
+    .into_iter()
+    .map(|(kind, subject, at_us)| NemesisRow {
+        kind,
+        subject,
+        at_us,
+    })
+    .collect();
+    let attempts = sqlx::query_as::<_, (String, String, String, String, String, i64)>(
+        "SELECT attempt_id, logical_key, parent_workflow_id, call_id, request_digest, recorded_at_us
+         FROM witness_effect_attempts ORDER BY recorded_at_us, attempt_id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .context("load witnessed effect attempts")?
+    .into_iter()
+    .map(
+        |(attempt_id, logical_key, parent_workflow_id, call_id, request_digest, at_us)| {
+            AttemptRow {
+                attempt_id,
+                logical_key,
+                parent_workflow_id,
+                call_id,
+                request_digest,
+                at_us,
+            }
+        },
+    )
+    .collect();
+    let commits = sqlx::query_as::<_, (String, String, String, String, Vec<u8>, String, i64)>(
+        "SELECT logical_key, parent_workflow_id, first_attempt_id, request_digest,
+                response_bytes, response_digest, recorded_at_us
+         FROM witness_effect_commits ORDER BY recorded_at_us, logical_key",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .context("load witnessed effect commits")?
+    .into_iter()
+    .map(
+        |(
+            logical_key,
+            parent_workflow_id,
+            first_attempt_id,
+            request_digest,
+            response,
+            response_digest,
+            at_us,
+        )| CommitRow {
+            logical_key,
+            parent_workflow_id,
+            first_attempt_id,
+            request_digest,
+            response,
+            response_digest,
+            at_us,
+        },
+    )
+    .collect();
+    let replies = sqlx::query_as::<_, (String, String, bool, String, i64)>(
+        "SELECT attempt_id, logical_key, accepted, response_digest, recorded_at_us
+         FROM witness_effect_replies ORDER BY recorded_at_us, attempt_id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .context("load witnessed effect replies")?
+    .into_iter()
+    .map(
+        |(attempt_id, logical_key, accepted, response_digest, at_us)| ReplyRow {
+            attempt_id,
+            logical_key,
+            accepted,
+            response_digest,
+            at_us,
+        },
+    )
+    .collect();
+    let provider_receipts = sqlx::query_as::<_, (String, String, i64)>(
+        "SELECT request_id, workflow_id, recorded_at_us
+         FROM witness_provider_receipts ORDER BY receipt_id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .context("load witnessed provider receipts")?
+    .into_iter()
+    .map(|(request_id, workflow_id, at_us)| ProviderReceiptRow {
+        request_id,
+        workflow_id,
+        at_us,
+    })
+    .collect();
+    tx.commit().await.context("close the witness snapshot")?;
+    Ok(WitnessHistory {
+        snapshot_at_us,
+        submissions,
+        acks,
+        terminals,
+        nemesis,
+        attempts,
+        commits,
+        replies,
+        provider_receipts,
+    })
+}
+
+/// Recovery work acknowledged before the restart must reach a terminal a
+/// client reads within this bound after the restart completes.
+pub(super) const RECOVERY_BOUND: Duration = Duration::from_secs(180);
+
+/// The failover tool batch loses its worker after `slow` commits.
+pub(super) const LOSS_AFTER_COMMIT_WORKFLOW: &str = "e2e-tool-batch-failover";
+
+/// The laws the selected segments claim. Segment 2 owns the cluster restart
+/// and the witnessed tool batches, so it claims all four; segment 1 alone
+/// claims law 3.
+pub(crate) fn recovery_law_scope(selection: SegmentSelection) -> LawScope {
+    if !selection.includes(WorkflowSegment::Two) {
+        return LawScope::causal_only();
+    }
+    let effect = |workflow_id: &str, key: &str| ExpectedEffect {
+        parent_workflow_id: workflow_id.to_string(),
+        logical_key: witness::effect_logical_key(workflow_id, witness::WITNESSED_EFFECT_TOOL, key),
+        terminal_pointer: format!("/final_value/batch/{key}"),
+    };
+    LawScope {
+        restart: true,
+        recovery_bound_us: i64::try_from(RECOVERY_BOUND.as_micros()).unwrap_or(i64::MAX),
+        effects: ["e2e-tool-batch", LOSS_AFTER_COMMIT_WORKFLOW]
+            .into_iter()
+            .flat_map(|workflow_id| ["slow", "fast"].map(|key| effect(workflow_id, key)))
+            .collect(),
+        loss_keys: vec![witness::effect_logical_key(
+            LOSS_AFTER_COMMIT_WORKFLOW,
+            witness::WITNESSED_EFFECT_TOOL,
+            "slow",
+        )],
+        replayed: vec![LOSS_AFTER_COMMIT_WORKFLOW.to_string()],
+    }
+}
+
+pub(super) async fn assert_recovery_laws(pool: &sqlx::PgPool, scope: &LawScope) -> Result<()> {
+    let history = load_witness_history(pool).await?;
+    let verdicts = check_recovery_laws(&history, scope);
+    let failures = verdicts
+        .iter()
+        .filter_map(|(law, verdict)| match verdict {
+            Verdict::Pass => None,
+            Verdict::Inconclusive(missing) => Some(format!(
+                "{} INCONCLUSIVE (not a pass): {missing:#?}",
+                law.label()
+            )),
+            Verdict::Violation(violations) => {
+                Some(format!("{} VIOLATED: {violations:#?}", law.label()))
+            }
+        })
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        failures.is_empty(),
+        "recovery-law witness failed:\n{}",
+        failures.join("\n")
+    );
+    println!(
+        "recovery-law witness passed: {}; submissions={} acks={} client-terminals={} nemesis={} effect-attempts={} effect-commits={} effect-replies={} provider-receipts={}",
+        verdicts
+            .iter()
+            .map(|(law, _)| law.label())
+            .collect::<Vec<_>>()
+            .join(", "),
+        history.submissions.len(),
+        history.acks.len(),
+        history.terminals.len(),
+        history.nemesis.len(),
+        history.attempts.len(),
+        history.commits.len(),
+        history.replies.len(),
+        history.provider_receipts.len(),
+    );
+    Ok(())
+}
+
+/// A run starts on empty ledgers; evidence from an earlier run is refused.
+pub(super) async fn assert_witness_ledger_empty(pool: &sqlx::PgPool) -> Result<()> {
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM witness_submissions)
+              + (SELECT COUNT(*) FROM witness_acknowledgements)
+              + (SELECT COUNT(*) FROM witness_client_terminals)
+              + (SELECT COUNT(*) FROM witness_nemesis)
+              + (SELECT COUNT(*) FROM witness_effect_attempts)
+              + (SELECT COUNT(*) FROM witness_effect_commits)
+              + (SELECT COUNT(*) FROM witness_effect_replies)
+              + (SELECT COUNT(*) FROM witness_provider_receipts)",
+    )
+    .fetch_one(pool)
+    .await
+    .context("count stale witness rows")?;
+    anyhow::ensure!(
+        rows == 0,
+        "the witness ledgers hold {rows} rows before the run started"
+    );
+    Ok(())
 }

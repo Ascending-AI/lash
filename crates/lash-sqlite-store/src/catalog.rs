@@ -3,48 +3,6 @@ use super::*;
 #[path = "catalog_reads.rs"]
 mod catalog_reads;
 
-impl SqliteStore {
-    pub(crate) async fn resume_artifact_owner_retirements(
-        &self,
-    ) -> Result<(), lash_core_execution::StoreError> {
-        let effect_host = self
-            .effect_host
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        let artifact_stores = self
-            .artifact_stores
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        let (Some(effect_host), Some((process_env_store, process_engines))) =
-            (effect_host, artifact_stores)
-        else {
-            return Ok(());
-        };
-        let scopes = effect_host
-            .pending_artifact_owner_retirements()
-            .await
-            .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
-        for scope in scopes {
-            let owner = lash_core_execution::ArtifactOwner::execution(scope.clone());
-            process_env_store
-                .retire_process_execution_env_owner(&owner)
-                .await
-                .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
-            process_engines
-                .retire_artifact_owner(&owner)
-                .await
-                .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
-            effect_host
-                .complete_artifact_owner_retirement(&scope)
-                .await
-                .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
-        }
-        Ok(())
-    }
-}
-
 #[async_trait::async_trait]
 impl lash_core_execution::SessionCatalogStore for SqliteStore {
     async fn admit_session(
@@ -149,6 +107,7 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
             request,
             self.clock.timestamp_ms(),
             self.options.connection_policy,
+            self.options.blob_profile,
         )
         .await
     }
@@ -221,11 +180,8 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
                 format!("sqlite-catalog:{catalog}"),
                 Arc::clone(effect_host),
             ));
-        *self
-            .effect_host
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
     }
+
     async fn reclaim_retained_evidence(
         &self,
         bound: lash_core_execution::store::RetentionBound,
@@ -233,11 +189,6 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
         let report = crate::retention::reclaim(self, bound)
             .await
             .map_err(|failure| *failure)?;
-        if let Err(error) = self.resume_artifact_owner_retirements().await {
-            return Err(lash_core_execution::MaintenanceFailure::failed(
-                error, report,
-            ));
-        }
         Ok(report)
     }
     async fn count_unsettled_turns(

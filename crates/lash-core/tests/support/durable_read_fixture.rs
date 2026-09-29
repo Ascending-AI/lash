@@ -428,13 +428,14 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("enqueue fixture pending turn input");
 
     let process_env = fixture_process_env();
-    let process_env_ref = publish_process_execution_env(
-        handles.process_envs.as_ref(),
-        &lash_core::ArtifactOwner::host("durable-read-fixture"),
-        &process_env,
-    )
-    .await
-    .expect("persist fixture process execution environment");
+    let host_claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+        lash_core::HostArtifactPin::mint(),
+    ))
+    .expect("fixture host pin claim");
+    let process_env_ref =
+        publish_process_execution_env(handles.process_envs.as_ref(), &host_claim, &process_env)
+            .await
+            .expect("persist fixture process execution environment");
     let registration = waiting_process_registration(process_env_ref.clone());
     let waiting = handles
         .processes

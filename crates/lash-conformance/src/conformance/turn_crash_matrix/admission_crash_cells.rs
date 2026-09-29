@@ -33,27 +33,37 @@ const NEWCOMER: &str = "newcomer checkpoint input";
 /// the redrive's first run, `before_redrive` writes to the scenario's store.
 /// Returns how the redrive's drain ended, the redrive's seam trace and how
 /// many times the tool effect executed in all.
-async fn crash_then_redrive(
+pub(super) async fn crash_then_redrive(
     law: &MatrixLaw<'_>,
     identity: &ReferenceIdentity,
     scenario: &str,
     point: TurnCrashPoint,
     before_redrive: Option<PendingTurnInputDraft>,
-) -> (reference_turn::DrainReport, Vec<TurnSeamOperation>, usize) {
+    fail_post_commit_delivery: bool,
+) -> (
+    reference_turn::DrainReport,
+    Vec<TurnSeamOperation>,
+    usize,
+    Vec<TurnSeamOperation>,
+) {
     let executions = Arc::new(AtomicUsize::new(0));
     let control = SeamControl::default();
     let crash = crash_at_armed_point(&control);
-    let crashing = ReferenceTurn::new(
+    let mut crashing = ReferenceTurn::new(
         law.stores,
         (law.make)(scenario),
         law.host,
         identity,
-        control,
+        control.clone(),
         &executions,
         crashed_turn_timings(),
-    )
-    .before_drive(move |control| control.arm(point.clone()))
-    .attempt();
+    );
+    if fail_post_commit_delivery {
+        crashing = crashing.fail_post_commit_delivery();
+    }
+    let crashing = crashing
+        .before_drive(move |control| control.arm(point.clone()))
+        .attempt();
     let crashing: crate::ConformanceTurnAttempt = Arc::new(move |scoped| {
         let crashing = Arc::clone(&crashing);
         let crash = crash.clone();
@@ -69,7 +79,7 @@ async fn crash_then_redrive(
     });
 
     let successor_control = SeamControl::default();
-    let (successor, redriven) = ReferenceTurn::new(
+    let mut successor = ReferenceTurn::new(
         law.stores,
         (law.make)(scenario),
         law.host,
@@ -77,9 +87,11 @@ async fn crash_then_redrive(
         successor_control.clone(),
         &executions,
         nominal_recovery_timings(),
-    )
-    .before_drive(SeamControl::clear)
-    .reporting();
+    );
+    if fail_post_commit_delivery {
+        successor = successor.fail_post_commit_delivery();
+    }
+    let (successor, redriven) = successor.before_drive(SeamControl::clear).reporting();
     let writer = (law.make)(scenario);
     let pending_write = Arc::new(std::sync::Mutex::new(before_redrive));
     let written = Arc::new(AtomicBool::new(false));
@@ -112,6 +124,7 @@ async fn crash_then_redrive(
         report,
         successor_control.trace(),
         executions.load(Ordering::SeqCst),
+        control.trace(),
     )
 }
 
@@ -170,7 +183,7 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
         .expect("read the head before the root")
         .map_or(0, |head| head.head_revision);
 
-    let (report, redriven, executions) = Box::pin(crash_then_redrive(
+    let (report, redriven, executions, _) = Box::pin(crash_then_redrive(
         &law,
         &identity,
         scenario,
@@ -179,6 +192,7 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
             placement: CrashPlacement::InsideCall,
         },
         None,
+        false,
     ))
     .await;
     let turn = report
@@ -282,7 +296,7 @@ pub async fn a_checkpoint_admission_crashed_before_its_record_redelivers_its_row
         crate::TurnInput::text(NEWCOMER),
     );
 
-    let (report, _, _) = Box::pin(crash_then_redrive(
+    let (report, _, _, _) = Box::pin(crash_then_redrive(
         &law,
         &identity,
         scenario,
@@ -293,6 +307,7 @@ pub async fn a_checkpoint_admission_crashed_before_its_record_redelivers_its_row
             placement: CrashPlacement::InsideCall,
         },
         Some(newcomer),
+        false,
     ))
     .await;
     report

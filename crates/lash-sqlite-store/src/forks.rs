@@ -75,11 +75,9 @@ pub(super) async fn pin_in_catalog(
     conn.write_flow(move |tx| {
         let outcome: Result<lash_core_execution::ForkPoint, lash_core_execution::StoreError> =
             (|| {
-                let fleet_format = crate::fleet_format::read_recorded(
-                    tx,
-                    lash_core_execution::FleetFormat::writable_range(),
-                )
-                .map_err(sqlite_error)?;
+                let fleet_format =
+                    crate::compat::read_recorded(tx, lash_core_execution::FleetFormat::writable())
+                        .map_err(sqlite_error)?;
                 if let Some((checkpoint_ref, source_session_id)) = tx
                     .query_row(
                         session_sql().anchors.select_by_node.sql(),
@@ -189,11 +187,9 @@ pub(super) async fn fork_points_in_catalog(
         let tx = conn.transaction()?;
         let outcome: Result<Vec<lash_core_execution::ForkPoint>, lash_core_execution::StoreError> =
             (|| {
-                let fleet_format = crate::fleet_format::read_recorded(
-                    &tx,
-                    lash_core_execution::FleetFormat::writable_range(),
-                )
-                .map_err(sqlite_error)?;
+                let fleet_format =
+                    crate::compat::read_recorded(&tx, lash_core_execution::FleetFormat::writable())
+                        .map_err(sqlite_error)?;
                 let mut stmt = tx
                     .prepare(session_sql().head.select_fork_points.sql())
                     .map_err(sqlite_error)?;
@@ -238,6 +234,7 @@ pub(super) async fn fork_at_in_catalog(
     request: &lash_core_execution::ForkSessionRequest,
     created_at_ms: u64,
     policy: SqliteConnectionPolicy,
+    blob_profile: BuiltinBlobProfile,
 ) -> Result<lash_core_execution::ForkSessionReceipt, lash_core_execution::StoreError> {
     let conn = open_factory_catalog(catalog, policy).await?;
     let request = request.clone();
@@ -247,9 +244,9 @@ pub(super) async fn fork_at_in_catalog(
             // writer consult; this transaction writes durable head/meta rows,
             // so it reads the deployment's generation rather than a build
             // constant.
-            let fleet_format = crate::fleet_format::read_recorded(
+            let fleet_format = crate::compat::read_recorded(
                 tx,
-                lash_core_execution::FleetFormat::writable_range(),
+                lash_core_execution::FleetFormat::writable(),
             )
             .map_err(sqlite_error)?;
             // Keep the fork fences in the shared order: exists -> deleted ->
@@ -290,7 +287,7 @@ pub(super) async fn fork_at_in_catalog(
                 )
                 .optional()
                 .map_err(sqlite_error)?;
-            let (source_session_id, checkpoint_ref) =
+            let (source_session_id, mut checkpoint_ref) =
                 retained.ok_or_else(|| lash_core_execution::StoreError::ForkPointNotRetained {
                     node_id: request.node_id.clone(),
                 })?;
@@ -332,6 +329,33 @@ pub(super) async fn fork_at_in_catalog(
                 .ok_or_else(|| lash_core_execution::StoreError::MissingFrameOpenAncestor {
                     leaf_node_id: request.node_id.clone(),
                 })?;
+            let frame_node_id = lash_core_execution::FrameNodeId::new(current_frame_node_id.clone())
+                .map_err(|error| stored_data_corrupt("fork frame", error))?;
+            let source_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
+                lash_core_execution::FrameEnvironmentId::new(source_session_id.clone(), frame_node_id.clone()),
+            );
+            let fork_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
+                lash_core_execution::FrameEnvironmentId::new(request.session_id.clone(), frame_node_id),
+            );
+            let source_frame_ended = crate::artifact_store::artifact_fenced_tx(tx, &source_frame)
+                .map_err(sqlite_error)?;
+            if source_frame_ended {
+                let mut checkpoint = SqliteStore::get_checkpoint_conn(
+                    tx, &BlobRef(checkpoint_ref.clone()), fleet_format,
+                )?.ok_or_else(|| stored_data_corrupt("fork checkpoint", "the retained checkpoint is missing"))?;
+                checkpoint.components.retain(|key, _| {
+                    key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
+                        && !key.starts_with("execution_state/")
+                });
+                checkpoint_ref = SqliteStore::put_checkpoint_conn(tx, &checkpoint, blob_profile, fleet_format)?
+                    .checkpoint_ref.as_str().to_owned();
+            } else {
+                crate::conn::cached_execute(tx,
+                    crate::artifact_store::artifact_sql().edges.copy_referrer_edges.sql(),
+                    params![source_frame.kind().as_str(), source_frame.canonical_id(),
+                        fork_frame.kind().as_str(), fork_frame.canonical_id()],
+                ).map_err(sqlite_error)?;
+            }
             let fork_generation = u64::try_from(fork_generation).map_err(|_| {
                 stored_data_corrupt(
                     "SessionGraph node",

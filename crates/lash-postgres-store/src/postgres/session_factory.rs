@@ -1,8 +1,6 @@
 use crate::session_sql::session_sql;
 use crate::*;
 
-#[path = "session_factory/artifact_retirement.rs"]
-mod artifact_retirement;
 #[path = "session_factory/control_intent_ledger.rs"]
 mod control_intent_ledger;
 #[path = "session_factory/store.rs"]
@@ -15,10 +13,6 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
             .turn_cancel_closure_owner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
-        *self
-            .effect_host
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
     }
 
     async fn reclaim_retained_evidence(
@@ -28,11 +22,6 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         let report = crate::evidence_retention::reclaim(self, bound)
             .await
             .map_err(|failure| *failure)?;
-        if let Err(error) = self.resume_artifact_owner_retirements().await {
-            return Err(lash_core_execution::MaintenanceFailure::failed(
-                error, report,
-            ));
-        }
         Ok(report)
     }
 
@@ -404,7 +393,9 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             lash_core_execution::MaintenanceFailure::failed_before_any_work(store_sqlx_error(err))
         })?;
         let mut report = lash_core_execution::SessionBlobReclaimReport::default();
-        if let Err(error) = delete_session_tx(&mut tx, session_id, &mut report).await {
+        if let Err(error) =
+            delete_session_tx(&mut tx, session_id, &mut report, self.fleet_format).await
+        {
             report.deleted_blob_count = 0;
             return Err(lash_core_execution::MaintenanceFailure::failed(
                 error, report,
@@ -577,7 +568,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 session_id: request.session_id.clone(),
             });
         }
-        let (source_session_id, checkpoint_ref) =
+        let (source_session_id, mut checkpoint_ref) =
             crate::support::retained_checkpoint_tx(&mut tx, &request.node_id)
                 .await?
                 .ok_or_else(|| StoreError::ForkPointNotRetained {
@@ -642,6 +633,62 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
                     leaf_node_id: request.node_id.clone(),
                 })?;
+        let frame_node_id = lash_core_execution::FrameNodeId::new(current_frame_node_id.clone())
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let source_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
+            lash_core_execution::FrameEnvironmentId::new(
+                source_session_id.clone(),
+                frame_node_id.clone(),
+            ),
+        );
+        let fork_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
+            lash_core_execution::FrameEnvironmentId::new(request.session_id.clone(), frame_node_id),
+        );
+        let mut frame_locks = [source_frame.clone(), fork_frame.clone()];
+        frame_locks.sort_by_key(|referrer| {
+            format!(
+                "lash-artifact-referrer:{}:{}",
+                referrer.kind().as_str(),
+                referrer.canonical_id()
+            )
+        });
+        for referrer in &frame_locks {
+            crate::artifact_store::lock_referrer_tx(&mut tx, referrer)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
+        let source_ended: bool = sqlx::query_scalar(
+            crate::artifact_store::artifact_sql()
+                .fences
+                .select_is_fenced
+                .sql(),
+        )
+        .bind(source_frame.kind().as_str())
+        .bind(source_frame.canonical_id())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if source_ended {
+            let mut checkpoint = crate::support::get_checkpoint_tx(
+                &mut tx,
+                &BlobRef(checkpoint_ref.clone()),
+                self.fleet_format,
+            )
+            .await?
+            .ok_or_else(|| StoreError::CheckpointRootMissing {
+                blob_ref: BlobRef(checkpoint_ref.clone()),
+            })?;
+            checkpoint.components.retain(|key, _| {
+                key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
+                    && !key.starts_with("execution_state/")
+            });
+            checkpoint_ref =
+                crate::support::put_checkpoint_tx(&mut tx, &checkpoint, self.fleet_format)
+                    .await?
+                    .0
+                    .as_str()
+                    .to_owned();
+        }
         // Relation and retention-source identities are metadata, not ancestry.
         // Reconstruct every inherited ceiling from the retained parent edges so
         // deleted owners need no surviving head or descendant carrier row.
@@ -756,6 +803,21 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             self.fleet_format,
         )
         .await?;
+        if !source_ended {
+            sqlx::query(
+                crate::artifact_store::artifact_sql()
+                    .edges
+                    .copy_referrer_edges
+                    .sql(),
+            )
+            .bind(source_frame.kind().as_str())
+            .bind(source_frame.canonical_id())
+            .bind(fork_frame.kind().as_str())
+            .bind(fork_frame.canonical_id())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::ForkSessionReceipt {
             session_id: request.session_id.clone(),
@@ -987,10 +1049,61 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
     }
 }
 
+async fn fence_deleted_session_frames_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_ids: &[SessionId],
+    fleet_format: lash_core_execution::FleetFormat,
+) -> Result<(), StoreError> {
+    let mut referrers = Vec::new();
+    for session_id in session_ids {
+        if let Some(head) =
+            crate::support::load_session_head_meta_tx(tx, session_id, false, fleet_format).await?
+            && let Some(frame) = head.current_frame_node_id
+        {
+            referrers.push(lash_core_execution::ArtifactReferrer::FrameEnvironment(
+                lash_core_execution::FrameEnvironmentId::new(session_id.clone(), frame),
+            ));
+        }
+    }
+    referrers.sort_by_key(|referrer| {
+        format!(
+            "lash-artifact-referrer:{}:{}",
+            referrer.kind().as_str(),
+            referrer.canonical_id()
+        )
+    });
+    let now = crate::support::postgres_transaction_epoch_ms(tx).await?;
+    for referrer in referrers {
+        crate::artifact_store::lock_referrer_tx(tx, &referrer)
+            .await
+            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::artifact_store::artifact_sql()
+                .fences
+                .insert_fence
+                .sql(),
+        )
+        .bind(referrer.kind().as_str())
+        .bind(referrer.canonical_id())
+        .bind(crate::support::clamp_epoch_ms(now))
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        crate::obligation_ledger::arm_cleanup_tx(
+            tx,
+            &lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), None),
+            now,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     report: &mut lash_core_execution::SessionBlobReclaimReport,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
     // A closing session's pins are its ended roots': the close cut their
@@ -1013,6 +1126,7 @@ pub(crate) async fn delete_session_tx(
             .await
             .map_err(store_sqlx_error)?;
     if materialized {
+        fence_deleted_session_frames_tx(tx, std::slice::from_ref(session_id), fleet_format).await?;
         // Permanent identity evidence for host-facing session ids.
         sqlx::query(session_sql().deleted_postgres.insert_from_meta.sql())
             .bind(session_id.as_str())
@@ -1184,6 +1298,7 @@ pub(crate) async fn delete_session_tx(
 pub(crate) async fn delete_process_sessions_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_ids: &[SessionId],
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
     if session_ids.is_empty() {
         return Ok(lash_core_execution::SessionBlobReclaimReport::default());
@@ -1193,6 +1308,7 @@ pub(crate) async fn delete_process_sessions_tx(
     let outcome: Result<(), StoreError> = async {
         crate::runtime_persistence::lock_session_history_mutations_tx(tx, session_ids).await?;
         crate::turn_cancel_closure::ensure_sessions_not_pinned_tx(tx, session_ids).await?;
+        fence_deleted_session_frames_tx(tx, session_ids, fleet_format).await?;
         let checkpoint_refs = sqlx::query_scalar::<_, String>(
             session_sql().head.select_checkpoints_for_sessions.sql(),
         )

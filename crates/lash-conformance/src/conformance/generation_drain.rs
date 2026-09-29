@@ -107,7 +107,7 @@ impl AdmittedRoot {
                 root: TurnId::from(name),
                 head,
                 max_inputs: 64,
-                policy: lash_core::testing::queued_work_claim_policy(64),
+                policy: lash_core::testing::queued_work_admission_policy(64),
                 base: crate::store::SessionHeadRef {
                     generation: 0,
                     revision: 0,

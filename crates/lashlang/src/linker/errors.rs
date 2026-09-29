@@ -39,7 +39,7 @@ pub enum LinkError {
         span: Option<Span>,
     },
     #[error(
-        "`await` of a settled {actual}: only tool calls, handles, or lists/records/comprehensions of them can be awaited - write `await m.op({{ id: x }})?`, `await [m.a({{}})?, m.b({{}})?]`, or `await [m.op({{ id: x }})? for x in xs]`"
+        "`await` of a settled {actual}: only tool calls, handles, or lists/records of them can be awaited - write `await m.op({{ id: x }})` or `await Promise.all([m.op({{ id: x }}), m.op({{ id: y }})])`"
     )]
     AwaitedSettledExpression { actual: String, span: Option<Span> },
     #[error("expected {expected}, got incompatible literal {actual}")]
@@ -224,13 +224,6 @@ pub enum LinkError {
         known: Vec<String>,
         span: Option<Span>,
     },
-    #[error("operator `{operator}` does not accept {left} and {right}")]
-    IncompatibleBinaryOperands {
-        operator: &'static str,
-        left: String,
-        right: String,
-        span: Option<Span>,
-    },
     #[error("builtin `{builtin}` expects {expected}, got {actual}")]
     IncompatibleBuiltinOperands {
         builtin: String,
@@ -293,7 +286,6 @@ impl LinkError {
             | Self::ProcessLifecycleOutsideProcess { span, .. }
             | Self::OpaqueHostDescriptorAccess { span, .. }
             | Self::UnknownObjectField { span, .. }
-            | Self::IncompatibleBinaryOperands { span, .. }
             | Self::IncompatibleBuiltinOperands { span, .. }
             | Self::IncompatibleIterationTarget { span, .. } => *span,
             Self::ModuleHash { .. } | Self::InvalidAst { .. } => None,

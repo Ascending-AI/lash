@@ -24,7 +24,11 @@ use crate::{
 
 /// The first execution of one `CloseRootScope` step.
 pub(super) struct CloseRootScopeRunner {
-    pub(super) store: crate::store::SessionStore,
+    /// The store that holds the root's terminal evidence: the session's
+    /// history store when the close runs on the session's runtime, and the
+    /// deployment's catalog when an engine runs it beside the session's next
+    /// root (FIG-4035). Both answer for any session they hold.
+    pub(super) terminals: Arc<dyn crate::store::RuntimeStore>,
     pub(super) session: SessionId,
     pub(super) root: TurnId,
     pub(super) sink: Arc<dyn ScopeCloseSink>,
@@ -66,8 +70,8 @@ impl RuntimeEffectLocalRunner for CloseRootScopeRunner {
             ));
         }
         let terminal = self
-            .store
-            .root_terminal(&self.root)
+            .terminals
+            .root_terminal(&self.session, &self.root)
             .await
             .map_err(|error| attempt_fault("root terminal read", error))?
             .ok_or_else(|| {

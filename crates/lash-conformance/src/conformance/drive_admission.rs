@@ -243,7 +243,7 @@ impl DriveParts {
             root: TurnId::from(root),
             head,
             max_inputs: 1,
-            policy: crate::testing::queued_work_claim_policy(1),
+            policy: crate::testing::queued_work_admission_policy(1),
             base: crate::store::SessionHeadRef {
                 generation: 0,
                 revision: self.initial_state().head_revision,
@@ -392,7 +392,7 @@ pub async fn admission_delivers_every_row_it_binds(
         crate::CheckpointKind::AfterWork,
         "admission-delivers:checkpoint",
         64,
-        crate::testing::queued_work_claim_policy(64),
+        crate::testing::queued_work_admission_policy(64),
     )
     .await
     .expect("admit at the checkpoint");
@@ -548,7 +548,7 @@ pub async fn a_root_admission_is_idempotent_across_new_rows_and_fences(
                 .await;
         }
         request.max_inputs = 8;
-        request.policy = crate::testing::queued_work_claim_policy(8);
+        request.policy = crate::testing::queued_work_admission_policy(8);
         request.turn_index = 7;
         request.admitted_generation = crate::engine::BuildGeneration::for_test("later-admission");
         let replay = parts
@@ -1207,7 +1207,7 @@ pub async fn every_driver_turn_is_owned_by_its_root(
                 "root `{root}`'s seal ran under its turn scope: {keys:?}"
             );
             assert!(
-                keys.contains(&format!("drive-claim:{root}")),
+                keys.contains(&format!("drive-admit:{root}")),
                 "root `{root}`'s admission ran under its turn scope: {keys:?}"
             );
             assert!(
@@ -1217,7 +1217,7 @@ pub async fn every_driver_turn_is_owned_by_its_root(
         }
         assert!(
             driver_keys.iter().all(|key| !key.starts_with("drive-seal:")
-                && !key.starts_with("drive-claim:")
+                && !key.starts_with("drive-admit:")
                 && !key.contains("llm")),
             "no root effect ran under the driver's scope: {driver_keys:?}"
         );
@@ -1426,7 +1426,7 @@ impl crate::store::RuntimeStoreDecorator for NoReplayRepairRead {
 
 /// A committed root redriven on its journal replays the admission that included
 /// orphan repair. The repair's store read runs only on first execution;
-/// the current lease's stop-only head check may still read committed evidence.
+/// a replay honours the recorded head verdict without a live head check.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

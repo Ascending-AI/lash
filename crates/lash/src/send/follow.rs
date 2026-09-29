@@ -4,24 +4,27 @@
 //! the activity of the root that applies its subject, and resolves the
 //! subject from the store on every wake: the engine's drive barrier, a
 //! commit or queue change on the observation, a settled root's report landing
-//! in this process's mailbox, and a bounded poll. It never
-//! answers from events: a follower whose replay window is gone still answers
-//! from the store.
+//! in this process's mailbox, and a bounded poll. Once it knows its root, it
+//! also holds one open wait on the root's published terminal, which answers
+//! a root that ran in another process as soon as it settles; a follower with
+//! no resident runtime probes for that root at the poll floor (FIG-3981). It
+//! never answers from events: a follower whose replay window is gone still
+//! answers from the store.
 
 use std::collections::VecDeque;
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
-use lash_core::drive::root_of_physical_turn;
+use lash_core::drive::{physical_turn_of, root_of_physical_turn};
 use lash_core::engine::{DriveAbort, DriveOutcome, DriveRequestId};
 use lash_core::facade_support::LiveReplayGap;
-use lash_core::facade_support::TurnOutcome;
+use lash_core::facade_support::{TurnAddress, TurnOutcome, TurnTerminal, TurnWorkDriver};
 use lash_core::runtime::TurnInputAcceptanceReceipt;
 use lash_core::{
-    LiveReplayGapReason, LiveReplayOutcome, LiveReplaySubscribeOutcome, LiveReplaySubscription,
-    SessionCursor, SessionObservationEvent, SessionObservationEventPayload, SessionRevision,
-    SessionWorkEngine, TurnActivity, TurnEvent, TurnId,
+    InputId, LiveReplayGapReason, LiveReplayOutcome, LiveReplaySubscribeOutcome,
+    LiveReplaySubscription, SessionCursor, SessionObservationEvent, SessionObservationEventPayload,
+    SessionRevision, SessionWorkEngine, TurnActivity, TurnEvent, TurnId,
 };
 use tokio::sync::mpsc;
 
@@ -47,6 +50,10 @@ const UNRESOLVED_CEILING: Duration = Duration::from_secs(30);
 const RETRY_PAUSE: Duration = Duration::from_millis(50);
 /// Unadopted activities a follower buffers before dropping the oldest.
 const BUFFER_CAPACITY: usize = 4096;
+
+/// A terminal wait in flight.
+type AwaitedTerminal =
+    BoxFuture<'static, std::result::Result<TurnTerminal, lash_core::RuntimeError>>;
 
 /// What a follower follows.
 #[derive(Clone, Debug)]
@@ -272,6 +279,117 @@ async fn moved_ask(
     }
 }
 
+/// One open wait on the adopted root's published terminal (FIG-3981).
+///
+/// A root that ran in another process deposits no report here and publishes
+/// nothing on this process's replay, so without the wait its follower learns
+/// that it settled only from a store poll that backs off to a second. The
+/// wait is held while a store read has just shown the root undecided and no
+/// run in this process may still deposit the root's report: that deposit
+/// answers first, with the full report. The wait is registered, so it holds nothing past its root: the
+/// commit's publish answers it, and a root that ended without that commit
+/// is retired, which releases it. Retirement never cancels a terminal the
+/// root's ending commit still publishes (FIG-4025).
+struct TerminalWait {
+    /// The root's physical turn waited on: a frame switch continues the root
+    /// in its next physical turn.
+    ordinal: u64,
+    wait: Option<AwaitedTerminal>,
+    /// The pause before the next wait, after one that failed.
+    pause: Option<Duration>,
+    /// The outcome the root's final physical turn committed with.
+    settled: Option<TurnOutcome>,
+    /// A physical turn published a failure, or its wait was released: the
+    /// store reads decide what follows (a park, a redrive, or the root's
+    /// end), with no wait held.
+    ended: bool,
+}
+
+impl TerminalWait {
+    fn new() -> Self {
+        Self {
+            ordinal: 0,
+            wait: None,
+            pause: None,
+            settled: None,
+            ended: false,
+        }
+    }
+
+    /// Hold the wait on `root`'s current physical turn, unless one is held,
+    /// the root's terminal is already known, or a run in this process may
+    /// still deposit the root's report.
+    fn hold(&mut self, ctx: &SendContext, root: &TurnId) {
+        if self.wait.is_some()
+            || self.settled.is_some()
+            || self.ended
+            || mailbox::may_deposit(ctx.parts.work.store_binding(), &ctx.parts.session_id, root)
+        {
+            return;
+        }
+        let driver = TurnWorkDriver::for_session(
+            std::sync::Arc::clone(&ctx.parts.effect_host),
+            ctx.parts.session_id.to_string(),
+            std::sync::Arc::clone(ctx.parts.store.store()),
+        );
+        let address = TurnAddress::new(
+            ctx.parts.session_id.clone(),
+            physical_turn_of(root, self.ordinal),
+        );
+        let pause = self.pause.take();
+        self.wait = Some(Box::pin(async move {
+            if let Some(pause) = pause {
+                tokio::time::sleep(pause).await;
+            }
+            driver.await_terminal(&address).await
+        }));
+    }
+
+    /// The held wait's answer; pending while none is held.
+    async fn next(&mut self) -> std::result::Result<TurnTerminal, lash_core::RuntimeError> {
+        match self.wait.as_mut() {
+            Some(wait) => wait.await,
+            None => std::future::pending().await,
+        }
+    }
+
+    /// Take the held wait's answer. The follower resolves after each: the
+    /// read holds the next wait while the root is undecided.
+    fn answered(
+        &mut self,
+        ctx: &SendContext,
+        answer: std::result::Result<TurnTerminal, lash_core::RuntimeError>,
+    ) {
+        self.wait = None;
+        match answer {
+            Ok(TurnTerminal::Committed {
+                outcome: TurnOutcome::AgentFrameSwitch { .. },
+                ..
+            }) => self.ordinal = self.ordinal.saturating_add(1),
+            Ok(TurnTerminal::Committed { outcome, .. }) => self.settled = Some(outcome),
+            // A failed turn publishes no further terminal, and neither does
+            // a root whose retirement (or its session's revocation) released
+            // the wait.
+            Ok(TurnTerminal::Failed { .. }) => self.ended = true,
+            Err(error)
+                if error.code == lash_core::RuntimeErrorCode::TurnControlUnknownOrRevoked =>
+            {
+                self.ended = true;
+            }
+            Err(error) => {
+                tracing::debug!(
+                    session_id = %ctx.parts.session_id,
+                    error = %error,
+                    "send handle's terminal wait failed; attaching again after a pause"
+                );
+                // A wait that cannot attach never spins: the store poll
+                // still answers meanwhile.
+                self.pause = Some(POLL_CEILING);
+            }
+        }
+    }
+}
+
 /// Where a follower stands in its subject's live activity: the replay
 /// cursor to go on from, whether it has observed any of the root's activity,
 /// and the gaps it has met so far. A windowed follower hands its position to
@@ -391,7 +509,15 @@ pub(super) async fn follow(
     let mut drive_stopped: Option<tokio::time::Instant> = None;
     let mut refused: Option<lash_core::RuntimeError> = None;
     let mut settled_at: Option<tokio::time::Instant> = None;
+    let mut terminal = TerminalWait::new();
     let mut poll = POLL_FLOOR;
+    // The store poll is due `poll` after the last resolve, and the root probe
+    // ticks at the floor, whatever wakes in between: a wake that resolves
+    // nothing (a probe that found no root, another root's activity) delays
+    // neither.
+    let mut poll_at = tokio::time::Instant::now() + poll;
+    let mut probe_ticks = tokio::time::interval_at(poll_at, POLL_FLOOR);
+    probe_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut resolve_now = true;
     let mut last_pass = false;
     loop {
@@ -432,11 +558,17 @@ pub(super) async fn follow(
                 .await
                 .map(|outcome| Followed::Answered(Box::new(outcome)));
             }
-            let resolution = match subject {
+            let resolution = match (&adoption.root, &terminal.settled, subject) {
+                // The open wait saw the root's final terminal published: the
+                // same terminal the store read would wait for.
+                (Some(root), Some(outcome), _) => Resolution::Settled {
+                    root: root.clone(),
+                    outcome: outcome.clone(),
+                },
                 // The input's report landing answers at once, whatever the
                 // store read is waiting on: a settled root's terminal read
                 // waits for its publication (FIG-3979).
-                Subject::Input(receipt) => tokio::select! {
+                (_, _, Subject::Input(receipt)) => tokio::select! {
                     resolution = resolve::resolve_input(&ctx.parts, receipt) => resolution?,
                     () = mailbox::settled_root_held(
                         ctx.parts.work.store_binding(),
@@ -444,7 +576,7 @@ pub(super) async fn follow(
                         &receipt.input_id,
                     ) => continue,
                 },
-                Subject::Root(root) => resolve::resolve_root(&ctx.parts, root).await?,
+                (_, _, Subject::Root(root)) => resolve::resolve_root(&ctx.parts, root).await?,
             };
             match resolution {
                 Resolution::Settled { root, outcome } => {
@@ -490,6 +622,11 @@ pub(super) async fn follow(
                         output: None,
                         gaps: observation.gaps,
                     })));
+                }
+                Resolution::Refused { root, refusal } => {
+                    adoption.adopt(root, tap).await;
+                    drain(ctx, &mut adoption, &mut observation, tap).await;
+                    return Err(EmbedError::Runtime(refusal));
                 }
                 Resolution::Stalled(stalled) => {
                     drain(ctx, &mut adoption, &mut observation, tap).await;
@@ -543,6 +680,13 @@ pub(super) async fn follow(
                     if let Some(error) = refused.take() {
                         return Err(EmbedError::Runtime(error));
                     }
+                    // Wait on the terminal only while a store read has just
+                    // shown the root undecided: a root this read shows ended
+                    // may already be retired, which releases no wait
+                    // registered after it.
+                    if let Some(root) = adoption.root.as_ref() {
+                        terminal.hold(ctx, root);
+                    }
                 }
             }
             if last_pass {
@@ -560,11 +704,20 @@ pub(super) async fn follow(
                     gaps: observation.gaps,
                 }));
             }
+            poll_at = tokio::time::Instant::now() + poll;
         }
         resolve_now = true;
         // Wait for the first wake.
-        let sleep = tokio::time::sleep(poll);
-        tokio::pin!(sleep);
+        let probed = root_probe(ctx, subject, &adoption);
+        let probe = async {
+            match probed {
+                Some(input) => {
+                    probe_ticks.tick().await;
+                    ctx.parts.store.root_of_input(input).await
+                }
+                None => std::future::pending().await,
+            }
+        };
         let closes = async {
             match deadline {
                 Some(deadline) => tokio::time::sleep_until(deadline).await,
@@ -632,6 +785,23 @@ pub(super) async fn follow(
                     }
                 }
             }
+            answer = terminal.next() => {
+                terminal.answered(ctx, answer);
+            }
+            bound = probe => {
+                // A root the probe finds is read at once, which holds its
+                // terminal wait while the root is undecided.
+                resolve_now = matches!(bound, Ok(Some(_)));
+                match bound {
+                    Ok(Some(root)) => adoption.adopt(root, tap).await,
+                    Ok(None) => {}
+                    Err(error) => tracing::debug!(
+                        session_id = %ctx.parts.session_id,
+                        error = %error,
+                        "send handle's root probe failed; the store poll goes on"
+                    ),
+                }
+            }
             () = &mut deposited => {
                 // A run in this process deposited its report or ended:
                 // resolve again when this follower waits on a settled root's
@@ -646,13 +816,35 @@ pub(super) async fn follow(
                         Subject::Root(_) => false,
                     };
             }
-            () = &mut sleep => {
+            () = tokio::time::sleep_until(poll_at) => {
                 poll = (poll * 2).min(POLL_CEILING);
             }
             () = closes => {
                 last_pass = true;
             }
         }
+    }
+}
+
+/// The input whose root a follower probes for at the poll floor: an input
+/// subject's, until its root is known, on a follower with no resident
+/// runtime. Such a follower reads a root that may run in another process,
+/// which publishes nothing on this process's replay, so without the probe it
+/// learns the root, and holds the root's terminal wait, only on a store
+/// poll that backs off to a second (FIG-3981). The probe is one keyed read
+/// of the input's root binding: the admission that writes the binding runs
+/// in the worker's process and announces it to no other, so there is no
+/// event to wait on instead.
+fn root_probe<'a>(
+    ctx: &SendContext,
+    subject: &'a Subject,
+    adoption: &Adoption,
+) -> Option<&'a InputId> {
+    match subject {
+        Subject::Input(receipt) if adoption.root.is_none() && ctx.live.is_none() => {
+            Some(&receipt.input_id)
+        }
+        _ => None,
     }
 }
 
@@ -702,17 +894,18 @@ async fn live_report(
     subject: &Subject,
     root: &TurnId,
 ) -> Result<Option<mailbox::SettledRoot>> {
-    let inputs = match subject {
-        Subject::Input(receipt) => vec![receipt.input_id.clone()],
-        Subject::Root(_) => resolve::inputs_of_root(&ctx.parts, root).await?,
-    };
-    Ok(inputs.into_iter().find_map(|input| {
-        mailbox::take_settled_root(
+    Ok(match subject {
+        Subject::Input(receipt) => mailbox::take_settled_root(
             ctx.parts.work.store_binding(),
             &ctx.parts.session_id,
-            &input,
-        )
-    }))
+            &receipt.input_id,
+        ),
+        Subject::Root(_) => mailbox::take_settled_root_of(
+            ctx.parts.work.store_binding(),
+            &ctx.parts.session_id,
+            root,
+        ),
+    })
 }
 
 #[allow(

@@ -72,12 +72,10 @@ impl RuntimeErrorCode {
         match self {
             // the attachment policy judges the recorded attachment, so it refuses it again.
             Self::AttachmentSourcePolicyDenied => Terminal,
-            // a permanent retirement fence already closed the owner.
-            Self::ArtifactOwnerRetired => Terminal,
-            // a permanent retirement fence already closed the destination owner.
-            Self::ArtifactDestinationOwnerRetired => Terminal,
-            // neither owner edge exists in durable state; a redrive reads the same state.
-            Self::ArtifactStagingEdgeMissing => Terminal,
+            // a permanent fence already ended the referrer.
+            Self::ArtifactReferrerEnded => Terminal,
+            // the bytes are not stored; a redrive reads the same state.
+            Self::ArtifactMissing => Terminal,
             // a contained panic of the effect body; the same body panics the same way.
             Self::EffectPanicked => Terminal,
             // the effect names no execution scope; wiring, not the attempt.
@@ -100,8 +98,8 @@ impl RuntimeErrorCode {
             Self::TurnExecutionRequiresReconciledToolSurface => Terminal,
             // transactional write authority was contended; the identical commit is safe to retry.
             Self::StoreCommitContended => Retryable,
-            // the queued run yielded with a durable continuation that a redrive resumes.
-            Self::QueuedRunPending => Retryable,
+            // the unfinished root or owed follow-on is resumed by a later drive.
+            Self::SessionRootPending => Retryable,
             // a follow-on owns the session; it runs first, then a redrive finds the head free.
             Self::FollowOnPending => Redrivable,
             // a newer commit moved the head; a redrive reloads it and re-establishes authority.

@@ -497,10 +497,12 @@ pub(super) async fn drive_suspended_sleep_cancel_scenario(
     Ok(())
 }
 
-/// Coordinate a real Restate service bounce with the shell harness while both
-/// workers and this runner stay alive. The tool wait preserves the existing
-/// start-gate replay proof, while the timer proves a resolved cancel promise
-/// wakes a suspended parent after the engine returns.
+/// Coordinate a cluster restart with the shell harness: it SIGKILLs both
+/// workers and stops Restate, then starts them again, while this runner stays
+/// alive. The tool wait preserves the existing start-gate replay proof, the
+/// timer proves a resolved cancel promise wakes a suspended parent after the
+/// engine returns, and both are the acknowledged-but-unfinished invocations
+/// whose recovery law 1 bounds.
 pub(super) async fn drive_engine_restart_scenario(
     storage: &PostgresStorage,
     ingress_url: &str,
@@ -532,6 +534,13 @@ pub(super) async fn drive_engine_restart_scenario(
 
     wait_for_harness_signal(storage.pool(), "engine-restart-complete").await?;
     wait_for_restate_recovery(admin_url).await?;
+    // Law 1: every terminal a client read before both workers and Restate
+    // went down is read again at the identical address; the checker requires
+    // the same bytes. The two turns acknowledged but unfinished across the
+    // restart are the bounded-recovery cohort.
+    let reattached = reattach_client_terminals().await?;
+    report_workflow_progress(&parked.workflow_id, "client-terminals-reattached");
+    println!("client terminals reattached after the workers and Restate restarted: {reattached}");
     wait_for_cancel_gate_attempts(storage.pool(), &parked.workflow_id, 2).await?;
     wait_for_invocation_suspended(&admin, &sleeping_invocation_id, Duration::from_secs(30)).await?;
     report_workflow_progress(&parked.workflow_id, "journal-replayed-after-engine-restart");

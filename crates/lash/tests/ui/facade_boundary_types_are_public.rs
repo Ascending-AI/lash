@@ -46,6 +46,7 @@ fn persistence_types_are_nameable(
         config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
         execution_config: None,
         current_frame_node_id: None,
+        frame_transition: None,
         graph,
         graph_base_leaf_node_id: None,
         checkpoint: Default::default(),
@@ -63,9 +64,9 @@ fn persistence_types_are_nameable(
             })
             .collect(),
         failure_evidence: Vec::new(),
+        outcome: None,
         turn_commit: RuntimeTurnCommitStamp::new(operation),
         ingress: None::<IngressSettlement>,
-        outcome: None,
         applied_commands: None,
         pending_follow_on: None,
         interrupted_turn_input_turn_id: None,

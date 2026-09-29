@@ -155,6 +155,7 @@ fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
         &SessionId::from("failing-child"),
         turn,
         state,
+        &crate::SessionTurnResult::Turn,
     );
     let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
         panic!("a failed child turn must project a tool failure");
@@ -243,6 +244,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
             test_lineage(&process_id, &predecessor_request),
             predecessor_request,
             crate::TurnInput::text("run"),
+            crate::SessionTurnResult::Turn,
             test_process_execution_write_authority(process_id.clone()),
             host_process_scope(&runtime.host.core, &process_id),
             tokio_util::sync::CancellationToken::new(),
@@ -304,6 +306,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         &child_session_id,
         turn,
         crate::ProcessStatus::Cancelled,
+        &crate::SessionTurnResult::FinalValue { schema: None },
     );
     assert_child_turn_cancellation(&runner_output, &evidence);
 
@@ -366,4 +369,188 @@ fn test_lineage(
         None,
         Some(&own_session),
     )
+}
+
+/// Project one ended child turn through the runner under `result`.
+fn project_turn(
+    turn: crate::AssembledTurn,
+    result: &crate::SessionTurnResult,
+) -> crate::ToolCallOutput {
+    let state = process_terminal_state_for_turn(&turn);
+    output_from_process_turn(
+        &crate::ProcessId::fixture("projected-child-process"),
+        &SessionId::from("projected-child"),
+        turn,
+        state,
+        result,
+    )
+}
+
+fn finished_turn(finish: crate::TurnFinish, text: &str) -> crate::AssembledTurn {
+    let mut turn = crate::testing::mock_assembled_turn(&SessionId::from("projected-child"), text);
+    turn.outcome = crate::TurnOutcome::Finished(finish);
+    turn
+}
+
+fn projected_failure(output: crate::ToolCallOutput) -> crate::ToolFailure {
+    let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+        panic!("expected a projected failure, got {:?}", output.outcome);
+    };
+    failure
+}
+
+/// ADR 0116 §3.7: under `FinalValue` the SessionTurn runner answers the
+/// child's final value, checked against the declared schema, and keeps the
+/// child's own failure and cancellation. This is the projection `spawn_agent`
+/// answers its caller with, so the tool no longer re-derives it.
+#[test]
+fn spawn_agent_projects_final_value() {
+    let untyped = crate::SessionTurnResult::FinalValue { schema: None };
+
+    // Final value, tool value and trimmed assistant text are the value.
+    let value = serde_json::json!({ "answer": 42 });
+    let output = project_turn(
+        finished_turn(
+            crate::TurnFinish::FinalValue {
+                value: value.clone(),
+            },
+            "unused",
+        ),
+        &untyped,
+    );
+    assert_eq!(output.value_for_projection(), value);
+    let output = project_turn(
+        finished_turn(
+            crate::TurnFinish::ToolValue {
+                tool_name: "finish".to_string(),
+                value: serde_json::json!(["tool", "value"]),
+            },
+            "unused",
+        ),
+        &untyped,
+    );
+    assert_eq!(
+        output.value_for_projection(),
+        serde_json::json!(["tool", "value"])
+    );
+    let output = project_turn(
+        finished_turn(
+            crate::TurnFinish::AssistantMessage {
+                text: "  useful prose  ".to_string(),
+            },
+            "unused",
+        ),
+        &untyped,
+    );
+    assert_eq!(
+        output.value_for_projection(),
+        serde_json::json!("useful prose")
+    );
+    let output = project_turn(
+        finished_turn(
+            crate::TurnFinish::AssistantMessage {
+                text: "   ".to_string(),
+            },
+            "  from the safe text  ",
+        ),
+        &untyped,
+    );
+    assert_eq!(
+        output.value_for_projection(),
+        serde_json::json!("from the safe text"),
+        "an empty final message falls back to the assistant's own output"
+    );
+
+    // The declared schema is checked: a match passes, a mismatch fails.
+    let typed = crate::SessionTurnResult::FinalValue {
+        schema: Some(serde_json::json!({
+            "type": "object",
+            "properties": { "answer": { "type": "integer" } },
+            "required": ["answer"],
+            "additionalProperties": false
+        })),
+    };
+    let output = project_turn(
+        finished_turn(
+            crate::TurnFinish::FinalValue {
+                value: value.clone(),
+            },
+            "unused",
+        ),
+        &typed,
+    );
+    assert_eq!(output.value_for_projection(), value);
+    let failure = projected_failure(project_turn(
+        finished_turn(
+            crate::TurnFinish::FinalValue {
+                value: serde_json::json!({ "answer": "forty-two" }),
+            },
+            "unused",
+        ),
+        &typed,
+    ));
+    assert_eq!(failure.code, "process_session_turn_result_schema_mismatch");
+    assert!(
+        failure
+            .message
+            .starts_with("the child's final value did not match the declared output schema:"),
+        "{}",
+        failure.message
+    );
+
+    // A child that ended its task with `submit_error` answers its own reason.
+    let mut submitted =
+        crate::testing::mock_assembled_turn(&SessionId::from("projected-child"), "unused");
+    submitted.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::ToolError {
+        tool_name: "submit_error".to_string(),
+        value: serde_json::json!({
+            "class": "execution",
+            "code": "subagent_submit_error",
+            "message": "missing shard amber",
+        }),
+    });
+    let failure = projected_failure(project_turn(submitted, &typed));
+    assert_eq!(failure.message, "missing shard amber");
+
+    // A frame switch has no final value, even when its metadata would match
+    // the schema.
+    let mut switched =
+        crate::testing::mock_assembled_turn(&SessionId::from("projected-child"), "unused");
+    switched.outcome = crate::TurnOutcome::AgentFrameSwitch {
+        frame_key: crate::FrameKey::from_caller_material("next-frame").expect("frame key"),
+        task: "continue elsewhere".to_string(),
+        initial_nodes: Vec::new(),
+    };
+    let failure = projected_failure(project_turn(switched.clone(), &untyped));
+    assert_eq!(failure.code, "process_session_turn_frame_switch");
+    // Under `Turn` the same frame switch is the assembled turn, unchanged.
+    let turn = project_turn(switched, &crate::SessionTurnResult::Turn);
+    assert!(turn.value_for_projection().get("turn").is_some());
+
+    // A stopped child never projects a value.
+    let mut stopped =
+        crate::testing::mock_assembled_turn(&SessionId::from("projected-child"), "unused");
+    stopped.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::Incomplete);
+    let failure = final_value_of_turn(&stopped).expect_err("a stopped child has no final value");
+    assert_eq!(failure.code, "process_session_turn_stopped");
+
+    // Cancellation stays typed.
+    let mut cancelled =
+        crate::testing::mock_assembled_turn(&SessionId::from("projected-child"), "unused");
+    cancelled.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled {
+        evidence: crate::TurnCancellationEvidence {
+            request_id: "cancel-child".to_string(),
+            origin: None,
+            reason: Some("the parent went away".to_string()),
+            undelivered: crate::TurnCancelDisposition::Defer,
+            mode: crate::TurnCancelMode::Immediate,
+            honoured_after_step: None,
+        },
+    });
+    let output = project_turn(cancelled, &typed);
+    let crate::ToolCallOutcome::Cancelled(cancellation) = output.outcome else {
+        panic!("a cancelled child answers a typed cancellation");
+    };
+    assert_eq!(cancellation.message, "the parent went away");
+    assert_eq!(cancellation.origin, Some(crate::CancelOrigin::TurnStopped));
 }

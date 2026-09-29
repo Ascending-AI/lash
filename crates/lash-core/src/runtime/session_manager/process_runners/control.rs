@@ -510,9 +510,12 @@ impl ProcessCapability {
             .identity
             .as_ref()
             .and_then(|identity| identity.label.clone());
-        let registration = request.into_registration(None).with_process_provenance(
-            crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
-        );
+        let registration = request
+            .into_registration(None)
+            .with_process_provenance(
+                crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
+            )
+            .with_consumer_hold(scope.consumer_hold.clone());
         let registration = with_admitted_start_cx(current, registration, &scope).await?;
         // A redrive presents the same start key, and the registrar returns the
         // retained process untouched (ADR 0107): its recorded attempt bound

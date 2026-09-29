@@ -541,23 +541,23 @@ async fn every_honest_exception_boundary_resumes() {
                     Expr::Block(vec![
                         Expr::Assign {
                             target: crate::AssignTarget::variable("n".into()),
-                            expr: Box::new(Expr::Binary {
+                            expr: Box::new(Expr::JavaScriptBinary {
                                 left: Box::new(Expr::Variable("n".into())),
-                                op: crate::ast::BinaryOp::Add,
+                                op: crate::ast::JavaScriptBinaryOp::Add,
                                 right: Box::new(Expr::Number(1.0)),
                             }),
                         },
                         Expr::If {
-                            condition: Box::new(Expr::Binary {
+                            condition: Box::new(Expr::JavaScriptBinary {
                                 left: Box::new(Expr::Variable("n".into())),
-                                op: crate::ast::BinaryOp::Greater,
+                                op: crate::ast::JavaScriptBinaryOp::Greater,
                                 right: Box::new(Expr::Number(2.0)),
                             }),
                             then_block: Box::new(Expr::Break),
                             else_block: Box::new(Expr::If {
-                                condition: Box::new(Expr::Binary {
+                                condition: Box::new(Expr::JavaScriptBinary {
                                     left: Box::new(Expr::Variable("n".into())),
-                                    op: crate::ast::BinaryOp::Equal,
+                                    op: crate::ast::JavaScriptBinaryOp::StrictEqual,
                                     right: Box::new(Expr::Number(1.0)),
                                 }),
                                 then_block: Box::new(Expr::Continue),

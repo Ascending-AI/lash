@@ -1,8 +1,8 @@
 mod cell_conformance;
 mod kernel_door_tests;
 
-use std::cell::RefCell;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 /// A fresh storage backend for tests that do not execute durable effects.
 pub(crate) async fn memory_backend() -> lash_core::Backend {
@@ -70,6 +70,15 @@ impl DoubleProcesses {
         runtime_host: lash_core::facade_support::RuntimeHostConfig,
         session_policy: lash_core::SessionPolicy,
     ) {
+        let backend = runtime_host.backend().clone();
+        let module_store: Arc<dyn lash_core::ModuleArtifactStore> = Arc::new(TestModuleStore {
+            selected: artifact_slot(),
+            fallback: backend.module_artifacts(),
+        });
+        let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
+            .map_module_artifacts(move |_| module_store)
+            .into_backend();
+        let runtime_host = runtime_host.with_backend(backend);
         let worker = lash_core_worker::DurableProcessWorker::new(
             lash_core_worker::DurableProcessWorkerConfig::new(
                 Arc::new(lash_core::facade_support::PluginHost::new(factories)),
@@ -152,18 +161,91 @@ pub(crate) async fn memory_store_backend() -> lash_core::Backend {
 }
 
 thread_local! {
-    /// One artifact backend per test thread so repeat reads use the same store.
-    static ARTIFACT_BACKEND: RefCell<Option<lash_core::Backend>> =
-        const { RefCell::new(None) };
+    /// A fixture's selected SQLite module store. Contexts and process workers
+    /// share the slot even when the fixture creates the store after the context.
+    static ARTIFACT_SLOT: Arc<Mutex<Option<lash_core::Backend>>> =
+        Arc::new(Mutex::new(None));
+}
+
+fn artifact_slot() -> Arc<Mutex<Option<lash_core::Backend>>> {
+    ARTIFACT_SLOT.with(Arc::clone)
+}
+
+struct TestModuleStore {
+    selected: Arc<Mutex<Option<lash_core::Backend>>>,
+    fallback: Arc<dyn lash_core::ModuleArtifactStore>,
+}
+
+impl TestModuleStore {
+    fn current(&self) -> Arc<dyn lash_core::ModuleArtifactStore> {
+        self.selected
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(lash_core::Backend::module_artifacts)
+            .unwrap_or_else(|| Arc::clone(&self.fallback))
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ModuleArtifactStore for TestModuleStore {
+    fn pause_next_publication_for_testing(&self) -> Option<lash_core::ArtifactPublicationPause> {
+        self.current().pause_next_publication_for_testing()
+    }
+
+    fn durability_tier(&self) -> lash_core::DurabilityTier {
+        self.current().durability_tier()
+    }
+
+    async fn publish_module_artifact(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        module_ref: &str,
+        bytes: &[u8],
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        self.current()
+            .publish_module_artifact(claim, module_ref, bytes)
+            .await
+    }
+
+    async fn acquire_module_artifact(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        self.current()
+            .acquire_module_artifact(claim, module_ref)
+            .await
+    }
+
+    async fn end_module_referrer(
+        &self,
+        cleanup: &lash_core::ResolvedArtifactCleanup,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        self.current().end_module_referrer(cleanup).await
+    }
+
+    async fn get_module_artifact(
+        &self,
+        module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
+        self.current().get_module_artifact(module_ref).await
+    }
 }
 
 pub(crate) async fn memory_artifact_store() -> lashlang::LashlangArtifacts {
-    let existing = ARTIFACT_BACKEND.with(|held| held.borrow().clone());
+    let slot = artifact_slot();
+    let existing = slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
     let backend = match existing {
         Some(backend) => backend,
         None => {
             let backend = memory_backend().await;
-            ARTIFACT_BACKEND.with(|held| *held.borrow_mut() = Some(backend.clone()));
+            *slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(backend.clone());
             backend
         }
     };
@@ -190,7 +272,33 @@ pub(crate) fn memory_artifact_store_blocking() -> lashlang::LashlangArtifacts {
 }
 
 pub(crate) async fn fresh_memory_artifact_store() -> lashlang::LashlangArtifacts {
-    lashlang::LashlangArtifacts::of_backend(&memory_backend().await)
+    let backend = memory_backend().await;
+    *artifact_slot()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(backend.clone());
+    lashlang::LashlangArtifacts::of_backend(&backend)
+}
+
+/// Use the module store a cell publishes into and the double's environment
+/// store when a test context acquires trigger and process-start referrers.
+fn engine_ports<'run>(
+    backend: &lash_core::Backend,
+    ports: lash_core::testing::TestExecutionPorts<'run>,
+) -> lash_core::testing::TestExecutionPorts<'run> {
+    let module_store: Arc<dyn lash_core::ModuleArtifactStore> = Arc::new(TestModuleStore {
+        selected: artifact_slot(),
+        fallback: backend.module_artifacts(),
+    });
+    let mut ports = ports.with_module_artifact_store(backend, Arc::clone(&module_store));
+    ports.process_engines = lash_core::ProcessEngineRegistry::new().with_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                lashlang::LashlangArtifacts::new(module_store),
+                lash_lashlang_runtime::LashlangSurface::default(),
+            ),
+        ),
+    );
+    ports
 }
 
 /// The scope a context built with no parent invocation claims: the builder's
@@ -214,7 +322,11 @@ pub(crate) fn double_ports<'h>(
     double: &lash_restate_test::RestateTestBackend,
     handler: &'h lash_restate_test::OpenHandler,
 ) -> lash_core::testing::TestExecutionPorts<'h> {
-    lash_core::testing::TestExecutionPorts::lent(&double.lash_backend(), handler.scoped())
+    let backend = double.lash_backend();
+    engine_ports(
+        &backend,
+        lash_core::testing::TestExecutionPorts::lent(&backend, handler.scoped()),
+    )
 }
 
 /// [`double_ports`] with `layer` in front of the double's host and of the
@@ -229,13 +341,16 @@ pub(crate) fn double_ports_over_layer<'h>(
     let lent =
         lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), Arc::clone(&layer))
             .expect("layer the handler's controller");
-    lash_core::testing::TestExecutionPorts {
-        effect_host: Arc::new(lash_core::testing::LayeredEffectHost::new(
-            backend.effect_host(),
-            layer,
-        )),
-        ..lash_core::testing::TestExecutionPorts::lent(&backend, lent)
-    }
+    engine_ports(
+        &backend,
+        lash_core::testing::TestExecutionPorts {
+            effect_host: Arc::new(lash_core::testing::LayeredEffectHost::new(
+                backend.effect_host(),
+                layer,
+            )),
+            ..lash_core::testing::TestExecutionPorts::lent(&backend, lent)
+        },
+    )
 }
 
 /// [`double_ports`] for a handler attempt the server may re-run
@@ -246,7 +361,10 @@ pub(crate) fn attempt_ports<'a>(
     backend: &lash_core::Backend,
     scoped: lash_core::ScopedEffectController<'a>,
 ) -> lash_core::testing::TestExecutionPorts<'a> {
-    lash_core::testing::TestExecutionPorts::lent(backend, scoped)
+    engine_ports(
+        backend,
+        lash_core::testing::TestExecutionPorts::lent(backend, scoped),
+    )
 }
 
 /// [`attempt_ports`] with `layer` in front of `backend`'s host and of
@@ -258,13 +376,16 @@ pub(crate) fn attempt_ports_over_layer<'a>(
 ) -> lash_core::testing::TestExecutionPorts<'a> {
     let lent = lash_core::testing::LayeredEffectHost::layer_scoped(scoped, Arc::clone(&layer))
         .expect("layer the attempt's controller");
-    lash_core::testing::TestExecutionPorts {
-        effect_host: Arc::new(lash_core::testing::LayeredEffectHost::new(
-            backend.effect_host(),
-            layer,
-        )),
-        ..lash_core::testing::TestExecutionPorts::lent(backend, lent)
-    }
+    engine_ports(
+        backend,
+        lash_core::testing::TestExecutionPorts {
+            effect_host: Arc::new(lash_core::testing::LayeredEffectHost::new(
+                backend.effect_host(),
+                layer,
+            )),
+            ..lash_core::testing::TestExecutionPorts::lent(backend, lent)
+        },
+    )
 }
 
 /// A fresh memory store set's process registry, for a trigger router whose

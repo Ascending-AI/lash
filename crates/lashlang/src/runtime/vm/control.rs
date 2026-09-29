@@ -547,8 +547,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             | super::Instruction::ToBool
                             | super::Instruction::JumpIfFalse(_)
                             | super::Instruction::JumpIfTrue(_)
-                            | super::Instruction::Unary(_)
-                            | super::Instruction::Binary(_)
                             | super::Instruction::BeginIter(_)
                     ) && matches!(
                         &self.stack[index],

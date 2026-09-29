@@ -189,7 +189,7 @@ impl RuntimeExecutionContext<'_> {
     /// attempt envelopes hash identically to the pre-group batch path), the
     /// checked opener/scope pair, the recorded cancellation authority, the
     /// execution-environment reference published under
-    /// `ArtifactOwner::Execution`, and the completion routing the admission
+    /// the scope's execution referrer, and the completion routing the admission
     /// computed.
     ///
     /// Every refusal is typed and happens before `open_effect_group` is
@@ -272,7 +272,16 @@ impl RuntimeExecutionContext<'_> {
         // the request (ADR 0099 §3): a refusal here — a retired owner — is a
         // formation failure, never a silently absent environment.
         let execution_env = self
-            .captured_process_execution_env_ref(&crate::ArtifactOwner::execution(scope.clone()))
+            .captured_process_execution_env_ref(
+                &crate::session::execution_context::execution_claim_of(&scope).map_err(
+                    |error| {
+                        crate::RuntimeEffectControllerError::new(
+                            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                            format!("tool-child group formation has no execution referrer: {error}"),
+                        )
+                    },
+                )?,
+            )
             .await
             .map_err(|error| {
                 crate::RuntimeEffectControllerError::new(

@@ -43,6 +43,15 @@ pub trait GroupChildCancelWatch: Send + Sync {
     async fn cancelled(&self) -> Result<(), RuntimeError>;
 }
 
+/// An engine's verdict on one effect journal (ADR 0113 §2.5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JournalReplay {
+    /// The journal may still replay or append.
+    MayReplay,
+    /// Nothing will replay or append to the journal again.
+    Settled,
+}
+
 /// Backend-level factory for scoped effect controllers.
 #[async_trait::async_trait]
 pub trait EffectHost: AwaitEventResolver {
@@ -259,22 +268,15 @@ pub trait EffectHost: AwaitEventResolver {
         ))
     }
 
-    /// Exact scopes whose authoritative retirement has committed but whose
-    /// execution-artifact owner has not yet been acknowledged as severed in
-    /// every configured artifact store.
-    async fn pending_artifact_owner_retirements(
+    /// Whether `journal` may still replay or append (ADR 0113 §2.5). `Settled`
+    /// is the engine's promise that nothing will replay or append to the
+    /// journal again; the artifact-cleanup executor severs nothing an
+    /// execution referrer holds, and nothing a gate protects, until it is.
+    /// A wait retirement alone never proves it.
+    async fn journal_replay(
         &self,
-    ) -> Result<Vec<ExecutionScope>, RuntimeError> {
-        Ok(Vec::new())
-    }
-
-    /// Acknowledge completion of execution-artifact cleanup for `scope`.
-    async fn complete_artifact_owner_retirement(
-        &self,
-        _scope: &ExecutionScope,
-    ) -> Result<(), RuntimeError> {
-        Ok(())
-    }
+        journal: &lash_sansio::EffectJournalIdentity,
+    ) -> Result<JournalReplay, RuntimeError>;
 
     /// Lift the scope-retirement fence of `scope` because its owner is being
     /// registered again: a pruned process id that a host re-registers starts

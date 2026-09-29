@@ -18,8 +18,7 @@ use lash_restate_test::{
 };
 
 use crate::session_driver::{
-    LASH_SESSION_DRIVE_VERSION, RestateSessionDriveRequest, RestateTurnDriveRequest,
-    turn_workflow_key,
+    RestateSessionDriveRequest, RestateTurnDriveRequest, turn_workflow_key,
 };
 use lash_core::SessionDriver;
 use lash_core::engine::{
@@ -27,11 +26,11 @@ use lash_core::engine::{
     admission_body, drive_admission_replay_key,
 };
 
-fn generation(build: &'static str) -> lash_core::engine::BuildGeneration {
+pub(super) fn generation(build: &'static str) -> lash_core::engine::BuildGeneration {
     lash_core::engine::BuildGeneration::for_test(build)
 }
 
-fn stable_session() -> crate::services::ServiceRoute {
+pub(super) fn stable_session() -> crate::services::ServiceRoute {
     crate::services::DEFAULT_NAMESPACE.stable(LashService::SessionDriver)
 }
 
@@ -46,19 +45,19 @@ fn turn_lane(build: &'static str) -> crate::services::ServiceRoute {
 /// One session's items: open ones in arrival order, and every item a root
 /// run consumed, in consumption order.
 #[derive(Clone, Debug, Default)]
-struct Ledger {
-    open: VecDeque<String>,
-    consumed: Vec<String>,
+pub(super) struct Ledger {
+    pub(super) open: VecDeque<String>,
+    pub(super) consumed: Vec<String>,
 }
 
 /// A gate one `(request, ordinal)` admission waits at, after the driver's
 /// ledger read and before it answers: the drive is then in flight inside
 /// its first admission, where the roll finds it.
-struct AdmissionGate {
+pub(super) struct AdmissionGate {
     request: String,
     ordinal: u32,
-    reached: tokio::sync::Notify,
-    release: tokio::sync::Notify,
+    pub(super) reached: tokio::sync::Notify,
+    pub(super) release: tokio::sync::Notify,
 }
 
 /// The drive both deployments install: one ledger for both builds, as the
@@ -67,7 +66,7 @@ struct AdmissionGate {
 /// the generation each request carried when its admission first ran, which
 /// the S9 stamp persists as `admitted_generation`.
 #[derive(Default)]
-struct RollDriver {
+pub(super) struct RollDriver {
     ledgers: Mutex<BTreeMap<SessionId, Ledger>>,
     admissions: Mutex<BTreeMap<(String, u32), usize>>,
     stamps: Mutex<BTreeMap<String, lash_core::engine::BuildGeneration>>,
@@ -76,7 +75,7 @@ struct RollDriver {
 }
 
 impl RollDriver {
-    fn accept(&self, session: &SessionId, item: &str) {
+    pub(super) fn accept(&self, session: &SessionId, item: &str) {
         self.ledgers
             .lock_recover()
             .entry(session.clone())
@@ -85,7 +84,7 @@ impl RollDriver {
             .push_back(item.to_owned());
     }
 
-    fn ledger(&self, session: &SessionId) -> Ledger {
+    pub(super) fn ledger(&self, session: &SessionId) -> Ledger {
         self.ledgers
             .lock_recover()
             .get(session)
@@ -105,7 +104,7 @@ impl RollDriver {
         self.stamps.lock_recover().get(request).cloned()
     }
 
-    fn runs_of(&self, root: &str) -> usize {
+    pub(super) fn runs_of(&self, root: &str) -> usize {
         self.root_runs
             .lock_recover()
             .get(root)
@@ -113,7 +112,7 @@ impl RollDriver {
             .unwrap_or_default()
     }
 
-    fn gate(&self, request: &str, ordinal: u32) -> Arc<AdmissionGate> {
+    pub(super) fn gate(&self, request: &str, ordinal: u32) -> Arc<AdmissionGate> {
         let gate = Arc::new(AdmissionGate {
             request: request.to_owned(),
             ordinal,
@@ -221,29 +220,43 @@ impl SessionDriver for RollDriver {
         &self,
         _controller: ScopedEffectController<'_>,
         admitted: lash_core::engine::Admitted,
-    ) -> Result<RootOutcome, DriveAbort> {
-        let root = admitted.root().clone();
-        *self
-            .root_runs
-            .lock_recover()
-            .entry(root.as_str().to_owned())
-            .or_default() += 1;
-        // Idempotent, like a commit fenced by its admission: a redrive of a
-        // root that already consumed its item consumes nothing.
-        let mut ledgers = self.ledgers.lock_recover();
-        let ledger = ledgers.entry(admitted.session().clone()).or_default();
-        if ledger.open.front().map(String::as_str) == Some(root.as_str()) {
-            ledger.open.pop_front();
-            ledger.consumed.push(root.as_str().to_owned());
-        }
-        Ok(RootOutcome::Committed {
-            outcome: lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::AssistantMessage {
-                    text: format!("answered {}", root.as_str()),
-                },
-            ),
-            root,
-        })
+    ) -> lash_core::engine::RootRunEnd {
+        lash_core::engine::RootRunEnd::owing_nothing(
+            async {
+                let root = admitted.root().clone();
+                *self
+                    .root_runs
+                    .lock_recover()
+                    .entry(root.as_str().to_owned())
+                    .or_default() += 1;
+                // Idempotent, like a commit fenced by its admission: a redrive of a
+                // root that already consumed its item consumes nothing.
+                let mut ledgers = self.ledgers.lock_recover();
+                let ledger = ledgers.entry(admitted.session().clone()).or_default();
+                if ledger.open.front().map(String::as_str) == Some(root.as_str()) {
+                    ledger.open.pop_front();
+                    ledger.consumed.push(root.as_str().to_owned());
+                }
+                Ok(RootOutcome::Committed {
+                    outcome: lash_core::facade_support::TurnOutcome::Finished(
+                        lash_core::facade_support::TurnFinish::AssistantMessage {
+                            text: format!("answered {}", root.as_str()),
+                        },
+                    ),
+                    root,
+                })
+            }
+            .await,
+        )
+    }
+
+    async fn close_root(
+        &self,
+        _controller: lash_core::ScopedEffectController<'_>,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::DriveAbort> {
+        Ok(())
     }
 }
 
@@ -274,22 +287,26 @@ impl RestateProcessRunner for NoProcesses {
     }
 }
 
+/// The endpoint URI build N registers at: its own, as every build's is
+/// (ADR 0115 §3.5).
+pub(super) const BUILD_N_URI: &str = "http://lash-roll.test/lash/n/build-n";
+
 /// The two builds over one server, one driver and one store set.
-struct SessionRoll {
-    server: RestateTestServer,
-    ingress: RestateIngressClient,
-    driver: Arc<RollDriver>,
+pub(super) struct SessionRoll {
+    pub(super) server: RestateTestServer,
+    pub(super) ingress: RestateIngressClient,
+    pub(super) driver: Arc<RollDriver>,
     /// The slot's installation of `driver`, kept for the roll's life.
     _installation: Arc<dyn SessionDriver>,
     endpoint_next: Mutex<Option<Endpoint>>,
-    deployment_n: DeploymentId,
+    pub(super) deployment_n: DeploymentId,
     deployment_next: Mutex<Option<DeploymentId>>,
     served: Arc<Mutex<Vec<(String, AttemptDispatch)>>>,
 }
 
 impl SessionRoll {
     /// Build N registered and serving; build N+1 built, not yet registered.
-    async fn start(seed: u64) -> Self {
+    pub(super) async fn start(seed: u64) -> Self {
         let server = RestateTestServer::new(ServerConfig::default().with_seed(seed))
             .expect("start the server double");
         let connection =
@@ -328,13 +345,19 @@ impl SessionRoll {
                     session_driver: slot.clone(),
                     build_generation: generation(build),
                     namespace: crate::RestateNamespace::default(),
+                    fleet: crate::object_state::FleetView::default(),
                 },
             )
             .build()
         };
         let served: Arc<Mutex<Vec<(String, AttemptDispatch)>>> = Arc::default();
         let deployment_n = server
-            .register_with(endpoint("N"), "build-N", Self::recording("N", &served))
+            .register_at(
+                endpoint("N"),
+                BUILD_N_URI,
+                "build-N",
+                Self::recording("N", &served),
+            )
             .await
             .expect("register build N");
         let endpoint_next = endpoint("N+1");
@@ -366,7 +389,7 @@ impl SessionRoll {
     }
 
     /// Register build N+1, once.
-    async fn register_next(&self) {
+    pub(super) async fn register_next(&self) {
         let Some(endpoint) = self.endpoint_next.lock_recover().take() else {
             return;
         };
@@ -379,7 +402,7 @@ impl SessionRoll {
         *self.deployment_next.lock_recover() = Some(id);
     }
 
-    fn deployment_next(&self) -> DeploymentId {
+    pub(super) fn deployment_next(&self) -> DeploymentId {
         self.deployment_next
             .lock_recover()
             .clone()
@@ -387,13 +410,12 @@ impl SessionRoll {
     }
 
     /// The request body `request`'s drive carries under `stamp`.
-    fn drive_body(
+    pub(super) fn drive_body(
         session: &SessionId,
         request: &str,
         stamp: &lash_core::engine::BuildGeneration,
     ) -> RestateSessionDriveRequest {
         RestateSessionDriveRequest {
-            drive_version: LASH_SESSION_DRIVE_VERSION,
             request: DriveRequest {
                 session: session.clone(),
                 request: DriveRequestId::new(request),
@@ -404,7 +426,7 @@ impl SessionRoll {
 
     /// Send `request`'s drive to `route`, keyed by the request id as the
     /// scheduler's sends are.
-    async fn send(
+    pub(super) async fn send(
         &self,
         session: &SessionId,
         request: &str,
@@ -416,7 +438,7 @@ impl SessionRoll {
                 &route.name(),
                 session.as_str(),
                 "drive",
-                &Self::drive_body(session, request, stamp),
+                &crate::Call::new(Self::drive_body(session, request, stamp)),
                 request,
             )
             .await
@@ -424,7 +446,7 @@ impl SessionRoll {
     }
 
     /// Attach to `request`'s drive under `route` and wait for its outcome.
-    async fn attach(
+    pub(super) async fn attach(
         &self,
         session: &SessionId,
         request: &str,
@@ -433,21 +455,23 @@ impl SessionRoll {
     ) -> DriveOutcome {
         tokio::time::timeout(
             Duration::from_secs(60),
-            self.ingress.call_object_json_idempotent::<_, DriveOutcome>(
-                &route.name(),
-                session.as_str(),
-                "drive",
-                &Self::drive_body(session, request, stamp),
-                request,
-            ),
+            self.ingress
+                .call_object_json_idempotent::<_, crate::Reply<DriveOutcome>>(
+                    &route.name(),
+                    session.as_str(),
+                    "drive",
+                    &crate::Call::new(Self::drive_body(session, request, stamp)),
+                    request,
+                ),
         )
         .await
         .expect("the drive ends")
         .expect("the drive's outcome")
+        .into_body()
     }
 
     /// Every invocation of `target` the double saw.
-    fn invocations_of(&self, target: &str) -> Vec<lash_restate_test::InvocationView> {
+    pub(super) fn invocations_of(&self, target: &str) -> Vec<lash_restate_test::InvocationView> {
         self.server
             .invocations()
             .into_iter()
@@ -468,7 +492,7 @@ impl SessionRoll {
         }
     }
 
-    async fn settle(&self) {
+    pub(super) async fn settle(&self) {
         self.server.settle().await;
     }
 }
@@ -734,12 +758,11 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
         let key = turn_workflow_key(&session_red, &TurnId::from(root));
         let target = format!("{}/{key}/run", turn_lane("N").name());
         roll.ingress
-            .send_workflow_json(
+            .send_lash_workflow(
                 &turn_lane("N").name(),
                 &key,
                 "run",
                 &RestateTurnDriveRequest {
-                    drive_version: LASH_SESSION_DRIVE_VERSION,
                     sender_generation: sender,
                     admitted: admission_body::admitted(
                         session_red.clone(),

@@ -49,7 +49,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
     assert_eq!(
         exec(finish_binary(
             builders::num(7.0),
-            BinaryOp::Subtract,
+            JavaScriptBinaryOp::Subtract,
             builders::num(2.0)
         ))
         .await
@@ -59,7 +59,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
     assert_eq!(
         exec(finish_binary(
             builders::num(3.0),
-            BinaryOp::Multiply,
+            JavaScriptBinaryOp::Multiply,
             builders::num(4.0)
         ))
         .await
@@ -69,7 +69,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
     assert_eq!(
         exec(finish_binary(
             builders::num(8.0),
-            BinaryOp::Divide,
+            JavaScriptBinaryOp::Divide,
             builders::num(2.0)
         ))
         .await
@@ -80,7 +80,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
     assert_eq!(
         exec(finish_binary(
             builders::num(8.0),
-            BinaryOp::Modulo,
+            JavaScriptBinaryOp::Remainder,
             builders::num(3.0)
         ))
         .await
@@ -90,7 +90,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
     assert_eq!(
         exec(finish_binary(
             builders::num(1.0),
-            BinaryOp::NotEqual,
+            JavaScriptBinaryOp::StrictNotEqual,
             builders::num(2.0)
         ))
         .await
@@ -100,7 +100,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
     assert_eq!(
         exec(finish_binary(
             builders::num(1.0),
-            BinaryOp::LessEqual,
+            JavaScriptBinaryOp::LessEqual,
             builders::num(2.0)
         ))
         .await
@@ -110,7 +110,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
     assert_eq!(
         exec(finish_binary(
             builders::num(2.0),
-            BinaryOp::Greater,
+            JavaScriptBinaryOp::Greater,
             builders::num(1.0)
         ))
         .await
@@ -120,7 +120,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
     assert_eq!(
         exec(finish_binary(
             builders::num(2.0),
-            BinaryOp::GreaterEqual,
+            JavaScriptBinaryOp::GreaterEqual,
             builders::num(1.0)
         ))
         .await
@@ -128,11 +128,10 @@ async fn arithmetic_and_compare_errors_are_covered() {
         Value::Bool(true)
     );
 
-    let value = exec(finish_binary(
+    let value = exec(finish_program(builders::concat(
         builders::list(vec![builders::num(1.0), builders::num(2.0)]),
-        BinaryOp::Add,
         builders::list(vec![builders::num(3.0)]),
-    ))
+    )))
     .await
     .expect("list concat should succeed");
     assert_eq!(
@@ -142,7 +141,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
 
     let value = exec(finish_binary(
         builders::string("a"),
-        BinaryOp::Add,
+        JavaScriptBinaryOp::Add,
         builders::string("b"),
     ))
     .await
@@ -151,7 +150,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
 
     let value = exec(finish_binary(
         builders::string("a"),
-        BinaryOp::Add,
+        JavaScriptBinaryOp::Add,
         builders::num(1.0),
     ))
     .await
@@ -160,7 +159,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
 
     let value = exec(finish_binary(
         builders::num(1.0),
-        BinaryOp::Add,
+        JavaScriptBinaryOp::Add,
         builders::string("b"),
     ))
     .await
@@ -170,7 +169,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
     // `finish 1 + true`
     let value = exec(finish_binary(
         builders::num(1.0),
-        BinaryOp::Add,
+        JavaScriptBinaryOp::Add,
         builders::bool_lit(true),
     ))
     .await
@@ -180,7 +179,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
     // `finish null + 2`
     let value = exec(finish_binary(
         builders::null(),
-        BinaryOp::Add,
+        JavaScriptBinaryOp::Add,
         builders::num(2.0),
     ))
     .await
@@ -189,7 +188,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
 
     let value = exec(finish_binary(
         builders::string("2"),
-        BinaryOp::Multiply,
+        JavaScriptBinaryOp::Multiply,
         builders::num(3.0),
     ))
     .await
@@ -198,21 +197,23 @@ async fn arithmetic_and_compare_errors_are_covered() {
 
     let value = exec(finish_binary(
         builders::string("2"),
-        BinaryOp::Less,
+        JavaScriptBinaryOp::Less,
         builders::num(10.0),
     ))
     .await
     .expect("numeric strings should compare");
     assert_eq!(value, Value::Bool(true));
 
-    let err = exec(finish_binary(
+    // JavaScript `+` coerces rather than fails: a record's ToPrimitive runs its
+    // default `toString`.
+    let value = exec(finish_binary(
         builders::record(Vec::new()),
-        BinaryOp::Add,
+        JavaScriptBinaryOp::Add,
         builders::num(1.0),
     ))
     .await
-    .expect_err("records should still fail arithmetic");
-    assert!(matches!(err, RuntimeError::ExpectedNumberType { .. }));
+    .expect("records coerce under JavaScript addition");
+    assert_eq!(value, Value::String("[object Object]1".into()));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1226,32 +1227,6 @@ async fn helper_functions_are_covered_directly() {
     );
 
     assert_eq!(
-        compare_numbers(Value::Number(1.0), Value::Number(2.0), |a, b| a < b).expect("compare"),
-        Value::Bool(true)
-    );
-    assert_eq!(
-        compare_ordered(
-            Value::String("abc".to_string().into()),
-            Value::String("def".to_string().into()),
-            |a, b| a < b,
-            |a, b| a < b,
-        )
-        .expect("string compare"),
-        Value::Bool(true)
-    );
-    assert_eq!(
-        add_values(Value::Number(1.0), Value::Number(2.0)).expect("add"),
-        Value::Number(3.0)
-    );
-    assert_eq!(
-        add_values(Value::String("a".to_string().into()), Value::Bool(true)).expect("concat"),
-        Value::String("atrue".to_string().into())
-    );
-    assert_eq!(
-        add_values(Value::Bool(true), Value::Number(2.0)).expect("numeric coercion"),
-        Value::Number(3.0)
-    );
-    assert_eq!(
         success(Value::Number(1.0)).as_record().unwrap()["ok"],
         Value::Bool(true)
     );
@@ -1287,14 +1262,6 @@ async fn helper_functions_are_covered_directly() {
     assert_eq!(
         stringify_value(&Value::Tuple(Vec::new().into())).expect("stringify"),
         "()"
-    );
-    assert_eq!(
-        add_values(
-            Value::Tuple(vec![Value::Number(1.0)].into()),
-            Value::Tuple(vec![Value::Number(2.0)].into())
-        )
-        .expect("tuple concat"),
-        Value::Tuple(vec![Value::Number(1.0), Value::Number(2.0)].into())
     );
     let mut appended = String::from("prefix:");
     append_stringified_value(&mut appended, &Value::Bool(true)).expect("append stringify");

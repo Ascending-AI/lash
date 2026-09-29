@@ -156,6 +156,8 @@ pub async fn deliver_scope_close(
             Ok(ScopeCloseAttempt::Owed { retryable: true })
         }
         RelayVerdict::Stalled(_) => Ok(ScopeCloseAttempt::Owed { retryable: false }),
+        // A scope close is never deferred; if it were, it is still owed.
+        RelayVerdict::Deferred { .. } => Ok(ScopeCloseAttempt::Owed { retryable: true }),
         RelayVerdict::NotDue => {
             if relay.ledger().state(&id).await?.is_none() {
                 sink.close_root_scope(terminal).await?;

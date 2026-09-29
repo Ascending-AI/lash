@@ -70,16 +70,17 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
     let artifact_store = lashlang::LashlangArtifacts::of_backend(&artifact_backend);
     artifact_store
         .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("restate-serializable-input"),
+            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+                lash_core::HostArtifactPin::mint(),
+            ))
+            .expect("host pin claim"),
             &linked_module.artifact,
         )
         .await
         .expect("publish serializable-input artifact");
-    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("process-exec-env store set")
-            .process_env_store();
+    // The start acquires its environment and module from the stores they
+    // were published into (ADR 0113 §3.3).
+    let process_env_store = artifact_backend.process_env_store();
     let process_env_ref =
         lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let process_ref = linked_module
@@ -121,14 +122,20 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
             ),
             registry_local_executor(registry.clone())
                 .with_process_env_store(process_env_store)
-                .with_process_engines(lash_core::ProcessEngineRegistry::new().with_registration(
-                    lash_lashlang_runtime::lashlang_process_engine_registration(
-                        lash_lashlang_runtime::LashlangProcessEngine::new(
-                            artifact_store,
-                            lash_lashlang_runtime::LashlangSurface::default(),
+                .with_process_engines(
+                    lash_core::ProcessEngineRegistry::new()
+                        .with_artifact_ports(lash_core::ArtifactReferrerPorts::of_backend(
+                            &artifact_backend,
+                        ))
+                        .with_registration(
+                            lash_lashlang_runtime::lashlang_process_engine_registration(
+                                lash_lashlang_runtime::LashlangProcessEngine::new(
+                                    artifact_store,
+                                    lash_lashlang_runtime::LashlangSurface::default(),
+                                ),
+                            ),
                         ),
-                    ),
-                )),
+                ),
         )
         .await
         .expect("start");
@@ -1116,7 +1123,7 @@ impl HttpTransport for BlockingCancelSignalTransport {
         Ok(HttpResponse {
             status: 200,
             headers: vec![("content-type".to_string(), "application/json".to_string())],
-            body: HttpResponseBody::buffered(r#""cancel_requested""#),
+            body: HttpResponseBody::buffered(crate::wire::reply_json("cancel_requested")),
         })
     }
 }

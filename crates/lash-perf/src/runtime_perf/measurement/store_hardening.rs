@@ -368,7 +368,7 @@ async fn measure_store_hardening_backend_turn(
             &root,
             lash_core::store::AdmittedHead::Batch(head.clone()),
         );
-        request.policy = lash_core::testing::queued_work_claim_policy(1);
+        request.policy = lash_core::testing::queued_work_admission_policy(1);
         store
             .admit_root(&request)
             .await?

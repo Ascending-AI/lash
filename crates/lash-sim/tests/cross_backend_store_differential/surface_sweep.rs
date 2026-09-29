@@ -56,6 +56,12 @@ pub(super) struct SurfaceScratch {
 pub(super) enum SurfaceMethod {
     LoadSession,
     ListPendingTurnInputs,
+    /// [`IngressStore::pending_turn_input`]: the keyed point read of the
+    /// case's next-turn input (`known`), or of an id no case enqueues
+    /// (FIG-3976).
+    PendingTurnInput {
+        known: bool,
+    },
     ListTurnInputApplications,
     /// [`RootStore::admit_root`](lash_core::store::RootStore::admit_root) of
     /// the sweep's input-headed root, under the first lease and replayed
@@ -115,6 +121,10 @@ pub(super) enum SurfaceMethod {
     RootTerminal,
     NonTerminalRootsPage,
     EndLostRoot,
+    /// [`RootStore::end_refused_root`](lash_core::store::RootStore::end_refused_root)
+    /// of the sweep's drain root: its refusal's end, then nothing more
+    /// (FIG-4018).
+    EndRefusedRoot,
     /// [`RootStore::root_binding`](lash_core::store::RootStore::root_binding)
     /// of the sweep's next-turn input.
     RootBinding,
@@ -192,6 +202,8 @@ impl SurfaceMethod {
         match self {
             Self::LoadSession => "surface:load_session",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
+            Self::PendingTurnInput { known: true } => "surface:pending_turn_input",
+            Self::PendingTurnInput { known: false } => "surface:pending_turn_input_unknown",
             Self::ListTurnInputApplications => "surface:list_turn_input_applications",
             Self::AdmitRoot {
                 lease: LeaseSlot::First,
@@ -234,6 +246,7 @@ impl SurfaceMethod {
             Self::RootTerminal => "surface:root_terminal",
             Self::NonTerminalRootsPage => "surface:non_terminal_roots_page",
             Self::EndLostRoot => "surface:end_lost_root",
+            Self::EndRefusedRoot => "surface:end_refused_root",
             Self::RootBinding => "surface:root_binding",
             Self::RootOfInput => "surface:root_of_input",
             Self::EnqueueRunSpecInput => "surface:enqueue_run_spec_input",
@@ -383,7 +396,7 @@ fn surface_admit_request(
     let mut request =
         lash_core::testing::store_fixtures::admit_root_request_for_test(fence, &root, head);
     request.max_inputs = 8;
-    request.policy = lash_core::testing::queued_work_claim_policy(1);
+    request.policy = lash_core::testing::queued_work_admission_policy(1);
     request.admitted_generation = lash_core::engine::BuildGeneration::for_test("surface-root");
     request
 }
@@ -561,6 +574,46 @@ pub(super) fn lost_root_recovery_case() -> GeneratedCase {
             surface(SurfaceMethod::EndLostRoot),
             surface(SurfaceMethod::RootTerminal),
             surface(SurfaceMethod::EndLostRoot),
+            surface(SurfaceMethod::NonTerminalRootsPage),
+        ],
+    }
+}
+
+/// A root whose run met a typed refusal ends the same way on every SQL
+/// backend, once: a second end, and the lost-root end after it, write
+/// nothing (FIG-4018).
+pub(super) fn refused_root_end_case() -> GeneratedCase {
+    GeneratedCase {
+        name: CaseName::RefusedRootEnd,
+        operations: vec![
+            StoreOperation::Commit {
+                label: "seed_refused_root_graph",
+                expected_head_revision: 0,
+                graph: append(
+                    vec![
+                        NodeSpec::new("root", None, "root"),
+                        NodeSpec::new("active-frame", Some("root"), "active"),
+                    ],
+                    Some("active-frame"),
+                ),
+                turn_commit: None,
+                checkpoint: CheckpointSpec::Empty,
+                usage: false,
+                adopt_attachment: false,
+            },
+            StoreOperation::EnqueueAdmittableQueuedWork,
+            StoreOperation::AcquireSessionLease {
+                slot: LeaseSlot::First,
+                owner: "refused-root-owner",
+            },
+            surface(SurfaceMethod::AdmitQueuedRoot),
+            surface(SurfaceMethod::UnfinishedRoot),
+            surface(SurfaceMethod::EndRefusedRoot),
+            surface(SurfaceMethod::RootTerminal),
+            surface(SurfaceMethod::UnfinishedRoot),
+            surface(SurfaceMethod::EndRefusedRoot),
+            surface(SurfaceMethod::EndLostRoot),
+            surface(SurfaceMethod::RootTerminal),
             surface(SurfaceMethod::NonTerminalRootsPage),
         ],
     }
@@ -814,6 +867,26 @@ impl BackendRunner {
                     "rows={}",
                     store.list_pending_turn_inputs(&session_id).await?.len()
                 )
+            }
+            SurfaceMethod::PendingTurnInput { known } => {
+                // The keyed point read answers what the list answers for the
+                // row: `Open`, `Admitted` naming its root, or nothing once
+                // the row is terminal or unknown (FIG-3976).
+                let input = lash_core::InputId::from(if known {
+                    format!("{session_id}:input")
+                } else {
+                    UNKNOWN_INPUT_ID.to_string()
+                });
+                match store.pending_turn_input(&session_id, &input).await? {
+                    Some(read) => match &read.status {
+                        lash_core::PendingTurnInputReadStatus::Open => "status=open".to_string(),
+                        lash_core::PendingTurnInputReadStatus::Admitted { root } => {
+                            format!("status=admitted:{root}")
+                        }
+                        other => format!("status={other:?}"),
+                    },
+                    None => "status=none".to_string(),
+                }
             }
             SurfaceMethod::ListTurnInputApplications => {
                 format!(
@@ -1078,7 +1151,7 @@ impl BackendRunner {
                         checkpoint: lash_core::CheckpointKind::AfterWork,
                         step: "fig-2841-surface-checkpoint".to_string(),
                         max_inputs: 1,
-                        policy: lash_core::testing::queued_work_claim_policy(1),
+                        policy: lash_core::testing::queued_work_admission_policy(1),
                     })
                     .await?;
                 format!(
@@ -1273,6 +1346,20 @@ impl BackendRunner {
                     root: lash_core::TurnId::from(surface_drain_scope(&session_id).id()),
                 };
                 match self.factory().end_lost_root(&root, 1).await? {
+                    Some(terminal) => format!("ended={:?}", terminal.kind),
+                    None => "ended=none".to_string(),
+                }
+            }
+            SurfaceMethod::EndRefusedRoot => {
+                let root = lash_core::TurnId::from(surface_drain_scope(&session_id).id());
+                let refusal = lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::StoreCommitSuperseded,
+                    "the head moved under the root's commit",
+                );
+                match store
+                    .end_refused_root(&session_id, &root, &refusal, 1)
+                    .await?
+                {
                     Some(terminal) => format!("ended={:?}", terminal.kind),
                     None => "ended=none".to_string(),
                 }

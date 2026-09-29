@@ -153,6 +153,7 @@ jobs:
       functional_e2e: ${{ steps.classify.outputs.functional_e2e }}
       workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
       restate_suites: ${{ steps.classify.outputs.restate_suites }}
+      rolling_upgrade: ${{ steps.classify.outputs.rolling_upgrade }}
       feature_lanes: ${{ steps.classify.outputs.feature_lanes }}
       workbench: ${{ steps.classify.outputs.workbench }}
       regress: ${{ steps.classify.outputs.regress }}
@@ -1879,6 +1880,62 @@ jobs:
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
+  rolling-upgrade:
+    name: Rolling upgrade E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    needs: plan
+    if: needs.plan.outputs.rolling_upgrade == 'true'
+    environment: build-cache
+    steps:
+      - *checkout
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Configure shared build cache
+        if: needs.plan.outputs.bazel_trusted == 'true'
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      - name: Install Bazel without shared cache
+        if: needs.plan.outputs.bazel_trusted != 'true'
+        shell: bash
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-linux-amd64 \
+            -o "$RUNNER_TEMP/bazel"
+          printf '5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992  %s\n' \
+            "$RUNNER_TEMP/bazel" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bazel"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          echo 'BAZEL_SHARED_CACHE_FLAGS=--config=local' >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          tool: just,protoc
+
+      - name: Run rolling upgrade
+        run: just e2e-rolling
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
   worker-artifacts:
     name: Build worker release artifacts
     runs-on: ubuntu-24.04
@@ -2734,6 +2791,9 @@ jobs:
       - name: Check example facade imports
         run: python3 scripts/check_facade_only_examples.py
 
+      - name: Check operator guide command coverage
+        run: python3 scripts/check_operator_guide_commands.py
+
       - name: Check diff hygiene
         run: bash scripts/ci/check-diff-hygiene.sh
 
@@ -2857,6 +2917,7 @@ jobs:
       - functional-e2e
       - functional-e2e-process-operations
       - pr-host-workers
+      - rolling-upgrade
       - worker-artifacts
       - restate-postgres-workers
       - restate-postgres-workers-summary

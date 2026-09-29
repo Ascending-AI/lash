@@ -182,7 +182,6 @@ mod rlm_inventory {
     use lash::rlm::lang::HostDescriptor as _;
     use lash::rlm::lang::HostRequirementsRef as _;
     use lash::rlm::lang::ImageValue as _;
-    use lash::rlm::lang::ListComprehensionClause as _;
     use lash::rlm::lang::ModuleCompileRequest as _;
     use lash::rlm::lang::ModuleIntrospection as _;
     use lash::rlm::lang::ModuleRef as _;

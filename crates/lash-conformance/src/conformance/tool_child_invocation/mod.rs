@@ -603,6 +603,7 @@ impl crate::ToolProvider for LawLeafProvider {
                                 label: Some(format!("law fence {call_id}")),
                                 name: Some(format!("law-fence-{call_id}")),
                                 expected_revision: None,
+                                module: None,
                             },
                         )),
                     ]),

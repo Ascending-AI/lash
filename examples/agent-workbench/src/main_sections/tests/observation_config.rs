@@ -42,11 +42,16 @@ async fn observation_get_preserves_config(path: &str) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let response = reqwest::Client::new()
-        .get(format!("http://{address}{path}"))
-        .send()
-        .await
-        .unwrap();
+    let request = reqwest::Client::new().get(format!("http://{address}{path}"));
+    let request = if path == "/api/observations" {
+        request.header(
+            "x-lash-protocol-hello",
+            "{\"negotiation\":\"hello\",\"supported\":{\"min\":100,\"max\":100}}",
+        )
+    } else {
+        request
+    };
+    let response = request.send().await.unwrap();
     assert!(
         response.status().is_success(),
         "{path}: {}",

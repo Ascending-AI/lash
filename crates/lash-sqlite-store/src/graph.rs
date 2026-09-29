@@ -1,4 +1,4 @@
-//! Session-graph persistence and garbage collection on [`Store`].
+//! Session-graph persistence and garbage collection on [`SqliteStore`].
 //!
 //! The shared
 //! `*_from_conn` helpers are **synchronous** and take a `&rusqlite::Connection`

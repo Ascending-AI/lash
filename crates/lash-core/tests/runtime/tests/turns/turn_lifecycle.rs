@@ -538,8 +538,8 @@ pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
 /// admitted it to the root. The turn's commit is refused for good, so the
 /// turn ends without the commit-time re-defer. Nothing re-defers the row
 /// behind the root's back: it stays bound to the root until the root's
-/// terminal write, here the engine's lost-run end, re-defers it to the next
-/// turn. The root's own acceptance ends with the root.
+/// terminal write, here the refused run's own end (FIG-4018), re-defers it
+/// to the next turn. The root's own acceptance ends with the root.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_teardown() {
     let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
@@ -624,32 +624,36 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
         .await
         .expect("list pending turn inputs")
     };
-    let pending = undelivered().await;
-    assert_eq!(
-        pending.len(),
-        1,
-        "the routed input is the turn's, admitted at its checkpoint; only the root's own \
-         acceptance is undelivered"
-    );
-    assert_eq!(
-        pending[0].status,
-        lash_core::PendingTurnInputReadStatus::Admitted {
-            root: TurnId::from(live_turn_id)
-        },
-        "the torn-down turn's rows stay bound to its root until the root ends"
-    );
-
-    lash_core::DeploymentStore::end_lost_root(
-        lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
-        &lash_core::engine::RootRef {
-            session: SessionId::from(session_id),
-            root: TurnId::from(live_turn_id),
-        },
-        0,
+    let terminal = lash_core::store::RootStore::root_terminal(
+        store.as_ref(),
+        &SessionId::from(session_id),
+        &TurnId::from(live_turn_id),
     )
     .await
-    .expect("end the lost root")
-    .expect("the root had no terminal");
+    .expect("read the root's terminal")
+    .expect("the refused run ended its root");
+    assert!(
+        matches!(
+            &terminal.cause,
+            lash_core::store::RootTerminalCause::Refused { code, .. }
+                if *code == lash_core::RuntimeErrorCode::RecordEncodingFailed
+        ),
+        "the root's terminal is its refusal: {terminal:?}"
+    );
+    assert!(
+        lash_core::DeploymentStore::end_lost_root(
+            lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
+            &lash_core::engine::RootRef {
+                session: SessionId::from(session_id),
+                root: TurnId::from(live_turn_id),
+            },
+            0,
+        )
+        .await
+        .expect("the lost-run end")
+        .is_none(),
+        "the lost-run end writes nothing over the refused run's own end"
+    );
     let pending = undelivered().await;
     assert_eq!(
         pending.len(),

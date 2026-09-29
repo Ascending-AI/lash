@@ -846,25 +846,6 @@ pub trait ProcessWakeOutbox: Send + Sync {
 /// Physical reclamation of terminal processes and their tombstones.
 #[async_trait::async_trait]
 pub trait ProcessRetention: Send + Sync {
-    /// Durable exact release inputs left by Process Prune.
-    async fn pending_process_artifact_cleanup(
-        &self,
-    ) -> Result<Vec<super::model::ProcessArtifactCleanup>, PluginError> {
-        Ok(Vec::new())
-    }
-
-    /// Acknowledge that all configured artifact stores applied one cleanup.
-    ///
-    /// Implementations remove the exact cleanup record.
-    async fn complete_process_artifact_cleanup(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<super::model::ProcessArtifactCleanupAck, PluginError> {
-        Ok(super::model::ProcessArtifactCleanupAck::Unknown {
-            process_id: process_id.clone(),
-        })
-    }
-
     /// Delete payload-free tombstones older than `cutoff_epoch_ms` without
     /// outrunning a trusted projection or orphaning outstanding trigger
     /// deliveries. `NoProjector` permits free compaction; `UpTo(cursor)` retains
@@ -951,20 +932,30 @@ pub trait ProcessRetention: Send + Sync {
     /// without deleting anything. The survey applies the prune's complete
     /// eligibility predicate — retired status, `updated_at_ms` before the
     /// cutoff, the projection `watermark`, no pending or enqueuing wake
-    /// delivery, no parent-end plan, and `filter` — so a caller that must
-    /// reclaim rows the registry does not own (the process's durable effect
-    /// journal and its await-event promises) fences exactly the rows the
-    /// prune reclaims and never a process the registry keeps. The prune
-    /// re-evaluates the predicate under its own transaction; a process that
-    /// becomes ineligible between survey and prune is retained by the prune
-    /// and its already-fenced journal stays reclaimed, which is the conservative
-    /// direction for a retired row.
+    /// delivery, no parent-end plan, no consumer hold, and `filter` — so a
+    /// caller that must reclaim rows the registry does not own (the process's
+    /// durable effect journal and its await-event promises) fences exactly the
+    /// rows the prune reclaims and never a process the registry keeps. The
+    /// prune re-evaluates the predicate under its own transaction; a process
+    /// that becomes ineligible between survey and prune is retained by the
+    /// prune and its already-fenced journal stays reclaimed, which is the
+    /// conservative direction for a retired row.
     async fn prunable_terminal_processes(
         &self,
         cutoff_epoch_ms: u64,
         filter: Option<ProcessListFilter>,
         watermark: ProjectionWatermark,
     ) -> Result<Vec<ProcessId>, PluginError>;
+
+    /// Releases the consumer hold `key` holds on `process_id` (ADR 0116
+    /// §3.6). A held row is never pruned; releasing a hold the row does not
+    /// carry, or one already released, changes nothing. The close of a hold's
+    /// owning scope releases it too, in the close's own transaction.
+    async fn release_consumer_hold(
+        &self,
+        process_id: &ProcessId,
+        key: &str,
+    ) -> Result<(), PluginError>;
 }
 
 /// Rebinding a registry backend to the runtime's clock.

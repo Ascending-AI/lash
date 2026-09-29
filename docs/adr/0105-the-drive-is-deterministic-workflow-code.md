@@ -95,10 +95,9 @@ so the seal rechecks it in the same transaction. A child never mints an epoch.
 
 - **Implemented (FIG-3682, FIG-3600 S5a): the root's admission records its
   base.** `Admitted` records no head. The root's recorded admission step
-  (`ClaimAcceptedTurnInput`, keyed by the root as `drive-claim:{root}`;
-  `AdmitRoot` at `drive-admit:{root}` under the FIG-3927 amendment, not yet
-  implemented) takes the rows and records, in its
-  `AcceptedTurnInputDrive::Claimed` outcome, the head the root runs on
+  (`AdmitRoot`, keyed by the root as `drive-admit:{root}` under the FIG-3927
+  amendment) binds the rows and records, in its `RootAdmission` outcome,
+  the head the root runs on
   (`base: SessionHeadRef`: generation, revision, leaf and checkpoint) and its
   `turn_index`. The admission is the one source of truth for the base: a
   replay reads that outcome back, rebuilds the turn from
@@ -112,38 +111,59 @@ so the seal rechecks it in the same transaction. A child never mints an epoch.
   re-execution reads it back rather than selecting again (FIG-3927).
 
 - **Implemented (FIG-3824): the admission and head inspection record drive
-  decisions.** The `ClaimAcceptedTurnInput` body repairs orphaned inputs
-  before admitting the root (the repair dies with the claims under FIG-3927:
-  a root's terminal write releases its rows, so there is nothing to repair).
-  It runs the store repair and any idempotent
-  await-event resolution inside that recorded body; a replay serves its
-  admission outcome and issues no second repair. After the admission,
+  decisions.** The `AdmitRoot` body runs no orphan repair: the repair died
+  with the claims under FIG-3927, because a root's terminal write releases
+  its rows, so there is nothing to repair. A replay serves its admission
+  outcome. After the admission,
   `InspectAdmittedHead` records `Ready` or `Diverged` from the refreshed
   resident head, committed-root evidence and pending input rows: `Ceded` is
-  no longer reachable after admission (FIG-3927, not yet implemented), because
+  no longer reachable after admission (FIG-3927), because
   an admitted head row is bound to the root and only the root's own commit or
   terminal settles it. Replay serves that verdict.
-  A `Ready` verdict is revalidated under the current drive fence
-  before any turn effect: if another drive advanced the head while this
-  handler was down, the root stops when its head input is gone or parks
-  as divergent when it remains. If this root's own commit advanced the head,
-  its committed evidence lets replay continue. The fenced read never chooses
-  new work or changes the admission's recorded base; this stop-only
-  re-evaluation is safe across attempts. The resident-head refresh may run
-  again on replay, but its values only feed recorded steps and this fenced
-  stop check. Loading the retained base may be re-evaluated safely: success
-  reconstructs the same immutable head, while a missing base parks before a
-  turn effect. It never selects different work.
+  The inspection's body is the drive's one live head check: a head that moved
+  from the admission's base with no commit of this root behind it is
+  `Diverged`, and the root parks before any turn effect. The body runs only
+  when `drive-head` is the attempt's live frontier, so it protects an attempt
+  that reaches `drive-head` after another writer moved the head, including
+  one whose earlier attempt recorded the admission and died. The resident-head
+  refresh may run again on replay, but its values only feed recorded steps.
+  Loading the retained base may be re-evaluated safely: success reconstructs
+  the same immutable head, while a missing base parks before a turn effect.
+  It never selects different work.
+- **Implemented (FIG-4058): replay honours the recorded verdict.** A replay
+  serves `drive-head` and honours its verdict at every recorded position; the
+  live head is never re-read against it. A retry whose journal runs past
+  `drive-head` retraces what the first attempt journaled after it, so a live
+  re-check that turned a recorded `Ready` into `Diverged` would park (or meet
+  `RT0016`) at a position the journal already holds. A head that moved after
+  `drive-head` was recorded is instead met by the turn's fenced commit as
+  `StoreCommitSuperseded`, which ends the root (FIG-4010, FIG-4018): no turn
+  commits on a head it was not admitted on either way. The re-check this
+  replaced was safe across attempts only when the journal ended at
+  `drive-head`.
 - **Implemented (FIG-4010): a superseded commit ends its root.** A drive
   fence does not stop a host service from moving the session head, so a
   root's commit can be refused as `StoreCommitSuperseded`. The engine's retry
   would replay the admission base and fence the journal recorded and meet
-  the same refusal on every attempt, and its replay meets the moved head in
-  the stop check above at a position where the refused attempt already
-  journaled the turn's commands (Restate `RT0016`, then a pause). The root
-  therefore ends in the attempt that met the refusal, with the superseded
-  commit as its typed refusal; the redrive that reloads the head is a new
-  root.
+  the same refusal on every attempt (and, before FIG-4058, its replay met the
+  moved head in a live re-check at a position where the refused attempt
+  already journaled the turn's commands: Restate `RT0016`, then a pause). The
+  root therefore ends in the attempt that met the refusal, with the
+  superseded commit as its typed refusal; the redrive that reloads the head
+  is a new root.
+- **Implemented (FIG-4018): a refused root ends in the store.** A root
+  attempt that ends with a refusal no retry changes (a superseded commit, a
+  finalize refusal, any refusal the engine records as `Released`) writes the
+  root's terminal, `RootTerminalCause::Refused` with the refusal, before the
+  engine records the run's outcome. It is an idempotent store write like the
+  commit and the park (§9): the root's own inputs are answered with the
+  refusal, the rows it held are released, and a root that already has
+  terminal evidence is left as it is. The refused run is the one writer of
+  that terminal; the engine's lost-root recovery ends only runs that
+  recorded no outcome. A replay after a crash or store fault on either side
+  of the write honours the recorded `Ready` (FIG-4058) and retraces its
+  journal to the same refusal, writing the end if the first attempt did
+  not.
 
 A sealed verdict carries a `DriveFence` that the store checks on
 head-changing writes and ingress settlement. `DriveFence` and `AdmissionId`
@@ -744,3 +764,13 @@ The plan's open questions, as ruled on 2026-09-24:
   directly declare commands instead.
 - **Cost: boxed controller futures.** The controller uses async trait futures;
   the Restate implementation records each operation at its own durable boundary.
+
+## Amendment (FIG-3562, 2026-09-29): determinism binds drives, not tool bodies
+
+[ADR 0116](0116-tools-are-opaque.md) deletes orchestrating bodies, so the D20 peek "before an orchestrating
+body" has no subject. A tool child's drive peeks before each attempt only.
+The determinism of this ADR binds drivers and engines. It never bound opaque
+tool bodies, and the body lint that policed orchestrating bodies is deleted.
+The `batch` expansion runs in the standard protocol driver, as a pure
+function of the recorded response and the turn's admitted configuration
+([ADR 0116](0116-tools-are-opaque.md) §2.1).

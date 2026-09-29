@@ -99,11 +99,11 @@ pub use vm::{
 pub(crate) use access::value_contains_tool_handle;
 #[allow(unused_imports)]
 pub(crate) use access::{
-    add_assign_index_number, add_assign_value_number, assign_index, assign_path, assign_path_steps,
-    assign_record_field, descend_index, descend_record_field, ensure_no_prototype_chain_wire_key,
-    heap_inherited_builtin, inline_inherited_builtin, is_prototype_chain_key, next_assign_index,
-    nullish_property_read, prototype_chain_data_key_error, prototype_chain_key_error,
-    read_field_ref_direct, read_image_field, read_index_ref_direct, read_javascript_field_direct,
+    assign_index, assign_path, assign_path_steps, assign_record_field, descend_index,
+    descend_record_field, ensure_no_prototype_chain_wire_key, heap_inherited_builtin,
+    inline_inherited_builtin, is_prototype_chain_key, next_assign_index, nullish_property_read,
+    prototype_chain_data_key_error, prototype_chain_key_error, read_field_ref_direct,
+    read_image_field, read_index_ref_direct, read_javascript_field_direct,
     read_javascript_heap_field, read_javascript_heap_index, read_javascript_index_direct,
     read_javascript_index_direct_with_key, resolve_existing_list_assignment_index, resolve_index,
     unwrap_tool_result,
@@ -212,7 +212,6 @@ pub fn cancel_checkpoint_reached(instructions: u64) -> u64 {
 #[derive(Clone)]
 pub struct CompiledProgram {
     pub(crate) chunk: Chunk,
-    pub(crate) compile_stats: CompileStats,
     /// What this program is: the entry point of the module artifact it was
     /// compiled from, under this build's contracts. A continuation it parks
     /// carries it, and only a program of the same identity resumes one.
@@ -223,16 +222,11 @@ impl std::fmt::Debug for CompiledProgram {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CompiledProgram")
             .field("instruction_count", &self.chunk.code.len())
-            .field("compile_stats", &self.compile_stats)
             .finish()
     }
 }
 
 impl CompiledProgram {
-    pub fn compile_stats(&self) -> &CompileStats {
-        &self.compile_stats
-    }
-
     /// The executable identity this program was compiled as.
     pub fn executable_identity(&self) -> &ExecutableIdentity {
         &self.executable
@@ -250,7 +244,6 @@ pub enum ExecutionOutcome {
 pub struct ProfileReport {
     instruction_stats: Vec<ProfileStat>,
     builtin_stats: Vec<ProfileStat>,
-    compile_stats: CompileStats,
 }
 
 impl ProfileReport {
@@ -262,36 +255,9 @@ impl ProfileReport {
         &self.builtin_stats
     }
 
-    pub fn compile_stats(&self) -> &CompileStats {
-        &self.compile_stats
-    }
-
     pub fn merge(&mut self, other: &Self) {
         merge_stats(&mut self.instruction_stats, &other.instruction_stats);
         merge_stats(&mut self.builtin_stats, &other.builtin_stats);
-        self.compile_stats.merge(&other.compile_stats);
-    }
-}
-
-/// Compile-time statistics captured when a program is compiled. Independent
-/// of run-time profiling — these counts reflect the shape of the compiled
-/// program itself (how many Type literals it contains, how many got
-/// const-folded, etc.). Runtime cost of `Type` evaluation appears in the
-/// instruction profile under `build_type_ref` / `build_record` / etc.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CompileStats {
-    pub type_literals_total: u64,
-    pub type_literals_const_folded: u64,
-    pub type_literals_dynamic: u64,
-    pub type_ref_sites: u64,
-}
-
-impl CompileStats {
-    pub fn merge(&mut self, other: &Self) {
-        self.type_literals_total += other.type_literals_total;
-        self.type_literals_const_folded += other.type_literals_const_folded;
-        self.type_literals_dynamic += other.type_literals_dynamic;
-        self.type_ref_sites += other.type_ref_sites;
     }
 }
 

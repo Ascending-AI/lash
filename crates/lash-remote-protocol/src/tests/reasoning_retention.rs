@@ -56,7 +56,9 @@ fn fig1123_remote_llm_request_json_round_trips() {
     };
 
     request.validate().expect("valid request");
-    let wire = request.encode_json().expect("serialize envelope");
+    let wire = request
+        .encode_json(&crate::negotiation::test_negotiated())
+        .expect("serialize envelope");
     let decoded = RemoteLlmRequest::decode_json(&wire).expect("version-first decode");
     assert_eq!(decoded.request_id, request.request_id);
     assert_eq!(decoded.scope, request.scope);
@@ -93,7 +95,7 @@ fn current_llm_envelope_rejects_userinfo_in_replay_route_without_echoing_it() {
         metadata: HashMap::new(),
     };
     let wire = request
-        .encode_json()
+        .encode_json(&crate::negotiation::test_negotiated())
         .expect("serialize adversarial request envelope");
 
     let error = RemoteLlmRequest::decode_json(&wire)

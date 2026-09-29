@@ -1,4 +1,4 @@
-//! The queued-work half of [`IngressStore`] for [`Store`], as inherent
+//! The [`QueuedWorkStore`] operations for [`SqliteStore`], as inherent
 //! methods the trait implementation forwards to: enqueue, host withdrawal,
 //! the completion marker, and the open-work reads.
 

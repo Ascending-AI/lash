@@ -63,6 +63,27 @@ upgrade = "coexist"
 description = "NDJSON trace records, event variants, contexts, and graph payloads"
 outside_manifest = "trace wire: gates a trace reader, not state lash reopens"
 
+[[surface]]
+constant = "LASHCTL_JSON_SCHEMA_VERSION"
+constant_path = "crates/lashctl/src/main.rs"
+upgrade = "coexist"
+description = "lashctl --json operator wire: the {schema_version, command, result, error} envelope and its result DTO shapes (ADR 0115 §5)"
+outside_manifest = "operator CLI wire: gates a --json consumer, not state lash reopens"
+
+[[surface]]
+constant = "SQLITE_BLOB_ENVELOPE_VERSION"
+constant_path = "crates/lash-sqlite-store/src/codec.rs"
+upgrade = "migrate"
+description = "versioned SQLite artifact blob envelope and compression codec"
+outside_manifest = "backend-local blob encoding: SQLite admits it when reading the blob"
+
+[[surface]]
+constant = "PROCESS_CURSOR_VERSION"
+constant_path = "crates/lash-sansio/src/process_cursor.rs"
+upgrade = "coexist"
+description = "opaque process-event cursor held by a host between reads"
+outside_manifest = "live host cursor: it is not stored by Lash"
+
 # Every SQLite catalog is created with `CREATE INDEX IF NOT EXISTS` and open runs
 # the whole schema text, so adding a non-unique index is not a compatibility
 # boundary: it reaches an existing file on its next open, and a file that already
@@ -529,11 +550,18 @@ description = "stored format of the record the effect-group state object retains
 manifest = "engine:restate.effect_group_state_format"
 
 [[surface]]
-constant = "EFFECT_GROUP_WIRE_VERSION"
-constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
+constant = "RESTATE_WIRE_VERSION"
+constant_path = "crates/lash-restate/src/compat.rs"
 upgrade = "coexist"
-description = "Restate effect-group wire: the group handlers' request and response shapes callers exchange with them"
-manifest = "engine:restate.effect_group_wire"
+description = "Restate cross-build handler wire (ADR 0115 §3.1): the frozen Call/Reply envelope every lash handler takes and answers, selected per call from the caller's range; it subsumes the effect-group wire"
+manifest = "engine:restate.wire"
+
+[[surface]]
+constant = "LASH_TURN_OUTCOME_FORMAT_VERSION"
+constant_path = "crates/lash-restate/src/session_driver.rs"
+upgrade = "migrate"
+description = "stored format of the root outcome LashTurn records under its outcome state (ADR 0115 §3.4)"
+manifest = "engine:restate.turn_outcome_format"
 
 [[surface]]
 constant = "EFFECT_GROUP_DISPATCH_JOURNAL_VERSION"
@@ -576,25 +604,29 @@ reason = "hash-domain family tag: an identity-preimage component, not a durable 
 # discriminator, not a mutable current-version constant, and predecessors are
 # refused by number rather than rewritten in place.
 [[unregistered]]
-constant = "QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION"
-constant_path = "crates/lash-core-store/src/store/queued_work.rs"
-reason = "tags the identity encoding of newly minted claim-lease tokens; stored tokens are opaque at release, settlement and recovery and never re-derived, so a bump strands no stored bytes and no reader fences on it"
-
-[[unregistered]]
 constant = "OLDEST_SUPPORTED_SESSION_STATE_VERSION"
 constant_path = "crates/lash-core-store/src/store/state_version.rs"
 reason = "lower bound of the admission window for the registered CURRENT_SESSION_STATE_VERSION, not a format of its own"
 
 [[unregistered]]
+constant = "BASE_SCHEMA_VERSION"
+constant_path = "crates/lash-sqlite-store/src/schema.rs"
+reason = "the shipped value of the registered SCHEMA_VERSION, which Phase A's synthetic-next build raises by one; not a format of its own"
+
+[[unregistered]]
+constant = "BASE_PROCESS_SCHEMA_VERSION"
+constant_path = "crates/lash-sqlite-store/src/schema.rs"
+reason = "the shipped value of the registered PROCESS_SCHEMA_VERSION, which Phase A's synthetic-next build raises by one; not a format of its own"
+
+[[unregistered]]
+constant = "BASE_TRIGGER_SCHEMA_VERSION"
+constant_path = "crates/lash-sqlite-store/src/schema.rs"
+reason = "the shipped value of the registered TRIGGER_SCHEMA_VERSION, which Phase A's synthetic-next build raises by one; not a format of its own"
+
+[[unregistered]]
 constant = "MIN_SUPPORTED_SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 reason = "lower bound of the admission window for the registered SCHEMA_VERSION, not a format of its own"
-
-[[unregistered]]
-constant = "PROCESS_CURSOR_VERSION"
-constant_path = "crates/lash-sansio/src/process_cursor.rs"
-upgrade = "coexist"
-reason = "stamps the opaque live process cursor a host holds between reads; lash persists no cursor, a retired stamp is refused by name at parse, and its wire carriers are guarded by REMOTE_PROTOCOL_VERSION"
 
 [[unregistered]]
 constant = "PROCESS_CURSOR_UNROUTED_EPOCH"
@@ -616,21 +648,6 @@ reason = "inner stamp of the continuation's number wire; the whole of continuati
 constant = "SESSION_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/lib.rs"
 reason = "public alias of the registered SQLite schema::SCHEMA_VERSION"
-
-[[unregistered]]
-constant = "SELECT_USER_VERSION"
-constant_path = "crates/lash-sqlite-store/src/connection_sql.rs"
-reason = "SQL text that reads a store stamp, not a version"
-
-[[unregistered]]
-constant = "SELECT_PROCESS_REGISTRY_USER_VERSION"
-constant_path = "crates/lash-sqlite-store/src/connection_sql.rs"
-reason = "SQL text that reads a store stamp, not a version"
-
-[[unregistered]]
-constant = "SELECT_COMPONENT_VERSION"
-constant_path = "crates/lash-postgres-store/src/postgres/schema.rs"
-reason = "SQL text that reads a store stamp, not a version"
 
 [[unregistered]]
 constant = "LASH_TRACE_SCHEMA_VERSION"

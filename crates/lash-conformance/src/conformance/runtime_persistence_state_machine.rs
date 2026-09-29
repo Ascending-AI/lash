@@ -663,7 +663,7 @@ fn admission_request(
     let mut request =
         lash_core::testing::store_fixtures::admit_root_request_for_test(fence, root, head);
     request.max_inputs = max_inputs;
-    request.policy = crate::testing::queued_work_claim_policy(4);
+    request.policy = crate::testing::queued_work_admission_policy(4);
     request
 }
 

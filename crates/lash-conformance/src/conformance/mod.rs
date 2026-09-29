@@ -29,6 +29,8 @@ pub use attachment_adoption::{
     attachment_owner_identity_round_trips_conformance, cross_owner_attachment_adoption_conformance,
 };
 
+#[cfg(feature = "lashlang")]
+mod artifact_referrers;
 mod artifact_store;
 mod attachment_owner;
 mod attachment_store;
@@ -124,6 +126,8 @@ mod wake_delivery;
 
 pub(crate) use admission_support::*;
 pub use admitted_head_redrive::*;
+#[cfg(feature = "lashlang")]
+pub use artifact_referrers::*;
 pub use artifact_store::*;
 pub use attachment_owner::*;
 pub use attachment_store::*;

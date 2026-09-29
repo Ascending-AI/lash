@@ -61,6 +61,10 @@ pub(super) async fn settle_commit_ingress_tx(
                     lash_core_execution::runtime::TurnInputStateKind::Completed,
                 )
                 .await?;
+                // The completing commit binds the input to the root that
+                // applied it: a checkpoint-admitted input carries no binding
+                // until now, and a root-admitted input's is this same row.
+                crate::session_roots::bind_applied_input_tx(tx, session_id, input_id, root).await?;
             }
         }
         for completion in &ingress.completed_batches {

@@ -31,6 +31,59 @@ use lash_sqlite_store::{SqliteDatabase, SqliteStoreSetOptions};
 use super::SUBSTRATE;
 use crate::backend_fixture::{Substrate, TestBackend, sync_await};
 
+struct ScopeLawTurnRunner(lash_restate_test::RestateTestBackend);
+
+#[async_trait::async_trait]
+impl lash_conformance::ConformanceTurnRunner for ScopeLawTurnRunner {
+    async fn run_turn(
+        &self,
+        admitted: lash_core_execution::AdmittedScope,
+        attempt: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        self.0
+            .run_in_handler(
+                admitted,
+                Arc::new(move |scoped| {
+                    let attempt = Arc::clone(&attempt);
+                    Box::pin(async move {
+                        attempt(scoped).await;
+                    })
+                }),
+            )
+            .await
+            .expect("the joined-scope law runs inside a handler");
+    }
+
+    async fn run_crashed_then_redriven_turn(
+        &self,
+        _admitted: lash_core_execution::AdmittedScope,
+        _crashing: lash_conformance::ConformanceTurnAttempt,
+        _redrive: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        unreachable!("the joined-scope law does not crash a turn")
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_joined_inputs_turn_scope_closes_with_its_admitting_root() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let stores = backend.as_stores();
+    let double_stores = Arc::clone(&stores);
+    let double = lash_restate_test::backend_with(
+        4023,
+        lash_restate_test::ServerConfig::default(),
+        move |_| Arc::clone(&double_stores),
+    )
+    .await
+    .expect("boot the joined-scope law's handler");
+    let effect_host = double.restate().restate_effect_host();
+    let runner =
+        Arc::new(ScopeLawTurnRunner(double)) as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+    lash_conformance::registration_macro_support::a_joined_inputs_turn_scope_closes_with_its_admitting_root(
+        "sqlite-joined-scope", effect_host, stores, runner,
+    ).await;
+}
+
 /// Engine promise authority for storage laws that cross a turn-control boundary.
 async fn promise_authority() -> (
     lash_restate_test::RestateTestBackend,
@@ -402,6 +455,17 @@ lash_conformance::artifact_store_reopenable_tests!({
                 keep_reopen.keep(&reopened);
                 artifact_store_handles(&reopened)
             }),
+        }
+    })
+});
+
+lash_conformance::artifact_referrer_tests!({
+    let retained: Retained<TestBackend> = Retained::default();
+    (retained.clone(), move || {
+        let backend = retained.open_blocking();
+        lash_conformance::fused_artifact_store::ReopenableArtifactStore {
+            open: artifact_store_handles(&backend),
+            reopen: Arc::new(move || artifact_store_handles(&backend)),
         }
     })
 });

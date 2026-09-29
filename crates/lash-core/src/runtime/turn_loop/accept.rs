@@ -254,7 +254,7 @@ impl LashRuntime {
                 // A parked root holds the session: the input stays accepted
                 // and is driven once the park is resolved.
                 return Err(aborted(RuntimeError::new(
-                    RuntimeErrorCode::QueuedRunPending,
+                    RuntimeErrorCode::SessionRootPending,
                     format!(
                         "accepted turn input `{accepted_id}` waits behind parked root `{}` \
                          (park {}); it is driven once that park is resolved",
@@ -275,7 +275,7 @@ impl LashRuntime {
             .map_err(aborted)?
             {
                 return Err(aborted(RuntimeError::new(
-                    RuntimeErrorCode::QueuedRunPending,
+                    RuntimeErrorCode::SessionRootPending,
                     format!(
                         "accepted turn input `{accepted_id}` waits behind the follow-on the \
                          session head owes, with {ahead} earlier inputs ahead of it; the drive \

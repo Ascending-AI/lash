@@ -3,8 +3,11 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
+mod referrers;
 mod trigger_scope;
-use trigger_scope::{missing_process_execution_error, resolve_trigger_owner_scope};
+pub(crate) use referrers::execution_claim_of;
+use trigger_scope::missing_process_execution_error;
+pub use trigger_scope::resolve_trigger_owner_scope;
 
 use tokio_util::sync::CancellationToken;
 
@@ -634,18 +637,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         correlation.authority.attempt_for(&correlation.process_id)
     }
 
-    /// Returns the exact owner used to stage artifacts produced by this
-    /// replayable execution.
-    pub fn artifact_owner(&self) -> crate::ArtifactOwner {
-        crate::ArtifactOwner::execution(
-            self.dispatch
-                .effect_controller
-                .scoped()
-                .execution_scope()
-                .clone(),
-        )
-    }
-
     pub fn session_scope(&self) -> crate::SessionScope {
         crate::SessionScope::for_agent_frame(
             self.session_id.clone(),
@@ -893,11 +884,12 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Self {
         // The lineage the process's body starts children under (FIG-3607 R1),
         // on the dispatch every start made inside this run realizes through.
-        if self.dispatch.process_lineage.is_none() {
-            let mut dispatch = (*self.dispatch).clone();
+        let mut dispatch = (*self.dispatch).clone();
+        if dispatch.process_lineage.is_none() {
             dispatch.process_lineage = Some(registration.lineage(&process_id));
-            self.dispatch = Arc::new(dispatch);
         }
+        dispatch.process_originator = Some(registration.provenance.originator.clone());
+        self.dispatch = Arc::new(dispatch);
         self.process_execution = Some(RuntimeProcessExecution {
             process_id,
             originator: registration.provenance.originator.clone(),
@@ -1276,12 +1268,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// the journaled process-start command, publishing nothing.
     ///
     /// Publication belongs inside the replayable process effect (FIG-3050).
-    /// Publishing here would stage the artifact under
-    /// [`ArtifactOwner::process_start`](crate::ArtifactOwner::process_start)
+    /// Publishing here would stage the artifact under the start's referrer
     /// *before* the start is journaled, and a replay of the same turn would
-    /// revisit that staging owner after the first attempt's start effect
-    /// transferred the artifact and permanently retired it — the divergence
-    /// FIG-3028 had to absorb with a retirement tolerance at this call site.
+    /// revisit that referrer after the first attempt's start settled and
+    /// fenced it — the divergence FIG-3028 had to absorb with a tolerance at
+    /// this call site.
     /// The spec instead rides
     /// [`ProcessStartOptions::env_spec`](crate::ProcessStartOptions::env_spec)
     /// into the command, and the executor publishes it under the journal.
@@ -1313,27 +1304,29 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// A retired owner fails here. Every caller publishes under a durable owner and then persists
-    /// the reference (trigger registration keeps it in `TriggerSubscriptionDraft::env_ref`), so a
-    /// retirement must surface at publish time rather than hand back a reference to bytes the
-    /// fence already reclaimed. Process starts do not publish at all before their journal: they go
-    /// through [`Self::process_start_execution_env`].
+    /// An ended referrer fails here. Every caller publishes under a durable referrer and then
+    /// persists the reference (trigger registration keeps it in
+    /// `TriggerSubscriptionDraft::env_ref`), so a fence must surface at publish time rather than
+    /// hand back a reference to bytes the cleanup already reclaimed. Process starts do not publish
+    /// at all before their journal: they go through [`Self::process_start_execution_env`].
     pub async fn captured_process_execution_env_ref(
         &self,
-        owner: &crate::ArtifactOwner,
+        claim: &crate::ReferrerClaim,
     ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
         if let Some(env_ref) = self.inherited_process_execution_env_ref() {
             return Ok(env_ref);
         }
         crate::publish_process_execution_env(
             self.process_env_store.as_ref(),
-            owner,
+            claim,
             &self.execution_env_spec,
         )
         .await
     }
 
-    fn inherited_process_execution_env_ref(&self) -> Option<crate::ProcessExecutionEnvRef> {
+    pub(crate) fn inherited_process_execution_env_ref(
+        &self,
+    ) -> Option<crate::ProcessExecutionEnvRef> {
         self.process_execution
             .as_ref()
             .and_then(|exec| exec.env_ref.clone())
@@ -1723,6 +1716,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 "trigger store is unavailable in this runtime",
             )
         })?;
+        let store = self.revision_referrer_trigger_store(store)?;
         #[expect(
             clippy::expect_used,
             reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"

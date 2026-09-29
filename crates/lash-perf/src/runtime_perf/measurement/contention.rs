@@ -905,7 +905,7 @@ async fn run_durable_contention_worker(
                             &root,
                             lash_core::store::AdmittedHead::Batch(head.batch_id),
                         );
-                    request.policy = lash_core::testing::queued_work_claim_policy(1);
+                    request.policy = lash_core::testing::queued_work_admission_policy(1);
                     match store.admit_root(&request).await {
                         Ok(admission) => admission,
                         Err(lash_core::StoreError::UnfinishedRootConflict { .. }) => None,
@@ -957,7 +957,7 @@ async fn run_durable_contention_worker(
                 &root,
                 admission.head.clone(),
             );
-            request.policy = lash_core::testing::queued_work_claim_policy(1);
+            request.policy = lash_core::testing::queued_work_admission_policy(1);
             let resumed = store.admit_root(&request).await?.ok_or_else(|| {
                 anyhow::anyhow!("contention worker {worker} lost its recorded admission")
             })?;

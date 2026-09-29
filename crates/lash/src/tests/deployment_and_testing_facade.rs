@@ -526,7 +526,7 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
                 lash_core::store::AdmittedHead::Input(head),
             );
             request.max_inputs = 1;
-            request.policy = lash_core::testing::queued_work_claim_policy(1);
+            request.policy = lash_core::testing::queued_work_admission_policy(1);
             request.admitted_generation = retired.clone();
             request
         })

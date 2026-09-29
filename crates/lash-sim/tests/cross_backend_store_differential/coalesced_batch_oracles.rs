@@ -195,7 +195,7 @@ async fn admit_oracle_root(
         &lash_core::TurnId::from(root),
         lash_core::store::AdmittedHead::Batch(head.batch_id),
     );
-    request.policy = lash_core::testing::queued_work_claim_policy(max_rows);
+    request.policy = lash_core::testing::queued_work_admission_policy(max_rows);
     Some(
         store
             .admit_root(&request)
@@ -538,7 +538,7 @@ async fn interrupted_admission_identity_stands_over_a_later_row() {
             &lash_core::TurnId::from(ADMISSION_GAP_ROOT),
             lash_core::store::AdmittedHead::Batch(lash_core::BatchId::from("unused-on-replay")),
         );
-        request.policy = lash_core::testing::queued_work_claim_policy(64);
+        request.policy = lash_core::testing::queued_work_admission_policy(64);
         let redriven = store
             .admit_root(&request)
             .await

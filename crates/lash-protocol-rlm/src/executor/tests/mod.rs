@@ -18,6 +18,7 @@ use super::*;
 use std::sync::Mutex;
 
 mod deferred_and_processes;
+mod frame_referrers;
 mod lifecycle_and_diagnostics;
 mod per_process_surface;
 mod production_map_law;

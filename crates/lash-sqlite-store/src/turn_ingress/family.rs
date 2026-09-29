@@ -39,7 +39,7 @@ lash_store_sql::statements! {
              ) OR (
                 ?3 > 0 AND EXISTS (
                     SELECT 1
-                    FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open
+                    FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
                     WHERE session_id = ?1
                       AND {{undelivered_turn_input_state(state)}}
                       AND admitted_root IS NULL
@@ -82,7 +82,7 @@ lash_store_sql::statements! {
              ) OR (
                 ?3 > 0 AND EXISTS (
                     SELECT 1
-                    FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open
+                    FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
                     WHERE session_id = ?1
                       AND {{undelivered_turn_input_state(state)}}
                       AND admitted_root IS NULL

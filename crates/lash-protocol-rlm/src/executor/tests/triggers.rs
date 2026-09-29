@@ -90,6 +90,54 @@ fn calendar_trigger_grant(route: &str) -> lash_lashlang_runtime::TriggerGrant {
     .with_route(serde_json::json!({"route": route}))
 }
 
+/// A cell context whose tool surface carries `triggers.register`. Registration
+/// is a declaring leaf tool (FIG-3116), so a cell reaches the trigger store
+/// only through the tool's realized intent: the tool resolves the target
+/// against `artifact_store`, and realization publishes the cell's execution
+/// env through the router's env store, the one the referrer ports hold.
+pub(super) async fn trigger_tool_context<'run>(
+    ports: impl Into<lash_core::testing::TestExecutionPorts<'run>>,
+    trigger_store: Arc<dyn lash_core::TriggerStore>,
+    artifact_store: &lashlang::LashlangArtifacts,
+    invocation: Option<lash_core::RuntimeInvocation>,
+) -> lash_core::RuntimeExecutionContext<'run> {
+    let ports: lash_core::testing::TestExecutionPorts<'run> = ports.into();
+    // Realization publishes into the store the referrer ports acquire from.
+    let router = lash_core::testing::test_trigger_router(
+        trigger_store,
+        crate::testing::memory_process_registry().await,
+    )
+    .with_process_artifacts(
+        Arc::clone(&ports.process_env_store),
+        lash_core::ProcessEngineRegistry::new().with_registration(
+            lash_lashlang_runtime::lashlang_process_engine_registration(
+                lash_lashlang_runtime::LashlangProcessEngine::new(
+                    artifact_store.clone(),
+                    LashlangSurface::new(
+                        lashlang::LashlangAbilities::default(),
+                        lashlang::LashlangLanguageFeatures::default(),
+                        timer_trigger_resources(),
+                    ),
+                ),
+            ),
+        ),
+    );
+    let builder = lash_core::testing::TestExecutionContextBuilder::new(ports)
+        .provider(Arc::new(
+            lash_lashlang_runtime::register_trigger_tool_provider(artifact_store.clone()),
+        ))
+        .tool_catalog(lash_core::ToolCatalog::from_tool_definitions(vec![
+            lash_lashlang_runtime::register_trigger_tool_definition(),
+        ]))
+        .trigger_router(Some(router));
+    match invocation {
+        Some(invocation) => builder.runtime_parent_invocation(invocation),
+        None => builder,
+    }
+    .build()
+    .into_runtime()
+}
+
 async fn execute_with_deferred_trigger(
     language: &str,
     code: &str,
@@ -105,25 +153,27 @@ async fn execute_with_deferred_trigger(
         ))
         .await
         .expect("open the cell's handler");
+    let artifact_store = crate::testing::fresh_memory_artifact_store().await;
     let response = execute_code_with_trigger_test_render(
         &mut state,
-        lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
+        trigger_tool_context(
             crate::testing::double_ports(&double, &handler),
             crate::testing::memory_trigger_store().await,
-            crate::testing::memory_process_registry().await,
-            lash_core::testing::exec_code_invocation(
+            &artifact_store,
+            Some(lash_core::testing::exec_code_invocation(
                 "session",
                 "turn",
                 0,
                 0,
                 "exec-code",
                 format!("exec-code:deferred-trigger:{language}"),
-            ),
-        ),
+            )),
+        )
+        .await,
         ExecRequest {
             code: code.to_string(),
         },
-        crate::testing::fresh_memory_artifact_store().await,
+        artifact_store,
         LashlangSurface::new(
             lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
@@ -314,21 +364,23 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
             ))
             .await
             .expect("open the cell's handler");
+        let artifact_store = crate::testing::fresh_memory_artifact_store().await;
         let response = execute_code_with_trigger_test_render(
             &mut state,
-            lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
+            trigger_tool_context(
                 crate::testing::double_ports(&double, &handler),
                 crate::testing::memory_trigger_store().await,
-                crate::testing::memory_process_registry().await,
-                lash_core::testing::exec_code_invocation(
+                &artifact_store,
+                Some(lash_core::testing::exec_code_invocation(
                     "session",
                     "turn",
                     0,
                     0,
                     "exec-code",
                     "exec-code:mixed-deferred-definitions",
-                ),
-            ),
+                )),
+            )
+            .await,
             ExecRequest {
                 code: r#"
                     const remember = async (change: calendar.Change) => true;
@@ -342,7 +394,7 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
                 "#
                 .to_string(),
             },
-            crate::testing::fresh_memory_artifact_store().await,
+            artifact_store,
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
@@ -485,11 +537,14 @@ pub(super) async fn execute_with_capturing_trigger_effects(
         .open_handler(crate::testing::default_cell_scope())
         .await
         .expect("open the cell's handler");
-    let ctx = lash_core::testing::code_execution_context_with_trigger_store(
+    let artifact_store = crate::testing::fresh_memory_artifact_store().await;
+    let ctx = trigger_tool_context(
         crate::testing::double_ports_over_layer(&double, &handler, Arc::new(capture.clone())),
         crate::testing::memory_trigger_store().await,
-        crate::testing::memory_process_registry().await,
-    );
+        &artifact_store,
+        None,
+    )
+    .await;
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -501,7 +556,7 @@ pub(super) async fn execute_with_capturing_trigger_effects(
         ExecRequest {
             code: code.to_string(),
         },
-        crate::testing::fresh_memory_artifact_store().await,
+        artifact_store,
         surface,
         None,
         RlmProjectedBindings::default(),
@@ -670,11 +725,14 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let ctx = lash_core::testing::code_execution_context_with_trigger_store(
+        let artifact_store = crate::testing::memory_artifact_store().await;
+        let ctx = trigger_tool_context(
             crate::testing::double_ports_over_layer(&double, &handler, Arc::new(capture.clone())),
             store.clone(),
-            crate::testing::memory_process_registry().await,
-        );
+            &artifact_store,
+            None,
+        )
+        .await;
         let surface = LashlangSurface::new(
             lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
@@ -696,7 +754,7 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
                     "#
                 .to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            artifact_store,
             surface,
             None,
             RlmProjectedBindings::default(),
@@ -720,8 +778,8 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
         // The fixture's production effect address gives the cell's binding
         // set (FIG-3587) and the deferred-resolution journal their link
         // identity, so the journaled binding set is the first envelope, the
-        // resolution production always wrote the second, the register the
-        // third.
+        // resolution production always wrote the second. The register
+        // follows once the leaf tool's declared intent is realized (FIG-3116).
         let (effect_owner_scope, effect_subscription_key) = {
             let envelopes = capture.envelopes.lock_recover();
             let lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation } =
@@ -742,9 +800,13 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
                 operation,
                 "deferred_tool_resolution:v2:[\"timer.Schedule\",\"triggers.register\"]"
             );
-            let lash_core::RuntimeEffectCommand::Trigger { command } = &envelopes[2].command else {
-                panic!("expected trigger effect")
-            };
+            let command = envelopes[2..]
+                .iter()
+                .find_map(|envelope| match &envelope.command {
+                    lash_core::RuntimeEffectCommand::Trigger { command } => Some(command),
+                    _ => None,
+                })
+                .expect("expected trigger effect");
             let lash_core::TriggerCommand::Register {
                 owner_scope, draft, ..
             } = command.as_ref()
@@ -873,11 +935,13 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
             .expect("open the cell's handler");
         let first = execute_code_unbounded_with_test_render(
             &mut state,
-            lash_core::testing::code_execution_context_with_trigger_store(
+            trigger_tool_context(
                 crate::testing::double_ports(&double, &handler),
                 trigger_store.clone(),
-                crate::testing::memory_process_registry().await,
-            ),
+                &artifact_store,
+                None,
+            )
+            .await,
             ExecRequest {
                 code: r#"
                         const remember = async (tick: timer.Tick) => tick.fired_at;
@@ -923,11 +987,13 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
             .expect("open the cell's handler");
         let unrelated = execute_code_unbounded_with_test_render(
             &mut state,
-            lash_core::testing::code_execution_context_with_trigger_store(
+            trigger_tool_context(
                 crate::testing::double_ports(&double, &handler),
                 trigger_store.clone(),
-                crate::testing::memory_process_registry().await,
-            ),
+                &artifact_store,
+                None,
+            )
+            .await,
             ExecRequest {
                 code: r#"
                         console.log("unrelated observation");
@@ -1632,15 +1698,28 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
             ],
             "ledger order is source dispatch order"
         );
-        let batch_effects = batched
+        // The host operations run inside their batch children. A registration
+        // is a declaring leaf tool (FIG-3116): its child only declares the
+        // intent, and the register effect lands when the intent is realized,
+        // outside the child: all five registrations, the batched one
+        // included, emit their register effect there.
+        let (child_effects, realized_effects): (Vec<_>, Vec<_>) = batched
             .trigger_effects()
             .into_iter()
-            .filter(|(effect_id, _)| effect_id.contains(":child:"))
-            .map(|(_, operation)| operation)
-            .collect::<Vec<_>>();
+            .partition(|(effect_id, _)| effect_id.contains(":child:"));
         assert_eq!(
-            batch_effects,
-            ["register", "list", "update", "enable", "disable", "delete"]
+            child_effects
+                .into_iter()
+                .map(|(_, operation)| operation)
+                .collect::<Vec<_>>(),
+            ["list", "update", "enable", "disable", "delete"]
+        );
+        assert_eq!(
+            realized_effects
+                .iter()
+                .filter(|(_, operation)| *operation == "register")
+                .count(),
+            5
         );
     });
 }
@@ -2068,11 +2147,13 @@ async fn execute_typescript_with_capturing_trigger_effects(
         .expect("open the cell's handler");
     let response = execute_code_with_test_render(
         &mut state,
-        lash_core::testing::code_execution_context_with_trigger_store(
+        trigger_tool_context(
             crate::testing::double_ports_over_layer(&double, &handler, Arc::new(capture.clone())),
             crate::testing::memory_trigger_store().await,
-            crate::testing::memory_process_registry().await,
-        ),
+            &store,
+            None,
+        )
+        .await,
         ExecRequest {
             code: code.to_string(),
         },

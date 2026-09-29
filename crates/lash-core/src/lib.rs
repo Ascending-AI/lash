@@ -17,6 +17,7 @@
 pub use async_trait::async_trait;
 
 pub use lash_core_execution::admitted_scope_wire;
+pub use lash_core_execution::compat;
 pub use lash_core_execution::direct;
 pub(crate) use lash_core_execution::direct_completion_client;
 pub use lash_core_execution::engine;
@@ -587,6 +588,7 @@ pub use tool_result::{
     CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, TimeoutBehavior,
     ToolOutcome,
 };
+pub use tool_result::{DeclaredStart, DeclaredStartRefused};
 pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
     TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
@@ -598,9 +600,16 @@ pub use triggers::{
     TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestorer,
     TriggerSourceCapture, TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
     TriggerSubscriptionLifecycle, TriggerSubscriptionRecord, admit_trigger_registration_target,
+    trigger_handle_outcome_value,
 };
 
 pub(crate) mod facade_ops {}
+pub use lash_core_execution::{
+    ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
+    ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, DefinitionRevisionId,
+    FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
+    SubscriptionRevisionId, artifact_referrer_ended, trigger_incarnation,
+};
 pub use lash_core_execution::{
     ArtifactPublicationPause, ArtifactStoreError, Backend, DurabilityTier, EffectEngine,
     ModuleArtifactStore, StoreBindingId, StoreSet,
@@ -674,26 +683,34 @@ pub use runtime::{ObservationSource, drive_with_observations};
 // effect hosts (e.g. lash-restate's workflows) and their integration tests —
 // they are deliberately public; the rest of the runtime module stays
 // crate-internal.
+/// Intent realization publishes the execution environment a declared trigger
+/// subscription names, under the realizing execution's journal referrer
+/// (FIG-3116, ADR 0113 §3.4).
+pub use lash_core_execution::runtime::publish_process_execution_env;
+/// The artifact ports a process-engine registry acquires start and revision
+/// artifacts through (ADR 0113 §3.3), for hosts that assemble a registry
+/// outside `RuntimeHostConfig`.
+pub use lash_core_execution::runtime::{ArtifactReferrerPorts, ReferrerAcquisition};
 pub use process_registry::{
     ProcessDefinitionExpectation, ProcessDefinitionLifecycle, ProcessDefinitionRecord,
     ProcessDefinitionRegistration, ProcessDefinitionRegistry,
 };
 pub use runtime::{
     AbandonEvidence, AbandonWriter, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope,
-    AdmittedTurnInputs, Ancestry, ArtifactOwner, AssistantResponseHookEvents,
-    AssistantStreamHookState, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BindingId,
-    BoundaryReason, CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet,
-    Clock, ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation,
-    ContractRef, DeclaredProcessIdentity, DefinitionRef, DeliveryPolicy, DeploymentStore,
+    AdmittedTurnInputs, Ancestry, AssistantResponseHookEvents, AssistantStreamHookState,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BindingId, BoundaryReason,
+    CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
+    ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
+    DeclaredProcessIdentity, DefinitionRef, DeliveryPolicy, DeploymentStore,
     DeploymentStoreDecorator, DrainMode, DrainModePolicy, EffectAddress, EffectGroupDrainBudget,
     EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener,
     EffectOpenerError, EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal,
     ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding,
     GroupChildCancelWatch, GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
-    IndependentEffectWork, InputItem, InvalidStartKey, LedgerUsageDisposition, Lifetime,
-    LifetimeDecision, LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome,
-    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
-    LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
+    IndependentEffectWork, InputItem, InvalidStartKey, JournalReplay, LedgerUsageDisposition,
+    Lifetime, LifetimeDecision, LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason,
+    LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
+    LiveReplaySubscription, LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoSessionWork, NonTerminalProcessPage,
     PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
     PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
@@ -701,12 +718,11 @@ pub use runtime::{
     PendingTurnInputBatch, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputRead,
     PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover,
-    PreparedLiveReplayPublication, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
-    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
-    ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
-    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessDriveStep,
-    ProcessEffectNodeSummary, ProcessEffectOmissions, ProcessEffectOmittedCounts,
+    PreparedLiveReplayPublication, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeCursor, ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority,
+    ProcessCompletionOutcome, ProcessContinuationStore, ProcessDefinitionRef,
+    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionValue,
+    ProcessDriveStep, ProcessEffectNodeSummary, ProcessEffectOmissions, ProcessEffectOmittedCounts,
     ProcessEffectOutcome, ProcessEffectOutcomeClass, ProcessEffectSummary,
     ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
     ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
@@ -764,24 +780,21 @@ pub use runtime::{
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
     WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry,
     WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
-    artifact_destination_owner_retired_error, artifact_owner_retired_error,
-    artifact_staging_edge_missing_error, artifact_store_plugin_error, effect_groups_unsupported,
-    lifetime, mint_process_id, park_turn_of_refused_group_child, park_turn_refused_by_generation,
-    retry_cancel_watch, tool_failure_code,
+    artifact_store_plugin_error, effect_groups_unsupported, lifetime, mint_process_id,
+    park_turn_of_refused_group_child, park_turn_refused_by_generation, retry_cancel_watch,
+    tool_failure_code,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
     AdmissionBoundary, AdmittedQueuedWork, ProcessEventSemantics, QueuedCheckpointTurnInput,
     QueuedCheckpointWork, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkCompletion,
     QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkPayload, RuntimeSubject, TurnWorkPayload,
-    artifact_owner_is_permanently_retired, artifact_staging_owner_edge_is_missing,
     load_process_execution_env, materialize_process_event_semantics, prepare_process_event_append,
     prepare_process_registration, prepare_process_start, prepare_process_transition,
     process_event_invocation, process_wake_batch_draft, process_wake_input_from_event_payload,
-    process_wake_turn_cause, process_wake_turn_text, publish_process_execution_env,
-    require_event_replay, settle_started_process_engine_artifacts,
-    settle_started_process_execution_env,
+    process_wake_turn_cause, process_wake_turn_text, require_event_replay,
 };
+pub use runtime::{ConsumerHold, SessionTurnResult};
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
 pub(crate) use session_model::plugin_runtime_protocol_event;
 
@@ -790,7 +803,7 @@ pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
 pub use session::{
     ExecRequest, RuntimeExecutionContext, SessionError, ToolDispatchSurface, ToolSurfaceDrift,
-    ToolSurfaceDriftKind, tool_dispatch_surface,
+    ToolSurfaceDriftKind, resolve_trigger_owner_scope, tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
@@ -825,7 +838,7 @@ pub(crate) use store::{
     ensure_supported_schema_version,
 };
 pub use tool_intent::{
-    CancelProcessIntent, EmitProcessEventIntent, EmitTriggerIntent,
+    CancelProcessIntent, DeclaredModuleArtifact, EmitProcessEventIntent, EmitTriggerIntent,
     RegisterProcessDefinitionIntent, RegisterTriggerIntent, SignalProcessIntent,
     StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
     TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, ToolAttemptOutcome, ToolIntent,

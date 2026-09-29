@@ -49,6 +49,7 @@
 //! lash considers valid. Host-added triggers, `CHECK` constraints, and row-level
 //! security are *not* read and are the host's own risk; see ADR 0052.
 
+use sqlx::Row;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -78,6 +79,137 @@ const SEED_ROWS: [(&str, &str); 2] = [
 /// The namespace-anchoring table. Its resolution through `search_path` decides
 /// which installation every other object is read from.
 const ANCHOR_TABLE: &str = "lash_schema_versions";
+
+/// Classify a newer catalog against the objects this build uses. A table or
+/// non-unique index added by the newer release is invisible to this build;
+/// restrictions on an existing table can reject its writes and are refused.
+pub(crate) async fn expanded_findings(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    report: &SchemaReport,
+) -> Result<Vec<String>, crate::StoreError> {
+    let mut findings = Vec::new();
+    for finding in &report.findings {
+        match finding {
+            SchemaFinding::UnexpectedColumn { table, found }
+                if found.nullable || found.value_source == ColumnValueSource::Default => {}
+            _ => findings.push(finding.to_string()),
+        }
+    }
+    let Some(schema) = &report.schema else {
+        return Ok(findings);
+    };
+    let names: Vec<String> = SchemaShape::expected().tables.keys().cloned().collect();
+    let ddl_tokens: Vec<&str> = crate::schema::SCHEMA_DDL.split_whitespace().collect();
+    let constraints = sqlx::query(
+        "SELECT relation.relname::text AS table_name, constraint_row.conname::text AS name,
+                constraint_row.contype::text AS kind
+         FROM pg_catalog.pg_constraint AS constraint_row
+         JOIN pg_catalog.pg_class AS relation ON relation.oid = constraint_row.conrelid
+         JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+         WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[])
+           AND constraint_row.contype IN ('c', 'x')",
+    )
+    .bind(schema)
+    .bind(&names)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(crate::store_sqlx_error)?;
+    for row in constraints {
+        let table: String = row.get("table_name");
+        let name: String = row.get("name");
+        let kind: String = row.get("kind");
+        let declared = ddl_tokens
+            .windows(2)
+            .any(|pair| pair[0] == "CONSTRAINT" && pair[1] == name);
+        if kind == "x" || !declared {
+            findings.push(format!(
+                "added {} constraint {table}.{name}",
+                if kind == "x" { "EXCLUDE" } else { "CHECK" }
+            ));
+        }
+    }
+    let triggers = sqlx::query(
+        "SELECT relation.relname::text AS table_name, trigger.tgname::text AS name
+         FROM pg_catalog.pg_trigger AS trigger
+         JOIN pg_catalog.pg_class AS relation ON relation.oid = trigger.tgrelid
+         JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+         WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[])
+           AND NOT trigger.tgisinternal",
+    )
+    .bind(schema)
+    .bind(&names)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(crate::store_sqlx_error)?;
+    for row in triggers {
+        findings.push(format!(
+            "added trigger {}.{}",
+            row.get::<String, _>("table_name"),
+            row.get::<String, _>("name")
+        ));
+    }
+    Ok(findings)
+}
+
+/// The synthetic next build's native catalog contains precisely its declared
+/// expansion on top of the N shape. A component-2 stamp alone is insufficient.
+#[cfg(feature = "synthetic-next")]
+pub(crate) async fn synthetic_next_findings(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    report: &SchemaReport,
+) -> Result<Vec<String>, crate::StoreError> {
+    let mut findings = expanded_findings(tx, report).await?;
+    let mut column_found = false;
+    for finding in &report.findings {
+        if let SchemaFinding::UnexpectedColumn { table, found } = finding {
+            if table == "lash_sessions"
+                && found.name == "synthetic_next_note"
+                && found.sql_type == "text"
+                && found.nullable
+                && found.value_source == ColumnValueSource::Supplied
+            {
+                column_found = true;
+            } else if found.nullable || found.value_source == ColumnValueSource::Default {
+                findings.push(format!("undeclared synthetic addition: {finding}"));
+            }
+        }
+    }
+    if !column_found {
+        findings.push("missing nullable lash_sessions.synthetic_next_note".to_owned());
+    }
+    let Some(schema) = report.schema.as_deref() else {
+        return Ok(findings);
+    };
+    let (table_found, index_found): (bool, bool) = sqlx::query_as(
+        "SELECT EXISTS (
+             SELECT 1 FROM pg_catalog.pg_class AS relation
+             JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+             WHERE namespace.nspname = $1 AND relation.relname = 'lash_synthetic_next'
+               AND relation.relkind = 'r'
+         ), EXISTS (
+             SELECT 1 FROM pg_catalog.pg_class AS index_relation
+             JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = index_relation.relnamespace
+             JOIN pg_catalog.pg_index AS index_row ON index_row.indexrelid = index_relation.oid
+             JOIN pg_catalog.pg_class AS table_relation ON table_relation.oid = index_row.indrelid
+             WHERE namespace.nspname = $1
+               AND index_relation.relname = 'idx_lash_synthetic_next_note'
+               AND table_relation.relname = 'lash_synthetic_next'
+               AND NOT index_row.indisunique
+               AND pg_catalog.pg_get_indexdef(index_relation.oid) LIKE '%(note)'
+         )",
+    )
+    .bind(schema)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(crate::store_sqlx_error)?;
+    if !table_found {
+        findings.push("missing table lash_synthetic_next".to_owned());
+    }
+    if !index_found {
+        findings.push("missing non-unique index idx_lash_synthetic_next_note".to_owned());
+    }
+    Ok(findings)
+}
 
 /// What a [`crate::PostgresStorage`] does when the live schema does not match
 /// the shape this build expects.
@@ -1216,8 +1348,7 @@ impl fmt::Display for SchemaReport {
 mod introspect;
 
 pub(crate) use introspect::{
-    ComponentVersion, Installation, read_component_version, read_search_path, resolve_installation,
-    verify_schema_shape,
+    Installation, read_search_path, resolve_installation, verify_schema_shape,
 };
 /// Reached only by the artifact-generation and catalog tests, which drive the
 /// introspection directly rather than through a full verification.

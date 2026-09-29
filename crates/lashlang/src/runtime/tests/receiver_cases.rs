@@ -21,25 +21,33 @@ fn summing_method() -> Expr {
             builders::assign("i", builders::num(0.0)),
             builders::assign("total", builders::num(0.0)),
             builders::while_loop(
-                builders::binary(builders::var("i"), BinaryOp::Less, builders::num(5.0)),
+                builders::binary(
+                    builders::var("i"),
+                    JavaScriptBinaryOp::Less,
+                    builders::num(5.0),
+                ),
                 builders::block(vec![
                     builders::assign(
                         "total",
                         builders::binary(
                             builders::var("total"),
-                            BinaryOp::Add,
+                            JavaScriptBinaryOp::Add,
                             builders::field(builders::var("self"), "k"),
                         ),
                     ),
                     builders::assign(
                         "i",
-                        builders::binary(builders::var("i"), BinaryOp::Add, builders::num(1.0)),
+                        builders::binary(
+                            builders::var("i"),
+                            JavaScriptBinaryOp::Add,
+                            builders::num(1.0),
+                        ),
                     ),
                 ]),
             ),
             Expr::Return(Box::new(builders::binary(
                 builders::var("total"),
-                BinaryOp::Add,
+                JavaScriptBinaryOp::Add,
                 builders::var("x"),
             ))),
         ])),

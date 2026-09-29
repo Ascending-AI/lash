@@ -204,6 +204,211 @@ async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
     Ok(())
 }
 
+/// A deployment store whose reads never show a turn's commit, as a
+/// follower's store read lags the commit a worker in another process made:
+/// the root's terminal is published, and no store poll sees that the root
+/// committed.
+struct UnseenCommits {
+    inner: Arc<dyn lash_core::DeploymentStore>,
+}
+
+#[async_trait]
+impl lash_core::RuntimeStoreDecorator for UnseenCommits {
+    type Inner = dyn lash_core::DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
+    }
+
+    async fn turn_is_committed(
+        &self,
+        _address: &lash_core::facade_support::TurnAddress,
+    ) -> std::result::Result<bool, lash_core::StoreError> {
+        Ok(false)
+    }
+}
+
+impl lash_core::DeploymentStoreDecorator for UnseenCommits {}
+
+/// Wraps the deployment store a fixture's catalog hands out.
+type StoreMap = Arc<
+    dyn Fn(Arc<dyn lash_core::DeploymentStore>) -> Arc<dyn lash_core::DeploymentStore>
+        + Send
+        + Sync,
+>;
+
+/// [`fixture_over`] with the deployment store `map` over the double's.
+async fn fixture_with_stores(batch: usize, map: StoreMap) -> Result<Fixture> {
+    fixture_over(batch, |backend| {
+        crate::testing::LayeredBackend::over(backend)
+            .map_session_store_factory(|inner| map(inner))
+            .into_backend()
+    })
+    .await
+}
+
+/// A root's follower learns that the root settled from its published
+/// terminal, through the one wait it holds open once the root is known, even
+/// while no store read shows the root's commit — the view a follower has of a
+/// root that ran on another worker (FIG-3981). Before, the follower asked for
+/// the terminal only once a store poll showed the commit, so a read that lags
+/// the commit never answered.
+async fn a_root_answers_from_its_published_terminal_while_no_store_read_shows_its_commit()
+-> Result<()> {
+    let fixture = fixture_with_stores(
+        1,
+        Arc::new(|inner| Arc::new(UnseenCommits { inner }) as Arc<_>),
+    )
+    .await?;
+    let session = fixture.core.session("send-terminal-wait").open().await?;
+
+    let handle = session.send(TurnInput::text(HELD)).await?;
+    provider_called(&fixture, 1).await;
+    let parts = session.durable().send_parts().await?;
+    let root = parts
+        .store
+        .root_of_input(handle.input_id())
+        .await
+        .expect("read the input's root")
+        .expect("the running root is bound to its input");
+    let following = tokio::spawn(session.root(root.clone()).outcome());
+    fixture.release.notify_one();
+
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), following)
+        .await
+        .expect("the root's follower answers from its published terminal")
+        .expect("the follower task completes")?;
+    assert_eq!(outcome.status, crate::TurnStatus::Answered);
+    assert_eq!(outcome.root.as_ref(), Some(&root));
+    let output = outcome.output.expect("a settled root has a report");
+    assert_eq!(
+        output.assistant_message(),
+        Some(format!("echo: {HELD}").as_str())
+    );
+    Ok(())
+}
+
+/// The reads one input's followers make while its root binding is awaited:
+/// keyed reads of the binding, and full store polls (each reads the input's
+/// open row).
+#[derive(Default)]
+struct BindingReads {
+    input: std::sync::Mutex<Option<lash_core::InputId>>,
+    keyed: AtomicUsize,
+    polls: AtomicUsize,
+}
+
+impl BindingReads {
+    fn watch(&self, input: &lash_core::InputId) {
+        *self.input.lock_recover() = Some(input.clone());
+    }
+
+    fn watches(&self, input: &lash_core::InputId) -> bool {
+        self.input.lock_recover().as_ref() == Some(input)
+    }
+}
+
+/// A deployment store counting [`BindingReads`].
+struct CountedBindingReads {
+    inner: Arc<dyn lash_core::DeploymentStore>,
+    reads: Arc<BindingReads>,
+}
+
+impl lash_core::DeploymentStoreDecorator for CountedBindingReads {}
+
+#[async_trait]
+impl lash_core::RuntimeStoreDecorator for CountedBindingReads {
+    type Inner = dyn lash_core::DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
+    }
+
+    async fn root_of_input(
+        &self,
+        session_id: &SessionId,
+        input: &lash_core::InputId,
+    ) -> std::result::Result<Option<lash_core::TurnId>, lash_core::StoreError> {
+        if self.reads.watches(input) {
+            self.reads.keyed.fetch_add(1, Ordering::SeqCst);
+        }
+        self.inner.root_of_input(session_id, input).await
+    }
+
+    async fn pending_turn_input(
+        &self,
+        session_id: &SessionId,
+        input: &lash_core::InputId,
+    ) -> std::result::Result<Option<lash_core::PendingTurnInputRead>, lash_core::StoreError> {
+        if self.reads.watches(input) {
+            self.reads.polls.fetch_add(1, Ordering::SeqCst);
+        }
+        self.inner.pending_turn_input(session_id, input).await
+    }
+}
+
+/// A follower with no resident runtime learns its input's root by one keyed
+/// read of the binding at the poll floor, while its full store poll backs
+/// off as before: a root that runs on another worker announces its binding
+/// to no event this process sees (FIG-3981). Waking on the probe delays
+/// neither the probe nor the poll. Before, the follower read the binding
+/// only on the backed-off poll.
+async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_backs_off()
+-> Result<()> {
+    let reads = Arc::new(BindingReads::default());
+    let counted = Arc::clone(&reads);
+    let fixture = fixture_with_stores(
+        1,
+        Arc::new(move |inner| {
+            Arc::new(CountedBindingReads {
+                inner,
+                reads: Arc::clone(&counted),
+            }) as Arc<_>
+        }),
+    )
+    .await?;
+    let session = fixture.core.session("send-root-probe").open().await?;
+
+    // The held root keeps the second input queued, bound to no root.
+    let held = session.send(TurnInput::text(HELD)).await?;
+    provider_called(&fixture, 1).await;
+    let queued = session
+        .send(TurnInput::text("queued behind the held root"))
+        .await?;
+    reads.watch(queued.input_id());
+    let following = tokio::spawn(
+        session
+            .durable()
+            .attach(queued.input_id().clone())
+            .outcome(),
+    );
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    let keyed = reads.keyed.load(Ordering::SeqCst);
+    let polls = reads.polls.load(Ordering::SeqCst);
+
+    fixture.release.notify_one();
+    assert_eq!(held.outcome().await?.status, crate::TurnStatus::Answered);
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), following)
+        .await
+        .expect("the queued input's follower answers once its root runs")
+        .expect("the follower task completes")?;
+    assert_eq!(outcome.status, crate::TurnStatus::Answered);
+
+    // Each poll of an unbound input reads the binding twice; every other
+    // keyed read is the probe's. The poll backs off 25 ms, 50 ms, .. to a
+    // second, so two seconds hold about seven polls and eighty probe ticks.
+    let probes = keyed.saturating_sub(2 * polls);
+    assert!(
+        (4..=20).contains(&polls),
+        "the store poll backs off, and a probe that found no root delays it: {polls} polls"
+    );
+    assert!(
+        probes >= 20,
+        "the follower probes its binding at the floor: {probes} probes beside {polls} polls"
+    );
+    Ok(())
+}
+
 /// A scope-close ledger that holds every claim until released, as a close
 /// the scope owner is slow to take: the root's recorded close step waits on
 /// its claim, and so does a reconcile pass. It counts the closes settled.
@@ -1038,6 +1243,20 @@ macro_rules! send_handle_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
                 super::a_settled_root_no_run_here_can_report_answers_at_once().await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_root_answers_from_its_published_terminal_while_no_store_read_shows_its_commit()
+            -> Result<()> {
+                super::a_root_answers_from_its_published_terminal_while_no_store_read_shows_its_commit()
+                    .await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_backs_off()
+            -> Result<()> {
+                super::an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_backs_off()
+                    .await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -167,8 +167,9 @@ pub(crate) async fn admit_root_postgres(
 /// ([`RootStore::admit_at_checkpoint`]).
 ///
 /// A read-only probe answers the common empty checkpoint without a write
-/// transaction. The probe also reports rows the step already bound, so a
-/// re-executed step always reaches the read-back.
+/// transaction. It refuses a stale fence first, whatever the caps and
+/// whatever is pending (FIG-3927 N4), and it also reports rows the step
+/// already bound, so a re-executed step always reaches the read-back.
 ///
 /// [`RootStore::admit_at_checkpoint`]: lash_core_execution::store::RootStore::admit_at_checkpoint
 pub(crate) async fn admit_at_checkpoint_postgres(
@@ -179,9 +180,6 @@ pub(crate) async fn admit_at_checkpoint_postgres(
     store
         .checkpoint_probe_count
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if request.max_inputs == 0 && request.policy.max_rows == 0 {
-        return Ok(CheckpointAdmission::default());
-    }
     if !checkpoint_work_pending_postgres(&store.pool, request).await? {
         return Ok(CheckpointAdmission::default());
     }
@@ -318,12 +316,14 @@ pub(crate) async fn open_session_command_run_postgres(
 }
 
 /// Whether `request`'s checkpoint has anything to admit or read back,
-/// answered by one read-only probe.
+/// answered by one read-only probe once its fence is known current.
 async fn checkpoint_work_pending_postgres(
     pool: &PgPool,
     request: &CheckpointAdmissionRequest,
 ) -> Result<bool, StoreError> {
     let mut connection = acquire_runtime_connection(pool).await?;
+    super::drive_epoch::require_fence_conn(&mut connection, request.session_id(), &request.fence)
+        .await?;
     // One statement per checkpoint, chosen exhaustively: the admitted
     // minimum-boundary set is what the checkpoint decides, and an optional
     // predicate over a bound boundary cannot seek an index.

@@ -4,12 +4,13 @@ use lash_sansio::TurnId;
 
 fn assert_streamed_envelope_contract<T>(
     body: T,
-    encode: impl Fn(&T) -> Result<Vec<u8>, serde_json::Error>,
+    encode: impl Fn(&T, &Negotiated) -> Result<Vec<u8>, serde_json::Error>,
     decode: impl Fn(&[u8]) -> Result<T, RemoteProtocolError>,
 ) where
     T: std::fmt::Debug + PartialEq,
 {
-    let wire = encode(&body).expect("streamed envelope encodes");
+    let wire =
+        encode(&body, &crate::negotiation::test_negotiated()).expect("streamed envelope encodes");
     assert_eq!(
         std::str::from_utf8(&wire)
             .expect("envelope utf-8")
@@ -32,8 +33,8 @@ fn assert_streamed_envelope_contract<T>(
             .expect_err("wrong-version envelope is refused");
     assert!(matches!(
         error,
-        RemoteProtocolError::UnsupportedProtocolVersion { actual, expected }
-            if actual == REMOTE_PROTOCOL_VERSION + 1 && expected == REMOTE_PROTOCOL_VERSION
+        RemoteProtocolError::Unsupported { peer: actual, local: expected }
+            if actual == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION + 1) && expected == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
 }
 
@@ -163,7 +164,9 @@ fn published_observation_item_schema() -> jsonschema::JSONSchema {
 }
 
 fn assert_process_observation_wire_contract(item: RemoteProcessObservationItem) {
-    let wire = item.encode_json().expect("encode observation item");
+    let wire = item
+        .encode_json(&crate::negotiation::test_negotiated())
+        .expect("encode observation item");
     assert_eq!(
         RemoteProcessObservationItem::decode_json(&wire).expect("decode item"),
         item
@@ -208,8 +211,8 @@ fn assert_process_observation_wire_contract(item: RemoteProcessObservationItem) 
     value["type"] = serde_json::json!("unknown_future_item");
     assert!(matches!(
         RemoteProcessObservationItem::decode_json(value.to_string().as_bytes()),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion { actual, expected })
-            if actual == REMOTE_PROTOCOL_VERSION - 1 && expected == REMOTE_PROTOCOL_VERSION
+        Err(RemoteProtocolError::Unsupported { peer: actual, local: expected })
+            if actual == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION - 1) && expected == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
     value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION);
     assert!(RemoteProcessObservationItem::decode_json(value.to_string().as_bytes()).is_err());
@@ -273,7 +276,9 @@ fn process_observation_cursor_wire_contract() {
         process_id: lash_sansio::ProcessId::fixture("process:wire"),
         cursor: Some(wire_cursor("process:wire", 1, 1)),
     };
-    let wire = request.encode_json().expect("request wire");
+    let wire = request
+        .encode_json(&crate::negotiation::test_negotiated())
+        .expect("request wire");
     assert_eq!(
         RemoteProcessObservationRequest::decode_json(&wire).expect("request"),
         request
@@ -283,7 +288,7 @@ fn process_observation_cursor_wire_contract() {
     value["retired_cursor"] = serde_json::json!("old");
     assert!(matches!(
         RemoteProcessObservationRequest::decode_json(value.to_string().as_bytes()),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion { .. })
+        Err(RemoteProtocolError::Unsupported { .. })
     ));
     value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION);
     assert!(RemoteProcessObservationRequest::decode_json(value.to_string().as_bytes()).is_err());
@@ -311,7 +316,12 @@ fn process_observation_snapshot_wire_contract() {
         snapshot: wire_snapshot(None),
     };
     assert!(
-        RemoteProcessObservationItem::decode_json(&misplaced.encode_json().expect("wire")).is_err(),
+        RemoteProcessObservationItem::decode_json(
+            &misplaced
+                .encode_json(&crate::negotiation::test_negotiated())
+                .expect("wire")
+        )
+        .is_err(),
         "a snapshot cursor must carry the snapshot's high-water sequence"
     );
 }
@@ -330,7 +340,9 @@ fn process_observation_event_wire_contract() {
     };
     assert!(
         RemoteProcessObservationItem::decode_json(
-            &foreign.encode_json().expect("foreign event wire")
+            &foreign
+                .encode_json(&crate::negotiation::test_negotiated())
+                .expect("foreign event wire")
         )
         .is_err()
     );
@@ -340,7 +352,12 @@ fn process_observation_event_wire_contract() {
         record: Box::new(process_node_record()),
     };
     assert!(
-        RemoteProcessObservationItem::decode_json(&cross.encode_json().expect("wire")).is_err(),
+        RemoteProcessObservationItem::decode_json(
+            &cross
+                .encode_json(&crate::negotiation::test_negotiated())
+                .expect("wire")
+        )
+        .is_err(),
         "an item cursor must name the item's process lifetime"
     );
 }
@@ -360,8 +377,12 @@ fn process_observation_committed_wire_contract() {
         event_type: "process.waiting".to_string(),
     };
     assert!(
-        RemoteProcessObservationItem::decode_json(&mismatched.encode_json().expect("wire"))
-            .is_err()
+        RemoteProcessObservationItem::decode_json(
+            &mismatched
+                .encode_json(&crate::negotiation::test_negotiated())
+                .expect("wire")
+        )
+        .is_err()
     );
 }
 
@@ -481,8 +502,8 @@ fn observation_decode_checks_version_before_unknown_payload_tag() {
     assert!(
         matches!(
             error,
-            RemoteProtocolError::UnsupportedProtocolVersion { actual, expected }
-                if actual == REMOTE_PROTOCOL_VERSION + 1 && expected == REMOTE_PROTOCOL_VERSION
+            RemoteProtocolError::Unsupported { peer: actual, local: expected }
+                if actual == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION + 1) && expected == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
         ),
         "{error:?}"
     );
@@ -523,8 +544,8 @@ fn turn_report_decode_checks_version_before_unknown_payload_tag() {
     assert!(
         matches!(
             error,
-            RemoteProtocolError::UnsupportedProtocolVersion { actual, expected }
-                if actual == REMOTE_PROTOCOL_VERSION + 1 && expected == REMOTE_PROTOCOL_VERSION
+            RemoteProtocolError::Unsupported { peer: actual, local: expected }
+                if actual == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION + 1) && expected == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
         ),
         "{error:?}"
     );
@@ -557,7 +578,9 @@ fn paged_process_events_wire_contract() {
         mode: lash_core::ProcessEventQueryMode::Lite,
         cursor: None,
     };
-    let wire = request.encode_json().expect("request wire");
+    let wire = request
+        .encode_json(&crate::negotiation::test_negotiated())
+        .expect("request wire");
     assert_eq!(
         RemoteProcessEventsRequest::decode_json(&wire).expect("request"),
         request
@@ -567,7 +590,7 @@ fn paged_process_events_wire_contract() {
     value["mode"] = serde_json::json!("future_mode");
     assert!(matches!(
         RemoteProcessEventsRequest::decode_json(value.to_string().as_bytes()),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion { .. })
+        Err(RemoteProtocolError::Unsupported { .. })
     ));
     value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION);
     assert!(RemoteProcessEventsRequest::decode_json(value.to_string().as_bytes()).is_err());
@@ -592,7 +615,9 @@ fn paged_process_events_wire_contract() {
         }),
         cursor: wire_cursor("process:wire", 0, 4),
     };
-    let wire = response.encode_json().expect("response wire");
+    let wire = response
+        .encode_json(&crate::negotiation::test_negotiated())
+        .expect("response wire");
     assert_eq!(
         RemoteProcessEventsResponse::decode_json(&wire).expect("response"),
         response
@@ -612,8 +637,12 @@ fn paged_process_events_wire_contract() {
         ..response.clone()
     };
     assert!(
-        RemoteProcessEventsResponse::decode_json(&stale_cursor.encode_json().expect("wire"))
-            .is_err(),
+        RemoteProcessEventsResponse::decode_json(
+            &stale_cursor
+                .encode_json(&crate::negotiation::test_negotiated())
+                .expect("wire")
+        )
+        .is_err(),
         "a page's cursor carries its last sequence"
     );
     let retention = RemoteProcessEventsResponse {
@@ -626,7 +655,9 @@ fn paged_process_events_wire_contract() {
         ),
         cursor: wire_cursor("process:wire", 0, 0),
     };
-    let wire = retention.encode_json().expect("retention wire");
+    let wire = retention
+        .encode_json(&crate::negotiation::test_negotiated())
+        .expect("retention wire");
     assert_eq!(
         RemoteProcessEventsResponse::decode_json(&wire).expect("retention"),
         retention
@@ -643,7 +674,9 @@ fn paged_process_events_wire_contract() {
         }),
         cursor: wire_cursor("process:wire", 0, 4),
     };
-    let wire = more.encode_json().expect("continuation response wire");
+    let wire = more
+        .encode_json(&crate::negotiation::test_negotiated())
+        .expect("continuation response wire");
     assert_eq!(
         RemoteProcessEventsResponse::decode_json(&wire).expect("continuation"),
         more
@@ -654,7 +687,9 @@ fn paged_process_events_wire_contract() {
         mode: lash_core::ProcessEventQueryMode::Full,
         cursor: Some(more.cursor.clone()),
     };
-    let wire = continued.encode_json().expect("continuation request wire");
+    let wire = continued
+        .encode_json(&crate::negotiation::test_negotiated())
+        .expect("continuation request wire");
     assert_eq!(
         RemoteProcessEventsRequest::decode_json(&wire).expect("continuation"),
         continued,
@@ -664,7 +699,9 @@ fn paged_process_events_wire_contract() {
     other_process.process_id = lash_sansio::ProcessId::fixture("another-process");
     assert!(
         RemoteProcessEventsRequest::decode_json(
-            &other_process.encode_json().expect("other process wire")
+            &other_process
+                .encode_json(&crate::negotiation::test_negotiated())
+                .expect("other process wire")
         )
         .is_err(),
         "a cursor names exactly one process"

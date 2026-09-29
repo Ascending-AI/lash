@@ -845,10 +845,12 @@ impl RuntimeExecutionContext<'_> {
         }
         {
             let mut cursor = this.observation_cursor(&format!("tool:{call_id}:intents"));
-            for intent_outcome in &outcome.intent_outcomes {
+            for intent_outcome in crate::tool_dispatch::model_visible_intent_outcomes(&outcome) {
                 model_return.parts.push(crate::ModelToolReturnPart::text(
                     intent_outcome.model_addendum(),
                 ));
+            }
+            for intent_outcome in &outcome.intent_outcomes {
                 cursor.observe(
                     this.dispatch.observer.as_ref(),
                     crate::engine::ObservedEvent::Activity {
@@ -1145,6 +1147,7 @@ impl RuntimeExecutionContext<'_> {
         replay_suffix: String,
         pending: crate::tool_dispatch::PendingToolDispatchOutcome,
         cancellation: Option<tokio_util::sync::CancellationToken>,
+        child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
     ) -> Result<ToolDispatchOutcome, crate::RuntimeEffectControllerError> {
         let fallback;
         let parent = if let Some(parent) = parent_invocation.as_ref() {
@@ -1179,18 +1182,25 @@ impl RuntimeExecutionContext<'_> {
         // Arm before parking, never after: the resolver the call named is what
         // makes the wait finishable, and this runs on the redrive too, because
         // the recorded attempt body that named it does not re-run.
-        if let Err(err) = crate::tool_dispatch::arm_pending_resolver(
-            self.dispatch.processes.as_ref(),
-            &pending.pending,
-            &pending.key,
-            self.process_scope(parent_invocation.clone()),
-        )
-        .await
-        {
-            return Ok(Self::unarmed_pending_outcome(pending, err));
-        }
+        let site = crate::tool_dispatch::ParkSite {
+            processes: self.dispatch.processes.as_ref(),
+            session_id: &self.dispatch.session_id,
+            call_id,
+            scope: self.process_scope(parent_invocation.clone()),
+            child_trace_hook,
+        };
+        let armed =
+            match crate::tool_dispatch::arm_pending_resolver(&site, &pending.pending, &pending.key)
+                .await?
+            {
+                crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
+                crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
+                    return Ok(pending.settle_unarmed(*failure, &armed));
+                }
+            };
         let cancellation = cancellation.unwrap_or_default();
         let resolver = pending.pending.resolved_by.clone();
+        let completion_key = pending.key.clone();
         let deadline = pending
             .pending
             .deadline
@@ -1250,13 +1260,21 @@ impl RuntimeExecutionContext<'_> {
                     record,
                     attempts,
                     intents: crate::ToolIntents::default(),
-                    intent_outcomes: Vec::new(),
+                    intent_outcomes: armed.intent_outcomes(),
                     captures: pending.captures,
                     triggers: pending.triggers,
                 });
             }
         };
-        Ok(self
+        crate::tool_dispatch::finish_parked_wait(
+            &site,
+            &pending.pending,
+            &armed,
+            &completion_key,
+            &resolution,
+        )
+        .await?;
+        let mut outcome = self
             .pending_completion_dispatch_outcome(
                 call_id,
                 &call_key,
@@ -1268,7 +1286,11 @@ impl RuntimeExecutionContext<'_> {
                 pending.captures,
                 pending.triggers,
             )
-            .await)
+            .await;
+        // A declared start's launch receipt is the call's one intent outcome
+        // (ADR 0116 §3.8).
+        outcome.intent_outcomes = armed.intent_outcomes();
+        Ok(outcome)
     }
 
     pub fn restore_tool_trigger_outcomes(
@@ -1277,36 +1299,6 @@ impl RuntimeExecutionContext<'_> {
     ) {
         for outcome in outcomes {
             self.dispatch.trigger_outcomes.enqueue(outcome);
-        }
-    }
-
-    /// Fails a call whose named resolver could not be armed.
-    ///
-    /// Deliberately a failure and not a park: a wait nobody is going to resolve
-    /// is indistinguishable from a hang, and the turn would hold until it was
-    /// cancelled. Reporting it here keeps the fault at the site that knows what
-    /// it was trying to arm.
-    fn unarmed_pending_outcome(
-        pending: crate::tool_dispatch::PendingToolDispatchOutcome,
-        error: crate::PluginError,
-    ) -> ToolDispatchOutcome {
-        let record = ToolCallRecord {
-            call_id: None,
-            tool: pending.tool_name,
-            args: pending.args,
-            output: ToolCallOutput::failure(ToolFailure::runtime(
-                ToolFailureClass::Internal,
-                "pending_tool_resolver_unarmed",
-                format!("the declared resolver for this call could not be armed: {error}"),
-            )),
-        };
-        ToolDispatchOutcome {
-            record,
-            attempts: pending.attempts,
-            intents: crate::ToolIntents::default(),
-            intent_outcomes: Vec::new(),
-            captures: pending.captures,
-            triggers: pending.triggers,
         }
     }
 
@@ -1457,6 +1449,7 @@ impl RuntimeExecutionContext<'_> {
                 .await;
         };
         let admitted_tool_id = authorization.tool_id().clone();
+        let park_trace_hook = child_execution_trace_hook.clone();
         self.emit_tool_call_started(
             &call_key,
             &call_id,
@@ -1570,6 +1563,7 @@ impl RuntimeExecutionContext<'_> {
                         "await".to_string(),
                         *pending,
                         self.cancellation_token.clone(),
+                        park_trace_hook.as_ref(),
                     )
                     .await
                 {

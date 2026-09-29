@@ -12,8 +12,7 @@ use std::sync::LazyLock;
 use lash_core_execution::WakeDeliveryState;
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
-    artifact_cleanup::ArtifactCleanupStatements, definitions::DefinitionStatements,
-    events::EventStatements, observers::ObserverStatements,
+    definitions::DefinitionStatements, events::EventStatements, observers::ObserverStatements,
     parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
     processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
     tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
@@ -143,9 +142,10 @@ lash_store_sql::statements! {
                             created_at_ms, updated_at_ms, last_event_sequence,
                             change_seq, status,
                             lifetime_scope_kind, lifetime_scope_id, lifetime, cancel_requested_at_ms,
-                            record_json
+                            record_json, consumer_hold_key, consumer_hold_scope_kind,
+                            consumer_hold_scope_id
                          )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)";
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)";
 
         /// SQLite spells a bound id list `json_each`; PostgreSQL deletes these
         /// rows inside its one-statement prune instead.
@@ -250,6 +250,7 @@ lash_store_sql::statements! {
              WHERE {{retired_process_status(status)}}
                AND updated_at_ms < ?1
                AND (?2 IS NULL OR change_seq <= ?2)
+               AND consumer_hold_key IS NULL
                AND NOT EXISTS (
                    SELECT 1 FROM process_wake_deliveries AS delivery
                    WHERE delivery.process_id = processes.process_id
@@ -711,15 +712,11 @@ lash_store_sql::statements! {
 
         /// The highest change sequence compaction may advance to: tombstones
         /// older than `?1`, at or below `?2`, not named by the JSON id array
-        /// `?3`, and with no artifact cleanup still owed.
+        /// `?3`. Artifact cleanup obligations live independently of tombstones.
         select_max_compactable_change_seq = "SELECT MAX(pruned_change_seq) FROM process_tombstones
              WHERE pruned_at_ms < ?1
                AND (?2 IS NULL OR pruned_change_seq <= ?2)
-               AND process_id NOT IN (SELECT value FROM json_each(?3))
-               AND NOT EXISTS (
-                   SELECT 1 FROM process_artifact_cleanup AS cleanup
-                   WHERE cleanup.process_id = process_tombstones.process_id
-               )";
+               AND process_id NOT IN (SELECT value FROM json_each(?3))";
 
         /// Delete exactly the rows
         /// [`TombstoneSqliteStatements::select_max_compactable_change_seq`]
@@ -727,23 +724,7 @@ lash_store_sql::statements! {
         delete_compactable = "DELETE FROM process_tombstones
          WHERE pruned_at_ms < ?1
            AND (?2 IS NULL OR pruned_change_seq <= ?2)
-           AND process_id NOT IN (SELECT value FROM json_each(?3))
-           AND NOT EXISTS (
-               SELECT 1 FROM process_artifact_cleanup AS cleanup
-               WHERE cleanup.process_id = process_tombstones.process_id
-           )";
-    }
-}
-
-lash_store_sql::statements! {
-    /// `process_artifact_cleanup` statements only SQLite issues.
-    pub(crate) struct ArtifactCleanupSqliteStatements @ "process_artifact_cleanup" {
-        /// Record the artifact release owed for pruned process `?1`.
-        ///
-        /// A plain insert per candidate here; PostgreSQL writes the same rows
-        /// from the one statement that performs its whole prune.
-        insert = "INSERT INTO process_artifact_cleanup (process_id, cleanup_json)
-             VALUES (?1, ?2)";
+           AND process_id NOT IN (SELECT value FROM json_each(?3))";
     }
 }
 
@@ -961,10 +942,6 @@ pub(crate) struct ProcessSql {
     pub(crate) park_event: ProcessParkEventStatements,
     /// `process_park_clock` statements, all of them SQLite's own.
     pub(crate) park_clock_sqlite: ProcessParkClockSqliteStatements,
-    /// `process_artifact_cleanup` statements both backends issue verbatim.
-    pub(crate) cleanup: ArtifactCleanupStatements,
-    /// `process_artifact_cleanup` statements only SQLite issues.
-    pub(crate) cleanup_sqlite: ArtifactCleanupSqliteStatements,
     /// `parent_end_plans` statements both backends issue verbatim.
     pub(crate) plan: ParentEndPlanStatements,
     /// `parent_end_plans` statements only SQLite issues.
@@ -1000,8 +977,6 @@ impl ProcessSql {
             clock_sqlite: ChangeClockSqliteStatements::render(dialect),
             park_event: ProcessParkEventStatements::render(dialect),
             park_clock_sqlite: ProcessParkClockSqliteStatements::render(dialect),
-            cleanup: ArtifactCleanupStatements::render(dialect),
-            cleanup_sqlite: ArtifactCleanupSqliteStatements::render(dialect),
             plan: ParentEndPlanStatements::render(dialect),
             plan_sqlite: ParentEndPlanSqliteStatements::render(dialect),
             floor: WakeAllocationFloorStatements::render(dialect),

@@ -385,7 +385,7 @@ impl lash_core::SessionDriver for CoreSessionDriver {
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         admitted: lash_core::engine::Admitted,
-    ) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
+    ) -> lash_core::engine::RootRunEnd {
         let runtime = match self.drive_runtime(admitted.session()).await {
             Ok(runtime) => runtime,
             // A root whose session is already deleted — or closed past
@@ -395,9 +395,13 @@ impl lash_core::SessionDriver for CoreSessionDriver {
             // recorded body answers the same retirement every redrive
             // replays (ADR 0104 O1, FIG-3881).
             Err(OpenFailure::SessionRetired(_)) => {
-                return lash_core::drive::run_admitted_root_retired(&controller, admitted).await;
+                return lash_core::engine::RootRunEnd::owing_nothing(
+                    lash_core::drive::run_admitted_root_retired(&controller, admitted).await,
+                );
             }
-            Err(failure) => return Err(failure.into_abort()),
+            Err(failure) => {
+                return lash_core::engine::RootRunEnd::owing_nothing(Err(failure.into_abort()));
+            }
         };
         crate::turn::run_admitted_root_observed(
             runtime.handle(),
@@ -407,5 +411,18 @@ impl lash_core::SessionDriver for CoreSessionDriver {
             runtime.unsettled_root(),
         )
         .await
+    }
+
+    /// The close runs on no runtime of the session: the host config's
+    /// catalog, scope owner and obligation ledger are all it reads, so it
+    /// never waits on, or holds, the writer the session's next root runs on.
+    async fn close_root(
+        &self,
+        controller: lash_core::ScopedEffectController<'_>,
+        session: &SessionId,
+        root: &lash_core::TurnId,
+    ) -> std::result::Result<(), lash_core::engine::DriveAbort> {
+        lash_core::drive::close_admitted_root(&self.config.env.core, &controller, session, root)
+            .await
     }
 }

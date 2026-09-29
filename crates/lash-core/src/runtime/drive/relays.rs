@@ -12,6 +12,9 @@ use std::sync::Arc;
 use super::relay::ObligationRelay;
 use super::{ControlIntentRelay, IngressRelay, ParentEndRelay, ScopeCloseRelay};
 use crate::engine::ScopeCloseSink;
+use crate::runtime::artifact_cleanup::{
+    ArtifactCleanupPorts, ArtifactCleanupRelay, StoreSetAuthorities,
+};
 use crate::runtime::process_start::ProcessStartRelay;
 use crate::runtime::process_terminal::ProcessTerminalRelay;
 use crate::runtime::session_delete::SessionDeleteRelay;
@@ -28,7 +31,8 @@ pub enum RelayNeed {
     /// a parent-end plan cancels children through it, and a terminal is
     /// published through it.
     ProcessWork,
-    /// The session administration a physical delete runs through.
+    /// The session administration a physical delete runs through, and
+    /// whose engine registry an artifact cleanup applies to.
     SessionAdministration,
 }
 
@@ -43,7 +47,9 @@ impl RelayNeed {
             ObligationKind::ParentEnd
             | ObligationKind::ProcessStart
             | ObligationKind::ProcessTerminal => Some(Self::ProcessWork),
-            ObligationKind::SessionDelete => Some(Self::SessionAdministration),
+            ObligationKind::SessionDelete | ObligationKind::ArtifactCleanup => {
+                Some(Self::SessionAdministration)
+            }
         }
     }
 
@@ -202,6 +208,21 @@ pub fn obligation_relays(
                     Arc::clone(wiring.registry()),
                     Arc::clone(wiring.port()),
                 ))
+            }
+            ObligationKind::ArtifactCleanup => {
+                let administration = administration.as_ref().ok_or_else(|| unavailable(kind))?;
+                Arc::new(ArtifactCleanupRelay::new(ArtifactCleanupPorts {
+                    ledger: backend.artifact_cleanup(),
+                    authorities: Arc::new(StoreSetAuthorities {
+                        effect_host: backend.effect_host(),
+                        processes: backend.process_registry(),
+                        triggers: backend.trigger_store(),
+                        definitions: backend.process_definition_registry(),
+                    }),
+                    process_env: backend.process_env_store(),
+                    modules: backend.module_artifacts(),
+                    engines: administration.process_engines().clone(),
+                }))
             }
         };
         relays.push(relay);

@@ -117,6 +117,17 @@ crate::statements! {
                AND {{undelivered_turn_input_state(state)}}
              ORDER BY enqueue_seq ASC";
 
+        /// Session `?1`'s inputs a checkpoint accepted into a running root,
+        /// each bound to that root until its commit settles it or its
+        /// terminal releases it: the rest of what the pending read lists
+        /// beside [`list_undelivered`](Self::list_undelivered) (FIG-4044).
+        list_accepted = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
+                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash
+             FROM pending_turn_inputs
+             WHERE session_id = ?1
+               AND {{accepted_turn_input_state(state)}}
+             ORDER BY enqueue_seq ASC";
+
         /// Session `?1`'s inputs root `?2` bound under step `?3`, in
         /// `enqueue_seq` order: what a re-executed admission step reads back
         /// instead of choosing again (FIG-3927).
@@ -237,8 +248,7 @@ crate::statements! {
         /// digest and receipt until session deletion, alongside the terminal
         /// evidence of the root that took it, so a retry under its id is
         /// validated against its digest and answered from that root for the
-        /// root's whole retained life (FIG-3837). An applied input stays even
-        /// when no root binding names it (a checkpoint delivery).
+        /// root's whole retained life (FIG-3837).
         delete_withdrawn = "DELETE FROM pending_turn_inputs
              WHERE session_id = ?1 AND {{cancelled_turn_input_state(state)}}
                AND NOT EXISTS (

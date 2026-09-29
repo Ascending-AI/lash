@@ -579,31 +579,78 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
+        // Open and admitted rows, and the rows a checkpoint accepted into a
+        // running root, read in one snapshot and listed in `enqueue_seq`
+        // order (FIG-4044).
         self.conn
-            .call(move |conn| {
+            .read(move |tx| {
                 let outcome: Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> =
                     (|| {
-                        let rows = {
-                            let mut stmt = conn
-                                .prepare(
-                                    crate::turn_ingress::turn_ingress_sql()
-                                        .pending_inputs
-                                        .list_undelivered
-                                        .sql(),
-                                )
-                                .map_err(sqlite_error)?;
-                            let rows = stmt
+                        let statements = &crate::turn_ingress::turn_ingress_sql().pending_inputs;
+                        let mut rows = Vec::new();
+                        for sql in [
+                            statements.list_undelivered.sql(),
+                            statements.list_accepted.sql(),
+                        ] {
+                            let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
+                            let listed = stmt
                                 .query_map(
                                     params![session_id.as_str()],
                                     pending_turn_input_row_from_sql,
                                 )
                                 .map_err(sqlite_error)?;
-                            rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
-                        };
-                        rows.into_iter()
+                            rows.extend(
+                                listed
+                                    .collect::<Result<Vec<_>, _>>()
+                                    .map_err(sqlite_error)?,
+                            );
+                        }
+                        let mut reads = rows
+                            .into_iter()
                             .map(pending_turn_input_read_from_row)
-                            .collect()
+                            .collect::<Result<Vec<_>, StoreError>>()?;
+                        reads.sort_by_key(|read| read.input.enqueue_seq);
+                        Ok(reads)
                     })();
+                Ok(outcome)
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn pending_turn_input(
+        &self,
+        session_id: &SessionId,
+        input_id: &lash_core_execution::InputId,
+    ) -> Result<Option<lash_core_execution::PendingTurnInputRead>, StoreError> {
+        let session_id = session_id.clone();
+        let input_id = input_id.clone();
+        self.conn
+            .call(move |conn| {
+                // One point read by primary key; the list's lifecycle filter
+                // is applied to the one row here: a row is listed until it is
+                // completed or cancelled, open or admitted to its root alike.
+                let outcome = (|| {
+                    let row = conn
+                        .prepare_cached(
+                            crate::turn_ingress::turn_ingress_sql()
+                                .pending_inputs
+                                .select_by_id
+                                .sql(),
+                        )
+                        .and_then(|mut stmt| {
+                            stmt.query_row(
+                                params![session_id.as_str(), input_id.as_str()],
+                                pending_turn_input_row_from_sql,
+                            )
+                            .optional()
+                        })
+                        .map_err(sqlite_error)?;
+                    Ok(row
+                        .map(pending_turn_input_read_from_row)
+                        .transpose()?
+                        .filter(|read| !read.input.state.is_terminal()))
+                })();
                 Ok(outcome)
             })
             .await

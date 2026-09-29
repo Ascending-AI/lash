@@ -13,8 +13,7 @@ use std::sync::LazyLock;
 use lash_core_execution::WakeDeliveryState;
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
-    artifact_cleanup::ArtifactCleanupStatements, definitions::DefinitionStatements,
-    events::EventStatements, observers::ObserverStatements,
+    definitions::DefinitionStatements, events::EventStatements, observers::ObserverStatements,
     parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
     processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
     tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
@@ -153,9 +152,9 @@ lash_store_sql::statements! {
                 created_at_ms, updated_at_ms, last_event_sequence,
                 change_seq, status,
                 lifetime_scope_kind, lifetime_scope_id, lifetime, cancel_requested_at_ms,
-                record_json
+                record_json, consumer_hold_key, consumer_hold_scope_kind, consumer_hold_scope_id
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
              ON CONFLICT (start_key) WHERE start_key IS NOT NULL DO NOTHING";
 
         /// How many processes are live.
@@ -256,6 +255,7 @@ lash_store_sql::statements! {
          WHERE {{retired_process_status(status)}}
            AND updated_at_ms < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
+           AND consumer_hold_key IS NULL
            AND NOT EXISTS (
                SELECT 1 FROM process_wake_deliveries AS delivery
                WHERE delivery.process_id = processes.process_id
@@ -273,6 +273,7 @@ lash_store_sql::statements! {
          WHERE {{retired_process_status(status)}}
            AND updated_at_ms < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
+           AND consumer_hold_key IS NULL
            AND NOT EXISTS (
                SELECT 1 FROM process_wake_deliveries AS delivery
                WHERE delivery.process_id = processes.process_id
@@ -445,25 +446,19 @@ lash_store_sql::statements! {
                 )";
 
         /// Prune the process rows named by the id array `?1`, stamping their
-        /// tombstones `?2` and recording the artifact cleanup array `?3`,
-        /// aligned with `?1`; reports the events and the rows it removed.
+        /// tombstones `?2`; reports the events and the rows it removed.
         ///
         /// One statement for the whole prune, where SQLite issues eight under
         /// its write lock. Every part has to see the same snapshot: the clock
         /// is bumped once for the batch, the tombstones take their change
-        /// sequences from that bump in candidate order, a cleanup row is
-        /// written beside each tombstone, and the process delete runs only if
-        /// both counts match the candidate count. Splitting it would let a
+        /// sequences from that bump in candidate order, and the process delete
+        /// runs only if the tombstone count matches. Splitting it would let a
         /// status writer land between the parts.
         ///
-        /// The cleanup records are the caller's, built from the locked
-        /// candidate rows by `ProcessArtifactCleanup::from_record` exactly as
-        /// SQLite builds them, never assembled here field by field: a field
-        /// the SQL forgot would silently deserialize to its default.
         prune_rows = "WITH candidates AS (
-             SELECT process_id, cleanup_json, ordinality
-             FROM unnest(?1::TEXT[], ?3::TEXT[]) WITH ORDINALITY
-                  AS candidate(process_id, cleanup_json, ordinality)
+             SELECT process_id, ordinality
+             FROM unnest(?1::TEXT[]) WITH ORDINALITY
+                  AS candidate(process_id, ordinality)
          ),
          deleted_events AS (
              DELETE FROM process_events AS event
@@ -496,23 +491,12 @@ lash_store_sql::statements! {
              ORDER BY candidate.ordinality
              RETURNING process_id
          ),
-         inserted_artifact_cleanup AS (
-             INSERT INTO process_artifact_cleanup (
-                 process_id, cleanup_json
-             )
-             SELECT tombstone.process_id, candidate.cleanup_json
-             FROM inserted_tombstones AS tombstone
-             JOIN candidates AS candidate USING (process_id)
-             RETURNING process_id
-         ),
          deleted_processes AS (
              DELETE FROM processes AS process
              USING candidates AS candidate,
-                   (SELECT count(*) FROM inserted_tombstones) AS tombstones,
-                   (SELECT count(*) FROM inserted_artifact_cleanup) AS cleanup
+                   (SELECT count(*) FROM inserted_tombstones) AS tombstones
              WHERE process.process_id = candidate.process_id
                AND tombstones.count = (SELECT count(*) FROM candidates)
-               AND cleanup.count = (SELECT count(*) FROM candidates)
              RETURNING process.process_id
          )
          SELECT (SELECT value FROM event_count),
@@ -569,15 +553,11 @@ lash_store_sql::statements! {
     pub(crate) struct TombstonePostgresStatements @ "process_tombstone" {
         /// The highest change sequence compaction may advance to: tombstones
         /// older than `?1`, at or below `?2`, not in the id array `?3`, and
-        /// with no artifact cleanup still owed.
+        /// after the process row has been pruned.
         select_max_compactable_change_seq = "SELECT MAX(pruned_change_seq) FROM process_tombstones
              WHERE pruned_at_ms < ?1
                AND (?2::BIGINT IS NULL OR pruned_change_seq <= ?2)
-               AND NOT (process_id = ANY(?3::TEXT[]))
-               AND NOT EXISTS (
-                   SELECT 1 FROM process_artifact_cleanup AS cleanup
-                   WHERE cleanup.process_id = process_tombstones.process_id
-               )";
+               AND NOT (process_id = ANY(?3::TEXT[]))";
 
         /// Delete exactly the rows
         /// [`TombstonePostgresStatements::select_max_compactable_change_seq`]
@@ -585,11 +565,7 @@ lash_store_sql::statements! {
         delete_compactable = "DELETE FROM process_tombstones
              WHERE pruned_at_ms < ?1
                AND (?2::BIGINT IS NULL OR pruned_change_seq <= ?2)
-               AND NOT (process_id = ANY(?3::TEXT[]))
-               AND NOT EXISTS (
-                   SELECT 1 FROM process_artifact_cleanup AS cleanup
-                   WHERE cleanup.process_id = process_tombstones.process_id
-               )";
+               AND NOT (process_id = ANY(?3::TEXT[]))";
     }
 }
 
@@ -854,9 +830,6 @@ pub(crate) struct ProcessSql {
     pub(crate) park_event: ProcessParkEventStatements,
     /// `process_park_clock` statements, all of them PostgreSQL's own.
     pub(crate) park_clock_postgres: ProcessParkClockPostgresStatements,
-    /// `process_artifact_cleanup` statements both backends issue verbatim.
-    pub(crate) cleanup: ArtifactCleanupStatements,
-    /// `process_artifact_cleanup` statements only PostgreSQL issues.
     /// `parent_end_plans` statements both backends issue verbatim.
     pub(crate) plan: ParentEndPlanStatements,
     /// `parent_end_plans` statements only PostgreSQL issues.
@@ -890,7 +863,6 @@ static PROCESS_SQL: LazyLock<ProcessSql> = LazyLock::new(|| {
         clock_postgres: ChangeClockPostgresStatements::render(dialect),
         park_event: ProcessParkEventStatements::render(dialect),
         park_clock_postgres: ProcessParkClockPostgresStatements::render(dialect),
-        cleanup: ArtifactCleanupStatements::render(dialect),
         plan: ParentEndPlanStatements::render(dialect),
         plan_postgres: ParentEndPlanPostgresStatements::render(dialect),
         floor: WakeAllocationFloorStatements::render(dialect),

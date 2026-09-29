@@ -190,6 +190,7 @@ impl SqliteStoreSet {
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
+        crate::compat::check_set(&location).map_err(tokio_rusqlite::Error::Error)?;
         let database = |database| {
             DatabaseLocation::in_backend(&location, &identity, database, anchors.as_ref())
         };
@@ -203,7 +204,7 @@ impl SqliteStoreSet {
             Arc::clone(&clock),
             None,
             None,
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
             #[cfg(feature = "testing")]
             options.fault_injector.clone(),
         )
@@ -302,7 +303,7 @@ impl SqliteStoreSet {
         Arc::clone(&self.inner.process_definitions)
     }
 
-    /// The durable-core [`Store`] that serves process execution environments
+    /// The durable-core [`SqliteStore`] that serves process execution environments
     /// and Lashlang artifacts. Unbound to any session.
     pub fn process_env_store(&self) -> Arc<SqliteStore> {
         Arc::clone(&self.inner.process_env_store)
@@ -314,7 +315,7 @@ impl SqliteStoreSet {
         Arc::clone(&self.inner.attachment_store)
     }
 
-    /// A new unbound [`Store`] on this store set's durable-core catalog, on
+    /// A new unbound [`SqliteStore`] on this store set's durable-core catalog, on
     /// a connection of its own.
     pub async fn open_store(&self) -> tokio_rusqlite::Result<Arc<SqliteStore>> {
         Ok(Arc::clone(&self.inner.process_env_store))
@@ -391,6 +392,12 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         if kind == lash_core_execution::store::ObligationKind::Ingress {
             return crate::ingress_obligation::ingress_ledger(&self.inner.process_env_store.conn);
         }
+        if kind == lash_core_execution::store::ObligationKind::ArtifactCleanup {
+            return Arc::new(crate::obligation_ledger::SqliteArtifactCleanupLedger::new(
+                self.inner.process_env_store.conn.clone(),
+                self.inner.process_registry.conn.clone(),
+            ));
+        }
         let conn = if crate::obligation_ledger::in_process_registry(kind) {
             self.inner.process_registry.conn.clone()
         } else {
@@ -398,6 +405,13 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         };
         Arc::new(crate::obligation_ledger::SqliteObligationLedger::new(
             kind, conn,
+        ))
+    }
+
+    fn artifact_cleanup(&self) -> Arc<dyn lash_core_execution::store::ArtifactCleanupLedger> {
+        Arc::new(crate::obligation_ledger::SqliteArtifactCleanupLedger::new(
+            self.inner.process_env_store.conn.clone(),
+            self.inner.process_registry.conn.clone(),
         ))
     }
 

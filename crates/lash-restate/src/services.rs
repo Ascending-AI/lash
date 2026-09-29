@@ -72,11 +72,11 @@ use std::sync::Arc;
 use lash_core::engine::BuildGeneration;
 use restate_sdk::context::{ContextClient, Request, RequestTarget, RunRetryPolicy};
 use restate_sdk::endpoint::{Builder, HandlerOptions, ServiceOptions};
-use restate_sdk::serde::Json;
 use restate_sdk::service::macro_support::{ServiceBoxFuture, service_definition};
 use restate_sdk::service::{Discoverable, Service};
 
 use crate::RestateEffectHost;
+use crate::compat::{Call, Reply};
 use crate::durable_wait::{
     LashDurableWaitRegistry as _, LashDurableWaitRegistryImpl, LashDurableWaitWorkflow as _,
     LashDurableWaitWorkflowImpl,
@@ -86,6 +86,7 @@ use crate::effect_group::{
     EffectGroupPayloadImpl, EffectGroupState as _, EffectGroupStateImpl,
 };
 use crate::ingress::RestateIngressClient;
+use crate::object_state::FleetView;
 use crate::process::{LashProcessWorkflow as _, LashProcessWorkflowImpl, RestateProcessRunner};
 use crate::process_attach::{LashProcessAttach as _, LashProcessAttachImpl};
 use crate::session_driver::{
@@ -413,8 +414,10 @@ impl std::fmt::Display for ServiceRoute {
 /// The SDK's generated clients bake the service's default-namespace name
 /// into every call, so lash's handlers call through these instead. Each
 /// method is pinned to the SDK client of the same service at compile time:
-/// the handler must exist there under the same name, with the same request
-/// and response types.
+/// the handler must exist there under the same name, taking a [`Call`] of
+/// the listed request and answering a [`Reply`] of the listed response. A
+/// method takes the request body and wraps it in a `Call` of this build's
+/// wire range; a handler without a listed request takes `Call<()>`.
 macro_rules! lash_clients {
     ($(
         $(#[$doc:meta])*
@@ -468,26 +471,28 @@ macro_rules! lash_clients {
         }
     };
     (@method $handler:ident($arg:ty) -> $res:ty) => {
-        pub(crate) fn $handler<'ctx>(&self, request: $arg) -> Request<'ctx, $arg, $res>
+        pub(crate) fn $handler<'ctx>(&self, body: $arg) -> Request<'ctx, Call<$arg>, Reply<$res>>
         where
             C: ContextClient<'ctx>,
         {
-            self.ctx.request(self.target(stringify!($handler)), request)
+            self.ctx.request(self.target(stringify!($handler)), Call::new(body))
         }
     };
     (@method $handler:ident() -> $res:ty) => {
-        pub(crate) fn $handler<'ctx>(&self) -> Request<'ctx, (), $res>
+        pub(crate) fn $handler<'ctx>(&self) -> Request<'ctx, Call<()>, Reply<$res>>
         where
             C: ContextClient<'ctx>,
         {
-            self.ctx.request(self.target(stringify!($handler)), ())
+            self.ctx.request(self.target(stringify!($handler)), Call::new(()))
         }
     };
     (@pin $handler:ident($arg:ty) -> $res:ty) => {
-        <Sdk<'static>>::$handler as fn(&Sdk<'static>, $arg) -> Request<'static, $arg, $res>
+        <Sdk<'static>>::$handler
+            as fn(&Sdk<'static>, Call<$arg>) -> Request<'static, Call<$arg>, Reply<$res>>
     };
     (@pin $handler:ident() -> $res:ty) => {
-        <Sdk<'static>>::$handler as fn(&Sdk<'static>) -> Request<'static, (), $res>
+        <Sdk<'static>>::$handler
+            as fn(&Sdk<'static>, Call<()>) -> Request<'static, Call<()>, Reply<$res>>
     };
 }
 
@@ -495,92 +500,92 @@ lash_clients! {
     /// Calls to one `LashDurableWaitIndex` object.
     DurableWaitRegistryCalls, durable_wait_registry: DurableWaitRegistry object,
     pinned to crate::durable_wait::LashDurableWaitRegistryClient {
-        is_revoked(Json<()>) -> Json<bool>;
-        peek_turn_gate(Json<crate::durable_wait::RestateDurableWaitIndexRequest>)
-            -> Json<crate::durable_wait::RestateTurnGatePeek>;
-        register(Json<crate::durable_wait::RestateDurableWaitIndexRequest>)
-            -> Json<crate::durable_wait::RestateDurableWaitRegistration>;
-        settle(Json<crate::durable_wait::RestateDurableWaitSettleRequest>) -> Json<()>;
-        register_awakeable(Json<crate::durable_wait::RestateDurableWaitAwakeableRequest>)
-            -> Json<crate::durable_wait::RestateDurableWaitRegistration>;
-        unregister_awakeable(Json<crate::durable_wait::RestateDurableWaitAwakeableRequest>)
-            -> Json<()>;
-        resolve(Json<crate::durable_wait::RestateDurableWaitResolveRequest>)
-            -> Json<crate::durable_wait::RestateDurableWaitResolveResponse>;
-        fence_cancel_decided(Json<crate::durable_wait::RestateDurableWaitCancelDecidedRequest>)
-            -> Json<()>;
-        retain_resolution(Json<crate::durable_wait::RestateDurableWaitResolveRequest>)
-            -> Json<()>;
-        cancel_all() -> Json<()>;
-        revoke_all() -> Json<()>;
-        begin_effect(Json<crate::durable_wait::RestateDurableWaitEffectRequest>) -> Json<bool>;
-        end_effect(Json<crate::durable_wait::RestateDurableWaitEffectRequest>) -> Json<()>;
-        record_group(Json<crate::durable_wait::RestateDurableWaitGroupRequest>) -> Json<bool>;
-        record_group_child(Json<crate::durable_wait::RestateDurableWaitGroupChildRequest>)
-            -> Json<bool>;
+        is_revoked() -> bool;
+        peek_turn_gate(crate::durable_wait::RestateDurableWaitIndexRequest)
+            -> crate::durable_wait::RestateTurnGatePeek;
+        register(crate::durable_wait::RestateDurableWaitIndexRequest)
+            -> crate::durable_wait::RestateDurableWaitRegistration;
+        settle(crate::durable_wait::RestateDurableWaitSettleRequest) -> ();
+        register_awakeable(crate::durable_wait::RestateDurableWaitAwakeableRequest)
+            -> crate::durable_wait::RestateDurableWaitRegistration;
+        unregister_awakeable(crate::durable_wait::RestateDurableWaitAwakeableRequest)
+            -> ();
+        resolve(crate::durable_wait::RestateDurableWaitResolveRequest)
+            -> crate::durable_wait::RestateDurableWaitResolveResponse;
+        fence_cancel_decided(crate::durable_wait::RestateDurableWaitCancelDecidedRequest)
+            -> ();
+        retain_resolution(crate::durable_wait::RestateDurableWaitResolveRequest)
+            -> ();
+        cancel_all() -> ();
+        revoke_all() -> ();
+        begin_effect(crate::durable_wait::RestateDurableWaitEffectRequest) -> bool;
+        end_effect(crate::durable_wait::RestateDurableWaitEffectRequest) -> ();
+        record_group(crate::durable_wait::RestateDurableWaitGroupRequest) -> bool;
+        record_group_child(crate::durable_wait::RestateDurableWaitGroupChildRequest)
+            -> bool;
         group_child_membership(
-            Json<crate::durable_wait::RestateDurableWaitGroupChildMembershipRequest>
-        ) -> Json<Option<String>>;
+            crate::durable_wait::RestateDurableWaitGroupChildMembershipRequest
+        ) -> Option<String>;
     }
 
     /// Calls to one `LashDurableWaitWorkflow`.
     DurableWaitWorkflowCalls, durable_wait_workflow: DurableWaitWorkflow workflow,
     pinned to crate::durable_wait::LashDurableWaitWorkflowClient {
-        await_resolution(Json<crate::durable_wait::RestateDurableWaitAwaitInput>)
-            -> Json<lash_core::Resolution>;
-        peek() -> Json<Option<lash_core::Resolution>>;
-        resolve(Json<crate::durable_wait::RestateDurableWaitResolveRequest>)
-            -> Json<lash_core::ResolveOutcome>;
+        await_resolution(crate::durable_wait::RestateDurableWaitAwaitInput)
+            -> lash_core::Resolution;
+        peek() -> Option<lash_core::Resolution>;
+        resolve(crate::durable_wait::RestateDurableWaitResolveRequest)
+            -> lash_core::ResolveOutcome;
     }
 
     /// Calls to one `LashProcessAttach` workflow.
     ProcessAttachCalls, process_attach: ProcessAttach workflow,
     pinned to crate::process_attach::LashProcessAttachClient {
-        run(Json<crate::process_attach::RestateProcessAttachRequest>) -> Json<()>;
+        run(crate::process_attach::RestateProcessAttachRequest) -> ();
     }
 
     /// Calls to one `EffectGroupIndex` object.
     EffectGroupStateCalls, effect_group_state: EffectGroupState object,
     pinned to crate::effect_group::EffectGroupStateClient {
-        probe() -> Json<crate::effect_group::EffectGroupProbeResponse>;
-        unsettled_children() -> Json<usize>;
-        open(Json<crate::effect_group::EffectGroupOpenRequest>)
-            -> Json<crate::effect_group::EffectGroupOpenResponse>;
-        probe_and_adopt(Json<crate::effect_group::EffectGroupAdoptRequest>)
-            -> Json<crate::effect_group::EffectGroupProbeAdoptResponse>;
-        record_dispatch(Json<crate::effect_group::EffectGroupRecordDispatchRequest>)
-            -> Json<crate::effect_group::EffectGroupRecordDispatchResponse>;
-        register_children(Json<crate::effect_group::EffectGroupRegisterRequest>)
-            -> Json<crate::effect_group::EffectGroupRegisterResponse>;
-        register_refusal(Json<crate::effect_group::EffectGroupRefusalRequest>)
-            -> Json<crate::effect_group::EffectGroupRegisterRefusalResponse>;
-        admit_child(Json<crate::effect_group::EffectGroupAdmissionRequest>)
-            -> Json<crate::effect_group::EffectGroupAdmissionResponse>;
-        commit_child(Json<crate::effect_group::EffectGroupCommitChildRequest>)
-            -> Json<crate::effect_group::EffectGroupCommitChildResponse>;
-        admit_semantic(Json<crate::effect_group::EffectGroupAdmitSemanticRequest>)
-            -> Json<crate::effect_group::EffectGroupAdmitSemanticResponse>;
-        drain_blockers(Json<crate::effect_group::EffectGroupDrainBlockersRequest>)
-            -> Json<crate::effect_group::EffectGroupDrainBlockersResponse>;
-        record_settlement(Json<crate::effect_group::EffectGroupRecordSettlementRequest>)
-            -> Json<crate::effect_group::EffectGroupRecordSettlementResponse>;
-        read_rank(Json<crate::effect_group::EffectGroupReadRankRequest>)
-            -> Json<crate::effect_group::EffectGroupReadRankResponse>;
-        close(Json<crate::effect_group::EffectGroupCloseRequest>)
-            -> Json<crate::effect_group::EffectGroupCloseResponse>;
-        retire() -> Json<crate::effect_group::EffectGroupRetireResponse>;
-        finish_retirement() -> Json<crate::effect_group::EffectGroupFinishRetirementResponse>;
-        retirement_cancel() -> Json<crate::effect_group::EffectGroupRetirementCancelResponse>;
+        probe() -> crate::effect_group::EffectGroupProbeResponse;
+        unsettled_children() -> usize;
+        open(crate::effect_group::EffectGroupOpenRequest)
+            -> crate::effect_group::EffectGroupOpenResponse;
+        probe_and_adopt(crate::effect_group::EffectGroupAdoptRequest)
+            -> crate::effect_group::EffectGroupProbeAdoptResponse;
+        record_dispatch(crate::effect_group::EffectGroupRecordDispatchRequest)
+            -> crate::effect_group::EffectGroupRecordDispatchResponse;
+        register_children(crate::effect_group::EffectGroupRegisterRequest)
+            -> crate::effect_group::EffectGroupRegisterResponse;
+        register_refusal(crate::effect_group::EffectGroupRefusalRequest)
+            -> crate::effect_group::EffectGroupRegisterRefusalResponse;
+        admit_child(crate::effect_group::EffectGroupAdmissionRequest)
+            -> crate::effect_group::EffectGroupAdmissionResponse;
+        commit_child(crate::effect_group::EffectGroupCommitChildRequest)
+            -> crate::effect_group::EffectGroupCommitChildResponse;
+        admit_semantic(crate::effect_group::EffectGroupAdmitSemanticRequest)
+            -> crate::effect_group::EffectGroupAdmitSemanticResponse;
+        drain_blockers(crate::effect_group::EffectGroupDrainBlockersRequest)
+            -> crate::effect_group::EffectGroupDrainBlockersResponse;
+        record_settlement(crate::effect_group::EffectGroupRecordSettlementRequest)
+            -> crate::effect_group::EffectGroupRecordSettlementResponse;
+        read_rank(crate::effect_group::EffectGroupReadRankRequest)
+            -> crate::effect_group::EffectGroupReadRankResponse;
+        close(crate::effect_group::EffectGroupCloseRequest)
+            -> crate::effect_group::EffectGroupCloseResponse;
+        retire() -> crate::effect_group::EffectGroupRetireResponse;
+        finish_retirement() -> crate::effect_group::EffectGroupFinishRetirementResponse;
+        retirement_cancel() -> crate::effect_group::EffectGroupRetirementCancelResponse;
     }
 
     /// Calls to one `EffectGroupPayload` object.
     EffectGroupPayloadCalls, effect_group_payload: EffectGroupPayload object,
     pinned to crate::effect_group::EffectGroupPayloadClient {
-        put(Json<crate::effect_group::EffectGroupPayloadPutRequest>)
-            -> Json<crate::effect_group::EffectGroupPayloadPutResponse>;
-        get() -> Json<crate::effect_group::EffectGroupPayloadGetResponse>;
-        retire() -> Json<()>;
-        delete_bytes() -> Json<()>;
+        put(crate::effect_group::EffectGroupPayloadPutRequest)
+            -> crate::effect_group::EffectGroupPayloadPutResponse;
+        get() -> crate::effect_group::EffectGroupPayloadGetResponse;
+        retire() -> ();
+        delete_bytes() -> ();
     }
 }
 
@@ -593,13 +598,13 @@ pub(crate) fn routed_workflow<'ctx, C, Req, Res>(
     key: impl Into<String>,
     handler: &str,
     request: Req,
-) -> restate_sdk::context::Request<'ctx, restate_sdk::serde::Json<Req>, restate_sdk::serde::Json<Res>>
+) -> Request<'ctx, Call<Req>, Reply<Res>>
 where
-    C: restate_sdk::context::ContextClient<'ctx>,
+    C: ContextClient<'ctx>,
 {
     ctx.request(
-        restate_sdk::context::RequestTarget::workflow(route.name().into_owned(), key, handler),
-        restate_sdk::serde::Json(request),
+        RequestTarget::workflow(route.name().into_owned(), key, handler),
+        Call::new(request),
     )
 }
 
@@ -611,13 +616,13 @@ pub(crate) fn routed_object<'ctx, C, Req, Res>(
     key: impl Into<String>,
     handler: &str,
     request: Req,
-) -> restate_sdk::context::Request<'ctx, restate_sdk::serde::Json<Req>, restate_sdk::serde::Json<Res>>
+) -> Request<'ctx, Call<Req>, Reply<Res>>
 where
-    C: restate_sdk::context::ContextClient<'ctx>,
+    C: ContextClient<'ctx>,
 {
     ctx.request(
-        restate_sdk::context::RequestTarget::object(route.name().into_owned(), key, handler),
-        restate_sdk::serde::Json(request),
+        RequestTarget::object(route.name().into_owned(), key, handler),
+        Call::new(request),
     )
 }
 
@@ -709,6 +714,9 @@ pub(crate) struct LashServiceParts<'a, R> {
     pub(crate) build_generation: BuildGeneration,
     /// The namespace every service is bound, and every call addressed, in.
     pub(crate) namespace: RestateNamespace,
+    /// Where the object handlers read the fleet epoch `F` that selects the
+    /// format they write (ADR 0115 §3.3).
+    pub(crate) fleet: FleetView,
 }
 
 /// Bind every [`LashService`] on `builder` under its name in the
@@ -730,6 +738,7 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
         session_driver,
         build_generation,
         namespace,
+        fleet,
     } = parts;
     let claimed = || {
         ServiceOptions::new().metadata(
@@ -757,6 +766,7 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
         effect_host.authority_id().clone(),
         build_generation.clone(),
         &namespace,
+        fleet.clone(),
     );
     // Dispatcher preflight and child runs retry `ctx.run` without a cap: a
     // child's failure is its recorded outcome, never a dispatcher giving up.
@@ -784,7 +794,7 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
                 ),
                 LashService::DurableWaitRegistry => bind_as(
                     builder,
-                    LashDurableWaitRegistryImpl::new(namespace.clone()).serve(),
+                    LashDurableWaitRegistryImpl::new(namespace.clone(), fleet.clone()).serve(),
                     &name,
                     claimed().enable_lazy_state(true),
                 ),
@@ -796,13 +806,16 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
                 ),
                 LashService::EffectGroupState => bind_as(
                     builder,
-                    EffectGroupStateImpl::new(namespace.clone()).serve(),
+                    EffectGroupStateImpl::new(namespace.clone(), fleet.clone()).serve(),
                     &name,
                     claimed(),
                 ),
-                LashService::EffectGroupPayload => {
-                    bind_as(builder, EffectGroupPayloadImpl.serve(), &name, claimed())
-                }
+                LashService::EffectGroupPayload => bind_as(
+                    builder,
+                    EffectGroupPayloadImpl::new(fleet.clone()).serve(),
+                    &name,
+                    claimed(),
+                ),
                 LashService::ProcessWorkflow => bind_as(
                     builder,
                     process_workflow.on_route(route.clone()).serve(),

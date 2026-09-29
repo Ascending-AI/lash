@@ -88,15 +88,11 @@ pub fn index(target: Expr, index: Expr) -> Expr {
 }
 
 pub fn add(left: Expr, right: Expr) -> Expr {
-    Expr::Binary {
-        op: lashlang::BinaryOp::Add,
+    Expr::JavaScriptBinary {
+        op: lashlang::JavaScriptBinaryOp::Add,
         left: Box::new(left),
         right: Box::new(right),
     }
-}
-
-pub fn tuple(items: Vec<Expr>) -> Expr {
-    Expr::Tuple(items)
 }
 
 pub fn record(fields: Vec<(&str, Expr)>) -> Expr {
@@ -115,16 +111,5 @@ pub fn for_range(binding: &str, end: f64, body: Vec<Expr>) -> Expr {
         iterable: Box::new(call("range", vec![number(0.0), number(end)])),
         bind: None,
         body: Box::new(Expr::Block(body)),
-    }
-}
-
-/// `[<element> for <binding> in <iterable>]`
-pub fn comprehension(element: Expr, binding: &str, iterable: Expr) -> Expr {
-    Expr::ListComprehension {
-        element: Box::new(element),
-        clauses: vec![lashlang::ListComprehensionClause::For {
-            binding: binding.into(),
-            iterable,
-        }],
     }
 }

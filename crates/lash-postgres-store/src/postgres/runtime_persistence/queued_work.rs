@@ -1,4 +1,4 @@
-//! The queued-work half of [`IngressStore`] for [`PostgresStore`], as
+//! The [`QueuedWorkStore`] operations for [`PostgresStore`], as
 //! inherent methods the trait implementation forwards to: enqueue, host
 //! withdrawal, the completion marker, and the open-work reads.
 

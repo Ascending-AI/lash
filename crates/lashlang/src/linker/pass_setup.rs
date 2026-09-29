@@ -42,7 +42,6 @@ pub(super) struct Linker<'module> {
     /// Declared function signatures, keyed by name. Collected before any body
     /// is lowered so a function may call one declared later, and itself.
     pub(super) function_signatures: BTreeMap<String, FunctionSignature>,
-    pub(super) type_defs: BTreeMap<String, TypeExpr>,
     /// Expected types recorded per node during the canonical walk, keyed by
     /// the node's [`AstPath`] in `program`.
     pub(super) expected_type_facts: Option<RefCell<ExpectedTypeFacts>>,
@@ -89,7 +88,6 @@ impl<'module> Linker<'module> {
             surface,
             process_types: BTreeMap::new(),
             function_signatures: BTreeMap::new(),
-            type_defs: BTreeMap::new(),
             expected_type_facts: None,
             completion_facts: RefCell::new(BTreeMap::new()),
             collect_completion: Cell::new(false),
@@ -194,18 +192,6 @@ impl<'module> Linker<'module> {
         for (index, declaration) in self.program.declarations.iter().enumerate() {
             let span = declaration_span(self.program, index);
             let (namespace, name) = match declaration {
-                Declaration::Type(decl) => {
-                    let name = decl.name.as_str();
-                    if !names.insert(("type", name.to_string())) {
-                        return Err(LinkError::DuplicateDeclaration {
-                            name: name.to_string(),
-                            span,
-                        });
-                    }
-                    self.type_defs
-                        .insert(decl.name.to_string(), decl.ty.clone());
-                    continue;
-                }
                 Declaration::Process(decl) => ("process", decl.name.as_str()),
                 // Functions need nothing from the host — no journal, no
                 // scheduler, no durability tier — so unlike `process` they are
@@ -233,12 +219,10 @@ impl<'module> Linker<'module> {
                     self.function_signatures
                         .insert(decl.name.to_string(), function_signature(decl));
                 }
-                Declaration::Type(_) => {}
             }
         }
         for declaration in &self.program.declarations {
             match declaration {
-                Declaration::Type(type_decl) => self.validate_type_refs(&type_decl.ty, None)?,
                 Declaration::Function(function) => {
                     for param in &function.params {
                         self.validate_type_refs(&param.ty, None)?;
@@ -354,7 +338,6 @@ impl<'module> Linker<'module> {
 
     pub(super) fn closed_schema_witness_binding(&self, expr: &Expr) -> Option<Binding> {
         let described_ty = match strip_label_annotation(expr) {
-            Expr::TypeLiteral(ty) => self.close_schema_type_expr(ty, &mut BTreeSet::new())?,
             Expr::Record(entries) => {
                 let mut shorthand = serde_json::Map::new();
                 for (name, descriptor) in entries {
@@ -374,80 +357,6 @@ impl<'module> Linker<'module> {
             _ => return None,
         };
         Some(Binding::SchemaWitness { described_ty })
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "the params and output were closed from a checked signature, so the rebuilt signature remains valid, per the message"
-    )]
-    pub(super) fn close_schema_type_expr(
-        &self,
-        ty: &TypeExpr,
-        resolving: &mut BTreeSet<String>,
-    ) -> Option<TypeExpr> {
-        Some(match ty {
-            TypeExpr::Ref(name) => {
-                if !resolving.insert(name.to_string()) {
-                    return None;
-                }
-                let closed =
-                    self.close_schema_type_expr(self.type_defs.get(name.as_str())?, resolving);
-                resolving.remove(name.as_str());
-                closed?
-            }
-            TypeExpr::List(item) => {
-                TypeExpr::List(Box::new(self.close_schema_type_expr(item, resolving)?))
-            }
-            TypeExpr::Object(fields) => TypeExpr::Object(
-                fields
-                    .iter()
-                    .map(|field| {
-                        Some(TypeField {
-                            name: field.name.clone(),
-                            ty: self.close_schema_type_expr(&field.ty, resolving)?,
-                            optional: field.optional,
-                        })
-                    })
-                    .collect::<Option<Vec<_>>>()?,
-            ),
-            TypeExpr::Union(items) => TypeExpr::union(
-                items
-                    .iter()
-                    .map(|item| self.close_schema_type_expr(item, resolving))
-                    .collect::<Option<Vec<_>>>()?,
-            ),
-            TypeExpr::Process(process) => match process.as_signature() {
-                None => ty.clone(),
-                Some(signature) => {
-                    let params = signature
-                        .params()
-                        .iter()
-                        .map(|param| {
-                            Some(ProcessParam {
-                                name: param.name.clone(),
-                                ty: self.close_schema_type_expr(&param.ty, resolving)?,
-                            })
-                        })
-                        .collect::<Option<Vec<_>>>()?;
-                    let output = self.close_schema_type_expr(signature.output(), resolving)?;
-                    TypeExpr::Process(crate::ProcessType::known(
-                        crate::ProcessSignature::try_new(params, output)
-                            .expect("resolved checked process signature remains valid"),
-                    ))
-                }
-            },
-            TypeExpr::TriggerHandle(event) => {
-                TypeExpr::TriggerHandle(Box::new(self.close_schema_type_expr(event, resolving)?))
-            }
-            TypeExpr::Any
-            | TypeExpr::Str
-            | TypeExpr::Int
-            | TypeExpr::Float
-            | TypeExpr::Bool
-            | TypeExpr::Dict
-            | TypeExpr::Null
-            | TypeExpr::Enum(_) => ty.clone(),
-        })
     }
 
     pub(super) fn operation_call_output_type(
@@ -482,9 +391,7 @@ impl<'module> Linker<'module> {
                 if !seen.insert(name.to_string()) {
                     return ty.clone();
                 }
-                let resolved = if let Some(ty) = self.type_defs.get(name.as_str()) {
-                    self.resolve_type_aliases_inner(ty, seen)
-                } else if let Some(data_type) = self
+                let resolved = if let Some(data_type) = self
                     .surface
                     .resources
                     .resolve_named_data_type(name.as_str())
@@ -623,51 +530,6 @@ impl<'module> Linker<'module> {
         Ok(Some(ty))
     }
 
-    pub(super) fn validate_binary_operands(
-        &self,
-        op: crate::ast::BinaryOp,
-        left: &TypeExpr,
-        right: &TypeExpr,
-        span: Option<Span>,
-    ) -> Result<(), LinkError> {
-        let left = self.resolve_type_aliases(left);
-        let right = self.resolve_type_aliases(right);
-        let compatible = if op == crate::ast::BinaryOp::In {
-            self.membership_operands_compatible(&left, &right)
-        } else {
-            binary_operands_compatible(op, &left, &right)
-        };
-        if compatible {
-            Ok(())
-        } else {
-            Err(LinkError::IncompatibleBinaryOperands {
-                operator: binary_op_source(op),
-                left: format_type_expr(&left),
-                right: format_type_expr(&right),
-                span,
-            })
-        }
-    }
-
-    pub(super) fn membership_operands_compatible(
-        &self,
-        needle: &TypeExpr,
-        haystack: &TypeExpr,
-    ) -> bool {
-        match haystack {
-            TypeExpr::Any | TypeExpr::Ref(_) => true,
-            TypeExpr::Str | TypeExpr::Enum(_) => {
-                matches!(needle, TypeExpr::Str | TypeExpr::Enum(_))
-            }
-            TypeExpr::List(item) => self.is_type_assignable(needle, item),
-            TypeExpr::Object(_) | TypeExpr::Dict => membership_key_type(needle),
-            TypeExpr::Union(items) => items
-                .iter()
-                .all(|item| self.membership_operands_compatible(needle, item)),
-            _ => false,
-        }
-    }
-
     pub(super) fn validate_shaping_builtin(
         &self,
         name: &str,
@@ -758,8 +620,7 @@ impl<'module> Linker<'module> {
     ) -> Result<(), LinkError> {
         match ty {
             TypeExpr::Ref(name) => {
-                if self.type_defs.contains_key(name.as_str())
-                    || self.surface.resources.has_resource_type(name.as_str())
+                if self.surface.resources.has_resource_type(name.as_str())
                     || self.surface.resources.has_named_data_type(name.as_str())
                     || self
                         .surface
@@ -884,7 +745,6 @@ impl<'module> Linker<'module> {
         span: Option<Span>,
     ) -> Result<Declaration, LinkError> {
         Ok(match declaration {
-            Declaration::Type(type_decl) => Declaration::Type(type_decl.clone()),
             Declaration::Process(process) => {
                 if process.label.is_some() {
                     self.ensure_feature(
@@ -1078,12 +938,10 @@ fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
         Expr::ReceiverCall { .. } => Some("a module operation call"),
         Expr::Await(_) => Some("await"),
         Expr::SleepFor(_) => Some("sleep for"),
-        Expr::SleepUntil(_) => Some("sleep until"),
         Expr::WaitSignal { .. } => Some("wait_signal"),
         Expr::ProcessRef { .. } => Some("a process reference"),
         Expr::ProcessLiteral(_) => Some("a process literal"),
         Expr::Print(_) => Some("print"),
-        Expr::Yield(_) => Some("yield"),
         Expr::Finish(_) => Some("finish"),
         Expr::Fail(_) => Some("fail"),
         // A label names a step in the workflow graph, and a pure body
@@ -1097,9 +955,7 @@ fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
         | Expr::Number(_)
         | Expr::String(_)
         | Expr::Variable(_)
-        | Expr::Tuple(_)
         | Expr::List(_)
-        | Expr::ListComprehension { .. }
         | Expr::Record(_)
         | Expr::Assign { .. }
         | Expr::If { .. }
@@ -1122,11 +978,8 @@ fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
         | Expr::Return(_)
         | Expr::Field { .. }
         | Expr::Index { .. }
-        | Expr::Unary { .. }
-        | Expr::Binary { .. }
         | Expr::JavaScriptUnary { .. }
         | Expr::JavaScriptBinary { .. }
-        | Expr::JavaScriptLogical { .. }
-        | Expr::TypeLiteral(_) => None,
+        | Expr::JavaScriptLogical { .. } => None,
     }
 }

@@ -2388,6 +2388,8 @@ derive_mutation_jobs() {{
                 "tool-lashlang-proxies",
                 "provider-testing-features",
                 "perf-dhat-heap",
+                "upgrade-harness-synthetic-next",
+                "lashctl-synthetic-next",
                 "regress-stable-features",
                 "host-features",
             },

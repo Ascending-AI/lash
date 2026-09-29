@@ -98,7 +98,7 @@ impl lash_core::ModuleArtifactStore for StoredBytesArtifactStore {
 
     async fn publish_module_artifact(
         &self,
-        _owner: &lash_core::ArtifactOwner,
+        _claim: &lash_core::ReferrerClaim,
         _module_ref: &str,
         _bytes: &[u8],
     ) -> Result<(), lash_core::ArtifactStoreError> {
@@ -107,34 +107,17 @@ impl lash_core::ModuleArtifactStore for StoredBytesArtifactStore {
         ))
     }
 
-    async fn retain_module_artifact(
+    async fn acquire_module_artifact(
         &self,
-        _owner: &lash_core::ArtifactOwner,
+        _claim: &lash_core::ReferrerClaim,
         _module_ref: &str,
     ) -> Result<(), lash_core::ArtifactStoreError> {
         Ok(())
     }
 
-    async fn transfer_module_artifact(
+    async fn end_module_referrer(
         &self,
-        _from: &lash_core::ArtifactOwner,
-        _to: &lash_core::ArtifactOwner,
-        _module_ref: &str,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        Ok(())
-    }
-
-    async fn release_module_artifact(
-        &self,
-        _owner: &lash_core::ArtifactOwner,
-        _module_ref: &str,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        Ok(())
-    }
-
-    async fn retire_module_artifact_owner(
-        &self,
-        _owner: &lash_core::ArtifactOwner,
+        _cleanup: &lash_core::ResolvedArtifactCleanup,
     ) -> Result<(), lash_core::ArtifactStoreError> {
         Ok(())
     }
@@ -315,21 +298,18 @@ async fn published_sleep_process() -> (LashlangArtifacts, LashlangProcessInput) 
         LashlangAbilities::default().with_sleep(),
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "process pause() -> null { finish await sleep_until(0) }",
+        source: "process pause() -> null { finish await sleep_for(0) }",
         program: process_module(
             "pause",
             Vec::new(),
             lashlang::TypeExpr::Null,
-            b::sleep_until(b::num(0.0)),
+            b::sleep_for(b::num(0.0)),
         ),
         environment: &environment,
     })
     .expect("sleep process compiles");
     store
-        .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("pre-cutover-fixture"),
-            &output.artifact,
-        )
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &output.artifact)
         .await
         .expect("sleep process artifact publishes");
     let input = LashlangProcessInput {

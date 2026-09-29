@@ -544,40 +544,6 @@ impl<'run> ProcessEngineRunContext<'run> {
     }
 }
 
-/// Settle one engine's staged start artifacts onto the owner of the process a
-/// start has just registered.
-///
-/// The staging owner is stable per process id and therefore shared by every
-/// concurrent attempt at the same start, so the transfer can find its source
-/// edge already severed by another attempt. Engine start artifacts are named by
-/// the same immutable payload the registration carries, so protecting them under
-/// the process owner reaches exactly the state the transfer would have left
-/// (FIG-3090). The engine's own refusal is untouched.
-pub async fn settle_started_process_engine_artifacts(
-    engine: &dyn ProcessEngine,
-    staging_owner: &crate::ArtifactOwner,
-    process_owner: &crate::ArtifactOwner,
-    payload: &serde_json::Value,
-    staged: bool,
-) -> Result<(), crate::PluginError> {
-    if !staged {
-        return engine.protect_start_artifacts(process_owner, payload).await;
-    }
-    match engine
-        .transfer_start_artifacts(staging_owner, process_owner, payload)
-        .await
-    {
-        Ok(()) => {}
-        Err(error) if crate::artifact_staging_owner_edge_is_missing(&error) => {
-            engine
-                .protect_start_artifacts(process_owner, payload)
-                .await?;
-        }
-        Err(error) => return Err(error),
-    }
-    engine.retire_artifact_owner(staging_owner).await
-}
-
 #[async_trait::async_trait]
 /// Deployment extension point for non-kernel process runtimes.
 ///
@@ -604,44 +570,34 @@ pub trait ProcessEngine: Send + Sync {
         payload: serde_json::Value,
     ) -> Result<ProcessRunOutcome, ProcessInfraError>;
 
-    /// Protect artifacts named by a start payload under its replayable staging
-    /// owner before process registration.
-    async fn protect_start_artifacts(
+    /// Every artifact a start payload names, with the store that holds it
+    /// (ADR 0113 §2.2).
+    fn start_artifacts(
         &self,
-        _owner: &crate::ArtifactOwner,
-        _payload: &serde_json::Value,
-    ) -> Result<(), crate::PluginError> {
-        Ok(())
-    }
+        payload: &serde_json::Value,
+    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError>;
 
-    /// Atomically transfer start-time artifact protection to the registered
-    /// process owner. Implementations must make replay idempotent.
-    async fn transfer_start_artifacts(
+    /// Apply a resolved cleanup to the engine's own artifact store. An engine
+    /// whose artifacts all live in a store-set port answers `Ok(())`: lashlang
+    /// names only `ArtifactStoreId::LashlangModule`, which the module port
+    /// ends. The cleanup's carries are only those under
+    /// `ArtifactStoreId::Engine` of this engine's kind.
+    async fn end_artifact_referrer(
         &self,
-        _from: &crate::ArtifactOwner,
-        _to: &crate::ArtifactOwner,
-        _payload: &serde_json::Value,
-    ) -> Result<(), crate::PluginError> {
-        Ok(())
-    }
+        cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::PluginError>;
 
-    /// Release artifacts named by a payload for one exact owner.
-    async fn release_artifacts(
+    /// Add the claim's edge to one artifact this engine's store holds,
+    /// refusing a fenced referrer with `ReferrerEnded`. Called only for names
+    /// `start_artifacts` reported under `ArtifactStoreId::Engine`, and only
+    /// after the caller armed the claim's guard with
+    /// `ArtifactCleanupLedger::arm_cleanup` (an engine store cannot write the
+    /// store set's ledger in its transaction).
+    async fn acquire_engine_artifact(
         &self,
-        _owner: &crate::ArtifactOwner,
-        _payload: &serde_json::Value,
-    ) -> Result<(), crate::PluginError> {
-        Ok(())
-    }
-
-    /// Permanently retire an execution owner and reclaim its untransferred
-    /// artifacts.
-    async fn retire_artifact_owner(
-        &self,
-        _owner: &crate::ArtifactOwner,
-    ) -> Result<(), crate::PluginError> {
-        Ok(())
-    }
+        claim: &crate::ReferrerClaim,
+        artifact_ref: &str,
+    ) -> Result<(), crate::PluginError>;
 
     /// Answer what this engine's stored artifact says about a definition
     /// reference: its authoritative signature and the signal event types the
@@ -800,6 +756,7 @@ impl ProcessEngineRegistration {
 pub struct ProcessEngineRegistry {
     engines: Arc<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: Arc<BTreeMap<String, ProcessEngineAdmission>>,
+    artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
 /// A [`ProcessEngineRegistry`] held weakly: it keeps no engine alive.
@@ -807,6 +764,7 @@ pub struct ProcessEngineRegistry {
 pub struct WeakProcessEngineRegistry {
     engines: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: std::sync::Weak<BTreeMap<String, ProcessEngineAdmission>>,
+    artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
 impl WeakProcessEngineRegistry {
@@ -816,6 +774,7 @@ impl WeakProcessEngineRegistry {
         Some(ProcessEngineRegistry {
             engines: self.engines.upgrade()?,
             admissions: self.admissions.upgrade()?,
+            artifact_ports: self.artifact_ports.clone(),
         })
     }
 }
@@ -831,7 +790,18 @@ impl ProcessEngineRegistry {
         WeakProcessEngineRegistry {
             engines: Arc::downgrade(&self.engines),
             admissions: Arc::downgrade(&self.admissions),
+            artifact_ports: self.artifact_ports.clone(),
         }
+    }
+
+    #[must_use]
+    pub fn with_artifact_ports(mut self, ports: super::ArtifactReferrerPorts) -> Self {
+        self.artifact_ports = Some(Arc::new(ports));
+        self
+    }
+
+    pub fn artifact_ports(&self) -> Option<&super::ArtifactReferrerPorts> {
+        self.artifact_ports.as_deref()
     }
 
     pub fn with_registration(self, registration: ProcessEngineRegistration) -> Self {
@@ -843,48 +813,27 @@ impl ProcessEngineRegistry {
         Self {
             engines: Arc::new(engines),
             admissions: Arc::new(admissions),
+            artifact_ports: self.artifact_ports,
         }
     }
 
-    /// Retire an execution artifact owner across every installed engine.
-    pub async fn retire_artifact_owner(
+    /// Apply one resolved cleanup to every installed engine's own store
+    /// (ADR 0113 §2.2): each engine receives the referrer and only the
+    /// carries under `ArtifactStoreId::Engine` of its own kind, and ends the
+    /// referrer in its store even when it has none to carry.
+    pub async fn end_artifact_referrer(
         &self,
-        owner: &crate::ArtifactOwner,
+        cleanup: &crate::ResolvedArtifactCleanup,
     ) -> Result<(), crate::PluginError> {
-        for engine in self.engines.values() {
-            engine.retire_artifact_owner(owner).await?;
+        for (kind, engine) in self.engines.iter() {
+            let own = crate::ResolvedArtifactCleanup::for_store(
+                &cleanup.referrer,
+                &cleanup.carries,
+                &crate::ArtifactStoreId::Engine(kind.clone()),
+            );
+            engine.end_artifact_referrer(&own).await?;
         }
         Ok(())
-    }
-
-    /// Release engine artifacts retained by one pruned process record.
-    pub async fn release_process_artifacts(
-        &self,
-        record: &crate::ProcessRecord,
-    ) -> Result<(), crate::PluginError> {
-        let crate::ProcessInput::Engine { kind, payload } = record.input.as_ref() else {
-            return Ok(());
-        };
-        self.require(kind)?
-            .release_artifacts(&crate::ArtifactOwner::process(record.id.clone()), payload)
-            .await
-    }
-
-    /// Release engine artifacts from the durable evidence Process Prune left
-    /// after deleting the full process row.
-    pub async fn release_pruned_process_artifacts(
-        &self,
-        cleanup: &crate::ProcessArtifactCleanup,
-    ) -> Result<(), crate::PluginError> {
-        let crate::ProcessInput::Engine { kind, payload } = &*cleanup.input else {
-            return Ok(());
-        };
-        self.require(kind)?
-            .release_artifacts(
-                &crate::ArtifactOwner::process(cleanup.process_id.clone()),
-                payload,
-            )
-            .await
     }
 
     /// This is the single enforcement point for unique engine kinds across everything

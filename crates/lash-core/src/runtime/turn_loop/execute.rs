@@ -325,7 +325,7 @@ impl LashRuntime {
             },
             scoped_effect_controller,
             local_stop,
-            initial_admissions,
+            mut initial_admissions,
             drive_fence,
         } = context;
         let turn_observer = logical_observer.for_turn(&trace_turn_id);
@@ -399,7 +399,15 @@ impl LashRuntime {
                 turn_graph_appends,
                 observer,
             }))
-            .await;
+            .await
+            .map(|mut execution| {
+                execution.withheld_terminal_work =
+                    initial_admissions.take_follow_on_work(matches!(
+                        execution.turn.outcome,
+                        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
+                    ));
+                execution
+            });
         }
         // `prepare_turn_preamble` has returned and dropped its read-view frame
         // before this clone, avoiding a transient second graph owner.
@@ -438,6 +446,10 @@ impl LashRuntime {
             })?;
         let finish_scoped_effect_controller = scoped_effect_controller.clone();
         let turn_cancel_peek_controller = &finish_scoped_effect_controller;
+        // Work an earlier turn of the logical run withheld for the run's
+        // follow-on: this turn's commit carries it on with its own, or hands
+        // it to a cancellation (FIG-4044).
+        let carried_withheld = initial_admissions.withheld_terminal_work.take();
         let session = self
             .session
             .take()
@@ -515,7 +527,10 @@ impl LashRuntime {
                 if let Some(evidence) = honoured {
                     driver.record_turn_cancel(evidence);
                     let cancellation_messages = driver.turn_pipeline.message_sequence();
-                    let driver = driver.reclaim();
+                    let mut driver = driver.reclaim();
+                    driver
+                        .withheld_terminal_work
+                        .carry_earlier(carried_withheld);
                     self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
                     return Box::pin(self.finish_cancelled_turn_after_effect_abort(
                         CancelledTurnFinishContext {
@@ -567,6 +582,7 @@ impl LashRuntime {
             mut withheld_terminal_work,
             turn_cancel,
         } = driver;
+        withheld_terminal_work.carry_earlier(carried_withheld);
         let mut pending_admissions =
             LogicalTurnAdmissions::new(pending_queued, pending_turn_inputs)
                 .with_withheld_terminal_work(withheld_terminal_work.take_if_any())

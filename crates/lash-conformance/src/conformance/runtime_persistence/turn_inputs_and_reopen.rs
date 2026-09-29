@@ -251,7 +251,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
         crate::CheckpointKind::AfterWork,
         "suffix-active-turn:step",
         10,
-        crate::testing::queued_work_claim_policy(10),
+        crate::testing::queued_work_admission_policy(10),
     )
     .await
     .expect("admit the suffix active input");
@@ -334,7 +334,9 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
             .iter()
             .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
-        vec![second.input_id.as_str()]
+        // The input the checkpoint accepted stays listed, bound to its root,
+        // until that root settles or releases it (FIG-4044).
+        vec![second.input_id.as_str(), active_claimed.input_id.as_str()]
     );
 }
 
@@ -520,7 +522,7 @@ pub async fn a_checkpoint_admission_rerun_returns_its_own_rows(store: Arc<dyn Ru
                 crate::CheckpointKind::AfterWork,
                 STEP,
                 10,
-                crate::testing::queued_work_claim_policy(10),
+                crate::testing::queued_work_admission_policy(10),
             )
             .await
             .expect("admit at the checkpoint")
@@ -594,7 +596,7 @@ pub async fn accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_
         crate::CheckpointKind::AfterWork,
         "fig1511:step",
         1,
-        crate::testing::queued_work_claim_policy(1),
+        crate::testing::queued_work_admission_policy(1),
     )
     .await
     .expect("admit the active input");
@@ -620,6 +622,14 @@ pub async fn accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_
 
     // The root ends without settling the input: its terminal releases it.
     end_root(&store, &successor, IngressSettlement::new(turn.clone())).await;
+    assert_eq!(
+        store
+            .root_of_input(&session_id, &input.input_id)
+            .await
+            .expect("read the released input's root"),
+        None,
+        "a released checkpoint input stays unbound"
+    );
     let released = store
         .list_pending_turn_inputs(&session_id)
         .await
@@ -856,7 +866,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         crate::CheckpointKind::AfterWork,
         "active-turn-1:step",
         1,
-        crate::testing::queued_work_claim_policy(1),
+        crate::testing::queued_work_admission_policy(1),
     )
     .await
     .expect("admit active inputs");

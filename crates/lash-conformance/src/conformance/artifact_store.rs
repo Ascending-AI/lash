@@ -1,10 +1,9 @@
-//! Conformance for owner-bound process-execution environment storage.
+//! Conformance for referrer-bound process environment storage.
 
 use super::*;
 use pretty_assertions::assert_eq;
 
-/// A writer plus a factory that constructs a post-write handle over the same
-/// backing store.
+/// A writer and a new handle over the same durable store.
 pub struct ReopenableProcessExecutionEnvStore {
     pub open: Arc<dyn crate::ProcessExecutionEnvStore>,
     pub reopen: Arc<dyn Fn() -> Arc<dyn crate::ProcessExecutionEnvStore> + Send + Sync>,
@@ -17,10 +16,21 @@ fn sample_env_spec() -> crate::ProcessExecutionEnvSpec {
     )
 }
 
-fn execution_owner(id: &str) -> crate::ArtifactOwner {
-    crate::ArtifactOwner::execution(crate::ExecutionScope::RuntimeOperation {
-        operation_id: id.to_string(),
-    })
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture validates its setup"
+)]
+fn host_claim() -> (crate::ArtifactReferrer, crate::ReferrerClaim) {
+    let referrer = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
+    let claim = crate::ReferrerClaim::unguarded(referrer.clone()).expect("host pin claim");
+    (referrer, claim)
+}
+
+fn cleanup(referrer: crate::ArtifactReferrer) -> crate::ResolvedArtifactCleanup {
+    crate::ResolvedArtifactCleanup {
+        referrer,
+        carries: Vec::new(),
+    }
 }
 
 pub async fn process_execution_env_store_fresh_instances<F>(make: &F)
@@ -34,170 +44,167 @@ where
 
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
+    reason = "conformance law validates each store operation"
 )]
-pub async fn failed_registration_reclaims_process_env(
+pub async fn process_env_last_referrer_reclaims_bytes(
     store: Arc<dyn crate::ProcessExecutionEnvStore>,
 ) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
-    let staged = execution_owner("failed-env-registration");
+    let (first, first_claim) = host_claim();
+    let (second, second_claim) = host_claim();
     store
-        .publish_process_execution_env(&staged, &env_ref, &bytes)
+        .publish_process_execution_env(&first_claim, &env_ref, &bytes)
         .await
-        .expect("protect env before registration");
+        .expect("publish first edge");
     store
-        .retire_process_execution_env_owner(&staged)
+        .acquire_process_execution_env(&second_claim, &env_ref)
         .await
-        .expect("fence and reclaim failed registration");
-    assert!(
-        store
-            .get_process_execution_env(&env_ref)
-            .await
-            .expect("read failed-registration env")
-            .is_none()
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn process_env_owner_lifecycle(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
-    let spec = sample_env_spec();
-    let env_ref = spec.stable_ref().expect("stable env ref");
-    let bytes = spec.to_store_bytes().expect("encode env spec");
-    let first = crate::ArtifactOwner::host("env-host-a");
-    let second = crate::ArtifactOwner::host("env-host-b");
-
+        .expect("acquire second edge");
     store
-        .publish_process_execution_env(&first, &env_ref, &bytes)
+        .end_process_env_referrer(&cleanup(first))
         .await
-        .expect("publish env");
-    store
-        .publish_process_execution_env(&second, &env_ref, &bytes)
-        .await
-        .expect("publish second exact owner");
-    store
-        .release_process_execution_env(&first, &env_ref)
-        .await
-        .expect("release first owner");
+        .expect("end first referrer");
     assert_eq!(
         store
             .get_process_execution_env(&env_ref)
             .await
-            .expect("read second-owned env"),
+            .expect("read"),
         Some(bytes.clone())
     );
     store
-        .release_process_execution_env(&second, &env_ref)
+        .end_process_env_referrer(&cleanup(second.clone()))
         .await
-        .expect("release final owner");
+        .expect("end last referrer");
     assert_eq!(
         store
             .get_process_execution_env(&env_ref)
             .await
-            .expect("read reclaimed env"),
+            .expect("read"),
         None
     );
     store
-        .release_process_execution_env(&second, &env_ref)
+        .end_process_env_referrer(&cleanup(second))
         .await
-        .expect("repeated release is idempotent");
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn process_env_transfer_and_fence(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
-    let spec = sample_env_spec();
-    let env_ref = spec.stable_ref().expect("stable env ref");
-    let bytes = spec.to_store_bytes().expect("encode env spec");
-    let staged = execution_owner("env-transfer");
-    let process = crate::ArtifactOwner::process(crate::ProcessId::fixture("env-process"));
-    store
-        .publish_process_execution_env(&staged, &env_ref, &bytes)
-        .await
-        .expect("stage env");
-    store
-        .transfer_process_execution_env(&staged, &process, &env_ref)
-        .await
-        .expect("transfer env");
-    store
-        .transfer_process_execution_env(&staged, &process, &env_ref)
-        .await
-        .expect("replayed transfer is idempotent");
-    store
-        .retire_process_execution_env_owner(&staged)
-        .await
-        .expect("retire staging owner");
-    let retired_error = store
-        .publish_process_execution_env(&staged, &env_ref, &bytes)
-        .await
-        .expect_err("retirement must fence a late publication");
-    assert!(
-        lash_core::runtime::artifact_owner_is_permanently_retired(&retired_error),
-        "the fence refusal carries the typed retirement reason, got {retired_error}"
-    );
-    let missing_edge_error = store
-        .transfer_process_execution_env(
-            &execution_owner("env-transfer-never-staged"),
-            &process,
-            &crate::ProcessExecutionEnvRef::new("process-env:env-transfer-never-staged"),
-        )
-        .await
-        .expect_err("a transfer with neither edge present must fail");
-    assert!(
-        lash_core::runtime::artifact_staging_owner_edge_is_missing(&missing_edge_error),
-        "the missing-edge refusal carries the typed reason, got {missing_edge_error}"
-    );
-    store
-        .release_process_execution_env(&process, &env_ref)
-        .await
-        .expect("release process owner");
-    assert!(
+        .expect("replayed end");
+    assert_eq!(
         store
             .get_process_execution_env(&env_ref)
             .await
-            .expect("read reclaimed env")
-            .is_none()
+            .expect("read"),
+        None
+    );
+    let refusal = store
+        .publish_process_execution_env(&second_claim, &env_ref, &bytes)
+        .await
+        .expect_err("ended pin is fenced");
+    assert!(
+        matches!(refusal, crate::ArtifactStoreError::ReferrerEnded { referrer } if referrer == second_claim.referrer().clone())
     );
 }
 
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
+    reason = "conformance law validates each store operation"
+)]
+pub async fn process_env_carry_precedes_reclamation(
+    store: Arc<dyn crate::ProcessExecutionEnvStore>,
+) {
+    let spec = sample_env_spec();
+    let env_ref = spec.stable_ref().expect("stable env ref");
+    let bytes = spec.to_store_bytes().expect("encode env spec");
+    let (source, source_claim) = host_claim();
+    let (destination, destination_claim) = host_claim();
+    store
+        .publish_process_execution_env(&source_claim, &env_ref, &bytes)
+        .await
+        .expect("publish source");
+    let transfer = crate::ResolvedArtifactCleanup {
+        referrer: source.clone(),
+        carries: vec![crate::ArtifactCarry {
+            artifact: crate::ArtifactName {
+                store: crate::ArtifactStoreId::ProcessEnv,
+                artifact_ref: env_ref.as_str().to_owned(),
+            },
+            to: destination.clone(),
+        }],
+    };
+    for _ in 0..2 {
+        store
+            .end_process_env_referrer(&transfer)
+            .await
+            .expect("carry is idempotent");
+        assert_eq!(
+            store
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read"),
+            Some(bytes.clone())
+        );
+    }
+    let late = store
+        .acquire_process_execution_env(&source_claim, &env_ref)
+        .await
+        .expect_err("source is fenced");
+    assert!(
+        matches!(late, crate::ArtifactStoreError::ReferrerEnded { referrer } if referrer == source)
+    );
+    store
+        .end_process_env_referrer(&cleanup(destination))
+        .await
+        .expect("end destination");
+    assert_eq!(
+        store
+            .get_process_execution_env(&env_ref)
+            .await
+            .expect("read"),
+        None
+    );
+    let late = store
+        .acquire_process_execution_env(&destination_claim, &env_ref)
+        .await
+        .expect_err("destination is fenced");
+    assert!(matches!(
+        late,
+        crate::ArtifactStoreError::ReferrerEnded { .. }
+    ));
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each store operation"
 )]
 pub async fn slow_process_env_writer_is_fenced(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
-    let abandoned = execution_owner("slow-env-writer");
+    let (referrer, claim) = host_claim();
     let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
     let writer_store = Arc::clone(&store);
-    let writer_owner = abandoned.clone();
     let writer = tokio::spawn(async move {
-        resume_rx.await.expect("retirement releases slow writer");
+        resume_rx.await.expect("fence releases writer");
         writer_store
-            .publish_process_execution_env(&writer_owner, &env_ref, &bytes)
+            .publish_process_execution_env(&claim, &env_ref, &bytes)
             .await
     });
     store
-        .retire_process_execution_env_owner(&abandoned)
+        .end_process_env_referrer(&cleanup(referrer.clone()))
         .await
-        .expect("retire while writer is paused");
-    resume_tx.send(()).expect("resume slow writer");
+        .expect("end while writer is paused");
+    resume_tx.send(()).expect("resume writer");
+    let refusal = writer
+        .await
+        .expect("writer joins")
+        .expect_err("fenced writer");
     assert!(
-        writer.await.expect("slow writer joins").is_err(),
-        "a process-env writer paused across retirement must remain fenced"
+        matches!(refusal, crate::ArtifactStoreError::ReferrerEnded { referrer: ended } if ended == referrer)
     );
 }
 
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
+    reason = "conformance law validates each store operation"
 )]
 pub async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionEnvStore) {
     let ReopenableProcessExecutionEnvStore { open, reopen } = reopenable;
@@ -205,43 +212,43 @@ pub async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionE
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
-    let first = crate::ArtifactOwner::host("env-reopen-first");
-    let second = crate::ArtifactOwner::host("env-reopen-second");
-    open.publish_process_execution_env(&first, &env_ref, &bytes)
+    let (first, first_claim) = host_claim();
+    let (second, second_claim) = host_claim();
+    open.publish_process_execution_env(&first_claim, &env_ref, &bytes)
         .await
-        .expect("publish env");
-    open.publish_process_execution_env(&second, &env_ref, &bytes)
+        .expect("publish first edge");
+    open.acquire_process_execution_env(&second_claim, &env_ref)
         .await
-        .expect("publish second env owner");
-    open.release_process_execution_env(&first, &env_ref)
+        .expect("acquire second edge");
+    open.end_process_env_referrer(&cleanup(first.clone()))
         .await
-        .expect("sever first owner before reopen");
+        .expect("end first referrer");
     drop(open);
     let reopened = reopen();
     assert!(
         !std::sync::Weak::ptr_eq(&open_identity, &Arc::downgrade(&reopened)),
-        "process execution env reopen factory reused the writer handle"
+        "reopen reused the writer handle"
     );
     assert_eq!(
         reopened
             .get_process_execution_env(&env_ref)
             .await
-            .expect("get env after reopen"),
+            .expect("read"),
         Some(bytes)
     );
     reopened
-        .release_process_execution_env(&first, &env_ref)
+        .end_process_env_referrer(&cleanup(first))
         .await
-        .expect("retry interrupted owner sever after reopen");
+        .expect("retry end after reopen");
     reopened
-        .release_process_execution_env(&second, &env_ref)
+        .end_process_env_referrer(&cleanup(second))
         .await
-        .expect("release final env owner after reopen");
+        .expect("end final referrer");
     assert_eq!(
         reopened
             .get_process_execution_env(&env_ref)
             .await
-            .expect("read reclaimed env after reopen"),
+            .expect("read"),
         None
     );
 }

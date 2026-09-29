@@ -1745,6 +1745,10 @@ pub fn open_agent_frame_in_state_with_clock(
         ));
     }
     state.current_frame_node_id = Some(frame_node_id);
+    // A committed frame switch ends the frame's globals (ADR 0113 §3.1):
+    // only a `continue_as` seed, replayed from the new frame's initial nodes,
+    // carries values into it.
+    state.set_execution_state_snapshot(None);
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
     if let Some((policy, protocol_turn_options)) = state.current_agent_frame().map(|frame| {
         (

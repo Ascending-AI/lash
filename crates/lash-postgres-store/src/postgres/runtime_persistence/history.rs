@@ -1,7 +1,5 @@
 use super::*;
-use lash_core_execution::runtime::usage::{
-    SessionUsageTotals, UnreportedUsageAttempt, UsageTotalRow,
-};
+use lash_core_execution::runtime::{SessionUsageTotals, UnreportedUsageAttempt, UsageTotalRow};
 use lash_core_execution::store::{
     AnchorUnavailable, FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget,
     HistoryCursor, HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore,
@@ -649,12 +647,12 @@ impl SessionHistoryStore for PostgresStore {
         .map_err(store_sqlx_error)?;
         let mut holes_by_seq = std::collections::HashMap::<
             i64,
-            Vec<lash_core_execution::runtime::usage::UnreportedLedgerAttempt>,
+            Vec<lash_core_execution::runtime::UnreportedLedgerAttempt>,
         >::new();
         for row in holes {
             let seq: i64 = row.get("seq");
             holes_by_seq.entry(seq).or_default().push(
-                lash_core_execution::runtime::usage::UnreportedLedgerAttempt {
+                lash_core_execution::runtime::UnreportedLedgerAttempt {
                     call_id: row.get("call_id"),
                     attempt_ordinal: u32::try_from(row.get::<i64, _>("attempt_ordinal"))
                         .map_err(|_| corrupt("TokenLedgerEntry", "invalid attempt ordinal"))?,

@@ -57,6 +57,13 @@ impl lash_core::AwaitEventResolver for DefaultBindingHost {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for DefaultBindingHost {
+    async fn journal_replay(
+        &self,
+        journal: &lash_sansio::EffectJournalIdentity,
+    ) -> Result<lash_core::JournalReplay, lash_core::RuntimeError> {
+        self.0.journal_replay(journal).await
+    }
+
     fn turn_control_binding_id(&self) -> String {
         self.0.turn_control_binding_id()
     }

@@ -39,6 +39,18 @@ pub(super) fn register_native_plugin(
         .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
             vocabulary: dialect.prompt_vocabulary(),
         }))?;
+    reg.tools().provider(Arc::new(
+        lash_lashlang_runtime::register_trigger_tool_provider(dialect.artifact_store()),
+    ))?;
+    // `processes.create` compiles in its attempt and declares the module;
+    // realization publishes it (FIG-3116).
+    reg.tools().provider(Arc::new(
+        lash_lashlang_runtime::process_create_tool_provider(
+            dialect.language_id(),
+            TypescriptDialect::parse_source,
+            dialect.surface(),
+        ),
+    ))?;
     reg.tool_catalog().contribute(Arc::new(move |ctx| {
         crate::tool_catalog::validate_discovery(
             &ctx.tools,

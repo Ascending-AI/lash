@@ -31,6 +31,18 @@ impl WithheldTerminalWork {
     pub(in crate::runtime) fn take_if_any(&mut self) -> Option<Self> {
         (!self.is_empty()).then(|| std::mem::take(self))
     }
+
+    /// Put `earlier` ahead of this work: what an earlier physical turn of
+    /// the logical run withheld, which this turn carries on to the run's
+    /// follow-on together with its own (FIG-4044).
+    pub(in crate::runtime) fn carry_earlier(&mut self, earlier: Option<Self>) {
+        let Some(mut earlier) = earlier else {
+            return;
+        };
+        earlier.queued.append(&mut self.queued);
+        earlier.turn_inputs.append(&mut self.turn_inputs);
+        *self = earlier;
+    }
 }
 
 pub(super) struct PhysicalTurnExecution {
@@ -549,6 +561,8 @@ impl LashRuntime {
                     }),
             };
             if let Some((code, message, task)) = terminal {
+                // A terminal record starts no follow-on: work an earlier turn
+                // withheld for one is handed back open by its commit.
                 let terminal = Box::pin(self.finish_logical_turn_error(LogicalTurnErrorContext {
                     code,
                     message,
@@ -556,7 +570,7 @@ impl LashRuntime {
                     delivered_task: Some(task),
                     sinks: TurnSinks { observer },
                     scoped_effect_controller: turn_effect_controller,
-                    admissions,
+                    admissions: admissions.with_follow_on_allowed(false),
                     drive_fence,
                 }))
                 .await;
@@ -716,7 +730,13 @@ impl LashRuntime {
                 }
                 let (input, options) = follow_on_input(&owed, follow_turn_context.clone());
                 start = LogicalTurnStart::Input(input, options);
-                admissions = LogicalTurnAdmissions::new(Vec::new(), Vec::new());
+                // Work an earlier turn withheld at its terminal checkpoint
+                // still waits for its FIG-3157 follow-on, which runs after
+                // the frame's. The frame's turn carries it: its commit owes
+                // that follow-on too, so it neither settles the rows nor
+                // ends the root that holds them (FIG-4044).
+                admissions = LogicalTurnAdmissions::new(Vec::new(), Vec::new())
+                    .with_withheld_terminal_work(carried_withheld.take());
                 continue;
             }
             // FIG-3157: the turn ended on its committed answer. Work it
