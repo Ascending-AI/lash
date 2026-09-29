@@ -414,10 +414,10 @@ mod tests {
 
     use lash_core::store::RuntimeCommit;
     use lash_core::{
-        DeploymentStore as _, PluginState, ProcessAwaitOutput, ProcessCompletionAuthority,
-        ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType,
-        ProcessValueSelector, ProcessWakeSpec, ProjectionWatermark, RuntimeSessionState,
-        SessionRelation, SessionStoreCreateRequest, ToolState,
+        PluginState, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
+        ProcessEventSemanticsSpec, ProcessEventType, ProcessValueSelector, ProcessWakeSpec,
+        ProjectionWatermark, RuntimeSessionState, SessionCatalogStore as _, SessionRelation,
+        SessionStoreCreateRequest, ToolState,
     };
 
     use super::*;
@@ -626,8 +626,8 @@ mod tests {
             .expect("SQLite memory store set");
         let factory =
             ObservedSessionStoreFactory::new(backend.session_store_factory(), collector.clone());
-        let store = factory
-            .create_store(&SessionStoreCreateRequest {
+        factory
+            .admit_session(&SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("mutation-session"),
@@ -636,6 +636,9 @@ mod tests {
             })
             .await
             .expect("create observed store");
+        let store =
+            lash_core::SessionStore::new(Arc::new(factory), SessionId::from("mutation-session"))
+                .expect("valid session id");
         let mut state = RuntimeSessionState {
             session_id: SessionId::from("mutation-session"),
             turn_index: 1,

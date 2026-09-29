@@ -23,9 +23,7 @@ async fn memory_factory() -> RuntimePerfStoreFactory {
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open a SQLite memory store set");
-    RuntimePerfStoreFactory::decorating_without_commit_measurement(Arc::new(
-        stores.open_store().await.expect("open the SQLite catalog"),
-    ))
+    RuntimePerfStoreFactory::decorating_without_commit_measurement(stores.session_store_factory())
 }
 
 #[tokio::test]

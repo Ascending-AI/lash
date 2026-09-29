@@ -17,8 +17,8 @@ use lash_core::runtime::recovery_lease::RecoveryDuties;
 use lash_core::store::ingress_obligation::ingress_obligation_id;
 use lash_core::store::{ObligationKind, ObligationLedger, ObligationState, StallReason};
 use lash_core::{
-    DeploymentStore as _, InputId, RuntimeStore, SessionDriver, SessionId, SessionWorkEngine,
-    StoreSet as _,
+    InputId, RuntimeStore, SessionCatalogStore as _, SessionDriver, SessionId, SessionStore,
+    SessionWorkEngine, StoreSet as _,
 };
 
 use crate::clock::SimClock;
@@ -99,9 +99,9 @@ async fn world() -> World {
             .expect("sim memory store set"),
     );
     let session = SessionId::from("ingress-bound");
-    let store = stores
-        .session_store_factory()
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    let factory = stores.session_store_factory();
+    factory
+        .admit_session(&lash_core::SessionStoreCreateRequest {
             session_id: session.clone(),
             relation: lash_core::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
@@ -110,6 +110,7 @@ async fn world() -> World {
         })
         .await
         .expect("create the session");
+    let store: Arc<dyn RuntimeStore> = factory;
     let engine = Arc::new(Engine {
         clock: clock.clone(),
         asks: Mutex::new(Vec::new()),
@@ -143,9 +144,11 @@ impl World {
     /// Accept `text` through the producer: its admission, then its
     /// immediate delivery.
     async fn accept(&self, text: &str) -> InputId {
+        let view = SessionStore::new(Arc::clone(&self.store), self.session.clone())
+            .expect("valid session id");
         self.ops
             .enqueue_turn_input(
-                &self.store,
+                &view,
                 lash_core::TurnInput::text(text),
                 lash_core::TurnInputIngress::NextTurn,
                 None,

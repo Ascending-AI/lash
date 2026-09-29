@@ -853,11 +853,7 @@ async fn run_once_inner(
 
     Ok(run.finish(RunTail {
         session_nodes: state.session_graph.nodes.len(),
-        active_path_messages: state
-            .read_view()
-            .expect("runtime frame scope resolves")
-            .messages()
-            .len(),
+        active_path_messages: state.read_view().messages().len(),
         extra_counters: std::mem::take(&mut extra_counters.lock_recover()),
         metric_samples,
         metric_samples_ms,

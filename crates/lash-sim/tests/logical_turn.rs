@@ -376,19 +376,15 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .pending_turn_inputs()
         .await
         .expect("pending inputs at switch commit");
-    let head_store = lash_core::SessionStoreFactory::open_existing_store_by_id(
-        lash::Backend::session_store_factory(&engine.backend()).as_ref(),
+    let catalog = lash::Backend::session_store_factory(&engine.backend());
+    let owed_at_commit = lash_core::store::SessionCommitStore::load_session_head_meta(
+        catalog.as_ref(),
         &SessionId::from("logical-turn-sim"),
     )
     .await
-    .expect("open the sim session store")
-    .expect("the sim session exists");
-    let owed_at_commit =
-        lash_core::store::SessionCommitStore::load_session_head_meta(head_store.as_ref())
-            .await
-            .expect("head at switch commit")
-            .expect("the switch committed a head")
-            .pending_follow_on;
+    .expect("head at switch commit")
+    .expect("the switch committed a head")
+    .pending_follow_on;
     let inbound_completed = pending_at_commit
         .iter()
         .all(|input| input.input.input_id != *first.input_id());
@@ -995,7 +991,7 @@ fn withheld_wake(session_id: &SessionId) -> lash_core::runtime::QueuedWorkBatchD
 async fn terminal_checkpoint_withheld_claim_is_traced_once() {
     let engine = sim_engine().await;
     let backend = engine.backend();
-    let factory: Arc<dyn lash_core::SessionStoreFactory> =
+    let factory: Arc<dyn lash_core::DeploymentStore> =
         lash::Backend::session_store_factory(&backend);
     let trace = Arc::new(RecordingTraceSink::default());
     let calls = Arc::new(AtomicUsize::new(0));
@@ -1012,12 +1008,7 @@ async fn terminal_checkpoint_withheld_claim_is_traced_once() {
                 let session_id = session_id.clone();
                 async move {
                     if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                        let store = factory
-                            .open_existing_store_by_id(&session_id)
-                            .await
-                            .unwrap()
-                            .unwrap();
-                        store
+                        factory
                             .enqueue_queued_work(withheld_wake(&session_id))
                             .await
                             .unwrap();

@@ -435,11 +435,7 @@ pub(super) async fn run_once_trace_jsonl(
 
     Ok(run.finish(RunTail {
         session_nodes: state.session_graph.nodes.len(),
-        active_path_messages: state
-            .read_view()
-            .expect("runtime frame scope resolves")
-            .messages()
-            .len(),
+        active_path_messages: state.read_view().messages().len(),
         extra_counters: trace_counters,
         phase_profile: Some(phase_profile),
         total_alloc: Some(total_alloc),

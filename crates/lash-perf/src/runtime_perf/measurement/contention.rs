@@ -527,11 +527,7 @@ pub(crate) async fn run_once_writer_contention(
             std::slice::from_ref(&turn),
         ),
         session_nodes: state.session_graph.nodes.len(),
-        active_path_messages: state
-            .read_view()
-            .expect("runtime frame scope resolves")
-            .messages()
-            .len(),
+        active_path_messages: state.read_view().messages().len(),
         extra_counters: BTreeMap::from([
             ("writer_contention.workers".to_string(), workers as u64),
             ("writer_contention.operation_kinds".to_string(), 3),
@@ -720,11 +716,7 @@ pub(crate) async fn run_once_async_process_settlement(
             std::slice::from_ref(&turn_result),
         ),
         session_nodes: state.session_graph.nodes.len(),
-        active_path_messages: state
-            .read_view()
-            .expect("runtime frame scope resolves")
-            .messages()
-            .len(),
+        active_path_messages: state.read_view().messages().len(),
         extra_counters: BTreeMap::from([
             ("async_settlement.children".to_string(), children as u64),
             (
@@ -778,7 +770,7 @@ async fn settle_durable_contention_root(
     let session_id = fence.session().clone();
     let work_identity = root.as_str().to_string();
     lash_core::facade_support::run_head_advancing_commit_attempt(
-        session_id,
+        session_id.clone(),
         work_identity,
         CancellationToken::new(),
         |admission_wait, admission_queue_depth| async move {

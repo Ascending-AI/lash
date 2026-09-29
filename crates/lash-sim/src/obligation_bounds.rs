@@ -21,13 +21,13 @@ use lash_core::engine::{
     EngineAck, EnginePage, EngineRefusal, ParkReconcileReport, ParkRecoveryWriter, RootRef,
     ScopeCloseSink, SessionControlEngine,
 };
-use lash_core::store::ControlIntentStore as _;
 use lash_core::store::{
     ControlIntent, ControlIntentId, ControlIntentState, ObligationKind, ObligationState,
     RootTerminal, StallReason,
 };
+use lash_core::store::{ControlIntentStore as _, RootStore as _};
 use lash_core::{
-    Clock, ClockWallTime as _, DeploymentStore as _, SessionId, StoreError, StoreSet, TurnId,
+    Clock, ClockWallTime as _, SessionCatalogStore as _, SessionId, StoreError, StoreSet, TurnId,
 };
 
 use crate::clock::SimClock;
@@ -155,8 +155,8 @@ impl World {
             .expect("sim memory store set");
         let factory = stores.session_store_factory();
         let session = SessionId::from(format!("obligation-bounds-{name}"));
-        let store = factory
-            .create_store(&lash_core::SessionStoreCreateRequest {
+        factory
+            .admit_session(&lash_core::SessionStoreCreateRequest {
                 session_id: session.clone(),
                 relation: lash_core::SessionRelation::Root,
                 pending_observer_intents: vec![],
@@ -166,7 +166,7 @@ impl World {
             .await
             .expect("session store");
         if root {
-            store
+            factory
                 .bind_root_inputs(&session, &TurnId::from("open-root"), &[])
                 .await
                 .expect("an open root");

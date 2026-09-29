@@ -64,7 +64,7 @@ fn seed_resident_graph(resident_nodes: usize) -> anyhow::Result<ResidentGraphFix
     // A resident graph at turn start has already served reads: its by_id /
     // active-path cache is warm, which is what makes the append's shared-cache
     // detach and the remap's by_id lookup representative.
-    graph.read_model(None).map_err(anyhow::Error::from)?;
+    graph.read_model();
     Ok(ResidentGraphFixture {
         resident_nodes,
         graph,
@@ -80,7 +80,7 @@ fn seed_resident_graph(resident_nodes: usize) -> anyhow::Result<ResidentGraphFix
 /// structures real append-only use produces.
 fn seed_growth_graph(resident_nodes: usize) -> anyhow::Result<ResidentGraphFixture> {
     let mut graph = lash_core::SessionGraph::default();
-    graph.read_model(None).map_err(anyhow::Error::from)?;
+    graph.read_model();
     for index in 0..resident_nodes {
         graph.append_message(checkpoint_message(
             format!("growth-msg-{resident_nodes}-{index}"),
@@ -94,7 +94,7 @@ fn seed_growth_graph(resident_nodes: usize) -> anyhow::Result<ResidentGraphFixtu
     }
     // Fold the appended read-model tail: a resident graph at turn start
     // holds a materialized read model, not N pending records.
-    let _ = graph.read_model(None).map_err(anyhow::Error::from)?;
+    let _ = graph.read_model();
     Ok(ResidentGraphFixture {
         resident_nodes,
         graph,
@@ -270,8 +270,7 @@ pub(super) async fn run_once_resident_graph_append_curve(
                             );
                             let read = fixture
                                 .graph
-                                .read_model(None)
-                                .map_err(anyhow::Error::from)?;
+                                .read_model();
                             std::hint::black_box(read.messages.len());
                             Ok(())
                         },

@@ -549,11 +549,7 @@ mod tests {
             GenerationOptionOutcome::SuppressedProtocolOwned
         );
 
-        let read_view = turn
-            .result
-            .state
-            .read_view()
-            .expect("runtime frame scope resolves");
+        let read_view = turn.result.state.read_view();
         assert_eq!(
             read_view.messages().len(),
             1,
