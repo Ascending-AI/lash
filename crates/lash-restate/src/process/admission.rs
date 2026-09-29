@@ -84,7 +84,13 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
 /// change, so one lands by bumping this epoch, which changes the build's
 /// generation and keeps the old journal replaying only under its own build.
 /// The bump guard pins the handler prefix steps below.
+#[cfg(not(feature = "synthetic-next"))]
 pub const JOURNAL_LOGIC_EPOCH: u32 = 1;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
+/// its generation lanes differ from N's.
+#[cfg(feature = "synthetic-next")]
+pub const JOURNAL_LOGIC_EPOCH: u32 = 2;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

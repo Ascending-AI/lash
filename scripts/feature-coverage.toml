@@ -391,6 +391,24 @@ commands = [
   ["cargo", "check", "-p", "lash-perf", "--all-targets", "--no-default-features", "--features", "dhat-heap", "--locked"],
 ]
 
+# Phase A's synthetic N+1 (ADR 0115 §6): `lash-upgrade-harness` forwards
+# `synthetic-next` to the crates whose blocks it moves, and `just e2e-rolling`
+# builds the node binary both ways.
+[[lane]]
+name = "upgrade-harness-synthetic-next"
+features = [
+  "lash-upgrade-harness/synthetic-next:on",
+  "lash-upgrade-harness/synthetic-next:off",
+  "lash-internal-restate/synthetic-next:on",
+  "lash-internal-restate/synthetic-next:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-restate", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-restate", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-upgrade-harness", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-upgrade-harness", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+]
+
 [[lane]]
 name = "regress-stable-features"
 features = [

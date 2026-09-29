@@ -39,6 +39,7 @@ members = [
     "crates/lash-sim",
     "crates/lash-subagents",
     "crates/lash-perf",
+    "crates/lash-upgrade-harness",
     "crates/lash-regress",
     "crates/lashlang",
     "crates/lash-typescript",

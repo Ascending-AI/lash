@@ -2954,6 +2954,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-upgrade-harness"
+version = "0.0.0-dev"
+dependencies = [
+ "anyhow",
+ "clap",
+ "lash-internal-core",
+ "lash-internal-core-store",
+ "lash-internal-postgres-store",
+ "lash-internal-remote-protocol",
+ "lash-internal-restate",
+ "lash-runtime",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "lashctl"
 version = "0.0.0-dev"
 dependencies = [

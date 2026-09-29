@@ -340,6 +340,56 @@ latency-gate:
     exit "$status"
   fi
 
+# Phase A's rolling upgrade (ADR 0115 §6, FIG-3805): head built twice, N
+# (the default build) and N+1 (the `synthetic-next` feature), run as separate
+# `lash-upgrade-node` processes over real PostgreSQL, a SQLite store directory
+# and one live `restate-server`: migrate, half roll, rollback and roll, every
+# turn answered and each named build driving the turns it must. Drain, retire
+# and finalize join the choreography as `lashctl` (L6) and finalize land; the
+# `phase_a` legs wait for their lanes. `LASH_POSTGRES_DATABASE_URL` reuses a
+# database the caller provides; otherwise a throwaway pg16 container serves
+# the run. Evidence (the step report and every node's log) lands under the
+# artifact directory, which `runbooks/rolling-upgrade/` judges.
+e2e-rolling:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd "{{repo}}"
+  artifacts="${LASH_E2E_ROLLING_ARTIFACT_DIR:-target/functional-e2e-artifacts/e2e-rolling}"
+  case "$artifacts" in
+    /*) ;;
+    *) artifacts="{{repo}}/$artifacts" ;;
+  esac
+  rm -rf "$artifacts"
+  mkdir -p "$artifacts/bin/n" "$artifacts/bin/n+1"
+  target="${CARGO_TARGET_DIR:-{{repo}}/target}"
+  case "$target" in
+    /*) ;;
+    *) target="{{repo}}/$target" ;;
+  esac
+
+  # Two builds of one tree share the binary's path in one target directory,
+  # so each is copied out before the next one builds.
+  cargo build --locked -p lash-upgrade-harness --bin lash-upgrade-node --features synthetic-next
+  cp "$target/debug/lash-upgrade-node" "$artifacts/bin/n+1/lash-upgrade-node"
+  cargo build --locked -p lash-upgrade-harness --bin lash-upgrade-node
+  cp "$target/debug/lash-upgrade-node" "$artifacts/bin/n/lash-upgrade-node"
+  cargo test --locked -p lash-upgrade-harness --test rolling --no-run
+
+  export LASH_UPGRADE_NODE_N="$artifacts/bin/n/lash-upgrade-node"
+  export LASH_UPGRADE_NODE_NEXT="$artifacts/bin/n+1/lash-upgrade-node"
+  export LASH_E2E_ROLLING_ARTIFACT_DIR="$artifacts"
+  run=(
+    python3 scripts/ci/restate_suite.py serve --name e2e-rolling
+      --keep-log "$artifacts/restate-server.log"
+      -- cargo test --locked -p lash-upgrade-harness --test rolling
+      -- --ignored --exact roll_and_rollback_smoke --nocapture
+  )
+  if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
+    "${run[@]}"
+  else
+    scripts/ci/with-service.sh pg16 -- "${run[@]}"
+  fi
+
 agent-workbench-attachment-usage-gate port='3030':
   bash "{{repo}}/scripts/agent-workbench-attachment-usage-gate.sh" "{{port}}"
 

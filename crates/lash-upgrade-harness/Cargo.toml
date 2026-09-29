@@ -1,0 +1,49 @@
+[package]
+name = "lash-upgrade-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Phase A's synthetic N+1 harness (ADR 0115 §6): two builds of one tree rolled, rolled back and rolled again over real stores and a real Restate server. Not shipped."
+
+[features]
+# The synthetic N+1 build (ADR 0115 §6). It moves the constants whose
+# `synthetic-next` blocks sit beside them in the crates it forwards to. No
+# production build enables it.
+synthetic-next = ["lash-restate/synthetic-next"]
+
+[lib]
+name = "lash_upgrade_harness"
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "lash-upgrade-node"
+path = "src/bin/lash-upgrade-node.rs"
+
+[[test]]
+name = "phase_a"
+path = "tests/phase_a/main.rs"
+
+[[test]]
+name = "rolling"
+path = "tests/rolling/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+lash = { workspace = true, features = ["restate", "sqlite"] }
+lash-core = { workspace = true, features = ["testing"] }
+lash-core-store = { workspace = true }
+lash-postgres-store = { workspace = true }
+lash-remote-protocol = { workspace = true }
+lash-restate = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", "signal", "time"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

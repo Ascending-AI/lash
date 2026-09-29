@@ -153,6 +153,7 @@ jobs:
       functional_e2e: ${{ steps.classify.outputs.functional_e2e }}
       workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
       restate_suites: ${{ steps.classify.outputs.restate_suites }}
+      rolling_upgrade: ${{ steps.classify.outputs.rolling_upgrade }}
       feature_lanes: ${{ steps.classify.outputs.feature_lanes }}
       workbench: ${{ steps.classify.outputs.workbench }}
       regress: ${{ steps.classify.outputs.regress }}

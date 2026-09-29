@@ -13,6 +13,12 @@ description = "Restate durable execution adapter for Lash runtime effects"
 name = "lash_restate"
 doctest = false
 
+[features]
+# Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
+# constants it moves. Only lash-upgrade-harness enables it; no production
+# build does.
+synthetic-next = []
+
 [lints]
 workspace = true
 
