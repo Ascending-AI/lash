@@ -290,7 +290,7 @@ fn rlm_prompt_history_finish_final_value_keeps_reasoning_prose_and_code_exact() 
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish(\"done\");",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("done")),
+                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("done").into()),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -315,7 +315,7 @@ fn rlm_prompt_history_reasoning_part_is_preserved_in_trajectory() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish(\"Hi.\");",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("Hi.")),
+                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("Hi.").into()),
             }),
             ..RlmProtocolExpectations::default()
         })

@@ -513,6 +513,16 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
                 identity.tag(1);
                 push_attachment_source(identity, source);
             }
+            // A retained output is its witness and the reference to its
+            // bytes, never the bytes (FIG-1643).
+            lash_sansio::ModelToolReturnPart::Retained(lash_sansio::RetainedOutput {
+                reference,
+                witness,
+            }) => {
+                identity.tag(2);
+                push_attachment_ref(identity, reference);
+                identity.string(witness);
+            }
         }),
         None => identity.string(&part.content()),
     }

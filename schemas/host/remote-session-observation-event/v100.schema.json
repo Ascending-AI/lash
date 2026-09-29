@@ -1904,7 +1904,7 @@
       ]
     },
     "RemoteToolResultBlock": {
-      "description": "One ordered block of a tool result: text, or an attachment at the position the tool's value placed it.",
+      "description": "One ordered block of a tool result: text, an attachment at the position the tool's value placed it, or output retained out of history: the bounded witness shown in its place and the attachment holding it whole.",
       "oneOf": [
         {
           "properties": {
@@ -1939,6 +1939,28 @@
           "required": [
             "source",
             "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reference": {
+              "$ref": "#/definitions/RemoteAttachmentRef"
+            },
+            "type": {
+              "enum": [
+                "retained"
+              ],
+              "type": "string"
+            },
+            "witness": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reference",
+            "type",
+            "witness"
           ],
           "type": "object"
         }

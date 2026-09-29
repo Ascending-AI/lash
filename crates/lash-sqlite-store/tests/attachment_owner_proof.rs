@@ -40,6 +40,18 @@ lash_conformance::attachment_owner_degraded_tests!({
     (dir, catalog, attachments)
 });
 
+lash_conformance::retained_output_reclamation_tests!({
+    let dir = tempfile::tempdir().unwrap();
+    let catalog = Arc::new(SqliteStore::open(dir.path()).await.unwrap())
+        as Arc<dyn lash_core_execution::DeploymentStore>;
+    let attachments = Arc::new(
+        lash_core_execution::facade_support::FileAttachmentStore::new(
+            dir.path().join("attachments"),
+        ),
+    ) as Arc<dyn lash_core_execution::AttachmentStore>;
+    (dir, catalog, attachments)
+});
+
 #[tokio::test]
 async fn attachment_constructors_warn_exactly_once_with_fields() {
     for path in [

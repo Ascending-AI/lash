@@ -732,7 +732,7 @@ impl ModelStore {
                 let response = lash_core::ExecResponse {
                     observations: vec![lash_core::Observation {
                         text: output.clone(),
-                        value: serde_json::json!(output),
+                        value: lash_core::OutputValue::Inline(serde_json::json!(output)),
                         projection: Default::default(),
                     }],
                     calls: Vec::new(),
@@ -748,6 +748,7 @@ impl ModelStore {
                         "output": output,
                         "exit_code": exit_code,
                     })),
+                    terminal_finish_retained: None,
                 };
                 let outcome = lash_core::RuntimeEffectOutcome::ExecCode {
                     result: Box::new(Ok(response)),

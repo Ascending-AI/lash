@@ -1,6 +1,6 @@
 {
   "scenario": "lashlang-effect-summary",
-  "recorded_at_git_sha": "3ca3392558e128dbbe96c9b683a1d36e7c4dd04f",
+  "recorded_at_git_sha": "3d5f8d35636d4aa52cd738647e02c281b2c7371f",
   "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
   "records": {
     "lash:lashlang:v2:process:34:p_00000000000070008000000000000001:lk2:0000000000:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:attempt:1": {
@@ -42,8 +42,8 @@
     },
     "lash:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:present": {
       "envelope": {
-        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:present\"},\"effect_id\":\"tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:present\"},\"command\":{\"type\":\"present_tool_result\",\"call_id\":\"tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e\",\"tool_id\":\"tool:recovery_count\",\"tool_name\":\"recovery_count\",\"render\":{\"renderer_id\":\"lash.tool.v1\",\"params\":{\"defaults\":{\"authored_view\":\"prefer\",\"head_share_percent\":50,\"max_lines\":400,\"retain_full_output\":true,\"value\":{\"array_head\":3,\"array_tail\":2,\"array_threshold\":10,\"indent\":2,\"layout\":\"auto\",\"line_width\":80,\"max_chars\":16000,\"max_depth\":3,\"min_item_chars\":80,\"stack_head\":3,\"stack_tail\":1}},\"per_tool\":{}}},\"args\":{\"line\":\"summary\"},\"output\":{\"outcome\":{\"status\":\"success\",\"payload\":{\"$lash_tool_value\":\"untrusted_json\",\"value\":{\"executed\":1,\"line\":\"summary\"}}}}}}",
-        "hash": "a4b2cd2c4da6c4b70f68606eb9d546951a5389c561cea6ed1d73ed8afb042464"
+        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:present\"},\"effect_id\":\"tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:present\"},\"command\":{\"type\":\"present_tool_result\",\"call_id\":\"tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e\",\"tool_id\":\"tool:recovery_count\",\"tool_name\":\"recovery_count\",\"render\":{\"renderer_id\":\"lash.tool.v1\",\"params\":{\"defaults\":{\"authored_view\":\"prefer\",\"head_share_percent\":50,\"max_lines\":400,\"value\":{\"array_head\":3,\"array_tail\":2,\"array_threshold\":10,\"indent\":2,\"layout\":\"auto\",\"line_width\":80,\"max_chars\":16000,\"max_depth\":3,\"min_item_chars\":80,\"stack_head\":3,\"stack_tail\":1}},\"per_tool\":{}}},\"args\":{\"line\":\"summary\"},\"output\":{\"outcome\":{\"status\":\"success\",\"payload\":{\"$lash_tool_value\":\"untrusted_json\",\"value\":{\"executed\":1,\"line\":\"summary\"}}}}}}",
+        "hash": "4e14a94532afda502e4799a33a4ddc725e47fe03c4e07f8a0bed3a6bceebe217"
       },
       "outcome": {
         "Ok": {
@@ -58,6 +58,10 @@
                   "text": "{\"executed\": 1, \"line\": \"summary\"}"
                 }
               ]
+            },
+            "retention": {
+              "inline_limit_bytes": 65536,
+              "witness_bytes": 4096
             }
           }
         }

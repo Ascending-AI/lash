@@ -851,7 +851,9 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
                     code: "durable.tool_projection()".to_string(),
                     output: vec![lash_rlm_types::RlmPrint {
                         text: "durable projection".to_string(),
-                        value: serde_json::json!("durable projection"),
+                        value: lash::attachments::OutputValue::Inline(serde_json::json!(
+                            "durable projection"
+                        )),
                     }],
                     calls: vec![
                         lash::persistence::ExecutedCallRecord {

@@ -181,11 +181,11 @@ fn rlm_exec_error_max_turn_stop_execution() -> Result<Value, FixedScriptRunnerEr
         None,
         vec![
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block("missing_name"))]),
-            RlmContractStep::Exec(rlm_exec_response(
+            RlmContractStep::Exec(Box::new(rlm_exec_response(
                 &[],
                 Some("unknown binding `missing_name`"),
                 None,
-            )),
+            ))),
         ],
     )
 }
@@ -210,7 +210,11 @@ fn rlm_typed_finish_emits_outcome_and_done_execution() -> Result<Value, FixedScr
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
                 "finish({ ok: true });",
             ))]),
-            RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!({ "ok": true })))),
+            RlmContractStep::Exec(Box::new(rlm_exec_response(
+                &[],
+                None,
+                Some(json!({ "ok": true })),
+            ))),
             RlmContractStep::Checkpoint,
         ],
     )
@@ -250,7 +254,7 @@ fn rlm_cell_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerErro
                 rlm_reasoning_part("Checking state."),
                 rlm_text_part(&rlm_typescript_block_with_prose("Ready.", "print(\"hi\");")),
             ]),
-            RlmContractStep::Exec(rlm_exec_response(&["hi\n"], None, None)),
+            RlmContractStep::Exec(Box::new(rlm_exec_response(&["hi\n"], None, None))),
         ],
     )
 }
@@ -282,7 +286,7 @@ fn rlm_lashlang_cell_exec_continues_execution() -> Result<Value, FixedScriptRunn
                 "Quick check.\n",
                 "print(\"hi\");",
             ))]),
-            RlmContractStep::Exec(rlm_exec_response(&["hi\n"], None, None)),
+            RlmContractStep::Exec(Box::new(rlm_exec_response(&["hi\n"], None, None))),
             RlmContractStep::Checkpoint,
         ],
     )
@@ -301,7 +305,7 @@ fn rlm_streamed_lashlang_cell_exec_persists_trajectory_execution()
                 "Streaming check.\n",
                 "print(\"streamed\");",
             ))]),
-            RlmContractStep::Exec(rlm_exec_response(&["streamed\n"], None, None)),
+            RlmContractStep::Exec(Box::new(rlm_exec_response(&["streamed\n"], None, None))),
             RlmContractStep::Checkpoint,
         ],
     )
@@ -318,7 +322,7 @@ fn rlm_empty_options_natural_default_execution() -> Result<Value, FixedScriptRun
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
                 "finish(\"done\");",
             ))]),
-            RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!("done")))),
+            RlmContractStep::Exec(Box::new(rlm_exec_response(&[], None, Some(json!("done"))))),
             RlmContractStep::Checkpoint,
         ],
     )
@@ -335,7 +339,7 @@ fn rlm_exec_result_no_tool_call_replay_execution() -> Result<Value, FixedScriptR
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
                 "const x = await tools.read_file({ path: \"foo\" });",
             ))]),
-            RlmContractStep::Exec(rlm_exec_response_with_tool_calls(
+            RlmContractStep::Exec(Box::new(rlm_exec_response_with_tool_calls(
                 &[],
                 None,
                 None,
@@ -345,7 +349,7 @@ fn rlm_exec_result_no_tool_call_replay_execution() -> Result<Value, FixedScriptR
                     json!({ "path": "foo" }),
                     lash_core::ToolCallOutput::success(json!("contents")),
                 )],
-            )),
+            ))),
         ],
     )
 }
@@ -369,7 +373,7 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
                 "const x = await tools.custom_frame_switch({});",
             ))]),
-            RlmContractStep::Exec(rlm_exec_response_with_tool_calls(
+            RlmContractStep::Exec(Box::new(rlm_exec_response_with_tool_calls(
                 &[],
                 None,
                 None,
@@ -386,7 +390,7 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
                         },
                     ),
                 )],
-            )),
+            ))),
             RlmContractStep::Checkpoint,
         ],
     )
@@ -403,7 +407,7 @@ fn rlm_exec_tool_control_fail_terminal_execution() -> Result<Value, FixedScriptR
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
                 "const x = await tools.custom_fail({});",
             ))]),
-            RlmContractStep::Exec(rlm_exec_response_with_tool_calls(
+            RlmContractStep::Exec(Box::new(rlm_exec_response_with_tool_calls(
                 &[],
                 None,
                 None,
@@ -421,7 +425,7 @@ fn rlm_exec_tool_control_fail_terminal_execution() -> Result<Value, FixedScriptR
                         },
                     ),
                 )],
-            )),
+            ))),
             RlmContractStep::Checkpoint,
         ],
     )
@@ -438,7 +442,11 @@ fn rlm_natural_allows_finish_value_execution() -> Result<Value, FixedScriptRunne
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
                 "finish({ ok: true });",
             ))]),
-            RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!({ "ok": true })))),
+            RlmContractStep::Exec(Box::new(rlm_exec_response(
+                &[],
+                None,
+                Some(json!({ "ok": true })),
+            ))),
             RlmContractStep::Checkpoint,
         ],
     )
@@ -463,11 +471,11 @@ fn rlm_typed_schema_mismatch_repair_loop_execution() -> Result<Value, FixedScrip
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
                 "finish({ missing: true });",
             ))]),
-            RlmContractStep::Exec(rlm_exec_response(
+            RlmContractStep::Exec(Box::new(rlm_exec_response(
                 &[],
                 None,
                 Some(json!({ "missing": true })),
-            )),
+            ))),
             RlmContractStep::Checkpoint,
         ],
     )
@@ -489,7 +497,7 @@ fn rlm_typed_schema_any_of_mismatch_execution() -> Result<Value, FixedScriptRunn
         None,
         vec![
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block("finish(true);"))]),
-            RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!(true)))),
+            RlmContractStep::Exec(Box::new(rlm_exec_response(&[], None, Some(json!(true))))),
         ],
     )
 }
@@ -498,7 +506,7 @@ fn rlm_typed_schema_any_of_mismatch_execution() -> Result<Value, FixedScriptRunn
 pub(super) enum RlmContractStep {
     Llm(Vec<LlmOutputPart>),
     StreamedLlm(Vec<LlmOutputPart>),
-    Exec(lash_core::ExecResponse),
+    Exec(Box<lash_core::ExecResponse>),
     Checkpoint,
 }
 
@@ -654,7 +662,7 @@ pub(super) fn run_rlm_protocol_contract(
                     })?;
                 machine.handle_response(lash_core::sansio::Response::ExecResult {
                     id: exec_id,
-                    result: Ok(result),
+                    result: Ok(*result),
                 });
             }
             RlmContractStep::Checkpoint => {
@@ -810,7 +818,7 @@ fn rlm_exec_response(
             .iter()
             .map(|value| lash_core::Observation {
                 text: (*value).to_string(),
-                value: serde_json::json!(value),
+                value: lash_core::OutputValue::Inline(serde_json::json!(value)),
                 projection: Default::default(),
             })
             .collect(),
@@ -821,6 +829,7 @@ fn rlm_exec_response(
         }),
         degraded_bindings: Vec::new(),
         terminal_finish,
+        terminal_finish_retained: None,
     }
 }
 
@@ -847,7 +856,7 @@ fn rlm_exec_response_with_tool_calls(
             .iter()
             .map(|value| lash_core::Observation {
                 text: (*value).to_string(),
-                value: serde_json::json!(value),
+                value: lash_core::OutputValue::Inline(serde_json::json!(value)),
                 projection: Default::default(),
             })
             .collect(),
@@ -858,6 +867,7 @@ fn rlm_exec_response_with_tool_calls(
         }),
         degraded_bindings: Vec::new(),
         terminal_finish,
+        terminal_finish_retained: None,
     }
 }
 

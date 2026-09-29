@@ -334,15 +334,21 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// Records a language-owned value once under a cell-scoped key. Replay
-    /// serves the stored result without invoking `run` again.
-    pub async fn journaled_language_value_with<F>(
+    /// serves the stored result without invoking `run` again, so whatever
+    /// `run` does — an attachment put included — happens on the first
+    /// execution only, and its recorded answer is what every replay reads.
+    pub async fn journaled_language_value_with<F, Fut>(
         &self,
         effect_id: String,
         operation: String,
         run: F,
     ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError>
     where
-        F: FnOnce() -> Result<serde_json::Value, crate::RuntimeEffectControllerError> + Send + 'run,
+        F: FnOnce() -> Fut + Send + 'run,
+        Fut: std::future::Future<
+                Output = Result<serde_json::Value, crate::RuntimeEffectControllerError>,
+            > + Send
+            + 'run,
     {
         // The cell replay key and causal parent identify this record. Live
         // turn indices may differ on redrive and must not change its envelope.
@@ -356,7 +362,9 @@ impl<'run> RuntimeExecutionContext<'run> {
                 ),
                 crate::RuntimeEffectLocalExecutor::language_runtime_value_with(
                     move |_| async move {
-                        Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: run()? })
+                        Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue {
+                            value: run().await?,
+                        })
                     },
                 ),
             )

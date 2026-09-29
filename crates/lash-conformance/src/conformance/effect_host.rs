@@ -641,6 +641,7 @@ where
                             error: None,
                             degraded_bindings: Vec::new(),
                             terminal_finish: Some(value),
+                            terminal_finish_retained: None,
                         })),
                     })
                 }),

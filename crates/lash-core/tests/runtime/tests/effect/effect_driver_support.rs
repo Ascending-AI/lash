@@ -70,7 +70,7 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
         Ok(lash_core::ExecResponse {
             observations: vec![lash_core::Observation {
                 text: "exec output".to_string(),
-                value: serde_json::json!("exec output"),
+                value: lash_core::OutputValue::Inline(serde_json::json!("exec output")),
                 projection: Default::default(),
             }],
             calls: Vec::new(),
@@ -78,6 +78,7 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
             error: None,
             degraded_bindings: Vec::new(),
             terminal_finish: None,
+            terminal_finish_retained: None,
         })
     }
 }

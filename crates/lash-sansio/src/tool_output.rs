@@ -1136,15 +1136,22 @@ impl ModelToolReturn {
     }
 }
 
-/// One ordered block of a tool's model-facing result: text, or an
-/// attachment at the position the tool's value placed it. The same blocks
-/// travel unchanged into the transcript's one [`crate::Part::ToolResult`]
-/// and the provider request's one tool-result block.
+/// One ordered block of a tool's model-facing result: text, an attachment
+/// at the position the tool's value placed it, or output retained out of
+/// history (FIG-1643). The same blocks travel unchanged into the
+/// transcript's one [`crate::Part::ToolResult`] and the provider request's
+/// one tool-result block.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ModelToolReturnPart {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     Attachment(AttachmentSource),
+    /// Text too long for history, retained as a session attachment. A reader
+    /// of the result sees the witness as text; the reference is never
+    /// materialized into a request, so retention never expands a prompt.
+    Retained(crate::RetainedOutput),
 }
 
 impl ModelToolReturnPart {
@@ -1152,11 +1159,31 @@ impl ModelToolReturnPart {
         Self::Text { text: text.into() }
     }
 
-    /// The attachment this block carries; `None` for text.
+    /// The attachment this block carries; `None` for text and for retained
+    /// output, whose reference is history's, not the model's.
     pub fn attachment(&self) -> Option<&AttachmentSource> {
         match self {
-            Self::Text { .. } => None,
+            Self::Text { .. } | Self::Retained(_) => None,
             Self::Attachment(source) => Some(source),
+        }
+    }
+
+    /// The retained output this block stands in for; `None` for text and
+    /// attachments.
+    pub fn retained(&self) -> Option<&crate::RetainedOutput> {
+        match self {
+            Self::Retained(retained) => Some(retained),
+            Self::Text { .. } | Self::Attachment(_) => None,
+        }
+    }
+
+    /// The text a reader of this block sees: a text block's text, a retained
+    /// block's witness, nothing for an attachment.
+    pub fn visible_text(&self) -> Option<&str> {
+        match self {
+            Self::Text { text } => Some(text),
+            Self::Retained(retained) => Some(&retained.witness),
+            Self::Attachment(_) => None,
         }
     }
 }
@@ -1187,12 +1214,16 @@ pub fn tool_result_text(content: &[ModelToolReturnPart]) -> std::borrow::Cow<'_,
     match content {
         [] => std::borrow::Cow::Borrowed(""),
         [ModelToolReturnPart::Text { text }] => std::borrow::Cow::Borrowed(text),
+        [ModelToolReturnPart::Retained(retained)] => std::borrow::Cow::Borrowed(&retained.witness),
         _ => {
             let mut attachments = 0usize;
             let lines: Vec<std::borrow::Cow<'_, str>> = content
                 .iter()
                 .map(|block| match block {
                     ModelToolReturnPart::Text { text } => std::borrow::Cow::Borrowed(text.as_str()),
+                    ModelToolReturnPart::Retained(retained) => {
+                        std::borrow::Cow::Borrowed(retained.witness.as_str())
+                    }
                     ModelToolReturnPart::Attachment(_) => {
                         attachments += 1;
                         std::borrow::Cow::Owned(format!("[Attachment {attachments}]"))

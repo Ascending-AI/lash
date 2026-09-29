@@ -56,7 +56,7 @@ fn terminal_step_event(
             images,
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Finished(final_output),
+            outcome: lash_rlm_types::CellOutcome::Finished(final_output.into()),
         },
     )))
 }

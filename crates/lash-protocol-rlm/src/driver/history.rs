@@ -617,7 +617,7 @@ pub(crate) fn step_output_text(
             }
             out.push_str(error);
         }
-        lash_rlm_types::CellOutcome::Finished(final_output) => {
+        lash_rlm_types::CellOutcome::Finished(lash_core::OutputValue::Inline(final_output)) => {
             if !out.is_empty() {
                 out.push_str("\n\n");
             }
@@ -626,6 +626,15 @@ pub(crate) fn step_output_text(
                 &serde_json::to_string_pretty(final_output)
                     .unwrap_or_else(|_| final_output.to_string()),
             );
+        }
+        // A final value too long for history is shown as its witness, never
+        // expanded (FIG-1643).
+        lash_rlm_types::CellOutcome::Finished(lash_core::OutputValue::Retained(retained)) => {
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            out.push_str("Final output:\n");
+            out.push_str(&retained.witness);
         }
         lash_rlm_types::CellOutcome::Running => {}
     }

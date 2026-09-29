@@ -204,89 +204,8 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        if !values.is_empty() {
-            let recorded = lash_core::RecordedRender::require_available(
-                seal_ctx.recorded_render(),
-                code_renderer.0.id(),
-            );
-            match recorded.and_then(|recorded| {
-                serde_json::from_value::<crate::render::ResolvedRlmRender>(recorded.params.clone())
-                    .map_err(|_| lash_core::RuntimeErrorCode::RecordedRendererUnavailable)
-            }) {
-                Ok(params) => {
-                    let renderer = code_renderer.0;
-                    let history_index = crate::projection::rlm_history_projection(
-                        seal_ctx.chronological_projection().as_ref(),
-                    )
-                    .len();
-                    let key = format!(
-                        "{}:prints",
-                        cell.identities()
-                            .namespace()
-                            .as_str()
-                            .trim_end_matches(":lk2")
-                    );
-                    let outcome = seal_ctx
-                        .journaled_language_value_with(
-                            key,
-                            format!("rlm.prints:{}", renderer.id()),
-                            move || {
-                                let mut observations = Vec::new();
-                                for value in values {
-                                    let observation = crate::render::rendered_print(
-                                        renderer.as_ref(),
-                                        &value,
-                                        &params.print,
-                                        history_index,
-                                        observations.len(),
-                                        flow_to_json_value(&value),
-                                    );
-                                    if let Some(observation) = observation {
-                                        observations.push(observation);
-                                    }
-                                }
-                                serde_json::to_value(observations).map_err(|error| {
-                                    lash_core::RuntimeEffectControllerError::new(
-                                        lash_core::RuntimeErrorCode::RecordEncodingFailed,
-                                        error.to_string(),
-                                    )
-                                })
-                            },
-                        )
-                        .await;
-                    match outcome {
-                        Ok(value) => match serde_json::from_value(value) {
-                            Ok(observations) => response.observations = observations,
-                            Err(error) => {
-                                response.error = Some(lash_core::CellFailure::new(
-                                    lash_core::CellFailureKind::Host,
-                                    error.to_string(),
-                                ))
-                            }
-                        },
-                        Err(error) => {
-                            let message = error.to_string();
-                            seal_ctx.record_nested_runtime_effect_error(error);
-                            response.error = Some(lash_core::CellFailure::new(
-                                lash_core::CellFailureKind::Host,
-                                message,
-                            ));
-                        }
-                    }
-                }
-                Err(code) => {
-                    let error = lash_core::RuntimeEffectControllerError::new(
-                        code,
-                        "recorded RLM renderer or parameters are unavailable",
-                    );
-                    let message = error.to_string();
-                    seal_ctx.record_nested_runtime_effect_error(error);
-                    response.error = Some(lash_core::CellFailure::new(
-                        lash_core::CellFailureKind::Host,
-                        message,
-                    ));
-                }
-            }
+        if !values.is_empty() || response.terminal_finish.is_some() {
+            record_cell_outputs(&seal_ctx, cell, &code_renderer, values, &mut response).await;
         }
     }
     if let Ok(cell) = cell.as_ref()
@@ -299,6 +218,205 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
         .await;
     }
     response
+}
+
+/// The journaled record of what a cell put into history (FIG-1643): its
+/// rendered prints, and for each print or the terminal value too long for
+/// history, the retention that stands in its place — under the retention
+/// policy the step read, which it records too.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecordedCellOutputs {
+    policy: lash_core::OutputRetentionPolicy,
+    observations: Vec<lash_core::Observation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    terminal_finish_retained: Option<lash_core::RetainedOutput>,
+}
+
+/// Renders the cell's prints and retains every output too long for history,
+/// once, inside one journaled step keyed under the cell (`{cell}:outputs`).
+///
+/// The step runs for every cell that printed or finished — never on whether
+/// something is oversized — so a replay under a changed policy issues the
+/// same step and is served the recorded observations, witnesses and
+/// references verbatim. A retention that fails is the step's typed
+/// `OutputRetentionFailed` error: the cell stops, and the outputs never
+/// enter history in its place.
+async fn record_cell_outputs(
+    ctx: &RuntimeExecutionContext<'_>,
+    cell: &cell_run::CellRun,
+    code_renderer: &crate::render::CodeRendererSlot,
+    values: Vec<lashlang::Value>,
+    response: &mut ExecResponse,
+) {
+    // Only prints are rendered: a cell that finished without printing needs
+    // no recorded renderer.
+    let params = if values.is_empty() {
+        None
+    } else {
+        let recorded = lash_core::RecordedRender::require_available(
+            ctx.recorded_render(),
+            code_renderer.0.id(),
+        );
+        match recorded.and_then(|recorded| {
+            serde_json::from_value::<crate::render::ResolvedRlmRender>(recorded.params.clone())
+                .map_err(|_| lash_core::RuntimeErrorCode::RecordedRendererUnavailable)
+        }) {
+            Ok(params) => Some(params),
+            Err(code) => {
+                let error = lash_core::RuntimeEffectControllerError::new(
+                    code,
+                    "recorded RLM renderer or parameters are unavailable",
+                );
+                fail_cell_on_nested_error(ctx, response, error);
+                return;
+            }
+        }
+    };
+    let renderer = Arc::clone(&code_renderer.0);
+    let history_index =
+        crate::projection::rlm_history_projection(ctx.chronological_projection().as_ref()).len();
+    let namespace = cell
+        .identities()
+        .namespace()
+        .as_str()
+        .trim_end_matches(":lk2")
+        .to_string();
+    let key = format!("{namespace}:outputs");
+    let attachments = ctx.attachment_store();
+    let terminal_finish = response.terminal_finish.clone();
+    let outcome = ctx
+        .journaled_language_value_with(
+            key.clone(),
+            format!("rlm.outputs:{}", renderer.id()),
+            move || async move {
+                let policy = attachments.output_retention();
+                let mut observations = Vec::new();
+                if let Some(params) = &params {
+                    for value in values {
+                        let observation = crate::render::rendered_print(
+                            renderer.as_ref(),
+                            &value,
+                            &params.print,
+                            history_index,
+                            observations.len(),
+                            flow_to_json_value(&value),
+                        );
+                        let Some(mut observation) = observation else {
+                            continue;
+                        };
+                        if let lash_core::OutputValue::Inline(value) = &observation.value {
+                            let label = format!("{key}:print:{}", observations.len());
+                            if let Some(retained) =
+                                retain_oversized_value(&attachments, policy, value, &label).await?
+                            {
+                                observation.value = lash_core::OutputValue::Retained(retained);
+                            }
+                        }
+                        observations.push(observation);
+                    }
+                }
+                let terminal_finish_retained = match &terminal_finish {
+                    Some(value) => {
+                        retain_oversized_value(&attachments, policy, value, &format!("{key}:final"))
+                            .await?
+                    }
+                    None => None,
+                };
+                serde_json::to_value(RecordedCellOutputs {
+                    policy,
+                    observations,
+                    terminal_finish_retained,
+                })
+                .map_err(|error| {
+                    lash_core::RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                        error.to_string(),
+                    )
+                })
+            },
+        )
+        .await;
+    match outcome {
+        Ok(value) => match serde_json::from_value::<RecordedCellOutputs>(value) {
+            Ok(recorded) => {
+                response.observations = recorded.observations;
+                response.terminal_finish_retained = recorded.terminal_finish_retained;
+            }
+            Err(error) => {
+                response.error = Some(lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Host,
+                    error.to_string(),
+                ))
+            }
+        },
+        Err(error) => fail_cell_on_nested_error(ctx, response, error),
+    }
+}
+
+/// Retains `value` when its JSON encoding is longer than `policy` allows in
+/// history: the encoding is put as a session attachment, and the answer is
+/// the witness — the encoding's first bytes and a notice naming the
+/// attachment — with its reference. `None` for a value history keeps inline.
+async fn retain_oversized_value(
+    attachments: &lash_core::facade_support::SessionAttachmentStore,
+    policy: lash_core::OutputRetentionPolicy,
+    value: &serde_json::Value,
+    label: &str,
+) -> Result<Option<lash_core::RetainedOutput>, lash_core::RuntimeEffectControllerError> {
+    let encoded = serde_json::to_string(value).map_err(|error| {
+        lash_core::RuntimeEffectControllerError::new(
+            lash_core::RuntimeErrorCode::RecordEncodingFailed,
+            error.to_string(),
+        )
+    })?;
+    if !policy.retains(encoded.len()) {
+        return Ok(None);
+    }
+    let meta = lash_core::AttachmentCreateMeta::new(
+        lash_core::MediaType::parse("application/json").map_err(|error| {
+            lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::OutputRetentionFailed,
+                format!("the retained-output media type is fixed and cannot parse: {error}"),
+            )
+        })?,
+        None,
+        Some(label.to_string()),
+    );
+    let byte_len = encoded.len();
+    let reference = attachments
+        .put(encoded.clone().into_bytes(), meta)
+        .await
+        .map_err(|error| {
+            lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::OutputRetentionFailed,
+                format!("retaining an RLM output of {byte_len} bytes failed: {error}"),
+            )
+            .retryable_uncommitted_derivation()
+        })?;
+    let notice = format!(
+        "…[value retained: {byte_len} bytes exceed the {}-byte history limit; full value: attachment {}]",
+        policy.inline_limit_bytes, reference.id
+    );
+    Ok(Some(lash_core::RetainedOutput {
+        witness: policy.witness(&encoded, &notice),
+        reference,
+    }))
+}
+
+/// Stops the cell on a nested effect's failure: the error is recorded for the
+/// turn, and the cell answers it as a host failure.
+fn fail_cell_on_nested_error(
+    ctx: &RuntimeExecutionContext<'_>,
+    response: &mut ExecResponse,
+    error: lash_core::RuntimeEffectControllerError,
+) {
+    let message = error.to_string();
+    ctx.record_nested_runtime_effect_error(error);
+    response.error = Some(lash_core::CellFailure::new(
+        lash_core::CellFailureKind::Host,
+        message,
+    ));
 }
 
 /// Feature-gated fixture that lets the repository's performance harness drive
@@ -927,6 +1045,7 @@ fn exec_setup_failure(error: lash_core::CellFailure) -> ExecResponse {
         error: Some(error),
         degraded_bindings: Vec::new(),
         terminal_finish: None,
+        terminal_finish_retained: None,
     }
 }
 
@@ -958,6 +1077,7 @@ fn exec_response_from(
         error,
         degraded_bindings: Vec::new(),
         terminal_finish,
+        terminal_finish_retained: None,
     }
 }
 

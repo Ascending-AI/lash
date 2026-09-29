@@ -624,9 +624,9 @@ fn checkpoint_pending_exec(
         result: Ok(ExecResponse {
             observations: vec![lash_core::Observation {
                 text: "checkpoint observation: resumed after ExecCode effect boundary".to_string(),
-                value: serde_json::json!(
+                value: lash_core::OutputValue::Inline(serde_json::json!(
                     "checkpoint observation: resumed after ExecCode effect boundary"
-                ),
+                )),
                 projection: Default::default(),
             }],
             calls: Vec::new(),
@@ -634,6 +634,7 @@ fn checkpoint_pending_exec(
             error: None,
             degraded_bindings: Vec::new(),
             terminal_finish: Some(serde_json::json!("runtime perf benchmark ok")),
+            terminal_finish_retained: None,
         }),
     });
     drain_checkpoint_machine(&mut restored);

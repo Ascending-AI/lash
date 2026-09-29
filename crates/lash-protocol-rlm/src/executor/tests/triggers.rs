@@ -1789,7 +1789,13 @@ pub(super) fn print_observation_preserves_typed_value_and_records_cut_metadata()
 
         assert!(response.error.is_none(), "{:?}", response.error);
         assert_eq!(response.observations.len(), 1);
-        assert_eq!(response.observations[0].value["output"], large);
+        assert_eq!(
+            response.observations[0]
+                .value
+                .inline()
+                .expect("a value within the history limit stays inline")["output"],
+            large
+        );
         assert!(response.observations[0].text.starts_with("[cut: "));
         assert!(
             response.observations[0]

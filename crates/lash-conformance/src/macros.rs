@@ -1831,6 +1831,27 @@ macro_rules! attachment_owner_degraded_tests {
     };
 }
 
+/// Register the retained-output crash-before-commit law (FIG-1643) over a
+/// fixture yielding `(guard, deployment store, attachment backend)`.
+#[macro_export]
+macro_rules! retained_output_reclamation_tests {
+    ($fixture:block) => {
+        $crate::retained_output_reclamation_tests!(@catalogue $fixture; [
+            (retained_output_crash_before_commit_is_reclaimed, "retained-output-crash-before-commit"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_guard, factory, attachments) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(factory, attachments).await;
+            }
+        )*
+    };
+}
+
 /// Register atomic runtime-operation effect-group retirement.
 #[macro_export]
 macro_rules! effect_group_runtime_retirement_tests {

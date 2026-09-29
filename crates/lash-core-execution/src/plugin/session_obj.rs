@@ -686,8 +686,16 @@ impl PluginSession {
     /// err)`), so one broken step settles a refusal the model can read instead
     /// of losing the whole presentation. Attachment-materialization notices
     /// are then computed under `attachment_acceptance`, the caller's recorded
-    /// environment, and the refs retained through `ctx.artifacts` ride the
-    /// returned [`crate::runtime::effect::ToolPresentation`] into the journal.
+    /// environment. Last, the folded return is measured against the
+    /// retention policy and its text retained if it is too long for history
+    /// (FIG-1643). The refs retained through `ctx.artifacts` and the policy
+    /// ride the returned [`crate::runtime::effect::ToolPresentation`] into
+    /// the journal.
+    ///
+    /// A retention that failed anywhere in the chain — the presenter's, a
+    /// step's, or the boundary's own — fails the presentation with a typed
+    /// `OutputRetentionFailed` error: a step that turned the refusal into
+    /// text does not make it the call's return.
     pub async fn present_tool_result(
         &self,
         ctx: ToolResultProjectionContext,
@@ -725,10 +733,22 @@ impl PluginSession {
             &ctx.output,
             &mut model_return,
         );
+        let retention = ctx.artifacts.retention_policy();
+        crate::runtime::effect::retain_oversized_return(
+            &mut model_return,
+            &ctx.call_id,
+            ctx.artifacts.as_ref(),
+            retention,
+        )
+        .await?;
+        if let Some(failure) = ctx.artifacts.retention_failure() {
+            return Err(crate::runtime::effect::output_retention_failed(failure));
+        }
         Ok(crate::runtime::effect::ToolPresentation {
             version: crate::runtime::effect::TOOL_PRESENTATION_VERSION,
             model_return,
             artifacts: ctx.artifacts.retained(),
+            retention,
         })
     }
 

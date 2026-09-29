@@ -465,7 +465,7 @@ impl RuntimeBoundaryHarness {
         let response = ExecResponse {
             observations: vec![lash_core::Observation {
                 text: output.clone(),
-                value: serde_json::json!(output),
+                value: lash_core::OutputValue::Inline(serde_json::json!(output)),
                 projection: Default::default(),
             }],
             calls: Vec::new(),
@@ -481,6 +481,7 @@ impl RuntimeBoundaryHarness {
                 "output": output,
                 "exit_code": exit_code,
             })),
+            terminal_finish_retained: None,
         };
         let (outcome, execution_count) = self
             .run_once(

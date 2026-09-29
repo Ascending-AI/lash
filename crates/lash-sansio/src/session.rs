@@ -157,11 +157,81 @@ impl<'de> serde::Deserialize<'de> for ExecCodeFailure {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+/// One printed value as a cell's executor reports it: the rendered text, the
+/// typed value — or its retention when its encoding was too long for history
+/// (FIG-1643) — and how the text was projected.
+///
+/// Serialized as `{text, value, projection}` for an inline value, the shape
+/// recorded payloads already carry, and `{text, retained, projection}` for a
+/// retained one; decoding refuses both or neither.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
     pub text: String,
-    pub value: serde_json::Value,
+    pub value: crate::OutputValue,
     pub projection: TextProjectionMetadata,
+}
+
+impl serde::Serialize for Observation {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(serde::Serialize)]
+        struct Fields<'a> {
+            text: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            value: Option<&'a serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            retained: Option<&'a crate::RetainedOutput>,
+            projection: &'a TextProjectionMetadata,
+        }
+        Fields {
+            text: &self.text,
+            value: self.value.inline(),
+            retained: self.value.retained(),
+            projection: &self.projection,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Observation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// A present `value` of `null` is the printed `null`.
+        fn present<'de, D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Option<serde_json::Value>, D::Error> {
+            <serde_json::Value as serde::Deserialize>::deserialize(deserializer).map(Some)
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(expecting = "struct Observation")]
+        struct Fields {
+            text: String,
+            #[serde(default, deserialize_with = "present")]
+            value: Option<serde_json::Value>,
+            #[serde(default)]
+            retained: Option<crate::RetainedOutput>,
+            projection: TextProjectionMetadata,
+        }
+        let Fields {
+            text,
+            value,
+            retained,
+            projection,
+        } = Fields::deserialize(deserializer)?;
+        let value = match (value, retained) {
+            (Some(value), None) => crate::OutputValue::Inline(value),
+            (None, Some(retained)) => crate::OutputValue::Retained(retained),
+            (Some(_), Some(_)) => {
+                return Err(serde::de::Error::custom(
+                    "an observation cannot carry both `value` and `retained`",
+                ));
+            }
+            (None, None) => return Err(serde::de::Error::missing_field("value")),
+        };
+        Ok(Self {
+            text,
+            value,
+            projection,
+        })
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -180,6 +250,12 @@ pub struct ExecResponse {
     /// as the terminal result of the session. `None` for chat-style sessions
     /// and for typed sessions whose step continued without finishing.
     pub terminal_finish: Option<serde_json::Value>,
+    /// The retention of `terminal_finish` when its encoding was too long for
+    /// history (FIG-1643): history records this in the value's place, and the
+    /// value itself is the turn's answer. `None` whenever `terminal_finish`
+    /// is, and for a value history keeps inline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_finish_retained: Option<crate::RetainedOutput>,
 }
 
 #[cfg(test)]

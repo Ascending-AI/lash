@@ -617,7 +617,7 @@ fn rlm_protocol_scenario_empty_turn_options_use_natural_default() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish(\"done\");",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("done")),
+                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("done").into()),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -648,6 +648,7 @@ fn rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_
             error: None,
             degraded_bindings: Vec::new(),
             terminal_finish: None,
+            terminal_finish_retained: None,
         })
         .expect(RlmProtocolExpectations {
             exec_codes: vec!["x = await tools.read_file({ path: \"foo\" })?"],
@@ -697,6 +698,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
             error: None,
             degraded_bindings: Vec::new(),
             terminal_finish: None,
+            terminal_finish_retained: None,
         })
         .checkpoint()
         .expect(RlmProtocolExpectations {
@@ -752,6 +754,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error() {
             error: None,
             degraded_bindings: Vec::new(),
             terminal_finish: None,
+            terminal_finish_retained: None,
         })
         .checkpoint()
         .expect(RlmProtocolExpectations {
@@ -794,7 +797,9 @@ fn rlm_protocol_scenario_typed_finish_emits_turn_outcome_and_done() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish({ ok: true });",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!({ "ok": true })),
+                outcome: lash_rlm_types::CellOutcome::Finished(
+                    serde_json::json!({ "ok": true }).into(),
+                ),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -825,7 +830,9 @@ fn rlm_protocol_scenario_natural_allows_finish_value() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish({ ok: true });",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!({ "ok": true })),
+                outcome: lash_rlm_types::CellOutcome::Finished(
+                    serde_json::json!({ "ok": true }).into(),
+                ),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -875,7 +882,9 @@ fn rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish({ ok: true });",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!({ "ok": true })),
+                outcome: lash_rlm_types::CellOutcome::Finished(
+                    serde_json::json!({ "ok": true }).into(),
+                ),
             }),
             ..RlmProtocolExpectations::default()
         })

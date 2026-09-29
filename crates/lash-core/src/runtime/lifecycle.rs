@@ -212,7 +212,8 @@ impl LashRuntime {
                     state.session_id.clone(),
                     Arc::clone(&host.core.clock),
                 )
-                .with_max_attachment_bytes(previous_attachment_store.max_attachment_bytes()),
+                .with_max_attachment_bytes(previous_attachment_store.max_attachment_bytes())
+                .with_output_retention(previous_attachment_store.output_retention()),
             );
             host.core.durability.attachment_store = scoped;
         }

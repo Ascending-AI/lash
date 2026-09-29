@@ -686,11 +686,21 @@ impl Part {
                 .iter_mut()
                 .filter_map(|block| match block {
                     ModelToolReturnPart::Attachment(source) => Some(source),
-                    ModelToolReturnPart::Text { .. } => None,
+                    ModelToolReturnPart::Text { .. } | ModelToolReturnPart::Retained(_) => None,
                 })
                 .collect(),
             _ => Vec::new(),
         }
+    }
+
+    /// Every output a tool result retained out of history (FIG-1643), in
+    /// content order. The commit that writes the part roots each one's
+    /// attachment.
+    pub fn retained_outputs(&self) -> impl Iterator<Item = &crate::RetainedOutput> {
+        self.tool_result_content()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(ModelToolReturnPart::retained)
     }
 
     /// The stored attachment this part points at; `Some` only for

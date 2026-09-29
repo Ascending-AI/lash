@@ -703,10 +703,10 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
             out,
             "last_rlm_step: iteration={} final_output={}",
             entry.protocol_iteration,
-            entry
-                .outcome
-                .terminal_value()
-                .map_or_else(|| "none".to_string(), serde_json::Value::to_string)
+            entry.outcome.terminal_value().map_or_else(
+                || "none".to_string(),
+                |value| lash_rlm_types::history_output_value(value).to_string()
+            )
         );
         if !entry.code.trim().is_empty() {
             let _ = writeln!(out, "last_rlm_code={}", preview(&entry.code, 900));

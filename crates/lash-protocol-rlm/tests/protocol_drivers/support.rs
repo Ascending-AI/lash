@@ -350,7 +350,7 @@ pub(crate) fn exec_response(
             .iter()
             .map(|item| lash_sansio::Observation {
                 text: (*item).to_string(),
-                value: serde_json::json!(*item),
+                value: lash_sansio::OutputValue::Inline(serde_json::json!(*item)),
                 projection: Default::default(),
             })
             .collect(),
@@ -361,6 +361,7 @@ pub(crate) fn exec_response(
         }),
         degraded_bindings: Vec::new(),
         terminal_finish: final_output,
+        terminal_finish_retained: None,
     }
 }
 
@@ -494,7 +495,8 @@ impl RlmProtocolScenario {
     }
 
     pub(crate) fn exec_result(mut self, result: lash_sansio::ExecResponse) -> Self {
-        self.steps.push(RlmProtocolStep::ExecResult(result));
+        self.steps
+            .push(RlmProtocolStep::ExecResult(Box::new(result)));
         self
     }
 
@@ -616,7 +618,7 @@ impl RlmProtocolScenario {
                         .unwrap_or_else(|| panic!("{} expected pending exec code", self.name));
                     machine.handle_response(Response::ExecResult {
                         id: exec_id,
-                        result: Ok(result.clone()),
+                        result: Ok(result.as_ref().clone()),
                     });
                 }
                 RlmProtocolStep::Checkpoint => {
@@ -684,7 +686,7 @@ pub(crate) enum RlmProtocolStep {
         chunks: Vec<String>,
         parts: Vec<LlmOutputPart>,
     },
-    ExecResult(lash_sansio::ExecResponse),
+    ExecResult(Box<lash_sansio::ExecResponse>),
     Checkpoint,
     CheckpointRoundTrip,
 }
@@ -963,7 +965,7 @@ impl RlmProtocolExpectations {
 pub(crate) struct RlmTrajectoryExpectation {
     pub(crate) code: &'static str,
     pub(crate) output: Vec<String>,
-    pub(crate) outcome: lash_rlm_types::CellOutcome<String>,
+    pub(crate) outcome: lash_rlm_types::HistoryCellOutcome,
 }
 
 #[derive(Default)]

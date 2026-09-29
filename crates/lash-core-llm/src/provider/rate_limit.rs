@@ -208,6 +208,9 @@ fn estimate_request_tokens(request: &LlmRequest) -> u32 {
                     for part in content {
                         chars += match part {
                             lash_sansio::ModelToolReturnPart::Text { text } => text.len(),
+                            lash_sansio::ModelToolReturnPart::Retained(retained) => {
+                                retained.witness.len()
+                            }
                             lash_sansio::ModelToolReturnPart::Attachment(_) => 256,
                         };
                     }

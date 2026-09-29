@@ -29,6 +29,7 @@ pub use tool_child_driver::{
 mod tool_presentation;
 pub use tool_presentation::{
     SessionPresentationArtifacts, TOOL_PRESENTATION_VERSION, ToolPresentation,
+    output_retention_failed, retain_oversized_return,
 };
 mod recorded_stream;
 mod request_digest;

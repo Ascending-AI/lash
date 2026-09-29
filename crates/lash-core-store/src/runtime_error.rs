@@ -191,6 +191,11 @@ pub enum RuntimeErrorCode {
     RunDefinitionUnavailable,
     /// A recorded renderer is absent on this worker. Redeploying it can resume the root.
     RecordedRendererUnavailable,
+    /// An output too long for history could not be retained as a session
+    /// attachment before it entered history (FIG-1643). The output never
+    /// enters history in its place: the step retries, and its retry budget
+    /// parks the root.
+    OutputRetentionFailed,
     /// A registered run definition refused the spec's context (FIG-3838):
     /// deterministic, so it is recorded as the root's failure.
     RunShapeRefused,
@@ -616,6 +621,7 @@ impl RuntimeErrorCode {
             Self::ProviderBindingUnavailable => "provider_binding_unavailable",
             Self::RunDefinitionUnavailable => "run_definition_unavailable",
             Self::RecordedRendererUnavailable => "recorded_renderer_unavailable",
+            Self::OutputRetentionFailed => "output_retention_failed",
             Self::RunShapeRefused => "run_shape_refused",
             Self::RunSpecMismatch => "run_spec_mismatch",
             Self::Plugin => "plugin",
@@ -859,6 +865,7 @@ impl RuntimeErrorCode {
         Self::ProviderBindingUnavailable,
         Self::RunDefinitionUnavailable,
         Self::RecordedRendererUnavailable,
+        Self::OutputRetentionFailed,
         Self::RunShapeRefused,
         Self::RunSpecMismatch,
         Self::Plugin,
@@ -1046,6 +1053,7 @@ impl RuntimeErrorCode {
             "provider_binding_unavailable" => Self::ProviderBindingUnavailable,
             "run_definition_unavailable" => Self::RunDefinitionUnavailable,
             "recorded_renderer_unavailable" => Self::RecordedRendererUnavailable,
+            "output_retention_failed" => Self::OutputRetentionFailed,
             "run_shape_refused" => Self::RunShapeRefused,
             "run_spec_mismatch" => Self::RunSpecMismatch,
             "plugin" => Self::Plugin,
@@ -1662,8 +1670,9 @@ impl RuntimeEffectControllerError {
     }
 
     /// Only the host derivations — the before-LLM-call and assistant-response hooks,
-    /// execution-environment sync, execution-environment load, and presentation
-    /// whose recorded renderer is unavailable — and a
+    /// execution-environment sync, execution-environment load, presentation
+    /// whose recorded renderer is unavailable, and a presentation or language
+    /// value whose output retention faulted (FIG-1643) — and a
     /// drive's admission and seal, a root's resolution (its spec read and its
     /// definition lookup, FIG-3838), a root's scope close and a session's close,
     /// whose store faults are the attempt's (FIG-3600), and a process command
@@ -1680,6 +1689,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::SyncExecutionEnvironment
                 | RuntimeEffectKind::LoadExecutionEnv
                 | RuntimeEffectKind::PresentToolResult
+                | RuntimeEffectKind::LanguageRuntimeValue
                 | RuntimeEffectKind::AdmitDrive
                 | RuntimeEffectKind::SealDriveAdmission
                 | RuntimeEffectKind::AdmitRoot

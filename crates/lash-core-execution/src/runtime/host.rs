@@ -240,9 +240,11 @@ impl RuntimeHostConfig {
     /// still names exactly one backend (ADR 0102, D2).
     pub fn with_backend(mut self, backend: crate::Backend) -> Self {
         let max_attachment_bytes = self.durability.attachment_store.max_attachment_bytes();
+        let output_retention = self.durability.attachment_store.output_retention();
         self.durability.attachment_store = Arc::new(
             crate::SessionAttachmentStore::ephemeral(backend.attachment_store())
-                .with_max_attachment_bytes(max_attachment_bytes),
+                .with_max_attachment_bytes(max_attachment_bytes)
+                .with_output_retention(output_retention),
         );
         let mut config = self
             .with_process_env_store(backend.process_env_store())
@@ -295,6 +297,22 @@ impl RuntimeHostConfig {
             self.durability
                 .attachment_store
                 .reconfigured_max_attachment_bytes(max_attachment_bytes),
+        );
+        self
+    }
+
+    /// The byte policy every output is measured against before it enters
+    /// session history (FIG-1643): an oversized tool presentation or RLM
+    /// print or final value is retained as a session attachment, and history
+    /// keeps a bounded witness and its reference. The default is
+    /// [`OutputRetentionPolicy::DEFAULT`](crate::OutputRetentionPolicy::DEFAULT).
+    /// Each step that applies the policy journals it, so changing it never
+    /// changes what a replay serves.
+    pub fn with_output_retention(mut self, policy: crate::OutputRetentionPolicy) -> Self {
+        self.durability.attachment_store = Arc::new(
+            self.durability
+                .attachment_store
+                .reconfigured_output_retention(policy),
         );
         self
     }

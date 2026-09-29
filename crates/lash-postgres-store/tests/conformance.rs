@@ -1886,6 +1886,22 @@ lash_conformance::session_read_view_tests!({
     )
 });
 
+lash_conformance::retained_output_reclamation_tests!({
+    let Some((_database_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let bytes =
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path()))
+            as Arc<dyn lash_core_execution::AttachmentStore>;
+    (
+        (_database_lock, attachments),
+        Arc::new(storage.session_store_factory()) as Arc<dyn DeploymentStore>,
+        bytes,
+    )
+});
+
 lash_conformance::attachment_owner_degraded_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         return;

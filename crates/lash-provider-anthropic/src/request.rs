@@ -95,6 +95,9 @@ impl AnthropicProvider {
                 match content.as_slice() {
                     [] => {}
                     [ModelToolReturnPart::Text { text }] => result["content"] = json!(text),
+                    [ModelToolReturnPart::Retained(retained)] => {
+                        result["content"] = json!(retained.witness)
+                    }
                     blocks => {
                         result["content"] = Value::Array(
                             blocks
@@ -107,6 +110,11 @@ impl AnthropicProvider {
                                     }
                                     ModelToolReturnPart::Text { text } => {
                                         Some(Self::text_block_value(text))
+                                    }
+                                    // Retained output is sent as its witness;
+                                    // its reference is never materialized.
+                                    ModelToolReturnPart::Retained(retained) => {
+                                        Some(Self::text_block_value(&retained.witness))
                                     }
                                     ModelToolReturnPart::Attachment(source) => {
                                         Self::attachment_block_value(req, source)

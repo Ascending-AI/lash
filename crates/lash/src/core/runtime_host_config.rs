@@ -43,6 +43,9 @@ impl LashCoreBuilder {
         if let Some(max) = self.max_attachment_bytes.take() {
             core = core.with_max_attachment_bytes(max);
         }
+        if let Some(policy) = self.output_retention.take() {
+            core = core.with_output_retention(policy);
+        }
         if let Some(policy) = self.process_wake_delivery_policy.take() {
             core.control.process_wake_delivery_policy = policy;
         }

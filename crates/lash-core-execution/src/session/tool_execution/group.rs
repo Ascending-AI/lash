@@ -459,7 +459,7 @@ impl RuntimeExecutionContext<'_> {
             .journaled_language_value_with(
                 format!("{group_key}:requests"),
                 RETAINED_REQUEST_OPERATION.to_string(),
-                move || Ok(live),
+                move || async move { Ok(live) },
             )
             .await?;
         let recorded = recorded.as_array().map(Vec::as_slice).unwrap_or_default();

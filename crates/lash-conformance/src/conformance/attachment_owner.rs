@@ -223,6 +223,133 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
     process_owner_leg(&backend).await;
 }
 
+/// A presentation's retained output across a crash before its commit
+/// (FIG-1643), through the runtime's own retention boundary.
+///
+/// The boundary retains an oversized return under the turn's owner binding,
+/// as a presentation does, and the turn dies before its commit. A sweep with
+/// no grace keeps the retained attachment while its turn can still commit —
+/// a redrive's commit names it — and reclaims it once a later turn commits
+/// and the crashed one never did. The committing turn's own retained output
+/// is rooted by that commit through its owner, as a turn's commit roots every
+/// put its turn owns — the commit lists no attachment ids — and resolves to
+/// its exact bytes.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn retained_output_crash_before_commit_is_reclaimed(
+    factory: Arc<dyn crate::DeploymentStore>,
+    backend: Arc<dyn crate::AttachmentStore>,
+) {
+    const SESSION_ID: &str = "retained-output-crash";
+    const POLICY: crate::OutputRetentionPolicy = crate::OutputRetentionPolicy {
+        inline_limit_bytes: 1024,
+        witness_bytes: 256,
+    };
+    let request = session_request(&SessionId::from(SESSION_ID));
+    let store = factory
+        .admit_view(&request)
+        .await
+        .expect("create the retained-output session");
+    let facade = Arc::new(
+        crate::SessionAttachmentStore::new(
+            Arc::clone(&backend),
+            Arc::new(
+                lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(
+                    store.store(),
+                )),
+            ),
+            SESSION_ID,
+        )
+        .with_output_retention(POLICY),
+    );
+    let sweep = || async {
+        crate::reclaim_unreferenced_attachments(
+            &*factory,
+            &*backend,
+            crate::AttachmentReclamationPolicy {
+                grace_period_ms: 0,
+                empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
+            },
+        )
+        .await
+        .expect("sweep the attachments")
+    };
+    let retain = |text: String, turn: &'static str| {
+        let facade = Arc::clone(&facade);
+        async move {
+            let _owner = facade.bind_turn_scoped(turn);
+            let artifacts =
+                crate::runtime::effect::SessionPresentationArtifacts::new(Arc::clone(&facade));
+            let mut model_return = crate::ModelToolReturn {
+                tool_name: "oversized".to_string(),
+                parts: vec![crate::ModelToolReturnPart::text(text)],
+                attachment_notices: Vec::new(),
+            };
+            crate::runtime::effect::retain_oversized_return(
+                &mut model_return,
+                &lash_core::ToolCallId::fixture(turn),
+                &artifacts,
+                POLICY,
+            )
+            .await
+            .expect("the boundary retains the oversized return");
+            let [crate::ModelToolReturnPart::Retained(retained)] = model_return.parts.as_slice()
+            else {
+                panic!("an oversized return is one retained block: {model_return:?}");
+            };
+            assert!(retained.witness.len() <= 256);
+            retained.clone()
+        }
+    };
+
+    // The crashed turn retained its output and never committed.
+    let crashed = retain("crashed turn output\n".repeat(500), "crashed-turn").await;
+    sweep().await;
+    assert!(
+        backend.get(&crashed.reference.id).await.is_ok(),
+        "a still-committable turn's retained output survives the sweep"
+    );
+
+    // A later turn retains its own output and commits it.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    let committed_text = "committed turn output\n".repeat(500);
+    let committed = retain(committed_text.clone(), "committed-turn").await;
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    commit_with_lease(
+        store.store(),
+        final_turn_commit(
+            store.store(),
+            &SessionId::from(SESSION_ID),
+            &TurnId::from("committed-turn"),
+            Vec::new(),
+        )
+        .await,
+        "retained-output-committer",
+    )
+    .await;
+
+    let report = sweep().await;
+    assert!(report.reclaimed_count >= 1, "{report:?}");
+    assert!(
+        matches!(
+            backend.get(&crashed.reference.id).await,
+            Err(crate::AttachmentStoreError::NotFound(_))
+        ),
+        "the crashed turn's retained output is reclaimed once a later turn commits"
+    );
+    assert_eq!(
+        backend
+            .get(&committed.reference.id)
+            .await
+            .expect("the committed retained output is rooted")
+            .bytes,
+        committed_text.into_bytes(),
+        "the rooted reference resolves to the exact retained bytes"
+    );
+}
+
 fn attachment_put_executor(
     facade: Arc<crate::SessionAttachmentStore>,
     bytes: &'static [u8],

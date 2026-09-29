@@ -877,20 +877,30 @@ pub enum RemoteLlmContentBlock {
     },
 }
 
-/// One ordered block of a tool result: text, or an attachment at the
-/// position the tool's value placed it.
+/// One ordered block of a tool result: text, an attachment at the position
+/// the tool's value placed it, or output retained out of history: the
+/// bounded witness shown in its place and the attachment holding it whole.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteToolResultBlock {
-    Text { text: String },
-    Attachment { source: Box<RemoteAttachmentSource> },
+    Text {
+        text: String,
+    },
+    Attachment {
+        source: Box<RemoteAttachmentSource>,
+    },
+    Retained {
+        witness: String,
+        reference: RemoteAttachmentRef,
+    },
 }
 
 impl RemoteToolResultBlock {
-    /// The attachment this block carries; `None` for text.
+    /// The attachment this block carries; `None` for text and for retained
+    /// output.
     pub fn attachment(&self) -> Option<&RemoteAttachmentSource> {
         match self {
-            Self::Text { .. } => None,
+            Self::Text { .. } | Self::Retained { .. } => None,
             Self::Attachment { source } => Some(source),
         }
     }

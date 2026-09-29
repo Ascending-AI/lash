@@ -1541,6 +1541,7 @@ pub struct SessionAttachmentStore {
     manifest: Arc<dyn AttachmentManifest>,
     session_id: SessionId,
     max_attachment_bytes: Option<u64>,
+    output_retention: lash_sansio::OutputRetentionPolicy,
     owner: Mutex<Option<BoundAttachmentOwner>>,
     clock: Arc<dyn crate::Clock>,
 }
@@ -1583,6 +1584,7 @@ impl SessionAttachmentStore {
             manifest,
             session_id: session_id.into(),
             max_attachment_bytes: None,
+            output_retention: lash_sansio::OutputRetentionPolicy::DEFAULT,
             owner: Mutex::new(None),
             clock,
         }
@@ -1629,10 +1631,47 @@ impl SessionAttachmentStore {
 
     pub fn reconfigured_max_attachment_bytes(&self, max_attachment_bytes: Option<u64>) -> Self {
         Self {
+            max_attachment_bytes,
+            ..self.reconfigured()
+        }
+    }
+
+    /// The byte policy an output is measured against before it enters
+    /// history (FIG-1643). Process configuration: every step that applies it
+    /// journals the policy it applied, so a replay never reads it again.
+    pub fn output_retention(&self) -> lash_sansio::OutputRetentionPolicy {
+        self.output_retention
+    }
+
+    /// This store with `output_retention` as its retention policy.
+    pub fn with_output_retention(
+        mut self,
+        output_retention: lash_sansio::OutputRetentionPolicy,
+    ) -> Self {
+        self.output_retention = output_retention;
+        self
+    }
+
+    /// A copy of this store under `output_retention`, keeping its bound
+    /// owner, as [`Self::reconfigured_max_attachment_bytes`] does for the
+    /// size limit.
+    pub fn reconfigured_output_retention(
+        &self,
+        output_retention: lash_sansio::OutputRetentionPolicy,
+    ) -> Self {
+        Self {
+            output_retention,
+            ..self.reconfigured()
+        }
+    }
+
+    fn reconfigured(&self) -> Self {
+        Self {
             backend: Arc::clone(&self.backend),
             manifest: Arc::clone(&self.manifest),
             session_id: self.session_id.clone(),
-            max_attachment_bytes,
+            max_attachment_bytes: self.max_attachment_bytes,
+            output_retention: self.output_retention,
             owner: Mutex::new(self.owner.lock_recover().clone()),
             clock: Arc::clone(&self.clock),
         }
@@ -2058,10 +2097,7 @@ pub fn degrade_unmaterializable_request_attachments(
                 LlmContentBlock::Text { text, .. } => vec![text.to_string()],
                 LlmContentBlock::ToolResult { content, .. } => content
                     .iter()
-                    .filter_map(|part| match part {
-                        lash_sansio::ModelToolReturnPart::Text { text } => Some(text.clone()),
-                        lash_sansio::ModelToolReturnPart::Attachment(_) => None,
-                    })
+                    .filter_map(|part| part.visible_text().map(str::to_string))
                     .collect(),
                 _ => Vec::new(),
             })

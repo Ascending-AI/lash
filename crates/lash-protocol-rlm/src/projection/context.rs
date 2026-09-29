@@ -728,7 +728,9 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!({ "answer": 42 })),
+            outcome: lash_rlm_types::CellOutcome::Finished(
+                serde_json::json!({ "answer": 42 }).into(),
+            ),
         };
         let retained = RlmTrajectoryEntry {
             id: "retained".to_string(),
@@ -817,7 +819,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("done")),
+            outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("done").into()),
         };
         let events = [
             lash_core::SessionHistoryRecord::Conversation(

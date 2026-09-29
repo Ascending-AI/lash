@@ -16,6 +16,7 @@ pub mod process_cursor;
 pub mod profile;
 pub mod prompt;
 mod redacted;
+mod retained_output;
 pub mod sansio;
 pub mod schema_contract;
 pub mod session;
@@ -117,6 +118,7 @@ pub use prompt::{
     prompt_text_fingerprint, prompt_tool_names_fingerprint,
 };
 pub use redacted::Redacted;
+pub use retained_output::{OutputRetentionPolicy, OutputValue, RetainedOutput};
 pub use sansio::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExpandedRow,

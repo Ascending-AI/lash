@@ -14,7 +14,7 @@ fn step(id: &str, error: Option<&str>, terminal: bool) -> RlmTrajectoryEntry {
         calls_omitted: 0,
         outcome: CellOutcome::from_parts(
             error.map(str::to_string),
-            terminal.then(|| serde_json::json!(1)),
+            terminal.then(|| serde_json::json!(1).into()),
         ),
     }
 }
@@ -422,7 +422,7 @@ fn many_step_projection_matches_bytes_with_one_transport_pass_and_decode() {
 fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
     let mut entry = step("null-finish", None, false);
     entry.code = "finish(null)".into();
-    entry.outcome = CellOutcome::Finished(serde_json::Value::Null);
+    entry.outcome = CellOutcome::Finished(serde_json::Value::Null.into());
     let events = pair(entry);
     let mut reloaded =
         serde_json::from_str::<Vec<SessionHistoryRecord>>(&serde_json::to_string(&events).unwrap())
@@ -437,7 +437,7 @@ fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
     };
     assert_eq!(
         restored.outcome.terminal_value(),
-        Some(&serde_json::Value::Null)
+        Some(&serde_json::Value::Null.into())
     );
     assert_eq!(ids(&render(&reloaded)).0, ["null-finish"]);
     reloaded.push(SessionHistoryRecord::Conversation(

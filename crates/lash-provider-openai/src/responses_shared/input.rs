@@ -173,6 +173,11 @@ fn function_call_output(req: &LlmRequest, content: &[ModelToolReturnPart]) -> Va
                 ModelToolReturnPart::Text { text } => {
                     Some(json!({"type": "input_text", "text": text}))
                 }
+                // Retained output is sent as its witness; its reference is
+                // never materialized.
+                ModelToolReturnPart::Retained(retained) => {
+                    Some(json!({"type": "input_text", "text": retained.witness}))
+                }
                 ModelToolReturnPart::Attachment(source) => Some(input_attachment_part(req, source)),
             })
             .collect(),

@@ -524,8 +524,8 @@ impl crate::AttachmentStore for CountingAttachmentStore {
 }
 
 /// A retained full output is a durable artifact, not a worker-local path
-/// (FIG-3420): with `retain_full_output` the truncation hint names an
-/// [`crate::AttachmentRef`] id that resolves through a *second* facade over
+/// (FIG-3420): a cut output is always retained (FIG-1643), and the
+/// truncation hint names an [`crate::AttachmentRef`] id that resolves through a *second* facade over
 /// the same store, the hint carries no path, and a reopened group serves the
 /// recorded presentation without a second `put`.
 #[expect(

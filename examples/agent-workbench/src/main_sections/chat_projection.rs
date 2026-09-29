@@ -434,8 +434,15 @@ pub(crate) fn transcript_rows_from_committed(
                             .collect::<Vec<_>>()
                             .join("\n");
                         if let Some(final_output) = step.outcome.terminal_value() {
-                            let final_output = serde_json::to_string_pretty(final_output)
-                                .unwrap_or_else(|_| final_output.to_string());
+                            let final_output = match final_output {
+                                lash::attachments::OutputValue::Inline(value) => {
+                                    serde_json::to_string_pretty(value)
+                                        .unwrap_or_else(|_| value.to_string())
+                                }
+                                lash::attachments::OutputValue::Retained(retained) => {
+                                    retained.witness.clone()
+                                }
+                            };
                             if !output.is_empty() {
                                 output.push('\n');
                             }

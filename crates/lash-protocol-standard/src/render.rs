@@ -24,7 +24,6 @@ pub struct ToolRenderParams {
     pub authored_view: AuthoredViewPolicy,
     pub max_lines: usize,
     pub head_share_percent: u8,
-    pub retain_full_output: bool,
 }
 
 impl Default for ToolRenderParams {
@@ -37,7 +36,6 @@ impl Default for ToolRenderParams {
             authored_view: AuthoredViewPolicy::Prefer,
             max_lines: 400,
             head_share_percent: 50,
-            retain_full_output: true,
         }
     }
 }
@@ -53,8 +51,6 @@ pub struct ToolRenderPatch {
     pub max_lines: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head_share_percent: Option<u8>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub retain_full_output: Option<bool>,
 }
 
 impl ToolRenderPatch {
@@ -64,7 +60,6 @@ impl ToolRenderPatch {
             authored_view: self.authored_view.or(under.authored_view),
             max_lines: self.max_lines.or(under.max_lines),
             head_share_percent: self.head_share_percent.or(under.head_share_percent),
-            retain_full_output: self.retain_full_output.or(under.retain_full_output),
         }
     }
 
@@ -74,7 +69,6 @@ impl ToolRenderPatch {
             authored_view: self.authored_view.unwrap_or(base.authored_view),
             max_lines: self.max_lines.unwrap_or(base.max_lines),
             head_share_percent: self.head_share_percent.unwrap_or(base.head_share_percent),
-            retain_full_output: self.retain_full_output.unwrap_or(base.retain_full_output),
         }
     }
 }
@@ -260,7 +254,19 @@ fn builtin_tool_output(
     }
 }
 
-fn full_output(output: &ToolCallOutput, params: &ToolRenderParams) -> String {
+/// The complete text a cut retains: a failure's rendered text, an authored
+/// view's text blocks, or the tool value.
+fn full_output(
+    output: &ToolCallOutput,
+    params: &ToolRenderParams,
+    rendered: &[ModelToolReturnPart],
+) -> String {
+    if !matches!(output.outcome, ToolCallOutcome::Success(_)) {
+        return rendered
+            .iter()
+            .filter_map(ModelToolReturnPart::visible_text)
+            .collect();
+    }
     if params.authored_view == AuthoredViewPolicy::Prefer
         && let Some(view) = &output.view
     {
@@ -283,11 +289,9 @@ fn full_output(output: &ToolCallOutput, params: &ToolRenderParams) -> String {
 fn text_stats(parts: &[ModelToolReturnPart]) -> (usize, usize) {
     let mut chars = 0;
     let mut lines = 0;
-    for part in parts {
-        if let ModelToolReturnPart::Text { text } = part {
-            chars += text.chars().count();
-            lines += text.chars().filter(|ch| *ch == '\n').count();
-        }
+    for text in parts.iter().filter_map(ModelToolReturnPart::visible_text) {
+        chars += text.chars().count();
+        lines += text.chars().filter(|ch| *ch == '\n').count();
     }
     (chars, if chars == 0 { 0 } else { lines + 1 })
 }
@@ -442,27 +446,30 @@ async fn render_present(
     let mut cuts = rendered.cuts;
     let (chars, lines) = text_stats(&rendered.body);
     cuts.original_chars = cuts.original_chars.max(chars);
-    if !matches!(ctx.output.outcome, ToolCallOutcome::Success(_)) {
-        result.parts = rendered.body;
-        return Ok(result);
-    }
+    // A failure is cut and retained exactly as a success is: its message is
+    // the tool's output too, and no longer than the limits allow either.
     let needs_cut = !cuts.is_empty() || chars > params.value.max_chars || lines > params.max_lines;
     if !needs_cut {
         result.parts = rendered.body;
         return Ok(result);
     }
-    let retention = if params.retain_full_output {
-        ctx.artifacts
-            .retain_text(
-                &format!("tool-output:{}", ctx.call_id),
-                &full_output(&ctx.output, params),
+    // Every cut retains the complete text, and a retention that fails is a
+    // typed failure of the presentation, never a notice the model reads.
+    let reference = ctx
+        .artifacts
+        .retain_text(
+            &format!("tool-output:{}", ctx.call_id),
+            &full_output(&ctx.output, params, &rendered.body),
+        )
+        .await
+        .map_err(|error| {
+            lash_core::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::OutputRetentionFailed,
+                format!("the cut tool output could not be retained: {error}"),
             )
-            .await
-            .map(|reference| format!("attachment {}", reference.id))
-            .unwrap_or_else(|error| format!("retention failed: {error}"))
-    } else {
-        "not retained".to_string()
-    };
+            .retryable_uncommitted_derivation()
+        })?;
+    let retention = format!("attachment {}", reference.id);
     let mut notice = format!(
         "[output cut: showing head and tail of {} chars / {lines} lines; full output: {retention}]",
         cuts.original_chars
@@ -498,8 +505,40 @@ async fn render_present(
     if notice.chars().count() > params.value.max_chars {
         notice = notice.chars().take(params.value.max_chars).collect();
     }
-    result.parts = head_tail(rendered.body, params, &notice, &mut cuts);
+    result.parts = retained_cut(
+        head_tail(rendered.body, params, &notice, &mut cuts),
+        reference,
+    );
     Ok(result)
+}
+
+/// A cut body as history keeps it: its text — head, notice and tail — is the
+/// witness of one retained block standing where the first text block stood,
+/// and its attachments follow in their order.
+fn retained_cut(
+    cut: Vec<ModelToolReturnPart>,
+    reference: lash_core::AttachmentRef,
+) -> Vec<ModelToolReturnPart> {
+    let witness = cut
+        .iter()
+        .filter_map(|part| match part {
+            ModelToolReturnPart::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    let mut retained = Some(ModelToolReturnPart::Retained(lash_core::RetainedOutput {
+        reference,
+        witness,
+    }));
+    let mut parts = Vec::with_capacity(cut.len());
+    for part in cut {
+        match part {
+            ModelToolReturnPart::Text { .. } => parts.extend(retained.take()),
+            other => parts.push(other),
+        }
+    }
+    parts.extend(retained);
+    parts
 }
 
 fn renderer_unavailable(
@@ -777,12 +816,14 @@ mod tests {
         let text = result
             .parts
             .iter()
-            .filter_map(|part| match part {
-                ModelToolReturnPart::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
+            .filter_map(ModelToolReturnPart::visible_text)
             .collect::<String>();
         assert!(text.chars().count() <= 220);
+        assert!(matches!(
+            result.parts.first(),
+            Some(ModelToolReturnPart::Retained(retained))
+                if retained.reference.id.as_str() == "full-output"
+        ));
         assert!(text.contains("[output cut: showing") && text.contains("attachment full-output"));
         assert!(text.contains("0..") && text.contains("chars"));
         assert_eq!(
@@ -801,40 +842,58 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn disabled_and_failed_retention_make_no_false_claim() {
+    async fn a_failed_retention_is_a_typed_failure_never_a_notice() {
         let output =
             ToolCallOutput::success_tool_value(lash_core::ToolValue::String("x".repeat(900)));
-        let mut params = ToolRenderParams {
+        let params = ToolRenderParams {
             value: RenderParams {
                 max_chars: 180,
                 ..RenderParams::default()
             },
             ..ToolRenderParams::default()
         };
-        params.retain_full_output = false;
-        let disabled = Arc::new(Artifacts::default());
-        let ctx = context(output.clone(), params.clone(), Arc::clone(&disabled));
-        let result = render_present(baseline(&ctx), &ctx, &ToolOutputRendererSlot::default())
-            .await
-            .expect("presented");
-        assert!(
-            lash_core::facade_support::tool_result_text(&result.parts).contains("not retained")
-        );
-        assert_eq!(disabled.writes.load(Ordering::SeqCst), 0);
-
-        params.retain_full_output = true;
         let failed = Arc::new(Artifacts {
             fail: true,
             ..Artifacts::default()
         });
         let ctx = context(output, params, Arc::clone(&failed));
+        let error = render_present(baseline(&ctx), &ctx, &ToolOutputRendererSlot::default())
+            .await
+            .expect_err("a cut the renderer cannot retain is not presented");
+        assert_eq!(error.code, RuntimeErrorCode::OutputRetentionFailed);
+        assert!(
+            error
+                .journal_disposition(lash_core::RuntimeEffectKind::PresentToolResult)
+                .is_retryable_derivation(),
+            "a store fault is the attempt's: the presentation retries"
+        );
+        assert_eq!(failed.writes.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_call_is_cut_and_retained_like_a_success() {
+        let artifacts = Arc::new(Artifacts::default());
+        let message = "stack frame\n".repeat(2_000);
+        let ctx = context(
+            ToolCallOutput::failure(lash_core::ToolFailure::io("dump", message.clone())),
+            ToolRenderParams::default(),
+            Arc::clone(&artifacts),
+        );
         let result = render_present(baseline(&ctx), &ctx, &ToolOutputRendererSlot::default())
             .await
             .expect("presented");
-        let text = lash_core::facade_support::tool_result_text(&result.parts);
-        assert!(text.contains("retention failed"));
-        assert!(!text.contains("attachment full-output"));
-        assert_eq!(failed.writes.load(Ordering::SeqCst), 1);
+        let (chars, lines) = text_stats(&result.parts);
+        assert!(chars <= 16_000, "{chars}");
+        assert!(lines <= 400, "{lines}");
+        let [ModelToolReturnPart::Retained(retained)] = result.parts.as_slice() else {
+            panic!("the cut failure is one retained block: {:?}", result.parts);
+        };
+        assert!(retained.witness.contains("[Tool execution failed]"));
+        assert!(retained.witness.contains("attachment full-output"));
+        let retained_text = artifacts.text.lock().expect("test mutex").clone();
+        assert_eq!(retained_text.len(), 1);
+        assert!(retained_text[0].starts_with("[Tool execution failed]"));
+        assert!(retained_text[0].ends_with(&message));
     }
 
     #[tokio::test]

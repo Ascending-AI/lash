@@ -573,6 +573,10 @@ fn trace_content_block(block: &LlmContentBlock) -> TraceContentBlock {
                     crate::ModelToolReturnPart::Text { text } => {
                         TraceToolResultBlock::Text { text: text.clone() }
                     }
+                    // A trace shows what the model was shown: the witness.
+                    crate::ModelToolReturnPart::Retained(retained) => TraceToolResultBlock::Text {
+                        text: retained.witness.clone(),
+                    },
                     crate::ModelToolReturnPart::Attachment(source) => {
                         TraceToolResultBlock::Attachment {
                             source: Box::new(trace_attachment(source)),

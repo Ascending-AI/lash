@@ -71,10 +71,18 @@ pub type ToolPresentationPresenter = Arc<
         + Sync,
 >;
 
-/// The impure capability a presentation step may need, journaled by the
-/// `PresentToolResult` boundary that runs the chain: a blob retained here is
-/// `put` once on the first run and the recorded `crate::AttachmentRef` is what
-/// replay serves.
+/// The one retention capability of a tool presentation (FIG-3420, FIG-1643),
+/// journaled by the `PresentToolResult` boundary that runs the chain: a blob
+/// retained here is `put` on the first run and the recorded
+/// `crate::AttachmentRef` is what replay serves.
+///
+/// The standard renderer retains a cut output through it, a step may retain
+/// what it presents, and the boundary itself retains whatever the folded
+/// return still carries past [`Self::retention_policy`]. A retention that
+/// fails fails the presentation with a typed
+/// [`OutputRetentionFailed`](crate::RuntimeErrorCode::OutputRetentionFailed)
+/// error, whatever a step made of the refusal: a presentation never records
+/// a retention failure as text.
 pub trait ToolPresentationArtifacts: Send + Sync {
     /// Retain `text` under `label`, returning the content-addressed reference
     /// the session now references.
@@ -84,19 +92,34 @@ pub trait ToolPresentationArtifacts: Send + Sync {
         text: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<crate::AttachmentRef, PluginError>> + Send + 'a>>;
 
+    /// The byte policy the boundary measures the folded return against. The
+    /// recorded presentation journals it, so a replay under another policy
+    /// serves the decision this one made.
+    fn retention_policy(&self) -> crate::OutputRetentionPolicy {
+        crate::OutputRetentionPolicy::DEFAULT
+    }
+
     /// The refs retained so far, in retain order. The runtime journals them on
     /// the recorded presentation outcome; a step reads its own `retain_text`
     /// return, never this.
     fn retained(&self) -> Vec<crate::AttachmentRef> {
         Vec::new()
     }
+
+    /// Why the first retention that failed while the chain ran failed, if
+    /// one did.
+    fn retention_failure(&self) -> Option<String> {
+        None
+    }
 }
 
-/// A presentation context that retains nothing: `retain_text` answers a typed
-/// refusal so a step that requires artifacts fails into the chain's recorded
-/// fallback rather than pretending a retention happened.
+/// A presentation context that retains nothing: `retain_text` answers a
+/// refusal, and the boundary fails the presentation with a typed retention
+/// failure rather than pretending a retention happened.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoPresentationArtifacts;
+
+const NO_PRESENTATION_ARTIFACTS: &str = "this presentation context retains no artifacts";
 
 impl ToolPresentationArtifacts for NoPresentationArtifacts {
     fn retain_text<'a>(
@@ -104,11 +127,7 @@ impl ToolPresentationArtifacts for NoPresentationArtifacts {
         _label: &'a str,
         _text: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<crate::AttachmentRef, PluginError>> + Send + 'a>> {
-        Box::pin(async move {
-            Err(PluginError::Session(
-                "this presentation context retains no artifacts".to_string(),
-            ))
-        })
+        Box::pin(async move { Err(PluginError::Session(NO_PRESENTATION_ARTIFACTS.to_string())) })
     }
 }
 pub type AfterTurnHook =

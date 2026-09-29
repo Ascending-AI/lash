@@ -743,10 +743,11 @@ finish(await handle);
     // landed appends its presentation on the resume — here the `start_process`
     // and resumed `replay_pending_input` boundaries — before the checkpoint.
     // The interrupted cell seals once it answers; the pre-crash run never
-    // reached that boundary. It prints nothing, so no prints step is recorded.
+    // reached that boundary. It finishes, so its outputs step records the
+    // final value's retention decision (FIG-1643).
     assert_eq!(
         replayed_envelopes.len(),
-        recorded_effect_count + 4,
+        recorded_effect_count + 5,
         "the resumed invocation may append only its previously uncommitted effects; appended: {:?}",
         appended_envelopes
             .iter()
@@ -764,6 +765,7 @@ finish(await handle);
         RuntimeEffectKind::PresentToolResult,
         RuntimeEffectKind::Checkpoint,
         RuntimeEffectKind::LanguageRuntimeValue,
+        RuntimeEffectKind::LanguageRuntimeValue,
     ]
     .iter()
     .map(|kind| format!("{kind:?}"))
@@ -771,7 +773,7 @@ finish(await handle);
     expected_kinds.sort();
     assert_eq!(
         appended_kinds, expected_kinds,
-        "the replay prefix must consume every pre-crash journal entry and append only the uncommitted presentations, the checkpoint and the cell's seal"
+        "the replay prefix must consume every pre-crash journal entry and append only the uncommitted presentations, the checkpoint, the cell's seal and its outputs"
     );
     let replayed_scalar = replayed_envelopes
         .iter()

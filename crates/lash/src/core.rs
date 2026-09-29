@@ -749,6 +749,7 @@ pub struct LashCoreBuilder {
     commit_budget: Option<facade_support::CommitBudget>,
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     max_attachment_bytes: Option<Option<u64>>,
+    output_retention: Option<lash_core::OutputRetentionPolicy>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     // Core fields applied over the config the backend's ports assemble.
     prompt: Option<PromptLayer>,
@@ -778,6 +779,7 @@ impl LashCoreBuilder {
             commit_budget: None,
             queued_work_batching: None,
             max_attachment_bytes: None,
+            output_retention: None,
             process_wake_delivery_policy: None,
             prompt: None,
             trace_sink: None,
@@ -831,6 +833,20 @@ impl LashCoreBuilder {
     /// This deployment limit is independent from [`Self::commit_budget`].
     pub fn max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
         self.max_attachment_bytes = Some(max_attachment_bytes);
+        self
+    }
+
+    /// The byte policy every output is measured against before it enters
+    /// session history (FIG-1643). A tool presentation, or an RLM print or
+    /// final value, longer than `inline_limit_bytes` is retained as a session
+    /// attachment, and history keeps a witness of at most `witness_bytes` and
+    /// the attachment's reference in its place. The default is
+    /// [`OutputRetentionPolicy::DEFAULT`](crate::attachments::OutputRetentionPolicy::DEFAULT).
+    ///
+    /// Each step that applies the policy journals it, so a changed policy
+    /// applies to new outputs and never to what a replay serves.
+    pub fn output_retention(mut self, policy: crate::attachments::OutputRetentionPolicy) -> Self {
+        self.output_retention = Some(policy);
         self
     }
 

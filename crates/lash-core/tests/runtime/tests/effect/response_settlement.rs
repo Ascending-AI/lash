@@ -92,12 +92,13 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
                 )),
                 degraded_bindings: Vec::new(),
                 terminal_finish: None,
+                terminal_finish_retained: None,
             });
         }
         Ok(lash_core::ExecResponse {
             observations: vec![lash_core::Observation {
                 text: "next cell executed".to_string(),
-                value: serde_json::json!("next cell executed"),
+                value: lash_core::OutputValue::Inline(serde_json::json!("next cell executed")),
                 projection: Default::default(),
             }],
             calls: Vec::new(),
@@ -105,6 +106,7 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
             error: None,
             degraded_bindings: Vec::new(),
             terminal_finish: None,
+            terminal_finish_retained: None,
         })
     }
 

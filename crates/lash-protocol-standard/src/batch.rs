@@ -325,14 +325,23 @@ fn fold_wrapper(
 }
 
 /// A member's presentation as the model saw it on its own: its text blocks
-/// joined (as JSON when the text is JSON), and its attachments, which the
-/// wrapper's result carries after its rows.
+/// joined (as JSON when the text is JSON), and its attachments and retained
+/// outputs, which the wrapper's result carries after its rows. A retained
+/// output's row names its attachment; its witness is shown once, in its
+/// block.
 fn presented_member(parts: Vec<ModelToolReturnPart>) -> (Value, Vec<ModelToolReturnPart>) {
     let mut text = String::new();
     let mut attachments = Vec::new();
     for part in parts {
         match part {
             ModelToolReturnPart::Text { text: block } => text.push_str(&block),
+            ModelToolReturnPart::Retained(retained) => {
+                text.push_str(&format!(
+                    "[output retained as attachment {}; its witness follows the results]",
+                    retained.reference.id
+                ));
+                attachments.push(ModelToolReturnPart::Retained(retained));
+            }
             attachment @ ModelToolReturnPart::Attachment(_) => attachments.push(attachment),
         }
     }

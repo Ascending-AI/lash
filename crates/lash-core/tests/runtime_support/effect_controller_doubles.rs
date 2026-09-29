@@ -671,6 +671,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                     error: None,
                     degraded_bindings: Vec::new(),
                     terminal_finish: Some(serde_json::json!("ok")),
+                    terminal_finish_retained: None,
                 })),
             }),
             // Delegated, exactly like every other command this double records

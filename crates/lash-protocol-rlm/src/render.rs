@@ -121,7 +121,7 @@ pub(crate) fn rendered_print(
     };
     Some(lash_sansio::Observation {
         text,
-        value: typed,
+        value: lash_sansio::OutputValue::Inline(typed),
         projection,
     })
 }
@@ -157,7 +157,10 @@ mod tests {
             serde_json::json!("abcdef"),
         )
         .expect("nonempty print");
-        assert_eq!(observation.value, serde_json::json!("abcdef"));
+        assert_eq!(
+            observation.value,
+            lash_sansio::OutputValue::Inline(serde_json::json!("abcdef"))
+        );
         assert_eq!(
             observation.text,
             "[cut: 6 chars rendered within 3; chars 1; narrow with history[4].output[2].<path>]\nabc\n...[truncated 3 chars]"

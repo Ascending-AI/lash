@@ -1,6 +1,6 @@
 {
   "scenario": "scalar-lashlang-tool-attempt",
-  "recorded_at_git_sha": "3ca3392558e128dbbe96c9b683a1d36e7c4dd04f",
+  "recorded_at_git_sha": "3d5f8d35636d4aa52cd738647e02c281b2c7371f",
   "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
   "records": {
     "lash:session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt": {

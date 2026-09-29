@@ -189,6 +189,8 @@ impl RuntimeErrorCode {
             // the spec names an exact revision this worker's deployment does not register yet.
             Self::RunDefinitionUnavailable => Retryable,
             Self::RecordedRendererUnavailable => Retryable,
+            // the attachment store refused or faulted; a healthy store retains the output.
+            Self::OutputRetentionFailed => Retryable,
             // a registered definition refuses the same context the same way.
             Self::RunShapeRefused => Terminal,
             // the same spec differs from the same running turn's again.

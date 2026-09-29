@@ -686,6 +686,11 @@ pub mod attachments {
     pub use lash_core::{
         AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType,
     };
+    /// Output kept out of session history (FIG-1643): the byte policy
+    /// [`LashCoreBuilder::output_retention`](crate::LashCoreBuilder::output_retention)
+    /// configures, the witness and reference history keeps in an oversized
+    /// output's place, and a value that is one or the other.
+    pub use lash_core::{OutputRetentionPolicy, OutputValue, RetainedOutput};
     pub use lash_sansio::{InvalidAttachmentId, InvalidMediaType};
 }
 

@@ -179,7 +179,7 @@ fn journaled_prints_replay_without_calling_the_renderer() {
                         assert_eq!(calls.load(Ordering::SeqCst), 1);
                         *observations.lock().expect("observations") =
                             Some(response.observations.clone());
-                        panic!("crash after the prints step");
+                        panic!("crash after the outputs step");
                     }
                     assert_eq!(
                         response.observations,

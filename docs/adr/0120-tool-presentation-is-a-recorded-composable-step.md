@@ -120,3 +120,27 @@ Item 4: The pre-1.0 freeze changes shapes in place;
 1.0 cut. Item 25 was already corrected by the FIG-4095 amendment above: a
 content-addressed put may repeat while the recorded presentation replays
 unchanged.
+
+## Amendment (FIG-1643, 2026-09-29): nothing oversized enters history
+
+Retention is no longer a renderer option: `retain_full_output` is deleted,
+and a cut output, a failure's included, is always retained. After the last
+step, `present_tool_result` measures the return's text against the
+session's `OutputRetentionPolicy` (an inline byte limit and a witness byte
+bound, set on the host config). An oversized return is retained through
+`retain_text` and replaced by one `ModelToolReturnPart::Retained` block: a
+bounded witness and the `AttachmentRef` of the exact text. The policy is
+recorded in the `ToolPresentation` beside the return, so a replay after a
+threshold change serves the recorded decision. A retention that cannot put
+is `RuntimeErrorCode::OutputRetentionFailed`, a typed failure that refuses
+presentation and is retryable while nothing downstream derived from it; it
+never becomes text for the model.
+
+An RLM cell's prints and final value follow the same rule inside the cell's
+journaled `{cell}:outputs` language value: an oversized value's JSON is put
+as an attachment and history carries `OutputValue::Retained`, while the
+host still receives the full final value. The retained attachment is owned
+by the turn that put it, so that turn's commit roots it
+([ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md)), and a
+turn that crashes before its commit leaves an intent the next commit's sweep
+reclaims.

@@ -514,12 +514,16 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             }];
         }
 
+        // The retention history records in place of a terminal value too
+        // long for it (FIG-1643); the value itself stays the turn's answer.
+        let mut finish_retained = None;
         match result {
             Ok(response) => {
                 // Fold the executor's `error` / `terminal_finish` pair into the
                 // one outcome it describes; a pair carrying both resolves to
                 // the failure rather than discarding it.
                 let outcome = CellOutcome::from_parts(response.error, response.terminal_finish);
+                finish_retained = response.terminal_finish_retained;
                 if !response.degraded_bindings.is_empty() {
                     actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                         "projection_rehydration",
@@ -621,7 +625,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 ctx.turn_id(),
                 ctx.protocol_iteration(),
                 &state,
-                Some(CellOutcome::Finished(finish_value.clone())),
+                Some(CellOutcome::Finished(match finish_retained {
+                    Some(retained) => lash_core::OutputValue::Retained(retained),
+                    None => lash_core::OutputValue::Inline(finish_value.clone()),
+                })),
             )));
             actions.push(DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
@@ -1040,7 +1047,7 @@ fn trajectory_entry(
     turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
-    entry_outcome: Option<CellOutcome<String>>,
+    entry_outcome: Option<lash_rlm_types::HistoryCellOutcome>,
 ) -> RlmTrajectoryEntry {
     // A step the driver adjudicated on the spot (schema-mismatch failure,
     // validated finish) names its outcome explicitly; otherwise the entry
@@ -1072,7 +1079,7 @@ fn trajectory_events(
     turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
-    entry_outcome: Option<CellOutcome<String>>,
+    entry_outcome: Option<lash_rlm_types::HistoryCellOutcome>,
 ) -> Vec<SessionHistoryRecord> {
     let mut events = Vec::new();
     if let Some(event) =

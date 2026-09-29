@@ -317,7 +317,6 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
     run_async_test_on_stack_budget("tool-projection-stack-test", || async {
         let mut standard_config = crate::plugins::StandardProtocolConfig::default();
         standard_config.render.defaults.value.max_chars = Some(32);
-        standard_config.render.defaults.retain_full_output = Some(false);
         let observed_tool_results = Arc::new(TokioMutex::new(Vec::<String>::new()));
         let observed_tool_results_provider = Arc::clone(&observed_tool_results);
         let responses = Arc::new(TokioMutex::new(VecDeque::from([

@@ -258,6 +258,7 @@ fn empty_exec_response() -> crate::ExecResponse {
         error: None,
         degraded_bindings: Vec::new(),
         terminal_finish: None,
+        terminal_finish_retained: None,
     }
 }
 
