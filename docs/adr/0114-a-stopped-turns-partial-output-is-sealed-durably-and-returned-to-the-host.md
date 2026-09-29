@@ -1554,6 +1554,17 @@ inside their own transaction.
 write, not only transient faults, so a deterministic refusal hangs the
 turn. FIG-4069 limits the retry to transient faults.
 
+**A tool attempt writes its capture outside its cancel watch (§2.2, §4.1).**
+A tool attempt's recorded body races a live watch on its stop: the turn's
+gate, or a group child's cancel fact over the ingress. The attempt now opens
+its writer and persists its start before that race, and persists its
+settlement after it, still inside the recorded step. What persists, and
+before what it publishes, is unchanged. Only the tool's own run, with its
+progress chunks, races the watch. An engine that sequences its steps
+therefore sees the store writes as the step's own work, never as work left
+running while the step waits on the watch's request: the Restate server
+double's serial scheduler keeps one grant order per seed (FIG-4071).
+
 **Frozen versions (§3.5).** The four capture tables change the stored
 shapes in place: SQLite stays at schema version 99 and PostgreSQL at DDL
 revision 141, as the version freeze requires. A catalog without the tables

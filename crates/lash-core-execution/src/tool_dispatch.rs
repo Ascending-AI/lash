@@ -30,7 +30,7 @@ pub use context::{PendingToolDispatchOutcome, ToolDispatchOutcome, ToolPreparati
 #[cfg(any(test, feature = "testing"))]
 pub use execution::coordinate_prepared_tool_call_launch_with_execution_context;
 pub use execution::{
-    execute_internal_process_tool, execute_orchestrating_tool,
+    ToolAttemptTurnCapture, execute_internal_process_tool, execute_orchestrating_tool,
     execute_prepared_tool_attempt_effect, finalize_tool_result_with_execution_context,
 };
 #[cfg(feature = "testing")]

@@ -12,6 +12,7 @@ mod process_handles;
 mod settlement_incorporation;
 #[cfg(test)]
 mod settlement_incorporation_tests;
+mod tool_attempt;
 pub(crate) mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
