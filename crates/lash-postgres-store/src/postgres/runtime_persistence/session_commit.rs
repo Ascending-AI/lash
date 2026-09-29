@@ -1,6 +1,20 @@
 use super::*;
 use crate::session_sql::session_sql;
 
+fn transition_source_matches_head_or_append(
+    prior: Option<&lash_core_execution::FrameNodeId>,
+    graph: &lash_core_execution::store::GraphAppend,
+    ended: &lash_core_execution::FrameNodeId,
+) -> bool {
+    match prior {
+        Some(frame) => frame == ended,
+        None => graph
+            .nodes()
+            .iter()
+            .any(|node| node.node_id.as_str() == ended.as_str() && node.frame_open().is_some()),
+    }
+}
+
 async fn apply_frame_transition_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     transition: &lash_core_execution::store::FrameTransition,
@@ -837,6 +851,25 @@ impl SessionCommitStore for PostgresSessionStore {
                 })?;
         }
         let meta = plan.head_meta(checkpoint_ref.clone());
+        if let Some(transition) = &commit.frame_transition {
+            // The head row is locked by the publication verdict above. The
+            // earlier head payload is stable under the session advisory lock.
+            if transition.ended.session_id() != commit.session_id
+                || transition.successor.session_id() != commit.session_id
+                || !transition_source_matches_head_or_append(
+                    existing
+                        .as_ref()
+                        .and_then(|head| head.current_frame_node_id.as_ref()),
+                    &commit.graph,
+                    transition.ended.frame_node_id(),
+                )
+                || meta.current_frame_node_id.as_ref() != Some(transition.successor.frame_node_id())
+            {
+                return Err(StoreError::Backend(
+                    "frame transition does not match the committed head".into(),
+                ));
+            }
+        }
         // The revision predicate stays on the upsert as the backstop, and it
         // is the ONLY statement-level guard for a concurrent *first* commit,
         // where the placeholder row above is created inside this transaction.
