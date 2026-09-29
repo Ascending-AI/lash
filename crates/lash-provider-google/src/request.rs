@@ -8,6 +8,17 @@ use lash_core::facade_support::{
     ProviderSchemaCapabilities, SchemaPurpose, SchemaResolutionRequest, resolve_schema,
 };
 
+fn user_prompt_id(req: &LlmRequest) -> uuid::Uuid {
+    let scope = format!("{}\0{}", req.provider_prompt_cache_key(), req.request_id());
+    let hash =
+        lash_sansio::core_support::blake3_domain_hash("lash-google-user-prompt-id/v1", scope);
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&hash[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes)
+}
+
 impl GoogleOAuthProvider {
     pub(crate) fn reasoning_retention_safe_request<'a>(
         &self,
@@ -498,7 +509,7 @@ impl GoogleOAuthProvider {
         }
         let mut request = json!({
             "model": req.model,
-            "user_prompt_id": uuid::Uuid::new_v4().to_string(),
+            "user_prompt_id": user_prompt_id(req).to_string(),
             "request": {
                 "contents": contents,
                 "generationConfig": generation_config,

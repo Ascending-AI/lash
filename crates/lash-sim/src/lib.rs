@@ -22,6 +22,8 @@ mod tool_call_replay;
 
 pub mod artifacts;
 pub mod backend_contention;
+#[cfg(test)]
+mod generation_disposition_matrix;
 pub mod generator;
 pub mod invariants;
 pub mod minimize;
