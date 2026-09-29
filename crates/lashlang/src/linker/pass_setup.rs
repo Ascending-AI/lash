@@ -55,12 +55,11 @@ pub(super) struct Linker<'module> {
     /// recovered error in the current top-level workflow node.
     pub(super) workflow_diagnostic_owner: RefCell<Option<AstPath>>,
     pub(super) workflow_error_path: RefCell<Option<AstPath>>,
+    /// Wait-site payloads for the literal currently being lifted. Nested lifts
+    /// replace this collector and restore their enclosing literal's collector.
+    pub(super) signal_collector: RefCell<Option<BTreeMap<String, TypeExpr>>>,
     /// Process declarations lifted from `Expr::ProcessLiteral` during the
     /// lowering walk, in lift order, with the span to record for each.
-    /// While one literal lifts, `collect_signals` is on and every wait site
-    /// records its await-site expected payload here.
-    pub(super) collect_signals: Cell<bool>,
-    pub(super) inferred_signals: RefCell<BTreeMap<String, TypeExpr>>,
     pub(super) lifted_declarations: RefCell<Vec<(Declaration, Option<Span>, AstPath)>>,
     /// Cell locals bound to a lifted process literal, by source name: the
     /// lifted declaration's digest name and the process type the lift settled.
@@ -95,8 +94,7 @@ impl<'module> Linker<'module> {
             recover_workflow_errors: Cell::new(false),
             workflow_diagnostic_owner: RefCell::new(None),
             workflow_error_path: RefCell::new(None),
-            collect_signals: Cell::new(false),
-            inferred_signals: RefCell::new(BTreeMap::new()),
+            signal_collector: RefCell::new(None),
             lifted_declarations: RefCell::new(Vec::new()),
             lifted_process_aliases: RefCell::new(BTreeMap::new()),
             open_places: OpenPlaces::of(program),

@@ -2323,3 +2323,120 @@ async fn process_rebuild_failure_is_terminal_but_artifact_io_failure_retries() {
         }
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn nested_signal_admission_registers_each_process_payload_independently() {
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    for (operation, ty) in [
+        ("accept_str", lashlang::TypeExpr::Str),
+        ("accept_int", lashlang::TypeExpr::Int),
+    ] {
+        catalog
+            .add_module_operation(
+                ["tools"],
+                "Tools",
+                operation,
+                operation,
+                ty,
+                lashlang::TypeExpr::Null,
+            )
+            .expect("unique test operation");
+    }
+    let wait = |name: &str, operation: &str| {
+        b::unwrap(b::await_expr(b::module_call(
+            &["tools"],
+            operation,
+            vec![b::wait_signal(name)],
+        )))
+    };
+    let environment = LashlangHostEnvironment::new(catalog, LashlangAbilities::all());
+    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: "nested signal admission fixture",
+        program: b::program(vec![b::assign(
+            "parent",
+            b::process_literal(
+                vec![],
+                b::block(vec![
+                    wait("daily", "accept_str"),
+                    b::assign(
+                        "first",
+                        b::process_literal(vec![], wait("daily", "accept_int")),
+                    ),
+                    b::assign(
+                        "second",
+                        b::process_literal(vec![], wait("second", "accept_str")),
+                    ),
+                    wait("after", "accept_str"),
+                ]),
+            ),
+        )]),
+        environment: &environment,
+    })
+    .expect("nested signal module compiles");
+    let store = memory_artifact_store().await;
+    store
+        .publish_module_artifact(&host_claim(), &output.artifact)
+        .await
+        .expect("publish corrected definition");
+    let processes = output
+        .artifact
+        .ir()
+        .declarations
+        .iter()
+        .filter_map(|decl| match decl {
+            lashlang::Declaration::Process(process) => Some(process),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(processes.len(), 3);
+    for (process, expected) in processes.into_iter().zip([
+        vec![("signal.daily", "integer")],
+        vec![("signal.second", "string")],
+        vec![("signal.after", "string"), ("signal.daily", "string")],
+    ]) {
+        let event_types = lashlang_process_signal_event_types(process);
+        let declarations = event_types
+            .iter()
+            .map(|event| {
+                (
+                    event.name.as_str(),
+                    event.payload_schema.schema["type"]
+                        .as_str()
+                        .expect("typed payload"),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(declarations, expected, "registration for {}", process.name);
+        let prepared = prepare_lashlang_process_start(
+            store.clone(),
+            None,
+            lashlang::ProcessStart {
+                module_ref: output.module_ref.clone(),
+                process_ref: output
+                    .artifact
+                    .process_ref(process.name.as_str())
+                    .expect("exported process")
+                    .clone(),
+                host_requirements_ref: output.host_requirements_ref.clone(),
+                start_site: test_start_site("nested-signal-admission", 1),
+                process_name: process.name.to_string(),
+                args: lashlang::Record::new(),
+            },
+            lash_core::ProcessOriginator::host(),
+            lash_core::LifetimeDecision::Detached,
+        )
+        .await
+        .expect("prepare exported process admission");
+        let admitted = prepared
+            .request
+            .event_types
+            .iter()
+            .filter(|event| event.name.starts_with("signal."))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            admitted,
+            event_types.iter().collect::<Vec<_>>(),
+            "admission pins this process's signals"
+        );
+    }
+}

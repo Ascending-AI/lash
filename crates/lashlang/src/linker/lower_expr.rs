@@ -987,9 +987,7 @@ impl<'module> Linker<'module> {
                 span: scope.span,
             });
         }
-        if self.collect_signals.get() {
-            self.record_signal_payload(name.as_str(), expected, scope.span)?;
-        }
+        self.record_signal_payload(name.as_str(), expected, scope.span)?;
         Ok((
             Expr::WaitSignal { name: name.clone() },
             Binding::Value(TypeExpr::Any),
@@ -1005,10 +1003,13 @@ impl<'module> Linker<'module> {
         expected: Option<&TypeExpr>,
         span: Option<Span>,
     ) -> Result<(), LinkError> {
+        let mut collector = self.signal_collector.borrow_mut();
+        let Some(signals) = collector.as_mut() else {
+            return Ok(());
+        };
         let payload = expected
             .map(|expected| self.resolve_type_aliases(expected))
             .unwrap_or(TypeExpr::Any);
-        let mut signals = self.inferred_signals.borrow_mut();
         match signals.get(name).cloned() {
             None => {
                 signals.insert(name.to_owned(), payload);

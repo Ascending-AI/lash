@@ -109,22 +109,17 @@ impl<'module> Linker<'module> {
             process_scope.declare(param.name.as_str(), self.binding_for_type(&param.ty));
         }
         let previous_completion = self.collect_completion.replace(true);
-        let previous_signals = self.collect_signals.replace(true);
-        // #1511 left this half-written: it took the enclosing literal's set
-        // and never restored it, so only the clearing side effect was ever
-        // live. Kept as the clear it actually is; restoring the outer set is
-        // a behaviour change and belongs in its own commit.
-        self.inferred_signals.borrow_mut().clear();
+        let previous_signals = self.signal_collector.replace(Some(BTreeMap::new()));
         let lowered = self.lower_expr(&literal.body, &path.child(0), &mut process_scope);
         self.collect_completion.set(previous_completion);
-        self.collect_signals.set(previous_signals);
         let signals = self
-            .inferred_signals
-            .borrow()
-            .iter()
+            .signal_collector
+            .replace(previous_signals)
+            .into_iter()
+            .flatten()
             .map(|(name, ty)| ProcessSignalDecl {
-                name: name.as_str().into(),
-                ty: ty.clone(),
+                name: name.into(),
+                ty,
             })
             .collect::<Vec<_>>();
         let body = lowered?.0;

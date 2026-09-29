@@ -379,3 +379,213 @@ fn an_immutable_capture_becomes_a_hidden_start_argument() {
         process.params
     );
 }
+
+fn typed_signal_wait(name: &str, operation: &str) -> Expr {
+    builders::unwrap(builders::await_expr(builders::module_call(
+        &["tools"],
+        operation,
+        vec![builders::wait_signal(name)],
+    )))
+}
+
+fn nested_signal_module(body: Vec<Expr>) -> Program {
+    builders::program(vec![builders::assign(
+        "parent",
+        builders::process_literal(vec![], builders::block(body)),
+    )])
+}
+
+fn assert_process_signals_and_exports(linked: &LinkedModule, expected: &[Vec<ProcessSignalDecl>]) {
+    let mut corrected = linked.artifact.ir().clone();
+    let processes = corrected
+        .declarations
+        .iter_mut()
+        .filter_map(|decl| match decl {
+            Declaration::Process(process) => Some(process),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(processes.len(), expected.len());
+    for (process, signals) in processes.into_iter().zip(expected) {
+        process.signals = signals.clone();
+    }
+    let corrected = crate::ModuleArtifact::from_ir_and_requirements(
+        corrected,
+        linked.artifact.host_requirements().clone(),
+    )
+    .expect("complete corrected artifact");
+    for (process, signals) in linked
+        .artifact
+        .ir()
+        .declarations
+        .iter()
+        .filter_map(|decl| match decl {
+            Declaration::Process(process) => Some(process),
+            _ => None,
+        })
+        .zip(expected)
+    {
+        assert_eq!(
+            linked.artifact.process_ref(process.name.as_str()),
+            corrected.process_ref(process.name.as_str()),
+            "export for {}",
+            process.name
+        );
+        assert_eq!(&process.signals, signals, "signals for {}", process.name);
+    }
+    assert_eq!(linked.artifact.module_ref(), corrected.module_ref());
+}
+
+#[test]
+fn nested_signal_parent_wait_before_child_survives() {
+    let linked = LinkedModule::link(
+        nested_signal_module(vec![
+            typed_signal_wait("before", "accept_str"),
+            builders::assign(
+                "child",
+                builders::process_literal(vec![], typed_signal_wait("child", "accept_int")),
+            ),
+        ]),
+        full_host_environment(),
+    )
+    .expect("independent nested signals link");
+    assert_process_signals_and_exports(
+        &linked,
+        &[
+            vec![builders::signal("child", TypeExpr::Int)],
+            vec![builders::signal("before", TypeExpr::Str)],
+        ],
+    );
+}
+
+#[test]
+fn nested_signal_parent_wait_after_child_excludes_child() {
+    let linked = LinkedModule::link(
+        nested_signal_module(vec![
+            builders::assign(
+                "child",
+                builders::process_literal(vec![], typed_signal_wait("child", "accept_int")),
+            ),
+            typed_signal_wait("after", "accept_str"),
+        ]),
+        full_host_environment(),
+    )
+    .expect("independent nested signals link");
+    assert_process_signals_and_exports(
+        &linked,
+        &[
+            vec![builders::signal("child", TypeExpr::Int)],
+            vec![builders::signal("after", TypeExpr::Str)],
+        ],
+    );
+}
+
+#[test]
+fn nested_signal_multiple_siblings_keep_separate_collectors() {
+    let linked = LinkedModule::link(
+        nested_signal_module(vec![
+            typed_signal_wait("before", "accept_str"),
+            builders::assign(
+                "first",
+                builders::process_literal(vec![], typed_signal_wait("first", "accept_int")),
+            ),
+            typed_signal_wait("between", "accept_str"),
+            builders::assign(
+                "second",
+                builders::process_literal(vec![], typed_signal_wait("second", "accept_float")),
+            ),
+            typed_signal_wait("after", "accept_str"),
+        ]),
+        full_host_environment(),
+    )
+    .expect("sibling signals link");
+    assert_process_signals_and_exports(
+        &linked,
+        &[
+            vec![builders::signal("first", TypeExpr::Int)],
+            vec![builders::signal("second", TypeExpr::Float)],
+            vec![
+                builders::signal("after", TypeExpr::Str),
+                builders::signal("before", TypeExpr::Str),
+                builders::signal("between", TypeExpr::Str),
+            ],
+        ],
+    );
+}
+
+#[test]
+fn nested_signal_equal_names_have_independent_payloads() {
+    let linked = LinkedModule::link(
+        nested_signal_module(vec![
+            typed_signal_wait("daily", "accept_str"),
+            builders::assign(
+                "child",
+                builders::process_literal(vec![], typed_signal_wait("daily", "accept_int")),
+            ),
+            typed_signal_wait("daily", "accept_str"),
+        ]),
+        full_host_environment(),
+    )
+    .expect("equal names in separate processes do not conflict");
+    assert_process_signals_and_exports(
+        &linked,
+        &[
+            vec![builders::signal("daily", TypeExpr::Int)],
+            vec![builders::signal("daily", TypeExpr::Str)],
+        ],
+    );
+}
+
+#[test]
+fn nested_signal_child_refusal_restores_parent_during_editor_recovery() {
+    let program = nested_signal_module(vec![
+        typed_signal_wait("daily", "accept_str"),
+        builders::assign(
+            "child",
+            builders::process_literal(
+                vec![],
+                builders::record(vec![
+                    ("signal", typed_signal_wait("daily", "accept_int")),
+                    ("invalid", builders::var("missing")),
+                ]),
+            ),
+        ),
+        typed_signal_wait("daily", "accept_str"),
+        typed_signal_wait("after", "accept_str"),
+    ]);
+    let environment = full_host_environment();
+    let mut linker = Linker::new(&program, &environment).with_workflow_analysis();
+    linker.recover_workflow_errors.set(true);
+    linker
+        .lower_expr(
+            &program.main,
+            &AstPath::main(vec![]),
+            &mut Scope::new(false, None),
+        )
+        .expect("editor continues after refusing the child");
+    let declarations = linker.lifted_declarations.borrow();
+    assert_eq!(declarations.len(), 1, "refused child must not lift");
+    let Declaration::Process(parent) = &declarations[0].0 else {
+        panic!("parent process")
+    };
+    assert_eq!(
+        parent.signals,
+        vec![
+            builders::signal("after", TypeExpr::Str),
+            builders::signal("daily", TypeExpr::Str)
+        ]
+    );
+    drop(declarations);
+    let analysis = linker.take_workflow_analysis();
+    let errors = analysis
+        .nodes
+        .values()
+        .flat_map(|node| &node.diagnostics)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        errors.len(),
+        1,
+        "no spurious parent signal conflict: {errors:?}"
+    );
+    assert!(matches!(errors[0].error, LinkError::UnknownName { .. }));
+}
