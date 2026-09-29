@@ -27,11 +27,33 @@ fn stored_data_corrupt(record_kind: &'static str, error: impl std::fmt::Display)
     }
 }
 
+lash_store_sql::statements! {
+    /// Capture statements only PostgreSQL issues.
+    struct CapturePostgresStatements @ "capture_commit" {
+        /// Clear physical turn `?2`'s staged capture (frames, writers and its
+        /// counters) and read its sealed partial, if any, in one round trip.
+        /// A data-modifying `WITH` runs whether or not the outer query reads
+        /// it, so the head commit pays one round trip for the capture, not
+        /// four. The commit's transaction rolls the clear back when the
+        /// partial disagrees with the commit.
+        select_partial_clearing_turn = "WITH cleared_frames AS (
+                 DELETE FROM turn_capture_frames WHERE session_id = ?1 AND turn_id = ?2
+             ), cleared_writers AS (
+                 DELETE FROM turn_capture_writers WHERE session_id = ?1 AND turn_id = ?2
+             ), cleared_turn AS (
+                 DELETE FROM turn_capture_turns WHERE session_id = ?1 AND turn_id = ?2
+             )
+             SELECT partial_json FROM stopped_partials
+                 WHERE session_id = ?1 AND turn_id = ?2";
+    }
+}
+
 struct CaptureSql {
     turns: CaptureTurnStatements,
     writers: CaptureWriterStatements,
     frames: CaptureFrameStatements,
     partials: StoppedPartialStatements,
+    commit: CapturePostgresStatements,
 }
 
 static SQL: LazyLock<CaptureSql> = LazyLock::new(|| {
@@ -41,6 +63,7 @@ static SQL: LazyLock<CaptureSql> = LazyLock::new(|| {
         writers: CaptureWriterStatements::render(dialect),
         frames: CaptureFrameStatements::render(dialect),
         partials: StoppedPartialStatements::render(dialect),
+        commit: CapturePostgresStatements::render(dialect),
     }
 });
 
@@ -278,61 +301,48 @@ pub(crate) async fn commit_capture_tx(
         return Ok(());
     };
     let session = &commit.session_id;
-    if let Some(reference) = &commit.stopped_partial {
-        if reference.id.session_id != *session || reference.id.turn_id != *turn {
-            return Err(StoreError::StoppedPartialNotSealed {
-                session_id: session.clone(),
-                turn_id: turn.clone(),
-            });
-        }
-        let Some((partial, _)) = partial_row(tx, session, turn).await? else {
-            return Err(StoreError::StoppedPartialNotSealed {
-                session_id: session.clone(),
-                turn_id: turn.clone(),
-            });
-        };
-        if partial.id != reference.id || partial.digest != reference.digest {
-            return Err(StoreError::StoppedPartialConflict {
-                session_id: session.clone(),
-                turn_id: turn.clone(),
-                existing: Box::new(partial.digest),
-                offered: Box::new(reference.digest),
-            });
-        }
-        sqlx::query(SQL.partials.commit.sql())
-            .bind(session.as_str())
-            .bind(turn.as_str())
-            .bind(number(now)?)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    } else if let Some((partial, _)) = partial_row(tx, session, turn).await? {
-        return Err(StoreError::StoppedPartialConflict {
+    let partial = sqlx::query_scalar::<_, String>(SQL.commit.select_partial_clearing_turn.sql())
+        .bind(session.as_str())
+        .bind(turn.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .map(|json| decode::<StoppedPartial>(&json))
+        .transpose()?;
+    match (&commit.stopped_partial, partial) {
+        (None, None) => Ok(()),
+        (None, Some(partial)) => Err(StoreError::StoppedPartialConflict {
             session_id: session.clone(),
             turn_id: turn.clone(),
             existing: Box::new(partial.digest),
             offered: Box::new(partial.digest),
-        });
+        }),
+        (Some(reference), partial) => {
+            let wrong_turn = reference.id.session_id != *session || reference.id.turn_id != *turn;
+            let Some(partial) = partial.filter(|_| !wrong_turn) else {
+                return Err(StoreError::StoppedPartialNotSealed {
+                    session_id: session.clone(),
+                    turn_id: turn.clone(),
+                });
+            };
+            if partial.id != reference.id || partial.digest != reference.digest {
+                return Err(StoreError::StoppedPartialConflict {
+                    session_id: session.clone(),
+                    turn_id: turn.clone(),
+                    existing: Box::new(partial.digest),
+                    offered: Box::new(reference.digest),
+                });
+            }
+            sqlx::query(SQL.partials.commit.sql())
+                .bind(session.as_str())
+                .bind(turn.as_str())
+                .bind(number(now)?)
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            Ok(())
+        }
     }
-    sqlx::query(SQL.frames.delete_turn.sql())
-        .bind(session.as_str())
-        .bind(turn.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    sqlx::query(SQL.writers.delete_turn.sql())
-        .bind(session.as_str())
-        .bind(turn.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    sqlx::query(SQL.turns.delete.sql())
-        .bind(session.as_str())
-        .bind(turn.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    Ok(())
 }
 
 pub(crate) async fn delete_session_capture_tx(
