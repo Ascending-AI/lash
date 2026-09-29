@@ -92,7 +92,7 @@ impl LlmToolsProvider {
     async fn llm_query(&self, args: &Value, context: &AttemptContext<'_>) -> Result<Value, String> {
         let task = required_string(args, "task")?;
         let inputs = args.get("inputs").cloned().unwrap_or(Value::Null);
-        let output_schema = lash_lashlang_runtime::parse_output_schema(args.get("output"))
+        let output_schema = lash_sansio::schema_contract::parse_output_schema(args.get("output"))
             .map_err(|err| err.to_string())?;
         let session_model = context
             .sessions()
@@ -445,6 +445,19 @@ mod tests {
         });
         lash_core::testing::ToolCallFixture::with_host_and_direct_completions(manager, completions)
             .attempt("test-turn")
+    }
+
+    #[test]
+    fn output_schema_has_no_language_runtime_dependency() {
+        let manifest = include_str!("../Cargo.toml");
+        for dependency in ["lash-lashlang-runtime", "lashlang"] {
+            assert!(
+                !manifest.lines().any(|line| line
+                    .split_once('=')
+                    .is_some_and(|(name, _)| name.trim() == dependency)),
+                "output-schema parsing must not depend on {dependency}"
+            );
+        }
     }
 
     #[test]

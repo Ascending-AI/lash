@@ -141,10 +141,7 @@ impl RenderValue for Value {
     }
 }
 
-/// Marker key that wraps a Type literal at its outermost level so a host-side
-/// consumer can tell a Type value apart from a plain record. The inner value
-/// is the JSON-Schema representation of the type.
-pub const LASH_TYPE_KEY: &str = "$lash_type";
+pub use lash_sansio::schema_contract::LASH_TYPE_KEY;
 pub const LASH_HOST_DESCRIPTOR_TYPE_KEY: &str = "$lash_host_descriptor_type";
 pub const LASH_HOST_DESCRIPTOR_VALUE_KEY: &str = "$lash_host_descriptor_value";
 pub const LASH_PROCESS_VALUE_KEY: &str = "$lash_process";

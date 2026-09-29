@@ -13,6 +13,9 @@ mod omission_null;
 #[cfg(test)]
 #[path = "schema_contract/omission_null_tests.rs"]
 mod omission_null_tests;
+mod typed_output;
+pub use typed_output::{LASH_TYPE_KEY, OutputSchemaError, SchemaScalarKind, parse_output_schema};
+
 mod ref_inline;
 #[cfg(test)]
 #[path = "schema_contract/ref_inline_tests.rs"]

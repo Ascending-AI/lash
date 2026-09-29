@@ -25,7 +25,6 @@ workspace = true
 [dependencies]
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
-lash-lashlang-runtime = { workspace = true }
 lash-tool-support = { workspace = true }
 async-trait = { workspace = true }
 jsonschema = { workspace = true, default-features = false }

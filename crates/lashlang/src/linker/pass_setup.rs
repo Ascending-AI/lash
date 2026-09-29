@@ -347,9 +347,10 @@ impl<'module> Linker<'module> {
                         serde_json::Value::String(descriptor.to_string()),
                     );
                 }
-                let schema =
-                    crate::parse_output_schema(Some(&serde_json::Value::Object(shorthand)))
-                        .ok()??;
+                let schema = lash_sansio::schema_contract::parse_output_schema(Some(
+                    &serde_json::Value::Object(shorthand),
+                ))
+                .ok()??;
                 crate::json_schema_to_type_expr(&schema).ok()?
             }
             _ => return None,

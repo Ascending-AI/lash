@@ -16,7 +16,6 @@ mod runtime;
 mod span;
 mod tracking;
 mod trigger;
-mod typed_output;
 mod value_refs;
 mod workflow_graph;
 
@@ -214,7 +213,6 @@ pub use trigger::{
     register_trigger_tool_output_ty, trigger_event_placeholder_expr,
     with_trigger_resource_operations,
 };
-pub use typed_output::{OutputSchemaError, parse_output_schema};
 pub use workflow_graph::{
     ListedStatement, NoStatementText, WorkflowBody, WorkflowBodySlot, WorkflowGraphProjector,
     WorkflowStatement, WorkflowStatementText, else_if_chain, statement_list,

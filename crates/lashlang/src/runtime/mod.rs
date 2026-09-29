@@ -83,8 +83,7 @@ pub use record::Record;
 pub(crate) use record::{Symbol, record_with_capacity};
 #[allow(unused_imports)]
 pub(crate) use schema::{
-    SchemaScalarKind, ValidationPlan, compile_schema_value, execute_validate_builtin,
-    execute_validation_plan,
+    ValidationPlan, compile_schema_value, execute_validate_builtin, execute_validation_plan,
 };
 pub(crate) use vm::SlotState;
 #[allow(unused_imports)]

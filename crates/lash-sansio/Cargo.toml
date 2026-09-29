@@ -33,6 +33,7 @@ blake3 = { workspace = true }
 jsonschema = { workspace = true, default-features = false, optional = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 schemars = { workspace = true }
 
 [dev-dependencies]

@@ -2311,7 +2311,6 @@ dependencies = [
  "async-trait",
  "jsonschema",
  "lash-internal-core",
- "lash-internal-lashlang-runtime",
  "lash-internal-sansio",
  "lash-internal-tool-support",
  "serde_json",
@@ -2685,6 +2684,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]

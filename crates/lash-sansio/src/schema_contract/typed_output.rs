@@ -3,14 +3,55 @@
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::{LASH_TYPE_KEY, runtime::SchemaScalarKind};
+/// Marker key that wraps a Type literal at its outermost level so a host-side
+/// consumer can tell a Type value apart from a plain record. The inner value
+/// is the JSON-Schema representation of the type.
+pub const LASH_TYPE_KEY: &str = "$lash_type";
 
-// Same name and value as json_schema.rs's importer cap, but opposite policy by
+/// JSON Schema type names shared by witness parsing and value validation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SchemaScalarKind {
+    String,
+    Number,
+    Integer,
+    Boolean,
+    Array,
+    Object,
+    Null,
+}
+
+impl SchemaScalarKind {
+    pub fn from_schema_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "string" => Self::String,
+            "number" => Self::Number,
+            "integer" => Self::Integer,
+            "boolean" => Self::Boolean,
+            "array" => Self::Array,
+            "object" => Self::Object,
+            "null" => Self::Null,
+            _ => return None,
+        })
+    }
+
+    pub const fn as_schema_name(self) -> &'static str {
+        match self {
+            Self::String => "string",
+            Self::Number => "number",
+            Self::Integer => "integer",
+            Self::Boolean => "boolean",
+            Self::Array => "array",
+            Self::Object => "object",
+            Self::Null => "null",
+        }
+    }
+}
+
+// Same value as the language JSON Schema importer cap, but opposite policy by
 // design (FIG-1878): the importer widens to Any at the cap, this parser errors.
 const MAX_SCHEMA_DEPTH: usize = 32;
 
-/// Accepts either record shorthand (field name to scalar/list descriptor) or
-/// the `$lash_type` wrapper produced by a Lashlang `Type { ... }` literal.
+/// Failure to parse an output-schema witness.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OutputSchemaError {
@@ -48,6 +89,16 @@ pub enum OutputSchemaError {
     UnknownScalar { kind: String },
 }
 
+/// Two shapes are accepted:
+/// - a record of field-name to type-descriptor strings (`"str"`, `"int"`,
+///   `"float"`, `"bool"`, `"record"`, or `"list[...]"` of those), compiled
+///   into a strict object schema; or
+/// - a Lashlang `Type { ... }` literal, a single-field
+///   `{"$lash_type": <schema>}` wrapper as produced by the Lashlang
+///   compiler, whose inner schema is passed through after validation.
+///
+/// Returns `Ok(None)` when `output` is absent or `null` (the tool falls back
+/// to its untyped default).
 pub fn parse_output_schema(value: Option<&Value>) -> Result<Option<Value>, OutputSchemaError> {
     let Some(value) = value else {
         return Ok(None);
@@ -184,6 +235,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn absent_and_null_output_use_the_untyped_default() {
+        assert_eq!(parse_output_schema(None), Ok(None));
+        assert_eq!(parse_output_schema(Some(&Value::Null)), Ok(None));
+    }
+
+    #[test]
+    fn lash_type_union_preserves_empty_and_nested_branches() {
+        let schema = json!({"anyOf": [
+            {},
+            {"type": "null"},
+            {"anyOf": [{"type": "integer"}, {"type": "array", "items": {"type": "string"}}]}
+        ]});
+        let wrapped = json!({(LASH_TYPE_KEY): schema.clone()});
+        assert_eq!(parse_output_schema(Some(&wrapped)), Ok(Some(schema)));
+    }
+
+    #[test]
+    fn lash_type_marker_with_siblings_is_a_record_descriptor() {
+        let output = json!({(LASH_TYPE_KEY): "str", "value": "int"});
+        let schema = parse_output_schema(Some(&output))
+            .expect("schema")
+            .expect("present");
+        assert_eq!(
+            schema["properties"][LASH_TYPE_KEY],
+            json!({"type": "string"})
+        );
+        assert_eq!(schema["required"], json!([LASH_TYPE_KEY, "value"]));
+        assert_eq!(schema["additionalProperties"], json!(false));
+    }
+
+    #[test]
     fn object_descriptor_alias_preserves_open_object_schema() {
         let output = serde_json::json!({"value": "object"});
 
@@ -270,5 +352,58 @@ mod tests {
             }))),
             Err(OutputSchemaError::TypeSchemaDepthExceeded)
         );
+    }
+    #[test]
+    fn output_schema_supports_scalars_and_lists() {
+        let schema = parse_output_schema(Some(&json!({
+            "answer": "str",
+            "count": "int",
+            "items": "list[str]"
+        })))
+        .expect("schema")
+        .expect("present");
+        assert_eq!(schema["properties"]["answer"]["type"], json!("string"));
+        assert_eq!(schema["properties"]["count"]["type"], json!("integer"));
+        assert_eq!(schema["properties"]["items"]["type"], json!("array"));
+    }
+
+    #[test]
+    fn output_schema_passes_through_lash_type_wrapper() {
+        let inner_schema = json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "status": { "type": "string", "enum": ["ok", "err"] }
+            },
+            "required": ["name", "tags", "status"],
+            "additionalProperties": false
+        });
+        let wrapped = json!({ LASH_TYPE_KEY: inner_schema.clone() });
+        let schema = parse_output_schema(Some(&wrapped))
+            .expect("schema")
+            .expect("present");
+        assert_eq!(schema, inner_schema);
+    }
+
+    #[test]
+    fn output_schema_rejects_lash_type_without_type_field() {
+        let wrapped = json!({ LASH_TYPE_KEY: {"properties": {}} });
+        let err = parse_output_schema(Some(&wrapped)).expect_err("missing type");
+        assert!(err.to_string().contains("type"), "error: {err}");
+    }
+
+    #[test]
+    fn output_schema_accepts_array_top_level_type() {
+        let wrapped = json!({
+            LASH_TYPE_KEY: {
+                "type": "array",
+                "items": {"type": "string"}
+            }
+        });
+        let schema = parse_output_schema(Some(&wrapped))
+            .expect("schema")
+            .expect("present");
+        assert_eq!(schema["type"], json!("array"));
     }
 }

@@ -1,6 +1,7 @@
 use super::{
     ImageValue, RuntimeError, Value, debug_assert_exported_value, record::Symbol, unwrap_type_value,
 };
+use lash_sansio::schema_contract::SchemaScalarKind;
 use smallvec::SmallVec;
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -27,69 +28,30 @@ struct ValidationFieldPlan {
     plan: ValidationPlan,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-/// The single home of Lashlang's JSON-Schema scalar vocabulary.
-pub(crate) enum SchemaScalarKind {
-    String,
-    Number,
-    Integer,
-    Boolean,
-    Array,
-    Object,
-    Null,
-}
-
-impl SchemaScalarKind {
-    pub(crate) fn from_schema_name(name: &str) -> Option<Self> {
-        Some(match name {
-            "string" => Self::String,
-            "number" => Self::Number,
-            "integer" => Self::Integer,
-            "boolean" => Self::Boolean,
-            "array" => Self::Array,
-            "object" => Self::Object,
-            "null" => Self::Null,
-            _ => return None,
-        })
+fn scalar_matches(kind: SchemaScalarKind, value: &Value) -> bool {
+    if matches!(value, Value::Ref(_)) {
+        debug_assert_exported_value("schema validation");
+        return false;
     }
 
-    pub(crate) const fn as_schema_name(self) -> &'static str {
-        match self {
-            Self::String => "string",
-            Self::Number => "number",
-            Self::Integer => "integer",
-            Self::Boolean => "boolean",
-            Self::Array => "array",
-            Self::Object => "object",
-            Self::Null => "null",
+    match kind {
+        SchemaScalarKind::String => matches!(value, Value::String(_)),
+        SchemaScalarKind::Number => matches!(value, Value::Number(number) if number.is_finite()),
+        SchemaScalarKind::Integer => {
+            matches!(value, Value::Number(number) if number.is_finite() && number.fract() == 0.0)
         }
-    }
-
-    fn matches(self, value: &Value) -> bool {
-        if matches!(value, Value::Ref(_)) {
-            debug_assert_exported_value("schema validation");
-            return false;
-        }
-
-        match self {
-            Self::String => matches!(value, Value::String(_)),
-            Self::Number => matches!(value, Value::Number(number) if number.is_finite()),
-            Self::Integer => {
-                matches!(value, Value::Number(number) if number.is_finite() && number.fract() == 0.0)
-            }
-            Self::Boolean => matches!(value, Value::Bool(_)),
-            Self::Array => match value {
-                Value::Tuple(_) | Value::List(_) => true,
-                Value::Projected(value) => matches!(value.value_type_name(), "tuple" | "list"),
-                _ => false,
-            },
-            Self::Object => match value {
-                Value::Record(_) | Value::Image(_) | Value::Resource(_) => true,
-                Value::Projected(value) => !matches!(value.value_type_name(), "tuple" | "list"),
-                _ => false,
-            },
-            Self::Null => matches!(value, Value::Null),
-        }
+        SchemaScalarKind::Boolean => matches!(value, Value::Bool(_)),
+        SchemaScalarKind::Array => match value {
+            Value::Tuple(_) | Value::List(_) => true,
+            Value::Projected(value) => matches!(value.value_type_name(), "tuple" | "list"),
+            _ => false,
+        },
+        SchemaScalarKind::Object => match value {
+            Value::Record(_) | Value::Image(_) | Value::Resource(_) => true,
+            Value::Projected(value) => !matches!(value.value_type_name(), "tuple" | "list"),
+            _ => false,
+        },
+        SchemaScalarKind::Null => matches!(value, Value::Null),
     }
 }
 
@@ -183,7 +145,7 @@ impl ValidationPlan {
     fn accepts(&self, value: &Value) -> bool {
         match &self.kind {
             ValidationPlanKind::Any => true,
-            ValidationPlanKind::Primitive(expected) => expected.matches(value),
+            ValidationPlanKind::Primitive(expected) => scalar_matches(*expected, value),
             ValidationPlanKind::Enum(allowed) => {
                 let Value::String(value) = value else {
                     return false;
@@ -238,7 +200,7 @@ impl ValidationPlan {
                 describe_primitive_failure(value, *expected, path)
             }
             ValidationPlanKind::Enum(allowed) => {
-                if !SchemaScalarKind::String.matches(value) {
+                if !scalar_matches(SchemaScalarKind::String, value) {
                     return describe_primitive_failure(value, SchemaScalarKind::String, path);
                 }
                 let allowed = allowed
@@ -252,7 +214,7 @@ impl ValidationPlan {
                 )
             }
             ValidationPlanKind::List(item_plan) => {
-                if !SchemaScalarKind::Array.matches(value) {
+                if !scalar_matches(SchemaScalarKind::Array, value) {
                     return describe_primitive_failure(value, SchemaScalarKind::Array, path);
                 }
                 let items = match value {
@@ -271,7 +233,7 @@ impl ValidationPlan {
                 describe_primitive_failure(value, SchemaScalarKind::Array, path)
             }
             ValidationPlanKind::Object(fields) => {
-                if !SchemaScalarKind::Object.matches(value) {
+                if !scalar_matches(SchemaScalarKind::Object, value) {
                     return describe_primitive_failure(value, SchemaScalarKind::Object, path);
                 }
                 for field in fields.iter() {

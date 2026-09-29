@@ -1364,7 +1364,6 @@ mod catalogue_preview;
 mod deferred;
 mod deferred_triggers;
 mod process;
-mod typed_output;
 
 pub use bridge::{
     ExecutionCancellation, lashlang_value_to_json, process_event_payload, process_sleep,
@@ -1396,7 +1395,6 @@ pub use process::{
     lashlang_process_signal_event_types, lashlang_program_hash, lashlang_type_expr_schema,
     trace_lashlang_main_map, trace_lashlang_process_map, trace_lashlang_process_map_snapshot,
 };
-pub use typed_output::parse_output_schema;
 
 #[cfg(test)]
 mod lib_tests;

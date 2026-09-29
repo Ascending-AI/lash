@@ -330,7 +330,7 @@ mod tests {
             let wrapped_json = serde_json::json!({
                 (crate::LASH_TYPE_KEY): schema_json.clone()
             });
-            let accepted = crate::parse_output_schema(Some(&wrapped_json))
+            let accepted = lash_sansio::schema_contract::parse_output_schema(Some(&wrapped_json))
                 .expect("schema should parse")
                 .expect("schema should be present");
             assert_eq!(accepted, schema_json, "schema for {ty:?} was not preserved");

@@ -171,9 +171,6 @@ pub enum LashlangRuntimeError {
         #[source]
         source: serde_json::Error,
     },
-    /// Parsing the typed-output schema witness failed.
-    #[error(transparent)]
-    OutputSchema(#[from] lashlang::OutputSchemaError),
 }
 
 /// A typed failure exposed through the Lashlang execution-host boundary.

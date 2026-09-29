@@ -66,7 +66,7 @@ constructs** are added.
      declared aliases/constants). A `Type{ nested: Inner }` whose `Inner` is a runtime value
      (`WrapTypeLiteral`, `runtime/compiler/effects.rs:540,562`) is **not** closed → `Any`.
    - Cover **both direct syntaxes**: `Type{...}` literals and the record-shorthand decoded by the
-     existing `parse_output_schema` / `$lash_type` vocabulary (`crates/lash-lashlang-runtime/src/typed_output.rs`).
+     existing `parse_output_schema` / `$lash_type` vocabulary (`crates/lash-sansio/src/schema_contract/typed_output.rs`).
    - The one contract-keyed rule: for a call whose contract is
      `ToolOutputContract::FromInputSchema{input_field, default_schema}`, output type = the shape of
      the closed witness in `input_field`; else `default_schema`; else `Any`. Key on the **contract**,
