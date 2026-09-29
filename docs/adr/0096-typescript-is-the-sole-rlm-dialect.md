@@ -1,6 +1,7 @@
 # 0096: TypeScript is the sole RLM dialect; lashlang names the IR and VM
 
-Status: Accepted (FIG-3016, 2026-09-13). Supersedes
+Status: Accepted (FIG-3016, 2026-09-13). FIG-3021's tool-prose cutover
+completed by FIG-4093 on 2026-09-29. Supersedes
 [ADR 0061](0061-two-first-class-rlm-dialects-with-full-parity-and-session-pinning.md)
 and [ADR 0063](0063-one-rlm-turn-is-prompted-in-one-dialect.md). Amends
 [ADR 0037](0037-lashlang-workflows-use-a-code-graph-code-lens.md),
@@ -131,11 +132,9 @@ Ruled by Sam on 2026-09-13, following the processes-are-values design session
 - **The `__` namespace stays reserved.** The journaled runtime module (now
   `__lashlang_runtime`, FIG-4020) and its siblings remain hidden from the
   model.
-- **Tool prose stays dialect-neutral by default, but the guard changes
-  shape.** With one registered dialect, a registration check that refuses any
-  registered dialect's identity would refuse the only correct spelling. Prose
-  may name TypeScript; the token mechanism is retired with the second
-  vocabulary. FIG-3021 owns the mechanics.
+- **Tool prose may name TypeScript.** FIG-4093 removed the registration guard
+  that refused the sole dialect's name and retired the `{{…}}` prose token
+  mechanism. Tool descriptions and schema prose render verbatim.
 - **The workflow-graph lens loses its stated limit.** ADR 0037's lens laws
   demanded a canonical printer whose source → graph → source round trip is an
   exact textual fixpoint, and ADR 0061 scoped the lens to Lashlang because only

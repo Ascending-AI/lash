@@ -19,13 +19,8 @@
 //! the retired spelling, so both are still rendered through a translator that
 //! can regress.
 //!
-//! It cannot reach the *other* half of the prompt's tool docs. A tool's
-//! description and schema prose are authored in the crate that owns the tool and
-//! rendered verbatim, so this walker's synthetic fixture proves nothing about
-//! what `lash-subagents` or a host plugin actually wrote — and three `lashlang`
-//! strings reached TypeScript sessions through exactly that gap. The sibling
-//! gate is `tool_catalog::validate_dialect_neutral_tool_prose`, which sweeps
-//! whatever a session registers at registration time instead of a fixture here.
+//! Tool descriptions and schema prose come from their owning crates and render
+//! verbatim. The owning crate must test the prose it contributes to a prompt.
 //!
 //! Authored examples share the blind spot and sit outside even that gate's
 //! reach: the prose sweep excludes them on purpose, and `authored_tool_examples`

@@ -2,7 +2,6 @@
 #[serde(default)]
 pub struct RlmPromptFeatures {
     pub images: bool,
-    pub type_literals: bool,
     pub decomposition: bool,
 }
 
@@ -10,7 +9,6 @@ impl Default for RlmPromptFeatures {
     fn default() -> Self {
         Self {
             images: true,
-            type_literals: true,
             decomposition: true,
         }
     }

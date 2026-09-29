@@ -149,11 +149,11 @@ prose naming *any* registered dialect — with one dialect that check would refu
 the only correct spelling. Tool prose may name TypeScript. FIG-3021 owns the
 mechanics.
 
-Amended 2026-09-24: the deletions above have not landed. `DialectPromptVocabulary`,
-`tool_call_path`, the prompt walker with its `SUBSTRATE_CARVE_OUTS`,
-`TOOL_PROSE_TOKENS` and `validate_dialect_neutral_tool_prose` remain in
-`lash-protocol-rlm` over the single TypeScript vocabulary, and tool prose that
-names TypeScript is still refused at registration.
+Amended 2026-09-24: `DialectPromptVocabulary`, `tool_call_path`, and the prompt
+walker with its `SUBSTRATE_CARVE_OUTS` remain over the single TypeScript
+vocabulary. FIG-4093 completed the prose cutover: `TOOL_PROSE_TOKENS` and
+`validate_dialect_neutral_tool_prose` are gone, and tool prose may name
+TypeScript.
 
 **Alive.** Substrate identifiers are not model-visible: modules under the
 reserved `__` namespace are hidden from the host-environment section rather

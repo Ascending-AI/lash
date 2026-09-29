@@ -15,7 +15,7 @@ fn catalog() -> lash_core::ToolCatalog {
 fn catalog_definitions() -> Vec<lash_core::ToolDefinition> {
     ((0..7).map(|index| {
             lash_core::ToolDefinition::raw(format!("tool:probe{index}"), format!("probe{index}"),
-                "Return a STRING containing record-looking text, not a structured record{{type_literal_hint}}.",
+                "Return a STRING containing record-looking text, not a structured record.",
                 serde_json::json!({"type":"object","properties":{"id":{"type":"string","description":"Record identifier"}},"required":["id"]}),
                 serde_json::json!({"type":"string"}))
                 .with_tool_binding(ToolBinding::new(["probe"], format!("op{index}")))
@@ -80,7 +80,6 @@ fn system_with(
 ) -> String {
     let features = crate::protocol::RlmPromptFeatures {
         images: enabled,
-        type_literals: enabled,
         decomposition: enabled,
     };
     let execution = if native {
@@ -397,7 +396,6 @@ fn each_host_capability_gates_its_own_vocabulary() {
             for enabled in [false, true] {
                 let features = crate::protocol::RlmPromptFeatures {
                     images: false,
-                    type_literals: false,
                     decomposition: false,
                 };
                 let mut surface = LashlangSurface::default();

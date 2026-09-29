@@ -474,7 +474,6 @@ fn build_turn_core(
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build();
             config.prompt_features.images = false;
-            config.prompt_features.type_literals = false;
             config.prompt_features.decomposition = false;
             config.lashlang_language_features.label_annotations = false;
             config.lashlang_abilities.sleep = false;

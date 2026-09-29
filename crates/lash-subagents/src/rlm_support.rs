@@ -194,7 +194,7 @@ pub(crate) fn spawn_agent_input_schema(capability_names: &[String]) -> Value {
             "output": {
                 "type": "object",
                 "additionalProperties": true,
-                "description": "Optional typed result shape. Use string descriptors for record fields, e.g. `{ queries: \"list[str]\" }`{{type_literal_hint}}."
+                "description": "Optional typed result shape. Use string descriptors for record fields, e.g. `{ queries: \"list[str]\" }`."
             },
             "seed": {
                 "type": "object",

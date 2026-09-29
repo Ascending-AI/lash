@@ -331,10 +331,6 @@ pub(crate) struct DialectPromptVocabulary {
     pub(crate) continue_as_call: &'static str,
     /// A complete continue-as example for the tool doc.
     pub(crate) continue_as_example: &'static str,
-    /// How the language tells a model to describe a *nested* typed shape, as a
-    /// clause that continues a sentence about flat string descriptors — empty
-    /// when it has no way to write one.
-    pub(crate) type_literal_hint: &'static str,
 }
 
 impl Default for DialectPromptVocabulary {
@@ -345,39 +341,7 @@ impl Default for DialectPromptVocabulary {
     }
 }
 
-/// One authored token and the vocabulary field that answers it.
-pub(crate) type ToolProseToken = (&'static str, fn(DialectPromptVocabulary) -> &'static str);
-
-/// The tokens a host or plugin may write in model-facing tool prose so the
-/// prompt's own vocabulary spells the language-specific part.
-///
-/// Tool descriptions and JSON-Schema `description` strings are authored once,
-/// in the crate that owns the tool. A language word written literally there is
-/// a leak no renderer can undo — which is how three `lashlang` strings reached
-/// TypeScript sessions through `agents.spawn` and `processes.list`. Anything
-/// the language owns is spelled by the vocabulary: prose that needs such a word
-/// writes the token, [`rlm_prompt_tool_docs`](crate::tool_catalog) resolves it,
-/// and [`crate::tool_catalog::validate_dialect_neutral_tool_prose`] refuses
-/// registration for the literal spelling.
-///
-/// One table, read by both the renderer and the guard, so a token can neither
-/// be resolved without being accepted nor accepted without being resolved.
-pub(crate) const TOOL_PROSE_TOKENS: &[ToolProseToken] =
-    &[("{{type_literal_hint}}", |vocabulary| {
-        vocabulary.type_literal_hint
-    })];
-
 impl DialectPromptVocabulary {
-    pub(crate) fn render_tool_prose(&self, text: &str) -> String {
-        let mut text = text.to_string();
-        for (token, resolve) in TOOL_PROSE_TOKENS {
-            if text.contains(token) {
-                text = text.replace(token, resolve(*self));
-            }
-        }
-        text
-    }
-
     /// `console.log(x)` for one expression.
     pub(crate) fn print_statement(&self, expression: &str) -> String {
         format!(
@@ -385,28 +349,6 @@ impl DialectPromptVocabulary {
             self.print_statement_prefix, self.print_statement_suffix
         )
     }
-}
-
-/// The words that identify the RLM language wherever they appear, lowercased.
-///
-/// Read from the dialect itself rather than listed, so a rename extends the
-/// tool-prose guard by construction. Deliberately narrow: the language's own
-/// name, its cell tags and its finish form are unmistakable, while `print_call`
-/// ("console.log") would fire on any tool that talks about logging. A word this
-/// list omits is a leak the guard cannot see, not a leak it permits.
-pub(crate) fn dialect_identity_markers(dialect: &TypescriptDialect) -> Vec<String> {
-    let vocabulary = dialect.prompt_vocabulary();
-    let tags = dialect.cell_tags();
-    let mut markers = vec![
-        dialect.language_id().to_lowercase(),
-        vocabulary.language_name.to_lowercase(),
-        tags.open.to_lowercase(),
-        tags.close.to_lowercase(),
-        vocabulary.finish_statement.to_lowercase(),
-    ];
-    markers.sort();
-    markers.dedup();
-    markers
 }
 
 #[cfg(test)]
