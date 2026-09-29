@@ -64,14 +64,29 @@ pub(crate) async fn root_terminal_conn(
     session_id: &SessionId,
     root: &TurnId,
 ) -> Result<Option<RootTerminal>, StoreError> {
-    let Some(row) = sqlx::query(session_roots_sql().roots.select_terminal.sql())
+    let row = sqlx::query(session_roots_sql().roots.select_terminal.sql())
         .bind(session_id.as_str())
         .bind(root.as_str())
         .fetch_optional(&mut *conn)
         .await
-        .map_err(store_sqlx_error)?
-    else {
-        return Ok(None);
+        .map_err(store_sqlx_error)?;
+    let Some(row) = row else {
+        let deleted: bool = sqlx::query_scalar(
+            crate::session_sql::session_sql()
+                .deleted_postgres
+                .exists
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(store_sqlx_error)?;
+        if !deleted {
+            return Ok(None);
+        }
+        return Ok(close_session_intent_conn(conn, session_id)
+            .await?
+            .and_then(|intent| intent.session_deleted_terminal(root)));
     };
     let kind: Option<String> = row.try_get(0).map_err(store_sqlx_error)?;
     let cause_json: Option<String> = row.try_get(1).map_err(store_sqlx_error)?;
