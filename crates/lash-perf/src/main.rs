@@ -138,6 +138,12 @@ struct Args {
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
+    /// Measure TypeScript string loops in the VM and enforce their scaling budget.
+    StringScaling {
+        /// Write the measurements and budget results to this JSON file.
+        #[arg(long, value_name = "OUT.json")]
+        out: Option<std::path::PathBuf>,
+    },
     /// Print the advisory duration trend table for an existing history file
     /// without running the benchmark.
     DurationTrend {
@@ -211,6 +217,12 @@ fn tokio_thread_stack_bytes(args: &Args) -> usize {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     match &args.command {
+        Some(Command::StringScaling { out }) => {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            return runtime.block_on(lash_perf::string_scaling::run(out.as_deref()));
+        }
         Some(Command::DurationTrend { history, profile }) => {
             // Pure history reading: no runtime, no measurement, no exit code.
             return lash_perf::runtime_perf::run_duration_trend_cli(history, profile.as_deref());

@@ -1,4 +1,7 @@
 {
+  "string_scaling": {
+    "max_normalized_time_ratio": 1.5
+  },
   "runtime_stack": {
     "deep_turn_composition": {
       "budget_bytes": 2097152,
