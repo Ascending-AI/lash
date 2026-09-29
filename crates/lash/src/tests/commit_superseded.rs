@@ -175,6 +175,10 @@ async fn a_superseded_turn_commit_ends_its_root_typed_and_never_pauses() -> Resu
         lash_core::RuntimeErrorCode::StoreCommitSuperseded,
         "the turn ends with the superseded commit: {refusal:?}; runs: {runs:#?}"
     );
+    // The send answers from the store, which can show the refusal before the
+    // root's run has returned to the engine: read the run once it settled.
+    fixture.double.server().settle().await;
+    let runs = fixture.turn_runs(TURN);
     let [run] = runs.as_slice() else {
         panic!("the root ran in one invocation: {runs:#?}");
     };
@@ -189,7 +193,6 @@ async fn a_superseded_turn_commit_ends_its_root_typed_and_never_pauses() -> Resu
         "the model is called once"
     );
 
-    fixture.double.server().settle().await;
     let open = fixture
         .double
         .server()
