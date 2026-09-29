@@ -838,8 +838,8 @@ impl SessionCommitStore for Store {
                         }
                     }
                     if let Some(transition) = &commit.frame_transition {
-                        if transition.ended.session_id() != &commit.session_id
-                            || transition.successor.session_id() != &commit.session_id
+                        if transition.ended.session_id() != commit.session_id
+                            || transition.successor.session_id() != commit.session_id
                             || existing.as_ref().and_then(|head| head.current_frame_node_id.as_ref())
                                 != Some(transition.ended.frame_node_id())
                             || meta.current_frame_node_id.as_ref()
