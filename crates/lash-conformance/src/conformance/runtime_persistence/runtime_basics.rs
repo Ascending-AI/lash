@@ -234,7 +234,7 @@ pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<
     assert!(
         matches!(
             refused,
-            crate::StoreError::SessionNotFound { ref session_id } if session_id == &unknown
+            crate::StoreError::SessionNotFound { ref session_id } if *session_id == unknown
         ),
         "an unknown session is refused as SessionNotFound, got {refused:?}"
     );

@@ -878,14 +878,17 @@ pub async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimeStore>) {
         )
         .await
         .expect_err("overflowing usage rows must fail load");
-    assert!(matches!(
-        error,
-        StoreError::TokenUsageAccountingOverflow {
-            usage_source,
-            model,
-            counter: "input_tokens",
-        } if usage_source == "overflow" && model == "usage-model"
-    ));
+    assert!(
+        matches!(
+            &error,
+            StoreError::TokenUsageAccountingOverflow {
+                usage_source,
+                model,
+                counter: "input_tokens",
+            } if usage_source == "overflow" && model == "usage-model"
+        ),
+        "overflowing usage rows fail load as TokenUsageAccountingOverflow, got {error:?}"
+    );
 }
 
 #[expect(
