@@ -18,6 +18,8 @@ use lash_core::testing::runtime_helpers::{LayeredStores, RecordingSessionStoreFa
 
 const SESSION: &str = "commit-superseded";
 const TURN: &str = "superseded-turn";
+const FIRST_TURN: &str = "first-turn";
+const NEXT_TURN: &str = "next-turn";
 
 /// A core over the double's engine, and the double it runs on.
 struct Fixture {
@@ -31,6 +33,12 @@ impl Fixture {
     /// the session head's next revision the way another writer would: the
     /// running turn's commit is then superseded.
     async fn head_moves_under_the_first_turn() -> Self {
+        Self::head_moves_under_model_call(0).await
+    }
+
+    /// The fixture whose provider moves the head while it answers model
+    /// call `moving` (0-based), as another writer would.
+    async fn head_moves_under_model_call(moving: usize) -> Self {
         let catalog = Arc::new(std::sync::OnceLock::<Arc<RecordingSessionStoreFactory>>::new());
         let installed = Arc::clone(&catalog);
         let backend =
@@ -54,7 +62,7 @@ impl Fixture {
                     let provider_calls = Arc::clone(&provider_calls);
                     let catalog = Arc::clone(&catalog);
                     async move {
-                        if provider_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        if provider_calls.fetch_add(1, Ordering::SeqCst) == moving {
                             let store = catalog
                                 .get()
                                 .and_then(|catalog| catalog.store_for(&SessionId::from(SESSION)))
@@ -84,6 +92,28 @@ impl Fixture {
             core,
             double,
             provider_calls,
+        }
+    }
+
+    /// The invocations still open once the engine has settled: a drive a
+    /// late ask started (a relay's, or the one queued behind the running
+    /// drive) is given until a deadline to finish, so only work that never
+    /// finishes is left.
+    async fn open_after_settling(&self) -> Vec<lash_restate_test::InvocationView> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            self.double.server().settle().await;
+            let open = self
+                .double
+                .server()
+                .invocations()
+                .into_iter()
+                .filter(|view| view.status != "completed")
+                .collect::<Vec<_>>();
+            if open.is_empty() || tokio::time::Instant::now() >= deadline {
+                return open;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
     }
 
@@ -155,6 +185,175 @@ async fn a_superseded_turn_commit_ends_its_root_typed_and_never_pauses() -> Resu
         .into_iter()
         .filter(|view| view.status != "completed")
         .collect::<Vec<_>>();
+    assert!(
+        open.is_empty(),
+        "the engine drains: no invocation is left running, retrying or paused: {open:#?}"
+    );
+    Ok(())
+}
+
+/// FIG-4018: a root that ends with a typed refusal is not left the session's
+/// unfinished root. Its end is written to the store, so the session's next
+/// send is admitted under a new root and completes, rather than re-admitting
+/// the refused root and answering its old refusal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_send_after_a_refused_root_drives_a_new_root() -> Result<()> {
+    // The head moves under the second turn, so the first commits the head
+    // the session's later turns run on.
+    let fixture = Fixture::head_moves_under_model_call(1).await;
+    let session = fixture.core.session(SESSION).open().await?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        session
+            .send(TurnInput::text("the session's first turn"))
+            .id(FIRST_TURN)
+            .output(),
+    )
+    .await
+    .expect("the first turn settles")?;
+
+    let refused = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        session
+            .send(TurnInput::text("the head moves under this turn's commit"))
+            .id(TURN)
+            .output(),
+    )
+    .await
+    .expect("the refused turn settles")
+    .expect_err("the superseded commit ends the turn with its refusal");
+    assert!(
+        matches!(&refused, EmbedError::Runtime(error)
+            if error.code == lash_core::RuntimeErrorCode::StoreCommitSuperseded),
+        "the first root ends with its typed refusal: {refused:?}"
+    );
+
+    let next = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        session
+            .send(TurnInput::text("the session's next send"))
+            .id(NEXT_TURN)
+            .output(),
+    )
+    .await;
+    let runs = fixture.turn_runs(NEXT_TURN);
+    let next = next
+        .unwrap_or_else(|_| panic!("the next send settles; its runs: {runs:#?}"))
+        .unwrap_or_else(|error| {
+            panic!("the next send completes under a new root: {error:?}; runs: {runs:#?}")
+        });
+    assert_eq!(
+        next.assistant_message(),
+        Some("answered"),
+        "the next send is answered by its own turn"
+    );
+    let [_] = runs.as_slice() else {
+        panic!("the next send ran as its own root: {runs:#?}");
+    };
+
+    let open = fixture.open_after_settling().await;
+    assert!(
+        open.is_empty(),
+        "the engine drains: no invocation is left running, retrying or paused: {open:#?}"
+    );
+    Ok(())
+}
+
+/// FIG-4018's crash window: the refused root's run dies after its end is
+/// written to the store and before the engine records its outcome. The
+/// replay retraces the run's journal to the same refusal, writes nothing
+/// more and records the outcome, so the root has one terminal, the refusal,
+/// and nothing is left paused. The refused send answers the refusal, and
+/// the session's next send is admitted under a new root and completes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_root_crashed_before_its_outcome_converges_on_one_terminal() -> Result<()> {
+    let fixture = Fixture::head_moves_under_model_call(1).await;
+    let session = fixture.core.session(SESSION).open().await?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        session
+            .send(TurnInput::text("the session's first turn"))
+            .id(FIRST_TURN)
+            .output(),
+    )
+    .await
+    .expect("the first turn settles")?;
+    // The run's only state write is its recorded outcome.
+    fixture.double.server().crash_on(
+        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeFrame {
+            ty: lash_restate_test::protocol::MessageType::SetStateCommand,
+        })
+        .service(lash_restate_test::TURN_DRIVER_SERVICE)
+        .key(lash_restate::turn_workflow_key(
+            &lash_core::SessionId::from(SESSION),
+            &lash_core::TurnId::from(TURN),
+        ))
+        .within_attempts(1),
+    );
+
+    let refused = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        session
+            .send(TurnInput::text("the head moves under this turn's commit"))
+            .id(TURN)
+            .output(),
+    )
+    .await;
+    let runs = fixture.turn_runs(TURN);
+    let refused = refused
+        .unwrap_or_else(|_| panic!("the refused turn settles; its runs: {runs:#?}"))
+        .expect_err("the superseded commit ends the turn with its refusal");
+    assert!(
+        matches!(&refused, EmbedError::Runtime(error)
+            if error.code == lash_core::RuntimeErrorCode::StoreCommitSuperseded),
+        "the refused root answers its typed refusal: {refused:?}; runs: {runs:#?}"
+    );
+
+    let next = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        session
+            .send(TurnInput::text("the session's next send"))
+            .id(NEXT_TURN)
+            .output(),
+    )
+    .await
+    .expect("the next send settles")
+    .unwrap_or_else(|error| panic!("the next send completes under a new root: {error:?}"));
+    assert_eq!(next.assistant_message(), Some("answered"));
+
+    fixture.double.server().settle().await;
+    let runs = fixture.turn_runs(TURN);
+    let [run] = runs.as_slice() else {
+        panic!("the refused root ran in one invocation: {runs:#?}");
+    };
+    assert_eq!(run.status, "completed", "the replay completed: {run:?}");
+    assert_eq!(
+        run.attempts, 2,
+        "the crash cut the first attempt and the replay finished: {run:?}"
+    );
+    let terminal = fixture
+        .core
+        .store_factory
+        .root_terminal(
+            &lash_core::SessionId::from(SESSION),
+            &lash_core::TurnId::from(TURN),
+        )
+        .await?
+        .expect("the refused root has terminal evidence");
+    assert!(
+        matches!(
+            &terminal.cause,
+            lash_core::store::RootTerminalCause::Refused { code, .. }
+                if *code == lash_core::RuntimeErrorCode::StoreCommitSuperseded
+        ),
+        "the root's one terminal is its refusal: {terminal:?}"
+    );
+    assert_eq!(
+        fixture.provider_calls.load(Ordering::SeqCst),
+        3,
+        "the replay called no model: the first turn, the refused turn and the next send did"
+    );
+    let open = fixture.open_after_settling().await;
     assert!(
         open.is_empty(),
         "the engine drains: no invocation is left running, retrying or paused: {open:#?}"

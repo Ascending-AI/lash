@@ -141,6 +141,19 @@ so the seal rechecks it in the same transaction. A child never mints an epoch.
   therefore ends in the attempt that met the refusal, with the superseded
   commit as its typed refusal; the redrive that reloads the head is a new
   root.
+- **Implemented (FIG-4018): a refused root ends in the store.** A root
+  attempt that ends with a refusal no retry changes (a superseded commit, a
+  finalize refusal, any refusal the engine records as `Released`) writes the
+  root's terminal, `RootTerminalCause::Refused` with the refusal, before the
+  engine records the run's outcome. It is an idempotent store write like the
+  commit and the park (§9): the root's own inputs are answered with the
+  refusal, the rows it held are released, and a root that already has
+  terminal evidence is left as it is. The refused run is the one writer of
+  that terminal; the engine's lost-root recovery ends only runs that
+  recorded no outcome. A replay after a crash between the write and the
+  recorded outcome meets a moved head at the stop check above, where the
+  refusal's own end tells it the run already ended: the check keeps the
+  recorded `Ready` and the replay retraces its journal to the same refusal.
 
 A sealed verdict carries a `DriveFence` that the store checks on
 head-changing writes and ingress settlement. `DriveFence` and `AdmissionId`

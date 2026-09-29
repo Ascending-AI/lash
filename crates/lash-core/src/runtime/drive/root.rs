@@ -362,13 +362,30 @@ impl LashRuntime {
         // The head is bound to this root alone (FIG-3927), so a head that
         // moved without this turn's commit diverged from the admission: the
         // root parks rather than drive a head it was not admitted on.
+        //
+        // A root its own refusal already ended (FIG-4018) is being replayed
+        // by the run that met the refusal, which died before it recorded its
+        // outcome. That run went past this check, so its replay does too: it
+        // retraces the recorded turn to the same refusal, whose end is
+        // already written, and records the outcome. Parking here instead
+        // would write at a position the journal already recorded, and the
+        // run would never finish.
         let verdict = if matches!(verdict, AdmittedHeadVerdict::Ready)
             && head_moved
             && !store
                 .committed_turn_exists(turn_id)
                 .await
                 .map_err(crate::runtime::runtime_error_from_store_commit)?
-        {
+            && !store
+                .root_terminal(&self.state.session_id, turn_id)
+                .await
+                .map_err(crate::runtime::runtime_error_from_store_commit)?
+                .is_some_and(|terminal| {
+                    matches!(
+                        terminal.cause,
+                        crate::store::RootTerminalCause::Refused { .. }
+                    )
+                }) {
             AdmittedHeadVerdict::Diverged {
                 live_revision: self.state.head_revision,
             }

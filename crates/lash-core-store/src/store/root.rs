@@ -128,6 +128,14 @@ pub enum RootTerminalCause {
     /// The engine ended this root's only run without a Lash outcome. A
     /// cancellation request already recorded for it makes the end cancelled.
     SubstrateLost { cancelled_by: Option<String> },
+    /// The root's run ended with a typed refusal no retry could change (a
+    /// superseded commit, a finalize refusal): the run's own end, written
+    /// before the engine records its outcome (FIG-4018). It keeps the
+    /// refusal, which is the answer of every input the root took.
+    Refused {
+        code: crate::RuntimeErrorCode,
+        message: String,
+    },
 }
 
 impl RootTerminalCause {
@@ -146,6 +154,7 @@ impl RootTerminalCause {
                     RootTerminalKind::Failed
                 }
             }
+            Self::Refused { .. } => RootTerminalKind::Failed,
         }
     }
 }
@@ -403,6 +412,28 @@ pub trait RootStore: Send + Sync {
         session_id: &SessionId,
         root: &TurnId,
     ) -> Result<Option<RootTerminal>, StoreError>;
+
+    /// End `root`, whose run met `refusal`, a typed refusal no retry can
+    /// change, with [`RootTerminalCause::Refused`] (FIG-4018).
+    ///
+    /// One transaction, as for a lost root: the head's owed follow-on is
+    /// cleared, the root's own inputs are cancelled and its batches removed,
+    /// and the terminal write releases whatever else it held and arms its
+    /// scope close. The session's next admission then drives a new root.
+    /// A root that already has terminal evidence, or no row, is left as it
+    /// is and answers `None`, so a replay of the run that wrote the end
+    /// writes nothing more.
+    async fn end_refused_root(
+        &self,
+        _session_id: &SessionId,
+        _root: &TurnId,
+        _refusal: &crate::RuntimeError,
+        _at_ms: u64,
+    ) -> Result<Option<RootTerminal>, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "end_refused_root",
+        })
+    }
 
     /// The root that took accepted input `input`: the root its admission bound
     /// it to. `None` while it is pending.

@@ -115,6 +115,10 @@ pub(super) enum SurfaceMethod {
     RootTerminal,
     NonTerminalRootsPage,
     EndLostRoot,
+    /// [`RootStore::end_refused_root`](lash_core::store::RootStore::end_refused_root)
+    /// of the sweep's drain root: its refusal's end, then nothing more
+    /// (FIG-4018).
+    EndRefusedRoot,
     /// [`RootStore::root_binding`](lash_core::store::RootStore::root_binding)
     /// of the sweep's next-turn input.
     RootBinding,
@@ -234,6 +238,7 @@ impl SurfaceMethod {
             Self::RootTerminal => "surface:root_terminal",
             Self::NonTerminalRootsPage => "surface:non_terminal_roots_page",
             Self::EndLostRoot => "surface:end_lost_root",
+            Self::EndRefusedRoot => "surface:end_refused_root",
             Self::RootBinding => "surface:root_binding",
             Self::RootOfInput => "surface:root_of_input",
             Self::EnqueueRunSpecInput => "surface:enqueue_run_spec_input",
@@ -561,6 +566,46 @@ pub(super) fn lost_root_recovery_case() -> GeneratedCase {
             surface(SurfaceMethod::EndLostRoot),
             surface(SurfaceMethod::RootTerminal),
             surface(SurfaceMethod::EndLostRoot),
+            surface(SurfaceMethod::NonTerminalRootsPage),
+        ],
+    }
+}
+
+/// A root whose run met a typed refusal ends the same way on every SQL
+/// backend, once: a second end, and the lost-root end after it, write
+/// nothing (FIG-4018).
+pub(super) fn refused_root_end_case() -> GeneratedCase {
+    GeneratedCase {
+        name: CaseName::RefusedRootEnd,
+        operations: vec![
+            StoreOperation::Commit {
+                label: "seed_refused_root_graph",
+                expected_head_revision: 0,
+                graph: append(
+                    vec![
+                        NodeSpec::new("root", None, "root"),
+                        NodeSpec::new("active-frame", Some("root"), "active"),
+                    ],
+                    Some("active-frame"),
+                ),
+                turn_commit: None,
+                checkpoint: CheckpointSpec::Empty,
+                usage: false,
+                adopt_attachment: false,
+            },
+            StoreOperation::EnqueueAdmittableQueuedWork,
+            StoreOperation::AcquireSessionLease {
+                slot: LeaseSlot::First,
+                owner: "refused-root-owner",
+            },
+            surface(SurfaceMethod::AdmitQueuedRoot),
+            surface(SurfaceMethod::UnfinishedRoot),
+            surface(SurfaceMethod::EndRefusedRoot),
+            surface(SurfaceMethod::RootTerminal),
+            surface(SurfaceMethod::UnfinishedRoot),
+            surface(SurfaceMethod::EndRefusedRoot),
+            surface(SurfaceMethod::EndLostRoot),
+            surface(SurfaceMethod::RootTerminal),
             surface(SurfaceMethod::NonTerminalRootsPage),
         ],
     }
@@ -1233,6 +1278,20 @@ impl BackendRunner {
                     root: lash_core::TurnId::from(surface_drain_scope(&session_id).id()),
                 };
                 match self.factory().end_lost_root(&root, 1).await? {
+                    Some(terminal) => format!("ended={:?}", terminal.kind),
+                    None => "ended=none".to_string(),
+                }
+            }
+            SurfaceMethod::EndRefusedRoot => {
+                let root = lash_core::TurnId::from(surface_drain_scope(&session_id).id());
+                let refusal = lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::StoreCommitSuperseded,
+                    "the head moved under the root's commit",
+                );
+                match store
+                    .end_refused_root(&session_id, &root, &refusal, 1)
+                    .await?
+                {
                     Some(terminal) => format!("ended={:?}", terminal.kind),
                     None => "ended=none".to_string(),
                 }

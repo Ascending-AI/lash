@@ -154,6 +154,7 @@ macro_rules! drive_admission_tests {
 
     (cancel_of_a_parked_root_writes_cancelled_settles_its_input_and_drains_the_next, "s7b-1"),
     (no_row_stays_bound_after_a_roots_verb_close_or_lost_end, "root-verb-unbinds"),
+    (a_refused_root_ends_once_and_its_next_input_admits_a_new_root, "refused-root-end"),
     (fork_releases_the_old_owner_before_the_new_root_drives_in_original_order_on_a_fresh_journal, "s7b-2"),
     (verbs_are_park_id_cas, "s7b-3"),
     (redrive_under_the_same_build_reparks_the_same_park_with_attempts_plus_one, "s7b-4"),

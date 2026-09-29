@@ -300,6 +300,34 @@ pub(crate) fn end_lost_root_conn(
     target: &lash_core_execution::engine::RootRef,
     at_ms: u64,
 ) -> Result<Option<RootTerminal>, StoreError> {
+    end_unanswered_root_conn(tx, target, at_ms, |cancelled_by| {
+        RootTerminalCause::SubstrateLost { cancelled_by }
+    })
+}
+
+/// The root's run met a typed refusal no retry can change (FIG-4018): the
+/// same transaction as a lost root's, ending it with the refusal.
+pub(crate) fn end_refused_root_conn(
+    tx: &Connection,
+    target: &lash_core_execution::engine::RootRef,
+    refusal: &lash_core_execution::RuntimeError,
+    at_ms: u64,
+) -> Result<Option<RootTerminal>, StoreError> {
+    end_unanswered_root_conn(tx, target, at_ms, |_| RootTerminalCause::Refused {
+        code: refusal.code.clone(),
+        message: refusal.message.clone(),
+    })
+}
+
+/// End a root no commit answered, with the cause `cause` makes of the
+/// root's recorded cancellation request, if any. A root that already has
+/// terminal evidence, or no row, is left as it is.
+fn end_unanswered_root_conn(
+    tx: &Connection,
+    target: &lash_core_execution::engine::RootRef,
+    at_ms: u64,
+    cause: impl FnOnce(Option<String>) -> RootTerminalCause,
+) -> Result<Option<RootTerminal>, StoreError> {
     let session = &target.session;
     let root = &target.root;
     if root_terminal_conn(tx, session, root)?.is_some() {
@@ -318,12 +346,11 @@ pub(crate) fn end_lost_root_conn(
         return Ok(None);
     }
     let record = crate::persistence::turn_cancel::load_turn_cancel_request_conn(tx, session, root)?;
-    let cancelled_by = record
-        .as_ref()
-        .map(|record| record.request.request_id.clone());
-    let cause = RootTerminalCause::SubstrateLost {
-        cancelled_by: cancelled_by.clone(),
-    };
+    let cause = cause(
+        record
+            .as_ref()
+            .map(|record| record.request.request_id.clone()),
+    );
     let terminal = RootTerminal {
         session_id: session.clone(),
         root: root.clone(),
@@ -944,6 +971,25 @@ impl RootStore for crate::Store {
         let root = root.clone();
         self.conn
             .call(move |conn| Ok(root_terminal_conn(conn, &session_id, &root)))
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn end_refused_root(
+        &self,
+        session_id: &SessionId,
+        root: &TurnId,
+        refusal: &lash_core_execution::RuntimeError,
+        at_ms: u64,
+    ) -> Result<Option<RootTerminal>, StoreError> {
+        self.bind_session(session_id)?;
+        let target = lash_core_execution::engine::RootRef {
+            session: session_id.clone(),
+            root: root.clone(),
+        };
+        let refusal = refusal.clone();
+        self.conn
+            .write_flow(move |tx| commit(end_refused_root_conn(tx, &target, &refusal, at_ms)))
             .await
             .map_err(sqlite_error)?
     }

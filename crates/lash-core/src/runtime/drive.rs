@@ -154,16 +154,8 @@ pub(crate) struct DriveRootRun {
 
 impl DriveRootRun {
     fn sealed(admitted: &Admitted, fence: crate::store::DriveFence) -> Self {
-        let root = match admitted.work() {
-            crate::engine::AdmittedWork::FollowOn { follow_on, .. } => {
-                crate::store::PhysicalTurn::split_turn_id(follow_on).0
-            }
-            crate::engine::AdmittedWork::Input { .. }
-            | crate::engine::AdmittedWork::Queued { .. }
-            | crate::engine::AdmittedWork::Commands { .. } => admitted.root().clone(),
-        };
         Self {
-            root,
+            root: evidence_root(admitted),
             fence,
             journal_generation: admitted.admitted_generation().clone(),
             terminal_written: false,
@@ -214,6 +206,20 @@ impl DriveRootRun {
 
     pub(crate) fn mark_terminal_written(&mut self) {
         self.terminal_written = true;
+    }
+}
+
+/// The logical root whose terminal evidence `admitted`'s run writes: the
+/// admitted root, except for a follow-on recovery, whose evidence names the
+/// root that owed the follow-on.
+fn evidence_root(admitted: &Admitted) -> TurnId {
+    match admitted.work() {
+        crate::engine::AdmittedWork::FollowOn { follow_on, .. } => {
+            crate::store::PhysicalTurn::split_turn_id(follow_on).0
+        }
+        crate::engine::AdmittedWork::Input { .. }
+        | crate::engine::AdmittedWork::Queued { .. }
+        | crate::engine::AdmittedWork::Commands { .. } => admitted.root().clone(),
     }
 }
 
@@ -778,12 +784,19 @@ impl LashRuntime {
     /// (FIG-3984), so whoever locks the runtime next, the engine's next
     /// attempt or a host's read, finds it as a redrive in a fresh process
     /// would (FIG-3982).
+    ///
+    /// An attempt that ends with a refusal no retry changes ends its root in
+    /// the store before it returns (FIG-4018): the engine records that
+    /// refusal as the run's outcome and never runs the root again, so
+    /// nothing else would end it, and the session's next admission would
+    /// name it again instead of the work behind it.
     async fn run_engine_root(
         &mut self,
         controller: &ScopedEffectController<'_>,
         admitted: Admitted,
         sinks: &DriveSinks<'_>,
     ) -> Result<RootRun, DriveAbort> {
+        let root = evidence_root(&admitted);
         let mut attempt = EngineAttempt::enter(self);
         let run = Box::pin(
             attempt
@@ -793,10 +806,59 @@ impl LashRuntime {
         .await;
         attempt.returned = true;
         drop(attempt);
-        run.map_err(|abort| match abort {
+        let run = run.map_err(|abort| match abort {
             DriveAbort::Retry(error) if !engine_retries(&error) => DriveAbort::Refused(error),
             abort => abort,
-        })
+        });
+        if let Err(DriveAbort::Refused(error)) = &run
+            && !error.is_retryable()
+        {
+            self.end_refused_root(&root, error).await?;
+        }
+        run
+    }
+
+    /// Write the end of `root`, whose run met `refusal`, to the store.
+    ///
+    /// The write is the refused run's own, made before the engine records
+    /// the run's outcome, so the recorded outcome always has its terminal
+    /// behind it and the engine's lost-root recovery, which ends only runs
+    /// that recorded nothing, never writes a second one. It is an
+    /// idempotent store write rather than a recorded step, like the commit
+    /// and the park (ADR 0105 §9): a root that already has terminal
+    /// evidence is left as it is, so a replay that meets the refusal again
+    /// writes nothing more. A store that cannot write it fails the attempt
+    /// as a live fault, and the engine's retry meets the refusal again.
+    async fn end_refused_root(
+        &self,
+        root: &TurnId,
+        refusal: &RuntimeError,
+    ) -> Result<(), DriveAbort> {
+        let store = self.drive_store()?;
+        match store
+            .end_refused_root(
+                &self.state.session_id,
+                root,
+                refusal,
+                self.host.core.clock.timestamp_ms(),
+            )
+            .await
+        {
+            Ok(Some(_)) => {
+                tracing::info!(
+                    session_id = %self.state.session_id,
+                    root = %root,
+                    code = %refusal.code,
+                    event = "root.refused_ended",
+                    "a root whose run met a refusal no retry changes is ended"
+                );
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(error) => Err(DriveAbort::Retry(
+                crate::runtime::runtime_error_from_store_commit(error),
+            )),
+        }
     }
 
     /// Discard what an earlier root's attempt left on this runtime (its

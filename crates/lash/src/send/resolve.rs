@@ -28,6 +28,12 @@ pub(super) enum Resolution {
     Settled { root: TurnId, outcome: TurnOutcome },
     /// The root is parked (ADR 0104 O3): durable, and not terminal.
     Parked(ParkedTurn),
+    /// The root's run ended with `refusal`, a typed refusal no retry could
+    /// change, and no turn of it committed (FIG-4018).
+    Refused {
+        root: TurnId,
+        refusal: lash_core::RuntimeError,
+    },
     /// The input is open and its delivery to the engine stalled (ADR 0109
     /// §3): no drive will take it until its obligation is re-armed.
     Stalled(StalledDelivery),
@@ -148,6 +154,9 @@ async fn resolve_from_turn(parts: &SendParts, turn: &TurnId) -> Result<Resolutio
                 if let Some(parked) = park_of(parts, &root).await? {
                     return Ok(Resolution::Parked(parked));
                 }
+                if let Some(refusal) = refusal_of(parts, &root).await? {
+                    return Ok(Resolution::Refused { root, refusal });
+                }
                 return Ok(Resolution::Undecided { root: Some(root) });
             }
         }
@@ -185,6 +194,21 @@ async fn terminal_of(parts: &SendParts, turn: &TurnId) -> Result<Option<TurnTerm
             Ok(None)
         }
     }
+}
+
+/// The refusal `root`'s run ended with, when its terminal evidence is one.
+async fn refusal_of(parts: &SendParts, root: &TurnId) -> Result<Option<lash_core::RuntimeError>> {
+    let terminal = match parts.store.root_terminal(&parts.session_id, root).await {
+        Ok(terminal) => terminal,
+        Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => None,
+        Err(error) => return Err(store_error(error)),
+    };
+    Ok(terminal.and_then(|terminal| match terminal.cause {
+        lash_core::store::RootTerminalCause::Refused { code, message } => {
+            Some(lash_core::RuntimeError::new(code, message))
+        }
+        _ => None,
+    }))
 }
 
 /// The session's park, when it holds `root`.

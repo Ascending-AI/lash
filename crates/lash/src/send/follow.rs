@@ -491,6 +491,11 @@ pub(super) async fn follow(
                         gaps: observation.gaps,
                     })));
                 }
+                Resolution::Refused { root, refusal } => {
+                    adoption.adopt(root, tap).await;
+                    drain(ctx, &mut adoption, &mut observation, tap).await;
+                    return Err(EmbedError::Runtime(refusal));
+                }
                 Resolution::Stalled(stalled) => {
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Ok(Followed::Answered(Box::new(SendOutcome {

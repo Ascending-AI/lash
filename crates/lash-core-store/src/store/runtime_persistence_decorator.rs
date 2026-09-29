@@ -97,6 +97,7 @@ macro_rules! persistence_operations {
                 fn admit_root(&self, request: &AdmitRootRequest) -> Result<Option<RootAdmission>, StoreError>;
                 fn admit_at_checkpoint(&self, request: &CheckpointAdmissionRequest) -> Result<CheckpointAdmission, StoreError>;
                 fn root_terminal(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Option<RootTerminal>, StoreError>;
+                fn end_refused_root(&self, session_id: &SessionId, root: &crate::TurnId, refusal: &crate::RuntimeError, at_ms: u64) -> Result<Option<RootTerminal>, StoreError>;
                 fn root_of_input(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 fn root_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 fn bound_turn_scopes(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Vec<crate::TurnId>, StoreError>;

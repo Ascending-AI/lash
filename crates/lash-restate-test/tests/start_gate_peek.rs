@@ -164,9 +164,9 @@ async fn a_failed_start_gate_peek_fails_the_turn_once_and_replays_identically() 
     let seed = 0x3647;
     let reference = run_turn(seed, None).await;
     assert!(
-        reference.outcome
-            == r#"drive ran [Released { root: TurnId("turn-1") }], stopped RootAborted { root: TurnId("turn-1") }"#,
-        "a revoked start gate fails the root, and the drive stops on it: {reference:?}"
+        reference.outcome == r#"drive ran [Released { root: TurnId("turn-1") }], stopped Idle"#,
+        "a revoked start gate fails the root, whose refusal ends it, and the drive finds \
+         nothing more to run: {reference:?}"
     );
     assert_eq!(
         reference.llm_calls, 0,

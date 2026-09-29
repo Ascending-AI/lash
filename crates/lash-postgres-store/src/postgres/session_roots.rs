@@ -295,6 +295,36 @@ pub(crate) async fn end_lost_root_tx(
     target: &lash_core_execution::engine::RootRef,
     at_ms: u64,
 ) -> Result<Option<RootTerminal>, StoreError> {
+    end_unanswered_root_tx(tx, target, at_ms, |cancelled_by| {
+        RootTerminalCause::SubstrateLost { cancelled_by }
+    })
+    .await
+}
+
+/// The root's run met a typed refusal no retry can change (FIG-4018): the
+/// same transaction as a lost root's, ending it with the refusal.
+pub(crate) async fn end_refused_root_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target: &lash_core_execution::engine::RootRef,
+    refusal: &lash_core_execution::RuntimeError,
+    at_ms: u64,
+) -> Result<Option<RootTerminal>, StoreError> {
+    end_unanswered_root_tx(tx, target, at_ms, |_| RootTerminalCause::Refused {
+        code: refusal.code.clone(),
+        message: refusal.message.clone(),
+    })
+    .await
+}
+
+/// End a root no commit answered, with the cause `cause` makes of the
+/// root's recorded cancellation request, if any. A root that already has
+/// terminal evidence, or no row, is left as it is.
+async fn end_unanswered_root_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target: &lash_core_execution::engine::RootRef,
+    at_ms: u64,
+    cause: impl FnOnce(Option<String>) -> RootTerminalCause,
+) -> Result<Option<RootTerminal>, StoreError> {
     let session = &target.session;
     let root = &target.root;
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session).await?;
@@ -324,10 +354,7 @@ pub(crate) async fn end_lost_root_tx(
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    let cancelled_by = request.map(|row| row.0);
-    let cause = RootTerminalCause::SubstrateLost {
-        cancelled_by: cancelled_by.clone(),
-    };
+    let cause = cause(request.map(|row| row.0));
     let terminal = RootTerminal {
         session_id: session.clone(),
         root: root.clone(),
@@ -894,6 +921,27 @@ impl RootStore for PostgresSessionStore {
     ) -> Result<Option<RootTerminal>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         root_terminal_conn(&mut connection, session_id, root).await
+    }
+
+    async fn end_refused_root(
+        &self,
+        session_id: &SessionId,
+        root: &TurnId,
+        refusal: &lash_core_execution::RuntimeError,
+        at_ms: u64,
+    ) -> Result<Option<RootTerminal>, StoreError> {
+        self.bind_session_id(session_id)?;
+        let target = lash_core_execution::engine::RootRef {
+            session: session_id.clone(),
+            root: root.clone(),
+        };
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = sqlx::Connection::begin(&mut *connection)
+            .await
+            .map_err(store_sqlx_error)?;
+        let terminal = end_refused_root_tx(&mut tx, &target, refusal, at_ms).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(terminal)
     }
 
     async fn root_of_input(

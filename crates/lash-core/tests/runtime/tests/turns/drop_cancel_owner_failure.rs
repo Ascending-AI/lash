@@ -195,67 +195,41 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
          the owner's end repairs nothing (FIG-3927 §2.6); the root's end applies the Drop"
     );
 
-    // Between the refusal and the root's end nothing moves: the undelivered
-    // input is still addressed to the turn that is over, the owner's own
-    // input stays bound to the root, and the Drop request records no outcome.
-    let pending = lash_core::IngressStore::list_pending_turn_inputs(
+    // The refused run ended its root before it returned (FIG-4018): the
+    // root's terminal is the refusal, and its write released the bound rows
+    // and applied the request's Drop to the host input addressed to the
+    // dead turn (FIG-3927 §2.4, §2.6). The engine's lost-run detector, which
+    // ends only runs that recorded nothing, writes nothing over it.
+    let terminal = lash_core::store::RootStore::root_terminal(
         inner_store.as_ref(),
-        &lash_core::SessionId::from(SESSION_ID),
+        &SessionId::from(SESSION_ID),
+        &TurnId::from(TURN_ID),
     )
     .await
-    .expect("list pending turn inputs after the refused finish");
-    let undelivered_row = pending
-        .iter()
-        .find(|row| row.input.input_id == undelivered.input_id)
-        .expect("the undelivered input is still pending");
-    assert_eq!(
-        undelivered_row.status,
-        lash_core::PendingTurnInputReadStatus::Open,
-        "no root admitted the undelivered input"
-    );
+    .expect("read the root's terminal")
+    .expect("the refused run ended its root");
     assert!(
         matches!(
-            &undelivered_row.input.state,
-            lash_core::TurnInputState::PendingActive(ingress) if ingress.turn_id == TURN_ID
+            &terminal.cause,
+            lash_core::store::RootTerminalCause::Refused { code, .. }
+                if *code == lash_core::RuntimeErrorCode::RecordEncodingFailed
         ),
-        "the undelivered input is still addressed to the dead turn: {:?}",
-        undelivered_row.input.state
+        "the root's terminal is its refusal: {terminal:?}"
     );
-    let owner_row = pending
-        .iter()
-        .find(|row| row.input.input_id != undelivered.input_id)
-        .expect("the owner's own input is still pending");
-    assert_eq!(
-        owner_row.status,
-        lash_core::PendingTurnInputReadStatus::Admitted {
-            root: TurnId::from(TURN_ID)
-        },
-        "the owner's input stays bound to its root until the root ends"
-    );
-    let record =
-        lash_core::store::IngressStore::turn_cancel_request(inner_store.as_ref(), &turn_address)
-            .await
-            .expect("read durable cancellation record")
-            .expect("Drop request remains recorded");
     assert!(
-        record.outcome.is_none(),
-        "no outcome is recorded before the root's end applies the Drop"
+        lash_core::SessionStoreFactory::end_lost_root(
+            lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
+            &lash_core::engine::RootRef {
+                session: SessionId::from(SESSION_ID),
+                root: TurnId::from(TURN_ID),
+            },
+            0,
+        )
+        .await
+        .expect("the lost-run end")
+        .is_none(),
+        "the lost-run end writes nothing over the refused run's own end"
     );
-
-    // The engine's lost-run detector ends the root; its terminal write
-    // releases the bound rows and applies the request's Drop to the host
-    // input addressed to the dead turn (FIG-3927 §2.4, §2.6).
-    lash_core::SessionStoreFactory::end_lost_root(
-        lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
-        &lash_core::engine::RootRef {
-            session: SessionId::from(SESSION_ID),
-            root: TurnId::from(TURN_ID),
-        },
-        0,
-    )
-    .await
-    .expect("end the lost root")
-    .expect("the root had no terminal");
 
     let pending = lash_core::IngressStore::list_pending_turn_inputs(
         inner_store.as_ref(),
