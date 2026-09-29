@@ -798,7 +798,16 @@ impl BackendRunner {
             .unwrap_or_else(|| unheld_drive_fence(&session_id));
         let answer = match method {
             SurfaceMethod::LoadSession => {
-                format!("present={}", store.load_session().await?.is_some())
+                format!(
+                    "present={}",
+                    store
+                        .load_session_window(
+                            &session_id,
+                            lash_core::store::WindowSelector::Current,
+                        )
+                        .await?
+                        .is_some()
+                )
             }
             SurfaceMethod::ListPendingTurnInputs => {
                 format!(
@@ -971,7 +980,10 @@ impl BackendRunner {
                 format!("admitted={}", admission.is_some())
             }
             SurfaceMethod::ReadSessionStateVersion => {
-                format!("version={}", store.read_session_state_version().await?)
+                format!(
+                    "version={}",
+                    store.read_session_state_version(&session_id).await?
+                )
             }
             SurfaceMethod::AdmitSessionState => {
                 let admission = store.admit_session_state(&lease_fence).await?;
@@ -979,12 +991,34 @@ impl BackendRunner {
             }
             SurfaceMethod::LoadKnownNode => {
                 let node_id = scoped_node_id(&session_id, "root");
-                let node = store.load_node(&node_id).await?;
-                format!("present={}", node.is_some())
+                let page = store
+                    .load_ancestors(
+                        &session_id,
+                        lash_core::store::HistoryAnchor::Node(node_id),
+                        lash_core::store::HistoryBudget {
+                            max_nodes: std::num::NonZeroU32::new(1).expect("nonzero node limit"),
+                            max_bytes: std::num::NonZeroU64::new(1024 * 1024)
+                                .expect("nonzero byte limit"),
+                        },
+                    )
+                    .await?;
+                format!("present={}", !page.nodes.is_empty())
             }
             SurfaceMethod::LoadUnknownNode => {
-                let node = store.load_node("fig-2841-unknown-node").await?;
-                format!("present={}", node.is_some())
+                let page = store
+                    .load_ancestors(
+                        &session_id,
+                        lash_core::store::HistoryAnchor::Node(lash_core::NodeId::from(
+                            "fig-2841-unknown-node",
+                        )),
+                        lash_core::store::HistoryBudget {
+                            max_nodes: std::num::NonZeroU32::new(1).expect("nonzero node limit"),
+                            max_bytes: std::num::NonZeroU64::new(1024 * 1024)
+                                .expect("nonzero byte limit"),
+                        },
+                    )
+                    .await?;
+                format!("present={}", !page.nodes.is_empty())
             }
             SurfaceMethod::ReadDriveEpoch => {
                 let observed = store.drive_epoch(&session_id).await?;
@@ -1121,7 +1155,7 @@ impl BackendRunner {
                 // builds it: a state-preserving commit receipted under the
                 // drain's own scope at the reserved `final` key, borrowing
                 // the held lane, claiming the committed head's frame and leaf.
-                let head = store.load_session_head_meta().await?;
+                let head = store.load_session_head_meta(&session_id).await?;
                 let mut commit = runtime_commit(
                     &session_id,
                     head.as_ref().map_or(0, |head| head.head_revision),
@@ -1531,7 +1565,7 @@ impl BackendRunner {
             }
             SurfaceMethod::Vacuum => {
                 let report = store
-                    .vacuum()
+                    .vacuum(&session_id)
                     .await
                     .map_err(|_| StoreError::Backend("vacuum_failed".to_string()))?;
                 format!(

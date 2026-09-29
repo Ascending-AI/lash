@@ -20,7 +20,7 @@ use lash_core::Backend;
 use lash_core::sync::MutexExt as _;
 
 use super::deployment::{
-    CrashProcessPort, CrashSessionFactory, CrashSessionWork, DriveLog, DriverProxy, HostFaults,
+    CrashDeploymentStore, CrashProcessPort, CrashSessionWork, DriveLog, DriverProxy, HostFaults,
     Trip,
 };
 use super::engine::{Engine, EngineHold, EngineInvocation, EngineKind};
@@ -65,7 +65,7 @@ fn layered(engine: Backend, work: &Arc<CrashSessionWork>, faults: &Arc<HostFault
     lash_core::testing::runtime_helpers::LayeredBackend::over(engine)
         .with_session_work(Arc::clone(work) as Arc<dyn lash_core::SessionWorkEngine>)
         .map_session_store_factory(move |factory| {
-            Arc::new(CrashSessionFactory::new(factory, factory_faults))
+            Arc::new(CrashDeploymentStore::new(factory, factory_faults))
         })
         .map_process_work_port(move |port| Arc::new(CrashProcessPort::new(port, port_faults)))
         .into_backend()

@@ -284,7 +284,7 @@ async fn stale_head_transaction_is_rejected(
     store: Arc<dyn RuntimeStore>,
 ) -> Result<BackendContentionOperation, String> {
     let expected_head_revision = store
-        .load_session()
+        .load_session_head_meta(session_id)
         .await
         .map_err(|err| format!("load current session head: {err}"))?
         .map_or(0, |read| read.head_revision);

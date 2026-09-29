@@ -543,12 +543,12 @@ impl lash_core::engine::SessionControlEngine for CrashControl {
 
 /// The deployment's session catalog with [`HostFaults`] on the writes a seam
 /// cuts between: the intent acknowledgement and the physical delete.
-pub struct CrashSessionFactory {
+pub struct CrashDeploymentStore {
     inner: Arc<dyn DeploymentStore>,
     faults: Arc<HostFaults>,
 }
 
-impl CrashSessionFactory {
+impl CrashDeploymentStore {
     #[must_use]
     pub fn new(inner: Arc<dyn DeploymentStore>, faults: Arc<HostFaults>) -> Self {
         Self { inner, faults }
@@ -558,142 +558,11 @@ impl CrashSessionFactory {
 type StoreResult<T> = Result<T, lash_core::StoreError>;
 
 #[async_trait::async_trait]
-impl DeploymentStore for CrashSessionFactory {
-    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
-        self.inner.bind_effect_host(effect_host);
-    }
+impl lash_core::store::RuntimeStoreDecorator for CrashDeploymentStore {
+    type Inner = dyn DeploymentStore;
 
-    fn bind_artifact_stores(
-        &self,
-        process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
-        process_engines: lash_core::ProcessEngineRegistry,
-    ) {
-        self.inner
-            .bind_artifact_stores(process_env_store, process_engines);
-    }
-
-    async fn create_store(
-        &self,
-        request: &lash_core::SessionStoreCreateRequest,
-    ) -> StoreResult<Arc<dyn lash_core::RuntimeStore>> {
-        self.inner.create_store(request).await
-    }
-
-    async fn open_existing_store(
-        &self,
-        request: &lash_core::SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn lash_core::RuntimeStore>>, String> {
-        self.inner.open_existing_store(request).await
-    }
-
-    async fn open_unbound_store(&self) -> StoreResult<Arc<dyn lash_core::RuntimeStore>> {
-        self.inner.open_unbound_store().await
-    }
-
-    async fn read_session(
-        &self,
-        session_id: &SessionId,
-    ) -> StoreResult<Option<lash_core::SessionReadView>> {
-        self.inner.read_session(session_id).await
-    }
-
-    async fn list_sessions(
-        &self,
-        filter: &lash_core::SessionListFilter,
-    ) -> StoreResult<Vec<lash_core::SessionSummary>> {
-        self.inner.list_sessions(filter).await
-    }
-
-    async fn count_unsettled_turns(&self) -> StoreResult<lash_core::store::UnsettledTurnCounts> {
-        self.inner.count_unsettled_turns().await
-    }
-
-    async fn list_turn_parks(
-        &self,
-        query: &lash_core::store::TurnParkQuery,
-    ) -> StoreResult<Vec<lash_core::store::TurnPark>> {
-        self.inner.list_turn_parks(query).await
-    }
-
-    async fn turn_park_feed(
-        &self,
-        after: lash_core::store::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> StoreResult<lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>> {
-        self.inner.turn_park_feed(after, limit).await
-    }
-
-    async fn compact_turn_park_feed(
-        &self,
-        through: lash_core::store::ParkFeedCursor,
-    ) -> StoreResult<()> {
-        self.inner.compact_turn_park_feed(through).await
-    }
-
-    async fn root_terminal(
-        &self,
-        session_id: &SessionId,
-        root: &lash_core::TurnId,
-    ) -> StoreResult<Option<lash_core::store::RootTerminal>> {
-        self.inner.root_terminal(session_id, root).await
-    }
-
-    async fn non_terminal_roots_page(
-        &self,
-        after: Option<&lash_core::engine::RootRef>,
-        limit: std::num::NonZeroUsize,
-    ) -> StoreResult<Vec<lash_core::engine::RootRef>> {
-        self.inner.non_terminal_roots_page(after, limit).await
-    }
-
-    async fn end_lost_root(
-        &self,
-        target: &lash_core::engine::RootRef,
-        at_ms: u64,
-    ) -> StoreResult<Option<lash_core::store::RootTerminal>> {
-        self.inner.end_lost_root(target, at_ms).await
-    }
-
-    async fn list_control_intents(
-        &self,
-        after: Option<lash_core::store::ControlIntentId>,
-        limit: std::num::NonZeroUsize,
-    ) -> StoreResult<Vec<lash_core::store::ControlIntent>> {
-        self.inner.list_control_intents(after, limit).await
-    }
-
-    async fn open_existing_store_by_id(
-        &self,
-        session_id: &SessionId,
-    ) -> StoreResult<Option<Arc<dyn lash_core::RuntimeStore>>> {
-        self.inner.open_existing_store_by_id(session_id).await
-    }
-
-    async fn pending_turn_cancel_closure_pins(
-        &self,
-        session_id: &SessionId,
-    ) -> StoreResult<Vec<lash_core::TurnCancelClosureAuthorization>> {
-        self.inner
-            .pending_turn_cancel_closure_pins(session_id)
-            .await
-    }
-
-    async fn retire_turn_cancel_closure_scope(
-        &self,
-        scope: &lash_core::ExecutionScope,
-    ) -> StoreResult<()> {
-        self.inner.retire_turn_cancel_closure_scope(scope).await
-    }
-
-    async fn has_claimable_queued_work(
-        &self,
-        request: &lash_core::SessionStoreCreateRequest,
-    ) -> StoreResult<Option<bool>> {
-        self.inner.has_claimable_queued_work(request).await
-    }
-
-    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        self.inner.session_was_deleted(session_id).await
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
     }
 
     async fn delete_session(
@@ -717,36 +586,12 @@ impl DeploymentStore for CrashSessionFactory {
         }
         self.inner.delete_session(session_id).await
     }
-
-    async fn reclaim_retained_evidence(
-        &self,
-        bound: lash_core::store::RetentionBound,
-    ) -> lash_core::store::MaintenanceResult<lash_core::store::RetentionReport> {
-        self.inner.reclaim_retained_evidence(bound).await
-    }
-
-    async fn pin(&self, node_id: &str) -> StoreResult<lash_core::ForkPoint> {
-        self.inner.pin(node_id).await
-    }
-
-    async fn unpin(&self, node_id: &str) -> StoreResult<()> {
-        self.inner.unpin(node_id).await
-    }
-
-    async fn fork_points(&self) -> StoreResult<Vec<lash_core::ForkPoint>> {
-        self.inner.fork_points().await
-    }
-
-    async fn fork_at(
-        &self,
-        request: &lash_core::ForkSessionRequest,
-    ) -> StoreResult<lash_core::ForkSessionReceipt> {
-        self.inner.fork_at(request).await
-    }
 }
 
+impl lash_core::DeploymentStoreDecorator for CrashDeploymentStore {}
+
 #[async_trait::async_trait]
-impl lash_core::store::ControlIntentStore for CrashSessionFactory {
+impl lash_core::store::ControlIntentStore for CrashDeploymentStore {
     async fn begin_session_close(
         &self,
         session_id: &SessionId,
@@ -811,7 +656,7 @@ impl lash_core::store::ControlIntentStore for CrashSessionFactory {
 }
 
 #[async_trait::async_trait]
-impl lash_core::AttachmentRootSet for CrashSessionFactory {
+impl lash_core::AttachmentRootSet for CrashDeploymentStore {
     fn can_prove_process_owner_death(&self) -> bool {
         self.inner.can_prove_process_owner_death()
     }

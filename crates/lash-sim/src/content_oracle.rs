@@ -450,35 +450,71 @@ fn is_reported(row: &Value) -> bool {
         .is_none_or(|disposition| disposition.as_str() == Some("reported"))
 }
 
-/// Read `session_id` back through a fresh handle from `factory`.
+/// Read the committed history through explicit graph and usage pages.
+#[expect(
+    clippy::expect_used,
+    reason = "the fixed history page limits are nonzero constants"
+)]
 pub async fn reopen_session(
-    factory: &dyn DeploymentStore,
+    store: &dyn DeploymentStore,
     session_id: &str,
 ) -> Result<Option<ReopenedSession>, String> {
-    let request = lash_core::SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
-        relation: lash_core::SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-    };
-    let Some(store) = factory
-        .open_existing_store(&request)
+    use lash_core::store::{HistoryAnchor, HistoryBudget};
+    use std::num::{NonZeroU32, NonZeroU64};
+
+    let session_id = SessionId::from(session_id.to_string());
+    let Some(head) = store
+        .load_session_head_meta(&session_id)
         .await
         .map_err(|err| format!("reopen `{session_id}`: {err}"))?
     else {
         return Ok(None);
     };
-    let Some(read) = store
-        .load_session()
-        .await
-        .map_err(|err| format!("load reopened `{session_id}`: {err}"))?
-    else {
-        return Ok(None);
-    };
-    let graph = serde_json::to_value(&read.graph)
+    let mut anchor = HistoryAnchor::Head;
+    let mut nodes = Vec::new();
+    loop {
+        let page = store
+            .load_ancestors(
+                &session_id,
+                anchor,
+                HistoryBudget {
+                    max_nodes: NonZeroU32::new(256).expect("nonzero page size"),
+                    max_bytes: NonZeroU64::new(32 * 1024 * 1024).expect("nonzero byte limit"),
+                },
+            )
+            .await
+            .map_err(|err| format!("page reopened `{session_id}` graph: {err}"))?;
+        nodes.extend(page.nodes.into_iter().map(|node| node.record));
+        match page.next {
+            Some(next) => anchor = HistoryAnchor::Cursor(next),
+            None => break,
+        }
+    }
+    nodes.reverse();
+    let graph = lash_core::SessionGraph::from_nodes(nodes, head.leaf_node_id)
+        .and_then(|graph| {
+            serde_json::to_value(graph)
+                .map_err(|err| lash_core::StoreError::Backend(err.to_string()))
+        })
         .map_err(|err| format!("reopened `{session_id}` graph does not encode: {err}"))?;
-    let ledger = serde_json::to_value(&read.token_ledger)
+    let mut ledger_rows = Vec::new();
+    let mut after = None;
+    loop {
+        let page = store
+            .load_usage_ledger_page(
+                &session_id,
+                after.as_ref(),
+                NonZeroU32::new(256).expect("nonzero page size"),
+            )
+            .await
+            .map_err(|err| format!("page reopened `{session_id}` usage: {err}"))?;
+        ledger_rows.extend(page.rows.into_iter().map(|row| row.entry));
+        match page.next {
+            Some(next) => after = Some(next),
+            None => break,
+        }
+    }
+    let ledger = serde_json::to_value(ledger_rows)
         .map_err(|err| format!("reopened `{session_id}` ledger does not encode: {err}"))?;
     let mut reopened = ReopenedSession::default();
     for message in active_path_messages(&graph, session_id)? {

@@ -620,7 +620,7 @@ async fn run_composition_case(
         .await
         .map_err(|failure| failure.reason)?;
     let final_state = reopened
-        .load_session()
+        .load_session_head_meta(&session_id)
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("composition case `{label}` lost the durable prefix"))?;
@@ -808,7 +808,7 @@ async fn run_seed(
         drop(store);
         store = open_store(backend, Arc::clone(&factory), &session_id).await?;
         let after_fault = store
-            .load_session()
+            .load_session_head_meta(&session_id)
             .await
             .map_err(|err| ScenarioFailure::harness(backend, format!("load after fault: {err}")))?
             .ok_or_else(|| {
@@ -845,7 +845,7 @@ async fn run_seed(
             ScenarioFailure::oracle(backend, scenario, "reopen hung for five seconds")
         })??;
         let reopened = store
-            .load_session()
+            .load_session_head_meta(&session_id)
             .await
             .map_err(|err| ScenarioFailure::harness(backend, format!("load after reopen: {err}")))?
             .ok_or_else(|| {
@@ -901,7 +901,7 @@ async fn run_seed(
     drop(store);
     let final_store = open_store(backend, factory, &session_id).await?;
     let final_read = final_store
-        .load_session()
+        .load_session_head_meta(&session_id)
         .await
         .map_err(|err| ScenarioFailure::harness(backend, format!("final load: {err}")))?
         .ok_or_else(|| {

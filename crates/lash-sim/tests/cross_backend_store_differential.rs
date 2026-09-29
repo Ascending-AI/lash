@@ -1690,7 +1690,10 @@ impl BackendRunner {
                 self.store = Some(Arc::clone(&reopened));
 
                 let loaded = reopened
-                    .load_session()
+                    .load_session_window(
+                        &self.session_id,
+                        lash_core::store::WindowSelector::Current,
+                    )
                     .await?
                     .expect("cold-reopened session must have durable state");
                 let checkpoint = loaded
