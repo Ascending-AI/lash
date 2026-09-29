@@ -11,7 +11,7 @@ use super::{
 
 /// Panics when the effect loop ends: every tool call settled and the turn
 /// has not committed.
-struct PanicBeforeTurnCommit;
+pub(super) struct PanicBeforeTurnCommit;
 
 impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicBeforeTurnCommit {
     fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
@@ -26,7 +26,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicBeforeTurnCommit {
 }
 
 /// The one execution of `label`'s body.
-fn only(world: &World, label: &str) -> Execution {
+pub(super) fn only(world: &World, label: &str) -> Execution {
     let executions = world.witness.of(label);
     assert_eq!(
         executions.len(),
@@ -40,7 +40,7 @@ fn only(world: &World, label: &str) -> Execution {
 }
 
 /// Every execution of one logical call saw one never-missing call id.
-fn assert_one_identity(label: &str, executions: &[Execution]) -> String {
+pub(super) fn assert_one_identity(label: &str, executions: &[Execution]) -> String {
     assert!(!executions.is_empty(), "`{label}` ran");
     let first = executions[0]
         .identity
@@ -63,7 +63,7 @@ fn answered_label(output: &serde_json::Value) -> Option<&str> {
 }
 
 /// The keys two logical calls saw must all be present and all differ.
-fn assert_distinct_keys(what: &str, one: &AttemptIdentity, other: &AttemptIdentity) {
+pub(super) fn assert_distinct_keys(what: &str, one: &AttemptIdentity, other: &AttemptIdentity) {
     let mut collisions = Vec::new();
     for ((name, one), (_, other)) in one.keys().into_iter().zip(other.keys()) {
         assert!(
@@ -212,7 +212,16 @@ pub async fn tool_identity_survives_unrecorded_effect_crash(tier: ToolCallIdenti
             );
             last_report(reported).await
         }
-        None => crash_while_held(&world, &turn).await,
+        None => {
+            let held = world.turn(
+                "held",
+                vec![
+                    calls(&[("call_effect", PROBE, ProbeArgs::held("effect"))]),
+                    text("the effect settled"),
+                ],
+            );
+            crash_while_held(&world, &held, "effect").await
+        }
     };
     assert_finished("the recovered turn", &assembled);
     let executions = world.witness.of("effect");
@@ -256,35 +265,79 @@ async fn first_attempt_key(
     )
 }
 
+async fn last_report(
+    reported: tokio::sync::mpsc::UnboundedReceiver<
+        Result<crate::AssembledTurn, crate::RuntimeError>,
+    >,
+) -> crate::AssembledTurn {
+    last_result(reported)
+        .await
+        .unwrap_or_else(|error| panic!("the recovered turn runs: {error}"))
+}
+
+/// The last execution's report: a replaying tier reports once per execution
+/// that reaches the end.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the tier's runner ran the attempt it was handed"
 )]
-async fn last_report(
+async fn last_result(
     mut reported: tokio::sync::mpsc::UnboundedReceiver<
         Result<crate::AssembledTurn, crate::RuntimeError>,
     >,
-) -> crate::AssembledTurn {
+) -> Result<crate::AssembledTurn, crate::RuntimeError> {
     let mut last = reported.recv().await.expect("the recovered turn reports");
     while let Ok(next) = reported.try_recv() {
         last = next;
     }
-    last.unwrap_or_else(|error| panic!("the recovered turn runs: {error}"))
+    last
 }
 
-/// Runs `turn`, whose one probe call holds after its effect, kills the
-/// turn's execution once the effect happened, and recovers it with the gate
-/// open.
+/// Runs `turn`, whose probe call `held` holds on the law's gate, kills the
+/// turn's execution once that call started, and recovers it.
+pub(super) async fn crash_while_held(
+    world: &World,
+    turn: &super::ScriptedTurn,
+    held: &'static str,
+) -> crate::AssembledTurn {
+    crash_while_held_result(world, turn, held)
+        .await
+        .unwrap_or_else(|error| panic!("the recovered turn runs: {error}"))
+}
+
+/// [`crash_while_held`], answering how the recovered turn ended.
+pub(super) async fn crash_while_held_result(
+    world: &World,
+    turn: &super::ScriptedTurn,
+    held: &'static str,
+) -> Result<crate::AssembledTurn, crate::RuntimeError> {
+    crash_when(world, turn, "the held probe starts", move |witness| {
+        witness.started(held) >= 1
+    })
+    .await
+}
+
+/// Runs `turn`, kills its execution once `ready` holds, and recovers it.
+///
+/// The gate a held probe waits on opens as the crash fires. A tier that
+/// keeps the crashing execution running dies at its next poll, and the held
+/// call then finishes in whichever execution outlives the crash — or runs
+/// again. A tier that suspends a turn at every await it cannot answer from
+/// its journal has no execution left to kill: the held call finishes, the
+/// turn resumes, and the resumed execution finds the crash fired and dies
+/// there, so the recovery still follows a crash rather than waiting on a
+/// gate that only the recovery would open.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn crash_while_held(world: &World, turn: &super::ScriptedTurn) -> crate::AssembledTurn {
-    let mut turn = turn.clone();
-    turn.responses = Arc::new(vec![
-        calls(&[("call_effect", PROBE, ProbeArgs::held("effect"))]),
-        text("the effect settled"),
-    ]);
+pub(super) async fn crash_when(
+    world: &World,
+    turn: &super::ScriptedTurn,
+    what: &'static str,
+    ready: impl Fn(&super::Witness) -> bool + Send + Sync + 'static,
+) -> Result<crate::AssembledTurn, crate::RuntimeError> {
+    let turn = turn.clone();
     let crash = crate::ConformanceCrash::new();
     let (report, reported) = tokio::sync::mpsc::unbounded_channel();
     let crashing: crate::ConformanceTurnAttempt = {
@@ -298,7 +351,7 @@ async fn crash_while_held(world: &World, turn: &super::ScriptedTurn) -> crate::A
             Box::pin(async move {
                 tokio::select! {
                     biased;
-                    () = crash.fired() => panic!("the turn dies with the effect's outcome unrecorded"),
+                    () = crash.fired() => panic!("the law kills the turn's execution here"),
                     ended = world.drive(&turn, scope, None) => panic!(
                         "the crashing turn ended ({ended:?}) before its crash fired"
                     ),
@@ -306,33 +359,27 @@ async fn crash_while_held(world: &World, turn: &super::ScriptedTurn) -> crate::A
             })
         })
     };
-    let redrive: crate::ConformanceTurnAttempt = {
-        let world = world.clone();
-        let inner = world.attempt(&turn, report);
-        Arc::new(move |scope| {
-            world.witness.open_gate();
-            inner(scope)
-        })
-    };
     let fire = {
         let world = world.clone();
         let crash = crash.clone();
         crate::task::spawn(async move {
-            world
-                .witness
-                .until("the probe performs its effect", |witness| {
-                    witness.started("effect") >= 1
-                })
-                .await;
+            world.witness.until(what, ready).await;
+            // Whatever settled by now has had time to become durable.
+            tokio::time::sleep(SETTLEMENT_GRACE).await;
             crash.fire();
+            world.witness.open_gate();
         })
     };
     world
         .runner()
-        .run_crashed_then_redriven_turn(world.admitted(&turn), crashing, redrive)
+        .run_crashed_then_redriven_turn(
+            world.admitted(&turn),
+            crashing,
+            world.attempt(&turn, report),
+        )
         .await;
     fire.await.expect("the crash trigger's task");
-    last_report(reported).await
+    last_result(reported).await
 }
 
 /// A reported failure after the effect — a timeout, say — is retried under
@@ -432,14 +479,11 @@ pub async fn recorded_outcome_skips_execution(tier: ToolCallIdentityTier) {
 }
 
 /// One model step calls a tool that does not exist, then two probes; one
-/// probe settles while the other is held, and the turn dies. Neither the refused sibling nor the completion order renumbers a
-/// call: the settled probe is not run again, the held probe's every run sees
-/// the call id its first run saw, the two probes' ids differ, and each
-/// recorded outcome belongs to its own call.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
+/// probe settles while the other is held, and the turn dies. Neither the
+/// refused sibling nor the completion order renumbers a call: the settled
+/// probe is not run again, the held probe's every run sees the call id its
+/// first run saw, the two probes' ids differ, and each recorded outcome
+/// belongs to its own call.
 pub async fn refusals_and_parallel_completion_never_renumber_identity(tier: ToolCallIdentityTier) {
     let world = World::new(&tier, "parallel-identity");
     // The quick probe comes first so a tier that runs a step's calls one at
@@ -457,60 +501,14 @@ pub async fn refusals_and_parallel_completion_never_renumber_identity(tier: Tool
         ),
     );
     let turn = world.turn("turn", vec![step, text("the parallel step settled")]);
-    let crash = crate::ConformanceCrash::new();
-    let (report, mut reported) = tokio::sync::mpsc::unbounded_channel();
-    let crashing: crate::ConformanceTurnAttempt = {
-        let world = world.clone();
-        let turn = turn.clone();
-        let crash = crash.clone();
-        Arc::new(move |scope| {
-            let world = world.clone();
-            let turn = turn.clone();
-            let crash = crash.clone();
-            Box::pin(async move {
-                tokio::select! {
-                    biased;
-                    () = crash.fired() => panic!("the turn dies with one probe settled and one held"),
-                    ended = world.drive(&turn, scope, None) => panic!(
-                        "the crashing turn ended ({ended:?}) before its crash fired"
-                    ),
-                }
-            })
-        })
-    };
-    let redrive: crate::ConformanceTurnAttempt = {
-        let world = world.clone();
-        let inner = world.attempt(&turn, report);
-        Arc::new(move |scope| {
-            world.witness.open_gate();
-            inner(scope)
-        })
-    };
-    let fire = {
-        let world = world.clone();
-        let crash = crash.clone();
-        crate::task::spawn(async move {
-            world
-                .witness
-                .until(
-                    "the quick probe settles while the held one runs",
-                    |witness| witness.of("quick").len() >= 1 && witness.started("held") >= 1,
-                )
-                .await;
-            tokio::time::sleep(SETTLEMENT_GRACE).await;
-            crash.fire();
-        })
-    };
-    world
-        .runner()
-        .run_crashed_then_redriven_turn(world.admitted(&turn), crashing, redrive)
-        .await;
-    fire.await.expect("the crash trigger's task");
-    let assembled = reported
-        .recv()
-        .await
-        .expect("the recovered turn reports")
-        .unwrap_or_else(|error| panic!("the recovered turn runs: {error}"));
+    let assembled = crash_when(
+        &world,
+        &turn,
+        "the quick probe settles while the held one runs",
+        |witness| !witness.of("quick").is_empty() && witness.started("held") >= 1,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("the recovered turn runs: {error}"));
     assert_finished("the recovered parallel turn", &assembled);
     let quick = only(&world, "quick");
     let held = assert_one_identity("held", &world.witness.of("held"));

@@ -3,7 +3,8 @@
 /// [`ToolCallIdentityTier`](crate::ToolCallIdentityTier): the tier's effect
 /// host and store set and its
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner), which must crash
-/// and redrive a turn.
+/// and redrive a turn and serve process segments, and the RLM protocol
+/// plugin factories.
 ///
 /// A law registered `held` states a contract that holds only once FIG-4080
 /// cuts every tool-derived identity over to the lash-minted call id: its
@@ -24,6 +25,16 @@ macro_rules! tool_call_identity_tests {
             recorded_outcome_skips_execution);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             refusals_and_parallel_completion_never_renumber_identity);
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
+            code_cells_keep_identity_and_distinguish_fresh_calls);
+        $crate::tool_call_identity_tests!(@held [$(#[$attr])*] $fixture;
+            frames_keep_identity_and_distinguish_fresh_calls);
+        $crate::tool_call_identity_tests!(@held [$(#[$attr])*] $fixture;
+            compaction_keeps_identity_and_distinguishes_fresh_calls);
+        $crate::tool_call_identity_tests!(@held [$(#[$attr])*] $fixture;
+            retained_payload_drift_is_refused_before_effects);
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
+            process_admission_names_each_call_and_survives_replay);
     };
     (@law [$($attr:tt)*] $fixture:block; $law:ident) => {
         $($attr)*
