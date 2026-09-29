@@ -66,6 +66,12 @@ pub async fn execute_final_tool_intents(
             replay_key = %identity.replay_key,
         );
         let _entered = span.enter();
+        if let crate::ToolIntent::RegisterTrigger(registration) = intent
+            && let Some(refusal) = validate_trigger_registration_authority(context, registration)
+        {
+            outcomes.push(refused(index, intent.kind(), Some(identity), refusal));
+            continue;
+        }
         let result = execute_one(context, intent, &identity, child_trace_hook).await;
         let outcome = match result {
             Ok(result) => {
@@ -251,6 +257,40 @@ fn refused(
         kind,
         refusal,
     }
+}
+
+fn validate_trigger_registration_authority(
+    context: &ToolDispatchContext<'_>,
+    intent: &crate::RegisterTriggerIntent,
+) -> Option<crate::ToolIntentRefusalReason> {
+    let expected_owner = match crate::resolve_trigger_owner_scope(
+        &context.session_id,
+        context.process_originator.as_ref(),
+    ) {
+        Ok(owner) => owner,
+        Err(error) => {
+            return Some(crate::ToolIntentRefusalReason::CommandFailed {
+                code: "trigger_owner_scope_unavailable".to_string(),
+                message: error.to_string(),
+            });
+        }
+    };
+    if intent.owner_scope != expected_owner {
+        return Some(crate::ToolIntentRefusalReason::ForeignTriggerOwnerScope {
+            expected: format!("{expected_owner:?}"),
+            recorded: format!("{:?}", intent.owner_scope),
+        });
+    }
+    let expected_actor = context.process_originator.clone().unwrap_or_else(|| {
+        crate::ProcessOriginator::session(crate::SessionScope::for_agent_frame(
+            context.session_id.clone(),
+            context.agent_frame_id.clone(),
+        ))
+    });
+    (intent.actor != expected_actor).then(|| crate::ToolIntentRefusalReason::ForeignTriggerActor {
+        expected: format!("{expected_actor:?}"),
+        recorded: format!("{:?}", intent.actor),
+    })
 }
 
 #[cfg(feature = "otel-trace")]

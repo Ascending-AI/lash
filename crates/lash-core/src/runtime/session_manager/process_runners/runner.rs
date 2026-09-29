@@ -151,6 +151,7 @@ impl RuntimeSessionServices {
             let run_context = ProcessRunContext::builder(&services)
                 .tool_surface(tool_surface)
                 .process_lineage(registration_for_runtime.lineage(&process_id_for_runtime))
+                .process_originator(registration_for_runtime.provenance.originator.clone())
                 .scoped_effect_controller(scoped_effect_controller)
                 .causal_invocation(execution_context_for_runtime.causal_invocation.clone())
                 .cancellation(cancellation_for_runtime.clone())

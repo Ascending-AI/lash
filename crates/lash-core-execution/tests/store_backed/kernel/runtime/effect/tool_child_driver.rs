@@ -143,6 +143,7 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
             process_lineage: None,
+            process_originator: None,
         }
     }
 

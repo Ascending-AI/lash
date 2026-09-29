@@ -812,6 +812,7 @@ impl Session {
             turn_context: turn_context.clone(),
             clock: Arc::clone(&self.services.clock),
             process_lineage: process_lineage_of(&turn_context),
+            process_originator: None,
         });
         Ok(RuntimeExecutionContext::new(
             SessionId::from(session_id.to_string()),

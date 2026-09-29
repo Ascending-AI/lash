@@ -894,6 +894,7 @@ pub(crate) fn rebind_child_dispatch<'run>(
         .is_some_and(|lineage| lineage.ancestry().starter() != enclosing.as_ref())
     {
         child.process_lineage = None;
+        child.process_originator = None;
     }
     // Lineage is recorded, not the opener's current one.
     child.parent_invocation = request.attempt_identity.parent_invocation().cloned();

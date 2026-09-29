@@ -818,6 +818,95 @@ async fn register_trigger_intent_subscription_with_schema(
     receipt.record_snapshot
 }
 
+#[tokio::test]
+async fn register_trigger_intent_refuses_foreign_authority_before_installing() {
+    for foreign_field in ["owner_scope", "actor", "legitimate"] {
+        let world = intent_law_world().await;
+        let env_ref = crate::testing::process_execution_env_fixture(world.env_store.as_ref()).await;
+        let draft = crate::TriggerSubscriptionDraft::for_process(
+            format!("test/foreign-{foreign_field}"),
+            env_ref,
+            "intent.foreign.trigger",
+            "intent-law-source",
+            crate::ProcessInput::Engine {
+                kind: "testing-fixture".to_string(),
+                payload: json!({"foreign_field": foreign_field}),
+            },
+            crate::ProcessIdentity::new("testing-fixture"),
+        );
+        let mut registration = crate::RegisterTriggerIntent {
+            session_id: SessionId::from("session"),
+            owner_scope: crate::TriggerOwnerScope::session("session"),
+            actor: crate::ProcessOriginator::session(crate::SessionScope::for_agent_frame(
+                "session",
+                crate::FrameNodeId::new("test-frame").expect("test frame id"),
+            )),
+            env_spec: None,
+            draft,
+        };
+        if foreign_field == "owner_scope" {
+            registration.owner_scope = crate::TriggerOwnerScope::session("foreign");
+        } else if foreign_field == "actor" {
+            registration.actor = crate::ProcessOriginator::host_scoped("foreign");
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let controller = Arc::new(IntentReplayController::new(None).await);
+        let mut context = fixed_intent_dispatch_context(
+            controller,
+            &world,
+            crate::ToolIntents::v3(vec![crate::ToolIntent::RegisterTrigger(Box::new(
+                registration,
+            ))]),
+            calls,
+        )
+        .await;
+        context.trigger_router = Some(crate::TriggerRouter::new(
+            Arc::clone(&world.trigger_store),
+            crate::testing::process_work_wiring_for_registry(Arc::clone(&world.registry)),
+        ));
+        let outcome = run_fixed_intent_attempt(&context).await;
+        let subscriptions = world
+            .trigger_store
+            .list_subscriptions(crate::TriggerSubscriptionFilter::default())
+            .await
+            .expect("read subscriptions");
+        match foreign_field {
+            "owner_scope" => assert!(
+                matches!(
+                    outcome.intent_outcomes.as_slice(),
+                    [crate::ToolIntentExecutionOutcome::Refused {
+                        refusal: crate::ToolIntentRefusalReason::ForeignTriggerOwnerScope { .. },
+                        ..
+                    }]
+                ),
+                "{outcome:?}"
+            ),
+            "actor" => assert!(
+                matches!(
+                    outcome.intent_outcomes.as_slice(),
+                    [crate::ToolIntentExecutionOutcome::Refused {
+                        refusal: crate::ToolIntentRefusalReason::ForeignTriggerActor { .. },
+                        ..
+                    }]
+                ),
+                "{outcome:?}"
+            ),
+            "legitimate" => assert!(
+                matches!(
+                    outcome.intent_outcomes.as_slice(),
+                    [crate::ToolIntentExecutionOutcome::Executed { .. }]
+                ),
+                "{outcome:?}"
+            ),
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            subscriptions.len(),
+            usize::from(foreign_field == "legitimate")
+        );
+    }
+}
+
 fn recorded_trigger_intents() -> crate::ToolIntents {
     crate::ToolIntents::v3(vec![crate::ToolIntent::EmitTrigger(
         crate::EmitTriggerIntent {

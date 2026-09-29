@@ -894,11 +894,12 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Self {
         // The lineage the process's body starts children under (FIG-3607 R1),
         // on the dispatch every start made inside this run realizes through.
-        if self.dispatch.process_lineage.is_none() {
-            let mut dispatch = (*self.dispatch).clone();
+        let mut dispatch = (*self.dispatch).clone();
+        if dispatch.process_lineage.is_none() {
             dispatch.process_lineage = Some(registration.lineage(&process_id));
-            self.dispatch = Arc::new(dispatch);
         }
+        dispatch.process_originator = Some(registration.provenance.originator.clone());
+        self.dispatch = Arc::new(dispatch);
         self.process_execution = Some(RuntimeProcessExecution {
             process_id,
             originator: registration.provenance.originator.clone(),

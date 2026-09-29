@@ -533,6 +533,14 @@ pub enum RemoteToolIntentRefusalReason {
         expected: String,
         recorded: String,
     },
+    ForeignTriggerOwnerScope {
+        expected: String,
+        recorded: String,
+    },
+    ForeignTriggerActor {
+        expected: String,
+        recorded: String,
+    },
     CommandFailed {
         code: String,
         message: String,

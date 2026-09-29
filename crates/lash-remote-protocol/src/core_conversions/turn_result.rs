@@ -221,6 +221,12 @@ impl From<lash_core::ToolIntentRefusalReason> for RemoteToolIntentRefusalReason 
             Core::SessionMismatch { expected, recorded } => {
                 Self::SessionMismatch { expected, recorded }
             }
+            Core::ForeignTriggerOwnerScope { expected, recorded } => {
+                Self::ForeignTriggerOwnerScope { expected, recorded }
+            }
+            Core::ForeignTriggerActor { expected, recorded } => {
+                Self::ForeignTriggerActor { expected, recorded }
+            }
             Core::CommandFailed { code, message } => Self::CommandFailed { code, message },
             Core::MintingGroupChildCancelled => Self::MintingGroupChildCancelled,
         }
