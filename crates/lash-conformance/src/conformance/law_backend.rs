@@ -286,6 +286,10 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("obligation ledger")
     }
 
+    fn artifact_cleanup(&self) -> Arc<dyn crate::store::ArtifactCleanupLedger> {
+        Self::no_second_substrate("artifact cleanup ledger")
+    }
+
     fn session_delete_ledger(&self) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger> {
         Self::no_second_substrate("session delete ledger")
     }

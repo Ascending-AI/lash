@@ -54,6 +54,30 @@ impl crate::ProcessEngine for LawFenceEngine {
         LAW_FENCE_ENGINE_KIND
     }
 
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &crate::ReferrerClaim,
+        _artifact_ref: &str,
+    ) -> Result<(), crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "the law fence engine stores no artifacts".to_string(),
+        ))
+    }
+
     async fn run(
         &self,
         _context: crate::ProcessEngineRunContext<'_>,
