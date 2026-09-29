@@ -715,7 +715,6 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
                             Ok(RuntimeEffectOutcome::LlmCall {
                                 result: Box::new(Ok(completion.response)),
                                 text_streamed: false,
-                                capture: None,
                                 call_record: Some(completion.call_record),
                                 stream: Box::default(),
                                 capture: None,

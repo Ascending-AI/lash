@@ -57,6 +57,7 @@ turn_event_tags! {
     CodeBlockCompleted => "code_block_completed",
     ToolCallStarted => "tool_call_started",
     ToolCallCompleted => "tool_call_completed",
+    ToolOutputProgress => "tool_output_progress",
     ToolIntentOutcome => "tool_intent_outcome",
     FinalValue => "final_value",
     ToolValue => "tool_value",
@@ -552,6 +553,20 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 message: "boom".to_string(),
             },
             json!({ "type": "error", "message": "boom" }),
+        ),
+        (
+            "tool_output_progress",
+            TurnEvent::ToolOutputProgress {
+                call_id: "call-1".to_string(),
+                chunk: lash_sansio::ToolOutputChunk {
+                    text: "line 1\n".to_string(),
+                },
+            },
+            json!({
+                "type": "tool_output_progress",
+                "call_id": "call-1",
+                "chunk": { "text": "line 1\n" },
+            }),
         ),
     ]
 }

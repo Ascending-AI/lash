@@ -1648,6 +1648,7 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
                         }),
                         triggers: Vec::new(),
                         capture: None,
+                        capture_watermark: None,
                     })
                 }),
             )

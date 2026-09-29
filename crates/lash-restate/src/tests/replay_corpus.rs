@@ -168,6 +168,7 @@ async fn drive_scalar_lashlang_tool_attempt(
                         }),
                         triggers: Vec::new(),
                         capture: None,
+                        capture_watermark: None,
                     })
                 }
             }),

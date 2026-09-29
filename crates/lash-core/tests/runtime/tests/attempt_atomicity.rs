@@ -595,6 +595,7 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
                     }),
                     triggers: Vec::new(),
                     capture: None,
+                    capture_watermark: None,
                 })
             }),
         )
@@ -700,6 +701,7 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
                     }),
                     triggers: Vec::new(),
                     capture: None,
+                    capture_watermark: None,
                 })
             }),
         )
@@ -827,6 +829,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
                     }),
                     triggers: Vec::new(),
                     capture: None,
+                    capture_watermark: None,
                 })
             }),
         )
@@ -1463,6 +1466,7 @@ fn attempt_done_outcome() -> lash_core::RuntimeEffectOutcome {
         }),
         triggers: Vec::new(),
         capture: None,
+        capture_watermark: None,
     }
 }
 
@@ -1852,6 +1856,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
                     launch: Box::new(outcome.launch),
                     triggers: outcome.triggers,
                     capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
+                    capture_watermark: outcome.capture_watermark.map(Box::new),
                 })
             }),
         )

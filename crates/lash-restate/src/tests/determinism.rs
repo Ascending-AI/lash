@@ -383,6 +383,7 @@ async fn run_tool(
                     }),
                     triggers: Vec::new(),
                     capture: None,
+                    capture_watermark: None,
                 })
             }),
         )

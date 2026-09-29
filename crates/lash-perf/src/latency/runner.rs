@@ -1071,6 +1071,7 @@ mod tests {
                     },
                     head_revision: None,
                     at_ms: 1,
+                    stopped_partial: None,
                 },
                 pending_calls: AtomicUsize::new(0),
                 applications_calls: AtomicUsize::new(0),

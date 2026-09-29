@@ -87,6 +87,51 @@ impl lash_core::SessionCommitStore for CommitRetryStore {
 }
 
 #[async_trait::async_trait]
+impl lash_core::store::TurnCaptureStore for CommitRetryStore {
+    async fn open_capture_writer(
+        &self,
+        request: &lash_core::store::OpenCaptureWriter,
+    ) -> Result<lash_core::store::CaptureWriterLease, lash_core::StoreError> {
+        self.inner.open_capture_writer(request).await
+    }
+
+    async fn append_capture_batch(
+        &self,
+        batch: &lash_core::store::CaptureBatch,
+    ) -> Result<lash_core::store::CaptureAck, lash_core::StoreError> {
+        self.inner.append_capture_batch(batch).await
+    }
+
+    async fn persist_attempt_reset(
+        &self,
+        reset: &lash_core::store::CaptureAttemptReset,
+    ) -> Result<lash_core::store::CaptureWriterLease, lash_core::StoreError> {
+        self.inner.persist_attempt_reset(reset).await
+    }
+
+    async fn advance_capture_base(
+        &self,
+        advance: &lash_core::store::CaptureBaseAdvance,
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner.advance_capture_base(advance).await
+    }
+
+    async fn seal_turn_capture(
+        &self,
+        request: &lash_core::store::SealTurnCapture,
+    ) -> Result<lash_core::store::SealedCapture, lash_core::StoreError> {
+        self.inner.seal_turn_capture(request).await
+    }
+
+    async fn read_stopped_partial(
+        &self,
+        request: &lash_core::store::StoppedPartialReadRequest,
+    ) -> Result<lash_core::store::StoppedPartialRead, lash_core::StoreError> {
+        self.inner.read_stopped_partial(request).await
+    }
+}
+
+#[async_trait::async_trait]
 impl lash_core::store::DriveEpochStore for CommitRetryStore {
     async fn seal_drive_epoch(
         &self,
