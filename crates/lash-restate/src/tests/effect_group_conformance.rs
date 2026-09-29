@@ -756,6 +756,7 @@ impl LiveConformanceHarness {
                     Box::pin(async move { stores })
                 }
             }),
+            turn_runner: self.turn_runner(),
         }
     }
 

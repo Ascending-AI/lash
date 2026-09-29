@@ -148,9 +148,10 @@ pub type ToolChildProcessesFactory = Arc<
         + Sync,
 >;
 
-/// What a tier supplies: a world factory over one substrate and a process
-/// registry factory. Every host journals, so a deferrable child is always
-/// recorded under durable completion routing (ADR 0102, D1).
+/// What a tier supplies: a world factory over one substrate, a process
+/// registry factory and the runner its opener-side steps run in. Every host
+/// journals, so a deferrable child is always recorded under durable
+/// completion routing (ADR 0102, D1).
 #[derive(Clone)]
 pub struct ToolChildLawFixture {
     /// Two calls are two views of one substrate.
@@ -158,6 +159,11 @@ pub struct ToolChildLawFixture {
     /// A fresh process registry and process-exec-env store on the substrate
     /// the host factory serves.
     pub make_processes: ToolChildProcessesFactory,
+    /// Where a law runs an opener step that journals, over the world's host:
+    /// a Restate host executes journaled commands only inside a handler, so
+    /// a law that records an opener fact, crashes the opener and replays it
+    /// hands those steps to the tier's turn runner.
+    pub turn_runner: Arc<dyn crate::ConformanceTurnRunner>,
 }
 
 /// The lease window the lane law and the recovery law's live phases use:

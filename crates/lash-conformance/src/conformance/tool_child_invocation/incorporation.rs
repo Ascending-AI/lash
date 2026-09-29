@@ -90,23 +90,14 @@ impl RecordingCharge {
     }
 }
 
-/// The opener's execution context over this host's admitted scope, with the
-/// charge sink the incorporation's usage deltas land in.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-fn incorporating_context(
-    host: &Arc<dyn crate::EffectHost>,
-    admitted: &crate::AdmittedScope,
+/// The opener's execution context over the controller its handler was lent,
+/// with the charge sink the incorporation's usage deltas land in.
+fn incorporating_context<'run>(
+    scoped: crate::ScopedEffectController<'run>,
     session_id: &crate::SessionId,
     charge: Arc<RecordingCharge>,
-) -> crate::RuntimeExecutionContext<'static> {
-    let controller = host
-        .scoped_static(admitted.clone())
-        .expect("the host lends a scoped controller")
-        .expect("this host hands out owned scoped controllers");
-    crate::testing::TestExecutionContextBuilder::over_controller(controller)
+) -> crate::RuntimeExecutionContext<'run> {
+    crate::testing::TestExecutionContextBuilder::over_controller(scoped)
         .session_id(session_id.clone())
         .direct_completions(
             crate::DirectCompletionClient::from_fn(|_request, _source| {
@@ -120,25 +111,87 @@ fn incorporating_context(
         .into_runtime()
 }
 
+/// What the opener's crashed execution recorded before it died.
+#[derive(Debug)]
+struct CrashedOpener {
+    incorporated: Vec<crate::runtime::effect::IncorporatedGroupRank>,
+    charged: usize,
+}
+
+/// What the opener's redelivered execution observed, step by step.
+#[derive(Debug)]
+struct RedrivenOpener {
+    /// The incorporation replayed at the crashed execution's cursor.
+    replayed: Vec<crate::runtime::effect::IncorporatedGroupRank>,
+    /// Charges after the replayed incorporation.
+    replay_charged: usize,
+    /// The ledger right after the replayed incorporation.
+    replay_ledger: crate::session::IncorporationLedger,
+    /// A second incorporation at the same cursor.
+    again: Vec<crate::runtime::effect::IncorporatedGroupRank>,
+    /// The rank consumed after the replay: the late settlement.
+    late_position: usize,
+    /// The incorporation that extends the cursor over it.
+    extended: Vec<crate::runtime::effect::IncorporatedGroupRank>,
+    /// Charges once the extension landed.
+    final_charged: usize,
+}
+
+/// The opener's side of the law, as one handler's work: open the group,
+/// consume its first settlement and incorporate that prefix. Every execution
+/// of the handler runs it from the top; on a replay each step answers from
+/// the journal.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn open_and_incorporate_first_rank<'run>(
+    scoped: &crate::ScopedEffectController<'run>,
+    group: crate::RuntimeEffectGroup,
+    session_id: &crate::SessionId,
+    charge: &Arc<RecordingCharge>,
+) -> (
+    crate::EffectGroupHandle,
+    crate::RuntimeExecutionContext<'run>,
+    Vec<crate::runtime::effect::IncorporatedGroupRank>,
+) {
+    let mut handle = scoped
+        .controller()
+        .open_effect_group(group)
+        .await
+        .expect("the group opens under the live opener");
+    // Rank 1 is the usage leaf; the deferred leaf is parked and unsettled.
+    let first = next_settlement(scoped, &mut handle, 0).await;
+    assert_eq!(first.position, 0, "the usage leaf settles first: {first:?}");
+    let context = incorporating_context(scoped.clone(), session_id, Arc::clone(charge));
+    let incorporated = context
+        .incorporate_group_prefix(&handle)
+        .await
+        .expect("the opener journals the consumed prefix");
+    (handle, context, incorporated)
+}
+
 /// §6: the opener's `incorporate_group_prefix` journals the incorporated
-/// prefix, and a replay re-incorporates exactly the recorded ranks — never a
-/// settlement that landed after the record was cut (FIG-3411 phase 2c).
+/// prefix, and a replay of the opener re-incorporates exactly the recorded
+/// ranks — never a settlement that landed after the record was cut
+/// (FIG-3411 phase 2c, FIG-4094).
 ///
-/// The group is `[usage leaf, spend-then-deferred leaf]`. The usage leaf
-/// settles first and is consumed; `incorporate_group_prefix` then journals a
-/// record covering rank 1 alone and charges that rank's usage once. Only then
-/// is the parked leaf resolved, so rank 2's settlement — with its own usage —
-/// is a fact the record never saw.
+/// The group is `[usage leaf, spend-then-deferred leaf]`, and the opener runs
+/// where the tier runs a turn — inside a real handler on Restate. It opens
+/// the group, consumes the usage leaf's settlement, and
+/// `incorporate_group_prefix` journals a record covering rank 1 alone and
+/// charges that rank's usage once. The opener then crashes where it stands.
 ///
-/// A fresh context over the same substrate replays the prefix at the saved
-/// cursor: the journaled outcome names rank 1, so rank 1's spend is charged
-/// and rank 2's is not — a settlement that arrived after the record is not
-/// early possession. A repeated call at the same cursor journals nothing and
-/// applies nothing. Extending the cursor to rank 2 then journals a second
-/// record covering exactly that rank.
-///
-/// On tiers whose controller cannot journal this command the
-/// law asserts the cursorless rank read the record is built on and stops.
+/// Only then is the parked leaf resolved, so rank 2's settlement — with its
+/// own usage — is durably present before the opener recovers, a fact the
+/// record never saw. The tier recovers the opener its own way (Restate
+/// redelivers the invocation, replaying its journal). The replayed
+/// incorporation at the saved cursor names rank 1 only, so rank 1's spend is
+/// charged and rank 2's is not — a settlement that arrived after the record
+/// is not early possession. A repeated call at the same cursor journals
+/// nothing and applies nothing. Consuming the late settlement and extending
+/// the cursor to rank 2 then journals a second record covering exactly that
+/// rank.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -171,52 +224,52 @@ pub async fn a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ra
         opener,
         tokio_util::sync::CancellationToken::new(),
     );
-    let scoped = host
-        .scoped(admitted.clone())
-        .expect("the group scope binds");
-    let mut handle = scoped
-        .controller()
-        .open_effect_group(incorporation_group(
-            &scope,
-            &session_id,
-            &group_key,
-            &scenario.env_ref,
-            ToolChildCompletionRouting::Durable,
-            recorded_cancellation_authority(&host, &admitted).await,
-        ))
-        .await
-        .expect("the group opens under the live opener");
+    let group = incorporation_group(
+        &scope,
+        &session_id,
+        &group_key,
+        &scenario.env_ref,
+        ToolChildCompletionRouting::Durable,
+        recorded_cancellation_authority(&host, &admitted).await,
+    );
 
-    // Rank 1 is the usage leaf; the deferred leaf is parked and unsettled.
-    let first = next_settlement(&scoped, &mut handle, 0).await;
-    assert_eq!(first.position, 0, "the usage leaf settles first: {first:?}");
-
-    let charge = Arc::new(RecordingCharge::default());
-    let context = incorporating_context(&host, &admitted, &session_id, Arc::clone(&charge));
-    let incorporated = match context.incorporate_group_prefix(&handle).await {
-        Ok(incorporated) => incorporated,
-        Err(error)
-            if error.code == crate::RuntimeErrorCode::EngineEffectHostRequiresHandlerScope =>
-        {
-            // This tier executes journaled commands only inside a handler
-            // context, so the incorporation record is cut there, not on the
-            // host controller the law drives. What the law can still hold the
-            // tier to is the cursorless read the record is built from.
-            let settled = scoped
-                .controller()
-                .read_group_settlement(&group_key, 1)
-                .await
-                .expect("the rank read is answered")
-                .expect("rank 1 is settled");
-            assert_eq!(
-                settled.sequence, first.sequence,
-                "the cursorless read names the settled rank"
-            );
-            assert!(!settled.child_replay_key.is_empty());
-            return;
-        }
-        Err(error) => panic!("incorporate_group_prefix failed: {error}"),
+    // The opener's first life: it records rank 1's incorporation, then dies.
+    let crash = crate::ConformanceCrash::new();
+    let crashed = Arc::new(std::sync::Mutex::new(None::<CrashedOpener>));
+    let crashing: crate::ConformanceTurnAttempt = {
+        let group = group.clone();
+        let session_id = session_id.clone();
+        let crash = crash.clone();
+        let crashed = Arc::clone(&crashed);
+        Arc::new(move |scoped| {
+            let group = group.clone();
+            let session_id = session_id.clone();
+            let crash = crash.clone();
+            let crashed = Arc::clone(&crashed);
+            Box::pin(async move {
+                let charge = Arc::new(RecordingCharge::default());
+                let (_handle, _context, incorporated) =
+                    open_and_incorporate_first_rank(&scoped, group, &session_id, &charge).await;
+                *crashed.lock_recover() = Some(CrashedOpener {
+                    incorporated,
+                    charged: charge.count(),
+                });
+                crash.fire();
+                std::future::pending().await
+            })
+        })
     };
+    fixture
+        .turn_runner
+        .run_turn_until_crash(admitted.clone(), crashing, crash)
+        .await;
+    let CrashedOpener {
+        incorporated,
+        charged,
+    } = crashed
+        .lock_recover()
+        .take()
+        .expect("the opener recorded its incorporation before it crashed");
     assert_eq!(
         incorporated.len(),
         1,
@@ -225,13 +278,13 @@ pub async fn a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ra
     assert_eq!(incorporated[0].rank, 1);
     assert!(!incorporated[0].child_replay_key.is_empty());
     assert_eq!(
-        charge.count(),
-        1,
+        charged, 1,
         "rank 1's usage was charged exactly once at incorporation"
     );
 
     // The late settlement: the parked leaf resolves and takes rank 2 — a fact
-    // the already-cut record does not name.
+    // the already-cut record does not name — and is durable before the
+    // opener recovers.
     let key = scenario
         .observation
         .parked_key(&format!("{group_key}-call-1"))
@@ -242,82 +295,138 @@ pub async fn a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ra
         crate::Resolution::Ok(serde_json::json!({ "leaf": "late", "via": "resolver" })),
     )
     .await;
-    let mut observer =
-        crate::EffectGroupHandle::restored(group_key.clone(), 2, 1).expect("cursor 1 restores");
-    let second = next_settlement(&scoped, &mut observer, 1).await;
-    assert_eq!(second.position, 1, "the deferred leaf settles rank 2");
-    assert!(
-        charge.count() == 1,
-        "consuming a settlement is not incorporation: rank 2's spend is uncharged"
-    );
+    rank_settled(&host, &admitted, &group_key, 2).await;
 
-    // Replay at the saved cursor on a fresh context — a fresh ledger, the
-    // journaled record already in the store. The recorded outcome names rank
-    // 1 only, so rank 2's settlement — now durably present — is excluded.
-    let replay_charge = Arc::new(RecordingCharge::default());
-    let replay_context =
-        incorporating_context(&host, &admitted, &session_id, Arc::clone(&replay_charge));
-    let replayed_handle =
-        crate::EffectGroupHandle::restored(group_key.clone(), 2, 1).expect("cursor 1 restores");
-    let replayed = replay_context
-        .incorporate_group_prefix(&replayed_handle)
-        .await
-        .expect("the recorded prefix replays");
+    // The opener's recovery: the tier redelivers it, and it runs from the
+    // top on a fresh context — a fresh ledger, the journaled record already
+    // in the journal.
+    let redriven = Arc::new(std::sync::Mutex::new(None::<RedrivenOpener>));
+    let redrive: crate::ConformanceTurnAttempt = {
+        let group = group.clone();
+        let session_id = session_id.clone();
+        let redriven = Arc::clone(&redriven);
+        Arc::new(move |scoped| {
+            let group = group.clone();
+            let session_id = session_id.clone();
+            let redriven = Arc::clone(&redriven);
+            Box::pin(async move {
+                let charge = Arc::new(RecordingCharge::default());
+                let (mut handle, context, replayed) =
+                    open_and_incorporate_first_rank(&scoped, group, &session_id, &charge).await;
+                let replay_charged = charge.count();
+                let replay_ledger = context.incorporation_ledger_snapshot();
+                let again = context
+                    .incorporate_group_prefix(&handle)
+                    .await
+                    .expect("a repeated incorporation at the same prefix succeeds");
+                let late = next_settlement(&scoped, &mut handle, 1).await;
+                let extended = context
+                    .incorporate_group_prefix(&handle)
+                    .await
+                    .expect("the prefix extension journals");
+                let final_charged = charge.count();
+                scoped
+                    .controller()
+                    .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
+                    .await
+                    .expect("the opener closes the group");
+                *redriven.lock_recover() = Some(RedrivenOpener {
+                    replayed,
+                    replay_charged,
+                    replay_ledger,
+                    again,
+                    late_position: late.position,
+                    extended,
+                    final_charged,
+                });
+                crate::ConformanceTurnEnd::Settled
+            })
+        })
+    };
+    fixture.turn_runner.run_turn(admitted, redrive).await;
+    let redriven = redriven
+        .lock_recover()
+        .take()
+        .expect("the redriven opener ran to its end");
+
+    // The recorded outcome names rank 1 only, so rank 2's settlement — now
+    // durably present — is excluded from the replay.
     assert_eq!(
-        replayed, incorporated,
+        redriven.replayed, incorporated,
         "replay re-incorporates exactly the recorded ranks"
     );
     assert_eq!(
-        replay_charge.count(),
-        1,
+        redriven.replay_charged, 1,
         "rank 2's late settlement was not incorporated on replay"
     );
-    let ledger = replay_context.incorporation_ledger_snapshot();
     assert!(
-        !ledger.incorporated.iter().any(|source| matches!(
-            source,
-            crate::session::SettlementSource::GroupRank { rank: 2, .. }
-        )),
-        "the incorporated prefix is the recorded ranks, no later rank: {ledger:?}"
+        !redriven
+            .replay_ledger
+            .incorporated
+            .iter()
+            .any(|source| matches!(
+                source,
+                crate::session::SettlementSource::GroupRank { rank: 2, .. }
+            )),
+        "the incorporated prefix is the recorded ranks, no later rank: {:?}",
+        redriven.replay_ledger
     );
 
     // A second call at the same cursor is the no-op the ledger makes it.
-    let again = replay_context
-        .incorporate_group_prefix(&replayed_handle)
-        .await
-        .expect("a repeated incorporation at the same prefix succeeds");
     assert!(
-        again.is_empty(),
-        "a repeated call at the same through_rank journals nothing: {again:?}"
-    );
-    assert_eq!(
-        replay_charge.count(),
-        1,
-        "the repeated call charged nothing"
+        redriven.again.is_empty(),
+        "a repeated call at the same through_rank journals nothing: {:?}",
+        redriven.again
     );
 
-    // Extending the cursor is a new record covering exactly the new rank.
-    let full_handle =
-        crate::EffectGroupHandle::restored(group_key.clone(), 2, 2).expect("cursor 2 restores");
-    let extended = replay_context
-        .incorporate_group_prefix(&full_handle)
-        .await
-        .expect("the prefix extension journals");
+    // Consuming the late settlement and extending the cursor is a new record
+    // covering exactly the new rank.
     assert_eq!(
-        extended.len(),
-        1,
-        "the extension covers only the newly consumed rank: {extended:?}"
+        redriven.late_position, 1,
+        "the deferred leaf settles rank 2"
     );
-    assert_eq!(extended[0].rank, 2);
     assert_eq!(
-        replay_charge.count(),
-        2,
+        redriven.extended.len(),
+        1,
+        "the extension covers only the newly consumed rank: {:?}",
+        redriven.extended
+    );
+    assert_eq!(redriven.extended[0].rank, 2);
+    assert_eq!(
+        redriven.final_charged, 2,
         "rank 2's spend is charged by its own record, once"
     );
+}
 
-    scoped
-        .controller()
-        .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
-        .await
-        .expect("the opener closes the group");
+/// Waits until `group_key`'s rank `rank` is durably settled, read from
+/// outside any opener.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn rank_settled(
+    host: &Arc<dyn crate::EffectHost>,
+    admitted: &crate::AdmittedScope,
+    group_key: &str,
+    rank: u64,
+) {
+    let scoped = host
+        .scoped(admitted.clone())
+        .expect("the group scope binds");
+    let deadline = std::time::Instant::now() + SETTLE_BUDGET;
+    loop {
+        let settled = scoped
+            .controller()
+            .read_group_settlement(group_key, rank)
+            .await
+            .expect("the rank read is answered");
+        if settled.is_some() {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "rank {rank} of {group_key} never settled"
+        );
+        tokio::time::sleep(POLL).await;
+    }
 }

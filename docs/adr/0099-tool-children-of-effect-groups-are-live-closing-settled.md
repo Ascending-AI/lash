@@ -681,7 +681,11 @@ rides a Lashlang segment handover, and a turn's ledger rides each of its
 journaled checkpoints, so a turn resumed after its worker died — which serves
 its completed cells from the journal and re-runs none of their
 incorporations — restores what those cells incorporated and never incorporates
-a rank twice.
+a rank twice. The conformance law
+`a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ranks` runs
+the opener inside a real Restate handler, on the server double and live
+(FIG-4094): it journals rank 1's record, crashes, lets rank 2 settle, and the
+redelivered handler's replay incorporates rank 1 alone.
 
 ---
 
