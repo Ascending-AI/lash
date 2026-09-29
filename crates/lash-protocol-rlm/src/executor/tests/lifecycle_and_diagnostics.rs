@@ -17,7 +17,7 @@ struct FailingArtifactStore;
 impl lash_core::ModuleArtifactStore for FailingArtifactStore {
     async fn publish_module_artifact(
         &self,
-        _owner: &lash_core::ArtifactOwner,
+        _claim: &lash_core::ReferrerClaim,
         _module_ref: &str,
         _bytes: &[u8],
     ) -> Result<(), lash_core::ArtifactStoreError> {
@@ -26,9 +26,9 @@ impl lash_core::ModuleArtifactStore for FailingArtifactStore {
         ))
     }
 
-    async fn retain_module_artifact(
+    async fn acquire_module_artifact(
         &self,
-        _owner: &lash_core::ArtifactOwner,
+        _claim: &lash_core::ReferrerClaim,
         _module_ref: &str,
     ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(lash_core::ArtifactStoreError::Backend(
@@ -36,30 +36,9 @@ impl lash_core::ModuleArtifactStore for FailingArtifactStore {
         ))
     }
 
-    async fn transfer_module_artifact(
+    async fn end_module_referrer(
         &self,
-        _from: &lash_core::ArtifactOwner,
-        _to: &lash_core::ArtifactOwner,
-        _module_ref: &str,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        Err(lash_core::ArtifactStoreError::Backend(
-            "injected artifact store failure".to_string(),
-        ))
-    }
-
-    async fn release_module_artifact(
-        &self,
-        _owner: &lash_core::ArtifactOwner,
-        _module_ref: &str,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        Err(lash_core::ArtifactStoreError::Backend(
-            "injected artifact store failure".to_string(),
-        ))
-    }
-
-    async fn retire_module_artifact_owner(
-        &self,
-        _owner: &lash_core::ArtifactOwner,
+        _cleanup: &lash_core::ResolvedArtifactCleanup,
     ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(lash_core::ArtifactStoreError::Backend(
             "injected artifact store failure".to_string(),
@@ -1741,6 +1720,6 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
         assert_eq!(second_stats.hits, 1);
         assert_eq!(second_stats.misses, 1);
         assert_eq!(second_stats.entries, 1);
-        assert!(state.stored_lashlang_modules.is_empty());
+        assert!(state.frame_held_module_refs().next().is_none());
     });
 }

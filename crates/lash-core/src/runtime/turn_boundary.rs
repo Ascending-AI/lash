@@ -77,9 +77,11 @@ pub(super) struct TurnBoundary {
     park_root: Option<crate::TurnId>,
 }
 
-/// The frame switch a final commit makes: the frame the turn was admitted on
-/// ends, and `carries` cross into the frame the switch opens (ADR 0113 §3.1).
-/// The committing turn is the switch's gate.
+/// The frame end a final commit makes (ADR 0113 §3.1). A switch the turn
+/// makes ends the frame the turn was admitted on (`ended`) and carries
+/// `carries` into the frame it opens; with no `ended`, the commit ends the
+/// last committed frame when a resident open moved the session past it. The
+/// committing turn is the gate.
 pub(super) struct FrameSwitchCommit {
     ended: Option<crate::FrameNodeId>,
     carries: Vec<crate::ArtifactName>,
@@ -642,11 +644,14 @@ impl TurnBoundary {
         let commit_budget = self.commit_budget;
         let drive_commit = self.drive_commit.clone();
         let park_root = self.park_root.clone();
-        let frame_switch = agent_frame_switch_materializes.then(|| FrameSwitchCommit {
-            ended: admitted_frame,
+        // A switch this turn makes ends the frame the turn was admitted on;
+        // otherwise the commit ends whatever frame a resident open left
+        // behind, if any.
+        let frame_switch = FrameSwitchCommit {
+            ended: admitted_frame.filter(|_| agent_frame_switch_materializes),
             carries: frame_carries,
             committing: self.operation_scope.clone(),
-        });
+        };
         let state = self.final_state_mut();
 
         if let Some(store) = store {
@@ -727,7 +732,7 @@ impl TurnBoundary {
         _session_execution_lease_completion: Option<crate::ClaimAuthority>,
         drive_commit: Option<DriveCommit>,
         park_root: Option<TurnId>,
-        frame_switch: Option<FrameSwitchCommit>,
+        frame_switch: FrameSwitchCommit,
     ) -> FinalCommitResult {
         let session_id = state.session_id.clone();
         let node_id_mapping = graph.derive_node_ids(&session_id, &operation)?;
@@ -743,26 +748,22 @@ impl TurnBoundary {
                 .expect("derived graph node identities are non-empty");
         }
         state.agent_frames = state.session_graph.agent_frame_records(&session_id);
-        let frame_transition = match frame_switch {
-            Some(FrameSwitchCommit {
-                ended,
-                carries,
-                committing,
-            }) => {
-                let ended = ended.map(|ended| {
-                    node_id_mapping
-                        .iter()
-                        .find(|(draft, _)| draft == ended.as_str())
-                        .map(|(_, derived)| {
-                            crate::FrameNodeId::new(derived.clone())
-                                .expect("derived graph node identities are non-empty")
-                        })
-                        .unwrap_or(ended)
-                });
-                committed_frame_transition(state, ended, carries, &committing)?
-            }
-            None => None,
-        };
+        let FrameSwitchCommit {
+            ended,
+            carries,
+            committing,
+        } = frame_switch;
+        let ended = ended.map(|ended| {
+            node_id_mapping
+                .iter()
+                .find(|(draft, _)| draft == ended.as_str())
+                .map(|(_, derived)| {
+                    crate::FrameNodeId::new(derived.clone())
+                        .expect("derived graph node identities are non-empty")
+                })
+                .unwrap_or(ended)
+        });
+        let frame_transition = committed_frame_transition(state, ended, carries, &committing)?;
         let persisted_node_ids = graph
             .nodes()
             .iter()

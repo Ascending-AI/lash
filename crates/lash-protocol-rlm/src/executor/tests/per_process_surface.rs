@@ -5,7 +5,7 @@ use lash_core::facade_support::{
     empty_trigger_source_key,
 };
 use lash_core::{
-    ArtifactOwner, CommitBudget, LashSchema, PluginError, PluginOptions, ProcessExecutionEnvSpec,
+    CommitBudget, LashSchema, PluginError, PluginOptions, ProcessExecutionEnvSpec,
     ProcessExecutionEnvStore, ProcessOriginator, QueuedWorkBatchingConfig, SessionPolicy,
     TriggerCommand, TriggerCommandOutcome, TriggerOccurrenceRequest, TriggerOwnerScope,
     TriggerStore, TriggerSubscriptionDraft, TurnBudget,
@@ -150,7 +150,8 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         )
         .expect("module compiles against the session-contributed surface");
     factory
-        .publish_lashlang_module(&ArtifactOwner::host("fig3344-trigger"), &compiled.artifact)
+        .artifact_store()
+        .publish_module_artifact(&host_pin_claim(), &compiled.artifact)
         .await
         .expect("module artifact publishes");
 
@@ -177,7 +178,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
     let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
-        &ArtifactOwner::host("fig3344-trigger-env"),
+        &host_pin_claim(),
         &ProcessExecutionEnvSpec::new(plugin_options(), session_policy()),
     )
     .await
@@ -286,4 +287,13 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         ),
         "a trigger-fired process must run under the session-contributed event type: {terminal:?}"
     );
+}
+
+/// A claim under a fresh host pin: the fixture publishes as a host would,
+/// and never releases it.
+fn host_pin_claim() -> lash_core::ReferrerClaim {
+    lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+        lash_core::HostArtifactPin::mint(),
+    ))
+    .expect("a host pin is an unguarded referrer")
 }

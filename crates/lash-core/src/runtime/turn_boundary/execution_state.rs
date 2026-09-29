@@ -61,8 +61,10 @@ pub(super) async fn frame_switch_execution_state_update(
 
 /// The artifact half of a commit that moves the session from frame `ended`
 /// to the state's current frame (ADR 0113 §3.1), gated on `committing`: the
-/// one execution that can still read what `ended` held. `None` when the
-/// commit opens no frame, or when there was no frame to end.
+/// one execution that can still read what `ended` held. With no `ended`, the
+/// commit ends the last frame the store already holds, which a frame opened
+/// in resident state and committed by this commit leaves behind. `None` when
+/// the commit opens no frame, or when there was no frame to end.
 ///
 /// # Errors
 ///
@@ -73,7 +75,10 @@ pub(in crate::runtime) fn committed_frame_transition(
     carries: Vec<crate::ArtifactName>,
     committing: &crate::ExecutionScope,
 ) -> Result<Option<crate::store::FrameTransition>, StoreError> {
-    let (Some(ended), Some(successor)) = (ended, state.current_frame_node_id.clone()) else {
+    let Some(successor) = state.current_frame_node_id.clone() else {
+        return Ok(None);
+    };
+    let Some(ended) = ended.or_else(|| last_committed_frame(state)) else {
         return Ok(None);
     };
     if ended == successor {
@@ -90,6 +95,27 @@ pub(in crate::runtime) fn committed_frame_transition(
         carries,
         gate,
     }))
+}
+
+/// The newest frame on the current frame's lineage that the store already
+/// holds: the current frame itself unless a frame was opened in resident
+/// state since the last commit.
+fn last_committed_frame(state: &RuntimeSessionState) -> Option<crate::FrameNodeId> {
+    let mut frame = state.current_frame_node_id.clone()?;
+    loop {
+        if state
+            .persisted_node_ids
+            .contains(&crate::NodeId::new(frame.as_str().to_string()))
+        {
+            return Some(frame);
+        }
+        frame = state
+            .agent_frames
+            .iter()
+            .find(|record| record.frame_node_id == frame)?
+            .previous_frame_node_id
+            .clone()?;
+    }
 }
 
 /// Take the turn's one execution-state capture. Called only from the final

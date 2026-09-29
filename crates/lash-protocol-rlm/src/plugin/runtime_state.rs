@@ -1210,4 +1210,56 @@ mod tests {
                 );
             });
     }
+
+    /// A process definition value naming a module built from `source`.
+    fn definition_json(source: &str) -> (String, serde_json::Value) {
+        let module_ref = lashlang::ModuleRef::new(&lashlang::ContentHash::new(source));
+        let identity = lashlang::ProcessDefinitionIdentity::new(
+            module_ref.clone(),
+            lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new("host")),
+            lashlang::ProcessRef::new(lashlang::ContentHash::new("component"), 0),
+            "run",
+        );
+        (module_ref.to_string(), identity.to_process_value())
+    }
+
+    #[test]
+    fn a_frame_switch_carries_exactly_the_modules_its_seed_references() {
+        let (carried, carried_value) = definition_json("carried");
+        let (projected, projected_value) = definition_json("projected");
+        let mut seed = crate::projection::RlmSeed::from_seed_value(&serde_json::json!({
+            "plain": 1,
+            "nested": { "list": [carried_value.clone(), carried_value] },
+        }))
+        .expect("seed value");
+        seed.projected.push(
+            "projected_definition".to_string(),
+            lash_rlm_types::RlmProjectedSeedEntry::Materialized(projected_value),
+        );
+        let mut nodes = crate::projection::rlm_seed_initial_nodes(seed);
+        // A globals patch in the initial nodes is replayed into the new
+        // frame too, so what it names is carried.
+        let (patched, patched_value) = definition_json("patched");
+        nodes.push(lash_core::SessionAppendNode::protocol_event(
+            crate::projection::rlm_protocol_event(RlmProtocolEvent::RlmGlobalsPatch(
+                RlmGlobalsPatchPluginBody {
+                    set_default: serde_json::Map::from_iter([(
+                        "patched".to_string(),
+                        patched_value,
+                    )]),
+                },
+            )),
+        ));
+
+        let mut expected = [carried, projected, patched]
+            .into_iter()
+            .map(|artifact_ref| lash_core::ArtifactName {
+                store: lash_core::ArtifactStoreId::LashlangModule,
+                artifact_ref,
+            })
+            .collect::<Vec<_>>();
+        expected.sort();
+        assert_eq!(frame_switch_carries(&nodes), expected);
+        assert!(frame_switch_carries(&[]).is_empty());
+    }
 }

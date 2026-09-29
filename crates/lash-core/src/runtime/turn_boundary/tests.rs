@@ -1906,3 +1906,68 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
         "turn 2's executed call is in the draft: {ids:?}"
     );
 }
+
+#[test]
+fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_frame() {
+    let clock = crate::SystemClock;
+    let mut state = RuntimeSessionState {
+        session_id: SessionId::from("frame-transition"),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
+    };
+    state.ensure_agent_frame_initialized_with_clock(&clock);
+    let committed = state
+        .current_frame_node_id
+        .clone()
+        .expect("an initialized session has a frame");
+    let committing = crate::ExecutionScope::turn(&state.session_id, "switching-turn");
+
+    // Nothing is committed yet, so an open ends no frame.
+    assert_eq!(
+        committed_frame_transition(&state, None, Vec::new(), &committing).unwrap(),
+        None
+    );
+    state.mark_node_ids_persisted([crate::NodeId::new(committed.as_str().to_string())]);
+    assert_eq!(
+        committed_frame_transition(&state, None, Vec::new(), &committing).unwrap(),
+        None,
+        "a commit that opens no frame ends none"
+    );
+
+    state.set_execution_state_snapshot(Some(b"frame-globals".to_vec().into()));
+    let opened = super::super::open_agent_frame_in_state_with_clock(
+        &mut state,
+        frame_request(frame_key("frame-a"), AgentFrameReason::new("frame-a")),
+        &clock,
+    )
+    .expect("open frame a");
+    assert!(opened.opened);
+    assert_eq!(
+        state.execution_state_snapshot(),
+        None,
+        "a frame open wipes the frame's globals"
+    );
+    // Two opens since the last commit: the commit ends the committed frame.
+    super::super::open_agent_frame_in_state_with_clock(
+        &mut state,
+        frame_request(frame_key("frame-b"), AgentFrameReason::new("frame-b")),
+        &clock,
+    )
+    .expect("open frame b");
+    let successor = state.current_frame_node_id.clone().expect("frame b");
+    let carried = crate::ArtifactName {
+        store: crate::ArtifactStoreId::LashlangModule,
+        artifact_ref: "lashlang:v2:blake3:carried".to_string(),
+    };
+    let transition = committed_frame_transition(&state, None, vec![carried.clone()], &committing)
+        .unwrap()
+        .expect("the commit ends the committed frame");
+    assert_eq!(
+        transition,
+        crate::store::FrameTransition {
+            ended: crate::FrameEnvironmentId::new(state.session_id.clone(), committed),
+            successor: crate::FrameEnvironmentId::new(state.session_id.clone(), successor),
+            carries: vec![carried],
+            gate: committing.journal_identity().unwrap(),
+        }
+    );
+}

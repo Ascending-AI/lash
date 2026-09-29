@@ -616,6 +616,14 @@ impl RlmExecutionState {
             })
     }
 
+    /// The modules the current frame is known to hold.
+    #[cfg(test)]
+    pub(super) fn frame_held_module_refs(&self) -> impl Iterator<Item = &lashlang::ModuleRef> {
+        self.frame_held_modules
+            .iter()
+            .flat_map(|(_, modules)| modules.iter())
+    }
+
     /// Record that `frame` holds an edge of `module_ref`, forgetting what an
     /// earlier frame held.
     pub(super) fn record_frame_hold(
