@@ -1334,7 +1334,7 @@ async fn session_store_factory_open_missing_returns_none(factory: Arc<dyn crate:
         .expect("open missing session");
     assert!(
         opened.is_none(),
-        "open_existing_store must return None for unknown sessions"
+        "lookup_session must answer Absent for unknown sessions"
     );
 }
 
@@ -1591,7 +1591,7 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Depl
     assert_eq!(
         meta.parent_session_id(),
         Some("custom-parent"),
-        "create_store must preserve the original relation"
+        "admit_session must preserve the original relation"
     );
 }
 

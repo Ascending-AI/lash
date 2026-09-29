@@ -1,7 +1,7 @@
 //! Conservation checks for pending and durable runtime usage.
 //!
 //! The durable comparison is intentionally aggregate-by-source/model because
-//! `RuntimeStore::load_session` exposes the merged token ledger, not its row identities.
+//! the paged usage ledger exposes rows by sequence, not by their identities.
 //! Confirmation is a differential mutation oracle: its expected snapshot states which returned
 //! identities may disappear, then checks the production retain.
 

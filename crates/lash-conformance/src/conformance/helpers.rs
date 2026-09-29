@@ -240,8 +240,8 @@ pub(crate) async fn node_readable_through_deleted(
     }
 }
 
-/// One stored node of `session_id`: the one-node page that replaces
-/// `load_node` (ADR 0112 §6). A node the session cannot read is the typed
+/// One stored node of `session_id`: a one-node page anchored at it
+/// (ADR 0112 §6). A node the session cannot read is the typed
 /// [`crate::StoreError::HistoryAnchorUnavailable`], never `Ok(None)`.
 pub(crate) async fn load_one_node(
     store: &dyn RuntimeStore,

@@ -44,7 +44,7 @@ pub async fn session_metadata_round_trips(store: Arc<dyn RuntimeStore>) {
 /// The recorded lineage of a session is a durable fact (FIG-1559), so the
 /// metadata writer may not quietly replace it.
 ///
-/// `admit_and_bind_session` already refuses a rebind that declares a different
+/// `admit_session` already refuses a rebind that declares a different
 /// lineage. `save_session_meta` replaces the same relation columns, and its one
 /// production caller round-trips the metadata it loaded, so a write that
 /// carries a different parent, a fork source, or a bare root over a recorded
@@ -59,7 +59,7 @@ pub async fn session_metadata_round_trips(store: Arc<dyn RuntimeStore>) {
 )]
 pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimeStore>) {
     // The fixture admitted this session as a root; claiming a parent for it is
-    // the conflict `admit_and_bind_session` already refuses on a rebind.
+    // the conflict `admit_session` already refuses on a rebind.
     let recorded = SessionMeta {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),

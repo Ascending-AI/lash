@@ -75,7 +75,7 @@ pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
     let process_id = register_process(registry.as_ref()).await;
     let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
     let process_session_id = crate::process_runtime_session_ids(&process_id)[0].clone();
-    let store = create_store(&factory, &process_session_id, &policy).await;
+    let store = admit_root_session(&factory, &process_session_id, &policy).await;
     let mut state = crate::RuntimeSessionState {
         session_id: process_session_id.clone(),
         ..crate::RuntimeSessionState::new(policy)
@@ -174,7 +174,8 @@ pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
     let process_id = register_process(registry.as_ref()).await;
     let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
 
-    let owner_store = create_store(&factory, &SessionId::from(OWNER_SESSION_ID), &policy).await;
+    let owner_store =
+        admit_root_session(&factory, &SessionId::from(OWNER_SESSION_ID), &policy).await;
     let owner_leaf = commit_root_node(
         owner_store.as_ref(),
         &SessionId::from(OWNER_SESSION_ID),
@@ -233,7 +234,7 @@ pub async fn process_prune_records_deletions_for_later_reclaim(
     let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
 
     let process_session_id = crate::process_runtime_session_ids(&process_id)[0].clone();
-    let process_store = create_store(&factory, &process_session_id, &policy).await;
+    let process_store = admit_root_session(&factory, &process_session_id, &policy).await;
     let process_leaf = commit_root_node(process_store.as_ref(), &process_session_id, &policy).await;
 
     fork_and_advance(
@@ -273,7 +274,7 @@ pub async fn process_prune_records_deletions_for_later_reclaim(
     );
 }
 
-async fn create_store(
+async fn admit_root_session(
     factory: &Arc<dyn crate::DeploymentStore>,
     session_id: &SessionId,
     policy: &crate::SessionPolicy,
