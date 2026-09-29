@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 49,
-  "cargo_target_count": 189,
+  "cargo_target_count": 191,
   "feature_lane_units": [
     {
       "features": [],
@@ -19183,7 +19183,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 250,
+  "generated_label_count": 252,
   "packages": [
     {
       "declared_features": [
@@ -21633,6 +21633,18 @@
           "cargo": "monty_comparison",
           "kind": "example",
           "label": "//crates/lash-typescript:monty_comparison__example",
+          "tags": []
+        },
+        {
+          "cargo": "tsvm_allocations",
+          "kind": "example",
+          "label": "//crates/lash-typescript:tsvm_allocations__example",
+          "tags": []
+        },
+        {
+          "cargo": "tsvm_costs",
+          "kind": "example",
+          "label": "//crates/lash-typescript:tsvm_costs__example",
           "tags": []
         },
         {

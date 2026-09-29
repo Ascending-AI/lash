@@ -89,6 +89,56 @@ lash_rust_binary(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "tsvm_allocations__example",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "tsvm_allocations",
+    crate_root = "examples/tsvm_allocations.rs",
+    declared_features = [
+        "testing",
+    ],
+    data_exclude = [
+        "tests/test262/test/**/*.js",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-typescript", "tsvm_allocations"),
+    extra_compile_data = [],
+    include_dev_deps = True,
+    library = ":lash-typescript",
+    library_crate_name = "lash_typescript",
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_binary(
+    name = "tsvm_costs__example",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "tsvm_costs",
+    crate_root = "examples/tsvm_costs.rs",
+    declared_features = [
+        "testing",
+    ],
+    data_exclude = [
+        "tests/test262/test/**/*.js",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-typescript", "tsvm_costs"),
+    extra_compile_data = [],
+    include_dev_deps = True,
+    library = ":lash-typescript",
+    library_crate_name = "lash_typescript",
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 lash_rust_integration_test(
     name = "integration__test",
     crate_features = [

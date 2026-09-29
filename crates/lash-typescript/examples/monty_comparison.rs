@@ -33,7 +33,7 @@ const AGENT_BLOCKS: [&str; 10] = [
 ];
 
 #[derive(Default)]
-struct Host(Mutex<Option<String>>);
+pub(crate) struct Host(Mutex<Option<String>>);
 
 impl ExecutionHost for Host {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
@@ -50,7 +50,7 @@ impl ExecutionHost for Host {
     }
 }
 
-fn compile_cell(source: &str, state: &State) -> lashlang::CompiledProgram {
+pub(crate) fn compile_cell(source: &str, state: &State) -> lashlang::CompiledProgram {
     let globals: BTreeSet<String> = state.binding_names().map(str::to_owned).collect();
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("parse `{source}`: {error}"));
@@ -61,18 +61,18 @@ fn compile_cell(source: &str, state: &State) -> lashlang::CompiledProgram {
         .unwrap_or_else(|error| panic!("compile `{source}`: {error}"))
 }
 
-fn run_cell(source: &str, state: &mut State, host: &Host) -> ExecutionOutcome {
+pub(crate) fn run_cell(source: &str, state: &mut State, host: &Host) -> ExecutionOutcome {
     let compiled = compile_cell(source, state);
     futures::executor::block_on(lashlang::execute(&compiled, state, host))
         .unwrap_or_else(|error| panic!("execute `{source}`: {error}"))
 }
 
-fn simple_session(host: &Host) {
+pub(crate) fn simple_session(host: &Host) {
     let outcome = run_cell(SIMPLE, &mut State::new(), host);
     assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(2.0)));
 }
 
-fn agent_session(host: &Host) {
+pub(crate) fn agent_session(host: &Host) {
     *host.0.lock().expect("print lock") = None;
     let mut state = State::new();
     for source in AGENT_BLOCKS {
