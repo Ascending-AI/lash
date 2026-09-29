@@ -2,11 +2,12 @@ use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use lash_core_execution::{
-    ArtifactReferrer, ArtifactStoreError, ReferrerClaim, ResolvedArtifactCleanup,
+    ArtifactReferrer, ArtifactStoreError, ReferrerClaim, ResolvedArtifactCleanup, StoreError,
 };
 use lash_store_sql::Dialect;
 use lash_store_sql::artifact::referrer_edges::ReferrerEdgeStatements;
 use lash_store_sql::artifact::referrer_fences::ReferrerFenceStatements;
+use sqlx::postgres::PgRow;
 use sqlx::{Postgres, Row, Transaction};
 
 use crate::*;
@@ -110,6 +111,18 @@ async fn is_fenced_tx(
         .fetch_one(&mut **tx)
         .await
         .map_err(backend)
+}
+
+fn decode_edge_referrer(row: &PgRow) -> Result<ArtifactReferrer, ArtifactStoreError> {
+    let kind: String = row.try_get(2).map_err(backend)?;
+    let id: String = row.try_get(3).map_err(backend)?;
+    ArtifactReferrer::decode(&kind, &id).map_err(|error| {
+        StoreError::StoredDataCorrupt {
+            record_kind: "artifact_referrer_edge",
+            message: error.to_string(),
+        }
+        .into()
+    })
 }
 
 impl PostgresLashlangArtifactStore {
@@ -219,7 +232,10 @@ impl PostgresLashlangArtifactStore {
         .map_err(backend)?;
         let source_refs: BTreeSet<String> = edges
             .iter()
-            .map(|row| row.try_get::<String, _>(1).map_err(backend))
+            .map(|row| {
+                decode_edge_referrer(row)?;
+                row.try_get::<String, _>(1).map_err(backend)
+            })
             .collect::<Result<_, _>>()?;
         let all_refs: BTreeSet<String> = source_refs
             .iter()
