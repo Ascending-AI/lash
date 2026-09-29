@@ -67,6 +67,12 @@ impl Services {
     /// A leg that moves the fleet epoch owns its database, because `F` is
     /// one row per database.
     pub fn fresh_postgres_database(&self, name: &str) -> Result<String> {
+        block_on(self.create_postgres_database(name))
+    }
+
+    /// [`fresh_postgres_database`](Self::fresh_postgres_database) from
+    /// async code.
+    pub async fn create_postgres_database(&self, name: &str) -> Result<String> {
         let database = name.replace('-', "_");
         ensure!(
             database
@@ -74,26 +80,41 @@ impl Services {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
             "`{name}` is not a plain database name"
         );
-        let url = self.postgres_url.clone();
         let create = format!("CREATE DATABASE {database}");
-        block_on(async move {
+        {
             use sqlx::Connection as _;
-            let mut connection = sqlx::PgConnection::connect(&url)
+            let mut connection = sqlx::PgConnection::connect(&self.postgres_url)
                 .await
-                .with_context(|| format!("connect to {url}"))?;
+                .with_context(|| format!("connect to {}", self.postgres_url))?;
             sqlx::query(&create)
                 .execute(&mut connection)
                 .await
                 .with_context(|| create.clone())?;
             connection.close().await.ok();
-            Ok(())
-        })?;
+        }
         let (server, query) = match self.postgres_url.split_once('?') {
             Some((server, query)) => (server, format!("?{query}")),
             None => (self.postgres_url.as_str(), String::new()),
         };
         let base = server.rsplit_once('/').map_or(server, |(base, _)| base);
         Ok(format!("{base}/{database}{query}"))
+    }
+
+    /// These services over a fresh PostgreSQL database of the leg's own, so
+    /// no leg sees another's stamps or rows, whatever order they run in.
+    pub async fn isolated(&self, leg: &str) -> Result<Self> {
+        let database = format!(
+            "phase_a_{leg}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_millis())
+                .unwrap_or_default()
+        );
+        Ok(Self {
+            postgres_url: self.create_postgres_database(&database).await?,
+            ..self.clone()
+        })
     }
 }
 
@@ -131,6 +152,9 @@ pub struct ServeOptions {
     pub bind: Option<String>,
     /// Serve without registering the endpoint.
     pub unregistered: bool,
+    /// Let [`ServingNode::register_now`] register the node later, through
+    /// its own engine.
+    pub register_later: bool,
 }
 
 /// One direct call to a lash handler ([`crate::node::objects`]).
@@ -293,6 +317,12 @@ impl NodeBinary {
         if options.unregistered {
             command.arg("--no-register");
         }
+        let register_trigger = options
+            .register_later
+            .then(|| ready_file.with_extension("register"));
+        if let Some(trigger) = &register_trigger {
+            command.arg("--register-when").arg(trigger);
+        }
         let child = command
             .stdin(Stdio::null())
             .stdout(Stdio::from(log.try_clone()?))
@@ -303,6 +333,7 @@ impl NodeBinary {
             child: Some(child),
             ready: None,
             log_path,
+            register_trigger,
         };
         let ready = node.await_ready(&ready_file)?;
         ensure!(
@@ -586,9 +617,33 @@ pub struct ServingNode {
     child: Option<Child>,
     ready: Option<ServeReady>,
     log_path: PathBuf,
+    register_trigger: Option<PathBuf>,
 }
 
 impl ServingNode {
+    /// Register a node served with [`ServeOptions::register_later`] now,
+    /// through its own engine and the registration guard.
+    pub fn register_now(&self) -> Result<()> {
+        let trigger = self
+            .register_trigger
+            .as_ref()
+            .context("the node was not served to register later")?;
+        let mut done = trigger.clone().into_os_string();
+        done.push(".done");
+        let done = PathBuf::from(done);
+        std::fs::write(trigger, b"").with_context(|| format!("write {}", trigger.display()))?;
+        let outcome: crate::node::RegisterWhenDone =
+            wait_for("the node to register", || match std::fs::read(&done) {
+                Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error).with_context(|| format!("read {}", done.display())),
+            })?;
+        match outcome.error {
+            None => Ok(()),
+            Some(error) => bail!("the node's registration failed: {error}"),
+        }
+    }
+
     /// What the node registered.
     pub fn ready(&self) -> Option<&ServeReady> {
         self.ready.as_ref()

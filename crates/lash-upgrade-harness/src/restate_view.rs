@@ -265,23 +265,4 @@ impl RestateView {
             .map(|row| (row.target_service_key, row.invocation))
             .collect())
     }
-
-    /// Register the endpoint at `uri` as an operator would, through the
-    /// admin API and past lash's own registration guard.
-    pub async fn register_as_operator(&self, uri: &str, force: bool) -> Result<()> {
-        let url = format!("{}/deployments", self.admin_url);
-        let response = self
-            .http
-            .post(&url)
-            .json(&serde_json::json!({ "uri": uri, "force": force }))
-            .send()
-            .await
-            .with_context(|| format!("POST {url}"))?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            bail!("registering {uri} answered {status}: {body}");
-        }
-        Ok(())
-    }
 }

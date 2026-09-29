@@ -196,6 +196,7 @@ fn object_sweep_crash_resume() -> Result<()> {
         &case,
         &ServeOptions {
             unregistered: true,
+            register_later: true,
             ..ServeOptions::default()
         },
     )?;
@@ -261,7 +262,7 @@ fn object_sweep_crash_resume() -> Result<()> {
         &case,
         &ServeOptions {
             bind: Some(bind),
-            unregistered: false,
+            ..ServeOptions::default()
         },
     )?;
     let resumed = next.spawn_sweep(&case)?.finish()?;
@@ -291,7 +292,7 @@ fn object_sweep_crash_resume() -> Result<()> {
 
     // An operator keeps the N deployment: its handlers are refused by
     // `_compat`, typed, and change nothing.
-    block_on(view.register_as_operator(kept_n.uri()?, false))?;
+    kept_n.register_now()?;
     let kept = block_on(view.deployment_at(kept_n.uri()?))?;
     let key = &groups[0];
     let before = block_on(view.object_state(GROUP, key))?;

@@ -113,6 +113,12 @@ pub struct ServeArgs {
     /// that URI, routes invocations to it.
     #[arg(long)]
     pub no_register: bool,
+    /// Register later, through this node's own engine and its registration
+    /// guard, once this file exists; the outcome is written beside it, to
+    /// the same path with `.done` appended. A node that opened the store
+    /// before finalize registers after it, as an operator keeping it would.
+    #[arg(long)]
+    pub register_when: Option<PathBuf>,
     #[command(flatten)]
     pub provider: ProviderArgs,
 }
@@ -459,6 +465,7 @@ fn scripted_reply(text: String) -> lash_core::llm::types::LlmResponse {
 /// A deployment of this build serving on a loopback port.
 pub(crate) struct Serving {
     pub(crate) core: lash::LashCore,
+    pub(crate) engine: Arc<lash::restate::RestateEngine>,
     pub(crate) ready: ServeReady,
     stop: tokio::sync::oneshot::Sender<()>,
     serving: tokio::task::JoinHandle<()>,
@@ -507,6 +514,7 @@ impl Serving {
         };
         Ok(Self {
             core,
+            engine,
             ready,
             stop,
             serving,
@@ -531,9 +539,37 @@ async fn serve(args: ServeArgs) -> Result<()> {
     )
     .await?;
     write_atomically(&args.ready_file, &serde_json::to_vec(&serving.ready)?)?;
+    if let Some(trigger) = args.register_when {
+        let engine = Arc::clone(&serving.engine);
+        let uri = serving.ready.uri.clone();
+        tokio::spawn(async move {
+            while !trigger.exists() {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            let outcome = RegisterWhenDone {
+                error: engine
+                    .register_deployment(&uri)
+                    .await
+                    .err()
+                    .map(|error| error.to_string()),
+            };
+            let mut done = trigger.into_os_string();
+            done.push(".done");
+            if let Ok(bytes) = serde_json::to_vec(&outcome) {
+                let _ = write_atomically(Path::new(&done), &bytes);
+            }
+        });
+    }
     shutdown_signal().await?;
     serving.stop().await;
     Ok(())
+}
+
+/// What a `serve --register-when` node's later registration answered.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegisterWhenDone {
+    /// The registration's error, when it was refused or failed.
+    pub error: Option<String>,
 }
 
 /// SIGTERM or SIGINT, whichever comes first.
