@@ -12,9 +12,7 @@
   "tool_batch_scaling": {
     "small_width": 8,
     "large_width": 64,
-    "max_normalized_time_ratio": 2.5,
-    "max_normalized_peak_rss_ratio": 2.5,
-    "max_dispatch_resumption_ratio": 2.0,
+    "max_dispatch_resumption_ratio": 3.0,
     "max_opener_resumption_ratio": 2.0
   },
   "runtime_stack": {

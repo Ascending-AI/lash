@@ -55,6 +55,7 @@ struct ReadFaultPlan {
     registration_hold: Option<RegistrationHold>,
     registration_pause: Option<NonTerminalPagePause>,
     consumer_release_pause: Option<NonTerminalPagePause>,
+    start_key_read_pause: Option<NonTerminalPagePause>,
 }
 
 /// Where a held registration stops: before it reaches the wrapped registry,
@@ -235,6 +236,15 @@ impl ProcessRegistryFaults {
         pause
     }
 
+    /// Hold the answer of the next start-key read until the returned handle
+    /// resumes it: the read reaches the wrapped registry first, so its caller
+    /// acts on what the key held then, however the key changed meanwhile.
+    pub fn pause_next_start_key_read(&self) -> NonTerminalPagePause {
+        let pause = NonTerminalPagePause::new();
+        self.faults.lock_recover().start_key_read_pause = Some(pause.clone());
+        pause
+    }
+
     /// Hold the next consumer-hold release until the returned handle resumes
     /// it: the instant a parked call has consumed its child's terminal and
     /// not yet released the child's row for pruning (ADR 0116 §3.6).
@@ -324,7 +334,12 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
         &self,
         start_key: &crate::StartKey,
     ) -> Result<Option<crate::ProcessRecord>, crate::PluginError> {
-        self.inner.get_process_by_start_key(start_key).await
+        let read = self.inner.get_process_by_start_key(start_key).await;
+        let pause = self.faults.lock_recover().start_key_read_pause.take();
+        if let Some(pause) = pause {
+            pause.hold().await;
+        }
+        read
     }
 
     async fn get_process(

@@ -3,6 +3,11 @@
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
+use lash_core::runtime::artifact_cleanup::{
+    ArtifactCleanupAuthorities, ArtifactCleanupPorts, ArtifactCleanupRelay, RetainedStart,
+    SubscriptionRevisionStanding,
+};
+
 #[expect(
     clippy::expect_used,
     reason = "conformance law validates each setup and transition"
@@ -265,4 +270,453 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
         Some(bytes_b),
         "B's environment is held by its process record, not stranded"
     );
+}
+
+/// FIG-4130 (the residual of C7), ADR 0113 §3.3: `Start(key)`'s end, applied
+/// by the relay the instant a terminal refusal arms it, keeps a concurrent
+/// start's environment and engine artifacts, held by its `ProcessRecord`.
+///
+/// A reads the key and finds no record. B then stages its environment and
+/// its engine's module under `Start(key)`, registers, and checks for a fence
+/// before there is one, so it leaves its content to `Start(key)`'s cleanup;
+/// the host pin that published the module is released. A ends `Start(key)`
+/// on its stale read, carrying nothing, and the relay applies that end before
+/// A does anything more. B's environment and module must still load, held by
+/// B's `ProcessRecord` alone, and A's environment must be gone.
+///
+/// Red on the parent commit: the relay severed `Start(key)` with no carries
+/// and reclaimed both, and A's re-read found B's row only to meet artifacts
+/// already gone, which it logged.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each setup and transition"
+)]
+pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_start_held(
+    registry: Arc<dyn crate::ProcessRegistry>,
+    ports: crate::ArtifactReferrerPorts,
+) {
+    let key = crate::StartKey::for_host("start-end-applied-before-rescue");
+    let module_ref = "fig-4130-concurrent-start-module";
+    let module_bytes = b"the concurrent start's module".to_vec();
+    let pin = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
+    ports
+        .modules()
+        .publish_module_artifact(
+            &crate::ReferrerClaim::unguarded(pin.clone()).expect("pin claim"),
+            module_ref,
+            &module_bytes,
+        )
+        .await
+        .expect("publish the module under the starter's pin");
+    let engine_start = || {
+        crate::ProcessRegistration::new(
+            crate::ProcessInput::Engine {
+                kind: MODULE_NAMING_ENGINE.to_owned(),
+                payload: serde_json::json!({ "module": module_ref }),
+            },
+            crate::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        )
+        .with_start_key(Some(key.clone()))
+    };
+    let engines = || {
+        crate::ProcessEngineRegistry::new().with_registration(
+            crate::ProcessEngineRegistration::accepting(Arc::new(ModuleNamingEngine)),
+        )
+    };
+
+    // A's starter: a process that has ended, so a start it makes is refused.
+    let ended = registry
+        .register_process(crate::ProcessRegistration::new(
+            crate::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            crate::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
+        .await
+        .expect("register the ended starter");
+    registry
+        .complete_process(
+            &ended.id,
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("end the starter");
+    let ended_scope = crate::ScopeId::process(ended.id.clone());
+
+    // The relay, applying `Start(key)`'s end the instant A arms it.
+    let relay = Arc::new(ArtifactCleanupRelay::new(ArtifactCleanupPorts {
+        ledger: Arc::clone(ports.cleanup()),
+        authorities: Arc::new(KeyRecords(Arc::clone(&registry))),
+        process_env: Arc::clone(ports.env()),
+        modules: Arc::clone(ports.modules()),
+        engines: engines(),
+    }));
+    let relay_on_end = Arc::new(RelayOnEnd {
+        inner: Arc::clone(ports.cleanup()),
+        start: crate::ArtifactReferrer::Start(key.clone()),
+        relay,
+        verdict: std::sync::OnceLock::new(),
+    });
+    let ports_a = crate::ArtifactReferrerPorts::new(
+        Arc::clone(ports.modules()),
+        Arc::clone(ports.env()),
+        Arc::clone(&relay_on_end) as Arc<dyn crate::ArtifactCleanupLedger>,
+        Arc::new(crate::SystemClock),
+    );
+    let (engines_a, engines_b) = (
+        engines().with_artifact_ports(ports_a),
+        engines().with_artifact_ports(ports.clone()),
+    );
+    let env_store = Arc::clone(ports.env());
+    let faults_a = crate::testing::ProcessRegistryFaults::new(Arc::clone(&registry));
+    let journal = |operation: &str| {
+        crate::ExecutionScope::runtime_operation(operation)
+            .journal_identity()
+            .expect("starter journal")
+    };
+    let (starter_a, starter_b) = (journal("refused-start-a"), journal("concurrent-start-b"));
+    let stores_a = crate::ProcessStartStores {
+        registry: &faults_a,
+        env_store: Some(&env_store),
+        engines: Some(&engines_a),
+        engines_required: true,
+        executor: "conformance process start",
+        starter: &starter_a,
+    };
+    let stores_b = crate::ProcessStartStores {
+        registry: registry.as_ref(),
+        env_store: Some(&env_store),
+        engines: Some(&engines_b),
+        engines_required: true,
+        executor: "conformance process start",
+        starter: &starter_b,
+    };
+    let spec = |budget| {
+        crate::ProcessExecutionEnvSpec::new(
+            crate::PluginOptions::default(),
+            crate::SessionPolicy::new(budget),
+        )
+    };
+    let spec_a = spec(crate::TurnBudget::Bounded(
+        std::num::NonZeroUsize::new(5).expect("a nonzero budget"),
+    ));
+    let spec_b = spec(crate::TurnBudget::Bounded(
+        std::num::NonZeroUsize::new(7).expect("a nonzero budget"),
+    ));
+    let (env_a, env_b) = (
+        spec_a.stable_ref().expect("A's environment ref"),
+        spec_b.stable_ref().expect("B's environment ref"),
+    );
+    let bytes_b = spec_b.to_store_bytes().expect("B's environment bytes");
+    assert_ne!(env_a, env_b);
+
+    let a_read_the_key = faults_a.pause_next_start_key_read();
+    let refuse_a = crate::register_process_start(
+        &stores_a,
+        crate::started_until_starter(engine_start(), ended_scope),
+        &[],
+        Some(&spec_a),
+    );
+    let start_b = async {
+        // A has staged, been refused, and read the key: no record yet.
+        a_read_the_key.wait_until_validated().await;
+        let started = crate::register_process_start(&stores_b, engine_start(), &[], Some(&spec_b))
+            .await
+            .expect("B registers under the key");
+        // The starter's own hold on the module ends with its start.
+        ports
+            .modules()
+            .end_module_referrer(&crate::ResolvedArtifactCleanup {
+                referrer: pin.clone(),
+                carries: Vec::new(),
+            })
+            .await
+            .expect("release the starter's pin");
+        a_read_the_key.resume();
+        started
+    };
+    let (refused_a, started_b) = tokio::join!(refuse_a, start_b);
+    let refused_a = refused_a.expect_err("A's starter has ended");
+    assert_eq!(
+        refused_a.code,
+        crate::RuntimeErrorCode::ProcessParentEnded,
+        "A is refused: {refused_a:?}"
+    );
+    assert_eq!(
+        started_b.disposition,
+        crate::ProcessRegistrationDisposition::Created
+    );
+    assert_eq!(started_b.record.env_ref.as_ref(), Some(&env_b));
+    assert_eq!(
+        relay_on_end.verdict.get(),
+        Some(&crate::drive::relay::RelayVerdict::Delivered),
+        "the relay applied A's end of `Start(key)` before A went on"
+    );
+
+    let module_held = || async {
+        ports
+            .modules()
+            .get_module_artifact(module_ref)
+            .await
+            .expect("read B's module")
+    };
+    let env_held = |env_ref| {
+        let env_store = Arc::clone(&env_store);
+        async move {
+            env_store
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read an environment")
+        }
+    };
+    assert_eq!(
+        env_held(env_b.clone()).await,
+        Some(bytes_b),
+        "B's environment survives `Start(key)`'s end"
+    );
+    assert_eq!(
+        module_held().await,
+        Some(module_bytes),
+        "B's engine artifact survives `Start(key)`'s end"
+    );
+    assert_eq!(
+        env_held(env_a).await,
+        None,
+        "A's environment went with `Start(key)`"
+    );
+
+    // B's process record is what holds them: ending it reclaims both.
+    let record_end = crate::ResolvedArtifactCleanup {
+        referrer: crate::ArtifactReferrer::ProcessRecord(started_b.record.id.clone()),
+        carries: Vec::new(),
+    };
+    env_store
+        .end_process_env_referrer(&record_end)
+        .await
+        .expect("end B's record in the environment store");
+    ports
+        .modules()
+        .end_module_referrer(&record_end)
+        .await
+        .expect("end B's record in the module store");
+    assert_eq!(env_held(env_b).await, None);
+    assert_eq!(module_held().await, None);
+}
+
+const MODULE_NAMING_ENGINE: &str = "start-staging-module";
+
+/// An engine whose start payload names one module: an artifact a start
+/// acquires and never publishes, so only its referrers keep it.
+struct ModuleNamingEngine;
+
+#[async_trait::async_trait]
+impl crate::ProcessEngine for ModuleNamingEngine {
+    fn kind(&self) -> &'static str {
+        MODULE_NAMING_ENGINE
+    }
+
+    async fn run(
+        &self,
+        _context: crate::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
+        Ok(
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            ))
+            .into(),
+        )
+    }
+
+    fn start_artifacts(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+        let module = payload
+            .get("module")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| crate::PluginError::Session("the payload names no module".into()))?;
+        Ok(vec![crate::ArtifactName {
+            store: crate::ArtifactStoreId::LashlangModule,
+            artifact_ref: module.to_owned(),
+        }])
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &crate::ReferrerClaim,
+        artifact_ref: &str,
+    ) -> Result<(), crate::PluginError> {
+        Err(crate::PluginError::Session(format!(
+            "the engine stores no artifact `{artifact_ref}`"
+        )))
+    }
+}
+
+/// The one authority `Start(key)`'s end asks: the record its key holds.
+struct KeyRecords(Arc<dyn crate::ProcessRegistry>);
+
+#[async_trait::async_trait]
+impl ArtifactCleanupAuthorities for KeyRecords {
+    async fn journal_replay(
+        &self,
+        journal: &crate::EffectJournalIdentity,
+    ) -> Result<crate::JournalReplay, String> {
+        Err(format!("the law asks no verdict on `{}`", journal.key()))
+    }
+
+    async fn retained_start(&self, key: &crate::StartKey) -> Result<Option<RetainedStart>, String> {
+        Ok(self
+            .0
+            .get_process_by_start_key(key)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(|record| RetainedStart {
+                process_id: record.id,
+                env_ref: record.env_ref,
+                input: record.input,
+            }))
+    }
+
+    async fn subscription_revision(
+        &self,
+        revision: &crate::SubscriptionRevisionId,
+    ) -> Result<SubscriptionRevisionStanding, String> {
+        Err(format!(
+            "the law asks no subscription revision `{revision:?}`"
+        ))
+    }
+
+    async fn definition_revision_current(
+        &self,
+        revision: &crate::DefinitionRevisionId,
+    ) -> Result<bool, String> {
+        Err(format!(
+            "the law asks no definition revision `{revision:?}`"
+        ))
+    }
+}
+
+/// The store set's cleanup ledger, where arming `start`'s `Ended` record has
+/// the relay deliver it at once, before the arming caller goes on.
+struct RelayOnEnd {
+    inner: Arc<dyn crate::ArtifactCleanupLedger>,
+    start: crate::ArtifactReferrer,
+    relay: Arc<ArtifactCleanupRelay>,
+    verdict: std::sync::OnceLock<crate::drive::relay::RelayVerdict>,
+}
+
+#[async_trait::async_trait]
+impl crate::ObligationLedger for RelayOnEnd {
+    fn kind(&self) -> crate::ObligationKind {
+        self.inner.kind()
+    }
+
+    async fn arm(
+        &self,
+        key: &crate::ObligationKey,
+        now_ms: u64,
+    ) -> Result<Option<crate::ObligationId>, crate::StoreError> {
+        self.inner.arm(key, now_ms).await
+    }
+
+    async fn claim_due(
+        &self,
+        now_ms: u64,
+        claim_ttl_ms: u64,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::ClaimedObligation>, crate::StoreError> {
+        self.inner.claim_due(now_ms, claim_ttl_ms, limit).await
+    }
+
+    async fn claim(
+        &self,
+        id: &crate::ObligationId,
+        now_ms: u64,
+        claim_ttl_ms: u64,
+    ) -> Result<Option<crate::ClaimedObligation>, crate::StoreError> {
+        self.inner.claim(id, now_ms, claim_ttl_ms).await
+    }
+
+    async fn settle(
+        &self,
+        id: &crate::ObligationId,
+        token: &crate::ClaimToken,
+        settlement: crate::ObligationSettlement,
+        now_ms: u64,
+    ) -> Result<crate::SettleOutcome, crate::StoreError> {
+        self.inner.settle(id, token, settlement, now_ms).await
+    }
+
+    async fn rearm(
+        &self,
+        id: &crate::ObligationId,
+        now_ms: u64,
+    ) -> Result<bool, crate::StoreError> {
+        self.inner.rearm(id, now_ms).await
+    }
+
+    async fn list_stalled(
+        &self,
+        after: Option<&crate::ObligationId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::StalledObligation>, crate::StoreError> {
+        self.inner.list_stalled(after, limit).await
+    }
+
+    async fn count_stalled(&self) -> Result<u64, crate::StoreError> {
+        self.inner.count_stalled().await
+    }
+
+    async fn standing(
+        &self,
+        id: &crate::ObligationId,
+    ) -> Result<Option<crate::ObligationStanding>, crate::StoreError> {
+        self.inner.standing(id).await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ArtifactCleanupLedger for RelayOnEnd {
+    async fn arm_cleanup(
+        &self,
+        cleanup: &crate::ArtifactCleanup,
+        now_ms: u64,
+    ) -> Result<crate::ObligationId, crate::StoreError> {
+        let id = self.inner.arm_cleanup(cleanup, now_ms).await?;
+        if cleanup.plan.is_ended() && cleanup.referrer == self.start {
+            let verdict =
+                crate::drive::relay::deliver_now(self.relay.as_ref(), &id, &crate::SystemClock)
+                    .await?;
+            let _ = self.verdict.set(verdict);
+        }
+        Ok(id)
+    }
+
+    async fn nudge(
+        &self,
+        referrer: &crate::ArtifactReferrer,
+        now_ms: u64,
+    ) -> Result<bool, crate::StoreError> {
+        self.inner.nudge(referrer, now_ms).await
+    }
+
+    async fn load_cleanup(
+        &self,
+        id: &crate::ObligationId,
+    ) -> Result<Option<crate::ArtifactCleanup>, crate::StoreError> {
+        self.inner.load_cleanup(id).await
+    }
 }

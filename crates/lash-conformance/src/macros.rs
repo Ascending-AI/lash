@@ -1259,6 +1259,7 @@ macro_rules! process_start_staging_tests {
     ($fixture:block) => {
         $crate::process_start_staging_tests!(@catalogue $fixture; [
             (a_refused_start_never_strands_a_concurrent_start_under_its_key, "refused-start-concurrent-stager"),
+            (a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_start_held, "start-end-applied-before-rescue"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

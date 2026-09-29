@@ -20,8 +20,8 @@ use crate::{
     ArtifactStoreError, ArtifactStoreId, DefinitionRevisionId, EffectHost, JournalReplay,
     ModuleArtifactStore, PluginError, ProcessDefinitionRegistry, ProcessEngineRegistry,
     ProcessExecutionEnvRef, ProcessExecutionEnvStore, ProcessId, ProcessInput, ProcessRegistry,
-    ResolvedArtifactCleanup, StartKey, SubscriptionRevisionId, TriggerStore,
-    TriggerSubscriptionFilter, TriggerSubscriptionLifecycle,
+    ReferrerClaim, ResolvedArtifactCleanup, RuntimeErrorCode, StartKey, SubscriptionRevisionId,
+    TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionLifecycle, artifact_referrer_ended,
 };
 
 /// The record a start key registered, as a start's guard carries onto it.
@@ -223,6 +223,10 @@ impl ArtifactCleanupRelay {
         };
         let authorities = &self.ports.authorities;
         match (&cleanup.plan, &cleanup.referrer) {
+            (ArtifactCleanupPlan::Ended { carries }, ArtifactReferrer::Start(key)) => {
+                self.hold_retained_start(key).await?;
+                Ok(Resolution::Carry(carries.clone()))
+            }
             (ArtifactCleanupPlan::Ended { carries }, _) => Ok(Resolution::Carry(carries.clone())),
             (ArtifactCleanupPlan::AwaitJournal, ArtifactReferrer::Execution(journal)) => {
                 Ok(settled_or_not_yet(self.journal_settled(journal).await?))
@@ -278,6 +282,93 @@ impl ArtifactCleanupRelay {
         retained: &RetainedStart,
     ) -> Result<Vec<ArtifactCarry>, DeliveryFailure> {
         let to = ArtifactReferrer::ProcessRecord(retained.process_id.clone());
+        Ok(self
+            .retained_names(retained)?
+            .into_iter()
+            .map(|artifact| ArtifactCarry {
+                artifact,
+                to: to.clone(),
+            })
+            .collect())
+    }
+
+    /// Hold the key's registered record's content under its `ProcessRecord`
+    /// before `Start(key)`'s end severs anything (ADR 0113 §3.3, FIG-4130).
+    ///
+    /// A terminal refusal ends `Start(key)` carrying nothing, because it read
+    /// no record for the key; a concurrent start's row can commit after that
+    /// read and before the end, having checked for a fence before there was
+    /// one, so it relies on `Start(key)`'s cleanup to carry its content. This
+    /// read runs after the fence: a row it misses commits later, and its
+    /// start then meets the fence and holds its own content. So every row
+    /// registered under the key has its content held by its record before
+    /// `Start(key)`'s edges go.
+    ///
+    /// An acquisition, not a carry: a name with no stored bytes was never
+    /// held by `Start(key)` (its start met the fence while staging and holds
+    /// it itself), so it is skipped rather than stalled; a pruned record's own
+    /// cleanup owns what it held.
+    async fn hold_retained_start(&self, key: &StartKey) -> Result<(), DeliveryFailure> {
+        let Some(retained) = self
+            .ports
+            .authorities
+            .retained_start(key)
+            .await
+            .map_err(retryable_text("start-key read"))?
+        else {
+            return Ok(());
+        };
+        let record = ArtifactReferrer::ProcessRecord(retained.process_id.clone());
+        let claim = ReferrerClaim::unguarded(record.clone())
+            .map_err(|error| DeliveryFailure::Undecodable(error.to_string()))?;
+        for name in self.retained_names(&retained)? {
+            let acquired = match &name.store {
+                ArtifactStoreId::ProcessEnv => self
+                    .ports
+                    .process_env
+                    .acquire_process_execution_env(
+                        &claim,
+                        &ProcessExecutionEnvRef::new(name.artifact_ref.clone()),
+                    )
+                    .await
+                    .map_err(PluginError::from),
+                ArtifactStoreId::LashlangModule => self
+                    .ports
+                    .modules
+                    .acquire_module_artifact(&claim, &name.artifact_ref)
+                    .await
+                    .map_err(PluginError::from),
+                ArtifactStoreId::Engine(kind) => {
+                    self.ports
+                        .engines
+                        .require(kind)
+                        .map_err(retryable("engine store"))?
+                        .acquire_engine_artifact(&claim, &name.artifact_ref)
+                        .await
+                }
+            };
+            match acquired {
+                Ok(()) => {}
+                Err(error) if artifact_referrer_ended(&error) == Some(&record) => return Ok(()),
+                Err(PluginError::Runtime(error))
+                    if error.code == RuntimeErrorCode::ArtifactMissing => {}
+                Err(error) => {
+                    return Err(DeliveryFailure::Retryable(format!(
+                        "holding `{}` under `{record}`: {error}",
+                        name.artifact_ref
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Every artifact the retained record names: its environment and its
+    /// engine's start artifacts.
+    fn retained_names(
+        &self,
+        retained: &RetainedStart,
+    ) -> Result<Vec<ArtifactName>, DeliveryFailure> {
         let mut names = Vec::new();
         if let Some(env_ref) = &retained.env_ref {
             names.push(ArtifactName {
@@ -295,13 +386,7 @@ impl ArtifactCleanupRelay {
                 DeliveryFailure::Refused(format!("the retained record's engine artifacts: {error}"))
             })?);
         }
-        Ok(names
-            .into_iter()
-            .map(|artifact| ArtifactCarry {
-                artifact,
-                to: to.clone(),
-            })
-            .collect())
+        Ok(names)
     }
 
     /// Ask every store to apply its share of the resolved cleanup (ADR 0113

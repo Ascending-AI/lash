@@ -1542,8 +1542,8 @@ impl RuntimeEffectController for RestateEffectHostController {
         commit_seq: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
         // The §5 barrier on the engine's own wake, over ingress: the index
-        // names the lower-commit siblings still owed a seat, and the drain
-        // parks on each one's durable drained wake instead of polling.
+        // names the last-committed unseated sibling, whose durable drained
+        // wake covers every lower-commit sibling by transitivity.
         let ingress = &self.await_event_ingress.ingress;
         let (wait_scope, positions) = match ingress
             .call_lash_object::<_, crate::effect_group::EffectGroupDrainBlockersResponse>(

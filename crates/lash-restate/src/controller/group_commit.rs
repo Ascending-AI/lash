@@ -94,11 +94,9 @@ where
     })
 }
 
-/// The §5 barrier on the engine's own wake: the index names the lower-commit
-/// siblings still owed a seat, and the drain parks on each one's durable
-/// drained wake — the same wake the dispatch workflow's settlement parks on —
-/// rather than polling the index. The set was fixed when this child's commit
-/// position was allocated, so waiting out each member once lifts the barrier.
+/// The §5 barrier on the engine's own wake: the index names the last-committed
+/// unseated sibling. Its drained wake covers every lower sibling by
+/// transitivity, so one wait lifts the barrier without polling the index.
 pub(super) async fn await_group_child_drain_admission<'ctx, C>(
     context: &C,
     namespace: &crate::RestateNamespace,

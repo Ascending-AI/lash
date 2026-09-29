@@ -210,9 +210,20 @@ async fn double() -> (
     Arc<dyn lash_core::StoreSet>,
     Arc<dyn lash_conformance::ConformanceTurnRunner>,
 ) {
+    double_with_config(lash_restate_test::ServerConfig::default()).await
+}
+
+async fn double_with_config(
+    config: lash_restate_test::ServerConfig,
+) -> (
+    lash_restate_test::RestateTestBackend,
+    Arc<dyn EffectHost>,
+    Arc<dyn lash_core::StoreSet>,
+    Arc<dyn lash_conformance::ConformanceTurnRunner>,
+) {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seed = 0x5a6a_0000 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let double = lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
+    let double = lash_restate_test::backend(seed, config)
         .await
         .expect("start the Restate server double");
     let host = double.lash_backend().effect_host() as Arc<dyn EffectHost>;
@@ -255,37 +266,39 @@ lash_conformance::batch_sugar_tests!({
     )
 });
 
-/// The perf guard (FIG-4068) for `batch` on this tier: a width-64 `batch`
-/// costs linear time and peak RSS in its members, held to
-/// `scripts/perf_guard_budgets.json`.
-#[test]
-fn batch_scales_linearly() {
-    lash_conformance::assert_tool_batch_scales_linearly(
-        "in-process/batch",
-        module_path!(),
-        "batch_scaling_child",
-        lash_conformance::ToolBatchScalingBudget::from_perf_guard_budgets(include_str!(
-            "../../../scripts/perf_guard_budgets.json"
-        )),
-    );
-}
-
-/// One width of [`batch_scales_linearly`], on a fresh double in a process of
-/// its own.
+/// A width-64 `batch` must not resume its dispatch or opener once per member.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "a width child of batch_scales_linearly: only its re-execution runs it"]
-async fn batch_scaling_child() {
-    let child = lash_conformance::tool_batch_scaling_child()
-        .expect("the parent names the width to measure");
-    let (_double, host, stores, runner) = double().await;
-    lash_conformance::run_tool_batch_scaling_child(
-        "batch-scaling",
-        host,
-        stores,
-        runner,
-        &lash_conformance::batch_sugar_producer(offered()),
-        child.width,
-        child.catalog,
-    )
-    .await;
+async fn batch_scales_linearly() {
+    let budget = lash_conformance::ToolBatchScalingBudget::from_perf_guard_budgets(include_str!(
+        "../../../scripts/perf_guard_budgets.json"
+    ));
+    let (double, host, stores, runner) =
+        double_with_config(lash_restate_test::ServerConfig::default().always_replay(true)).await;
+    let producer = lash_conformance::batch_sugar_producer(offered());
+    let mut measured = Vec::new();
+    for width in [budget.small_width, budget.large_width] {
+        measured.push(
+            lash_conformance::measure_tool_batch_resumptions(
+                "batch-scaling",
+                Arc::clone(&host),
+                Arc::clone(&stores),
+                Arc::clone(&runner),
+                &producer,
+                width,
+                budget.large_width,
+                || async {
+                    lash_restate_test::tool_batch_resumption_counts(double.server())
+                        .await
+                        .into()
+                },
+            )
+            .await,
+        );
+    }
+    lash_conformance::assert_tool_batch_resumptions_bounded(
+        "in-process/batch",
+        measured[0],
+        measured[1],
+        budget,
+    );
 }

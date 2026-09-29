@@ -51,3 +51,42 @@ pub use server::{
     RemoveDeploymentError, RestateTestServer, ResumeDeployment, ResumeRefusal, RetryPolicy,
     ServedHook, ServerConfig, StartError, Stats, TimeMode, TimerView,
 };
+
+/// Completed group-dispatch and opener suspensions on a server double.
+/// Waits for dispatches because they can outlive the opener turn.
+pub async fn tool_batch_resumption_counts(server: &RestateTestServer) -> (u64, u64) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        let invocations = server.invocations();
+        let dispatches = invocations
+            .iter()
+            .filter(|invocation| {
+                invocation.target.contains("EffectGroupDispatch")
+                    && invocation.target.ends_with("/run")
+            })
+            .collect::<Vec<_>>();
+        if dispatches
+            .iter()
+            .all(|invocation| invocation.status == "completed")
+        {
+            let dispatch = dispatches
+                .iter()
+                .map(|invocation| u64::from(invocation.suspensions))
+                .sum();
+            let opener = invocations
+                .iter()
+                .filter(|invocation| {
+                    invocation.target.contains("ConformanceTurnProbe/")
+                        || invocation.target.contains("LashTestHandlerHost/")
+                })
+                .map(|invocation| u64::from(invocation.suspensions))
+                .sum();
+            return (dispatch, opener);
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "a group dispatch did not finish before counting resumptions"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
