@@ -46,6 +46,10 @@ lash_rust_unit_test(
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
+    extra_data = [
+        "@workbench_node_linux_x64//:bin/node",
+    ],
+    test_env = {"LASH_AGENT_SERVICE_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/agent-service",

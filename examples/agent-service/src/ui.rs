@@ -183,15 +183,33 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     let chats = [];
     let activeChat = null;
     let settings = { default_model:'anthropic/claude-sonnet-4.6', default_model_variant:'high', model_variants:['low','medium','high'] };
-    let streaming = null;
-    let replayCursor = null;
-    let reasoning = null;
-    let pendingCodeBlock = null;
-    let pendingTools = [];
-    let busy = false;
+    let viewGeneration = 0;
+    let messageReadGeneration = 0;
+    let branchReadGeneration = 0;
+    let activeRun = null;
     let branchPoints = [];
     const boards = new Map();
 
+    function currentView() {
+      return { chatId:activeChat, generation:viewGeneration };
+    }
+    function isCurrentView(owner) {
+      return owner.chatId === activeChat && owner.generation === viewGeneration;
+    }
+    function isBusy() {
+      return activeRun !== null;
+    }
+    async function selectChat(chatId) {
+      activeChat = chatId;
+      const view = { chatId, generation:++viewGeneration };
+      messagesEl.innerHTML = '';
+      branchPoints = [];
+      renderChats();
+      renderBoard();
+      renderBranchPoints();
+      await Promise.all([loadMessages(chatId, view), loadBranchPoints(chatId, view)]);
+      return view;
+    }
     function emptyBoard() {
       return { cells:Array(9).fill(null), turn:'X' };
     }
@@ -237,18 +255,18 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
         cell.className = `cell ${mark ? mark.toLowerCase() : ''}${winCells.has(index) ? ' win' : ''}`;
         cell.textContent = mark || '';
         cell.ariaLabel = `cell ${index}`;
-        cell.disabled = busy || Boolean(mark) || board.turn !== 'X' || done;
+        cell.disabled = isBusy() || Boolean(mark) || board.turn !== 'X' || done;
         cell.onclick = () => playHuman(index);
         boardEl.appendChild(cell);
       });
       gameStatusBlockEl.classList.toggle('done', done);
       gameStatusEl.textContent = boardStatus(board);
-      resetBoardBtn.disabled = busy || !activeChat;
-      pinBranchBtn.disabled = busy || !activeChat;
-      forkBranchBtn.disabled = busy || !activeChat || !branchPoints.length;
+      resetBoardBtn.disabled = isBusy() || !activeChat;
+      pinBranchBtn.disabled = isBusy() || !activeChat;
+      forkBranchBtn.disabled = isBusy() || !activeChat || !branchPoints.length;
       gameHintEl.textContent = done
         ? `${terminalHint(board)} Reset the board to start another round.`
-        : busy
+        : isBusy()
           ? 'Agent is thinking and may call board tools.'
         : board.turn === 'X'
           ? 'Your turn: click any empty square.'
@@ -278,7 +296,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       setModelControls(null);
     }
     async function saveActiveModel() {
-      if (!activeChat || busy) return;
+      if (!activeChat || isBusy()) return;
       const selection = selectedModel();
       const chat = await (await api(`/api/chats/${activeChat}/model`, {
         method:'POST',
@@ -288,18 +306,18 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       if (index >= 0) chats[index] = chat;
       renderChats();
     }
-    function setBoard(board) {
-      if (!activeChat || !board || !Array.isArray(board.cells)) return;
+    function setBoard(owner, board) {
+      if (!owner.chatId || !board || !Array.isArray(board.cells)) return;
       const cells = board.cells.slice(0, 9).map(cell => cell === 'X' || cell === 'O' ? cell : null);
       const terminal = Boolean(winner(cells)) || cells.every(Boolean);
-      boards.set(activeChat, {
+      boards.set(owner.chatId, {
         cells,
         turn: terminal ? 'X' : board.turn === 'O' ? 'O' : 'X'
       });
-      renderBoard();
+      if (isCurrentView(owner)) renderBoard();
     }
     async function resetBoard() {
-      if (busy) return;
+      if (isBusy()) return;
       if (!activeChat) await newChat();
       if (!activeChat) return;
       boards.set(activeChat, emptyBoard());
@@ -314,10 +332,10 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       renderBoard();
       sendText(`I played X in the ${cellName(index)}.`);
     }
-    function applyToolBoard(event) {
+    function applyToolBoard(event, owner) {
       const raw = toolResult(event);
       const board = raw?.board?.cells ? raw.board : raw;
-      if (board?.cells) setBoard(board);
+      if (board?.cells) setBoard(owner, board);
     }
     function terminalToolSummary(board) {
       if (!board?.cells) return null;
@@ -377,13 +395,13 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       if (!res.ok) throw new Error((await res.json()).error || res.statusText);
       return res;
     }
-    async function loadChats() {
+    async function loadChats(view = currentView()) {
       chats = await (await api('/api/chats')).json();
-      if (!activeChat && chats[0]) activeChat = chats[0].id;
       renderChats();
-      if (activeChat) {
-        await loadMessages(activeChat);
-        await loadBranchPoints(activeChat);
+      if (!activeChat && chats[0]) {
+        await selectChat(chats[0].id);
+      } else if (activeChat && isCurrentView(view) && !isBusy()) {
+        await Promise.all([loadMessages(view.chatId, view), loadBranchPoints(view.chatId, view)]);
       }
     }
     function renderChats() {
@@ -394,12 +412,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
         b.innerHTML = `<span class="chat-title"></span><span class="chat-model"></span>`;
         b.querySelector('.chat-title').textContent = chat.title;
         b.querySelector('.chat-model').textContent = chat.model_label;
-        b.onclick = async () => {
-          activeChat = chat.id;
-          renderChats();
-          await loadMessages(chat.id);
-          await loadBranchPoints(chat.id);
-        };
+        b.onclick = () => selectChat(chat.id);
         chatsEl.appendChild(b);
       }
       const current = chats.find(c => c.id === activeChat);
@@ -407,15 +420,12 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       if (current) setModelControls(current);
     }
     async function newChat() {
+      const view = currentView();
       const chat = await (await api('/api/chats', { method:'POST', body: JSON.stringify(selectedModel()) })).json();
       chats.unshift(chat);
-      activeChat = chat.id;
-      branchPoints = [];
       boards.set(chat.id, emptyBoard());
-      renderChats();
-      renderBoard();
-      renderBranchPoints();
-      messagesEl.innerHTML = '';
+      if (isCurrentView(view)) await selectChat(chat.id);
+      else renderChats();
     }
     function renderBranchPoints() {
       branchPointEl.innerHTML = '';
@@ -432,38 +442,47 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
         option.textContent = 'No pinned turns';
         branchPointEl.appendChild(option);
       }
-      pinBranchBtn.disabled = busy || !activeChat;
-      forkBranchBtn.disabled = busy || !activeChat || !branchPoints.length;
-      branchPointEl.disabled = busy || !branchPoints.length;
+      pinBranchBtn.disabled = isBusy() || !activeChat;
+      forkBranchBtn.disabled = isBusy() || !activeChat || !branchPoints.length;
+      branchPointEl.disabled = isBusy() || !branchPoints.length;
       branchStatusEl.textContent = branchPoints.length
         ? `${branchPoints.length} retained turn${branchPoints.length === 1 ? '' : 's'} available`
         : 'Pin a completed turn to preserve a branch point.';
     }
-    async function loadBranchPoints(chatId) {
-      branchPoints = await (await api(`/api/chats/${chatId}/branch-points`)).json();
+    async function loadBranchPoints(chatId, view) {
+      if (!isCurrentView(view)) return;
+      const requestGeneration = ++branchReadGeneration;
+      const points = await (await api(`/api/chats/${chatId}/branch-points`)).json();
+      if (!isCurrentView(view) || requestGeneration !== branchReadGeneration) return;
+      branchPoints = points;
       renderBranchPoints();
     }
     async function pinCurrentTurn() {
-      if (!activeChat || busy) return;
+      if (!activeChat || isBusy()) return;
+      const view = currentView();
       pinBranchBtn.disabled = true;
       branchStatusEl.textContent = 'Pinning current turn…';
       try {
-        const point = await (await api(`/api/chats/${activeChat}/branch-points`, {
+        const point = await (await api(`/api/chats/${view.chatId}/branch-points`, {
           method:'POST',
           body:'{}'
         })).json();
-        await loadBranchPoints(activeChat);
+        await loadBranchPoints(view.chatId, view);
+        if (!isCurrentView(view)) return;
         branchPointEl.value = point.node_id;
         branchStatusEl.textContent = `Pinned ${point.message_count} messages as a retained turn.`;
       } catch (error) {
+        if (!isCurrentView(view)) return;
         branchStatusEl.textContent = error.message;
         pinBranchBtn.disabled = false;
       }
     }
     async function forkPinnedTurn() {
-      const sourceChat = activeChat;
+      const view = currentView();
+      let publicationView = view;
+      const sourceChat = view.chatId;
       const nodeId = branchPointEl.value;
-      if (!sourceChat || !nodeId || busy) return;
+      if (!sourceChat || !nodeId || isBusy()) return;
       forkBranchBtn.disabled = true;
       branchStatusEl.textContent = 'Creating branch…';
       try {
@@ -472,20 +491,29 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
           body:JSON.stringify({ node_id:nodeId })
         })).json();
         chats.unshift(chat);
-        activeChat = chat.id;
         boards.set(chat.id, emptyBoard());
-        renderChats();
-        await loadMessages(chat.id);
-        await loadBranchPoints(chat.id);
+        if (!isCurrentView(view)) {
+          renderChats();
+          return;
+        }
+        const selection = selectChat(chat.id);
+        publicationView = currentView();
+        await selection;
+        if (!isCurrentView(publicationView)) return;
         branchStatusEl.textContent = `Branched from ${sourceChat.slice(0, 8)} at a pinned turn.`;
       } catch (error) {
+        if (!isCurrentView(publicationView)) return;
         branchStatusEl.textContent = error.message;
         forkBranchBtn.disabled = false;
       }
     }
-    async function loadMessages(id) {
-      boards.set(id, emptyBoard());
+    async function loadMessages(id, view) {
+      if (!isCurrentView(view)) return;
+      const requestGeneration = ++messageReadGeneration;
       const messages = await (await api(`/api/chats/${id}/messages`)).json();
+      if (!isCurrentView(view) || requestGeneration !== messageReadGeneration
+          || (activeRun && isCurrentView(activeRun))) return;
+      boards.set(id, emptyBoard());
       messagesEl.innerHTML = '';
       // Replay persisted board snapshots in message order. User messages carry
       // the human move; tool rows carry accepted agent moves.
@@ -499,19 +527,19 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
           for (const callId of message.payload.tool_call_ids || []) codeLinkedToolIds.add(callId);
         }
       }
-      for (const message of messages) appendMessage(message, { toolsByCallId, codeLinkedToolIds });
+      for (const message of messages) appendMessage(message, view, { toolsByCallId, codeLinkedToolIds });
       renderBoard();
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
-    function appendMessage(message, replay = {}) {
+    function appendMessage(message, owner, replay = {}) {
       if (message.kind === 'reasoning') {
-        appendReasoningMessage(message.text);
+        appendReasoningMessage(message.text, owner);
         return;
       }
       if (message.kind === 'tool_call' && message.payload) {
         if (message.payload.phase !== 'completed') return;
         if (message.payload.call_id && replay.codeLinkedToolIds?.has(message.payload.call_id)) return;
-        appendTool(message.payload);
+        appendTool(message.payload, owner);
         return;
       }
       if (message.kind === 'code_block' && message.payload) {
@@ -519,10 +547,11 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
         const linkedTools = (message.payload.tool_call_ids || [])
           .map((callId) => replay.toolsByCallId?.get(callId))
           .filter(Boolean);
-        appendCodeBlock(message.payload, linkedTools);
+        appendCodeBlock(message.payload, owner, linkedTools);
         return;
       }
-      if (message.payload?.board?.cells) setBoard(message.payload.board);
+      if (message.payload?.board?.cells) setBoard(owner, message.payload.board);
+      if (!isCurrentView(owner)) return;
       const el = document.createElement('div');
       el.className = `msg ${message.role}`;
       el.innerHTML = `<div class="meta"></div><div></div>`;
@@ -530,9 +559,10 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       el.lastElementChild.textContent = message.text;
       messagesEl.appendChild(el);
     }
-    function appendTool(event, parent = messagesEl) {
+    function appendTool(event, owner, parent = messagesEl) {
       if (event.phase !== 'completed') return;
-      applyToolBoard(event);
+      applyToolBoard(event, owner);
+      if (!isCurrentView(owner)) return;
       const ok = toolSucceeded(event);
       const el = document.createElement('div');
       el.className = 'tool' + (ok ? '' : ' fail');
@@ -559,8 +589,10 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       );
       parent.appendChild(el);
     }
-    function appendCodeBlock(event, linkedTools = []) {
+    function appendCodeBlock(event, owner, linkedTools = []) {
       if (event.phase !== 'completed') return;
+      for (const tool of linkedTools) applyToolBoard(tool, owner);
+      if (!isCurrentView(owner)) return;
       const el = document.createElement('details');
       el.className = 'code-block' + (event.success === false ? ' fail' : '');
       el.open = false;
@@ -571,28 +603,30 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       el.querySelector('summary').textContent = label;
       const code = event.code || el.querySelector('pre').textContent || '';
       el.querySelector('pre').textContent = code;
-      for (const tool of linkedTools) appendTool(tool, el);
+      for (const tool of linkedTools) appendTool(tool, owner, el);
       messagesEl.appendChild(el);
       return el;
     }
-    function appendCompletedTool(event) {
-      if (pendingCodeBlock) {
-        pendingTools.push(event);
+    function appendCompletedTool(event, run) {
+      applyToolBoard(event, run);
+      if (run.pendingCodeBlock) {
+        run.pendingTools.push(event);
       } else {
-        appendTool(event);
+        appendTool(event, run);
       }
     }
-    function completeCodeBlock(event) {
+    function completeCodeBlock(event, run) {
       const linkedIds = new Set(event.tool_call_ids || []);
-      const linkedTools = pendingTools.filter((tool) => tool.call_id && linkedIds.has(tool.call_id));
-      const unlinkedTools = pendingTools.filter((tool) => !tool.call_id || !linkedIds.has(tool.call_id));
+      const linkedTools = run.pendingTools.filter((tool) => tool.call_id && linkedIds.has(tool.call_id));
+      const unlinkedTools = run.pendingTools.filter((tool) => !tool.call_id || !linkedIds.has(tool.call_id));
       appendCodeBlock(
-        { ...event, phase:'completed', code: event.code || pendingCodeBlock?.code || '' },
+        { ...event, phase:'completed', code: event.code || run.pendingCodeBlock?.code || '' },
+        run,
         linkedTools,
       );
-      pendingCodeBlock = null;
-      for (const tool of unlinkedTools) appendTool(tool);
-      pendingTools = [];
+      run.pendingCodeBlock = null;
+      for (const tool of unlinkedTools) appendTool(tool, run);
+      run.pendingTools = [];
     }
     function thinkingPanel(label) {
       const el = document.createElement('details');
@@ -602,113 +636,125 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       el.querySelector('summary').textContent = label;
       return el;
     }
-    function appendReasoning(delta) {
-      if (!reasoning) {
-        reasoning = thinkingPanel('thinking');
-        messagesEl.appendChild(reasoning);
+    function appendReasoning(delta, run) {
+      if (!isCurrentView(run)) return;
+      if (!run.reasoning) {
+        run.reasoning = thinkingPanel('thinking');
+        messagesEl.appendChild(run.reasoning);
       }
-      reasoning.querySelector('pre').textContent += delta;
+      run.reasoning.querySelector('pre').textContent += delta;
     }
-    function appendReasoningMessage(text) {
-      if (!text) return;
-      if (reasoning) {
-        reasoning.open = true;
-        reasoning.querySelector('summary').textContent = 'thinking';
-        reasoning.querySelector('pre').textContent = text;
-        reasoning.dataset.persisted = 'true';
-        reasoning = null;
+    function appendReasoningMessage(text, owner) {
+      if (!text || !isCurrentView(owner)) return;
+      if (owner.reasoning) {
+        owner.reasoning.open = true;
+        owner.reasoning.querySelector('summary').textContent = 'thinking';
+        owner.reasoning.querySelector('pre').textContent = text;
+        owner.reasoning.dataset.persisted = 'true';
+        owner.reasoning = null;
         return;
       }
       const el = thinkingPanel('thinking');
       el.querySelector('pre').textContent = text;
       messagesEl.appendChild(el);
     }
-    function finishReasoning() {
-      reasoning = null;
-    }
-    function appendStreamText(delta) {
-      if (!streaming) {
-        streaming = document.createElement('div');
-        streaming.className = 'msg assistant';
-        streaming.innerHTML = '<div class="meta">assistant</div><div></div>';
-        messagesEl.appendChild(streaming);
+    function appendStreamText(delta, run) {
+      if (!isCurrentView(run)) return;
+      if (!run.streaming) {
+        run.streaming = document.createElement('div');
+        run.streaming.className = 'msg assistant';
+        run.streaming.innerHTML = '<div class="meta">assistant</div><div></div>';
+        messagesEl.appendChild(run.streaming);
       }
-      streaming.lastElementChild.textContent += delta;
+      run.streaming.lastElementChild.textContent += delta;
     }
-    function handleTurnEvent(event) {
-      if (event.type === 'assistant_prose_delta') appendStreamText(event.text);
-      if (event.type === 'reasoning_delta') appendReasoning(event.text);
-      if (event.type === 'code_block_started') pendingCodeBlock = event;
-      if (event.type === 'code_block_completed') completeCodeBlock(event);
-      if (event.type === 'tool_call_completed') appendCompletedTool({ ...event, phase:'completed' });
-      if (event.type === 'final_value') appendStreamText(renderTerminalValue(event.value));
-      if (event.type === 'tool_value') appendStreamText(renderTerminalValue(event.value));
+    function handleTurnEvent(event, run) {
+      if (event.type === 'assistant_prose_delta') appendStreamText(event.text, run);
+      if (event.type === 'reasoning_delta') appendReasoning(event.text, run);
+      if (event.type === 'code_block_started') run.pendingCodeBlock = event;
+      if (event.type === 'code_block_completed') completeCodeBlock(event, run);
+      if (event.type === 'tool_call_completed') appendCompletedTool({ ...event, phase:'completed' }, run);
+      if (event.type === 'final_value') appendStreamText(renderTerminalValue(event.value), run);
+      if (event.type === 'tool_value') appendStreamText(renderTerminalValue(event.value), run);
     }
-    function handleObservation(event) {
-      if (event.type === 'turn_activity') handleTurnEvent(event.activity);
+    function handleObservation(event, run) {
+      if (event.type === 'turn_activity') handleTurnEvent(event.activity, run);
     }
     async function sendText(text) {
+      if (!text || isBusy()) return;
       if (!activeChat) await newChat();
-      if (!text) return;
-      if (busy) return;
+      if (!activeChat || isBusy()) return;
+      ++viewGeneration;
+      const run = {
+        ...currentView(), streaming:null, reasoning:null, pendingCodeBlock:null,
+        pendingTools:[], replayCursor:null, reader:null
+      };
+      activeRun = run;
       document.querySelector('#text').value = '';
-      streaming = null;
-      reasoning = null;
-      pendingCodeBlock = null;
-      pendingTools = [];
-      busy = true;
       renderBoard();
-      const res = await api(`/api/chats/${activeChat}/messages`, {
-        method:'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-lash-protocol-hello': JSON.stringify({
-            negotiation: 'hello',
-            supported: { min: 100, max: 100 }
-          })
-        },
-        body: JSON.stringify({
-          text,
-          board: currentBoard(),
-          ...selectedModel()
-        })
-      });
-      const accept = JSON.parse(res.headers.get('x-lash-protocol-accept') || 'null');
-      if (accept?.negotiation !== 'accept' || accept.selected !== 100
-          || accept.supported?.min > 100 || accept.supported?.max < 100) {
-        busy = false;
-        renderBoard();
-        alert('remote protocol negotiation failed');
-        return;
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream:true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const item = JSON.parse(line);
-          if (item.type === 'message') appendMessage(item.message);
-          if (item.type === 'replay_cursor') replayCursor = item.cursor;
-          if (item.type === 'replay_gap') replayCursor = item.gap?.latest_cursor ?? replayCursor;
-          if (item.type === 'observation') handleObservation(item.event);
-          if (item.type === 'error') alert(item.message);
-          messagesEl.scrollTop = messagesEl.scrollHeight;
+      renderBranchPoints();
+      let completed = false;
+      try {
+        const res = await api(`/api/chats/${run.chatId}/messages`, {
+          method:'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-lash-protocol-hello': JSON.stringify({
+              negotiation: 'hello',
+              supported: { min: 100, max: 100 }
+            })
+          },
+          body: JSON.stringify({ text, board:boards.get(run.chatId), ...selectedModel() })
+        });
+        const accept = JSON.parse(res.headers.get('x-lash-protocol-accept') || 'null');
+        if (accept?.negotiation !== 'accept' || accept.selected !== 100
+            || accept.supported?.min > 100 || accept.supported?.max < 100) {
+          throw new Error('remote protocol negotiation failed');
+        }
+        run.reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { value, done } = await run.reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream:true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const item = JSON.parse(line);
+            if (item.type === 'message') appendMessage(item.message, run);
+            if (item.type === 'replay_cursor') run.replayCursor = item.cursor;
+            if (item.type === 'replay_gap') run.replayCursor = item.gap?.latest_cursor ?? run.replayCursor;
+            if (item.type === 'observation') handleObservation(item.event, run);
+            if (item.type === 'error' && isCurrentView(run)) alert(item.message);
+            if (isCurrentView(run)) messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
+        }
+        completed = true;
+      } catch (error) {
+        if (isCurrentView(run)) alert(error.message);
+      } finally {
+        try {
+          for (const tool of run.pendingTools) appendTool(tool, run);
+        } finally {
+          run.streaming = null;
+          run.reasoning = null;
+          run.pendingCodeBlock = null;
+          run.pendingTools = [];
+          try {
+            run.reader?.releaseLock();
+          } finally {
+            run.reader = null;
+            if (activeRun === run) {
+              activeRun = null;
+              renderBoard();
+              renderBranchPoints();
+            }
+          }
         }
       }
-      streaming = null;
-      for (const tool of pendingTools) appendTool(tool);
-      pendingCodeBlock = null;
-      pendingTools = [];
-      finishReasoning();
-      busy = false;
-      renderBoard();
-      await loadChats();
+      if (completed) await loadChats(activeChat === run.chatId ? currentView() : run);
     }
     async function send(e) {
       e.preventDefault();
@@ -734,3 +780,26 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
   </script>
 </body>
 </html>"#;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn browser_stream_ownership() {
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/browser_stream_ownership.mjs");
+        let node =
+            std::env::var_os("LASH_AGENT_SERVICE_TEST_NODE").unwrap_or_else(|| "node".into());
+        let output = std::process::Command::new(node)
+            .arg("--test")
+            .arg("--test-reporter=tap")
+            .arg(script)
+            .output()
+            .expect("run agent-service browser ownership fixtures");
+        println!("{}", String::from_utf8_lossy(&output.stdout));
+        assert!(
+            output.status.success(),
+            "browser ownership fixtures failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}

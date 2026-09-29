@@ -371,6 +371,13 @@ kinds = ["bin-unit-test"]
 data = ["@workbench_node_linux_x64//:bin/node"]
 env = { LASH_WORKBENCH_TEST_NODE = "$(rootpath @workbench_node_linux_x64//:bin/node)" }
 
+# The agent-service unit gate exercises its embedded browser controller in Node.
+[[rule]]
+packages = ["agent-service"]
+kinds = ["bin-unit-test"]
+data = ["@workbench_node_linux_x64//:bin/node"]
+env = { LASH_AGENT_SERVICE_TEST_NODE = "$(rootpath @workbench_node_linux_x64//:bin/node)" }
+
 # --- Test-run requests --------------------------------------------------------
 
 # A test run's request comes from its measured row in test-run-sizes.json.
