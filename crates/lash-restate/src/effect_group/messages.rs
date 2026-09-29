@@ -266,8 +266,10 @@ pub struct EffectGroupAdoptRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectGroupRecordDispatchRequest {
-    pub position: usize,
-    pub invocation_id: String,
+    /// Every child's invocation id by position: a dispatch records the whole
+    /// group in one call (FIG-4088).
+    #[serde(with = "btree_map_as_pairs")]
+    pub dispatched: BTreeMap<usize, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

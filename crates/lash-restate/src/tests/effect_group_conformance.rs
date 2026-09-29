@@ -1060,8 +1060,7 @@ impl LiveConformanceHarness {
                 &group_key,
                 "record_dispatch",
                 &EffectGroupRecordDispatchRequest {
-                    position: 0,
-                    invocation_id: child_invocation.clone(),
+                    dispatched: [(0, child_invocation.clone())].into_iter().collect(),
                 },
             )
             .await
@@ -1215,8 +1214,9 @@ impl LiveConformanceHarness {
                 &group_key,
                 "record_dispatch",
                 &EffectGroupRecordDispatchRequest {
-                    position: 0,
-                    invocation_id: child_invocation.as_str().to_owned(),
+                    dispatched: [(0, child_invocation.as_str().to_owned())]
+                        .into_iter()
+                        .collect(),
                 },
             )
             .await
@@ -1885,8 +1885,9 @@ async fn run_design_witnesses(
             &admission_group,
             "record_dispatch",
             &EffectGroupRecordDispatchRequest {
-                position: 0,
-                invocation_id: child_invocation.as_str().to_owned(),
+                dispatched: [(0, child_invocation.as_str().to_owned())]
+                    .into_iter()
+                    .collect(),
             },
         )
         .await

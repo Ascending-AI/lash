@@ -53,7 +53,9 @@ mod reopen;
 mod wire;
 use drain_barrier::blocking_positions;
 pub(crate) use drain_barrier::{drained_wait_lifted, drained_wait_request};
-use group_waits::{resolve_group_wait, seal_cancel_decisions, wait_resolution};
+use group_waits::{
+    resolve_group_wait, resolve_group_waits, seal_cancel_decisions, wait_resolution,
+};
 pub(crate) use protocol::EFFECT_GROUP_STATE_FAMILY;
 #[cfg(test)]
 pub(crate) use protocol::EFFECT_GROUP_STATE_FORMATS;
@@ -564,25 +566,31 @@ impl EffectGroupState for EffectGroupStateImpl {
             return Ok(Reply::at(wire, EffectGroupRecordDispatchResponse::Retired));
         }
         let shape = record.live()?.shape.clone();
-        let children = shape.children();
+        let expected_positions = (0..shape.children()).collect::<Vec<_>>();
+        if request.dispatched.keys().copied().collect::<Vec<_>>() != expected_positions {
+            return Ok(Reply::at(
+                wire,
+                EffectGroupRecordDispatchResponse::DispatchMismatch,
+            ));
+        }
         let response = match &mut record.lifecycle {
             EffectGroupLifecycle::Preparing {
                 dispatch: EffectGroupDispatchState::Adopted { dispatched, .. },
                 ..
-            } => match dispatched.get(&request.position) {
-                Some(existing) if existing == &request.invocation_id => {
+            } => {
+                if *dispatched == request.dispatched {
                     EffectGroupRecordDispatchResponse::Duplicate
-                }
-                Some(_) => EffectGroupRecordDispatchResponse::DispatchMismatch,
-                None if request.position >= children => {
+                } else if dispatched
+                    .iter()
+                    .any(|(position, id)| request.dispatched.get(position) != Some(id))
+                {
                     EffectGroupRecordDispatchResponse::DispatchMismatch
-                }
-                None => {
-                    dispatched.insert(request.position, request.invocation_id);
+                } else {
+                    dispatched.clone_from(&request.dispatched);
                     store_index(&ctx, object.writer, record.clone());
                     EffectGroupRecordDispatchResponse::Recorded
                 }
-            },
+            }
             EffectGroupLifecycle::Preparing { .. } => {
                 EffectGroupRecordDispatchResponse::DispatchMismatch
             }
@@ -596,12 +604,14 @@ impl EffectGroupState for EffectGroupStateImpl {
             EffectGroupRecordDispatchResponse::Recorded
                 | EffectGroupRecordDispatchResponse::Duplicate
         ) {
-            resolve_group_wait(
+            resolve_group_waits(
                 &ctx,
                 &self.namespace,
                 &shape.wait_scope,
                 &group_key,
-                EffectGroupWaitKind::Admit(request.position),
+                expected_positions
+                    .iter()
+                    .map(|&position| EffectGroupWaitKind::Admit(position)),
                 EffectGroupWaitResolution::Admit,
             )
             .await?;

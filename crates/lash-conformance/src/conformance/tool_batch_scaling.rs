@@ -28,6 +28,16 @@
 //! [`assert_tool_batch_scales_linearly`], and an `#[ignore]`d child, which
 //! calls [`run_tool_batch_scaling_child`] on its tier. Only the parent's
 //! re-execution runs the child.
+//!
+//! A durable tier also counts the group dispatch's resumptions (FIG-4088).
+//! Each resumption of the dispatch replays its journal, which holds one call
+//! per child, so the replay costs the width once per resumption: linear only
+//! while the resumptions stay bounded. A dispatch that suspended once per
+//! child replayed quadratically, and a width-64 group on an engine that
+//! replays at every await started its last member more than a minute in.
+//! [`measure_tool_batch_dispatch_resumptions`] runs one gated scenario and
+//! reads the tier's count; [`assert_tool_batch_dispatch_resumptions_bounded`]
+//! holds the large width's count to the small width's, unnormalized.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -60,6 +70,11 @@ pub struct ToolBatchScalingBudget {
     pub max_normalized_time_ratio: f64,
     /// The same bound on the child process's peak RSS.
     pub max_normalized_peak_rss_ratio: f64,
+    /// The most the large width's group dispatch may resume, over the small
+    /// width's, with no width normalization: a dispatch that resumes a fixed
+    /// number of times scores about one, and one that resumes per child
+    /// scores the width ratio.
+    pub max_dispatch_resumption_ratio: f64,
 }
 
 impl ToolBatchScalingBudget {
@@ -90,7 +105,9 @@ impl ToolBatchScalingBudget {
             budget.max_normalized_time_ratio.is_finite()
                 && budget.max_normalized_time_ratio >= 1.0
                 && budget.max_normalized_peak_rss_ratio.is_finite()
-                && budget.max_normalized_peak_rss_ratio >= 1.0,
+                && budget.max_normalized_peak_rss_ratio >= 1.0
+                && budget.max_dispatch_resumption_ratio.is_finite()
+                && budget.max_dispatch_resumption_ratio >= 1.0,
             "tool_batch_scaling ratios must be finite and at least one: {budget:?}"
         );
         budget
@@ -310,6 +327,104 @@ pub fn assert_tool_batch_scales_linearly(
     );
 }
 
+/// How often one width's group dispatch resumed on a tier that replays at
+/// every await (FIG-4088).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToolBatchDispatchResumptions {
+    pub width: usize,
+    /// The suspensions the scenario's group dispatch took: each one is a
+    /// resumption that replays the dispatch's whole journal.
+    pub resumptions: u64,
+    /// The scenario turn's wall time, reported beside the count.
+    pub turn: Duration,
+}
+
+impl ToolBatchDispatchResumptions {
+    /// `large`'s resumptions over `small`'s, unnormalized. A tier with none
+    /// counts as one, so a dispatch that never suspends scores one.
+    pub fn ratio(small: &Self, large: &Self) -> f64 {
+        large.resumptions.max(1) as f64 / small.resumptions.max(1) as f64
+    }
+}
+
+/// Runs one gated width-`width` scenario of [`crate::measure_gated_tool_batch`]
+/// and reports how often its group dispatch resumed: `resumptions` is the
+/// tier's running count of group-dispatch suspensions, read before and after
+/// the scenario, and it waits for the scenario's dispatch to finish before it
+/// answers.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the scenario's tier handles beside the tier's own resumption count"
+)]
+pub async fn measure_tool_batch_dispatch_resumptions<F, Fut>(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+    producer: &crate::ToolBatchProducer,
+    width: usize,
+    catalog: usize,
+    resumptions: F,
+) -> ToolBatchDispatchResumptions
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = u64>,
+{
+    let before = resumptions().await;
+    let measured = crate::measure_gated_tool_batch(
+        prefix,
+        effect_host,
+        stores,
+        runner,
+        producer,
+        width,
+        catalog,
+    )
+    .await;
+    ToolBatchDispatchResumptions {
+        width,
+        resumptions: resumptions().await.saturating_sub(before),
+        turn: measured.turn,
+    }
+}
+
+/// Fails when the large width's group dispatch resumed more than `budget`
+/// allows over the small width's.
+///
+/// # Panics
+///
+/// When the ratio exceeds `max_dispatch_resumption_ratio`.
+pub fn assert_tool_batch_dispatch_resumptions_bounded(
+    label: &str,
+    small: ToolBatchDispatchResumptions,
+    large: ToolBatchDispatchResumptions,
+    budget: ToolBatchScalingBudget,
+) {
+    let ratio = ToolBatchDispatchResumptions::ratio(&small, &large);
+    println!(
+        "{label}: width {} dispatch resumed {} times ({:?} turn); width {} resumed {} times \
+         ({:?} turn); ratio {ratio:.2} (budget {})",
+        small.width,
+        small.resumptions,
+        small.turn,
+        large.width,
+        large.resumptions,
+        large.turn,
+        budget.max_dispatch_resumption_ratio,
+    );
+    assert!(
+        ratio <= budget.max_dispatch_resumption_ratio,
+        "{label}: a width-{} group dispatch must resume at most {}x as often as a width-{} one; \
+         it resumed {} times against {} ({ratio:.2}x). Every resumption replays a journal that \
+         grows with the width, so resumptions that grow with it cost quadratic replay.",
+        large.width,
+        budget.max_dispatch_resumption_ratio,
+        small.width,
+        large.resumptions,
+        small.resumptions,
+    );
+}
+
 /// Bounds one child: a wedged scenario fails the guard instead of hanging it.
 const CHILD_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -379,6 +494,7 @@ mod tests {
         large_width: 64,
         max_normalized_time_ratio: 2.5,
         max_normalized_peak_rss_ratio: 2.5,
+        max_dispatch_resumption_ratio: 2.0,
     };
 
     fn sample(width: usize, cpu_ms: f64, peak_rss_kib: u64) -> ToolBatchScalingSample {
@@ -401,5 +517,23 @@ mod tests {
         assert!(!ToolBatchScalingRatios::of(&small, &quadratic_time).within(&BUDGET));
         let quadratic_memory = sample(64, 800.0, 6_400_000);
         assert!(!ToolBatchScalingRatios::of(&small, &quadratic_memory).within(&BUDGET));
+    }
+
+    #[test]
+    fn bounded_dispatch_resumptions_pass_and_per_child_resumptions_trip_the_budget() {
+        let resumed = |width, resumptions| ToolBatchDispatchResumptions {
+            width,
+            resumptions,
+            turn: Duration::ZERO,
+        };
+        let ratio = |small, large| ToolBatchDispatchResumptions::ratio(&small, &large);
+        assert!(ratio(resumed(8, 7), resumed(64, 9)) <= BUDGET.max_dispatch_resumption_ratio);
+        assert!(ratio(resumed(8, 0), resumed(64, 0)) <= BUDGET.max_dispatch_resumption_ratio);
+        // FIG-4088's dispatch: an invocation-id await and a record call per
+        // child, two resumptions each.
+        assert!(
+            ratio(resumed(8, 2 * 8 + 5), resumed(64, 2 * 64 + 5))
+                > BUDGET.max_dispatch_resumption_ratio
+        );
     }
 }
