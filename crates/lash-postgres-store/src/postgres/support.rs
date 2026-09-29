@@ -281,6 +281,12 @@ pub(crate) fn plugin_sqlx_error(err: sqlx::Error) -> PluginError {
     PluginError::Session(err.to_string())
 }
 
+/// A store refusal met by a registry-facing write, the writer fence's
+/// included, as the registry's error.
+pub(crate) fn plugin_store_error(err: StoreError) -> PluginError {
+    PluginError::Session(err.to_string())
+}
+
 pub(crate) fn process_decode_error(err: serde_json::Error) -> PluginError {
     PluginError::Session(format!("failed to decode process registry row: {err}"))
 }

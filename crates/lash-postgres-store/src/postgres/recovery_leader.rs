@@ -16,6 +16,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use crate::StoreError;
+use crate::begin_guarded;
 use crate::support::store_sqlx_error;
 
 static SQL: LazyLock<RecoveryLeaderStatements> =
@@ -65,18 +66,19 @@ fn millis(field: &'static str, value: u64) -> Result<i64, StoreError> {
 #[derive(Clone)]
 pub(crate) struct PostgresRecoveryLeader {
     pool: PgPool,
+    fence: crate::guarded_tx::WriterFence,
 }
 
 impl PostgresRecoveryLeader {
-    pub(crate) fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub(crate) fn new(pool: PgPool, fence: crate::guarded_tx::WriterFence) -> Self {
+        Self { pool, fence }
     }
 }
 
 #[async_trait::async_trait]
 impl RecoveryLeaderStore for PostgresRecoveryLeader {
     async fn acquire(&self, claim: &LeaseClaim) -> Result<LeaseAnswer, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let now = db_now(&mut tx).await?;
         let taken = sqlx::query(SQL.acquire.sql())
             .bind(claim.name.as_str())
@@ -85,7 +87,7 @@ impl RecoveryLeaderStore for PostgresRecoveryLeader {
             .bind(now)
             .bind(millis("lease ttl", claim.ttl_ms)?)
             .bind(millis("lease minimum tenure", claim.min_tenure_ms)?)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let row = match taken {
@@ -101,7 +103,7 @@ impl RecoveryLeaderStore for PostgresRecoveryLeader {
     }
 
     async fn renew(&self, claim: &LeaseClaim, term: i64) -> Result<LeaseAnswer, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let now = db_now(&mut tx).await?;
         let renewed = sqlx::query(SQL.renew.sql())
             .bind(claim.name.as_str())
@@ -109,7 +111,7 @@ impl RecoveryLeaderStore for PostgresRecoveryLeader {
             .bind(term)
             .bind(now)
             .bind(millis("lease ttl", claim.ttl_ms)?)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let leader = renewed.is_some();
@@ -131,14 +133,14 @@ impl RecoveryLeaderStore for PostgresRecoveryLeader {
         holder: &HolderId,
         term: i64,
     ) -> Result<bool, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let now = db_now(&mut tx).await?;
         let changed = sqlx::query(SQL.resign.sql())
             .bind(name.as_str())
             .bind(holder.as_str())
             .bind(term)
             .bind(now)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();

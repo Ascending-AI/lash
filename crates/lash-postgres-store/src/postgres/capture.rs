@@ -16,6 +16,7 @@ use lash_store_sql::session::{
 };
 use sqlx::{Acquire, PgConnection, Postgres, Row, Transaction};
 
+use crate::begin_guarded;
 use crate::{
     PostgresStore, RuntimeCommit, StoreError, acquire_runtime_connection, store_sqlx_error,
 };
@@ -597,7 +598,7 @@ impl TurnCaptureStore for PostgresStore {
     ) -> Result<CaptureWriterLease, StoreError> {
         lash_core_execution::store::validate_session_id(&request.turn.session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         let session = &request.turn.session_id;
         let turn = &request.turn.turn_id;
         crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, session).await?;
@@ -606,7 +607,7 @@ impl TurnCaptureStore for PostgresStore {
             .bind(session.as_str())
             .bind(turn.as_str())
             .bind(request.root.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let mut row = turn_row(&mut tx, session, turn)
@@ -628,7 +629,7 @@ impl TurnCaptureStore for PostgresStore {
                     sqlx::query(SQL.turns.mark_recovered.sql())
                         .bind(session.as_str())
                         .bind(turn.as_str())
-                        .execute(&mut *tx)
+                        .execute(&mut **tx)
                         .await
                         .map_err(store_sqlx_error)?;
                 }
@@ -636,7 +637,7 @@ impl TurnCaptureStore for PostgresStore {
                     .bind(session.as_str())
                     .bind(turn.as_str())
                     .bind(request.invocation.as_str())
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
                     .map_err(store_sqlx_error)?;
                 previous
@@ -651,7 +652,7 @@ impl TurnCaptureStore for PostgresStore {
             .bind(request.invocation.as_str())
             .bind(i64::from(epoch))
             .bind("live")
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let lease = lease_at(&mut tx, &request.turn, &request.invocation, epoch, base).await?;
@@ -663,7 +664,7 @@ impl TurnCaptureStore for PostgresStore {
         lash_core_execution::store::validate_session_id(&batch.lease.turn.session_id)?;
         batch.validate_bounds()?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         let lease = &batch.lease;
         let session = &lease.turn.session_id;
         let turn = &lease.turn.turn_id;
@@ -681,7 +682,7 @@ impl TurnCaptureStore for PostgresStore {
             .bind(lease.invocation.as_str())
             .bind(i64::from(lease.attempt_epoch))
             .bind(number(batch.batch_ordinal)?)
-            .fetch_all(&mut *tx)
+            .fetch_all(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         if !existing.is_empty() {
@@ -723,7 +724,7 @@ impl TurnCaptureStore for PostgresStore {
                 .bind(i64::from(lease.attempt_epoch))
                 .bind(number(batch.batch_ordinal)?)
                 .bind(json)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
         }
@@ -732,7 +733,7 @@ impl TurnCaptureStore for PostgresStore {
             .bind(session.as_str())
             .bind(turn.as_str())
             .bind(number(first + encoded.len() as u64)?)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -748,7 +749,7 @@ impl TurnCaptureStore for PostgresStore {
     ) -> Result<CaptureWriterLease, StoreError> {
         lash_core_execution::store::validate_session_id(&reset.lease.turn.session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         let lease = &reset.lease;
         let session = &lease.turn.session_id;
         let turn = &lease.turn.turn_id;
@@ -764,7 +765,7 @@ impl TurnCaptureStore for PostgresStore {
                 .bind(turn.as_str())
                 .bind(lease.invocation.as_str())
                 .bind(i64::from(lease.attempt_epoch))
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             if matches!(prior.as_deref(), Some("fenced" | "retracted")) {
@@ -786,7 +787,7 @@ impl TurnCaptureStore for PostgresStore {
                         .bind(turn.as_str())
                         .bind(lease.invocation.as_str())
                         .bind(i64::from(lease.attempt_epoch))
-                        .execute(&mut *tx)
+                        .execute(&mut **tx)
                         .await
                         .map_err(store_sqlx_error)?;
                 }
@@ -812,7 +813,7 @@ impl TurnCaptureStore for PostgresStore {
                 .bind(turn.as_str())
                 .bind(lease.invocation.as_str())
                 .bind(i64::from(lease.attempt_epoch))
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             if prior.as_deref() == Some("retracted") {
@@ -828,7 +829,7 @@ impl TurnCaptureStore for PostgresStore {
             .bind(turn.as_str())
             .bind(lease.invocation.as_str())
             .bind(i64::from(lease.attempt_epoch))
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         sqlx::query(SQL.writers.insert.sql())
@@ -837,7 +838,7 @@ impl TurnCaptureStore for PostgresStore {
             .bind(lease.invocation.as_str())
             .bind(i64::from(next))
             .bind("live")
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let result = lease_at(&mut tx, &lease.turn, &lease.invocation, next, lease.base).await?;
@@ -848,7 +849,7 @@ impl TurnCaptureStore for PostgresStore {
     async fn advance_capture_base(&self, advance: &CaptureBaseAdvance) -> Result<(), StoreError> {
         lash_core_execution::store::validate_session_id(&advance.turn.session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         let session = &advance.turn.session_id;
         let turn = &advance.turn.turn_id;
         crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, session).await?;
@@ -879,14 +880,14 @@ impl TurnCaptureStore for PostgresStore {
             .bind(turn.as_str())
             .bind(i64::from(advance.to.0))
             .bind(base)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         sqlx::query(SQL.frames.delete_before_base.sql())
             .bind(session.as_str())
             .bind(turn.as_str())
             .bind(i64::from(advance.to.0))
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -899,7 +900,7 @@ impl TurnCaptureStore for PostgresStore {
     ) -> Result<SealedCapture, StoreError> {
         lash_core_execution::store::validate_session_id(&request.turn.session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         let result = seal_capture_tx(&mut tx, request, self.clock.timestamp_ms(), false).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(result)

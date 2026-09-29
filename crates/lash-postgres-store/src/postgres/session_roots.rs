@@ -1009,9 +1009,7 @@ impl RootStore for PostgresStore {
             root: root.clone(),
         };
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = sqlx::Connection::begin(&mut *connection)
-            .await
-            .map_err(store_sqlx_error)?;
+        let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
         let terminal = end_refused_root_tx(&mut tx, &target, refusal, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(terminal)
@@ -1059,9 +1057,7 @@ impl RootStore for PostgresStore {
         inputs: &[InputId],
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = sqlx::Connection::begin(&mut *connection)
-            .await
-            .map_err(store_sqlx_error)?;
+        let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
         crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         bind_root_inputs_conn(&mut tx, session_id, root, inputs).await?;
         tx.commit().await.map_err(store_sqlx_error)

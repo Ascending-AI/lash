@@ -35,7 +35,7 @@ use wake_delivery::{
 };
 impl lash_core_execution::FleetFormatStore for PostgresProcessRegistry {
     fn fleet_format(&self) -> lash_core_execution::FleetFormat {
-        self.fleet_format
+        self.fence.fleet()
     }
 }
 
@@ -241,7 +241,9 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         let wake_session_id = registration.wake_session_id.clone();
         let consumer_hold = registration.consumer_hold.clone();
         let start_key = registration.start_key.clone();
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         // While the process minted for a key is retained, a start under the
         // same key returns that process untouched (ADR 0107); a host's key
         // must also present its start, wake target included.
@@ -295,7 +297,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             parent_end::lock_consumer_hold_tx(&mut tx, &hold.key).await?;
             let abandoned: bool = sqlx::query_scalar(process_sql().abandoned_hold.exists.sql())
                 .bind(hold.key.as_str())
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
             if abandoned {
@@ -348,7 +350,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))
             .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_id()))
             .bind(consumer_hold.as_ref().map(|hold| hold.cancels))
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
         // On this tier alone the read that found no retained process for the
@@ -405,7 +407,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             sqlx::query(process_sql().observer.insert.sql())
                 .bind(session_id.as_str())
                 .bind(process_id.as_str())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
             append_process_event_tx(
@@ -418,7 +420,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                 ),
                 now,
                 self.wake_delivery_config,
-                self.fleet_format,
+                self.fence.fleet(),
             )
             .await?;
         }
@@ -446,7 +448,9 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         process_id: &ProcessId,
         external_ref: ProcessExternalRef,
     ) -> Result<ProcessRecord, PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         match lash_core_execution::runtime::prepare_process_transition(
             &record,
@@ -463,7 +467,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                     *request,
                     self.clock.timestamp_ms(),
                     self.wake_delivery_config,
-                    self.fleet_format,
+                    self.fence.fleet(),
                 )
                 .await?;
             }
@@ -481,12 +485,14 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
         process_id: &ProcessId,
         by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let changed = sqlx::query(process_sql().observer_postgres.insert_if_absent.sql())
             .bind(session_id.as_str())
             .bind(process_id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?
             .rows_affected();
@@ -497,7 +503,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
                 ProcessEventAppendRequest::observer_added(process_id, session_id, &by),
                 self.clock.timestamp_ms(),
                 self.wake_delivery_config,
-                self.fleet_format,
+                self.fence.fleet(),
             )
             .await?;
         }
@@ -511,12 +517,14 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
         process_id: &ProcessId,
         by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let changed = sqlx::query(process_sql().observer.delete.sql())
             .bind(session_id.as_str())
             .bind(process_id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?
             .rows_affected();
@@ -527,7 +535,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
                 ProcessEventAppendRequest::observer_removed(process_id, session_id, &by),
                 self.clock.timestamp_ms(),
                 self.wake_delivery_config,
-                self.fleet_format,
+                self.fence.fleet(),
             )
             .await?;
         }
@@ -542,13 +550,15 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
         process_ids: &[ProcessId],
         by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         for process_id in process_ids {
             let mut record = require_process_tx(&mut tx, process_id).await?;
             let removed = sqlx::query(process_sql().observer.delete.sql())
                 .bind(from_session_id.as_str())
                 .bind(process_id.as_str())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?
                 .rows_affected();
@@ -560,7 +570,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
             sqlx::query(process_sql().observer_postgres.insert_if_absent.sql())
                 .bind(to_session_id.as_str())
                 .bind(process_id.as_str())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
             append_process_event_tx(
@@ -569,7 +579,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
                 ProcessEventAppendRequest::observer_removed(process_id, from_session_id, &by),
                 self.clock.timestamp_ms(),
                 self.wake_delivery_config,
-                self.fleet_format,
+                self.fence.fleet(),
             )
             .await?;
             append_process_event_tx(
@@ -578,7 +588,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
                 ProcessEventAppendRequest::observer_added(process_id, to_session_id, &by),
                 self.clock.timestamp_ms(),
                 self.wake_delivery_config,
-                self.fleet_format,
+                self.fence.fleet(),
             )
             .await?;
         }
@@ -653,12 +663,14 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
         process_id: &ProcessId,
         target: Option<&str>,
     ) -> Result<(), PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let previous: Option<String> =
             sqlx::query_scalar(process_sql().process.select_wake_session_id.sql())
                 .bind(process_id.as_str())
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
         if previous.as_deref() == target {
@@ -671,20 +683,20 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
             ProcessEventAppendRequest::subscription_retargeted(process_id, target),
             self.clock.timestamp_ms(),
             self.wake_delivery_config,
-            self.fleet_format,
+            self.fence.fleet(),
         )
         .await?;
         sqlx::query(process_sql().process.set_wake_session_id.sql())
             .bind(process_id.as_str())
             .bind(target)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
         if let Some(previous) = previous {
             sqlx::query(process_sql().wake.discard_retargeted.sql())
                 .bind(process_id.as_str())
                 .bind(previous)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
         }
@@ -697,30 +709,32 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
     ) -> Result<lash_core_execution::ProcessSessionDeleteReport, PluginError> {
         // The session's scope is not closed here: its `CloseSession` intent
         // is the one owner of that row (FIG-3607 R10, ADR 0108 §5).
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         let discarded_wake_delivery_count =
             sqlx::query(process_sql().wake.discard_target_gone.sql())
                 .bind(session_id.as_str())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize;
         let removed_observer_count = sqlx::query(process_sql().observer.delete_by_session.sql())
             .bind(session_id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?
             .rows_affected() as usize;
         let cleared_subscription_count =
             sqlx::query(process_sql().process.clear_wake_session_for_session.sql())
                 .bind(session_id.as_str())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize;
         sqlx::query(process_sql().floor.delete_by_session.sql())
             .bind(session_id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -741,7 +755,9 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendReceipt, PluginError> {
         facade_support::validate_generic_process_event_append(&request)?;
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let occurred_at_ms = self.clock.timestamp_ms();
         let result = append_process_event_tx(
@@ -750,7 +766,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
             request,
             occurred_at_ms,
             self.wake_delivery_config,
-            self.fleet_format,
+            self.fence.fleet(),
         )
         .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -766,7 +782,9 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         if requests.is_empty() {
             return Ok(Vec::new());
         }
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         validate_process_execution_authority(process_id, &record, authority, None)?;
         // `occurred_at_ms` provenance is inconsistent in this backend: four
@@ -780,7 +798,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
             requests,
             occurred_at_ms,
             self.wake_delivery_config,
-            self.fleet_format,
+            self.fence.fleet(),
         )
         .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -922,7 +940,7 @@ impl lash_core_execution::ProcessToolIntents for PostgresProcessRegistry {
         &self,
         submission: lash_core_execution::ToolIntentSubmissionRecord,
     ) -> Result<lash_core_execution::ToolIntentSubmissionAdmission, PluginError> {
-        tool_intent_submission::admit(&self.pool, submission).await
+        tool_intent_submission::admit(&self.pool, &self.fence, submission).await
     }
 
     async fn complete_tool_intent_submission(
@@ -930,7 +948,7 @@ impl lash_core_execution::ProcessToolIntents for PostgresProcessRegistry {
         replay_key: &str,
         outcome: lash_core_execution::ToolIntentExecutionOutcome,
     ) -> Result<lash_core_execution::ToolIntentSubmissionRecord, PluginError> {
-        tool_intent_submission::complete(&self.pool, replay_key, outcome).await
+        tool_intent_submission::complete(&self.pool, &self.fence, replay_key, outcome).await
     }
 }
 
@@ -964,7 +982,7 @@ impl lash_core_execution::ProcessWakeOutbox for PostgresProcessRegistry {
                 .map_err(plugin_sqlx_error)?
         };
         rows.into_iter()
-            .map(|row| decode_wake_delivery_row(row, self.fleet_format))
+            .map(|row| decode_wake_delivery_row(row, self.fence.fleet()))
             .collect()
     }
 
@@ -981,7 +999,14 @@ impl lash_core_execution::ProcessWakeOutbox for PostgresProcessRegistry {
         claim_token: &str,
     ) -> Result<lash_core_execution::WakeDeliveryClaimOutcome, PluginError> {
         let disposition = lash_core_execution::WakeDeliveryDisposition::Enqueued;
-        update_wake_delivery_state(&self.pool, delivery_id, claim_token, disposition).await
+        update_wake_delivery_state(
+            &self.pool,
+            &self.fence,
+            delivery_id,
+            claim_token,
+            disposition,
+        )
+        .await
     }
 
     async fn discard_wake_delivery(
@@ -991,7 +1016,14 @@ impl lash_core_execution::ProcessWakeOutbox for PostgresProcessRegistry {
         reason: lash_core_execution::WakeDiscardReason,
     ) -> Result<lash_core_execution::WakeDeliveryClaimOutcome, PluginError> {
         let disposition = lash_core_execution::WakeDeliveryDisposition::Discarded { reason };
-        update_wake_delivery_state(&self.pool, delivery_id, claim_token, disposition).await
+        update_wake_delivery_state(
+            &self.pool,
+            &self.fence,
+            delivery_id,
+            claim_token,
+            disposition,
+        )
+        .await
     }
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
@@ -1000,14 +1032,20 @@ impl lash_core_execution::ProcessWakeOutbox for PostgresProcessRegistry {
             .timestamp_ms()
             .saturating_add(self.wake_delivery_config.delivery_expiry_ms);
         let next_attempt_at_ms = self.clock.timestamp_ms();
-        let changed = sqlx::query(process_sql().wake.redrive_discarded.sql())
-            .bind(delivery_id)
-            .bind(expires_at_ms as i64)
-            .bind(next_attempt_at_ms as i64)
-            .execute(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?
-            .rows_affected();
+        let changed = crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
+            Box::pin(async move {
+                sqlx::query(process_sql().wake.redrive_discarded.sql())
+                    .bind(delivery_id)
+                    .bind(expires_at_ms as i64)
+                    .bind(next_attempt_at_ms as i64)
+                    .execute(tx.as_mut())
+                    .await
+                    .map_err(store_sqlx_error)
+            })
+        })
+        .await
+        .map_err(plugin_store_error)?
+        .rows_affected();
         if changed == 0 {
             return Err(PluginError::Session(format!(
                 "wake delivery `{delivery_id}` is not discarded or does not exist"
@@ -1022,23 +1060,28 @@ impl lash_core_execution::ProcessWakeOutbox for PostgresProcessRegistry {
         claim_token: &str,
         next_attempt_at_ms: u64,
     ) -> Result<lash_core_execution::WakeDeliveryClaimOutcome, PluginError> {
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         let changed = sqlx::query(process_sql().wake.release_claim.sql())
             .bind(delivery_id)
             .bind(claim_token)
             .bind(next_attempt_at_ms as i64)
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?
             .rows_affected();
-        if changed == 0 {
-            let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-            let delivery = load_wake_delivery_tx(&mut tx, delivery_id, self.fleet_format).await?;
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(lash_core_execution::WakeDeliveryClaimOutcome::ClaimLost {
+        let outcome = if changed == 0 {
+            let fleet_format = tx.fleet();
+            let delivery = load_wake_delivery_tx(&mut tx, delivery_id, fleet_format).await?;
+            lash_core_execution::WakeDeliveryClaimOutcome::ClaimLost {
                 state: delivery.state(),
-            });
-        }
-        Ok(lash_core_execution::WakeDeliveryClaimOutcome::Applied)
+            }
+        } else {
+            lash_core_execution::WakeDeliveryClaimOutcome::Applied
+        };
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(outcome)
     }
 }
 #[async_trait::async_trait]
@@ -1067,9 +1110,11 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
             None => Vec::new(),
         };
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         sqlx::query(process_sql().clock_postgres.select_current_for_update.sql())
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
         let compacted_through: Option<i64> = sqlx::query_scalar(
@@ -1086,7 +1131,7 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
                 .map(ProcessId::as_str)
                 .collect::<Vec<_>>(),
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
         let deleted = sqlx::query(process_sql().tombstone_postgres.delete_compactable.sql())
@@ -1098,14 +1143,14 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
                     .map(ProcessId::as_str)
                     .collect::<Vec<_>>(),
             )
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?
             .rows_affected() as usize;
         if let Some(compacted_through) = compacted_through {
             sqlx::query(process_sql().clock_postgres.raise_compaction_horizon.sql())
                 .bind(compacted_through)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
         }
@@ -1136,13 +1181,19 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         process_id: &ProcessId,
         key: &str,
     ) -> Result<(), PluginError> {
-        sqlx::query(process_sql().process.release_consumer_hold.sql())
-            .bind(process_id.as_str())
-            .bind(key)
-            .execute(&self.pool)
-            .await
-            .map(drop)
-            .map_err(plugin_sqlx_error)
+        crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
+            Box::pin(async move {
+                sqlx::query(process_sql().process.release_consumer_hold.sql())
+                    .bind(process_id.as_str())
+                    .bind(key)
+                    .execute(tx.as_mut())
+                    .await
+                    .map(drop)
+                    .map_err(store_sqlx_error)
+            })
+        })
+        .await
+        .map_err(plugin_store_error)
     }
 
     async fn abandon_consumer_hold(
@@ -1150,19 +1201,21 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         key: &str,
         owner: &lash_core_execution::ScopeId,
     ) -> Result<Vec<ProcessId>, PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         parent_end::lock_consumer_hold_tx(&mut tx, key).await?;
         sqlx::query(process_sql().abandoned_hold.mark.sql())
             .bind(key)
             .bind(owner.storage_kind())
             .bind(owner.storage_id())
             .bind(self.clock.timestamp_ms() as i64)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
         let ids: Vec<String> = sqlx::query_scalar(process_sql().process.select_owed_cancels.sql())
             .bind(key)
-            .fetch_all(&mut *tx)
+            .fetch_all(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;

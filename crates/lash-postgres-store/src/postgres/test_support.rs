@@ -254,7 +254,7 @@ impl PostgresStore {
         mut self,
         fleet_format: lash_core_execution::FleetFormat,
     ) -> Self {
-        self.fleet_format = fleet_format;
+        self.fence = self.fence.standing_on(fleet_format);
         self
     }
 }

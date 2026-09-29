@@ -33,6 +33,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row};
 
 use crate::StoreError;
+use crate::begin_guarded;
 use crate::process_sql::{
     ParentEndPlanObligationPostgresStatements, ProcessObligationPostgresStatements,
     ProcessStartObligationPostgresStatements,
@@ -358,12 +359,17 @@ pub(crate) struct PostgresObligationLedger {
     sql: ObligationSql<'static>,
     locking: &'static str,
     pool: PgPool,
+    fence: crate::guarded_tx::WriterFence,
 }
 
 impl PostgresObligationLedger {
-    pub(crate) fn new(kind: ObligationKind, pool: PgPool) -> Self {
+    pub(crate) fn new(
+        kind: ObligationKind,
+        pool: PgPool,
+        fence: crate::guarded_tx::WriterFence,
+    ) -> Self {
         let (sql, locking) = obligation_sql(kind);
-        Self::over_table(kind, sql, locking, pool)
+        Self::over_table(kind, sql, locking, pool, fence)
     }
 
     /// The ledger of one table of `kind`, through that table's statements
@@ -373,12 +379,14 @@ impl PostgresObligationLedger {
         sql: ObligationSql<'static>,
         locking: &'static str,
         pool: PgPool,
+        fence: crate::guarded_tx::WriterFence,
     ) -> Self {
         Self {
             kind,
             sql,
             locking,
             pool,
+            fence,
         }
     }
 }
@@ -419,11 +427,11 @@ impl ObligationLedger for PostgresObligationLedger {
         )?;
         let limit = i64::try_from(limit.get()).unwrap_or(i64::MAX);
         let token = ClaimToken::mint();
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let ids: Vec<String> = sqlx::query_scalar(locking)
             .bind(now)
             .bind(limit)
-            .fetch_all(&mut *tx)
+            .fetch_all(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let mut claimed = Vec::with_capacity(ids.len());
@@ -433,7 +441,7 @@ impl ObligationLedger for PostgresObligationLedger {
                 .bind(token.as_str())
                 .bind(until)
                 .bind(now)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             if let Some(row) = row {
@@ -456,13 +464,15 @@ impl ObligationLedger for PostgresObligationLedger {
             "obligation claim expiry",
             now_ms.saturating_add(claim_ttl_ms),
         )?;
+        let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
         let row = sqlx::query(sql.claim.sql())
             .bind(id.as_str())
             .bind(token.as_str())
             .bind(until)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
         row.map(|row| read_claim(self.kind, &row, token))
             .transpose()
     }
@@ -504,11 +514,13 @@ impl ObligationLedger for PostgresObligationLedger {
                     .bind(sql_i64("obligation due instant", due_at_ms)?)
             }
         };
+        let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
         let changed = query
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();
+        tx.commit().await.map_err(store_sqlx_error)?;
         Ok(if changed == 1 {
             SettleOutcome::Applied
         } else {
@@ -518,13 +530,16 @@ impl ObligationLedger for PostgresObligationLedger {
 
     async fn rearm(&self, id: &ObligationId, now_ms: u64) -> Result<bool, StoreError> {
         let sql = self.sql;
+        let due_at = sql_i64("obligation due instant", now_ms)?;
+        let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
         let changed = sqlx::query(sql.rearm.sql())
             .bind(id.as_str())
-            .bind(sql_i64("obligation due instant", now_ms)?)
-            .execute(&self.pool)
+            .bind(due_at)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();
+        tx.commit().await.map_err(store_sqlx_error)?;
         Ok(changed == 1)
     }
 
@@ -594,21 +609,24 @@ impl ArtifactCleanupLedger for PostgresObligationLedger {
         cleanup: &ArtifactCleanup,
         now_ms: u64,
     ) -> Result<ObligationId, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let id = arm_cleanup_tx(&mut tx, cleanup, now_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(id)
     }
 
     async fn nudge(&self, referrer: &ArtifactReferrer, now_ms: u64) -> Result<bool, StoreError> {
+        let due_at = sql_i64("cleanup due instant", now_ms)?;
+        let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
         let changed = sqlx::query(CLEANUP.nudge.sql())
             .bind(referrer.kind().as_str())
             .bind(referrer.canonical_id())
-            .bind(sql_i64("cleanup due instant", now_ms)?)
-            .execute(&self.pool)
+            .bind(due_at)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();
+        tx.commit().await.map_err(store_sqlx_error)?;
         Ok(changed == 1)
     }
 

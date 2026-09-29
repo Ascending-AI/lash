@@ -47,16 +47,23 @@ pub(crate) async fn arm_tx(
 
 pub(super) async fn settle(
     pool: &PgPool,
+    fence: &crate::guarded_tx::WriterFence,
     process_id: &ProcessId,
     settled_at_ms: u64,
 ) -> Result<bool, PluginError> {
-    let changed = sqlx::query(STATEMENTS.obligation_settle_published.sql())
-        .bind(process_id.as_str())
-        .bind(i64::try_from(settled_at_ms).unwrap_or(i64::MAX))
-        .execute(pool)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected();
+    let changed = crate::guarded_tx::guarded(pool, fence, |tx| {
+        Box::pin(async move {
+            sqlx::query(STATEMENTS.obligation_settle_published.sql())
+                .bind(process_id.as_str())
+                .bind(i64::try_from(settled_at_ms).unwrap_or(i64::MAX))
+                .execute(tx.as_mut())
+                .await
+                .map_err(crate::store_sqlx_error)
+        })
+    })
+    .await
+    .map_err(crate::plugin_store_error)?
+    .rows_affected();
     Ok(changed == 1)
 }
 

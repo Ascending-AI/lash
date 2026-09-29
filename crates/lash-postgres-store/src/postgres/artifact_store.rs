@@ -142,7 +142,9 @@ impl PostgresLashlangArtifactStore {
         bytes: Option<&[u8]>,
         claim: &ReferrerClaim,
     ) -> Result<(), ArtifactStoreError> {
-        let mut tx = self.pool.begin().await.map_err(backend)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(ArtifactStoreError::from)?;
         lock_referrer_tx(&mut tx, claim.referrer())
             .await
             .map_err(backend)?;
@@ -165,14 +167,14 @@ impl PostgresLashlangArtifactStore {
                 .bind(namespace)
                 .bind(artifact_ref)
                 .bind(bytes)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(backend)?;
             let stored: Vec<u8> =
                 sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
                     .bind(namespace)
                     .bind(artifact_ref)
-                    .fetch_one(&mut *tx)
+                    .fetch_one(&mut **tx)
                     .await
                     .map_err(backend)?;
             if stored != bytes {
@@ -184,7 +186,7 @@ impl PostgresLashlangArtifactStore {
             let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await
                 .map_err(backend)?;
             if !exists {
@@ -198,7 +200,7 @@ impl PostgresLashlangArtifactStore {
             .bind(artifact_ref)
             .bind(claim.referrer().kind().as_str())
             .bind(claim.referrer().canonical_id())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(backend)?;
         tx.commit().await.map_err(backend)
@@ -209,7 +211,9 @@ impl PostgresLashlangArtifactStore {
         namespace: &str,
         cleanup: &ResolvedArtifactCleanup,
     ) -> Result<(), ArtifactStoreError> {
-        let mut tx = self.pool.begin().await.map_err(backend)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(ArtifactStoreError::from)?;
         let mut referrers: Vec<ArtifactReferrer> = cleanup
             .carries
             .iter()
@@ -236,7 +240,7 @@ impl PostgresLashlangArtifactStore {
         .bind(namespace)
         .bind(cleanup.referrer.kind().as_str())
         .bind(cleanup.referrer.canonical_id())
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await
         .map_err(backend)?;
         let source_refs: BTreeSet<String> = edges
@@ -266,7 +270,7 @@ impl PostgresLashlangArtifactStore {
             .bind(cleanup.referrer.kind().as_str())
             .bind(cleanup.referrer.canonical_id())
             .bind(crate::support::clamp_epoch_ms(now))
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(backend)?;
         for carry in &cleanup.carries {
@@ -277,7 +281,7 @@ impl PostgresLashlangArtifactStore {
             let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await
                 .map_err(backend)?;
             if !exists {
@@ -291,7 +295,7 @@ impl PostgresLashlangArtifactStore {
                 .bind(artifact_ref)
                 .bind(carry.to.kind().as_str())
                 .bind(carry.to.canonical_id())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(backend)?;
         }
@@ -304,14 +308,14 @@ impl PostgresLashlangArtifactStore {
         .bind(namespace)
         .bind(cleanup.referrer.kind().as_str())
         .bind(cleanup.referrer.canonical_id())
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(backend)?;
         for artifact_ref in &source_refs {
             sqlx::query(artifact_sql().postgres.delete_unreferenced.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(backend)?;
         }

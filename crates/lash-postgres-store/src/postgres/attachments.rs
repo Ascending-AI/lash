@@ -290,16 +290,19 @@ struct PostgresSweepLiveness {
 /// connection held for the pass's life.
 pub(crate) async fn begin_attachment_sweep(
     pool: &PgPool,
+    fence: &crate::guarded_tx::WriterFence,
     catalog_id: &str,
 ) -> Result<lash_core_execution::AttachmentSweepGeneration, StoreError> {
     let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
     for _ in 0..ATTACHMENT_SWEEP_MINT_ATTEMPTS {
+        let mut tx = crate::begin_guarded(&mut connection, fence).await?;
         let generation: i64 =
             sqlx::query_scalar(attachment_sql().sweep_clock.mint_generation.sql())
                 .bind(true)
-                .fetch_one(&mut connection)
+                .fetch_one(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
         let held: bool = sqlx::query_scalar(
             crate::connection_sql::connection_sql()
                 .try_lock_session_by_class_and_text
@@ -373,6 +376,7 @@ async fn sweep_pass_is_dead(
 /// one CAS per row under the digest's fence lock.
 pub(crate) async fn adopt_attachment_condemnations(
     pool: &PgPool,
+    fence: &crate::guarded_tx::WriterFence,
     catalog_id: &str,
     generation: &lash_core_execution::AttachmentSweepGeneration,
 ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, StoreError> {
@@ -404,13 +408,13 @@ pub(crate) async fn adopt_attachment_condemnations(
             adoption.held_by_live_pass.push(id);
             continue;
         }
-        let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = crate::begin_guarded(pool, fence).await?;
         lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
         let adopted = sqlx::query(attachment_sql().condemnation.adopt.sql())
             .bind(id.as_str())
             .bind(mine)
             .bind(owner)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();
@@ -449,12 +453,13 @@ pub(crate) async fn adopt_attachment_condemnations(
 /// A restoring writer's token is never cleared here.
 pub(crate) async fn settle_attachment_condemnation(
     pool: &PgPool,
+    fence: &crate::guarded_tx::WriterFence,
     attachment_id: &str,
     generation: &lash_core_execution::AttachmentSweepGeneration,
     settlement: lash_core_execution::AttachmentCondemnationSettlement,
 ) -> Result<lash_core_execution::AttachmentSettlementOutcome, StoreError> {
     let generation = sweep_generation_sql(generation)?;
-    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    let mut tx = crate::begin_guarded(pool, fence).await?;
     lock_attachment_fence_tx(&mut tx, attachment_id).await?;
     let statements = &attachment_sql().condemnation;
     let settled = match settlement {
@@ -462,14 +467,14 @@ pub(crate) async fn settle_attachment_condemnation(
             sqlx::query(statements.delete_armed.sql())
                 .bind(attachment_id)
                 .bind(generation)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
         }
         lash_core_execution::AttachmentCondemnationSettlement::Spared => {
             sqlx::query(statements.delete_spared.sql())
                 .bind(attachment_id)
                 .bind(generation)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
         }
         lash_core_execution::AttachmentCondemnationSettlement::Failed { stall, error } => {
@@ -478,7 +483,7 @@ pub(crate) async fn settle_attachment_condemnation(
                 .bind(generation)
                 .bind(error)
                 .bind(stall.map(|reason| reason.as_str()))
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
         }
     }
@@ -559,21 +564,22 @@ pub(crate) async fn list_attachment_condemnations(
 /// after removing that unstamped intent.
 pub(crate) async fn recover_abandoned_attachment_write(
     pool: &PgPool,
+    fence: &crate::guarded_tx::WriterFence,
     attachment_id: &str,
 ) -> Result<(), StoreError> {
-    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    let mut tx = crate::begin_guarded(pool, fence).await?;
     lock_attachment_fence_tx(&mut tx, attachment_id).await?;
     let claim =
         sqlx::query_as::<_, (String, String)>(attachment_sql().condemnation.select_claim.sql())
             .bind(attachment_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
     if let Some((token, session_id)) = claim {
         sqlx::query(attachment_sql().manifest.delete_unproven_for_session.sql())
             .bind(attachment_id)
             .bind(&session_id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let condemned_superseded =
@@ -581,7 +587,7 @@ pub(crate) async fn recover_abandoned_attachment_write(
                 .bind(attachment_id)
                 .bind(&token)
                 .bind(&session_id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?
                 .rows_affected();
@@ -589,7 +595,7 @@ pub(crate) async fn recover_abandoned_attachment_write(
             sqlx::query(attachment_sql().condemnation.clear_write_claim.sql())
                 .bind(attachment_id)
                 .bind(token)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
         }
@@ -609,7 +615,7 @@ impl AttachmentManifest for PostgresStore {
         let pool = self.pool.clone();
         {
             let write_id = lash_core_execution::AttachmentWriteToken::new();
-            let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+            let mut tx = crate::begin_guarded(&pool, &self.fence).await?;
             crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &intent.session_id)
                 .await?;
             lock_attachment_fence_tx(&mut tx, intent.attachment_id.as_str()).await?;
@@ -617,7 +623,7 @@ impl AttachmentManifest for PostgresStore {
                 attachment_sql().condemnation.select_phase_and_claim.sql(),
             )
             .bind(intent.attachment_id.as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
             #[cfg(test)]
@@ -645,7 +651,7 @@ impl AttachmentManifest for PostgresStore {
                         .bind(intent.attachment_id.as_str())
                         .bind(write_id.as_hex())
                         .bind(intent.session_id.as_str())
-                        .execute(&mut *tx)
+                        .execute(&mut **tx)
                         .await
                         .map_err(store_sqlx_error)?
                         .rows_affected();
@@ -673,7 +679,7 @@ impl AttachmentManifest for PostgresStore {
                 .bind(intent.owner.as_ref().map(|owner| owner.kind().as_str()))
                 .bind(intent.owner.as_ref().map(|owner| owner.id().to_string()))
                 .bind(write_id.as_hex())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             tx.commit().await.map_err(store_sqlx_error)?;
@@ -695,7 +701,7 @@ impl AttachmentManifest for PostgresStore {
         let write_id = permit.write_id().as_hex();
         let written_at_ms = clamp_epoch_ms(self.clock.timestamp_ms());
         {
-            let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+            let mut tx = crate::begin_guarded(&pool, &self.fence).await?;
             lock_attachment_fence_tx(&mut tx, &attachment_id).await?;
             // Id-matched: only the row this attempt still owns is stamped, and
             // the first proven upload is kept.
@@ -704,7 +710,7 @@ impl AttachmentManifest for PostgresStore {
                 .bind(session_id.as_str())
                 .bind(&write_id)
                 .bind(written_at_ms)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?
                 .rows_affected();
@@ -716,7 +722,7 @@ impl AttachmentManifest for PostgresStore {
             sqlx::query(attachment_sql().condemnation.delete_by_write_token.sql())
                 .bind(&attachment_id)
                 .bind(&write_id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             tx.commit().await.map_err(store_sqlx_error)
@@ -733,7 +739,7 @@ impl AttachmentManifest for PostgresStore {
         let session_id = intent.session_id.clone();
         let write_id = permit.write_id().as_hex();
         {
-            let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+            let mut tx = crate::begin_guarded(&pool, &self.fence).await?;
             lock_attachment_fence_tx(&mut tx, &attachment_id).await?;
             // Only this attempt's own unstamped, uncommitted row. A superseded
             // permit matches nothing and deletes nothing.
@@ -741,7 +747,7 @@ impl AttachmentManifest for PostgresStore {
                 .bind(&attachment_id)
                 .bind(session_id.as_str())
                 .bind(&write_id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             let condemned_superseded =
@@ -749,7 +755,7 @@ impl AttachmentManifest for PostgresStore {
                     .bind(&attachment_id)
                     .bind(&write_id)
                     .bind(session_id.as_str())
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
                     .map_err(store_sqlx_error)?
                     .rows_affected();
@@ -757,7 +763,7 @@ impl AttachmentManifest for PostgresStore {
                 sqlx::query(attachment_sql().condemnation.clear_write_claim.sql())
                     .bind(&attachment_id)
                     .bind(&write_id)
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
                     .map_err(store_sqlx_error)?;
             }
@@ -775,7 +781,7 @@ impl AttachmentManifest for PostgresStore {
         let session_id = SessionId::from(session_id.to_string());
         let attachment_ids = attachment_ids.to_vec();
         {
-            let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+            let mut tx = crate::begin_guarded(&pool, &self.fence).await?;
             crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &session_id).await?;
             commit_attachment_refs_tx(&mut tx, &session_id, &attachment_ids, now).await?;
             tx.commit().await.map_err(store_sqlx_error)
@@ -841,13 +847,14 @@ impl AttachmentManifest for PostgresStore {
         let session_id = SessionId::from(session_id.to_string());
         let attachment_id = attachment_id.to_string();
         {
+            let mut tx = crate::begin_guarded(&pool, &self.fence).await?;
             sqlx::query(attachment_sql().manifest_postgres.forget_for_session.sql())
                 .bind(session_id.as_str())
                 .bind(attachment_id)
-                .execute(&pool)
+                .execute(&mut **tx)
                 .await
-                .map(|_| ())
-                .map_err(store_sqlx_error)
+                .map_err(store_sqlx_error)?;
+            tx.commit().await.map_err(store_sqlx_error)
         }
     }
 

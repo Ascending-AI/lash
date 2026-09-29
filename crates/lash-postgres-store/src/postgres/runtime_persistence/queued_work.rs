@@ -13,7 +13,7 @@ impl PostgresStore {
             .validate_process_wake_source()
             .map_err(StoreError::Backend)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -31,7 +31,7 @@ impl PostgresStore {
             .validate_process_wake_source()
             .map_err(StoreError::Backend)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -48,7 +48,7 @@ impl PostgresStore {
         batch_id: &str,
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -56,7 +56,7 @@ impl PostgresStore {
         let row = sqlx::query(sql.queued_batches_postgres.select_cancelable.sql())
             .bind(session_id.as_str())
             .bind(batch_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let Some(row) = row else {
@@ -73,7 +73,7 @@ impl PostgresStore {
         }
         sqlx::query(sql.queued_batches_postgres.delete_cancelled.sql())
             .bind(batch_id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;

@@ -565,14 +565,12 @@ async fn apply_step(
     installation: Option<&Installation>,
     step: &PlannedStep<'_>,
 ) -> Result<MigrationStep, StoreError> {
-    let mut tx = sqlx::Connection::begin(&mut *connection)
-        .await
-        .map_err(store_sqlx_error)?;
+    let mut tx = crate::guarded_tx::begin_migration(connection).await?;
     let started_at_ms = server_clock_ms(&mut tx).await?;
     let (migration, from_version, to_version, ledger) = match step {
         PlannedStep::Bootstrap => {
             sqlx::raw_sql(SCHEMA_DDL)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             // The bootstrap just created the ledger in the search_path's first
@@ -593,7 +591,7 @@ async fn apply_step(
                 ));
             };
             sqlx::raw_sql(migration.statements)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             // Moving the stamp is part of the step: a later open sees either
@@ -607,7 +605,7 @@ async fn apply_step(
             .bind(SCHEMA_COMPONENT)
             .bind(1_i32)
             .bind(1_i32)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
             (
@@ -648,9 +646,7 @@ async fn apply_step(
 async fn apply_synthetic_expand(
     connection: &mut sqlx::PgConnection,
 ) -> Result<Option<MigrationStep>, StoreError> {
-    let mut tx = sqlx::Connection::begin(&mut *connection)
-        .await
-        .map_err(store_sqlx_error)?;
+    let mut tx = crate::guarded_tx::begin_migration(connection).await?;
     let version: i32 =
         sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
             .bind(SCHEMA_COMPONENT)
@@ -727,9 +723,7 @@ async fn apply_synthetic_expand(
 ///
 /// [`FleetFormat::seed`]: lash_core_execution::FleetFormat::seed
 async fn seed_fleet_format(connection: &mut sqlx::PgConnection) -> Result<(), StoreError> {
-    let mut tx = sqlx::Connection::begin(&mut *connection)
-        .await
-        .map_err(store_sqlx_error)?;
+    let mut tx = crate::guarded_tx::begin_migration(connection).await?;
     crate::fleet_format::seed(
         &mut tx,
         lash_core_execution::FleetFormat::seed(lash_core_execution::FleetFormat::writable()),

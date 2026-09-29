@@ -77,8 +77,7 @@ impl PostgresStoreSet {
                 ),
                 trigger_store: Arc::new(storage.trigger_store().with_clock(Arc::clone(&clock))),
                 process_definitions: Arc::new(
-                    PostgresProcessDefinitionRegistry::with_pool(storage.pool().clone())
-                        .with_clock(Arc::clone(&clock)),
+                    PostgresProcessDefinitionRegistry::new(storage).with_clock(Arc::clone(&clock)),
                 ),
                 process_env_store: Arc::new(storage.process_env_store()),
                 attachment_store,
@@ -173,6 +172,7 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
     fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
         Arc::new(crate::recovery_leader::PostgresRecoveryLeader::new(
             self.inner.storage.pool().clone(),
+            self.inner.storage.fence.clone(),
         ))
     }
 

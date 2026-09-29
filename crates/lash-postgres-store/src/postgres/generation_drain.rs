@@ -16,6 +16,7 @@ use lash_store_sql::draining_generations::DrainingGenerationStatements;
 use sqlx::{PgPool, Row};
 
 use crate::StoreError;
+use crate::guarded_tx::guarded;
 use crate::support::store_sqlx_error;
 
 static SQL: LazyLock<DrainingGenerationStatements> =
@@ -41,11 +42,12 @@ fn corrupt(record_kind: &'static str, error: impl std::fmt::Display) -> StoreErr
 #[derive(Clone)]
 pub(crate) struct PostgresGenerationDrain {
     pool: PgPool,
+    fence: crate::guarded_tx::WriterFence,
 }
 
 impl PostgresGenerationDrain {
-    pub(crate) fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub(crate) fn new(pool: PgPool, fence: crate::guarded_tx::WriterFence) -> Self {
+        Self { pool, fence }
     }
 
     async fn count_of(&self, sql: &str, generation: &BuildGeneration) -> Result<u64, StoreError> {
@@ -104,21 +106,32 @@ impl GenerationDrainStore for PostgresGenerationDrain {
         generation: &BuildGeneration,
         now_ms: u64,
     ) -> Result<bool, StoreError> {
-        let marked = sqlx::query(SQL.mark.sql())
-            .bind(generation.as_str())
-            .bind(millis("drain mark instant", now_ms)?)
-            .execute(&self.pool)
-            .await
-            .map_err(store_sqlx_error)?;
+        let marked_at = millis("drain mark instant", now_ms)?;
+        let marked = guarded(&self.pool, &self.fence, |tx| {
+            Box::pin(async move {
+                sqlx::query(SQL.mark.sql())
+                    .bind(generation.as_str())
+                    .bind(marked_at)
+                    .execute(tx.as_mut())
+                    .await
+                    .map_err(store_sqlx_error)
+            })
+        })
+        .await?;
         Ok(marked.rows_affected() == 1)
     }
 
     async fn clear_draining(&self, generation: &BuildGeneration) -> Result<bool, StoreError> {
-        let cleared = sqlx::query(SQL.clear.sql())
-            .bind(generation.as_str())
-            .execute(&self.pool)
-            .await
-            .map_err(store_sqlx_error)?;
+        let cleared = guarded(&self.pool, &self.fence, |tx| {
+            Box::pin(async move {
+                sqlx::query(SQL.clear.sql())
+                    .bind(generation.as_str())
+                    .execute(tx.as_mut())
+                    .await
+                    .map_err(store_sqlx_error)
+            })
+        })
+        .await?;
         Ok(cleared.rows_affected() == 1)
     }
 

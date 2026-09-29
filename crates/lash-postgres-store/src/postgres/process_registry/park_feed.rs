@@ -208,7 +208,9 @@ pub(super) async fn compact_process_park_feed(
     registry: &PostgresProcessRegistry,
     through: ParkFeedCursor,
 ) -> Result<(), PluginError> {
-    let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
+    let mut tx = begin_guarded(&registry.pool, &registry.fence)
+        .await
+        .map_err(plugin_store_error)?;
     // Locking the clock first serializes against concurrent bumps, and
     // clamping `through` to the allocated sequence keeps the horizon from
     // rising past events the feed has not yet committed.
@@ -218,13 +220,13 @@ pub(super) async fn compact_process_park_feed(
             .select_current_for_update
             .sql(),
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
     let through_seq = clamp_epoch_ms(through.store_sequence()).min(current);
     sqlx::query(process_sql().park_event.delete_events_through.sql())
         .bind(through_seq)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
     sqlx::query(
@@ -234,7 +236,7 @@ pub(super) async fn compact_process_park_feed(
             .sql(),
     )
     .bind(through_seq)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
     tx.commit().await.map_err(plugin_sqlx_error)?;

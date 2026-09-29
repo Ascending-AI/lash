@@ -141,6 +141,6 @@ impl lash_core_execution::FleetFormatStore for crate::PostgresStore {
     /// write, which is the identity map until `finalize-upgrade` (FIG-3800)
     /// exists.
     fn fleet_format(&self) -> FleetFormat {
-        self.fleet_format
+        self.fence.fleet()
     }
 }

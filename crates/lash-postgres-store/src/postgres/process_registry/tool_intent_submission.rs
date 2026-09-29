@@ -8,9 +8,12 @@ use crate::{plugin_sqlx_error, process_decode_error};
 
 pub(super) async fn admit(
     pool: &PgPool,
+    fence: &crate::guarded_tx::WriterFence,
     submission: ToolIntentSubmissionRecord,
 ) -> Result<ToolIntentSubmissionAdmission, PluginError> {
-    let mut tx = pool.begin().await.map_err(plugin_sqlx_error)?;
+    let mut tx = crate::begin_guarded(pool, fence)
+        .await
+        .map_err(crate::plugin_store_error)?;
     let encoded = serde_json::to_string(&submission).map_err(process_decode_error)?;
     let inserted = sqlx::query(
         crate::turn_ingress::turn_ingress_sql()
@@ -26,7 +29,7 @@ pub(super) async fn admit(
     .bind(submission.kind.as_str())
     .bind(&submission.payload_hash)
     .bind(encoded)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
     if inserted.rows_affected() == 1 {
@@ -40,7 +43,7 @@ pub(super) async fn admit(
             .sql(),
     )
     .bind(&submission.identity.replay_key)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
     let existing = decode(row.get(0))?;
@@ -50,10 +53,13 @@ pub(super) async fn admit(
 
 pub(super) async fn complete(
     pool: &PgPool,
+    fence: &crate::guarded_tx::WriterFence,
     replay_key: &str,
     outcome: ToolIntentExecutionOutcome,
 ) -> Result<ToolIntentSubmissionRecord, PluginError> {
-    let mut tx = pool.begin().await.map_err(plugin_sqlx_error)?;
+    let mut tx = crate::begin_guarded(pool, fence)
+        .await
+        .map_err(crate::plugin_store_error)?;
     let row = sqlx::query(
         crate::turn_ingress::turn_ingress_sql()
             .tool_intents_postgres
@@ -61,7 +67,7 @@ pub(super) async fn complete(
             .sql(),
     )
     .bind(replay_key)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
     let mut submission = decode(row.get(0))?;
@@ -76,7 +82,7 @@ pub(super) async fn complete(
         )
         .bind(replay_key)
         .bind(encoded)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
     }

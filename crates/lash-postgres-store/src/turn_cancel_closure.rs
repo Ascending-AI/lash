@@ -25,6 +25,7 @@ pub(crate) async fn lock_scope(
 
 pub(crate) async fn retire_scope(
     pool: &sqlx::PgPool,
+    fence: &crate::guarded_tx::WriterFence,
     scope: &lash_core_execution::ExecutionScope,
 ) -> Result<(), StoreError> {
     let scope_id = scope
@@ -32,7 +33,7 @@ pub(crate) async fn retire_scope(
         .map_err(|error| StoreError::Backend(error.to_string()))?
         .key()
         .to_string();
-    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    let mut tx = crate::begin_guarded(pool, fence).await?;
     lock_scope(&mut tx, &scope_id)
         .await
         .map_err(store_sqlx_error)?;
@@ -42,7 +43,7 @@ pub(crate) async fn retire_scope(
             .list_all
             .sql(),
     )
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
     for (session_id, encoded) in rows {
@@ -65,7 +66,7 @@ pub(crate) async fn retire_scope(
             .sql(),
     )
     .bind(&scope_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
     tx.commit().await.map_err(store_sqlx_error)?;

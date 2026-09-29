@@ -41,13 +41,17 @@ fn conflict(
 /// PostgreSQL-backed process-definition registry.
 pub struct PostgresProcessDefinitionRegistry {
     pool: PgPool,
+    fence: crate::guarded_tx::WriterFence,
     clock: std::sync::Arc<dyn Clock>,
 }
 
 impl PostgresProcessDefinitionRegistry {
-    pub fn with_pool(pool: PgPool) -> Self {
+    /// The definition registry over `storage`'s catalog, behind its writer
+    /// fence.
+    pub fn new(storage: &crate::PostgresStorage) -> Self {
         Self {
-            pool,
+            pool: storage.pool().clone(),
+            fence: storage.fence.clone(),
             clock: std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
         }
     }
@@ -90,21 +94,23 @@ impl ProcessDefinitionRegistry for PostgresProcessDefinitionRegistry {
         );
         let fingerprint = definition.fingerprint();
         let now_ms = self.clock.timestamp_ms();
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         sqlx::query(
             crate::connection_sql::connection_sql()
                 .lock_xact_by_text
                 .sql(),
         )
         .bind(&definition_id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
         let existing: Option<(i64, String, String)> =
             sqlx::query_as(process_sql().definition.select_for_cas.sql())
                 .bind(&owner_json)
                 .bind(name)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
         type PgExisting = Option<(i64, String, String)>;
@@ -148,7 +154,7 @@ impl ProcessDefinitionRegistry for PostgresProcessDefinitionRegistry {
                     .bind(&fingerprint)
                     .bind(i64::try_from(now_ms).unwrap_or(0))
                     .bind(&record_json)
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
                     .map_err(plugin_sqlx_error)?;
                 ProcessDefinitionRegistration::Admitted(Box::new(record))
@@ -217,7 +223,7 @@ impl ProcessDefinitionRegistry for PostgresProcessDefinitionRegistry {
                     .bind(&fingerprint)
                     .bind(i64::try_from(now_ms).unwrap_or(0))
                     .bind(&record_json)
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
                     .map_err(plugin_sqlx_error)?
                     .rows_affected();

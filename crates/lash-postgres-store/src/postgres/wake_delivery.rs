@@ -9,18 +9,20 @@ pub(super) async fn claim_pending_wake_deliveries(
     if limit == 0 {
         return Ok(Vec::new());
     }
-    let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
+    let mut tx = begin_guarded(&registry.pool, &registry.fence)
+        .await
+        .map_err(plugin_store_error)?;
     let now = registry.clock.timestamp_ms() as i64;
     sqlx::query(process_sql().wake.reclaim_lapsed_claims.sql())
         .bind(now)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
     let ids = sqlx::query_scalar::<_, String>(process_sql().wake_postgres.select_claimable.sql())
         .bind(limit as i64)
         .bind(now)
         .bind(lash_core_execution::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS)
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
     let mut deliveries = Vec::with_capacity(ids.len());
@@ -31,10 +33,10 @@ pub(super) async fn claim_pending_wake_deliveries(
             .bind(now)
             .bind(now.saturating_add(registry.wake_delivery_config.enqueuing_stale_after_ms as i64))
             .bind(claim_token)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
-        deliveries.push(load_wake_delivery_tx(&mut tx, &id, registry.fleet_format).await?);
+        deliveries.push(load_wake_delivery_tx(&mut tx, &id, registry.fence.fleet()).await?);
     }
     tx.commit().await.map_err(plugin_sqlx_error)?;
     Ok(deliveries)
@@ -80,21 +82,28 @@ pub(super) fn wake_delivery_report<'a>(
 
 pub(super) async fn update_wake_delivery_state(
     pool: &PgPool,
+    fence: &crate::guarded_tx::WriterFence,
     delivery_id: &str,
     claim_token: &str,
     disposition: lash_core_execution::WakeDeliveryDisposition,
 ) -> Result<lash_core_execution::WakeDeliveryClaimOutcome, PluginError> {
     let state = disposition.state();
     let reason = disposition.discard_reason();
-    let changed = sqlx::query(process_sql().wake.settle_claim.sql())
-        .bind(delivery_id)
-        .bind(claim_token)
-        .bind(state.as_str())
-        .bind(reason.map(lash_core_execution::WakeDiscardReason::as_str))
-        .execute(pool)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected();
+    let changed = crate::guarded_tx::guarded(pool, fence, |tx| {
+        Box::pin(async move {
+            sqlx::query(process_sql().wake.settle_claim.sql())
+                .bind(delivery_id)
+                .bind(claim_token)
+                .bind(state.as_str())
+                .bind(reason.map(lash_core_execution::WakeDiscardReason::as_str))
+                .execute(tx.as_mut())
+                .await
+                .map_err(crate::store_sqlx_error)
+        })
+    })
+    .await
+    .map_err(crate::plugin_store_error)?
+    .rows_affected();
     // The statement's own predicate is the fence (`state` is enqueuing and the
     // claim token still matches), so exactly one row must change; the shared
     // backstop records the disagreement if not and the existing branch

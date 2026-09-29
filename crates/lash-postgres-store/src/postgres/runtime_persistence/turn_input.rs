@@ -28,7 +28,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 message: error.to_string(),
             })?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -41,7 +41,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         match existing {
@@ -74,7 +74,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 .bind(session_id.as_str())
                 .bind(binding_id)
                 .bind(&admitted_scope_json)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
                 let selected: (String, Option<String>) = sqlx::query_as(
@@ -84,7 +84,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                         .sql(),
                 )
                 .bind(session_id.as_str())
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
                 if selected.0 != binding_id || selected.1 != admitted_scope_json {
@@ -134,7 +134,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 })?;
         }
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -163,7 +163,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                     .sql(),
             )
             .bind(&scope_id)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
             if retired {
@@ -177,7 +177,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 .sql(),
         )
         .bind(authorization.session_id().as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         let admitted_physical_scope = authorization
@@ -216,7 +216,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         )
         .bind(authorization.session_id().as_str())
         .bind(authorization.turn_id().as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         let outcome = match existing {
@@ -252,7 +252,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 .bind(authorization.session_id().as_str())
                 .bind(authorization.turn_id().as_str())
                 .bind(encoded)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
                 lash_core_execution::TurnCancelClosureAuthorizationOutcome::Authorized
@@ -344,7 +344,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         let session_id = &request.address.session_id;
         let turn_id = &request.address.turn_id;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -359,7 +359,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         )
         .bind(session_id.as_str())
         .bind(operation_key)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         if committed {
@@ -407,7 +407,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 .bind(session_id.as_str())
                 .bind(turn_id.as_str())
                 .bind(revision)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             }
@@ -429,7 +429,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 .bind(&request.reason)
                 .bind(turn_cancel_disposition_wire(request.undelivered))
                 .bind(turn_cancel_mode_wire(request.mode))
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             }
@@ -464,7 +464,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         evidence: &lash_core_execution::facade_support::TurnCancellationEvidence,
     ) -> Result<bool, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         ensure_session_not_deleted_tx(&mut tx, &address.session_id).await?;
         let applied = reconcile_turn_cancel_winner_tx(
             &mut tx,
@@ -485,7 +485,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         use lash_core_execution::store_backend_support as support;
         let session_id = batch.session_id();
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -506,7 +506,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                     sqlx::query_as(sql.pending_inputs.select_id_by_source_key.sql())
                         .bind(session_id.as_str())
                         .bind(source_key)
-                        .fetch_optional(&mut *tx)
+                        .fetch_optional(&mut **tx)
                         .await
                         .map_err(store_sqlx_error)?
                 }
@@ -517,7 +517,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                     (None, Some(input_id)) => {
                         sqlx::query_as(sql.pending_inputs.select_session_by_input_id.sql())
                             .bind(input_id)
-                            .fetch_optional(&mut *tx)
+                            .fetch_optional(&mut **tx)
                             .await
                             .map_err(store_sqlx_error)?
                     }
@@ -555,7 +555,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                         .bind(&submission_digest)
                         .bind(now as i64)
                         .bind(run_spec.column())
-                        .execute(&mut *tx)
+                        .execute(&mut **tx)
                         .await
                         .map_err(|err| {
                             pending_turn_input_insert_error(err, session_id, &input_id)
@@ -714,7 +714,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 session_id,
                 &turn_id,
                 &result_json,
-                self.fleet_format,
+                self.fence.fleet(),
             )?;
             commits.push((
                 result.head_revision,
@@ -735,7 +735,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         targets: &[lash_core_execution::PendingTurnInputCancelTarget],
     ) -> Result<Vec<lash_core_execution::PendingTurnInputCancelReceipt>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -769,7 +769,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         if let Some(released) = released {
@@ -797,7 +797,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         anchor: &lash_core_execution::PendingTurnInputCancelTarget,
     ) -> Result<lash_core_execution::PendingTurnInputSuffixCancelOutcome, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -825,7 +825,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         )
         .bind(session_id.as_str())
         .bind(anchor_row.enqueue_seq as i64)
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
         .into_iter()
@@ -842,7 +842,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         if let Some(released) = released {

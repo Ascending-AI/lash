@@ -95,9 +95,11 @@ pub(super) async fn prune_terminal_processes(
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     let pruned_at_ms = crate::support::clamp_epoch_ms(registry.clock.timestamp_ms());
     let max_change_seq = watermark_change_seq(watermark);
-    let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
+    let mut tx = begin_guarded(&registry.pool, &registry.fence)
+        .await
+        .map_err(plugin_store_error)?;
     let prunable = select_prunable(
-        &mut *tx,
+        &mut **tx,
         process_sql()
             .process_postgres
             .list_prunable_terminal_for_update
@@ -135,7 +137,7 @@ pub(super) async fn prune_terminal_processes(
         .iter()
         .flat_map(facade_support::process_runtime_session_ids)
         .collect::<Vec<_>>();
-    let blob_reclaim = delete_process_sessions_tx(&mut tx, &session_ids, registry.fleet_format)
+    let blob_reclaim = delete_process_sessions_tx(&mut tx, &session_ids, registry.fence.fleet())
         .await
         .map_err(|failure| {
             PluginError::Session(format!(

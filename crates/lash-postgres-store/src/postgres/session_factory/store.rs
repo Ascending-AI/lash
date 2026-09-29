@@ -29,7 +29,7 @@ impl PostgresStore {
             pending_observer_intents: request.pending_observer_intents.clone(),
         };
         let created_at_ms = self.clock.timestamp_ms();
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
             .await?;
         let deleted = sqlx::query_scalar::<_, bool>(
@@ -38,7 +38,7 @@ impl PostgresStore {
              )",
         )
         .bind(request.session_id.as_str())
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         if deleted {
@@ -51,7 +51,7 @@ impl PostgresStore {
             &meta,
             crate::session_meta::SessionMetaWrite::Insert,
             created_at_ms,
-            self.fleet_format,
+            self.fence.fleet(),
         )
         .await?;
         if inserted && request.head == lash_core_execution::SessionCreationHead::Config {

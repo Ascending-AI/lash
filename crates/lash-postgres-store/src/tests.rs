@@ -349,7 +349,10 @@ async fn attachment_unwired_process_registry_factory_warns() {
             .connect_lazy("postgres://localhost/unused")
             .unwrap(),
         catalog_id: Arc::from("unused.public"),
-        fleet_format: lash_core_execution::FleetFormat::current(),
+        fence: crate::guarded_tx::WriterFence::new(
+            lash_core_execution::FleetFormat::writable(),
+            lash_core_execution::FleetFormat::current(),
+        ),
     };
     for path in [
         "PostgresStorage::session_store_factory",
@@ -1497,6 +1500,11 @@ fn postgres_statement_name(query: &str) -> &'static str {
     match collapsed.as_str() {
         "BEGIN" => "begin",
         "COMMIT" => "commit",
+        q if q.starts_with("SELECT format_version FROM lash_fleet_format")
+            && q.ends_with("FOR SHARE") =>
+        {
+            "writer-fence"
+        }
         // pg_stat_statements may report the literal text or the parameterised
         // form (`current_setting($1,$2)`); match on the function shape instead.
         q if q.starts_with("SELECT NULLIF(current_setting(") => "testing-lease-epoch-probe",
@@ -1684,7 +1692,8 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
         .expect("statement-pin input is admissible");
     assert_eq!(admission.input_ids().len(), 1);
     let admission_statements = postgres_statement_calls_by_name(storage.pool()).await;
-    // AdmitRoot is one write transaction: it checks the drive fence, reads
+    // AdmitRoot is one write transaction: its first statement is the writer
+    // fence (ADR 0115 §2.2); it checks the drive fence, reads
     // any recorded admission and the pending follow-on, composes and binds
     // the rows, retains the admission base and records the root. Binding the
     // input to its root checks the input's existing binding, opens the root's
@@ -1694,6 +1703,7 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
         std::collections::BTreeMap::from([
             ("begin", 1),
             ("commit", 1),
+            ("writer-fence", 1),
             ("testing-lease-epoch-probe", 1),
             ("drive-epoch-read", 1),
             ("root-admission-read", 1),
@@ -1737,12 +1747,14 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
     // against the locked fact. Clearing the turn's staged capture and reading
     // its sealed partial (ADR 0114, FIG-433) adds one more. The commit refuses
     // a session the catalog never admitted (ADR 0112) with one probe, where it
-    // used to insert the meta row.
+    // used to insert the meta row. The writer fence (ADR 0115 §2.2) is the
+    // transaction's first statement.
     // This fixture does not pass through the testing lease-epoch probe.
     let expected_commit: std::collections::BTreeMap<&'static str, i64> =
         std::collections::BTreeMap::from([
             ("begin", 1),
             ("commit", 1),
+            ("writer-fence", 1),
             ("advisory-lock", 1),
             ("deleted-session-check", 1),
             ("head-lock", 1),

@@ -652,10 +652,10 @@ pub struct PostgresStorage {
     /// `lash_catalog_identity`: what a session catalog registers under with
     /// its turn-cancel-closure owner.
     catalog_id: Arc<str>,
-    /// The durable-format generation this store's writers emit — the
-    /// fleet-format row (ADR 0106 §1 `F`) as the open transaction recorded or
-    /// read it.
-    fleet_format: lash_core_execution::FleetFormat,
+    /// The writer fence every handle of this storage shares (ADR 0115 §2.2):
+    /// this build's writable range and the fleet epoch `F` its fences last
+    /// read, seeded with the open transaction's admitted `F`.
+    fence: guarded_tx::WriterFence,
 }
 
 #[derive(Clone)]
@@ -666,7 +666,7 @@ pub struct PostgresStore {
     fault_injector: Option<testing::PostgresFaultInjector>,
     pool: PgPool,
     catalog_id: Arc<str>,
-    fleet_format: lash_core_execution::FleetFormat,
+    fence: guarded_tx::WriterFence,
     process_registry_shared: bool,
     clock: Arc<dyn lash_core_execution::Clock>,
     turn_cancel_closure_owner:
@@ -696,10 +696,11 @@ pub struct PostgresProcessRegistry {
     scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts,
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_execution::ProcessIdMint,
-    /// `F` this storage admitted at open: every wake-delivery and process-event
-    /// payload the registry stamps goes through `writer_version`, never a bare
-    /// build constant (FIG-3796).
-    fleet_format: lash_core_execution::FleetFormat,
+    /// The storage's writer fence: every mutation fences on `F`, and every
+    /// wake-delivery and process-event payload the registry stamps goes
+    /// through the fenced `F`'s `writer_version`, never a bare build constant
+    /// (FIG-3796).
+    fence: guarded_tx::WriterFence,
 }
 
 impl PostgresProcessRegistry {
@@ -723,6 +724,7 @@ impl PostgresProcessRegistry {
 #[derive(Clone)]
 pub struct PostgresTriggerStore {
     pool: PgPool,
+    fence: guarded_tx::WriterFence,
     clock: Arc<dyn lash_core_execution::Clock>,
     fixed_incarnation: Option<String>,
 }
@@ -743,6 +745,7 @@ impl PostgresTriggerStore {
 #[derive(Clone)]
 pub struct PostgresLashlangArtifactStore {
     pool: PgPool,
+    fence: guarded_tx::WriterFence,
     publication_pause: Arc<std::sync::Mutex<Option<lash_core_execution::ArtifactPublicationPause>>>,
 }
 
@@ -843,16 +846,13 @@ impl PostgresStorage {
             .connect(database_url)
             .await
             .map_err(store_sqlx_error)?;
-        let (catalog_id, fleet_format) = ensure_schema(
-            &pool,
-            config.schema_check,
-            lash_core_execution::FleetFormat::writable(),
-        )
-        .await?;
+        let writable = lash_core_execution::FleetFormat::writable();
+        let (catalog_id, fleet_format) =
+            ensure_schema(&pool, config.schema_check, writable).await?;
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
-            fleet_format,
+            fence: guarded_tx::WriterFence::new(writable, fleet_format),
         })
     }
 
@@ -915,16 +915,13 @@ impl PostgresStorage {
         pool: PgPool,
         config: PostgresStoreConfig,
     ) -> Result<Self, StoreError> {
-        let (catalog_id, fleet_format) = ensure_schema(
-            &pool,
-            config.schema_check,
-            lash_core_execution::FleetFormat::writable(),
-        )
-        .await?;
+        let writable = lash_core_execution::FleetFormat::writable();
+        let (catalog_id, fleet_format) =
+            ensure_schema(&pool, config.schema_check, writable).await?;
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
-            fleet_format,
+            fence: guarded_tx::WriterFence::new(writable, fleet_format),
         })
     }
 
@@ -948,7 +945,7 @@ impl PostgresStorage {
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
-            fleet_format,
+            fence: guarded_tx::WriterFence::new(writable, fleet_format),
         })
     }
 
@@ -984,7 +981,10 @@ impl PostgresStorage {
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
-            fleet_format,
+            fence: guarded_tx::WriterFence::new(
+                lash_core_execution::FleetFormat::writable(),
+                fleet_format,
+            ),
         })
     }
 
@@ -1162,14 +1162,22 @@ impl PostgresStorage {
     }
 
     /// The fleet format this storage's durable writers emit — the `F` of ADR
-    /// 0106 §1 as the fleet-format row recorded it at open.
+    /// 0106 §1 as its writer fences last read it, or as the open admitted it
+    /// before any fence ran (ADR 0115 §2.3).
     ///
     /// This is the hook durable writers consult for their writer version:
     /// `fleet_format.writer_version(CURRENT_…)` maps a format's build-newest
-    /// version onto the generation the fleet agreed to write, which is the
-    /// identity map until `finalize-upgrade` (FIG-3800) exists.
+    /// version onto the generation the fleet agreed to write.
     pub fn fleet_format(&self) -> lash_core_execution::FleetFormat {
-        self.fleet_format
+        self.fence.fleet()
+    }
+
+    /// Pass every guarded transaction of this storage, through any handle it
+    /// hands out, through `seam` right after its writer fence (ADR 0115 §6).
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_after_fence_for_testing(self, seam: testing::AfterFence) -> Self {
+        self.fence.install_after_fence(seam);
+        self
     }
 
     fn unwired_session_store_factory(&self, path: &'static str) -> PostgresStore {
@@ -1177,7 +1185,7 @@ impl PostgresStorage {
         PostgresStore {
             pool: self.pool.clone(),
             catalog_id: Arc::clone(&self.catalog_id),
-            fleet_format: self.fleet_format,
+            fence: self.fence.clone(),
             process_registry_shared: false,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
@@ -1206,7 +1214,7 @@ impl PostgresStorage {
         PostgresStore {
             pool: self.pool.clone(),
             catalog_id: Arc::clone(&self.catalog_id),
-            fleet_format: self.fleet_format,
+            fence: self.fence.clone(),
             process_registry_shared: true,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
@@ -1241,7 +1249,7 @@ impl PostgresStorage {
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
-            fleet_format: self.fleet_format,
+            fence: self.fence.clone(),
         }
     }
 
@@ -1255,13 +1263,14 @@ impl PostgresStorage {
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
-            fleet_format: self.fleet_format,
+            fence: self.fence.clone(),
         }
     }
 
     pub fn trigger_store(&self) -> PostgresTriggerStore {
         PostgresTriggerStore {
             pool: self.pool.clone(),
+            fence: self.fence.clone(),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             fixed_incarnation: None,
         }
@@ -1270,6 +1279,7 @@ impl PostgresStorage {
     pub fn lashlang_artifact_store(&self) -> PostgresLashlangArtifactStore {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
+            fence: self.fence.clone(),
             publication_pause: Arc::new(std::sync::Mutex::new(None)),
         }
     }
@@ -1277,6 +1287,7 @@ impl PostgresStorage {
     pub fn process_env_store(&self) -> PostgresLashlangArtifactStore {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
+            fence: self.fence.clone(),
             publication_pause: Arc::new(std::sync::Mutex::new(None)),
         }
     }
@@ -1289,6 +1300,7 @@ impl PostgresStorage {
     ) -> Arc<dyn lash_core_execution::store::generation_drain::GenerationDrainStore> {
         Arc::new(crate::generation_drain::PostgresGenerationDrain::new(
             self.pool.clone(),
+            self.fence.clone(),
         ))
     }
 
@@ -1296,7 +1308,7 @@ impl PostgresStorage {
     pub async fn fleet_generations(
         &self,
     ) -> Result<Vec<(lash_core_execution::engine::BuildGeneration, bool)>, StoreError> {
-        crate::generation_drain::PostgresGenerationDrain::new(self.pool.clone())
+        crate::generation_drain::PostgresGenerationDrain::new(self.pool.clone(), self.fence.clone())
             .fleet_generations()
             .await
     }
@@ -1309,11 +1321,12 @@ impl PostgresStorage {
     ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
         // Ingress spans two tables (ADR 0109 §3).
         if kind == lash_core_execution::store::ObligationKind::Ingress {
-            return crate::ingress_obligation::ingress_ledger(&self.pool);
+            return crate::ingress_obligation::ingress_ledger(&self.pool, &self.fence);
         }
         Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
             kind,
             self.pool.clone(),
+            self.fence.clone(),
         ))
     }
 
@@ -1321,6 +1334,7 @@ impl PostgresStorage {
         Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
             lash_core_execution::store::ObligationKind::ArtifactCleanup,
             self.pool.clone(),
+            self.fence.clone(),
         ))
     }
 
@@ -1437,6 +1451,8 @@ mod evidence_retention;
 mod fleet_format;
 #[path = "postgres/generation_drain.rs"]
 mod generation_drain;
+#[path = "postgres/guarded_tx.rs"]
+mod guarded_tx;
 #[path = "postgres/ingress_obligation.rs"]
 mod ingress_obligation;
 #[path = "postgres/migrate.rs"]
@@ -1510,6 +1526,7 @@ mod trigger_store;
 mod turn_ingress;
 
 pub use backend::PostgresStoreSet;
+use guarded_tx::begin_guarded;
 pub use migrate::{MigrationPhase, MigrationReport, MigrationStep};
 pub use preflight::PostgresStorePreflight;
 pub use process_definitions::PostgresProcessDefinitionRegistry;

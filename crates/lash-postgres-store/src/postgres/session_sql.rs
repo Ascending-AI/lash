@@ -747,6 +747,17 @@ lash_store_sql::statements! {
         /// The recorded fleet format.
         select_fleet_format = "SELECT format_version FROM fleet_format WHERE singleton = TRUE";
 
+        /// The writer fence: the first statement of every mutating
+        /// transaction (ADR 0115 §2.2). The share lock is what orders a
+        /// writer against finalize, which reads the row `FOR UPDATE`.
+        select_for_fence = "SELECT format_version FROM fleet_format
+             WHERE singleton = TRUE
+             FOR SHARE";
+
+        /// Whether the row's relation exists at all: a migration fences only
+        /// a catalog that can record `F`.
+        select_is_present = "SELECT to_regclass('lash_fleet_format') IS NOT NULL";
+
         /// `lash migrate`'s seed: a recorded generation is never overwritten
         /// — moving the row is the finalize operation's job alone.
         insert_if_absent = "INSERT INTO fleet_format (

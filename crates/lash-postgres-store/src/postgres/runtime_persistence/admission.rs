@@ -43,7 +43,7 @@ pub(crate) async fn admit_root_postgres(
 ) -> Result<Option<RootAdmission>, StoreError> {
     let session_id = request.session_id();
     let mut connection = acquire_runtime_connection(&store.pool).await?;
-    let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+    let mut tx = begin_guarded(&mut *connection, &store.fence).await?;
     #[cfg(any(test, feature = "testing"))]
     store
         .set_transaction_lease_clock_for_testing(&mut tx)
@@ -53,7 +53,7 @@ pub(crate) async fn admit_root_postgres(
     let existing: Option<Option<String>> = sqlx::query_scalar(roots.roots.select_admission.sql())
         .bind(session_id.as_str())
         .bind(request.root.as_str())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
     if let Some(Some(json)) = existing {
@@ -121,11 +121,11 @@ pub(crate) async fn admit_root_postgres(
     };
     let mut base = request.base.clone();
     base.generation =
-        read_session_state_version_tx(&mut tx, session_id, true, store.fleet_format).await?;
+        read_session_state_version_tx(&mut tx, session_id, true, store.fence.fleet()).await?;
     sqlx::query(session_sql().meta.retain_admission_base.sql())
         .bind(session_id.as_str())
         .bind(base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str()))
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
     let admission = RootAdmission {
@@ -150,7 +150,7 @@ pub(crate) async fn admit_root_postgres(
         .bind(request.root.as_str())
         .bind(json)
         .bind(request.admitted_generation.as_str())
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
@@ -189,7 +189,7 @@ pub(crate) async fn admit_at_checkpoint_postgres(
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let session_id = request.session_id();
     let mut connection = acquire_runtime_connection(&store.pool).await?;
-    let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+    let mut tx = begin_guarded(&mut *connection, &store.fence).await?;
     #[cfg(any(test, feature = "testing"))]
     store
         .set_transaction_lease_clock_for_testing(&mut tx)
@@ -271,7 +271,7 @@ pub(crate) async fn open_session_command_run_postgres(
 ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
     let session_id = fence.session();
     let mut connection = acquire_runtime_connection(&store.pool).await?;
-    let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+    let mut tx = begin_guarded(&mut *connection, &store.fence).await?;
     #[cfg(any(test, feature = "testing"))]
     store
         .set_transaction_lease_clock_for_testing(&mut tx)
@@ -299,7 +299,7 @@ pub(crate) async fn open_session_command_run_postgres(
             .bind(session_id.as_str())
             .bind(batch.batch_id.as_str())
             .bind(i64::try_from(now).unwrap_or(i64::MAX))
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();

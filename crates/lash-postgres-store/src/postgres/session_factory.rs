@@ -29,7 +29,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         &self,
         scope: &lash_core_execution::ExecutionScope,
     ) -> Result<(), StoreError> {
-        crate::turn_cancel_closure::retire_scope(&self.pool, scope).await?;
+        crate::turn_cancel_closure::retire_scope(&self.pool, &self.fence, scope).await?;
         if let Some(owner) = self.turn_cancel_closure_owner_binding() {
             owner
                 .release(scope)
@@ -297,9 +297,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         at_ms: u64,
     ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
         let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
-        let mut tx = sqlx::Connection::begin(&mut *connection)
-            .await
-            .map_err(crate::store_sqlx_error)?;
+        let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
         let result = crate::session_roots::end_lost_root_tx(&mut tx, target, at_ms).await?;
         tx.commit().await.map_err(crate::store_sqlx_error)?;
         Ok(result)
@@ -327,7 +325,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         through: lash_core_execution::store::ParkFeedCursor,
     ) -> Result<(), StoreError> {
         let through_seq = i64::try_from(through.store_sequence()).unwrap_or(i64::MAX);
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let sql = crate::turn_ingress::turn_ingress_sql();
         // Lock the clock row before the delete: a concurrent bump either
         // commits ahead of the lock — its events are then visible to the
@@ -336,18 +334,18 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         // horizon never rises past events the feed has not yet committed.
         let current_seq: i64 =
             sqlx::query_scalar(sql.turn_park_clock.select_current_for_update.sql())
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
         let through_seq = through_seq.min(current_seq);
         sqlx::query(sql.turn_park_events.delete_events_through.sql())
             .bind(through_seq)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         sqlx::query(sql.turn_park_clock.raise_compaction_horizon.sql())
             .bind(through_seq)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)
@@ -389,12 +387,12 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
     ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
         lash_core_execution::store::validate_session_id(session_id)
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
-        let mut tx = self.pool.begin().await.map_err(|err| {
-            lash_core_execution::MaintenanceFailure::failed_before_any_work(store_sqlx_error(err))
-        })?;
+        let mut tx = crate::begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
         let mut report = lash_core_execution::SessionBlobReclaimReport::default();
         if let Err(error) =
-            delete_session_tx(&mut tx, session_id, &mut report, self.fleet_format).await
+            delete_session_tx(&mut tx, session_id, &mut report, self.fence.fleet()).await
         {
             report.deleted_blob_count = 0;
             return Err(lash_core_execution::MaintenanceFailure::failed(
@@ -416,7 +414,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         node_id: &lash_core_execution::NodeId,
     ) -> Result<lash_core_execution::ForkPoint, StoreError> {
         let node_id = node_id.as_str();
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let (source_session_id, checkpoint_ref) =
             crate::support::retained_checkpoint_tx(&mut tx, node_id)
                 .await?
@@ -428,7 +426,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         crate::support::lock_checkpoint_blob_tx(&mut tx, &checkpoint_ref, None).await?;
         let live_node = sqlx::query_scalar::<_, bool>(session_sql().graph_postgres.lock_live.sql())
             .bind(node_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         if live_node.is_none() {
@@ -439,12 +437,12 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         if let Some((checkpoint_ref, source_session_id)) =
             sqlx::query_as::<_, (String, String)>(session_sql().anchors.select_by_node.sql())
                 .bind(node_id)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?
         {
             let config =
-                crate::support::retained_fork_config_tx(&mut tx, node_id, self.fleet_format)
+                crate::support::retained_fork_config_tx(&mut tx, node_id, self.fence.fleet())
                     .await?;
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(lash_core_execution::ForkPoint {
@@ -471,11 +469,11 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             .bind(node_id)
             .bind(&checkpoint_ref)
             .bind(source_session_id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let config =
-            crate::support::retained_fork_config_tx(&mut tx, node_id, self.fleet_format).await?;
+            crate::support::retained_fork_config_tx(&mut tx, node_id, self.fence.fleet()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::ForkPoint {
             node_id: node_id.to_string().into(),
@@ -488,15 +486,15 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
 
     async fn unpin(&self, node_id: &lash_core_execution::NodeId) -> Result<(), StoreError> {
         let node_id = node_id.as_str();
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         sqlx::query(session_sql().graph_postgres.lock_live_id.sql())
             .bind(node_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let removed = sqlx::query(session_sql().anchors.delete_by_node.sql())
             .bind(node_id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();
@@ -527,7 +525,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 config: crate::support::retained_fork_config_tx(
                     &mut tx,
                     &node_id,
-                    self.fleet_format,
+                    self.fence.fleet(),
                 )
                 .await?,
                 node_id: node_id.into(),
@@ -544,7 +542,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         &self,
         request: &lash_core_execution::ForkSessionRequest,
     ) -> Result<lash_core_execution::ForkSessionReceipt, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         // Target identity fences precede source-retention fences. This unlocked
         // fast path only decides already-materialized targets and permanent
         // tombstones; keep the post-lock checks below for concurrent changes.
@@ -555,7 +553,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 .sql(),
         )
         .bind(request.session_id.as_str())
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         if exists {
@@ -582,7 +580,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         let exists =
             sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
                 .bind(request.session_id.as_str())
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
         if exists {
@@ -592,7 +590,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         }
         let deleted = sqlx::query_scalar::<_, bool>(session_sql().deleted_postgres.exists.sql())
             .bind(request.session_id.as_str())
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         if deleted {
@@ -608,7 +606,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 .sql(),
         )
         .bind(&*request.node_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         let (_owning_session_id, fork_generation) =
@@ -665,14 +663,14 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         )
         .bind(source_frame.kind().as_str())
         .bind(source_frame.canonical_id())
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         if source_ended {
             let mut checkpoint = crate::support::get_checkpoint_tx(
                 &mut tx,
                 &BlobRef(checkpoint_ref.clone()),
-                self.fleet_format,
+                self.fence.fleet(),
             )
             .await?
             .ok_or_else(|| StoreError::CheckpointRootMissing {
@@ -683,7 +681,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                     && !key.starts_with("execution_state/")
             });
             checkpoint_ref =
-                crate::support::put_checkpoint_tx(&mut tx, &checkpoint, self.fleet_format)
+                crate::support::put_checkpoint_tx(&mut tx, &checkpoint, self.fence.fleet())
                     .await?
                     .0
                     .as_str()
@@ -701,7 +699,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 session_sql().graph_postgres.select_edge_for_share.sql(),
             )
             .bind(&*current_node_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .ok_or_else(|| StoreError::StoredDataCorrupt {
@@ -744,7 +742,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         let head = lash_core_execution::store::SessionHeadMeta::assemble(
             &request.session_id,
             lash_core_execution::store::SessionHeadPayload {
-                schema_version: self.fleet_format.writer_version(
+                schema_version: self.fence.fleet().writer_version(
                     lash_core_execution::surface_format!(
                         lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
                     ),
@@ -771,7 +769,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             .bind(encode_json(&head.payload())?)
             .bind(&checkpoint_ref)
             .bind(&*request.node_id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         for ancestor in fork_plan.ancestors() {
@@ -784,7 +782,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                         "fork generation does not fit PostgreSQL BIGINT".to_string(),
                     )
                 })?)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
         }
@@ -800,7 +798,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             &meta,
             crate::session_meta::SessionMetaWrite::Insert,
             created_at_ms,
-            self.fleet_format,
+            self.fence.fleet(),
         )
         .await?;
         if !source_ended {
@@ -814,7 +812,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             .bind(source_frame.canonical_id())
             .bind(fork_frame.kind().as_str())
             .bind(fork_frame.canonical_id())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         }
@@ -863,14 +861,14 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         // composes age with durable owner-death proof: a later committed turn
         // supersedes a turn owner, a missing process row proves a process owner
         // was pruned, and only unscoped host puts use age alone.
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         sqlx::query(
             crate::attachments::attachment_sql()
                 .manifest_postgres
                 .delete_deleted_session_roots
                 .sql(),
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         let delete_sql = crate::attachments::forget_aged_uncommitted_attachment_intents_sql(
@@ -879,7 +877,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
         sqlx::query(delete_sql)
             .bind(cutoff)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let rows = sqlx::query(
@@ -888,7 +886,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
                 .select_rooted_ids
                 .sql(),
         )
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -929,7 +927,8 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         &self,
     ) -> Result<lash_core_execution::AttachmentSweepGeneration, lash_core_execution::StoreError>
     {
-        crate::attachments::begin_attachment_sweep(&self.pool, &self.catalog_id).await
+        crate::attachments::begin_attachment_sweep(&self.pool, &self.fence, &self.catalog_id)
+            .await
     }
 
     async fn adopt_attachment_condemnations(
@@ -937,8 +936,13 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         generation: &lash_core_execution::AttachmentSweepGeneration,
     ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, lash_core_execution::StoreError>
     {
-        crate::attachments::adopt_attachment_condemnations(&self.pool, &self.catalog_id, generation)
-            .await
+        crate::attachments::adopt_attachment_condemnations(
+            &self.pool,
+            &self.fence,
+            &self.catalog_id,
+            generation,
+        )
+        .await
     }
 
     async fn condemn_attachment(
@@ -948,7 +952,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         generation: &lash_core_execution::AttachmentSweepGeneration,
     ) -> Result<lash_core_execution::AttachmentCondemnation, lash_core_execution::StoreError> {
         let generation = crate::attachments::sweep_generation_sql(generation)?;
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         // The same per-digest lock a writer's `begin_attachment_write` takes:
         // the root predicate below and that writer's manifest insert cannot
         // interleave.
@@ -957,7 +961,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         let rooted = sqlx::query(self.live_attachment_ref_sql())
             .bind(id.as_str())
             .bind(cutoff)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .is_some();
@@ -973,7 +977,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         )
         .bind(id.as_str())
         .bind(generation)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
@@ -989,7 +993,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
                     .sql(),
             )
             .bind(id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         }
@@ -1013,7 +1017,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         // open `begin_attachment_write` — after it read `condemned` and before
         // it deleted the row — leaving the writer to erase a `deleting` row and
         // put bytes into an in-flight delete.
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
         let armed = sqlx::query(
             crate::attachments::attachment_sql()
@@ -1023,7 +1027,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         )
         .bind(id.as_str())
         .bind(generation)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
@@ -1040,7 +1044,8 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         &self,
         id: &lash_core_execution::AttachmentId,
     ) -> Result<(), lash_core_execution::StoreError> {
-        crate::attachments::recover_abandoned_attachment_write(&self.pool, id.as_str()).await
+        crate::attachments::recover_abandoned_attachment_write(&self.pool, &self.fence, id.as_str())
+            .await
     }
 
     async fn settle_attachment_condemnation(
@@ -1052,6 +1057,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
     {
         crate::attachments::settle_attachment_condemnation(
             &self.pool,
+            &self.fence,
             id.as_str(),
             generation,
             settlement,

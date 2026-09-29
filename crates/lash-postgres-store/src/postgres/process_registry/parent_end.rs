@@ -198,11 +198,14 @@ pub(crate) async fn plan_exists_tx(
 /// before this row exists, or reads the row and refuses the child.
 pub(super) async fn record(
     pool: &PgPool,
+    fence: &crate::guarded_tx::WriterFence,
     parent: &ScopeId,
     ended_at_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), PluginError> {
-    let mut tx = pool.begin().await.map_err(plugin_sqlx_error)?;
+    let mut tx = crate::begin_guarded(pool, fence)
+        .await
+        .map_err(crate::plugin_store_error)?;
+    let fleet_format = tx.fleet();
     record_tx(&mut tx, parent, ended_at_ms, fleet_format).await?;
     tx.commit().await.map_err(plugin_sqlx_error)
 }
@@ -380,24 +383,27 @@ pub(super) async fn children(
 /// row's claim owns its own settle, and a `stalled` row keeps its stall.
 pub(super) async fn settle(
     pool: &PgPool,
+    fence: &crate::guarded_tx::WriterFence,
     parent: &ScopeId,
     settled_at_ms: u64,
 ) -> Result<(), PluginError> {
     let (kind, id) = ledger_key(parent);
-    let mut tx = pool.begin().await.map_err(plugin_sqlx_error)?;
+    let mut tx = crate::begin_guarded(pool, fence)
+        .await
+        .map_err(crate::plugin_store_error)?;
     lock_parent_scope_tx(&mut tx, parent).await?;
     sqlx::query(process_sql().plan.settle.sql())
         .bind(kind)
         .bind(id.clone())
         .bind(settled_at_ms as i64)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
     sqlx::query(process_sql().plan.obligation_apply_delivered.sql())
         .bind(kind)
         .bind(id)
         .bind(settled_at_ms as i64)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
     tx.commit().await.map_err(plugin_sqlx_error)

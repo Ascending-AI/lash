@@ -16,34 +16,34 @@ pub(crate) async fn reclaim(
     bound: lash_core_execution::store::RetentionBound,
 ) -> ReclaimResult {
     async {
-        let mut tx = factory.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&factory.pool, &factory.fence).await?;
         // One cross-worker fence for this host-invoked, atomic multi-phase sweep.
         sqlx::query(
             crate::connection_sql::connection_sql()
                 .lock_xact_evidence_retention
                 .sql(),
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         // deleted_sessions permanently protects identity reuse (FIG-754 / FIG-748).
         let removed_receipt_count =
             sqlx::query(session_sql().turn_commits_postgres.delete_retained.sql())
                 .bind(clamp_epoch_ms(bound.committed_before_epoch_ms))
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?
                 .rows_affected() as usize;
         let removed_stopped_partial_count = sqlx::query(crate::capture::retention_delete_sql())
             .bind(clamp_epoch_ms(bound.committed_before_epoch_ms))
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .rows_affected() as usize;
         // Only terminal usage becomes eligible; live ledgers reconstruct
         // resumed accounting. Anti-join after the receipt-root sweep.
         let removed_usage_delta_count = sqlx::query(session_sql().usage.delete_reclaimable.sql())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .rows_affected() as usize;
@@ -55,7 +55,7 @@ pub(crate) async fn reclaim(
                 .delete_deleted_session_roots
                 .sql(),
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected() as usize;

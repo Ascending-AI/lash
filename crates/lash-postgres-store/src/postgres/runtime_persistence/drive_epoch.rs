@@ -113,8 +113,8 @@ impl PostgresStore {
         &self,
         connection: &'c mut sqlx::pool::PoolConnection<sqlx::Postgres>,
         session_id: &SessionId,
-    ) -> Result<PgTx<'c>, StoreError> {
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+    ) -> Result<crate::guarded_tx::GuardedTx<'c>, StoreError> {
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -150,7 +150,7 @@ impl DriveEpochStore for PostgresStore {
                     .bind(sql_counter_value("drive_epoch", next)?)
                     .bind(admission.as_str())
                     .bind(root_start.as_str())
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
                     .map_err(store_sqlx_error)?
                     .rows_affected();

@@ -410,20 +410,22 @@ impl TriggerStore for PostgresTriggerStore {
             command.owner_scope(),
             &subscription_key,
         );
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         sqlx::query(
             crate::connection_sql::connection_sql()
                 .lock_xact_by_text
                 .sql(),
         )
         .bind(&subscription_id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
 
         let stored = sqlx::query(sql.receipt.select_by_operation_id.sql())
             .bind(&receipt_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
         if let Some(row) = stored {
@@ -453,7 +455,7 @@ impl TriggerStore for PostgresTriggerStore {
         {
             let rows = sqlx::query(sql.subscription_postgres.select_records_for_prune.sql())
                 .bind(owner_scope.namespace())
-                .fetch_all(&mut *tx)
+                .fetch_all(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
             let records = rows
@@ -474,7 +476,7 @@ impl TriggerStore for PostgresTriggerStore {
             let current_json: Option<String> =
                 sqlx::query_scalar(sql.subscription_postgres.select_record_by_id.sql())
                     .bind(&subscription_id)
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(&mut **tx)
                     .await
                     .map_err(plugin_sqlx_error)?;
             let current = current_json
@@ -525,7 +527,7 @@ impl TriggerStore for PostgresTriggerStore {
                 .bind(record.created_at_ms as i64)
                 .bind(record.updated_at_ms as i64)
                 .bind(serde_json::to_string(record).map_err(process_decode_error)?)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
         }
@@ -536,7 +538,7 @@ impl TriggerStore for PostgresTriggerStore {
             .bind(&request_fingerprint)
             .bind(serde_json::to_string(&result).map_err(process_decode_error)?)
             .bind(now as i64)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -579,14 +581,16 @@ impl TriggerStore for PostgresTriggerStore {
     ) -> Result<usize, PluginError> {
         let sql = trigger_sql();
         let owner_scope = lash_core_execution::TriggerOwnerScope::session(session_id).namespace();
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         let rows = sqlx::query(
             sql.subscription_postgres
                 .select_session_owned_for_update
                 .sql(),
         )
         .bind(&owner_scope)
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
         let now = self.clock.timestamp_ms();
@@ -607,7 +611,7 @@ impl TriggerStore for PostgresTriggerStore {
                 .bind(sql_revision)
                 .bind(now as i64)
                 .bind(serde_json::to_string(&record).map_err(process_decode_error)?)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
         }
@@ -623,14 +627,16 @@ impl TriggerStore for PostgresTriggerStore {
         let sql = trigger_sql();
         let occurrence_id =
             lash_core_execution::facade_support::deterministic_occurrence_id(&request);
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         sqlx::query(
             crate::connection_sql::connection_sql()
                 .lock_xact_by_text
                 .sql(),
         )
         .bind(&request.idempotency_key)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
         let existing = sqlx::query(
@@ -639,7 +645,7 @@ impl TriggerStore for PostgresTriggerStore {
                 .sql(),
         )
         .bind(&request.idempotency_key)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
         let (occurrence, is_new) = if let Some(row) = existing {
@@ -675,7 +681,7 @@ impl TriggerStore for PostgresTriggerStore {
                 .bind(&occurrence.source_key)
                 .bind(occurrence.occurred_at_ms as i64)
                 .bind(serde_json::to_string(&occurrence).map_err(process_decode_error)?)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
             (occurrence, true)
@@ -697,7 +703,7 @@ impl TriggerStore for PostgresTriggerStore {
             sqlx::query(sql.occurrence.arm_reclaimable.sql())
                 .bind(&occurrence.occurrence_id)
                 .bind(i64::try_from(occurrence.occurred_at_ms).unwrap_or(i64::MAX))
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
         }
@@ -787,15 +793,21 @@ impl TriggerStore for PostgresTriggerStore {
         process_id: &ProcessId,
     ) -> Result<(), PluginError> {
         let bound_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
-        let bound = sqlx::query(trigger_sql().delivery.bind_process.sql())
-            .bind(occurrence_id)
-            .bind(subscription_id)
-            .bind(process_id.as_str())
-            .bind(bound_at_ms)
-            .execute(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?
-            .rows_affected();
+        let bound = crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
+            Box::pin(async move {
+                sqlx::query(trigger_sql().delivery.bind_process.sql())
+                    .bind(occurrence_id)
+                    .bind(subscription_id)
+                    .bind(process_id.as_str())
+                    .bind(bound_at_ms)
+                    .execute(tx.as_mut())
+                    .await
+                    .map_err(crate::store_sqlx_error)
+            })
+        })
+        .await
+        .map_err(crate::plugin_store_error)?
+        .rows_affected();
         if bound == 1 {
             Ok(())
         } else {
@@ -878,7 +890,9 @@ impl TriggerStore for PostgresTriggerStore {
                 lash_core_execution::TriggerOwnerScope::session(session_id).namespace()
             })
             .collect::<Vec<_>>();
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
 
         let reclaimed_delivery_count = if candidates.is_empty() {
             0
@@ -892,21 +906,21 @@ impl TriggerStore for PostgresTriggerStore {
                         .map(ProcessId::as_str)
                         .collect::<Vec<_>>(),
                 )
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize
         };
         let reclaimed_occurrence_count =
             sqlx::query(sql.occurrence_postgres.delete_orphan_fired.sql())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize;
 
         let blocked_owner_scopes: Vec<String> =
             sqlx::query_scalar(sql.delivery_postgres.select_session_owner_scopes.sql())
-                .fetch_all(&mut *tx)
+                .fetch_all(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
         let blocked_owner_scopes = blocked_owner_scopes
@@ -927,7 +941,7 @@ impl TriggerStore for PostgresTriggerStore {
                     .sql(),
             )
             .bind(&deleted_owner_scopes)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?
             .rows_affected() as usize
@@ -937,7 +951,7 @@ impl TriggerStore for PostgresTriggerStore {
         } else {
             sqlx::query(sql.receipt_postgres.delete_for_session_owners.sql())
                 .bind(&receipt_owner_ids)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize
@@ -973,7 +987,9 @@ impl TriggerStore for PostgresTriggerStore {
             .map(|candidate| candidate.process_id.clone())
             .collect::<Vec<_>>();
         let armed_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
         let deleted = sqlx::query(sql.delivery_postgres.delete_retention_candidates.sql())
             .bind(occurrence_ids)
             .bind(subscription_ids)
@@ -983,7 +999,7 @@ impl TriggerStore for PostgresTriggerStore {
                     .map(ProcessId::as_str)
                     .collect::<Vec<_>>(),
             )
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?
             .rows_affected() as usize;
@@ -995,7 +1011,7 @@ impl TriggerStore for PostgresTriggerStore {
                     .collect::<Vec<_>>(),
             )
             .bind(armed_at_ms)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -1031,18 +1047,25 @@ impl TriggerStore for PostgresTriggerStore {
             .collect::<Vec<_>>();
 
         for occurrence_id in candidates {
-            let deleted = sqlx::query(sql.occurrence_postgres.delete_reclaimable_by_id.sql())
-                .bind(&occurrence_id)
-                .bind(cutoff_epoch_ms)
-                .execute(&self.pool)
-                .await
-                .map_err(|error| {
-                    lash_core_execution::MaintenanceFailure::failed(
-                        Box::new(plugin_sqlx_error(error)),
-                        report.clone(),
-                    )
-                })?
-                .rows_affected() as usize;
+            let occurrence_id = occurrence_id.as_str();
+            let deleted = crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
+                Box::pin(async move {
+                    sqlx::query(sql.occurrence_postgres.delete_reclaimable_by_id.sql())
+                        .bind(occurrence_id)
+                        .bind(cutoff_epoch_ms)
+                        .execute(tx.as_mut())
+                        .await
+                        .map_err(crate::store_sqlx_error)
+                })
+            })
+            .await
+            .map_err(|error| {
+                lash_core_execution::MaintenanceFailure::failed(
+                    Box::new(crate::plugin_store_error(error)),
+                    report.clone(),
+                )
+            })?
+            .rows_affected() as usize;
             if deleted == 0 {
                 report.reinspection_deferred_count += 1;
             } else {
@@ -1054,14 +1077,18 @@ impl TriggerStore for PostgresTriggerStore {
 
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        Ok(
-            sqlx::query(trigger_sql().receipt.prune_host_and_platform.sql())
-                .bind(cutoff_epoch_ms)
-                .execute(&self.pool)
-                .await
-                .map_err(plugin_sqlx_error)?
-                .rows_affected() as usize,
-        )
+        let pruned = crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
+            Box::pin(async move {
+                sqlx::query(trigger_sql().receipt.prune_host_and_platform.sql())
+                    .bind(cutoff_epoch_ms)
+                    .execute(tx.as_mut())
+                    .await
+                    .map_err(crate::store_sqlx_error)
+            })
+        })
+        .await
+        .map_err(crate::plugin_store_error)?;
+        Ok(pruned.rows_affected() as usize)
     }
 
     async fn prune_non_fired_occurrences(
@@ -1069,14 +1096,18 @@ impl TriggerStore for PostgresTriggerStore {
         cutoff_epoch_ms: u64,
     ) -> Result<usize, PluginError> {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        Ok(
-            sqlx::query(trigger_sql().occurrence_postgres.prune_non_fired.sql())
-                .bind(cutoff_epoch_ms)
-                .execute(&self.pool)
-                .await
-                .map_err(plugin_sqlx_error)?
-                .rows_affected() as usize,
-        )
+        let pruned = crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
+            Box::pin(async move {
+                sqlx::query(trigger_sql().occurrence_postgres.prune_non_fired.sql())
+                    .bind(cutoff_epoch_ms)
+                    .execute(tx.as_mut())
+                    .await
+                    .map_err(crate::store_sqlx_error)
+            })
+        })
+        .await
+        .map_err(crate::plugin_store_error)?;
+        Ok(pruned.rows_affected() as usize)
     }
 }
 

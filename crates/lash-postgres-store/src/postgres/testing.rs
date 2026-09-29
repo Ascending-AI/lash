@@ -34,6 +34,156 @@ pub use crate::fault_injection::{
     PostgresFaultArm, PostgresFaultInjector, PostgresFaultObservation, PostgresFaultPoint,
 };
 
+/// The `AfterFence` seam (ADR 0115 §6): pauses a guarded transaction right
+/// after its writer fence, while it holds the fleet-format row `FOR SHARE`.
+///
+/// Install it on a storage with
+/// [`PostgresStorage::with_after_fence_for_testing`](crate::PostgresStorage::with_after_fence_for_testing);
+/// every handle that storage hands out passes it. Each [`Self::pause_next`]
+/// arms one pause, taken by the next transaction whose fence admits `F`, in
+/// arming order. It also counts fences that met lock contention, so a test can
+/// tell a retried fence from a first one.
+#[derive(Clone, Debug, Default)]
+pub struct AfterFence {
+    state: std::sync::Arc<std::sync::Mutex<AfterFenceState>>,
+}
+
+#[derive(Debug, Default)]
+struct AfterFenceState {
+    armed: std::collections::VecDeque<ArmedPause>,
+    passed: Vec<u32>,
+    contended: u64,
+}
+
+#[derive(Debug)]
+struct ArmedPause {
+    reached: tokio::sync::oneshot::Sender<u32>,
+    release: tokio::sync::oneshot::Receiver<()>,
+}
+
+/// One armed pause: the transaction that takes it waits after its fence
+/// until [`Self::release`] (or until this handle is dropped).
+#[derive(Debug)]
+pub struct FencePause {
+    reached: Option<tokio::sync::oneshot::Receiver<u32>>,
+    release: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl AfterFence {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Pause the next guarded transaction that passes its fence.
+    pub fn pause_next(&self) -> FencePause {
+        let (reached_tx, reached_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        self.lock_state().armed.push_back(ArmedPause {
+            reached: reached_tx,
+            release: release_rx,
+        });
+        FencePause {
+            reached: Some(reached_rx),
+            release: Some(release_tx),
+        }
+    }
+
+    /// The epoch each fence that admitted its transaction read, in order.
+    pub fn passed(&self) -> Vec<u32> {
+        self.lock_state().passed.clone()
+    }
+
+    /// How many fences failed on lock contention.
+    pub fn contended(&self) -> u64 {
+        self.lock_state().contended
+    }
+
+    pub(crate) fn record_contended(&self) {
+        self.lock_state().contended += 1;
+    }
+
+    /// Called by a fence that admitted `recorded`: takes the next armed pause,
+    /// if any, and waits for its release.
+    pub(crate) async fn pass(&self, recorded: u32) {
+        let armed = {
+            let mut state = self.lock_state();
+            state.passed.push(recorded);
+            state.armed.pop_front()
+        };
+        if let Some(armed) = armed {
+            let _ = armed.reached.send(recorded);
+            let _ = armed.release.await;
+        }
+    }
+
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, AfterFenceState> {
+        use lash_sansio::sync::MutexExt;
+        self.state.lock_recover()
+    }
+}
+
+impl FencePause {
+    /// Wait until a transaction has taken this pause; answers the `F` its
+    /// fence read.
+    ///
+    /// # Panics
+    ///
+    /// Panics when called twice, or when the seam was dropped unreached.
+    #[expect(
+        clippy::expect_used,
+        reason = "test-harness helper: a pause awaited twice or never reachable is a test-authoring fault"
+    )]
+    pub async fn reached(&mut self) -> u32 {
+        self.reached
+            .take()
+            .expect("a pause is awaited once")
+            .await
+            .expect("the seam holding this pause was dropped before a fence reached it")
+    }
+
+    /// Let the paused transaction continue.
+    pub fn release(mut self) {
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
+    }
+}
+
+/// Finalize's side of the fence, for tests that race it (ADR 0115 §2.2):
+/// read the fleet-format row `FOR UPDATE`, move it to `epoch`, and hold the
+/// transaction open until [`HeldFinalize::commit`].
+///
+/// FIG-3800 B ships the operator's finalize; until then this is the one
+/// place that moves `F` the way finalize will.
+pub struct HeldFinalize {
+    tx: sqlx::Transaction<'static, sqlx::Postgres>,
+}
+
+impl HeldFinalize {
+    /// Begin finalize: waits behind every writer holding the row `FOR SHARE`.
+    pub async fn begin(pool: &sqlx::PgPool, epoch: u32) -> Result<Self, sqlx::Error> {
+        let mut tx = pool.begin().await?;
+        sqlx::query("SELECT format_version FROM lash_fleet_format WHERE singleton FOR UPDATE")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE lash_fleet_format SET format_version = $1 WHERE singleton")
+            .bind(i32::try_from(epoch).unwrap_or(i32::MAX))
+            .execute(&mut *tx)
+            .await?;
+        Ok(Self { tx })
+    }
+
+    /// Commit the move.
+    pub async fn commit(self) -> Result<(), sqlx::Error> {
+        self.tx.commit().await
+    }
+}
+
+/// Finalize `F` to `epoch` in one transaction (see [`HeldFinalize`]).
+pub async fn finalize_fleet_epoch(pool: &sqlx::PgPool, epoch: u32) -> Result<(), sqlx::Error> {
+    HeldFinalize::begin(pool, epoch).await?.commit().await
+}
+
 /// A throwaway Postgres database, created for one test and dropped with it.
 ///
 /// Construction connects to the maintenance database named in the base URL,

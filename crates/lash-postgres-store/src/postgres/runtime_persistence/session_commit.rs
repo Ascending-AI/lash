@@ -1,4 +1,5 @@
 use super::*;
+use crate::guarded_tx::FleetMoved;
 use crate::session_sql::session_sql;
 
 /// End every frame in `left` (the frames the commit leaves) in the commit's
@@ -193,7 +194,7 @@ impl SessionCommitStore for PostgresStore {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let version =
-            read_session_state_version_tx(&mut tx, session_id, false, self.fleet_format).await?;
+            read_session_state_version_tx(&mut tx, session_id, false, self.fence.fleet()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(version)
     }
@@ -209,7 +210,7 @@ impl SessionCommitStore for PostgresStore {
             .await?;
         require_drive_fence_tx(&mut tx, fence).await?;
         let version =
-            read_session_state_version_tx(&mut tx, fence.session(), true, self.fleet_format)
+            read_session_state_version_tx(&mut tx, fence.session(), true, self.fence.fleet())
                 .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::store::SessionStateAdmission {
@@ -225,7 +226,7 @@ impl SessionCommitStore for PostgresStore {
         base: &lash_core_execution::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -233,7 +234,7 @@ impl SessionCommitStore for PostgresStore {
         sqlx::query(session_sql().meta.retain_admission_base.sql())
             .bind(fence.session().as_str())
             .bind(base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str()))
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -246,7 +247,7 @@ impl SessionCommitStore for PostgresStore {
         follow_on_turn_id: &lash_core_execution::TurnId,
     ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -269,7 +270,7 @@ impl SessionCommitStore for PostgresStore {
                 ))?,
             )
             .bind(follow_on_turn_id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         if updated.rows_affected() != 1 {
@@ -286,21 +287,132 @@ impl SessionCommitStore for PostgresStore {
         self.read_session_state_version(session_id).await?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        let meta = load_session_head_meta_tx(&mut tx, session_id, false, self.fleet_format).await?;
+        let meta =
+            load_session_head_meta_tx(&mut tx, session_id, false, self.fence.fleet()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(meta)
     }
 
+    /// A commit's payloads are encoded before `BEGIN`, under the last `F`
+    /// this store's fences observed. When the fence finds `F` moved to
+    /// another writable epoch, the commit rolls back, is encoded again under
+    /// the new one and runs once more (ADR 0115 §2.3); `F` moves at most once
+    /// per release, so a second move is plain contention.
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
+        let encoded_under = self.fence.fleet();
         let planner =
-            lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, self.fleet_format)?;
+            lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, encoded_under)?;
+        match self.commit_encoded(&planner, encoded_under).await? {
+            Ok(receipt) => Ok(receipt),
+            Err(moved) => {
+                let planner = lash_core_execution::store::RuntimeCommitPlanner::prepare(
+                    planner.commit().clone(),
+                    moved.current,
+                )?;
+                self.commit_encoded(&planner, moved.current)
+                    .await?
+                    .map_err(|_| StoreError::Contended)
+            }
+        }
+    }
+
+    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
+        let created_at_ms = self.clock.timestamp_ms();
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+        ensure_session_not_deleted_tx(&mut tx, &meta.session_id).await?;
+        // FIG-3045: the recorded lineage is write-once, so a metadata replace
+        // that moves it is refused here exactly as admission refuses a
+        // conflicting rebind.
+        if let Some(recorded) =
+            crate::session_meta::load_recorded_lineage_tx(&mut tx, &meta.session_id).await?
+        {
+            lash_core_execution::store_backend_support::guard_session_meta_relation_rewrite(
+                &meta.session_id,
+                &recorded,
+                &meta.relation,
+            )?;
+        }
+        crate::session_meta::write_session_meta_tx(
+            &mut tx,
+            &meta,
+            crate::session_meta::SessionMetaWrite::Replace,
+            created_at_ms,
+            self.fence.fleet(),
+        )
+        .await?;
+        tx.commit().await.map_err(store_sqlx_error)
+    }
+
+    async fn load_session_meta(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionMeta>, StoreError> {
+        crate::session_meta::load_session_meta(&self.pool, Some(session_id)).await
+    }
+
+    async fn load_session_meta_for_commit(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionMeta>, StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        self.load_session_meta(session_id).await
+    }
+
+    async fn record_turn_park(
+        &self,
+        park: &lash_core_execution::store::TurnParkWrite,
+    ) -> Result<lash_core_execution::store::TurnPark, StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+        ensure_session_not_deleted_tx(&mut tx, &park.session_id).await?;
+        let recorded = super::turn_park::record_turn_park_tx(&mut tx, park).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(recorded)
+    }
+
+    async fn load_turn_park(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<lash_core_execution::store::TurnPark>, StoreError> {
+        sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .turn_parks
+                .select_by_session
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?
+        .as_ref()
+        .map(super::turn_park::decode_turn_park_row)
+        .transpose()
+    }
+}
+
+impl PostgresStore {
+    /// One attempt at a commit `planner` encoded under `encoded_under`:
+    /// `Ok(Err(FleetMoved))` when the fence read another epoch, having
+    /// written nothing.
+    async fn commit_encoded(
+        &self,
+        planner: &lash_core_execution::store::RuntimeCommitPlanner,
+        encoded_under: lash_core_execution::FleetFormat,
+    ) -> Result<Result<RuntimeCommitReceipt, FleetMoved>, StoreError> {
         let commit = planner.commit();
         let now = self.clock.timestamp_ms();
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+        if let Err(moved) = tx.require_encoded_under(encoded_under) {
+            return Ok(Err(moved));
+        }
         // The simulator's backend-fault plan arms this transaction seam; the
         // `testing` feature is off in production, where these expand to nothing.
         #[cfg(feature = "testing")]
@@ -321,7 +433,7 @@ impl SessionCommitStore for PostgresStore {
         let admitted =
             sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
                 .bind(commit.session_id.as_str())
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
         if !admitted {
@@ -337,8 +449,7 @@ impl SessionCommitStore for PostgresStore {
         // mutating graph reachability, existing sessions lock and recheck this
         // revision so commit, maintenance, and deletion share one authority.
         let existing =
-            load_session_head_meta_tx(&mut tx, &commit.session_id, false, self.fleet_format)
-                .await?;
+            load_session_head_meta_tx(&mut tx, &commit.session_id, false, encoded_under).await?;
         planner.validate_node_derivation()?;
         {
             // A root's commit settles its park (FIG-3586, FIG-3600 S7) in the
@@ -353,7 +464,7 @@ impl SessionCommitStore for PostgresStore {
             .bind(commit.session_id.as_str())
             .bind(planner.operation_key())
             .bind(commit.settled_park_root().map(|root| root.as_str()))
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
             if let Some(row) = prior {
@@ -379,7 +490,7 @@ impl SessionCommitStore for PostgresStore {
                     &commit.session_id,
                     planner.operation_key(),
                     &result_json,
-                    self.fleet_format,
+                    encoded_under,
                 )?;
                 lash_core_execution::store::validate_turn_commit_outcome_code(
                     &result,
@@ -414,14 +525,14 @@ impl SessionCommitStore for PostgresStore {
                         .bind(closure.session_id().as_str())
                         .bind(closure.turn_id().as_str())
                         .bind(encoded)
-                        .execute(&mut *tx)
+                        .execute(&mut **tx)
                         .await
                         .map_err(store_sqlx_error)?;
                     }
                     pg_sim_fault!(self.fault_injector, BeforeCommit, write_transaction_ordinal);
                     pg_sim_fault!(self.fault_injector, CommitIo, write_transaction_ordinal);
                     tx.commit().await.map_err(store_sqlx_error)?;
-                    return Ok(replay.into_result());
+                    return Ok(Ok(replay.into_result()));
                 }
             }
         }
@@ -471,7 +582,7 @@ impl SessionCommitStore for PostgresStore {
                         .sql(),
                 )
                 .bind(&scope_id)
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
                 if retired {
@@ -488,7 +599,7 @@ impl SessionCommitStore for PostgresStore {
                 sqlx::query_scalar(session_sql().turn_commits.exists_for_turn.sql())
                     .bind(closure.session_id().as_str())
                     .bind(final_key)
-                    .fetch_one(&mut *tx)
+                    .fetch_one(&mut **tx)
                     .await
                     .map_err(store_sqlx_error)?;
             if committed {
@@ -505,7 +616,7 @@ impl SessionCommitStore for PostgresStore {
             )
             .bind(closure.session_id().as_str())
             .bind(closure.turn_id().as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
             let expected = serde_json::to_string(closure).map_err(|error| {
@@ -535,13 +646,13 @@ impl SessionCommitStore for PostgresStore {
         // Publication owns the complete sorted blob-row set before this fresh
         // commit locks or writes any checkpoint owner edge, graph row, or head.
         let (checkpoint_ref, manifest) =
-            put_checkpoint_tx(&mut tx, &commit.checkpoint, self.fleet_format).await?;
+            put_checkpoint_tx(&mut tx, &commit.checkpoint, encoded_under).await?;
         let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
         if existing.is_none() {
             let placeholder = SessionHeadMeta::assemble(
                 &commit.session_id,
                 SessionHeadPayload {
-                    schema_version: self.fleet_format.writer_version(
+                    schema_version: encoded_under.writer_version(
                         lash_core_execution::surface_format!(
                             lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
                         ),
@@ -557,14 +668,14 @@ impl SessionCommitStore for PostgresStore {
             sqlx::query(session_sql().head.insert_placeholder.sql())
                 .bind(commit.session_id.as_str())
                 .bind(encode_json(&placeholder.payload())?)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
         }
         let locked_revision =
             sqlx::query_scalar::<_, i64>(session_sql().head.select_revision_for_update.sql())
                 .bind(commit.session_id.as_str())
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?
                 .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
@@ -582,7 +693,7 @@ impl SessionCommitStore for PostgresStore {
                     .sql(),
             )
             .bind(leaf_node_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .map(|(generation, frame_node_id)| {
@@ -609,7 +720,7 @@ impl SessionCommitStore for PostgresStore {
             .bind(i64::try_from(parent.generation).map_err(|_| {
                 StoreError::Backend("parent generation does not fit PostgreSQL BIGINT".to_string())
             })?)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?,
         };
@@ -646,7 +757,7 @@ impl SessionCommitStore for PostgresStore {
         let occupied_node_ids =
             sqlx::query_scalar::<_, String>(session_sql().graph_postgres.select_occupied.sql())
                 .bind(&node_ids)
-                .fetch_all(&mut *tx)
+                .fetch_all(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?
                 .into_iter()
@@ -712,7 +823,7 @@ impl SessionCommitStore for PostgresStore {
                     .bind(entry.entry.usage.reasoning_output_tokens)
                     .bind(reconciled_call_id)
                     .bind(reconciled_attempt_ordinal)
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(&mut **tx)
                     .await
                     .map_err(store_sqlx_error)?;
             if let (
@@ -727,14 +838,14 @@ impl SessionCommitStore for PostgresStore {
                         .bind(&attempt.call_id)
                         .bind(i64::from(attempt.attempt_ordinal))
                         .bind(attempt.generation_id.as_deref())
-                        .execute(&mut *tx)
+                        .execute(&mut **tx)
                         .await
                         .map_err(store_sqlx_error)?;
                 }
             }
         }
         for (node, facts) in commit.graph.nodes().iter().zip(plan.planned_node_facts()) {
-            let node_json = node.encode_storage_body(self.fleet_format).map_err(|err| {
+            let node_json = node.encode_storage_body(encoded_under).map_err(|err| {
                 StoreError::Backend(format!("failed to encode graph node body: {err}"))
             })?;
             sqlx::query(session_sql().graph.insert.sql())
@@ -751,7 +862,7 @@ impl SessionCommitStore for PostgresStore {
                     StoreError::Backend("graph node body exceeds PostgreSQL BIGINT".to_string())
                 })?)
                 .bind(node_json)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(|error| {
                     graph_node_insert_error(
@@ -801,7 +912,7 @@ impl SessionCommitStore for PostgresStore {
                     meta.pending_follow_on.as_ref(),
                 )?,
             )
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await;
         let head_write = match head_write {
             Ok(result) => result,
@@ -829,7 +940,7 @@ impl SessionCommitStore for PostgresStore {
         ) {
             let actual_now = sqlx::query_scalar::<_, i64>(session_sql().head.select_revision.sql())
                 .bind(commit.session_id.as_str())
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?
                 .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
@@ -851,7 +962,7 @@ impl SessionCommitStore for PostgresStore {
         sqlx::query(session_sql().meta.touch_last_commit.sql())
             .bind(commit.session_id.as_str())
             .bind(i64::try_from(now).unwrap_or(i64::MAX))
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         if plan.head_changed()
@@ -881,7 +992,7 @@ impl SessionCommitStore for PostgresStore {
             .bind(commit.session_id.as_str())
             .bind(turn_id.as_str())
             .bind(AttachmentOwnerKind::Turn.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         }
@@ -918,7 +1029,7 @@ impl SessionCommitStore for PostgresStore {
                 .bind(columns.1)
                 .bind(columns.2)
                 .bind(!receipt.result.failure_evidence.is_empty())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             for batch_id in commit
@@ -939,7 +1050,7 @@ impl SessionCommitStore for PostgresStore {
                     .bind(None::<&str>)
                     .bind(now as i64)
                     .bind(false)
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
                     .map_err(store_sqlx_error)?;
             }
@@ -954,7 +1065,7 @@ impl SessionCommitStore for PostgresStore {
             )
             .bind(closure.session_id().as_str())
             .bind(closure.turn_id().as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         }
@@ -963,83 +1074,6 @@ impl SessionCommitStore for PostgresStore {
         pg_sim_fault!(self.fault_injector, BeforeCommit, write_transaction_ordinal);
         pg_sim_fault!(self.fault_injector, CommitIo, write_transaction_ordinal);
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(result)
-    }
-
-    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        let created_at_ms = self.clock.timestamp_ms();
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        ensure_session_not_deleted_tx(&mut tx, &meta.session_id).await?;
-        // FIG-3045: the recorded lineage is write-once, so a metadata replace
-        // that moves it is refused here exactly as admission refuses a
-        // conflicting rebind.
-        if let Some(recorded) =
-            crate::session_meta::load_recorded_lineage_tx(&mut tx, &meta.session_id).await?
-        {
-            lash_core_execution::store_backend_support::guard_session_meta_relation_rewrite(
-                &meta.session_id,
-                &recorded,
-                &meta.relation,
-            )?;
-        }
-        crate::session_meta::write_session_meta_tx(
-            &mut tx,
-            &meta,
-            crate::session_meta::SessionMetaWrite::Replace,
-            created_at_ms,
-            self.fleet_format,
-        )
-        .await?;
-        tx.commit().await.map_err(store_sqlx_error)
-    }
-
-    async fn load_session_meta(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<SessionMeta>, StoreError> {
-        crate::session_meta::load_session_meta(&self.pool, Some(session_id)).await
-    }
-
-    async fn load_session_meta_for_commit(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<SessionMeta>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        self.load_session_meta(session_id).await
-    }
-
-    async fn record_turn_park(
-        &self,
-        park: &lash_core_execution::store::TurnParkWrite,
-    ) -> Result<lash_core_execution::store::TurnPark, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        ensure_session_not_deleted_tx(&mut tx, &park.session_id).await?;
-        let recorded = super::turn_park::record_turn_park_tx(&mut tx, park).await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(recorded)
-    }
-
-    async fn load_turn_park(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<lash_core_execution::store::TurnPark>, StoreError> {
-        sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .turn_parks
-                .select_by_session
-                .sql(),
-        )
-        .bind(session_id.as_str())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(store_sqlx_error)?
-        .as_ref()
-        .map(super::turn_park::decode_turn_park_row)
-        .transpose()
+        Ok(Ok(result))
     }
 }

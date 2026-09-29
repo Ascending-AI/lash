@@ -31,7 +31,7 @@ impl PostgresStore {
         decide: impl Fn(&ControlIntentState) -> Option<ControlIntentState> + Send + Sync,
     ) -> Result<IntentSettle, StoreError> {
         for _ in 0..INTENT_WRITE_ATTEMPTS {
-            let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+            let mut tx = begin_guarded(&self.pool, &self.fence).await?;
             let Some(answer) = settle_intent_claimed_conn(&mut tx, id, claim, &decide).await?
             else {
                 continue;
@@ -50,7 +50,7 @@ impl ControlIntentStore for PostgresStore {
         request: &lash_core_execution::store::RootIntentRequest,
         at_ms: u64,
     ) -> Result<ControlIntent, lash_core_execution::store::RootIntentRefused> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let intent = crate::root_verbs::open_root_intent_tx(&mut tx, request, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(intent)
@@ -62,7 +62,7 @@ impl ControlIntentStore for PostgresStore {
         at_ms: u64,
     ) -> Result<Option<ControlIntent>, StoreError> {
         lash_core_execution::store::validate_session_id(session_id)?;
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let intent = begin_session_close_tx(&mut tx, session_id, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(intent)
@@ -74,7 +74,7 @@ impl ControlIntentStore for PostgresStore {
         at_ms: u64,
     ) -> Result<IntentApplication, StoreError> {
         for _ in 0..INTENT_WRITE_ATTEMPTS {
-            let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+            let mut tx = begin_guarded(&self.pool, &self.fence).await?;
             let stored = load_intent_conn(&mut tx, id)
                 .await?
                 .ok_or(StoreError::ControlIntentUnknown { intent: id })?;

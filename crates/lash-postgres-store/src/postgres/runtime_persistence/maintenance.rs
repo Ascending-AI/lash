@@ -31,7 +31,7 @@ impl StoreMaintenance for PostgresStore {
 impl PostgresStore {
     async fn vacuum_tombstones(&self, session_id: &SessionId) -> Result<VacuumReport, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         // `lash_deleted_sessions` is deliberately exempt: it is permanent
         // identity evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
         let removed_node_count = sqlx::query(
@@ -41,7 +41,7 @@ impl PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected() as usize;
@@ -52,7 +52,7 @@ impl PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
@@ -68,7 +68,7 @@ impl PostgresStore {
     }
     async fn gc_unreachable_blobs(&self) -> Result<GcReport, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         // Serialize against concurrent checkpoint-blob writers. Every commit
         // INSERTs its new manifest into `lash_blobs` (holding a ROW EXCLUSIVE
         // lock) inside the same transaction that repoints `lash_sessions`, so an
@@ -86,7 +86,7 @@ impl PostgresStore {
         // another session's live checkpoint.
         let root_refs =
             sqlx::query_scalar::<_, String>(session_sql().head.select_checkpoint_roots.sql())
-                .fetch_all(&mut *tx)
+                .fetch_all(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
         let root_count = root_refs.len();
@@ -102,7 +102,7 @@ impl PostgresStore {
             let bytes: Option<Vec<u8>> =
                 sqlx::query_scalar(crate::blobs::blob_sql().shared.select_content.sql())
                     .bind(&checkpoint_hash)
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(&mut **tx)
                     .await
                     .map_err(store_sqlx_error)?;
             let Some(bytes) = bytes else {
@@ -115,7 +115,7 @@ impl PostgresStore {
                     lash_core_execution::surface_format!(
                         lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION
                     ),
-                    self.fleet_format,
+                    self.fence.fleet(),
                 )?;
             // GC interprets only the root's ref graph, never component bodies.
             // Retain refs even when a newer writer used an unknown component
@@ -129,13 +129,13 @@ impl PostgresStore {
         // component can sort before its root, and its strict FK must never be
         // weakened to accommodate stale ownership data.
         sqlx::query(session_sql().checkpoint_edges.delete_unrooted.sql())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
         let all_hashes = sqlx::query_scalar::<_, String>(
             crate::blobs::blob_sql().shared.select_all_hashes.sql(),
         )
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
         let mut deleted_blob_count = 0usize;
@@ -145,7 +145,7 @@ impl PostgresStore {
             }
             sqlx::query(crate::blobs::blob_sql().shared.delete_by_hash.sql())
                 .bind(hash)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             deleted_blob_count += 1;

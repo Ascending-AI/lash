@@ -483,6 +483,7 @@ jobs:
           python3 scripts/test_check_service_gate_pinning.py
           python3 scripts/test_check_substrate_boundary.py
           python3 scripts/test_check_writer_stamps.py
+          python3 scripts/test_check_guarded_transactions.py
           python3 scripts/test_toolchain_canary.py
           python3 scripts/test_main_ci_policy.py
           python3 scripts/test_release_version.py
@@ -1441,6 +1442,9 @@ jobs:
 
       - name: Check fleet-format writer stamps
         run: python3 scripts/check_writer_stamps.py
+
+      - name: Check guarded transactions
+        run: python3 scripts/check-guarded-transactions.py
 
   unicode-tests:
     name: Test deferred Unicode suites

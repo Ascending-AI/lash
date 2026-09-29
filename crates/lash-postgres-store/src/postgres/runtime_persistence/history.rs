@@ -162,9 +162,9 @@ impl SessionHistoryStore for PostgresStore {
     ) -> Result<Option<SessionWindowRead>, StoreError> {
         let mut tx = read_tx(self).await?;
         check_live(&mut tx, session_id).await?;
-        read_session_state_version_tx(&mut tx, session_id, false, self.fleet_format).await?;
+        read_session_state_version_tx(&mut tx, session_id, false, self.fence.fleet()).await?;
         let Some(meta) =
-            load_session_head_meta_tx(&mut tx, session_id, false, self.fleet_format).await?
+            load_session_head_meta_tx(&mut tx, session_id, false, self.fence.fleet()).await?
         else {
             return match selector {
                 WindowSelector::Current => Ok(None),
@@ -185,7 +185,7 @@ impl SessionHistoryStore for PostgresStore {
         };
         let checkpoint = match checkpoint_ref.as_ref() {
             Some(reference) => {
-                let checkpoint = get_checkpoint_tx(&mut tx, reference, self.fleet_format).await?;
+                let checkpoint = get_checkpoint_tx(&mut tx, reference, self.fence.fleet()).await?;
                 if checkpoint.is_none() {
                     // An admitted base may have been collected since; the
                     // current head's own manifest never is, so its absence is
@@ -296,7 +296,7 @@ impl SessionHistoryStore for PostgresStore {
                     node_id,
                     parent,
                     &body,
-                    self.fleet_format,
+                    self.fence.fleet(),
                 )
                 .map_err(|error| corrupt("SessionGraph node", error.to_string()))?;
                 #[cfg(any(test, feature = "testing"))]
@@ -387,11 +387,12 @@ impl SessionHistoryStore for PostgresStore {
         let lineage = lineage_stamp(&mut tx, session_id).await?;
         let (pinned_leaf, start, expected_generation) = match anchor {
             HistoryAnchor::Head => {
-                let meta = load_session_head_meta_tx(&mut tx, session_id, false, self.fleet_format)
-                    .await?
-                    .ok_or_else(|| StoreError::SessionNotFound {
-                        session_id: session_id.clone(),
-                    })?;
+                let meta =
+                    load_session_head_meta_tx(&mut tx, session_id, false, self.fence.fleet())
+                        .await?
+                        .ok_or_else(|| StoreError::SessionNotFound {
+                            session_id: session_id.clone(),
+                        })?;
                 let Some(leaf) = meta.leaf_node_id else {
                     return Ok(HistoryPage {
                         pinned_leaf: None,
@@ -548,7 +549,7 @@ impl SessionHistoryStore for PostgresStore {
                 id,
                 header.parent,
                 &json,
-                self.fleet_format,
+                self.fence.fleet(),
             )
             .map_err(|error| corrupt("SessionGraph node", error.to_string()))?;
             #[cfg(any(test, feature = "testing"))]
@@ -775,7 +776,7 @@ impl SessionHistoryStore for PostgresStore {
                 session_id,
                 &turn_id,
                 &result_json,
-                self.fleet_format,
+                self.fence.fleet(),
             )?;
             lash_core_execution::store::validate_turn_commit_outcome_code(
                 &receipt,
