@@ -23,6 +23,8 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
     .build(crate::testing::runtime_lease_owner())?;
 
     core.session("commit-graph-only-budget-surface")
+        .created()
+        .await
         .open()
         .await?
         .send(TurnInput::text("graph rows only"))
@@ -32,6 +34,8 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
 
     let session = core
         .session("commit-adoption-row-budget-surface")
+        .created()
+        .await
         .open()
         .await?;
     let error = session

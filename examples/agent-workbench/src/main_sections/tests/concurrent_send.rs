@@ -101,9 +101,8 @@ async fn new_turn_after_abandoned_drive_admits_without_waiting() {
     // Materialize and park the durable session before incarnation A claims the
     // workflow lane. Dropping the acquisition value simulates process loss: it
     // performs no owner-side release, so the durable lease remains live.
-    let parked = state
-        .core
-        .session(session_id.clone())
+    let parked = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open the first incarnation")
@@ -124,9 +123,8 @@ async fn new_turn_after_abandoned_drive_admits_without_waiting() {
         .acquired()
         .expect("abandoned drive sealed");
 
-    let successor = state
-        .core
-        .session(session_id.clone())
+    let successor = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open the replacement incarnation");
@@ -182,9 +180,8 @@ async fn new_turn_after_abandoned_drive_admits_without_waiting() {
 
     // After takeover and completion, ordinary administration can reopen and
     // append against the current generation.
-    let contender = state
-        .core
-        .session(session_id.clone())
+    let contender = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open the replacement worker runtime");
@@ -238,9 +235,8 @@ async fn same_worker_successor_opens_after_abandoned_drive() {
     )
     .await;
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("materialize restart-gate session");
@@ -265,9 +261,8 @@ async fn same_worker_successor_opens_after_abandoned_drive() {
         .acquired()
         .expect("abandoned drive sealed");
 
-    let successor = state
-        .core
-        .session(session_id.clone())
+    let successor = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open same-worker successor boot");
@@ -365,15 +360,13 @@ async fn two_live_writers_rebase_appends_into_durable_graph_order() {
     let double = crate::tests::test_double_backend(0).await;
     let state = queued_send_test_state(&double, provider).await;
     let session_id = state.current_session_id();
-    let left = state
-        .core
-        .session(session_id.clone())
+    let left = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open left append writer");
-    let right = state
-        .core
-        .session(session_id.clone())
+    let right = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open right append writer");
@@ -451,9 +444,8 @@ async fn two_live_writers_rebase_appends_into_durable_graph_order() {
         .await
         .expect("CAS loser refreshes and commits its append");
 
-    let fresh = state
-        .core
-        .session(session_id)
+    let fresh = crate::created_session(&state.core, session_id)
+        .await
         .open()
         .await
         .expect("reopen durable append graph");
@@ -545,15 +537,13 @@ async fn reply_commit_reloads_past_queued_input_head_conflicts() {
     let double = crate::tests::test_double_backend(0).await;
     let state = queued_send_test_state(&double, provider).await;
     let session_id = state.current_session_id();
-    let follower = state
-        .core
-        .session(session_id.clone())
+    let follower = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open the reply-committing session");
-    let engine = state
-        .core
-        .session(session_id.clone())
+    let engine = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open the competing engine writer");
@@ -621,9 +611,8 @@ async fn reply_commit_reloads_past_queued_input_head_conflicts() {
     );
     commit.expect("the reply commit must reload and retry past head conflicts");
 
-    let fresh = state
-        .core
-        .session(session_id)
+    let fresh = crate::created_session(&state.core, session_id)
+        .await
         .open()
         .await
         .expect("reopen the durable session");
@@ -819,7 +808,7 @@ async fn slow_delete_retention_is_bounded_and_can_be_retried() {
     state.restate_ingress_url = spawn_slow_session_delete_retention_restate().await;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&old_session_id, "test")
+        .create_or_open_session(&old_session_id, "test")
         .await
         .expect("materialize the session before the slow delete");
 
@@ -878,7 +867,7 @@ async fn an_ambiguous_delete_attach_failure_never_claims_the_session_remains_liv
     state.restate_ingress_url = spawn_ambiguous_session_delete_restate().await;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&old_session_id, "test")
+        .create_or_open_session(&old_session_id, "test")
         .await
         .expect("materialize the session before the ambiguous delete");
 
@@ -967,7 +956,7 @@ async fn a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating()
     let mut state = queued_send_test_state(&double, provider).await;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&old_session_id, "test")
+        .create_or_open_session(&old_session_id, "test")
         .await
         .expect("materialize the session before simulated deletion");
     state.restate_ingress_url = spawn_tombstone_then_fail_session_delete_restate(
@@ -1024,7 +1013,7 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
     let mut state = queued_send_test_state(&double, provider).await;
     let retired_session_id = state.current_session_id();
     state
-        .open_session(&SessionId::from(&retired_session_id), "test")
+        .create_or_open_session(&SessionId::from(&retired_session_id), "test")
         .await
         .expect("materialize the session before deleting it");
     let selected_session_id = "workbench-selected-during-delete";
@@ -1114,7 +1103,7 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
     state.restate_ingress_url = restate_ingress_url;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&old_session_id, "test")
+        .create_or_open_session(&old_session_id, "test")
         .await
         .expect("materialize the old session before its failed delete");
 
@@ -1720,7 +1709,9 @@ async fn a_stalled_turn_does_not_block_competing_recovery_open() {
     );
     tokio::time::timeout(
         Duration::from_secs(2),
-        state.core.session(session_id.clone()).open(),
+        crate::created_session(&state.core, session_id.clone())
+            .await
+            .open(),
     )
     .await
     .expect("recovery open does not wait out a superseded predecessor")

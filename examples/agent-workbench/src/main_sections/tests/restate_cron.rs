@@ -150,6 +150,7 @@ pub(crate) async fn start_live_restate_cron_scenario(
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let LiveWorkbenchRestateHarness {
         state,
+        store_set: _,
         process_worker,
         backend,
         process_env_store: _,

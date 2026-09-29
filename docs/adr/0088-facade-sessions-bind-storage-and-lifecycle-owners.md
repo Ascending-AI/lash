@@ -4,6 +4,10 @@
 
 Accepted. Ratified on FIG-2872.
 
+Amended 2026-09-29 (FIG-4112): a session's store comes only from the core's
+catalog. Open resolves an existing store; only `create` writes one. The
+explicit store on `SessionBuilder` no longer exists.
+
 ## Context
 
 The facade previously treated session persistence as optional after open. A
@@ -22,10 +26,11 @@ resume use that binding. Resume carries the binding forward while taking live
 provider, plugin, prompt, tracing, and policy configuration from the receiving
 core. It does not substitute the receiving core's lifecycle services.
 
-An explicit store on `SessionBuilder` wins for that root session. Otherwise the
-core catalog creates or opens the store. With neither, open returns
-`MissingSessionStore` before admission or execution. Related sessions use the
-same admission and binding model; their relation may inform catalog selection,
+Every facade session's store comes from the core's catalog; there is no
+explicit store on `SessionBuilder`. Open resolves an existing store; only
+`create` writes one (FIG-4112), so an open of an id the catalog has never
+created is `UnknownSession`, before admission or execution. Related sessions
+use the same admission and binding model; their relation may inform catalog selection,
 but never permits reusing a parent's exact store or publishing a storeless
 executable runtime. [ADR 0089](0089-parent-relationships-do-not-define-a-second-session-model.md)
 records that broader session-model invariant. An explicitly chosen in-memory

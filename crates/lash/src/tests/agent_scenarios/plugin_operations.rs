@@ -67,7 +67,7 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
         .model(mock_model_spec())
         .plugin(Arc::new(StaticPluginFactory::new("accept", spec)))
         .build(crate::testing::runtime_lease_owner())?;
-        let session = core.session("plugin-accept").open().await?;
+        let session = core.session("plugin-accept").created().await.open().await?;
         let ops = session.plugin_operations();
         let probe = || "cobalt-583".to_string();
         let before = session.admin().state().persist_current().await?;

@@ -496,10 +496,9 @@ pub(in crate::runtime::session_manager) async fn create_session(
             .await?
             .is_some()
     {
-        return Err(crate::PluginError::Session(format!(
-            "session `{}` already exists",
-            plan.session_id
-        )));
+        return Err(crate::PluginError::SessionAlreadyExists {
+            session_id: plan.session_id,
+        });
     }
     let materialized = materialize_session_init(current, &plan).await?;
     // A host create returns only the durable handle: the runtime it assembled

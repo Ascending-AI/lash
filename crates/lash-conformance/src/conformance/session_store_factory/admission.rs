@@ -32,7 +32,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         crate::StoreError::InvalidSessionId { .. }
     ));
 
-    // A host API's creating verb bakes its config in (FIG-4099).
+    // The host API's creating verb bakes its config in (FIG-4099, FIG-4112).
     let request = crate::SessionStoreCreateRequest {
         head: crate::SessionCreationHead::Config,
         ..session_store_request(

@@ -90,7 +90,12 @@ async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt()
     .provider(prompt_capture_provider(Arc::clone(&captures)))
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core_v1.session("core-prompt-redeploy").open().await?;
+    let session = core_v1
+        .session("core-prompt-redeploy")
+        .created()
+        .await
+        .open()
+        .await?;
     session.send(TurnInput::text("commit V1")).output().await?;
     drop(session);
     // V1's drive outlives the answer while it closes the root's scope
@@ -110,6 +115,8 @@ async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt()
     .build(crate::testing::runtime_lease_owner())?;
     core_v2
         .session("core-prompt-redeploy")
+        .created()
+        .await
         .open()
         .await?
         .send(TurnInput::text("render V2"))
@@ -141,6 +148,8 @@ async fn open_with_state_without_builder_prompt_renders_supplied_snapshot_prompt
     .build(crate::testing::runtime_lease_owner())?;
 
     core.session("open-with-state-supplied-prompt")
+        .created()
+        .await
         .open_with_state(prompt_probe_state(
             &SessionId::from("open-with-state-supplied-prompt"),
             supplied,
@@ -156,10 +165,10 @@ async fn open_with_state_without_builder_prompt_renders_supplied_snapshot_prompt
     Ok(())
 }
 
-/// FIG-4099: the supplied snapshot is the session's config; a builder prompt
-/// stated beside it is not reconciled over it.
+/// FIG-4099, FIG-4112: the supplied snapshot is the session's config; the
+/// prompt the session was created with is not reconciled over it.
 #[tokio::test]
-async fn open_with_state_runs_the_supplied_snapshot_prompt_not_the_builders() -> Result<()> {
+async fn open_with_state_runs_the_supplied_snapshot_prompt_not_the_created_one() -> Result<()> {
     use crate::PromptLayerSink as _;
 
     let supplied = lash_core::PromptLayer::new().with_contribution(
@@ -174,10 +183,12 @@ async fn open_with_state_runs_the_supplied_snapshot_prompt_not_the_builders() ->
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    core.session("open-with-state-builder-prompt")
-        .instructions("OPEN WITH STATE NEW PROMPT")
+    core.session("open-with-state-created-prompt")
+        .create(crate::SessionCreation::default().instructions("OPEN WITH STATE NEW PROMPT"))
+        .await?;
+    core.session("open-with-state-created-prompt")
         .open_with_state(prompt_probe_state(
-            &SessionId::from("open-with-state-builder-prompt"),
+            &SessionId::from("open-with-state-created-prompt"),
             supplied,
         ))
         .await?
@@ -193,39 +204,6 @@ async fn open_with_state_runs_the_supplied_snapshot_prompt_not_the_builders() ->
     Ok(())
 }
 
-/// FIG-4099: a reopen runs with what the session recorded — for a head from
-/// before prompt persistence, no session prompt — and a host prompt stated at
-/// the reopen is ignored.
-#[tokio::test]
-async fn legacy_promptless_head_ignores_a_reopen_host_prompt_in_memory() -> Result<()> {
-    use crate::PromptLayerSink as _;
-
-    let backend = backend_from_literal_head(LEGACY_PROMPTLESS_HEAD_JSON).await;
-    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-
-    let session = core
-        .session("legacy-promptless")
-        .instructions("HOST SUPPLIED AT REOPEN")
-        .open()
-        .await?;
-    session.send(TurnInput::text("probe")).output().await?;
-
-    let requests = captures.lock_recover();
-    assert_eq!(requests.len(), 1);
-    assert!(
-        !rendered_system_prompt(&requests[0]).contains("HOST SUPPLIED AT REOPEN"),
-        "a reopen never reconciles the host prompt over the recorded config"
-    );
-    Ok(())
-}
-
 #[tokio::test]
 async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_in_memory() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -237,7 +215,12 @@ async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_in_memo
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let fresh = core.session("fresh-prompt-baseline").open().await?;
+    let fresh = core
+        .session("fresh-prompt-baseline")
+        .created()
+        .await
+        .open()
+        .await?;
     fresh.send(TurnInput::text("fresh probe")).output().await?;
     let legacy_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend_from_literal_head(LEGACY_PROMPTLESS_HEAD_JSON).await,
@@ -246,7 +229,12 @@ async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_in_memo
     .provider(prompt_capture_provider(Arc::clone(&captures)))
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let legacy = legacy_core.session("legacy-promptless").open().await?;
+    let legacy = legacy_core
+        .session("legacy-promptless")
+        .created()
+        .await
+        .open()
+        .await?;
     legacy
         .send(TurnInput::text("legacy probe"))
         .output()
@@ -281,7 +269,12 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_in_memory
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("committed-prompt").open().await?;
+    let session = core
+        .session("committed-prompt")
+        .created()
+        .await
+        .open()
+        .await?;
     session.send(TurnInput::text("probe")).output().await?;
 
     let requests = captures.lock_recover();
@@ -309,7 +302,12 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_in_m
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("explicit-empty-prompt").open().await?;
+    let session = core
+        .session("explicit-empty-prompt")
+        .created()
+        .await
+        .open()
+        .await?;
     session.send(TurnInput::text("probe")).output().await?;
 
     let requests = captures.lock_recover();
@@ -320,12 +318,11 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_in_m
     Ok(())
 }
 
-/// FIG-4099: a host prompt stated at a reopen is ignored and writes nothing;
-/// the prompt changes through `update(SessionConfigPatch)`, which recommits it.
+/// FIG-4099, FIG-4112: a reopen, which cannot state a prompt, writes
+/// nothing; the prompt changes through `update(SessionConfigPatch)`, which
+/// recommits it.
 #[tokio::test]
-async fn a_reopen_host_prompt_is_ignored_and_update_recommits_the_prompt_in_memory() -> Result<()> {
-    use crate::PromptLayerSink as _;
-
+async fn a_reopen_writes_nothing_and_update_recommits_the_prompt_in_memory() -> Result<()> {
     let old = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Old", "OLD STORED PROMPT"),
     );
@@ -349,11 +346,7 @@ async fn a_reopen_host_prompt_is_ignored_and_update_recommits_the_prompt_in_memo
         .load_session_head_meta()
         .await?
         .expect("seeded session head");
-    let session = core
-        .session("host-reprompt")
-        .instructions("NEW HOST PROMPT")
-        .open()
-        .await?;
+    let session = core.session("host-reprompt").open().await?;
     let after_open = store
         .load_session_head_meta()
         .await?
@@ -507,29 +500,6 @@ async fn sqlite_store_from_literal_legacy_head() -> (
 }
 
 #[tokio::test]
-async fn legacy_promptless_head_ignores_a_reopen_host_prompt_sqlite() -> Result<()> {
-    use crate::PromptLayerSink as _;
-
-    let (_stores, backend, _) = sqlite_store_from_literal_legacy_head().await;
-    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("legacy-promptless")
-        .instructions("SQLITE HOST PROMPT")
-        .open()
-        .await?;
-    session.send(TurnInput::text("probe")).output().await?;
-    assert!(!rendered_system_prompt(&captures.lock_recover()[0]).contains("SQLITE HOST PROMPT"));
-    Ok(())
-}
-
-#[tokio::test]
 async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_sqlite() -> Result<()> {
     let (_stores, backend, _) = sqlite_store_from_literal_legacy_head().await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -541,12 +511,16 @@ async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_sqlite(
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     core.session("fresh-sqlite-baseline")
+        .created()
+        .await
         .open()
         .await?
         .send(TurnInput::text("fresh"))
         .output()
         .await?;
     core.session("legacy-promptless")
+        .created()
+        .await
         .open()
         .await?
         .send(TurnInput::text("legacy"))
@@ -576,6 +550,8 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_sqlite() 
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     core.session("sqlite-committed")
+        .created()
+        .await
         .open()
         .await?
         .send(TurnInput::text("probe"))
@@ -606,6 +582,8 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_sqli
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     core.session("sqlite-explicit-empty")
+        .created()
+        .await
         .open()
         .await?
         .send(TurnInput::text("probe"))
@@ -618,9 +596,7 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_sqli
 }
 
 #[tokio::test]
-async fn a_reopen_host_prompt_is_ignored_and_update_recommits_the_prompt_sqlite() -> Result<()> {
-    use crate::PromptLayerSink as _;
-
+async fn a_reopen_writes_nothing_and_update_recommits_the_prompt_sqlite() -> Result<()> {
     let old = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Old", "SQLITE OLD PROMPT"),
     );
@@ -638,11 +614,7 @@ async fn a_reopen_host_prompt_is_ignored_and_update_recommits_the_prompt_sqlite(
         .load_session_head_meta()
         .await?
         .expect("seeded SQLite head");
-    let session = core
-        .session("sqlite-host-reprompt")
-        .instructions("SQLITE NEW HOST PROMPT")
-        .open()
-        .await?;
+    let session = core.session("sqlite-host-reprompt").open().await?;
     let after_open = store
         .load_session_head_meta()
         .await?

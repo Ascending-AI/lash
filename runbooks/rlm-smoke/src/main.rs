@@ -528,13 +528,25 @@ async fn main() -> Result<()> {
             engine.endpoint_builder(worker).build(),
         )
         .await?;
+    // A smoke run may name a session an earlier run created: create-or-use,
+    // written out, since only `create` creates (FIG-4112).
+    match core
+        .session(&args.session_id)
+        .create(lash::SessionCreation {
+            plugin_options: lash::plugins::PluginOptions::typed(
+                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash::rlm::RlmCreateExtras::default(),
+            )
+            .context("encode RLM session option")?,
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
+        Err(error) => return Err(error).context("create RLM smoke session"),
+    }
     let session = core
         .session(&args.session_id)
-        .plugin_option(
-            lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-            lash::rlm::RlmCreateExtras::default(),
-        )
-        .context("encode RLM session option")?
         .open()
         .await
         .context("open RLM smoke session")?;

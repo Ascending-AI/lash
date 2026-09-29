@@ -13,7 +13,7 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("parked-config").open().await?;
+    let session = core.session("parked-config").created().await.open().await?;
     session
         .send(TurnInput::text("establish head"))
         .output()
@@ -61,7 +61,12 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("incidental-reopen").open().await?;
+    let session = core
+        .session("incidental-reopen")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("establish head"))
         .output()
@@ -84,7 +89,12 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
         .await?;
     Box::pin(session.close()).await?;
 
-    let reopened = core.session("incidental-reopen").open().await?;
+    let reopened = core
+        .session("incidental-reopen")
+        .created()
+        .await
+        .open()
+        .await?;
     let policy = reopened.policy_snapshot();
     assert_eq!(
         policy.model, commanded_model,

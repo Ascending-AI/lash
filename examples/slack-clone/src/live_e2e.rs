@@ -36,7 +36,9 @@ mod host_shutdown_tests;
 #[path = "../../shared/shutdown_marker.rs"]
 mod shutdown_marker;
 
-use core_builders::{StandardCoreSpec, echo_tools, model_spec, provider, rlm_core, standard_core};
+use core_builders::{
+    StandardCoreSpec, create_or_open, echo_tools, model_spec, provider, rlm_core, standard_core,
+};
 
 pub const DEFAULT_RLM_MODEL: &str = "anthropic/claude-sonnet-5";
 pub const DEFAULT_STANDARD_MODEL: &str = "deepseek/deepseek-v4-flash-0731";
@@ -711,9 +713,7 @@ async fn run_smoke_probes(
     .await
     .map_err(FailureReason::harness)?;
     let stream_result = async {
-        let stream_session = stream_core
-            .session("live-smoke-stream")
-            .open()
+        let stream_session = create_or_open(&stream_core, "live-smoke-stream")
             .await
             .map_err(FailureReason::harness)?;
         let handle = stream_session
@@ -745,9 +745,7 @@ async fn run_smoke_probes(
     .await
     .map_err(FailureReason::harness)?;
     let tool_result = async {
-        let tool_session = tool_core
-            .session("live-smoke-tool")
-            .open()
+        let tool_session = create_or_open(&tool_core, "live-smoke-tool")
             .await
             .map_err(FailureReason::harness)?;
         tokio::time::timeout(
@@ -1127,7 +1125,7 @@ async fn run_attempt(
             return failed_attempt(attempt, nonce_a, nonce_b, ledger, error);
         }
     };
-    let session_a = match rlm.session(format!("swap-{attempt}-a")).open().await {
+    let session_a = match create_or_open(&rlm, format!("swap-{attempt}-a")).await {
         Ok(session) => session,
         Err(error) => {
             let primary = error.to_string();
@@ -1141,7 +1139,7 @@ async fn run_attempt(
             return failed_attempt(attempt, nonce_a, nonce_b, ledger, primary);
         }
     };
-    let session_b = match standard.session(format!("swap-{attempt}-b")).open().await {
+    let session_b = match create_or_open(&standard, format!("swap-{attempt}-b")).await {
         Ok(session) => session,
         Err(error) => {
             let primary = error.to_string();

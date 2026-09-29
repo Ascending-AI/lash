@@ -303,9 +303,8 @@ pub(crate) async fn retire_workbench_session(
     session_id: &SessionId,
 ) {
     drop(
-        state
-            .core
-            .session(session_id)
+        crate::created_session(&state.core, session_id)
+            .await
             .open()
             .await
             .expect("open session before retirement"),
@@ -365,9 +364,8 @@ fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
         .await;
         let session_id = state.current_session_id();
         drop(
-            state
-                .core
-                .session(&session_id)
+            crate::created_session(&state.core, &session_id)
+                .await
                 .open()
                 .await
                 .expect("materialize session before concurrent retirement"),
@@ -811,9 +809,8 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     // gate so its numbered-alt branch is covered from the real wire shape.
     let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state(&double, 4).await;
-    let session = state
-        .core
-        .session(state.current_session_id())
+    let session = crate::created_session(&state.core, state.current_session_id())
+        .await
         .open()
         .await
         .expect("open multi-attachment browser session");
@@ -1205,9 +1202,8 @@ async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_
     let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state(&double, 16).await;
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open canonical session");
@@ -1285,9 +1281,8 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
     // What the runtime commits for the same send: a runtime-minted id — here the
     // queued-ingress spelling, which no host can predict — carrying the turn
     // provenance the runtime stamps.
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open session for the committed turn input");
@@ -1525,9 +1520,8 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
         "user",
         first_prompt,
     );
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open pre-switch session");
@@ -1771,9 +1765,8 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     committed.parts.push(injected_attachment_part(
         lash::direct::AttachmentSource::stored(attachment),
     ));
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open attachment backfill session");
@@ -1864,9 +1857,8 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
     committed.parts.push(injected_attachment_part(
         lash::direct::AttachmentSource::stored(attachment),
     ));
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open attachment replay session");
@@ -1919,9 +1911,8 @@ async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
     message.parts.push(injected_attachment_part(
         lash::direct::AttachmentSource::stored(attachment.clone()),
     ));
-    let session = state
-        .core
-        .session(session_id)
+    let session = crate::created_session(&state.core, session_id)
+        .await
         .open()
         .await
         .expect("open committed attachment session");
@@ -2198,9 +2189,8 @@ async fn workbench_settled_turn_cancels_preserve_execution_done() {
     let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state(&double, 16).await;
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open cancel identity session");
@@ -2250,9 +2240,8 @@ async fn product_event_identity_deduplicates_real_live_and_canonical_turn_output
     state.event_tx =
         SessionEventRegistry::persistent(path.clone(), 4).expect("persistent product events");
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open real turn session");

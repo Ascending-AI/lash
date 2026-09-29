@@ -30,7 +30,12 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("delete-partial-report").open().await?;
+    let session = core
+        .session("delete-partial-report")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("materialize the session"))
         .output()

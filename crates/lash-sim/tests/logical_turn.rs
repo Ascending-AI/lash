@@ -361,8 +361,8 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
             "logical-turn-test-boot",
         ))
         .expect("build logical-turn sim core");
-    let session = core
-        .session("logical-turn-sim")
+    let session = created_session(&core, "logical-turn-sim")
+        .await
         .open()
         .await
         .expect("open sim session");
@@ -574,8 +574,8 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .into_handle();
     let (finish_core, finish_engine) =
         standard_core(finish_provider, Arc::new(NoTools), finish_trace.clone()).await;
-    let finish_session = finish_core
-        .session("logical-turn-finish")
+    let finish_session = created_session(&finish_core, "logical-turn-finish")
+        .await
         .open()
         .await
         .expect("open finish session");
@@ -619,8 +619,8 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         cancel_trace.clone(),
         None,
     );
-    let cancel_session = cancel_core
-        .session("logical-turn-cancel")
+    let cancel_session = created_session(&cancel_core, "logical-turn-cancel")
+        .await
         .open()
         .await
         .expect("open cancel session");
@@ -658,8 +658,8 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         Some(8),
     )
     .await;
-    let error_session = error_core
-        .session("logical-turn-error")
+    let error_session = created_session(&error_core, "logical-turn-error")
+        .await
         .open()
         .await
         .expect("open error session");
@@ -716,8 +716,8 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         bound_trace.clone(),
     )
     .await;
-    let bound_session = bound_core
-        .session("logical-turn-bound")
+    let bound_session = created_session(&bound_core, "logical-turn-bound")
+        .await
         .open()
         .await
         .expect("open bound session");
@@ -818,8 +818,8 @@ finish({ baton: baton });
             "logical-turn-test-boot",
         ))
         .expect("build RLM seed sim core");
-    let session = core
-        .session("logical-turn-rlm-seed")
+    let session = created_session(&core, "logical-turn-rlm-seed")
+        .await
         .open()
         .await
         .expect("open RLM seed session");
@@ -932,8 +932,8 @@ await control.continue_as({
             "logical-turn-test-boot",
         ))
         .expect("build RLM shadowed-control sim core");
-    let session = core
-        .session("logical-turn-rlm-shadowed-control")
+    let session = created_session(&core, "logical-turn-rlm-shadowed-control")
+        .await
         .open()
         .await
         .expect("open shadowed-control session");
@@ -1056,7 +1056,11 @@ async fn terminal_checkpoint_withheld_claim_is_traced_once() {
             "withheld-trace-test-boot",
         ))
         .unwrap();
-    let session = core.session(session_id.as_str()).open().await.unwrap();
+    let session = created_session(&core, session_id.as_str())
+        .await
+        .open()
+        .await
+        .unwrap();
     session
         .send(TurnInput::text("start the logical run"))
         .output()
@@ -1070,4 +1074,27 @@ async fn terminal_checkpoint_withheld_claim_is_traced_once() {
     let verdict = logical_turn_claims_settle_exactly_once(&trace.snapshot());
     assert!(verdict.is_passed(), "{verdict:?}");
     assert_global_invariants(&engine, "withheld-claim").await;
+}
+
+/// This test crate's one path to a session that may not exist yet
+/// (FIG-4112): only `create` creates, so this creates `session_id` with the
+/// core's config unless the catalog already holds it, then hands back the
+/// builder for the verb under test. An existing or deleted id is left for
+/// that verb to report.
+async fn created_session(
+    core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> lash::SessionBuilder {
+    let session_id = session_id.into();
+    match core
+        .session(session_id.clone())
+        .create(lash::SessionCreation::default())
+        .await
+    {
+        Ok(_)
+        | Err(lash::EmbedError::SessionAlreadyExists { .. })
+        | Err(lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. })) => {}
+        Err(error) => panic!("create session `{session_id}`: {error:?}"),
+    }
+    core.session(session_id)
 }

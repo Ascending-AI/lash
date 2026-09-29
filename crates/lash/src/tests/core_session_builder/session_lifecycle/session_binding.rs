@@ -107,7 +107,16 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     .model(model_spec("resume-model", None, 200_000))
     .build(owner)?;
 
-    let parked = Box::pin(source.session("owner-preserved").open().await?.park()).await?;
+    let parked = Box::pin(
+        source
+            .session("owner-preserved")
+            .created()
+            .await
+            .open()
+            .await?
+            .park(),
+    )
+    .await?;
     let resumed = receiving.resume(parked).await?;
     let result = resumed
         .send(TurnInput::text("use receiving core live configuration"))
@@ -174,7 +183,7 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    drop(core.session("delete-retry").open().await?);
+    drop(core.session("delete-retry").created().await.open().await?);
     let first = delete_bound_session_outcome(&core, "delete-retry").await?;
     let crate::SessionDeletion::Closing(closing) = first else {
         panic!("the failed retirement leaves the session closing, got {first:?}");
@@ -196,7 +205,7 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
             .was_deleted()
             .await?
     );
-    let reopened = core.session("delete-retry").open().await?;
+    let reopened = core.session("delete-retry").created().await.open().await?;
     let refused = reopened
         .send(TurnInput::text("sent to a closing session"))
         .output()
@@ -232,10 +241,11 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
     Ok(())
 }
 
-/// FIG-1559: the handle reports the relation the store recorded, and a rebind
-/// that renames the parent is a typed refusal rather than silent absorption.
+/// FIG-1559, FIG-4112: the handle reports the relation the store recorded,
+/// and a create naming another parent for an existing id is refused as
+/// `SessionAlreadyExists`, never absorbed into the recorded row.
 #[tokio::test]
-async fn parent_relation_is_read_back_and_a_conflicting_rebind_is_refused() -> Result<()> {
+async fn parent_relation_is_read_back_and_a_conflicting_create_is_refused() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
@@ -244,51 +254,41 @@ async fn parent_relation_is_read_back_and_a_conflicting_rebind_is_refused() -> R
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let child = core
-        .session("relation-child")
-        .parent("relation-parent")
-        .open()
+    core.session("relation-child")
+        .create(crate::SessionCreation {
+            parent: Some("relation-parent".into()),
+            ..Default::default()
+        })
         .await?;
+    let child = core.session("relation-child").open().await?;
     assert_eq!(child.parent_session_id(), Some("relation-parent"));
     drop(child);
 
-    // A reopen that names no parent still reports the recorded relation: the
-    // handle reads the durable fact, not the request it was built from.
+    // A reopen names no parent and still reports the recorded relation: the
+    // handle reads the durable fact.
     let reopened = core.session("relation-child").open().await?;
     assert_eq!(reopened.parent_session_id(), Some("relation-parent"));
     drop(reopened);
 
     let error = match core
         .session("relation-child")
-        .parent("other-parent")
-        .open()
+        .create(crate::SessionCreation {
+            parent: Some("other-parent".into()),
+            ..Default::default()
+        })
         .await
     {
-        Ok(_) => panic!("a rebind naming a different parent must be refused"),
+        Ok(_) => panic!("a create naming an existing id must be refused"),
         Err(error) => error,
     };
-    match &error {
-        crate::EmbedError::Store(lash_core::store::StoreError::SessionRelationMismatch {
-            session_id,
-            recorded,
-            requested,
-        }) => {
-            assert_eq!(session_id.as_str(), "relation-child");
-            assert_eq!(
-                **recorded,
-                lash_core::SessionLineage::Child {
-                    parent_session_id: "relation-parent".into()
-                }
-            );
-            assert_eq!(
-                **requested,
-                lash_core::SessionLineage::Child {
-                    parent_session_id: "other-parent".into()
-                }
-            );
-        }
-        other => panic!("expected a typed relation-mismatch refusal, got: {other:?}"),
-    }
+    assert!(
+        matches!(
+            &error,
+            crate::EmbedError::SessionAlreadyExists { session_id }
+                if session_id.as_str() == "relation-child"
+        ),
+        "expected SessionAlreadyExists, got: {error:?}"
+    );
 
     // The refusal left the recorded relation intact.
     let after = core.session("relation-child").open().await?;
@@ -344,7 +344,7 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     .model(model_spec("owner-services-model", None, 200_000))
     .build(owner)?;
 
-    let session = source.session(session_id).open().await?;
+    let session = source.session(session_id).created().await.open().await?;
     let process_id = source_registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(

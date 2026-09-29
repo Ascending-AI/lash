@@ -458,9 +458,7 @@ await task.fail({ reason: "parent observed child failure" });
         Some(1),
     )
     .await?;
-    let session = core
-        .session("sim-agent-failed-child-contract")
-        .open()
+    let session = crate::open_created_session(&core, "sim-agent-failed-child-contract")
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());
@@ -637,9 +635,7 @@ async fn facade_final_value_execution_inner(
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     engine.serve_processes(&core)?;
-    let session = core
-        .session(session_id)
-        .open()
+    let session = crate::open_created_session(&core, session_id)
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let result = engine
@@ -746,9 +742,7 @@ async fn facade_agent_process_execution_with_options(
         max_turns,
     )
     .await?;
-    let session = core
-        .session(session_id)
-        .open()
+    let session = crate::open_created_session(&core, session_id)
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());
@@ -818,9 +812,7 @@ finish({ recovered: true });
         effect_layer,
     )
     .await?;
-    let session = core
-        .session("sim-agent-durable-input-contract")
-        .open()
+    let session = crate::open_created_session(&core, "sim-agent-durable-input-contract")
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());

@@ -72,7 +72,13 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs() -> Resul
         crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
     )
     .await?;
-    let session = fixture.core.session("send-root-budget").open().await?;
+    let session = fixture
+        .core
+        .session("send-root-budget")
+        .created()
+        .await
+        .open()
+        .await?;
     let session_id = lash_core::SessionId::from("send-root-budget");
     let store = lash_core::runtime::live_session_view(&fixture.core.store_factory, &session_id)
         .await?
@@ -196,7 +202,7 @@ impl HeldDriveFixture {
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
         let session_id = lash_core::SessionId::from(session);
-        drop(core.session(session).open().await?);
+        drop(core.session(session).created().await.open().await?);
         let store = catalog
             .get()
             .and_then(|catalog| catalog.store_for(&session_id))
@@ -296,7 +302,13 @@ async fn a_root_retried_on_a_held_runtime_starts_from_the_durable_session() -> R
         ROOTS,
         "each root committed once"
     );
-    let session = fixture.core.session("drive-held-retry").open().await?;
+    let session = fixture
+        .core
+        .session("drive-held-retry")
+        .created()
+        .await
+        .open()
+        .await?;
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
     assert_eq!(
         session.durable().turn_input_applications().await?.len(),
@@ -344,7 +356,13 @@ async fn sibling_drive_roots(
 /// driven once the tick's relay delivers the obligation.
 async fn a_lost_drive_schedule_is_healed_by_the_reconcile_tick() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture.core.session("send-drain-sweep").open().await?;
+    let session = fixture
+        .core
+        .session("send-drain-sweep")
+        .created()
+        .await
+        .open()
+        .await?;
     let session_id = lash_core::SessionId::from("send-drain-sweep");
     let store = lash_core::runtime::live_session_view(&fixture.core.store_factory, &session_id)
         .await?
@@ -442,7 +460,15 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<
 async fn a_drive_on_a_deleted_session_answers_its_retirement() -> Result<()> {
     let fixture = fixture(1).await?;
     let session_id = lash_core::SessionId::from("send-retired");
-    drop(fixture.core.session("send-retired").open().await?);
+    drop(
+        fixture
+            .core
+            .session("send-retired")
+            .created()
+            .await
+            .open()
+            .await?,
+    );
     // The physical half of a deletion: the tombstone every store read and
     // store open of the session answers. The close's engine half is the
     // release of the session's live executions, and the law's session has
@@ -518,7 +544,15 @@ fn open_session_invocations(fixture: &Fixture, session: &lash_core::SessionId) -
 async fn a_root_replayed_after_its_session_was_deleted_replays_its_journal() -> Result<()> {
     let fixture = fixture(1).await?;
     let session_id = lash_core::SessionId::from("send-closed-replay");
-    drop(fixture.core.session("send-closed-replay").open().await?);
+    drop(
+        fixture
+            .core
+            .session("send-closed-replay")
+            .created()
+            .await
+            .open()
+            .await?,
+    );
     let root = lash_core::TurnId::from("closed-replay-root");
     let server = fixture._double.server();
     // The root's journal: its input, the generation sentinel, the start

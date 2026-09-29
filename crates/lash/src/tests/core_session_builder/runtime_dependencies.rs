@@ -119,7 +119,7 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
     session
         .plugin_factories
         .push(Arc::new(rlm_factory(&artifacts)));
-    let session_error = match session.open().await {
+    let session_error = match session.created().await.open().await {
         Ok(_) => panic!("a per-session RLM factory over another backend must be refused"),
         Err(error) => error,
     };
@@ -363,7 +363,12 @@ async fn external_process_port_composes_the_engine_session_work_and_drives_the_c
     ))
     .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("external-process-engine-work").open().await?;
+    let session = core
+        .session("external-process-engine-work")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor_before = session
         .observe()
         .current_observation()
@@ -789,6 +794,8 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         .await
         .expect("remove the partially published observer");
     core.session("fork-observer-branch")
+        .created()
+        .await
         .open_with_state(lash_core::RuntimeSessionState {
             session_id: SessionId::from("fork-observer-branch"),
             ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -828,7 +835,11 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         )
         .await
         .expect("deliberately remove the recovered observer");
-    core.session("fork-observer-branch").open().await?;
+    core.session("fork-observer-branch")
+        .created()
+        .await
+        .open()
+        .await?;
     assert!(
         registry
             .list_observed_by(
@@ -1122,7 +1133,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             .await?,
         "the fixture must preserve the real crash gap before publication"
     );
-    core.session(session_id).open().await?;
+    core.session(session_id).created().await.open().await?;
     assert!(
         registry
             .is_observer(&SessionId::from(session_id), &process_id)
@@ -1139,7 +1150,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         observer_event_count, 1,
         "recovery must publish the missing observer edge exactly once"
     );
-    core.session(session_id).open().await?;
+    core.session(session_id).created().await.open().await?;
     assert_eq!(
         registry
             .full_event_window(&process_id, 0)
@@ -1166,7 +1177,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             lash_core::ProcessObserverBy::host("post-recovery-removal"),
         )
         .await?;
-    core.session(session_id).open().await?;
+    core.session(session_id).created().await.open().await?;
     assert!(
         !registry
             .is_observer(&SessionId::from(session_id), &process_id)
@@ -1245,7 +1256,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
             );
         }
 
-        core.session(&session_id).open().await?;
+        core.session(&session_id).created().await.open().await?;
 
         assert!(
             registry
@@ -1432,7 +1443,12 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     })
     .await?;
 
-    let branch = core.session("generation-fork-branch").open().await?;
+    let branch = core
+        .session("generation-fork-branch")
+        .created()
+        .await
+        .open()
+        .await?;
     let branch_state = branch.admin().state().persist_current().await?;
     assert_eq!(
         branch_state.policy.generation, host_generation,

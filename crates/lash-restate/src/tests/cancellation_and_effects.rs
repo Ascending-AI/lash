@@ -1186,8 +1186,8 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
             "lash-restate-fig430-test-boot",
         ))
         .expect("build FIG-430 core");
-    let session = core
-        .session(session_id)
+    let session = crate::tests::created_session(&core, session_id)
+        .await
         .open()
         .await
         .expect("open FIG-430 session");

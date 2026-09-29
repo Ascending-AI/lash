@@ -97,7 +97,12 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
             .provider(queued_text_provider(programs))
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
-        let session = core.session("flat-checkpoint-growth").open().await?;
+        let session = core
+            .session("flat-checkpoint-growth")
+            .created()
+            .await
+            .open()
+            .await?;
         for _ in 0..LARGE_BINDINGS {
             session
                 .send(TurnInput::text("store"))
@@ -244,7 +249,12 @@ fn checkpoint_flatness_rejects_a_binding_that_grows_each_turn() -> Result<()> {
             .provider(queued_text_provider(programs))
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
-        let session = core.session("growing-checkpoint-witness").open().await?;
+        let session = core
+            .session("growing-checkpoint-witness")
+            .created()
+            .await
+            .open()
+            .await?;
         session
             .send(TurnInput::text("store"))
             .require_finish()?

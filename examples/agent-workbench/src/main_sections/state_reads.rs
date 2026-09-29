@@ -29,10 +29,9 @@ impl AppState {
     /// The durable head this attach needs is the same one `/api/state` reads
     /// without a lease, so it is read the same way and handed to
     /// [`lash::SessionBuilder::observe_with_state`], which admits nothing,
-    /// claims nothing, and is never a runtime the session's drives run on. The builder is still
-    /// [`Self::observer_session_builder`]: no model statement, so observing a
-    /// session never restates the process-wide selection as its config
-    /// (FIG-3144, FIG-3151, FIG-4099).
+    /// claims nothing, and is never a runtime the session's drives run on.
+    /// Observing never creates (FIG-4112): a session the catalog does not
+    /// hold is `UnknownSession`, and no row is written (FIG-3144, FIG-3151).
     pub(crate) async fn open_session_for_observation(
         &self,
         session_id: &SessionId,
@@ -42,7 +41,7 @@ impl AppState {
             self.session_store_factory.clone();
         let store = lash::persistence::SessionStore::new(runtime_store, session_id.clone())
             .map_err(lash::EmbedError::Store)?;
-        let absent = matches!(
+        if matches!(
             lash::persistence::SessionCatalogStore::lookup_session(
                 self.session_store_factory.as_ref(),
                 session_id,
@@ -50,20 +49,20 @@ impl AppState {
             .await
             .map_err(lash::EmbedError::Store)?,
             lash::persistence::SessionLookup::Absent
-        );
-        let state = if absent {
-            None
-        } else {
-            match lash::persistence::load_session_window_state(
-                &store,
-                lash::persistence::WindowSelector::Current,
-            )
-            .await
-            {
-                Ok(loaded) => loaded.map(|loaded| loaded.state),
-                Err(lash::persistence::StoreError::SessionNotFound { .. }) => None,
-                Err(error) => return Err(lash::EmbedError::Store(error)),
-            }
+        ) {
+            return Err(lash::EmbedError::UnknownSession {
+                session_id: session_id.clone(),
+            });
+        }
+        let state = match lash::persistence::load_session_window_state(
+            &store,
+            lash::persistence::WindowSelector::Current,
+        )
+        .await
+        {
+            Ok(loaded) => loaded.map(|loaded| loaded.state),
+            Err(lash::persistence::StoreError::SessionNotFound { .. }) => None,
+            Err(error) => return Err(lash::EmbedError::Store(error)),
         }
         .unwrap_or_else(|| {
             // A session with no durable head yet: the same empty state the
@@ -74,7 +73,7 @@ impl AppState {
             state.session_id = session_id.clone();
             state
         });
-        self.observer_session_builder(session_id.to_string())
+        self.session_builder(session_id.to_string())
             .observe_with_state(state)
             .await
     }

@@ -134,7 +134,12 @@ async fn deterministic_before_llm_failure_on_a_direct_turn_is_a_recorded_failed_
         counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
         Some(protocol.clone()),
     );
-    let session = core.session("direct-before-llm").open().await?;
+    let session = core
+        .session("direct-before-llm")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let output = session
         .send(TurnInput::text("refused before the model call"))
@@ -202,7 +207,7 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_root_is_cancelled() ->
         counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
         Some(protocol.clone()),
     );
-    let session = core.session(SESSION).open().await?;
+    let session = core.session(SESSION).created().await.open().await?;
 
     let handle = session
         .send(TurnInput::text(STRANDED_WORDS))
@@ -306,7 +311,7 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
     ))
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(SESSION).open().await?;
+    let session = core.session(SESSION).created().await.open().await?;
     // The engine drives a send as soon as it is accepted. Hold the session's
     // drive so nothing claims the input before the withdraw below: the
     // withdraw is never a claim race.
@@ -369,7 +374,12 @@ async fn cancellation_still_settles_stopped_cancelled() -> Result<()> {
         .build()
         .into_handle();
     let core = backend.core(provider, None);
-    let session = core.session("direct-cancelled").open().await?;
+    let session = core
+        .session("direct-cancelled")
+        .created()
+        .await
+        .open()
+        .await?;
     let cancel = CancellationToken::new();
     let running = tokio::spawn({
         let session = session.clone();

@@ -72,14 +72,27 @@ impl AppStateData {
         // still records the retired `dialect` field is refused by the protocol
         // as an incompatible format rather than served under another language.
         //
-        // The model is creation config: it is baked into the session the
-        // first time the chat opens, and a reopen runs with what the session
-        // recorded (FIG-4099). A chat whose model changed since then moves
-        // its session with the one durable config command.
+        // The model is creation config: the chat's session is created lazily,
+        // after its app-DB chat row, and records the model then; a reopen runs
+        // with what the session recorded (FIG-4099). Only `create` creates
+        // (FIG-4112), so the create-or-use arm is written out: an existing
+        // session keeps its recorded model, and a chat whose model changed
+        // since moves its session with the one durable config command.
+        match self
+            .core
+            .session(chat_id)
+            .create(lash::SessionCreation {
+                spec: lash::SessionSpec::inherit().model(model.clone()),
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
         let session = self
             .core
             .session(chat_id)
-            .session_spec(lash::SessionSpec::inherit().model(model.clone()))
             .plugin::<DemoPlugin>(DemoPluginConfig {
                 db: Arc::clone(&self.db),
             })
@@ -532,9 +545,16 @@ mod session_language_tests {
         // Seed: a core that carries the source persists the tool in the
         // session's checkpoint.
         let seeding_core = test_core_with_tools(&double, Arc::new(SeedTools)).await;
+        seeding_core
+            .session(chat_id.clone())
+            .create(lash::SessionCreation {
+                spec: lash::SessionSpec::inherit().model(mock_model_spec()),
+                ..Default::default()
+            })
+            .await
+            .expect("seed create");
         let seeded = seeding_core
             .session(chat_id.clone())
-            .session_spec(lash::SessionSpec::inherit().model(mock_model_spec()))
             .open()
             .await
             .expect("seed open");
@@ -638,9 +658,16 @@ mod session_language_tests {
         };
 
         let seeding_core = test_core_with_tools(&double, Arc::new(SeedTools)).await;
+        seeding_core
+            .session(chat_id.clone())
+            .create(lash::SessionCreation {
+                spec: lash::SessionSpec::inherit().model(mock_model_spec()),
+                ..Default::default()
+            })
+            .await
+            .expect("seed create");
         let seeded = seeding_core
             .session(chat_id.clone())
-            .session_spec(lash::SessionSpec::inherit().model(mock_model_spec()))
             .open()
             .await
             .expect("seed open");

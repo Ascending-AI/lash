@@ -50,7 +50,7 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
             "intent-ingress-observability-worker",
             "intent-ingress-observability-boot",
         ))?;
-    let _session = core.session(SESSION).open().await?;
+    let _session = crate::created_session(&core, SESSION).await.open().await?;
     Ok((core, process, other_process))
 }
 

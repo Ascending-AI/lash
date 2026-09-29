@@ -447,9 +447,8 @@ fn replay_cron_state(
 
 async fn materialize_session(state: &crate::AppState, session_id: &SessionId) {
     drop(
-        state
-            .core
-            .session(session_id)
+        crate::created_session(&state.core, session_id)
+            .await
             .open()
             .await
             .expect("materialize FIG-1071 replay session"),

@@ -89,35 +89,46 @@ impl BenchmarkCore {
         }
     }
 
+    fn core(&self) -> &LashCore {
+        match self {
+            Self::Standard(core) | Self::Rlm(core) => core,
+        }
+    }
+
+    /// Create a benchmark's fresh session with `creation`, then open it.
+    pub(crate) async fn create_and_open_session(
+        &self,
+        session_id: SessionId,
+        creation: lash::SessionCreation,
+    ) -> lash::Result<lash::LashSession> {
+        self.core()
+            .session(session_id.clone())
+            .create(creation)
+            .await?;
+        self.core().session(session_id).open().await
+    }
+
+    /// Open a session the benchmark already created.
     pub(crate) async fn open_session(
         &self,
         session_id: SessionId,
     ) -> lash::Result<lash::LashSession> {
-        match self {
-            Self::Standard(core) => core.session(session_id).open().await,
-            Self::Rlm(core) => core.session(session_id).open().await,
-        }
+        self.core().session(session_id).open().await
     }
 
-    pub(crate) async fn open_child_session(
+    pub(crate) async fn create_and_open_child_session(
         &self,
         session_id: SessionId,
         parent_session_id: SessionId,
     ) -> lash::Result<lash::LashSession> {
-        match self {
-            Self::Standard(core) => {
-                core.session(session_id)
-                    .parent(parent_session_id)
-                    .open()
-                    .await
-            }
-            Self::Rlm(core) => {
-                core.session(session_id)
-                    .parent(parent_session_id)
-                    .open()
-                    .await
-            }
-        }
+        self.create_and_open_session(
+            session_id,
+            lash::SessionCreation {
+                parent: Some(parent_session_id),
+                ..Default::default()
+            },
+        )
+        .await
     }
 
     async fn open_session_with_state(
@@ -126,8 +137,9 @@ impl BenchmarkCore {
         state: lash::persistence::RuntimeSessionState,
     ) -> lash::Result<lash::LashSession> {
         match self {
-            Self::Standard(core) => core.session(session_id).open_with_state(state).await,
-            Self::Rlm(core) => core.session(session_id).open_with_state(state).await,
+            Self::Standard(core) | Self::Rlm(core) => {
+                core.session(session_id).open_with_state(state).await
+            }
         }
     }
 }
@@ -255,13 +267,13 @@ impl BenchmarkRuntime {
         self.session.as_ref().expect("benchmark session").clone()
     }
 
-    pub(crate) async fn open_child_session(
+    pub(crate) async fn create_and_open_child_session(
         &self,
         session_id: SessionId,
     ) -> anyhow::Result<lash::LashSession> {
         let parent_session_id = self.session().session_id();
         self.core
-            .open_child_session(session_id, parent_session_id)
+            .create_and_open_child_session(session_id, parent_session_id)
             .await
             .map_err(anyhow::Error::from)
     }
@@ -988,7 +1000,9 @@ pub(crate) async fn build_runtime(
     };
     let process_phase_probes = install_process_worker(&restate, &core)?;
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
-    let session = core.open_session(session_id.clone()).await?;
+    let session = core
+        .create_and_open_session(session_id.clone(), lash::SessionCreation::default())
+        .await?;
     let store = store_factory
         .session_store(&session_id)
         .ok_or_else(|| anyhow::anyhow!("runtime perf session store was not opened"))?;
@@ -1184,7 +1198,9 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let core = durable_benchmark_core(backend, mode_id, provider, plugin_stack)?;
     let process_phase_probes = install_process_worker(&restate, &core)?;
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
-    let session = core.open_session(session_id.clone()).await?;
+    let session = core
+        .create_and_open_session(session_id.clone(), lash::SessionCreation::default())
+        .await?;
     let persistence = if wiring.session_store_handle {
         match store_factory.lookup_session(&session_id).await? {
             lash_core::SessionLookup::Live(_) => {

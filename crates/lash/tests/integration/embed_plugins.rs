@@ -237,8 +237,8 @@ async fn prompt_hook_and_tool_provider_read_typed_session_config() {
     };
     let (core, _double) =
         core_with_responses(vec![response_tool_call(), response_text("done")]).await;
-    let session = core
-        .session("typed-context")
+    let session = crate::created_session(&core, "typed-context")
+        .await
         .plugin::<TestPlugin>(config)
         .open()
         .await
@@ -261,8 +261,8 @@ async fn prompt_hook_and_tool_provider_read_typed_session_config() {
 #[tokio::test]
 async fn sessions_without_typed_plugin_install_do_not_get_inactive_fallback_tools() {
     let (core, _double) = core_with_responses(vec![response_text("done")]).await;
-    let session = core
-        .session("without-typed-plugin")
+    let session = crate::created_session(&core, "without-typed-plugin")
+        .await
         .open()
         .await
         .expect("session");

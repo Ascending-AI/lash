@@ -153,7 +153,7 @@ impl Fixture {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_superseded_turn_commit_ends_its_root_typed_and_never_pauses() -> Result<()> {
     let fixture = Fixture::head_moves_under_the_first_turn().await;
-    let session = fixture.core.session(SESSION).open().await?;
+    let session = fixture.core.session(SESSION).created().await.open().await?;
 
     let superseded = tokio::time::timeout(
         std::time::Duration::from_secs(60),
@@ -216,7 +216,7 @@ async fn the_send_after_a_refused_root_drives_a_new_root() -> Result<()> {
     // The head moves under the second turn, so the first commits the head
     // the session's later turns run on.
     let fixture = Fixture::head_moves_under_model_call(1).await;
-    let session = fixture.core.session(SESSION).open().await?;
+    let session = fixture.core.session(SESSION).created().await.open().await?;
     tokio::time::timeout(
         std::time::Duration::from_secs(60),
         session
@@ -283,7 +283,7 @@ async fn the_send_after_a_refused_root_drives_a_new_root() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_refused_root_crashed_before_its_outcome_converges_on_one_terminal() -> Result<()> {
     let fixture = Fixture::head_moves_under_model_call(1).await;
-    let session = fixture.core.session(SESSION).open().await?;
+    let session = fixture.core.session(SESSION).created().await.open().await?;
     tokio::time::timeout(
         std::time::Duration::from_secs(60),
         session
@@ -384,7 +384,7 @@ async fn a_refused_root_crashed_before_its_outcome_converges_on_one_terminal() -
 /// refusal: the send answers it, the root's one terminal is the refusal, it
 /// is never parked, and the session's next send completes under a new root.
 async fn a_redriven_root_past_drive_head_ends_with_its_refusal(fixture: Fixture) -> Result<()> {
-    let session = fixture.core.session(SESSION).open().await?;
+    let session = fixture.core.session(SESSION).created().await.open().await?;
     tokio::time::timeout(
         std::time::Duration::from_secs(60),
         session

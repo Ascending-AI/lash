@@ -10,28 +10,41 @@
 //! A session id reaches Lash three ways, and the choice is the first thing to
 //! make deliberately:
 //!
+//! * `core.session(id).create(creation).await` — the only verb that
+//!   **creates**, and the only one that takes session config. It writes the
+//!   session's catalog entry and its initial config head — the
+//!   [`SessionCreation`]'s spec, parent and plugin options — in one store
+//!   transaction and returns its [`DurableSession`], without building a
+//!   runtime. An id that already exists is refused with
+//!   [`EmbedError::SessionAlreadyExists`], always.
 //! * `core.session(id).open().await` — the **live session**
 //!   ([`LashSession`]). It builds a runtime: plugins, tool registry, protocol
-//!   restore, lifecycle events, process admission. Use it to run turns.
+//!   restore, lifecycle events, process admission. Use it to run turns. It
+//!   never creates: the session runs with the config it recorded.
 //! * `core.session(id).durable().await` — the **Durable Session**
 //!   ([`DurableSession`]). It builds nothing and creates nothing: the
 //!   session's queue and settled reads, answered from its store, correct while
 //!   another process runs the session live. Use it to enqueue,
 //!   list, cancel or reconcile.
-//! * `core.session(id).create().await` — the only verb that **creates**. It
-//!   writes the session's catalog entry and returns its [`DurableSession`],
-//!   still without building a runtime. Use it when a host admits durable input
-//!   for a session whose first turn has not run yet.
+//!
+//! Every verb but `create` resolves an existing session and writes no catalog
+//! row: an id the catalog has never created is refused with
+//! [`EmbedError::UnknownSession`]. A host that means create-or-open writes it
+//! out, so the arm where its config does not apply is visible:
+//!
+//! ```ignore
+//! match core.session(id.clone()).create(creation).await {
+//!     Ok(_) | Err(EmbedError::SessionAlreadyExists { .. }) => {}
+//!     Err(error) => return Err(error),
+//! }
+//! let session = core.session(id).open().await?;
+//! ```
 //!
 //! Polling a queue through `open()` costs a whole runtime per poll and, on a
 //! core that does not carry the session's tool sources, orphans them. Reach
 //! for `durable()` whenever no turn is being run. An open session exposes the
 //! same operations through [`LashSession::durable`], so there is one behaviour
-//! either way.
-//!
-//! A Durable Session never creates: the id must already exist, or the
-//! operation is refused with a typed error — `create()` is how a host makes it
-//! exist. See [`DurableSession`].
+//! either way. See [`DurableSession`].
 //!
 //! Every public name has exactly one home. The crate root carries the daily
 //! core/session/turn path; each domain module ([`tools`], [`persistence`],
@@ -111,7 +124,9 @@ pub use crate::send::{
     SendBatchBuilder, SendBuilder, SendHandle, SendOutcome, StalledDelivery, TurnEvents,
     TurnStatus,
 };
-pub use crate::session::{LashSession, ObservableSession, ParkedSession, SessionBuilder};
+pub use crate::session::{
+    LashSession, ObservableSession, ParkedSession, SessionBuilder, SessionCreation,
+};
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
 pub use crate::turn::{
     ReportSource, TurnActivityFanout, TurnOutput, TurnReport, message_role, message_text,
@@ -192,12 +207,12 @@ pub mod prelude {
         ParkedSession, PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
         PromptLayerSink, Result, SendBuilder, SendHandle, SendOutcome, SessionBuilder,
         SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch,
-        SessionCreateRequest, SessionDeleteReport, SessionDeletion, SessionListFilter,
-        SessionRelationKind, SessionSpec, SessionStartPoint, SessionTriggerAdmin, SessionView,
-        ToolAdmin, TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget,
-        TurnCause, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
-        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStatus, TurnStop,
-        message_role, message_text,
+        SessionCreateRequest, SessionCreation, SessionDeleteReport, SessionDeletion,
+        SessionListFilter, SessionRelationKind, SessionSpec, SessionStartPoint,
+        SessionTriggerAdmin, SessionView, ToolAdmin, TurnActivity, TurnActivityFanout,
+        TurnActivityId, TurnActivitySink, TurnBudget, TurnCause, TurnEvent, TurnExecutionMetrics,
+        TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport,
+        TurnStatus, TurnStop, message_role, message_text,
     };
 }
 

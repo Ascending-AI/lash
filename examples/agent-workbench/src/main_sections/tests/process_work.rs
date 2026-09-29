@@ -1109,9 +1109,8 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
             .await
             .expect("complete work-rail process");
     }
-    let session = state
-        .core
-        .session(deleted_session_id.clone())
+    let session = crate::created_session(&state.core, deleted_session_id.clone())
+        .await
         .open()
         .await
         .expect("open the session under deletion");

@@ -146,6 +146,10 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
+    state
+        .ensure_current_session()
+        .await
+        .expect("create the workbench's current session");
     let session_id = state.current_session_id();
     // The engine admits none of the inputs: the test asserts which of them
     // the host's settle leaves pending.
@@ -210,9 +214,8 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         lash::persistence::TurnInputState::DeferredNextTurn
     );
 
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open session for pending input evidence");
@@ -250,9 +253,8 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from("running-turn"))
         .await
         .expect("settle running turn");
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open session after turn settle");
@@ -290,9 +292,8 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .await
         .expect_err("settled active-turn input must be rejected");
     assert_eq!(race_error.status, StatusCode::CONFLICT);
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open session after settle race");
@@ -386,7 +387,7 @@ async fn turn_cancel_test_state_with_ingress(
         .processes()
         .observer()
         .expect("process observer configured");
-    AppState {
+    let state = AppState {
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
@@ -412,7 +413,12 @@ async fn turn_cancel_test_state_with_ingress(
             .expect("open active turns"),
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
-    }
+    };
+    state
+        .ensure_current_session()
+        .await
+        .expect("create the workbench's current session");
+    state
 }
 
 #[test]
@@ -715,9 +721,8 @@ finish(await handle);
     };
     let session_id = state.current_session_id();
     let turn_text = "start and await the held process";
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open the Stop-over-process session");
@@ -997,9 +1002,8 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     let double = crate::tests::test_double_backend(0).await;
     let state = turn_cancel_test_state(&double, &data_dir, admin_url).await;
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(&session_id)
+    let session = crate::created_session(&state.core, &session_id)
+        .await
         .open()
         .await
         .expect("open stop-mode session");
@@ -1449,6 +1453,10 @@ async fn a_pending_cancel_probes_the_roots_lash_turn_inner() {
     let state = turn_cancel_test_state(&double, &data_dir, admin_url).await;
     state.sessions.ensure(&session_id);
     state.sessions.select(&session_id);
+    state
+        .ensure_current_session()
+        .await
+        .expect("create the selected session");
     state.track_turn(&session_id, &turn_id);
 
     let (driver, acknowledge) = expiring_terminal_driver(&state);

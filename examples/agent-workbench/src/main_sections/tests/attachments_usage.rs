@@ -201,9 +201,8 @@ async fn run_attachment_usage_gate(
     let input = restate::workbench_turn_input(&state, &request)
         .await
         .expect("build attachment turn input through workbench adapter");
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open gate session");

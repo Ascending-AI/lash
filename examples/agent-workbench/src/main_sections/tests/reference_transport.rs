@@ -481,7 +481,7 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
         .processes()
         .observer()
         .expect("process observer configured");
-    AppState {
+    let state = AppState {
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
@@ -506,7 +506,12 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
-    }
+    };
+    state
+        .ensure_current_session()
+        .await
+        .expect("create the workbench's current session");
+    state
 }
 
 /// A bare-prose answer needs no `finish` call: the runtime commits the reply
@@ -652,9 +657,8 @@ async fn one_output_identity_per_turn_across_disconnect_and_redelivery() {
     )
     .await;
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open session");
@@ -760,9 +764,8 @@ async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
     )
     .await;
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open session");
@@ -874,9 +877,8 @@ async fn a_retried_attempt_replaces_partial_prose_on_the_same_row() {
     )
     .await;
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open session");
@@ -966,9 +968,8 @@ async fn a_redriven_turn_keeps_its_output_identity() {
     double.crash_turn_drive(lash_restate_test::CrashPoint::BeforeRunResult {
         name: Some(format!("lash:{session_id}:turn-one:1:1:llm_call:6")),
     });
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open session");

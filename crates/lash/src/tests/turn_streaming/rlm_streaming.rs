@@ -19,7 +19,12 @@ pub(super) async fn pending_host_tool_completion_parks_turn_and_resolves_through
     .tools(Arc::new(PendingAppTools::new(key_tx)))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("pending-host-tool").open().await?;
+    let session = core
+        .session("pending-host-tool")
+        .created()
+        .await
+        .open()
+        .await?;
     let turn_session = session.clone();
     let turn_events = Arc::clone(&events);
     let mut turn = tokio::spawn(async move {
@@ -97,7 +102,12 @@ pub(super) async fn pending_host_tool_completion_parks_turn_and_resolves_through
 #[tokio::test]
 pub(super) async fn stream_returns_terminal_metadata_without_prose() -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("semantic-events").open().await?;
+    let session = core
+        .session("semantic-events")
+        .created()
+        .await
+        .open()
+        .await?;
     let events = RecordingEvents::default();
 
     let result = session
@@ -137,7 +147,7 @@ pub(super) async fn stream_emits_chronological_tool_events_without_prose_polluti
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("tool-events").open().await?;
+    let session = core.session("tool-events").created().await.open().await?;
     let events = RecordingEvents::default();
 
     let collected = session
@@ -237,7 +247,12 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("interleaved-standard-order").open().await?;
+    let session = core
+        .session("interleaved-standard-order")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let result = session
         .send(TurnInput::text("preserve every part"))
@@ -378,7 +393,12 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
-        let session = core.session("rlm-streamed-raw-final-cell").open().await?;
+        let session = core
+            .session("rlm-streamed-raw-final-cell")
+            .created()
+            .await
+            .open()
+            .await?;
         let events = Arc::new(RecordingEvents::default());
 
         let result = session
@@ -464,7 +484,12 @@ pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
             .build()
             .into_handle();
         let core = rlm_abort_drain_core(provider).await?;
-        let session = core.session("rlm-abort-reset").open().await?;
+        let session = core
+            .session("rlm-abort-reset")
+            .created()
+            .await
+            .open()
+            .await?;
 
         let result = session.send(TurnInput::text("finish")).output().await?;
 
@@ -547,7 +572,12 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
-        let session = core.session("rlm-abort-late-events").open().await?;
+        let session = core
+            .session("rlm-abort-late-events")
+            .created()
+            .await
+            .open()
+            .await?;
 
         let result = session.send(TurnInput::text("finish")).output().await?;
 
@@ -686,7 +716,12 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
             .build()
             .into_handle();
         let core = rlm_abort_drain_core(provider).await?;
-        let session = core.session("rlm-abort-no-usage").open().await?;
+        let session = core
+            .session("rlm-abort-no-usage")
+            .created()
+            .await
+            .open()
+            .await?;
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(3),
@@ -764,7 +799,12 @@ pub(super) fn rlm_turn_without_interruption_or_usage_writes_no_ledger_row() -> R
             .build()
             .into_handle();
         let core = rlm_abort_drain_core(provider).await?;
-        let session = core.session("rlm-zero-usage").open().await?;
+        let session = core
+            .session("rlm-zero-usage")
+            .created()
+            .await
+            .open()
+            .await?;
         let result = session.send(TurnInput::text("finish")).output().await?;
         assert_eq!(result.final_value(), Some(&serde_json::json!("quiet")));
         let attempt = result
@@ -808,7 +848,12 @@ finish("done");"#,
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-live-tool-events").open().await?;
+    let session = core
+        .session("rlm-live-tool-events")
+        .created()
+        .await
+        .open()
+        .await?;
     let events = Arc::new(RecordingEvents::default());
 
     let result = session
@@ -978,7 +1023,12 @@ finish("recovered");"#,
             .model(mock_model_spec())
             .tools(Arc::new(FailingAppTools))
             .build(crate::testing::runtime_lease_owner())?;
-        let session = core.session("rlm-recovered-tool-failure").open().await?;
+        let session = core
+            .session("rlm-recovered-tool-failure")
+            .created()
+            .await
+            .open()
+            .await?;
 
         let result = session
             .send(TurnInput::text("recover the tool failure"))
@@ -1020,7 +1070,12 @@ finish("done");"#,
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-aggregate-tool-ids").open().await?;
+    let session = core
+        .session("rlm-aggregate-tool-ids")
+        .created()
+        .await
+        .open()
+        .await?;
     let events = Arc::new(RecordingEvents::default());
 
     let result = session
@@ -1091,7 +1146,12 @@ finish("done");"#,
         .trace_jsonl_path(trace_path.clone())
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-tool-trace").open().await?;
+    let session = core
+        .session("rlm-tool-trace")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let result = session.send(TurnInput::text("use tool")).output().await?;
     assert!(matches!(
@@ -1225,7 +1285,12 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
             .trace_jsonl_path(trace_path.clone())
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
-        let session = core.session("rlm-native-tool-contract").open().await?;
+        let session = core
+            .session("rlm-native-tool-contract")
+            .created()
+            .await
+            .open()
+            .await?;
 
         let turn = session
             .send(TurnInput::text("trigger native provider tool call"))
@@ -1303,7 +1368,12 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inne
         .tools(Arc::new(PendingAppTools::new(key_tx)))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-pending-host-tool").open().await?;
+    let session = core
+        .session("rlm-pending-host-tool")
+        .created()
+        .await
+        .open()
+        .await?;
     let turn_session = session.clone();
     let turn_events = Arc::clone(&events);
     let mut turn = tokio::spawn(async move {
@@ -1391,7 +1461,12 @@ finish(result);"#,
     ))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-process-pending-host-tool").open().await?;
+    let session = core
+        .session("rlm-process-pending-host-tool")
+        .created()
+        .await
+        .open()
+        .await?;
     let turn_session = session.clone();
     let turn_events = Arc::clone(&events);
     let mut turn = tokio::spawn(async move {
@@ -1466,7 +1541,12 @@ pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("continue-as-observation").open().await?;
+    let session = core
+        .session("continue-as-observation")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor = session.observe().current_observation().cursor;
 
     let output = session
@@ -1521,7 +1601,7 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
         }))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
 
     let first = session
         .send(TurnInput::text("plain finish with nested append"))
@@ -1570,7 +1650,7 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
         }))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
 
     let output = session
         .send(TurnInput::text("switch frames in process"))
@@ -1616,7 +1696,7 @@ pub(super) async fn engine_driven_continue_as_survives_post_commit_graph_append_
         }))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
 
     let output = session
         .send(TurnInput::text("switch frames on the engine"))
@@ -1711,7 +1791,7 @@ finish({ established: established.total });"#,
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     let established = session
         .send(TurnInput::text(
             "establish a durable global carried across the frame switch",

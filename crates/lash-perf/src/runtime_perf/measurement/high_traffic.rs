@@ -36,15 +36,15 @@ async fn take_population_sessions(
     let mut sessions = Vec::with_capacity(population);
     sessions.push(runtime.take_session());
     for index in 1..population {
-        sessions.push(
-            core.session(format!(
-                "runtime-perf-{}-population-{index}-{}",
-                scenario.name(),
-                uuid::Uuid::new_v4()
-            ))
-            .open()
-            .await?,
-        );
+        let session_id = lash::SessionId::from(format!(
+            "runtime-perf-{}-population-{index}-{}",
+            scenario.name(),
+            uuid::Uuid::new_v4()
+        ));
+        core.session(session_id.clone())
+            .create(lash::SessionCreation::default())
+            .await?;
+        sessions.push(core.session(session_id).open().await?);
     }
     Ok(sessions)
 }

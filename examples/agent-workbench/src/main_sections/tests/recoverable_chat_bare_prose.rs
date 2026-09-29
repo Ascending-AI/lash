@@ -49,9 +49,8 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
     let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open bare prose session");
@@ -156,9 +155,8 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
     let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open reasoned prose session");
@@ -273,9 +271,8 @@ async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
     let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open mid-turn prose session");

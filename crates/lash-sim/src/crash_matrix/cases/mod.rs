@@ -165,7 +165,7 @@ async fn send_text(
         let text = text.to_owned();
         let sent = world
             .host_op(async move {
-                let session = core.session(session).open().await?;
+                let session = crate::open_created_session(&core, session).await?;
                 session
                     .send(lash::TurnInput::text(text))
                     .id(root.as_str())

@@ -1,8 +1,7 @@
 use super::build_plugin_host;
 use crate::support::{
     Arc, DeploymentStore, LashRuntime, LiveReplayStore, PluginFactory, RuntimeEnvironment,
-    RuntimeHandle, SessionCreationHead, SessionPolicy, SessionRelation, SessionStoreCreateRequest,
-    async_trait,
+    RuntimeHandle, SessionPolicy, async_trait,
 };
 use lash_sansio::SessionId;
 
@@ -119,36 +118,31 @@ impl CoreSessionDriver {
     ) -> std::result::Result<RuntimeHandle, OpenFailure> {
         let mut policy = self.config.policy.clone();
         policy.session_id = Some(session_id.clone());
-        let mut creation_config = lash_core::PersistedSessionConfig::from(&policy);
-        creation_config.protocol_turn_options = crate::session::creation_protocol_turn_options(
-            self.config.protocol_factory.as_ref(),
-            session_id,
-            None,
-            &lash_core::PluginOptions::default(),
-            self.config.store_factory.fleet_format(),
-        )
-        .map_err(|error| {
-            OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))
-        })?;
-        let store = lash_core::runtime::admit_session_view(
-            &self.config.store_factory,
-            &SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: session_id.clone(),
-                relation: SessionRelation::default(),
-                config: creation_config,
-                head: SessionCreationHead::Config,
-            },
-        )
-        .await
-        .map_err(|error| match error {
-            error @ (lash_core::StoreError::SessionDeleted { .. }
-            | lash_core::StoreError::SessionClosing { .. }) => {
-                OpenFailure::SessionRetired(session_retired_error(session_id, error))
-            }
-            error => OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string())),
-        })?;
+        // The engine drives only a session that exists: a missing one is
+        // terminal, never a silent create (FIG-4112). Resolution writes no
+        // catalog row.
+        let store =
+            match crate::session::resolve_existing_session(&self.config.store_factory, session_id)
+                .await
+            {
+                Ok(store) => store,
+                Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
+                    return Err(OpenFailure::Contended);
+                }
+                Err(crate::EmbedError::Store(
+                    error @ (lash_core::StoreError::SessionDeleted { .. }
+                    | lash_core::StoreError::SessionClosing { .. }),
+                )) => {
+                    return Err(OpenFailure::SessionRetired(session_retired_error(
+                        session_id, error,
+                    )));
+                }
+                Err(error) => {
+                    return Err(OpenFailure::Terminal(lash_core::PluginError::Session(
+                        error.to_string(),
+                    )));
+                }
+            };
         let state = match crate::session::load_state_from_store(session_id, &policy, &store).await {
             Ok(state) => state,
             Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
@@ -201,11 +195,10 @@ impl CoreSessionDriver {
                 error => lash_core::PluginError::Session(error.to_string()),
             })
         })?;
-        // A session the engine opens first (a send to a session no host
-        // created) is created here with the core's config, like any creating
-        // open (FIG-4099). The protocol fills its defaults only for a
-        // session that recorded no protocol options; a recorded session
-        // keeps what it recorded.
+        // The session runs with the config it recorded at creation (FIG-4099,
+        // FIG-4112). The protocol fills its defaults only for a session that
+        // recorded no protocol options; a recorded session keeps what it
+        // recorded.
         runtime
             .configure_protocol_on_materialize(
                 &lash_core::PluginOptions::default(),

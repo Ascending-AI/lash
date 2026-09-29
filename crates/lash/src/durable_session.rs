@@ -14,8 +14,9 @@
 //!   `core.session(id).durable().await` — acquires the store through the
 //!   catalog's non-creating seam.
 //! * [`SessionBuilder::create`](crate::SessionBuilder::create) —
-//!   `core.session(id).create().await` — writes the session's catalog entry
-//!   first, then hands back this handle. The only verb that creates.
+//!   `core.session(id).create(creation).await` — writes the session's catalog
+//!   entry and initial config head first, then hands back this handle. The
+//!   only verb that creates.
 //! * [`LashSession::durable`](crate::LashSession::durable) — the open
 //!   session's own Session Binding, reusing its owner-issued store and ports.
 //!
@@ -32,8 +33,7 @@
 //! never created fails with [`EmbedError::UnknownSession`], and to a deleted
 //! one with [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted).
 //! Nothing is stored and no driver is woken in either case. Create the session
-//! first — `core.session(id).create()`, or `open()` if a runtime is wanted
-//! anyway — then send.
+//! first — `core.session(id).create(creation)` — then send.
 //!
 //! A catalog that cannot resolve a session by id at all is a different answer
 //! from a session that is not there: it surfaces as

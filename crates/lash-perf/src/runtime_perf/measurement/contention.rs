@@ -410,7 +410,7 @@ pub(crate) async fn run_once_writer_contention(
     for worker in 0..workers {
         peer_sessions.push(
             runtime
-                .open_child_session(SessionId::from(format!(
+                .create_and_open_child_session(SessionId::from(format!(
                     "runtime-perf-{}-peer-{worker}",
                     scenario.name()
                 )))

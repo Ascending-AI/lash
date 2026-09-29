@@ -114,6 +114,8 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     // registrar mints a process id.
     t.compile_fail("tests/ui/model_code_cannot_mint_a_host_start_key.rs");
     t.compile_fail("tests/ui/process_id_minting_is_sealed.rs");
+    // FIG-4112: only `create` takes session config; an open cannot state it.
+    t.compile_fail("tests/ui/session_open_takes_no_config.rs");
     if cfg!(feature = "rlm") {
         // FIG-1979: the dialect has one carrier, and a memory limit cannot be
         // spelled as an instruction budget.

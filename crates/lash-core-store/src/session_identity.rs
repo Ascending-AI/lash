@@ -726,8 +726,8 @@ pub enum SessionCreationHead {
     /// Creation bakes the request's config in: the store writes it as the
     /// session's initial config head in the same transaction as the catalog
     /// row, so every later open — and the engine's own drive-open — runs with
-    /// the config the creator stated. Every creating verb of a session's
-    /// host API states this.
+    /// the config the creator stated. The host API's one creating verb,
+    /// `create`, states this (FIG-4112).
     Config,
     /// The creator commits the session's first head itself — a runtime
     /// binding the complete state it was handed, or a child session's

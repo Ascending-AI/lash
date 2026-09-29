@@ -118,9 +118,7 @@ async fn probe_session(
         .model(model)
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session = core
-        .session(session_id.to_string())
-        .open()
+    let session = crate::open_created_session(&core, session_id.to_string())
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     // The exhausted turn is expected to fail; the retried one to succeed. The

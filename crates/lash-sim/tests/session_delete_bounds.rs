@@ -181,7 +181,11 @@ impl Deployment {
         reason = "test fixture: a session that fails to run aborts the law"
     )]
     async fn ended_root(&self, session: &str, root: &str) -> ObligationId {
-        let handle = self.core.session(session).open().await.expect("open");
+        let handle = created_session(&self.core, session)
+            .await
+            .open()
+            .await
+            .expect("open");
         handle
             .send(lash::TurnInput::text("end a root"))
             .id(root)
@@ -464,4 +468,27 @@ async fn a_lapsed_claim_is_retaken_within_its_bound() {
         break;
     }
     assert!(deployment.was_deleted(SESSION).await);
+}
+
+/// This test crate's one path to a session that may not exist yet
+/// (FIG-4112): only `create` creates, so this creates `session_id` with the
+/// core's config unless the catalog already holds it, then hands back the
+/// builder for the verb under test. An existing or deleted id is left for
+/// that verb to report.
+async fn created_session(
+    core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> lash::SessionBuilder {
+    let session_id = session_id.into();
+    match core
+        .session(session_id.clone())
+        .create(lash::SessionCreation::default())
+        .await
+    {
+        Ok(_)
+        | Err(lash::EmbedError::SessionAlreadyExists { .. })
+        | Err(lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. })) => {}
+        Err(error) => panic!("create session `{session_id}`: {error:?}"),
+    }
+    core.session(session_id)
 }

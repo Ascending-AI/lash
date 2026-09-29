@@ -233,7 +233,7 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
     ))
     .plugin(window_probe.plugin())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     session
         .send(TurnInput::text("first request"))
         .id("standard-compaction-pressure-first")
@@ -336,7 +336,7 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     for (turn_id, text) in [
         ("standard-compaction-explicit-one", "first request"),
         ("standard-compaction-explicit-two", "second request"),
@@ -404,7 +404,7 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     let overflow = session
         .send(TurnInput::text("summarize the report"))
         .id("standard-compaction-recovery-overflow")
@@ -561,7 +561,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     let overflow = session
         .send(TurnInput::text("summarize the report"))
         .id("standard-compaction-exhausted-overflow")
@@ -677,7 +677,7 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     let overflow = session
         .send(TurnInput::text("summarize the report"))
         .id("standard-compaction-residency-overflow")
@@ -873,7 +873,7 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     for (turn_id, text) in [
         ("standard-compaction-same-parent-one", "first request"),
         ("standard-compaction-same-parent-two", "second request"),
@@ -978,7 +978,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     ))
     .trace_jsonl_path(trace_path.clone())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
 
     session
         .send(TurnInput::text("first request"))
@@ -1085,7 +1085,12 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let reopened_session = reopened_core.session(session_id).open().await?;
+    let reopened_session = reopened_core
+        .session(session_id)
+        .created()
+        .await
+        .open()
+        .await?;
     reopened_session
         .send(TurnInput::text("continue after compaction"))
         .id("standard-compaction-reopened")
@@ -1126,7 +1131,7 @@ async fn compaction_accepts_parent_turn_authority() -> Result<()> {
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
 
     session
         .send(TurnInput::text("first request"))
@@ -1188,7 +1193,7 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     let shared_scope_handler = held_double(&core)
         .expect("the core runs on its held double")
         .open_handler(lash_core::AdmittedScope::runtime_operation(
@@ -1272,7 +1277,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     ))
     .trace_jsonl_path(trace_path.clone())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
 
     session
         .send(TurnInput::text("remember this image").with_attachment(
@@ -1396,7 +1401,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
     ))
     .plugin(Arc::new(injection_plugin))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
 
     for ordinal in 0..=THRESHOLD_TURNS {
         session
@@ -1454,7 +1459,7 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         .provider(provider)
         .model(model_spec("standard-compaction-rlm-model", None, 40_000))
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
 
     let primed = session
         .send(TurnInput::text("prime durable history"))
@@ -1577,7 +1582,7 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
     .model(model_spec("after-turn-model", None, 40_000))
     .plugin(Arc::new(plugin))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     session
         .send(TurnInput::text("first request"))
         .id("enqueue-first")
@@ -1713,7 +1718,7 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
     .model(model_spec("mid-turn-model", None, 40_000))
     .plugin(Arc::new(plugin))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     session
         .send(TurnInput::text("first request"))
         .id("append-first")
@@ -1849,7 +1854,7 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
     .model(model_spec("same-turn-model", None, 40_000))
     .plugin(Arc::new(plugin))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     // Before the fix this turn failed its own final commit:
     // `store head revision conflict: expected 0, actual 1`.
     session
@@ -1975,7 +1980,7 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
     .model(model_spec("after-turn-model", None, 40_000))
     .plugin(Arc::new(plugin))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     session
         .send(TurnInput::text("first request"))
         .id("enqueue-once")
@@ -2074,7 +2079,7 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     session
         .send(TurnInput::text("first request"))
         .id("standard-compaction-commit-failure-one")

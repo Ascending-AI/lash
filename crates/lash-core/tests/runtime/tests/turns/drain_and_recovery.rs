@@ -739,7 +739,13 @@ pub(super) async fn session_manager_rejects_duplicate_child_session_ids() {
         )
         .await
         .expect_err("duplicate child session should fail");
-    assert!(err.to_string().contains("already exists"));
+    assert!(
+        matches!(
+            &err,
+            lash_core::PluginError::SessionAlreadyExists { session_id } if session_id.as_str() == "child"
+        ),
+        "a duplicate create is the typed SessionAlreadyExists, got {err:?}"
+    );
 }
 
 #[test]

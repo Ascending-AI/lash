@@ -56,12 +56,15 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
+    state
+        .ensure_current_session()
+        .await
+        .expect("create the workbench's current session");
     let old_session_id = state.current_session_id();
     let _deleted_session_events = state.event_tx.subscribe(&old_session_id);
     assert!(state.event_tx.contains(&old_session_id));
-    let session = state
-        .core
-        .session(old_session_id.clone())
+    let session = crate::created_session(&state.core, old_session_id.clone())
+        .await
         .open()
         .await
         .expect("open old session");
@@ -156,9 +159,8 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
         "mock Restate ingress must not consume deletion work inline"
     );
     assert!(
-        state
-            .core
-            .session(snapshot.settings.session_id)
+        crate::created_session(&state.core, snapshot.settings.session_id)
+            .await
             .open()
             .await
             .expect("open new session")

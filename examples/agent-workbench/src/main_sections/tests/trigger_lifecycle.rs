@@ -36,8 +36,8 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .build(crate::test_core_owner())
         .expect("build core");
     crate::tests::install_test_process_worker(&double, &core);
-    let session = core
-        .session(session_id.clone())
+    let session = crate::created_session(&core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open session");
@@ -166,8 +166,8 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     assert!(handles.iter().all(|handle| handle.label() == first_label));
     session.close().await.expect("close session");
 
-    let reopened = core
-        .session(session_id.clone())
+    let reopened = crate::created_session(&core, session_id.clone())
+        .await
         .open()
         .await
         .expect("reopen session");

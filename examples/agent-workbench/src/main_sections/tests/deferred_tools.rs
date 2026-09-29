@@ -79,8 +79,8 @@ finish(result.digest);
             .into_handle();
         let double = test_double_backend(SEED).await;
         let core = deferred_tools_test_core(double.lash_backend(), provider, deferred);
-        let session = core
-            .session("workbench-deferred-round-trip")
+        let session = crate::created_session(&core, "workbench-deferred-round-trip")
+            .await
             .open()
             .await
             .expect("open deferred round-trip session");
@@ -161,8 +161,8 @@ finish("typed link failures observed");
             .into_handle();
         let double = test_double_backend(SEED).await;
         let core = deferred_tools_test_core(double.lash_backend(), provider, deferred);
-        let output = core
-            .session("workbench-deferred-link-errors")
+        let output = crate::created_session(&core, "workbench-deferred-link-errors")
+            .await
             .open()
             .await
             .expect("open deferred link-error session")

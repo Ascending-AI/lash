@@ -328,10 +328,8 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         panic!("expected exactly one routed suspended turn")
     };
     let routed_address = routed_address.clone();
-    let session = harness
-        .state
-        .core
-        .session(&session_id)
+    let session = crate::created_session(&harness.state.core, &session_id)
+        .await
         .open()
         .await
         .expect("open suspended turn session for durable address");
@@ -479,10 +477,8 @@ finish(await handle);
         panic!("expected exactly one routed suspended turn")
     };
     let routed_address = routed_address.clone();
-    let session = harness
-        .state
-        .core
-        .session(&session_id)
+    let session = crate::created_session(&harness.state.core, &session_id)
+        .await
         .open()
         .await
         .expect("open suspended turn session for durable address");
@@ -739,9 +735,8 @@ async fn submit_workbench_turn_via_restate(
     text: &str,
 ) -> (WorkbenchTurn, lash::TurnAddress) {
     let turn = run_workbench_turn_via_restate(state, text).await;
-    let session = state
-        .core
-        .session(&turn.session_id)
+    let session = crate::created_session(&state.core, &turn.session_id)
+        .await
         .open()
         .await
         .expect("open workbench session for durable turn address");
@@ -784,10 +779,8 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() -
         failure_provider::DevProviderScenario::RateLimitOnce,
     )
     .await;
-    let session = harness
-        .state
-        .core
-        .session(harness.state.current_session_id())
+    let session = crate::created_session(&harness.state.core, harness.state.current_session_id())
+        .await
         .open()
         .await
         .expect("open observer session");
@@ -889,10 +882,8 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() -
     // releases the observation snapshot without flushing that stale graph over
     // the workflow's committed transcript.
     drop(session);
-    let committed = harness
-        .state
-        .core
-        .session(session_id.clone())
+    let committed = crate::created_session(&harness.state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open committed retry session");
@@ -901,10 +892,8 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() -
         .close()
         .await
         .expect("close committed retry session");
-    let reloaded = harness
-        .state
-        .core
-        .session(session_id)
+    let reloaded = crate::created_session(&harness.state.core, session_id)
+        .await
         .open()
         .await
         .expect("reload retry session");
@@ -1032,7 +1021,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     let session_id = harness.state.current_session_id();
     harness
         .state
-        .open_session(&session_id, "test")
+        .create_or_open_session(&session_id, "test")
         .await
         .expect("materialize the session before its failed delete");
     harness
@@ -1730,7 +1719,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
 
     let settled_session = harness
         .state
-        .open_session(&session_id, "test")
+        .create_or_open_session(&session_id, "test")
         .await
         .expect("open settled ingress session through the host retry boundary");
     let read_view = settled_session.read_view();

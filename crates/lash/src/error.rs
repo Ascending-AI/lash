@@ -68,13 +68,26 @@ pub enum EmbedError {
     #[error("session store operation failed: {0}")]
     Store(#[from] lash_core::StoreError),
     #[error(
-        "session `{session_id}` has no durable session store; a Durable Session never creates one, so create the session first with core.session(id).open()"
+        "session `{session_id}` does not exist; only create() creates a session, so create it first with core.session(id).create(creation)"
     )]
-    /// A Durable Session operation named a session the catalog has never
-    /// created. Acquisition is deliberately non-creating, so this replaces the
-    /// silent metadata materialisation an unknown-id enqueue once performed.
+    /// A verb other than [`create`](crate::SessionBuilder::create) named a
+    /// session the catalog has never created. `open()`, `durable()`,
+    /// `open_with_state()`, `observe_with_state()` and every Durable Session
+    /// operation resolve an existing session and write no catalog row
+    /// (FIG-4112).
     UnknownSession {
         /// Session identifier with no durable store.
+        session_id: SessionId,
+    },
+    #[error(
+        "session `{session_id}` already exists; create() never adopts an existing session, so open it with core.session(id).open()"
+    )]
+    /// [`create`](crate::SessionBuilder::create) named a session the catalog
+    /// already holds. It is refused always — even when a retry states exactly
+    /// the config the session recorded: the host owns its ids, and a host
+    /// that means create-or-open treats this as present and opens.
+    SessionAlreadyExists {
+        /// Session identifier the catalog already holds.
         session_id: SessionId,
     },
     #[error("store is bound to session `{loaded}` but builder requested `{requested}`")]
@@ -278,6 +291,7 @@ impl EmbedError {
             | Self::PluginBackendMismatch { .. }
             | Self::ObligationRelayUnavailable(_)
             | Self::UnknownSession { .. }
+            | Self::SessionAlreadyExists { .. }
             | Self::MissingModelSpec
             | Self::MissingTurnBudget
             | Self::MissingCommitBudget
@@ -340,7 +354,8 @@ impl EmbedError {
             | Self::MissingQueuedWorkBatching
             | Self::StoreSessionMismatch { .. }
             | Self::DrainOwnGeneration { .. }
-            | Self::UnknownSession { .. } => true,
+            | Self::UnknownSession { .. }
+            | Self::SessionAlreadyExists { .. } => true,
             Self::Send(error) => matches!(**error, SendError::LiveTurnContext { .. }),
             Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),

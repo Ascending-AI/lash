@@ -99,7 +99,12 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
         .model(mock_model_spec())
         .tools(Arc::new(RetailTools))
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("fig2764-comprehension").open().await?;
+    let session = core
+        .session("fig2764-comprehension")
+        .created()
+        .await
+        .open()
+        .await?;
     let events = RecordingEvents::default();
     let result = session
         .send(TurnInput::text("which orders were delivered?"))

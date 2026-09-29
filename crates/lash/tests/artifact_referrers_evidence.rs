@@ -180,8 +180,8 @@ async fn cold_reopen_globals_across_turns() {
         response("const run = await processes.start({ definition: saved }); finish(await run);"),
     ])));
     let first_core = rlm_core_with_queue(double, Arc::clone(&responses));
-    let first_session = first_core
-        .session("artifact-referrers-cold-reopen")
+    let first_session = created_session(&first_core, "artifact-referrers-cold-reopen")
+        .await
         .open()
         .await
         .expect("open first session");
@@ -213,8 +213,8 @@ async fn cold_reopen_globals_across_turns() {
 
     let second_core = rlm_core_with_queue(double, Arc::clone(&responses));
     serve_processes(double, &second_core);
-    let second_session = second_core
-        .session("artifact-referrers-cold-reopen")
+    let second_session = created_session(&second_core, "artifact-referrers-cold-reopen")
+        .await
         .open()
         .await
         .expect("cold reopen");
@@ -262,8 +262,8 @@ async fn overwrite_retains_old_module_until_frame_end() {
             response("finish('new frame');"),
         ],
     );
-    let session = core
-        .session("artifact-referrers-overwrite")
+    let session = created_session(&core, "artifact-referrers-overwrite")
+        .await
         .open()
         .await
         .expect("session");
@@ -329,8 +329,8 @@ async fn continue_as_carries_only_seeded_definition() {
         ],
     );
     serve_processes(double, &core);
-    let session = core
-        .session("artifact-referrers-carry")
+    let session = created_session(&core, "artifact-referrers-carry")
+        .await
         .open()
         .await
         .expect("session");
@@ -456,7 +456,11 @@ async fn a_pressure_seed_carries_its_module_into_the_new_frame() {
         ));
     let core = rlm_core_with_plugins(double, Arc::clone(&responses), vec![Arc::clone(&hook)]);
     serve_processes(double, &core);
-    let session = core.session(session_id).open().await.expect("session");
+    let session = created_session(&core, session_id)
+        .await
+        .open()
+        .await
+        .expect("session");
     let bound = session
         .send(TurnInput::text("bind the definition"))
         .output()
@@ -525,8 +529,8 @@ async fn first_turn_continue_as_fences_its_initial_frame() {
             response("finish('next frame');"),
         ],
     );
-    let session = core
-        .session("artifact-referrers-first-switch")
+    let session = created_session(&core, "artifact-referrers-first-switch")
+        .await
         .open()
         .await
         .expect("session");
@@ -589,8 +593,8 @@ async fn named_definition_survives_uncarried_frame_switch() {
             response("finish('switched');"),
         ],
     );
-    let session = core
-        .session("artifact-referrers-named")
+    let session = created_session(&core, "artifact-referrers-named")
+        .await
         .open()
         .await
         .expect("session");
@@ -691,8 +695,8 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value() {
         response("const run = await processes.start({ definition: made }); finish(await run);"),
     ])));
     let first_core = rlm_core_with_queue(double, Arc::clone(&responses));
-    let first_session = first_core
-        .session("processes-create-cold-reopen")
+    let first_session = created_session(&first_core, "processes-create-cold-reopen")
+        .await
         .open()
         .await
         .expect("open first session");
@@ -713,8 +717,8 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value() {
 
     let second_core = rlm_core_with_queue(double, Arc::clone(&responses));
     serve_processes(double, &second_core);
-    let second_session = second_core
-        .session("processes-create-cold-reopen")
+    let second_session = created_session(&second_core, "processes-create-cold-reopen")
+        .await
         .open()
         .await
         .expect("cold reopen");
@@ -753,7 +757,11 @@ async fn created_definition_is_reclaimed_after_session_deletion() {
     let double = &fixture.double;
     let core = rlm_core(double, vec![response(&create_definition_cell("made"))]);
     let session_id = "processes-create-deletion";
-    let session = core.session(session_id).open().await.expect("session");
+    let session = created_session(&core, session_id)
+        .await
+        .open()
+        .await
+        .expect("session");
     let created = session
         .send(TurnInput::text("create definition"))
         .output()
@@ -827,4 +835,27 @@ async fn created_definition_is_reclaimed_after_session_deletion() {
     })
     .await
     .expect("the created module is reclaimed after its session is deleted");
+}
+
+/// This test crate's one path to a session that may not exist yet
+/// (FIG-4112): only `create` creates, so this creates `session_id` with the
+/// core's config unless the catalog already holds it, then hands back the
+/// builder for the verb under test. An existing or deleted id is left for
+/// that verb to report.
+async fn created_session(
+    core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> lash::SessionBuilder {
+    let session_id = session_id.into();
+    match core
+        .session(session_id.clone())
+        .create(lash::SessionCreation::default())
+        .await
+    {
+        Ok(_)
+        | Err(lash::EmbedError::SessionAlreadyExists { .. })
+        | Err(lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. })) => {}
+        Err(error) => panic!("create session `{session_id}`: {error:?}"),
+    }
+    core.session(session_id)
 }

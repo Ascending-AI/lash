@@ -511,6 +511,13 @@ async fn run_lane(
     holds: Option<Arc<HoldRegistry>>,
 ) -> Result<Vec<Sample>> {
     let session_id = SessionId::from(format!("latency-{}-{lane}", spec.name));
+    // Each lane names a fresh session.
+    let durable = topology
+        .core
+        .session(session_id.clone())
+        .create(lash::SessionCreation::default())
+        .await
+        .map_err(anyhow::Error::from)?;
     let session = match spec.topology {
         Topology::SameProcess => LaneSession::Live(
             topology
@@ -520,14 +527,7 @@ async fn run_lane(
                 .await
                 .map_err(anyhow::Error::from)?,
         ),
-        Topology::CrossWorker => LaneSession::Durable(
-            topology
-                .core
-                .session(session_id.clone())
-                .create()
-                .await
-                .map_err(anyhow::Error::from)?,
-        ),
+        Topology::CrossWorker => LaneSession::Durable(durable),
     };
     // The observer uses a non-creating catalog lookup and keyed reads beside
     // the live writer; it does not acquire execution authority.

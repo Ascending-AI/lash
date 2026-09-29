@@ -238,9 +238,7 @@ finish(await handle);
     )
     .await
     .expect("build batch envelope contract");
-    let session = core
-        .session("sim-agent-batched-tool-attempt-envelope")
-        .open()
+    let session = crate::open_created_session(&core, "sim-agent-batched-tool-attempt-envelope")
         .await
         .expect("open batch envelope contract session");
 
@@ -289,9 +287,7 @@ finish(await handle);
     )
     .await
     .expect("build segment envelope contract");
-    let session = core
-        .session("sim-agent-segment-tool-attempt-envelope")
-        .open()
+    let session = crate::open_created_session(&core, "sim-agent-segment-tool-attempt-envelope")
         .await
         .expect("open segment envelope contract session");
 
@@ -333,9 +329,7 @@ finish(winner);
     )
     .await
     .expect("build race timer contract");
-    let session = core
-        .session("sim-agent-race-timer-child-layer")
-        .open()
+    let session = crate::open_created_session(&core, "sim-agent-race-timer-child-layer")
         .await
         .expect("open race timer contract session");
 
@@ -384,9 +378,7 @@ finish(winner);
     )
     .await
     .expect("build race turn contract");
-    let session = core
-        .session("sim-agent-race-turn")
-        .open()
+    let session = crate::open_created_session(&core, "sim-agent-race-turn")
         .await
         .expect("open race turn contract session");
     let result = engine

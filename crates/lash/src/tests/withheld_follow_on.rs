@@ -73,7 +73,12 @@ async fn a_stopped_turn_runs_withheld_input_in_a_follow_on() -> Result<()> {
         .model(mock_model_spec())
         .tools(Arc::new(StopQueuedTool))
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("stopped-withheld").open().await?;
+    let session = core
+        .session("stopped-withheld")
+        .created()
+        .await
+        .open()
+        .await?;
     *durable.lock_recover() = Some(session.durable());
     let output = session
         .send(TurnInput::text("start tool stop"))

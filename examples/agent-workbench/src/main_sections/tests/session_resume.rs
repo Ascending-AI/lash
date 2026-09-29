@@ -52,8 +52,8 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         .model(model.clone())
         .build(crate::test_core_owner())
         .expect("build first workbench core");
-    let first_session = first_core
-        .session(session_id.clone())
+    let first_session = crate::created_session(&first_core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open first-process session");
@@ -281,9 +281,8 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         ]
     );
 
-    let resumed_session = state
-        .core
-        .session(session_id.clone())
+    let resumed_session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open resumed session");

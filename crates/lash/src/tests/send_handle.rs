@@ -93,7 +93,13 @@ async fn reaches(counter: &AtomicUsize, count: usize, what: &str) {
 /// Durable (D1 §1.5 3b, risk R1).
 async fn a_root_whose_live_report_is_gone_answers_its_durable_report() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture.core.session("send-durable-report").open().await?;
+    let session = fixture
+        .core
+        .session("send-durable-report")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let handle = session
         .send(TurnInput::text("report me"))
@@ -179,7 +185,13 @@ async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
             .into_backend()
     })
     .await?;
-    let session = fixture.core.session("send-no-grace").open().await?;
+    let session = fixture
+        .core
+        .session("send-no-grace")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let handle = session
         .send(TurnInput::text("report me once"))
@@ -260,7 +272,13 @@ async fn a_root_answers_from_its_published_terminal_while_no_store_read_shows_it
         Arc::new(|inner| Arc::new(UnseenCommits { inner }) as Arc<_>),
     )
     .await?;
-    let session = fixture.core.session("send-terminal-wait").open().await?;
+    let session = fixture
+        .core
+        .session("send-terminal-wait")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let handle = session.send(TurnInput::text(HELD)).await?;
     provider_called(&fixture, 1).await;
@@ -367,7 +385,13 @@ async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_ba
         }),
     )
     .await?;
-    let session = fixture.core.session("send-root-probe").open().await?;
+    let session = fixture
+        .core
+        .session("send-root-probe")
+        .created()
+        .await
+        .open()
+        .await?;
 
     // The held root keeps the second input queued, bound to no root.
     let held = session.send(TurnInput::text(HELD)).await?;
@@ -529,7 +553,13 @@ async fn a_send_answers_before_its_roots_scope_closes() -> Result<()> {
         }
     })
     .await?;
-    let session = fixture.core.session("send-before-close").open().await?;
+    let session = fixture
+        .core
+        .session("send-before-close")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let handle = session
         .send(TurnInput::text("answer me"))
@@ -555,7 +585,13 @@ async fn a_send_answers_before_its_roots_scope_closes() -> Result<()> {
 /// answers from that root's evidence (D2 Q6).
 async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture.core.session("send-settled-id").open().await?;
+    let session = fixture
+        .core
+        .session("send-settled-id")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let first = session
         .send(TurnInput::text("only once"))
@@ -608,7 +644,13 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
 /// its narrow form refuses as not settled (D1 §1.6, §1.7).
 async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture.core.session("send-withdrawn").open().await?;
+    let session = fixture
+        .core
+        .session("send-withdrawn")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let running = session.send(TurnInput::text(HELD)).id("held-root").await?;
     provider_called(&fixture, 1).await;
@@ -669,7 +711,13 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
 /// MEDIUM-4).
 async fn an_input_answered_inside_another_root_resolves_answered_with_that_root() -> Result<()> {
     let fixture = fixture(4).await?;
-    let session = fixture.core.session("send-shared-root").open().await?;
+    let session = fixture
+        .core
+        .session("send-shared-root")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let running = session.send(TurnInput::text(HELD)).id("held-root").await?;
     provider_called(&fixture, 1).await;
@@ -731,7 +779,13 @@ async fn an_input_answered_inside_another_root_resolves_answered_with_that_root(
 async fn a_dropped_session_leaves_nothing_with_its_core() -> Result<()> {
     let fixture = fixture(1).await?;
     let residents = Arc::downgrade(&fixture.core.residents);
-    let session = fixture.core.session("dropped-unclosed").open().await?;
+    let session = fixture
+        .core
+        .session("dropped-unclosed")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("one turn"))
         .id("dropped-unclosed-root")
@@ -757,7 +811,13 @@ async fn a_dropped_session_leaves_nothing_with_its_core() -> Result<()> {
 async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
     let fixture = fixture(1).await?;
     let session_id = lash_core::SessionId::from("send-observed");
-    let host = fixture.core.session(session_id.clone()).open().await?;
+    let host = fixture
+        .core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
     host.send(TurnInput::text("first"))
         .id("observed-first")
         .output()
@@ -787,6 +847,8 @@ async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
     let observer = fixture
         .core
         .session(session_id.clone())
+        .created()
+        .await
         .observe_with_state(state)
         .await?;
     assert_eq!(observer.read_view().turn_index(), 1);
@@ -831,7 +893,10 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
         )
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let durable = core.session("engine-first").create().await?;
+    let durable = core
+        .session("engine-first")
+        .create(crate::SessionCreation::default())
+        .await?;
     durable
         .send(TurnInput::text("the engine opens this session first"))
         .id("engine-first-root")
@@ -882,7 +947,12 @@ async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
         })
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("cancel-past-switch").open().await?;
+    let session = core
+        .session("cancel-past-switch")
+        .created()
+        .await
+        .open()
+        .await?;
     let handle = session
         .send(TurnInput::text("switch frames, then wait"))
         .id("cancel-past-switch-root")
@@ -903,7 +973,13 @@ async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
 
 async fn cancel_finds_the_consuming_root_before_application() -> Result<()> {
     let fixture = fixture(4).await?;
-    let session = fixture.core.session("cancel-bound-input").open().await?;
+    let session = fixture
+        .core
+        .session("cancel-bound-input")
+        .created()
+        .await
+        .open()
+        .await?;
     let first = session.send(TurnInput::text(HELD)).id("first-root").await?;
     provider_called(&fixture, 1).await;
     let second = session
@@ -950,7 +1026,13 @@ async fn cancel_finds_the_consuming_root_before_application() -> Result<()> {
 
 async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture.core.session("send-replay-gap").open().await?;
+    let session = fixture
+        .core
+        .session("send-replay-gap")
+        .created()
+        .await
+        .open()
+        .await?;
     let handle = session.send(TurnInput::text(HELD)).id("gap-root").await?;
     provider_called(&fixture, 1).await;
     drop(
@@ -1016,7 +1098,13 @@ async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
 /// and key.
 async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
     let fixture = fixture(4).await?;
-    let session = fixture.core.session("send-attach-id").open().await?;
+    let session = fixture
+        .core
+        .session("send-attach-id")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let running = session.send(TurnInput::text(HELD)).id("held-root").await?;
     provider_called(&fixture, 1).await;
@@ -1061,7 +1149,13 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
 /// history; a follower that watched it run reports none.
 async fn an_unobserved_root_answers_with_a_reported_gap() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture.core.session("send-unobserved-root").open().await?;
+    let session = fixture
+        .core
+        .session("send-unobserved-root")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let handle = session
         .send(TurnInput::text("watch me"))
@@ -1116,7 +1210,13 @@ fn assert_identity_conflict(refused: std::result::Result<Vec<crate::SendHandle>,
 /// accepted id with other content, or one id twice, accepts nothing.
 async fn a_batch_answers_one_handle_per_input_in_request_order() -> Result<()> {
     let fixture = fixture(4).await?;
-    let session = fixture.core.session("send-batch").open().await?;
+    let session = fixture
+        .core
+        .session("send-batch")
+        .created()
+        .await
+        .open()
+        .await?;
     let batch = || {
         [
             ("batch-a", TurnInput::text("first")),
@@ -1203,7 +1303,13 @@ async fn a_batch_answers_one_handle_per_input_in_request_order() -> Result<()> {
 /// drain (FIG-3877) — and nothing is enqueued.
 async fn a_send_under_an_unservable_route_is_refused_before_acceptance() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture.core.session("send-bad-route").open().await?;
+    let session = fixture
+        .core
+        .session("send-bad-route")
+        .created()
+        .await
+        .open()
+        .await?;
     let error = session
         .send(TurnInput::text("route me nowhere"))
         .provider_id("no-such-provider")

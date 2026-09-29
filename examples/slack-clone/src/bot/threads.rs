@@ -493,7 +493,21 @@ fn node_message_id(node: &lash::persistence::SessionNodeRecord) -> Option<&str> 
     node.message_id()
 }
 
-async fn open_channel_session(core: &LashCore, channel_id: &str) -> Result<LashSession> {
+/// Open (or resume) the channel's session, creating it on the channel's
+/// first event. The bot owns its channel session ids and means create-or-use:
+/// only `create` creates (FIG-4112), so an existing channel session — the
+/// common case — is the arm where creation config does not apply.
+pub(crate) async fn open_channel_session(core: &LashCore, channel_id: &str) -> Result<LashSession> {
+    match core
+        .session(session_id(channel_id))
+        .create(lash::SessionCreation::default())
+        .await
+    {
+        Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("create session for channel {channel_id}"));
+        }
+    }
     let session = core
         .session(session_id(channel_id))
         .open()

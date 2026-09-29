@@ -68,11 +68,11 @@ pub(crate) async fn create_session(
             session_id: session_id.clone(),
         })?;
     let entry = state.sessions.record(session_id.clone(), name);
-    // Open once so the session exists for the selector and the first `/api/state`
-    // poll, through the same builder every route uses.
+    // Create the session for the selector and the first `/api/state` poll,
+    // then open it once, through the same builder every route uses.
     drop(
         state
-            .open_session(&session_id, "api.sessions")
+            .create_or_open_session(&session_id, "api.sessions")
             .await
             .map_err(|error| state.session_admission_error(&session_id, "api.sessions", error))?,
     );

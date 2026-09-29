@@ -482,9 +482,7 @@ mod tests {
             .model(model)
             .build(crate::sim_process_owner())
             .expect("RLM core");
-        let session = core
-            .session("rlm-stop-honoring-boundary")
-            .open()
+        let session = crate::open_created_session(&core, "rlm-stop-honoring-boundary")
             .await
             .expect("RLM session");
         let run = tokio::time::timeout(

@@ -268,7 +268,7 @@ pub(super) fn compile_surface_tool_definition(name: &str) -> lash_core::ToolDefi
 #[tokio::test]
 async fn standard_core_runs_mock_turn() -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("main").open().await?;
+    let session = core.session("main").created().await.open().await?;
     let events = RecordingEvents::default();
 
     let result = session
@@ -316,7 +316,12 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("commit-budget-surface").open().await?;
+    let session = core
+        .session("commit-budget-surface")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let error = match session
         .send(TurnInput::text("produce an oversized turn"))
@@ -365,7 +370,12 @@ async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable(
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("commit-node-budget-surface").open().await?;
+    let session = core
+        .session("commit-node-budget-surface")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let error = match session
         .send(TurnInput::text("produce a turn"))
@@ -426,7 +436,12 @@ async fn testing_set_persisted_replaces_resident_state_for_park_fixture() -> Res
         crate::CommitBudgetLimit::Unbounded,
     ))
     .await?;
-    let session = core.session("testing-set-persisted-park").open().await?;
+    let session = core
+        .session("testing-set-persisted-park")
+        .created()
+        .await
+        .open()
+        .await?;
     let fixture = pending_park_state("testing-set-persisted-park", "park fixture via testing");
     let node_ids = |nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>]| {
         nodes.iter().map(|n| n.node_id.clone()).collect::<Vec<_>>()
@@ -494,7 +509,12 @@ async fn public_append_byte_budget_failure_is_typed_terminal_and_actionable() ->
         crate::CommitBudgetLimit::Unbounded,
     ))
     .await?;
-    let session = core.session("append-byte-budget-surface").open().await?;
+    let session = core
+        .session("append-byte-budget-surface")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let error =
         Box::pin(
@@ -521,7 +541,12 @@ async fn public_append_node_budget_failure_is_typed_terminal_and_actionable() ->
         crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
     ))
     .await?;
-    let session = core.session("append-node-budget-surface").open().await?;
+    let session = core
+        .session("append-node-budget-surface")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let error =
         Box::pin(
@@ -548,7 +573,12 @@ async fn park_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<(
         crate::CommitBudgetLimit::Unbounded,
     ))
     .await?;
-    let session = core.session("park-byte-budget-surface").open().await?;
+    let session = core
+        .session("park-byte-budget-surface")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .admin()
         .state()
@@ -575,7 +605,12 @@ async fn park_node_budget_failure_is_typed_terminal_and_actionable() -> Result<(
         crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
     ))
     .await?;
-    let session = core.session("park-node-budget-surface").open().await?;
+    let session = core
+        .session("park-node-budget-surface")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .admin()
         .state()
@@ -642,12 +677,14 @@ async fn prompt_layers_apply_across_core_session_and_mutation_scopes() -> Result
     .instructions("Repeated instruction.")
     .prompt_contribution(PromptContribution::guidance("Core", "core guidance"))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("prompt-api")
-        .instructions("Alpha session instruction.")
-        .prompt_contribution(PromptContribution::guidance("Session", "session guidance"))
-        .open()
+    core.session("prompt-api")
+        .create(
+            crate::SessionCreation::default()
+                .instructions("Alpha session instruction.")
+                .prompt_contribution(PromptContribution::guidance("Session", "session guidance")),
+        )
         .await?;
+    let session = core.session("prompt-api").open().await?;
 
     session.send(TurnInput::text("first")).output().await?;
     Box::pin(session.admin().config().replace_prompt_slot(
@@ -699,7 +736,12 @@ async fn per_turn_prompt_layer_applies_only_to_its_root() -> Result<()> {
     .provider(recording_prompt_provider(Arc::clone(&seen)))
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("per-turn-prompt").open().await?;
+    let session = core
+        .session("per-turn-prompt")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("first"))
         .prompt_layer(
@@ -737,6 +779,8 @@ async fn provider_overrides_apply_at_core_and_session_scopes_and_a_config_route_
             "session-model",
             "session",
         ))
+        .created()
+        .await
         .open()
         .await?;
 
@@ -796,6 +840,8 @@ async fn provider_only_overrides_keep_session_model_and_variant() -> Result<()> 
             "session",
             Arc::clone(&seen),
         ))
+        .created()
+        .await
         .open()
         .await?;
 
@@ -818,7 +864,7 @@ async fn rlm_core_opens_rlm_session() -> Result<()> {
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    core.session("rlm").open().await?;
+    core.session("rlm").created().await.open().await?;
     Ok(())
 }
 
@@ -855,7 +901,12 @@ async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() -> Result<()>
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("rlm-abilities-prompt").open().await?;
+    let session = core
+        .session("rlm-abilities-prompt")
+        .created()
+        .await
+        .open()
+        .await?;
 
     session
         .send(TurnInput::text("hello"))
@@ -924,6 +975,8 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("rlm-finish-history-single-copy")
+        .created()
+        .await
         .open()
         .await?;
 
@@ -1025,7 +1078,12 @@ async fn rlm_multi_turn_finish_history_preserves_observed_lashlang_few_shots() -
         .provider(provider)
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("rlm-multi-turn-history-shape").open().await?;
+    let session = core
+        .session("rlm-multi-turn-history-shape")
+        .created()
+        .await
+        .open()
+        .await?;
 
     for (turn, answer) in ANSWERS.iter().enumerate() {
         session
@@ -1158,20 +1216,28 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    let markdown = core.session("rlm-root-markdown").open().await?;
-    markdown.send(TurnInput::text("hello")).output().await?;
-
-    let raw = core
-        .session("rlm-root-raw")
-        .plugin_option(
-            lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-            lash_rlm_types::RlmCreateExtras {
-                final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-                ..lash_rlm_types::RlmCreateExtras::default()
-            },
-        )?
+    let markdown = core
+        .session("rlm-root-markdown")
+        .created()
+        .await
         .open()
         .await?;
+    markdown.send(TurnInput::text("hello")).output().await?;
+
+    core.session("rlm-root-raw")
+        .create(crate::SessionCreation {
+            plugin_options: lash_core::PluginOptions::typed(
+                lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash_rlm_types::RlmCreateExtras {
+                    final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+                    ..lash_rlm_types::RlmCreateExtras::default()
+                },
+            )
+            .map_err(EmbedError::ProtocolTurnOptions)?,
+            ..Default::default()
+        })
+        .await?;
+    let raw = core.session("rlm-root-raw").open().await?;
     raw.send(TurnInput::text("hello"))
         .require_finish()?
         .output()
@@ -1196,23 +1262,31 @@ async fn a_recorded_final_answer_format_survives_a_reopen_that_states_nothing() 
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    let raw = core
-        .session("rlm-format-survives-reopen")
-        .plugin_option(
-            lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-            lash_rlm_types::RlmCreateExtras {
-                final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-                ..lash_rlm_types::RlmCreateExtras::default()
-            },
-        )?
-        .open()
+    core.session("rlm-format-survives-reopen")
+        .create(crate::SessionCreation {
+            plugin_options: lash_core::PluginOptions::typed(
+                lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash_rlm_types::RlmCreateExtras {
+                    final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+                    ..lash_rlm_types::RlmCreateExtras::default()
+                },
+            )
+            .map_err(EmbedError::ProtocolTurnOptions)?,
+            ..Default::default()
+        })
         .await?;
+    let raw = core.session("rlm-format-survives-reopen").open().await?;
     raw.send(TurnInput::text("hello"))
         .require_finish()?
         .output()
         .await?;
     Box::pin(raw.close()).await?;
-    let reopened = core.session("rlm-format-survives-reopen").open().await?;
+    let reopened = core
+        .session("rlm-format-survives-reopen")
+        .created()
+        .await
+        .open()
+        .await?;
     reopened
         .send(TurnInput::text("again"))
         .require_finish()?
@@ -1235,7 +1309,7 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let _parent = core.session("rlm-root").open().await?;
+    let _parent = core.session("rlm-root").created().await.open().await?;
     let mut plugin_options = lash_core::PluginOptions {
         plugins: BTreeMap::new(),
     };
@@ -1250,12 +1324,14 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
 
     let err = match core
         .session("rlm-child-bad-extras")
-        .parent("rlm-root")
-        .plugin_options(plugin_options)
-        .open()
+        .create(crate::SessionCreation {
+            parent: Some("rlm-root".into()),
+            plugin_options,
+            ..Default::default()
+        })
         .await
     {
-        Ok(_) => panic!("malformed RLM create extras should fail session open"),
+        Ok(_) => panic!("malformed RLM create extras should fail session creation"),
         Err(error) => error,
     };
 
@@ -1311,7 +1387,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    let error = match core.session(session_id).open().await {
+    let error = match core.session(session_id).created().await.open().await {
         Ok(_) => panic!("cold open must reject the persisted v5 execution snapshot"),
         Err(error) => error,
     };
@@ -1355,7 +1431,7 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let reopened = core.session("persisted").open().await?;
+    let reopened = core.session("persisted").created().await.open().await?;
     let messages = reopened.read_view().messages().to_vec();
     assert_eq!(messages.len(), 1);
     assert_eq!(message_text(&messages[0]), "already stored");
@@ -1389,7 +1465,12 @@ async fn cold_reopen_restores_its_committed_prompt_layer() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let reopened = core.session("committed-session").open().await?;
+    let reopened = core
+        .session("committed-session")
+        .created()
+        .await
+        .open()
+        .await?;
 
     assert_eq!(reopened.policy_snapshot().prompt, expected_prompt);
     Ok(())
@@ -1405,7 +1486,7 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("parked").open().await?;
+    let session = core.session("parked").created().await.open().await?;
     session.send(TurnInput::text("hello")).output().await?;
     let before = session
         .read_view()
@@ -1461,7 +1542,12 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("deleted-while-parked").open().await?;
+    let session = core
+        .session("deleted-while-parked")
+        .created()
+        .await
+        .open()
+        .await?;
     session.send(TurnInput::text("hello")).output().await?;
     let parked = Box::pin(session.park()).await?;
 
@@ -1504,7 +1590,7 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("busy").open().await?;
+    let session = core.session("busy").created().await.open().await?;
     // A live clone shares the underlying runtime handle, exactly as an in-flight
     // turn would: parking must refuse rather than silently flush a session that
     // something else is still driving.
@@ -1517,7 +1603,7 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
 
     // Once the other handle is gone, the sole remaining handle parks cleanly.
     drop(live_clone);
-    let parked = Box::pin(core.session("busy").open().await?.park()).await?;
+    let parked = Box::pin(core.session("busy").created().await.open().await?.park()).await?;
     assert_eq!(parked.session_id(), "busy");
     Ok(())
 }
@@ -1574,7 +1660,12 @@ async fn persisted_provider_id_rebinds_to_live_provider_on_open() -> Result<()> 
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let reopened = core.session("provider-rebind").open().await?;
+    let reopened = core
+        .session("provider-rebind")
+        .created()
+        .await
+        .open()
+        .await?;
     let persisted = reopened.admin().state().persist_current().await?;
 
     assert_eq!(persisted.policy.recorded_provider_id(), "embed-test");
@@ -1615,7 +1706,13 @@ async fn persisted_provider_id_mismatch_is_refused_at_open_not_deferred_to_a_tur
     // The durable pin disagrees with the provider this host names, so the
     // open answers the conflict instead of discarding the request and letting
     // the first turn fail on a provider nobody asked for.
-    let error = match core.session("provider-mismatch").open().await {
+    let error = match core
+        .session("provider-mismatch")
+        .created()
+        .await
+        .open()
+        .await
+    {
         Ok(_) => panic!("a recorded provider mismatch must be refused at open"),
         Err(error) => error,
     };
@@ -1675,7 +1772,12 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("frame-provider-mismatch").open().await?;
+    let session = core
+        .session("frame-provider-mismatch")
+        .created()
+        .await
+        .open()
+        .await?;
     assert_eq!(
         session.policy_snapshot().recorded_provider_id(),
         "embed-test"
@@ -1720,7 +1822,12 @@ async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> 
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("refresh-provider-mismatch").open().await?;
+    let session = core
+        .session("refresh-provider-mismatch")
+        .created()
+        .await
+        .open()
+        .await?;
 
     set_head_provider_id(&store, "other-provider").await;
     let waiter = tokio::spawn({
@@ -1771,11 +1878,21 @@ async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()>
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let first = core.session("provider-reload").open().await?;
+    let first = core
+        .session("provider-reload")
+        .created()
+        .await
+        .open()
+        .await?;
     first.send(TurnInput::text("first")).output().await?;
     drop(first);
 
-    let reopened = core.session("provider-reload").open().await?;
+    let reopened = core
+        .session("provider-reload")
+        .created()
+        .await
+        .open()
+        .await?;
     let second = reopened.send(TurnInput::text("second")).output().await?;
 
     assert_eq!(assistant_prose(&second.activities), "echo: second");
@@ -1795,7 +1912,12 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("delete-session").open().await?;
+    let session = core
+        .session("delete-session")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("stored before delete"))
         .output()
@@ -1831,7 +1953,7 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
     );
     // Ids are single-use: the tombstone refuses a reopen rather than handing
     // back an empty session under the deleted id.
-    let reopen = core.session("delete-session").open().await;
+    let reopen = core.session("delete-session").created().await.open().await;
     assert!(
         matches!(
             &reopen,
@@ -1929,7 +2051,13 @@ async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Res
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    drop(core.session("retire-delete-session").open().await?);
+    drop(
+        core.session("retire-delete-session")
+            .created()
+            .await
+            .open()
+            .await?,
+    );
 
     delete_bound_session(&core, "retire-delete-session").await?;
 
@@ -1958,7 +2086,7 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
         ("retired-append-messages", false),
         ("retired-append-plugin-body", true),
     ] {
-        let session = core.session(session_id).open().await?;
+        let session = core.session(session_id).created().await.open().await?;
         factory
             .delete_session(&SessionId::from(session_id))
             .await
@@ -2035,7 +2163,12 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
 
-    let opened = core.session("manual-state").open_with_state(state).await?;
+    let opened = core
+        .session("manual-state")
+        .created()
+        .await
+        .open_with_state(state)
+        .await?;
     assert_eq!(
         message_text(&opened.read_view().messages().to_vec()[0]),
         "manual input"
@@ -2061,6 +2194,8 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
 
     let reopened = core
         .session("manual-state")
+        .created()
+        .await
         .open_with_state(persisted)
         .await?;
     let state = reopened.admin().tools().state().await?;
@@ -2123,7 +2258,7 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
         .model(builder_model.clone())
         .plugin(probe_factory)
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     assert_eq!(
         session.policy_snapshot().model.id,
         "top-level-model",
@@ -2252,7 +2387,12 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
     .model(builder_model.clone())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session(session_id).open_with_state(persisted).await?;
+    let session = core
+        .session(session_id)
+        .created()
+        .await
+        .open_with_state(persisted)
+        .await?;
     let writer = session.runtime.writer();
     let state = writer
         .lock()
@@ -2346,12 +2486,20 @@ async fn core_store_factory_is_used_for_sessions_created_from_a_running_session(
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let _session = core.session("root-with-child-store").open().await?;
-
-    core.session("child-store")
-        .parent("root-with-child-store")
+    let _session = core
+        .session("root-with-child-store")
+        .created()
+        .await
         .open()
         .await?;
+
+    core.session("child-store")
+        .create(crate::SessionCreation {
+            parent: Some("root-with-child-store".into()),
+            ..Default::default()
+        })
+        .await?;
+    core.session("child-store").open().await?;
 
     let mut session_ids = core
         .sessions()

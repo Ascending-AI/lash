@@ -99,9 +99,8 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
     assert_eq!(second_script.calls(), 0, "no turn for a settled redelivery");
     assert_eq!(platform.bot_messages(&channel).await.len(), 1);
     // The redelivery must not have queued a second copy of the mention either.
-    let session = bot
-        .core()
-        .session(session_id(&channel))
+    let session = crate::tests::created_session(bot.core(), session_id(&channel))
+        .await
         .open()
         .await
         .expect("open channel session");

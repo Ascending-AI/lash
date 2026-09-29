@@ -659,8 +659,8 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     // session drive runs the turn and executes the provider body.
     let double = crate::tests::test_double_backend(0).await;
     let driven = ownership_core(double.lash_backend(), "Restate double");
-    let session = driven
-        .session("workbench-runtime-owned-replay")
+    let session = crate::created_session(&driven, "workbench-runtime-owned-replay")
+        .await
         .open()
         .await
         .expect("open the session on the double");
@@ -756,9 +756,8 @@ async fn turn_body_reader_treats_ambiguous_errors_as_terminal() {
     )
     .await;
     let session_id = state.current_session_id();
-    state
-        .core
-        .session(session_id.clone())
+    crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open session for ambiguous turn-body test")

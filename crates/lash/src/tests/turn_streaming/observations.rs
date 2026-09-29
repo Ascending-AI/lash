@@ -7,7 +7,7 @@ fn bid() -> lash_core::llm::types::StreamBlockIdentity {
 #[tokio::test]
 pub(super) async fn turn_builder_stream_emits_activities_and_finishes() -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("turn-stream").open().await?;
+    let session = core.session("turn-stream").created().await.open().await?;
     let handle = session.send(TurnInput::text("stream me")).await?;
     let mut stream = handle.events();
 
@@ -100,7 +100,12 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("reasoning-single-publication").open().await?;
+    let session = core
+        .session("reasoning-single-publication")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let output = session
         .send(TurnInput::text("run one command"))
@@ -226,7 +231,12 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("reasoning-tool-publication").open().await?;
+    let session = core
+        .session("reasoning-tool-publication")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let output = session
         .send(TurnInput::text("inspect with a tool"))
@@ -277,7 +287,12 @@ async fn semantic_publication_streamed_reasoning_keeps_distinct_completed_reason
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("mixed-reasoning-publication").open().await?;
+    let session = core
+        .session("mixed-reasoning-publication")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let output = session
         .send(TurnInput::text("keep every distinct reasoning item"))
@@ -332,7 +347,12 @@ async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Res
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("reasoning-buffered-text").open().await?;
+    let session = core
+        .session("reasoning-buffered-text")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let output = session
         .send(TurnInput::text("answer after reasoning"))
@@ -379,6 +399,8 @@ async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("identical-reasoning-publication")
+        .created()
+        .await
         .open()
         .await?;
 
@@ -396,7 +418,12 @@ async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_
 #[tokio::test]
 pub(super) async fn session_observation_replays_live_activity_and_commit() -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("session-observation-replay").open().await?;
+    let session = core
+        .session("session-observation-replay")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor = session.observe().current_observation().cursor;
 
     let output = session.send(TurnInput::text("observe me")).output().await?;
@@ -609,7 +636,12 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
             ))
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
-        let session = core.session("rlm-provider-retry-prose").open().await?;
+        let session = core
+            .session("rlm-provider-retry-prose")
+            .created()
+            .await
+            .open()
+            .await?;
 
         let first = session
             .send(TurnInput::text("trigger deterministic rate limit retry"))
@@ -702,7 +734,12 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
         let persisted = session.admin().state().persist_current().await?;
         Box::pin(session.close()).await?;
 
-        let reopened = core.session("rlm-provider-retry-prose").open().await?;
+        let reopened = core
+            .session("rlm-provider-retry-prose")
+            .created()
+            .await
+            .open()
+            .await?;
         reopened.admin().state().set_persisted(persisted).await?;
         assert_eq!(
             reopened
@@ -738,7 +775,12 @@ pub(super) fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> R
             .provider(natural_prose_reasoning_provider(Arc::clone(&requests)))
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
-        let session = core.session("rlm-natural-prose-single-copy").open().await?;
+        let session = core
+            .session("rlm-natural-prose-single-copy")
+            .created()
+            .await
+            .open()
+            .await?;
 
         let first = session
             .send(TurnInput::text("answer naturally"))
@@ -830,6 +872,8 @@ pub(super) async fn session_observation_envelopes_scope_activity_and_commit_to_t
     let core = standard_core().await;
     let session = core
         .session("session-observation-turn-identity")
+        .created()
+        .await
         .open()
         .await?;
     let cursor = session.observe().current_observation().cursor;
@@ -897,7 +941,12 @@ pub(super) async fn session_observation_retracts_two_retried_visible_attempts_li
     .provider(retrying_visible_stream_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("retry-visible-observation").open().await?;
+    let session = core
+        .session("retry-visible-observation")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor = session.observe().current_observation().cursor;
     let lash_core::facade_support::SessionObservationSubscription::Subscribed(mut subscription) =
         session.observe().subscribe_from_cursor(&cursor)?
@@ -957,8 +1006,18 @@ pub(super) async fn session_observation_retracts_two_retried_visible_attempts_li
 #[tokio::test]
 pub(super) async fn session_observation_rejects_cursor_from_another_session() -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("session-observation-a").open().await?;
-    let other = core.session("session-observation-b").open().await?;
+    let session = core
+        .session("session-observation-a")
+        .created()
+        .await
+        .open()
+        .await?;
+    let other = core
+        .session("session-observation-b")
+        .created()
+        .await
+        .open()
+        .await?;
     let other_cursor = other.observe().current_observation().cursor;
 
     let err = session
@@ -979,6 +1038,8 @@ pub(super) async fn session_observation_subscription_replays_buffered_events_bef
     let core = standard_core().await;
     let session = core
         .session("session-observation-subscribe-replay")
+        .created()
+        .await
         .open()
         .await?;
     let cursor = session.observe().current_observation().cursor;
@@ -1033,6 +1094,8 @@ pub(super) async fn session_observation_recovery_stream_replays_buffered_events_
     let core = standard_core().await;
     let session = core
         .session("session-observation-recovered-stream")
+        .created()
+        .await
         .open()
         .await?;
     let cursor = session.observe().current_observation().cursor;
@@ -1078,6 +1141,8 @@ pub(super) async fn session_observation_remote_subscription_replays_dto_events()
     let core = standard_core().await;
     let session = core
         .session("session-observation-remote-subscribe")
+        .created()
+        .await
         .open()
         .await?;
     let observation = session.observe().current_remote_observation();
@@ -1131,6 +1196,8 @@ pub(super) async fn session_observation_remote_recovery_stream_yields_dto_gap() 
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("session-observation-remote-gap")
+        .created()
+        .await
         .open()
         .await?;
     let observation = session.observe().current_remote_observation();
@@ -1179,6 +1246,8 @@ pub(super) async fn capacity_and_age_trim_force_snapshot_with_matching_observati
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("session-observation-recovered-gap")
+        .created()
+        .await
         .open()
         .await?;
     let cursor = session.observe().current_observation().cursor;
@@ -1221,6 +1290,8 @@ pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_ev
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("trimmed-gap-unseen-auxiliary-event")
+        .created()
+        .await
         .open()
         .await?;
     let stale_cursor = session.observe().current_observation().cursor;
@@ -1264,7 +1335,12 @@ pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_ev
 pub(super) async fn recoverable_chat_conformance_snapshot_subscription_and_terminal_replacement()
 -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("recoverable-chat-terminal").open().await?;
+    let session = core
+        .session("recoverable-chat-terminal")
+        .created()
+        .await
+        .open()
+        .await?;
     let snapshot = session.observe().recoverable_chat_snapshot();
     assert!(snapshot.read_view.messages().is_empty());
     let mut stream = session
@@ -1415,6 +1491,8 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("failed-commit-observation-reconciliation")
+        .created()
+        .await
         .open()
         .await?;
     let before = session.observe().current_observation();
@@ -1472,6 +1550,8 @@ pub(super) async fn idle_session_reconnect_after_failed_append_yields_gap_withou
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("idle-failed-commit-observation-reconciliation")
+        .created()
+        .await
         .open()
         .await?;
     let cursor = session.observe().current_observation().cursor;
@@ -1517,7 +1597,7 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
         .live_replay_store(replay_store.clone())
         .build(crate::testing::runtime_lease_owner())?;
         let session_id = SessionId::from(format!("two-histories-{boundary:?}"));
-        let session = core.session(session_id).open().await?;
+        let session = core.session(session_id).created().await.open().await?;
         let before = session.observe().recoverable_chat_snapshot();
         let turn_session = session.clone();
         let turn = tokio::spawn(async move {
@@ -1625,6 +1705,8 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("notification-observes-installed-projection")
+        .created()
+        .await
         .open()
         .await?;
     let cursor = session.observe().current_observation().cursor;
@@ -1749,7 +1831,12 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
 #[tokio::test]
 pub(super) async fn payload_authority_matches_revision_transition() -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("payload-authority-transition").open().await?;
+    let session = core
+        .session("payload-authority-transition")
+        .created()
+        .await
+        .open()
+        .await?;
     let initial = session.observe().current_observation();
 
     session
@@ -1973,7 +2060,12 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
 #[tokio::test]
 pub(super) async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("recoverable-chat-redelivery").open().await?;
+    let session = core
+        .session("recoverable-chat-redelivery")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     session
         .send(TurnInput::text("redelivery identity"))
@@ -2021,7 +2113,16 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    Box::pin(bootstrap_core.session(session_id).open().await?.close()).await?;
+    Box::pin(
+        bootstrap_core
+            .session(session_id)
+            .created()
+            .await
+            .open()
+            .await?
+            .close(),
+    )
+    .await?;
     drop(bootstrap_core);
 
     let first_core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -2034,7 +2135,12 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         lash_core::facade_support::InMemoryLiveReplayStore::default(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let first_session = first_core.session(session_id).open().await?;
+    let first_session = first_core
+        .session(session_id)
+        .created()
+        .await
+        .open()
+        .await?;
     let initial_cursor = first_session.observe().recoverable_chat_snapshot().cursor;
     first_session.observe().runtime.record_turn_activity(
         Some(&TurnId::from("before-restart-turn")),
@@ -2065,7 +2171,12 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         lash_core::facade_support::InMemoryLiveReplayStore::default(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let second_session = second_core.session(session_id).open().await?;
+    let second_session = second_core
+        .session(session_id)
+        .created()
+        .await
+        .open()
+        .await?;
     let restarted_at = second_session.observe().recoverable_chat_snapshot().cursor;
     let mut retained_applied_ids = second_session
         .observe()
@@ -2153,7 +2264,12 @@ pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() ->
         ),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("recoverable-chat-gap").open().await?;
+    let session = core
+        .session("recoverable-chat-gap")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     session
         .send(TurnInput::text("trim the initial cursor"))
@@ -2218,6 +2334,8 @@ pub(super) async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("subscriber-lag-trimmed-recovery")
+        .created()
+        .await
         .open()
         .await?;
     let cursor = session.observe().current_observation().cursor;
@@ -2309,7 +2427,12 @@ pub(super) async fn recoverable_chat_conformance_disconnect_does_not_cancel_serv
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("recoverable-chat-disconnect").open().await?;
+    let session = core
+        .session("recoverable-chat-disconnect")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     let stream = session.observe().subscribe_recoverable_chat(cursor);
     let run_session = session.clone();

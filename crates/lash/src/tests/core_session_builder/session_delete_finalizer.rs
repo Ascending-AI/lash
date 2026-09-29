@@ -58,7 +58,7 @@ async fn closing_fixture_under(
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(SESSION).open().await?;
+    let session = core.session(SESSION).created().await.open().await?;
     session
         .send(TurnInput::text("a root that ends before the delete"))
         .id(ROOT)
@@ -131,7 +131,7 @@ async fn the_physical_delete_waits_for_the_closes_cleanup() -> Result<()> {
     );
     assert!(closing.obligation.is_some(), "the close armed the delete");
     assert!(!was_deleted(&core).await?);
-    let open = core.session(SESSION).open().await?;
+    let open = core.session(SESSION).created().await.open().await?;
     let refused = open
         .send(TurnInput::text("sent while closing"))
         .output()

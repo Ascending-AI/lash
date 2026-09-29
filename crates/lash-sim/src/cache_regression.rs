@@ -168,9 +168,7 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
         )
         .build(crate::sim_process_owner())
         .expect("RLM cache regression core");
-    let session = core
-        .session("cache-regression-session")
-        .open()
+    let session = crate::open_created_session(&core, "cache-regression-session")
         .await
         .expect("RLM cache regression session");
     engine

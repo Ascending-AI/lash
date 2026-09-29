@@ -13,9 +13,8 @@ async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
     let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open provider failure session");

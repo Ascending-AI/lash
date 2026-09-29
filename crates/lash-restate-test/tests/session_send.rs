@@ -168,7 +168,11 @@ async fn transcript(session: &lash::LashSession) -> String {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn idle_send_is_claimed_at_once() {
     let world = world(0x5501).await;
-    let session = world.core.session("idle-send").open().await.expect("open");
+    let session = created_session(&world.core, "idle-send")
+        .await
+        .open()
+        .await
+        .expect("open");
     let session_id = SessionId::from("idle-send");
     let receipt = session
         .send(lash::TurnInput::text("hello"))
@@ -205,7 +209,11 @@ async fn idle_send_is_claimed_at_once() {
 async fn busy_sends_answer_in_arrival_order() {
     let world = world(0x5502).await;
     world.gate.armed.store(true, Ordering::SeqCst);
-    let session = world.core.session("busy-send").open().await.expect("open");
+    let session = created_session(&world.core, "busy-send")
+        .await
+        .open()
+        .await
+        .expect("open");
     let session_id = SessionId::from("busy-send");
     let first = session
         .send(lash::TurnInput::text("first question"))
@@ -277,9 +285,8 @@ async fn busy_sends_answer_in_arrival_order() {
 async fn back_to_back_sends_queue_at_most_one_drive() {
     const SENDS: usize = 24;
     let world = world(0x5508).await;
-    let session = world
-        .core
-        .session("back-to-back")
+    let session = created_session(&world.core, "back-to-back")
+        .await
         .open()
         .await
         .expect("open");
@@ -341,7 +348,11 @@ async fn back_to_back_sends_queue_at_most_one_drive() {
 async fn a_held_drive_admits_nothing_until_released() {
     let world = world(0x5507).await;
     world.gate.armed.store(true, Ordering::SeqCst);
-    let session = world.core.session("held-drive").open().await.expect("open");
+    let session = created_session(&world.core, "held-drive")
+        .await
+        .open()
+        .await
+        .expect("open");
     let session_id = SessionId::from("held-drive");
     let running = session
         .send(lash::TurnInput::text("first question"))
@@ -407,9 +418,8 @@ async fn a_held_drive_admits_nothing_until_released() {
 async fn withdraw_while_queued_vs_cancel_while_running() {
     let world = world(0x5503).await;
     world.gate.armed.store(true, Ordering::SeqCst);
-    let session = world
-        .core
-        .session("withdraw-cancel")
+    let session = created_session(&world.core, "withdraw-cancel")
+        .await
         .open()
         .await
         .expect("open");
@@ -510,9 +520,8 @@ async fn dropping_the_handle_stops_nothing() {
     let world = world(0x5504).await;
     let session_id = SessionId::from("dropped-handle");
     let input_id = {
-        let session = world
-            .core
-            .session("dropped-handle")
+        let session = created_session(&world.core, "dropped-handle")
+            .await
             .open()
             .await
             .expect("open");
@@ -610,15 +619,21 @@ async fn a_dropped_child_turn_leaves_the_child_session_reusable() {
             "dropped-child",
         ))
         .expect("build the lash core");
-    let _parent = core
-        .session("dropped-child-parent")
+    let _parent = created_session(&core, "dropped-child-parent")
+        .await
         .open()
         .await
         .expect("open the parent");
     let first = {
+        core.session("dropped-child")
+            .create(lash::SessionCreation {
+                parent: Some("dropped-child-parent".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("create the child");
         let child = core
             .session("dropped-child")
-            .parent("dropped-child-parent")
             .open()
             .await
             .expect("open the child");
@@ -640,7 +655,7 @@ async fn a_dropped_child_turn_leaves_the_child_session_reusable() {
 
     let child = tokio::time::timeout(
         Duration::from_secs(20),
-        core.session("dropped-child").open(),
+        created_session(&core, "dropped-child").await.open(),
     )
     .await
     .expect("the child reopens while its dropped turn runs")
@@ -687,9 +702,8 @@ async fn a_dropped_child_turn_leaves_the_child_session_reusable() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn dropped_schedule_is_reconciled() {
     let world = world(0x5505).await;
-    let session = world
-        .core
-        .session("dropped-schedule")
+    let session = created_session(&world.core, "dropped-schedule")
+        .await
         .open()
         .await
         .expect("open");
@@ -768,7 +782,11 @@ async fn dropped_schedule_is_reconciled() {
 async fn a_session_with_live_engine_work_is_not_re_asked() {
     let world = world(0x5e55).await;
     world.gate.armed.store(true, Ordering::SeqCst);
-    let session = world.core.session("in-flight").open().await.expect("open");
+    let session = created_session(&world.core, "in-flight")
+        .await
+        .open()
+        .await
+        .expect("open");
     let session_id = SessionId::from("in-flight");
     let receipt = session
         .durable()
@@ -863,4 +881,27 @@ async fn a_second_core_over_one_engine_reports_its_ignored_driver() {
     assert_eq!(ignored.field("incarnation_id"), "second-core");
     drop(second);
     drop(world);
+}
+
+/// This test crate's one path to a session that may not exist yet
+/// (FIG-4112): only `create` creates, so this creates `session_id` with the
+/// core's config unless the catalog already holds it, then hands back the
+/// builder for the verb under test. An existing or deleted id is left for
+/// that verb to report.
+async fn created_session(
+    core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> lash::SessionBuilder {
+    let session_id = session_id.into();
+    match core
+        .session(session_id.clone())
+        .create(lash::SessionCreation::default())
+        .await
+    {
+        Ok(_)
+        | Err(lash::EmbedError::SessionAlreadyExists { .. })
+        | Err(lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. })) => {}
+        Err(error) => panic!("create session `{session_id}`: {error:?}"),
+    }
+    core.session(session_id)
 }

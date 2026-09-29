@@ -13,13 +13,13 @@ async fn concurrent_sessions_isolate_transcripts_triggers_and_processes_inner() 
     crate::tests::install_test_process_worker(&double, &core);
     let session_a_id = "workbench-isolation-a";
     let session_b_id = "workbench-isolation-b";
-    let session_a = core
-        .session(session_a_id)
+    let session_a = crate::created_session(&core, session_a_id)
+        .await
         .open()
         .await
         .expect("open session A");
-    let session_b = core
-        .session(session_b_id)
+    let session_b = crate::created_session(&core, session_b_id)
+        .await
         .open()
         .await
         .expect("open session B");

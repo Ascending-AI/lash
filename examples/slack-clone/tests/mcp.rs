@@ -257,8 +257,8 @@ async fn bundled_server_exercises_sampling_both_elicitation_modes_and_roots_thro
         direct_server_config(&api_base_url),
     )
     .await;
-    let session = core
-        .session("mcp-client-depth")
+    let session = created_session(&core, "mcp-client-depth")
+        .await
         .open()
         .await
         .expect("open session");
@@ -521,8 +521,8 @@ async fn bundled_mcp_tools_join_the_catalog_and_feed_the_standard_tool_loop() {
         direct_server_config(&api_base_url),
     )
     .await;
-    let session = core
-        .session("mcp-catalog")
+    let session = created_session(&core, "mcp-catalog")
+        .await
         .open()
         .await
         .expect("open session");
@@ -619,8 +619,8 @@ async fn server_death_is_a_typed_failure_and_the_next_turn_uses_a_respawned_serv
         wrapped_server_config(&api_base_url, &pid_file),
     )
     .await;
-    let session = core
-        .session("mcp-recovery")
+    let session = created_session(&core, "mcp-recovery")
+        .await
         .open()
         .await
         .expect("open session");
@@ -776,8 +776,8 @@ async fn an_exact_native_name_collision_is_rejected_instead_of_shadowing_mcp() {
         direct_server_config(&api_base_url),
     )
     .await;
-    let session = core
-        .session("mcp-collision")
+    let session = created_session(&core, "mcp-collision")
+        .await
         .open()
         .await
         .expect("open session");
@@ -838,11 +838,12 @@ async fn http_mcp_server(token: &str) -> (String, tokio::task::JoinHandle<()>) {
 
 #[expect(
     clippy::expect_used,
-    reason = "the session was created by the caller, so open succeeds; the admin catalog read \
+    reason = "the session exists once created here, so open succeeds; the admin catalog read \
               cannot fail on a live core"
 )]
 async fn catalog_names(core: &lash::LashCore, session_id: &SessionId) -> Vec<String> {
-    core.session(session_id)
+    created_session(core, session_id)
+        .await
         .open()
         .await
         .expect("open session")
@@ -954,9 +955,8 @@ async fn attaching_and_detaching_an_http_server_moves_its_tools_through_the_cata
 
     // A session opened after the attach can actually route to the new server,
     // not merely list it.
-    let session = runtime
-        .core
-        .session("mcp-http-call")
+    let session = created_session(&runtime.core, "mcp-http-call")
+        .await
         .open()
         .await
         .expect("open session");
@@ -1031,9 +1031,8 @@ async fn binary_mcp_content_is_attached_for_each_server() {
         .await
         .expect("attach the inline server");
 
-    let session = runtime
-        .core
-        .session("mcp-http-badge")
+    let session = created_session(&runtime.core, "mcp-http-badge")
+        .await
         .open()
         .await
         .expect("open session");
@@ -1139,9 +1138,8 @@ async fn a_stalled_call_times_out_as_a_tool_failure_and_keeps_the_connection() {
         .await
         .expect("attach the HTTP MCP server");
 
-    let session = runtime
-        .core
-        .session("mcp-http-stall")
+    let session = created_session(&runtime.core, "mcp-http-stall")
+        .await
         .open()
         .await
         .expect("open session");
@@ -1209,9 +1207,8 @@ async fn a_host_can_opt_out_of_timeout_disconnects_entirely() {
         .await
         .expect("attach the HTTP MCP server");
 
-    let session = runtime
-        .core
-        .session("mcp-http-never-disconnect")
+    let session = created_session(&runtime.core, "mcp-http-never-disconnect")
+        .await
         .open()
         .await
         .expect("open session");
@@ -1254,9 +1251,8 @@ async fn a_form_the_answer_book_cannot_satisfy_is_declined_rather_than_answered(
         .await
         .expect("attach the HTTP MCP server");
 
-    let session = runtime
-        .core
-        .session("mcp-http-elicit")
+    let session = created_session(&runtime.core, "mcp-http-elicit")
+        .await
         .open()
         .await
         .expect("open session");
@@ -1298,9 +1294,8 @@ async fn a_question_the_host_has_not_read_is_declined_even_with_a_familiar_field
         .await
         .expect("attach the HTTP MCP server");
 
-    let session = runtime
-        .core
-        .session("mcp-http-unknown-prompt")
+    let session = created_session(&runtime.core, "mcp-http-unknown-prompt")
+        .await
         .open()
         .await
         .expect("open session");
@@ -1371,9 +1366,8 @@ async fn publishing_a_root_notifies_the_connected_server_which_re_reads_the_list
         .await
         .expect("notify connected servers");
 
-    let session = runtime
-        .core
-        .session("mcp-http-roots")
+    let session = created_session(&runtime.core, "mcp-http-roots")
+        .await
         .open()
         .await
         .expect("open session");
@@ -1636,9 +1630,8 @@ async fn publishing_a_root_through_the_operator_api_reaches_the_connected_server
     assert_eq!(published["roots"], 2);
     assert_eq!(published["notified"], true);
 
-    let session = runtime
-        .core
-        .session("mcp-admin-roots")
+    let session = created_session(&runtime.core, "mcp-admin-roots")
+        .await
         .open()
         .await
         .expect("open session");
@@ -1660,4 +1653,27 @@ async fn publishing_a_root_through_the_operator_api_reaches_the_connected_server
     slack_clone::bot::shutdown_core(&runtime.core)
         .await
         .expect("shut down bot core");
+}
+
+/// This test crate's one path to a session that may not exist yet
+/// (FIG-4112): only `create` creates, so this creates `session_id` with the
+/// core's config unless the catalog already holds it, then hands back the
+/// builder for the verb under test. An existing or deleted id is left for
+/// that verb to report.
+async fn created_session(
+    core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> lash::SessionBuilder {
+    let session_id = session_id.into();
+    match core
+        .session(session_id.clone())
+        .create(lash::SessionCreation::default())
+        .await
+    {
+        Ok(_)
+        | Err(lash::EmbedError::SessionAlreadyExists { .. })
+        | Err(lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. })) => {}
+        Err(error) => panic!("create session `{session_id}`: {error:?}"),
+    }
+    core.session(session_id)
 }

@@ -267,15 +267,22 @@ async fn run_turn(
     telemetry: &Arc<crate::telemetry::Telemetry>,
 ) -> Result<(lash::TurnOutput, Vec<String>)> {
     let session_id = SessionId::from(format!("toolbench-{run}-typescript-{}", task.id));
-    let session_builder = core.session(session_id);
-    let session_builder = if channel == crate::ChannelSelection::Standard {
-        session_builder
+    // Each run names a fresh session, created with its RLM session options.
+    let plugin_options = if channel == crate::ChannelSelection::Standard {
+        lash::plugins::PluginOptions::default()
     } else {
-        session_builder
-            .plugin_option(lash::rlm::RLM_PROTOCOL_PLUGIN_ID, session_options())
+        lash::plugins::PluginOptions::typed(lash::rlm::RLM_PROTOCOL_PLUGIN_ID, session_options())
             .context("encode RLM session option")?
     };
-    let session = session_builder
+    core.session(session_id.clone())
+        .create(lash::SessionCreation {
+            plugin_options,
+            ..Default::default()
+        })
+        .await
+        .context("create toolbench session")?;
+    let session = core
+        .session(session_id)
         .open()
         .await
         .context("open toolbench session")?;

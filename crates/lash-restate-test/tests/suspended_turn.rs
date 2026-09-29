@@ -257,8 +257,8 @@ async fn start_turn_with(options: TurnOptions) -> Turn {
                 "suspended-turn",
             ))
             .expect("build the lash core");
-    let session = core
-        .session(SESSION)
+    let session = created_session(&core, SESSION)
+        .await
         .open()
         .await
         .expect("open the session");
@@ -905,4 +905,27 @@ async fn a_replayed_tool_child_issues_the_same_commands_as_its_journal() {
         "the turn ends cancelled: {answer}"
     );
     assert_eq!(executions.load(Ordering::SeqCst), 1, "the tool ran once");
+}
+
+/// This test crate's one path to a session that may not exist yet
+/// (FIG-4112): only `create` creates, so this creates `session_id` with the
+/// core's config unless the catalog already holds it, then hands back the
+/// builder for the verb under test. An existing or deleted id is left for
+/// that verb to report.
+async fn created_session(
+    core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> lash::SessionBuilder {
+    let session_id = session_id.into();
+    match core
+        .session(session_id.clone())
+        .create(lash::SessionCreation::default())
+        .await
+    {
+        Ok(_)
+        | Err(lash::EmbedError::SessionAlreadyExists { .. })
+        | Err(lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. })) => {}
+        Err(error) => panic!("create session `{session_id}`: {error:?}"),
+    }
+    core.session(session_id)
 }

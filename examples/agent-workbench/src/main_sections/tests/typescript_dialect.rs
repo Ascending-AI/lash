@@ -14,19 +14,18 @@ pub(crate) async fn run_turn_through_the_workbench_open_path(
     turn_id: &TurnId,
     text: &str,
 ) {
+    // A turn route creates the session with the host's selection when it is
+    // new, as `start_user_turn` does.
+    state
+        .ensure_session(session_id)
+        .await
+        .expect("create the session through the workbench path");
     // The previous turn's drive can still hold the session's execution lease a
     // moment after its terminal is observable, so the open goes through the
     // same bounded retry every route applies.
     let session = retry_session_open(
         "test.workbench_open_path",
-        || {
-            state
-                .session_builder(session_id.to_string())
-                .session_spec(
-                    lash::SessionSpec::inherit().turn_budget(lash::TurnBudget::bounded(8)),
-                )
-                .open()
-        },
+        || state.session_builder(session_id.to_string()).open(),
         |event, payload| state.trace_for_session(session_id, event, payload),
     )
     .await

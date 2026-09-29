@@ -70,6 +70,31 @@ fn sim_process_owner() -> lash_core::LeaseOwnerIdentity {
     )
 }
 
+/// The simulator's one path to a session its world names (FIG-4112).
+///
+/// A simulated world reaches each session the same way on its first touch
+/// and after every crash or retry, so it means create-or-use. Only `create`
+/// creates, so the arm where the core's creation config does not apply — the
+/// session already exists and keeps what it recorded — is written out here,
+/// once, before the open. A deleted id is left for the open to report.
+pub(crate) async fn open_created_session(
+    core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> lash::Result<lash::LashSession> {
+    let session_id = session_id.into();
+    match core
+        .session(session_id.clone())
+        .create(lash::SessionCreation::default())
+        .await
+    {
+        Ok(_)
+        | Err(lash::EmbedError::SessionAlreadyExists { .. })
+        | Err(lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. })) => {}
+        Err(error) => return Err(error),
+    }
+    core.session(session_id).open().await
+}
+
 pub use artifacts::{
     FixedScriptManifest, FixedScriptProof, FixedScriptSummary, GeneratedSimProfileReport,
     ScriptHashManifest,

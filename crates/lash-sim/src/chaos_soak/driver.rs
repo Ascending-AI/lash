@@ -425,20 +425,29 @@ impl Driver {
                     deleted: None,
                 });
                 // A host that died inside the create creates again when it
-                // comes back: the create is idempotent, and every later step
-                // on the session needs it.
+                // comes back, and every later step on the session needs it.
+                // A create never adopts an existing id (FIG-4112), so a retry
+                // that finds the session its lost attempt created treats
+                // `SessionAlreadyExists` as present: create-or-use.
                 for attempt in 1..=OPEN_ATTEMPTS {
                     let core = self.world.core()?;
                     let id = id.clone();
                     let parent = parent.clone();
                     let opened = self
                         .host(Box::pin(async move {
-                            let builder = core.session(id);
-                            let builder = match parent {
-                                Some(parent) => builder.parent(parent),
-                                None => builder,
-                            };
-                            builder.create().await.map(|_| ())
+                            match core
+                                .session(id)
+                                .create(lash::SessionCreation {
+                                    parent,
+                                    ..Default::default()
+                                })
+                                .await
+                            {
+                                Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {
+                                    Ok(())
+                                }
+                                Err(error) => Err(error),
+                            }
                         }))
                         .await?;
                     match opened {

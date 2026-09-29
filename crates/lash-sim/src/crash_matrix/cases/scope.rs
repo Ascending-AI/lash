@@ -154,8 +154,7 @@ async fn stage_scope_close_with_claim(
     };
     // The session exists before its root's children are registered.
     let core = world.core()?;
-    core.session(session.clone())
-        .open()
+    crate::open_created_session(&core, session.clone())
         .await
         .map_err(|error| format!("open `{session}`: {error}"))?;
     for _ in 0..child_count {
@@ -316,10 +315,7 @@ pub(super) async fn stage_parent_end(point: CrashPoint, seed: u64) -> Result<Sta
     let world = CrashWorld::new(seed, standard_core(), false).await?;
     world.restart().await?;
     let session = session_name(Seam::ParentEnd, seed);
-    world
-        .core()?
-        .session(session.clone())
-        .open()
+    crate::open_created_session(&world.core()?, session.clone())
         .await
         .map_err(|error| format!("open `{session}`: {error}"))?;
     let mut expected = Expected {

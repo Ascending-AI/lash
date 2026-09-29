@@ -567,8 +567,8 @@ async fn live_restate_stateless_service_rebuild_recovers_each_service_kind() {
     let core = deployment_core(&engine, &executions, &models);
     engine.install_process_worker(worker(&core));
     let session_id = lash_core::SessionId::from(run_tag("rebuild-session"));
-    let session = core
-        .session(session_id.as_str())
+    let session = crate::created_session(&core, session_id.as_str())
+        .await
         .open()
         .await
         .expect("open session");

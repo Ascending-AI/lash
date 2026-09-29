@@ -138,8 +138,8 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
             "google-reasoning-boundaries-test-boot",
         ))
         .expect("core");
-    let session = core
-        .session("google-reasoning-boundaries")
+    let session = created_session(&core, "google-reasoning-boundaries")
+        .await
         .open()
         .await
         .expect("session");
@@ -224,8 +224,8 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
             "google-signature-only-reasoning-test-boot",
         ))
         .expect("core");
-    let session = core
-        .session("google-signature-only-reasoning")
+    let session = created_session(&core, "google-signature-only-reasoning")
+        .await
         .open()
         .await
         .expect("session");
@@ -254,4 +254,27 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
 
     assert_eq!(activities, ["visible reasoning"]);
     assert_eq!(durable, ["", "visible reasoning"]);
+}
+
+/// This test crate's one path to a session that may not exist yet
+/// (FIG-4112): only `create` creates, so this creates `session_id` with the
+/// core's config unless the catalog already holds it, then hands back the
+/// builder for the verb under test. An existing or deleted id is left for
+/// that verb to report.
+async fn created_session(
+    core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> lash::SessionBuilder {
+    let session_id = session_id.into();
+    match core
+        .session(session_id.clone())
+        .create(lash::SessionCreation::default())
+        .await
+    {
+        Ok(_)
+        | Err(lash::EmbedError::SessionAlreadyExists { .. })
+        | Err(lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. })) => {}
+        Err(error) => panic!("create session `{session_id}`: {error:?}"),
+    }
+    core.session(session_id)
 }

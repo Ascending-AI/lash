@@ -60,7 +60,14 @@ async fn a_core_built_while_a_dropped_cores_drive_is_in_flight_drives_on_its_own
     .build(crate::testing::runtime_lease_owner())?;
     // No session stays open on V1, so nothing but V1 itself and its
     // in-flight drive holds V1's driver.
-    drop(core_v1.session("first-core-session").open().await?);
+    drop(
+        core_v1
+            .session("first-core-session")
+            .created()
+            .await
+            .open()
+            .await?,
+    );
     let handle = core_v1
         .session("first-core-session")
         .durable()
@@ -83,7 +90,12 @@ async fn a_core_built_while_a_dropped_cores_drive_is_in_flight_drives_on_its_own
     .provider(tagged_provider("v2", Arc::clone(&calls), None))
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core_v2.session("second-core-session").open().await?;
+    let session = core_v2
+        .session("second-core-session")
+        .created()
+        .await
+        .open()
+        .await?;
     tokio::time::timeout(
         std::time::Duration::from_secs(30),
         session.send(TurnInput::text("run on V2")).output(),

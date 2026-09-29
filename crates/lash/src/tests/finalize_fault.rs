@@ -159,7 +159,13 @@ async fn retried_to_one_committed_root(
         fault,
     )])
     .await?;
-    let session = fixture.core.session(session_id).open().await?;
+    let session = fixture
+        .core
+        .session(session_id)
+        .created()
+        .await
+        .open()
+        .await?;
 
     let output = session
         .send(TurnInput::text("finalize blips once"))
@@ -222,7 +228,7 @@ async fn a_finalize_fault_on_every_attempt_pauses_the_root_run() -> Result<()> {
         session_blip,
     )])
     .await?;
-    let session = fixture.core.session(SESSION).open().await?;
+    let session = fixture.core.session(SESSION).created().await.open().await?;
     let key = lash_restate::turn_workflow_key(
         &lash_core::SessionId::from(SESSION),
         &lash_core::TurnId::from(TURN),
@@ -305,7 +311,13 @@ async fn refused_terminal(
         fault,
     )])
     .await?;
-    let session = fixture.core.session(session_id).open().await?;
+    let session = fixture
+        .core
+        .session(session_id)
+        .created()
+        .await
+        .open()
+        .await?;
 
     let refused = session
         .send(TurnInput::text("finalize refuses"))
@@ -388,7 +400,7 @@ async fn a_journaled_failure_settles_the_root_failed_after_a_live_finalize_fault
         failing_after_turn(Arc::clone(&finalize_calls), 1, session_blip),
     ])
     .await?;
-    let session = fixture.core.session(SESSION).open().await?;
+    let session = fixture.core.session(SESSION).created().await.open().await?;
 
     let settled = session
         .send(TurnInput::text("checkpoint fails and is journaled"))

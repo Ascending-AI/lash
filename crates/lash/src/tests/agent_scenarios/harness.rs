@@ -387,7 +387,13 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         .max_turns(case.max_turns)
         .build()
         .await?;
-    let session = runtime.core.session(&case.session_id).open().await?;
+    let session = runtime
+        .core
+        .session(&case.session_id)
+        .created()
+        .await
+        .open()
+        .await?;
     if !case.seeded_attachment_writes.is_empty() {
         // Stand in for the writer that really uploaded these bytes. The
         // evidence a store keeps is per digest, not per session, so a
@@ -839,7 +845,13 @@ impl AgentSessionTurnProcessScenario {
         // while shared AgentScenario setup still covers the provider, process
         // registry, graph store, and remote DTO assertions.
         let runtime = self.runtime().await?;
-        let session = runtime.core.session(&self.session_id).open().await?;
+        let session = runtime
+            .core
+            .session(&self.session_id)
+            .created()
+            .await
+            .open()
+            .await?;
         let handle = session
             .admin()
             .processes()
@@ -984,7 +996,13 @@ impl AgentDurableInputSuspensionScenario {
         let runtime = self
             .runtime(Arc::clone(&tools) as Arc<dyn ToolProvider>)
             .await?;
-        let session = runtime.core.session(&self.session_id).open().await?;
+        let session = runtime
+            .core
+            .session(&self.session_id)
+            .created()
+            .await
+            .open()
+            .await?;
         let events = Arc::new(RecordingEvents::default());
         let turn_session = session.clone();
         let turn_events = Arc::clone(&events);
@@ -1179,6 +1197,8 @@ finish(await handle);"#,
     let session = runtime
         .core
         .session("agent-scenario-process-llm-query")
+        .created()
+        .await
         .open()
         .await?;
     let result = session
@@ -1223,6 +1243,8 @@ finish(await handle);"#,
     let session = runtime
         .core
         .session("agent-scenario-direct-completion-attempt-retry")
+        .created()
+        .await
         .open()
         .await?;
     let result = session

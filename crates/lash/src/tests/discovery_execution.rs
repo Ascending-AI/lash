@@ -129,7 +129,12 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 calls: calls.clone(),
             }))
             .build(crate::testing::runtime_lease_owner())?;
-        let session = core.session(format!("discovery-{mode}")).open().await?;
+        let session = core
+            .session(format!("discovery-{mode}"))
+            .created()
+            .await
+            .open()
+            .await?;
         let output = session
             .send(TurnInput::text("read the hidden tool"))
             .output()

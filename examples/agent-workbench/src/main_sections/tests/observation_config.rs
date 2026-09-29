@@ -4,7 +4,10 @@ async fn observation_get_preserves_config(path: &str) {
     let double = crate::tests::test_double_backend(0).await;
     let state = recoverable_chat_test_state(&double, 16).await;
     let session_id = state.current_session_id();
-    let session = state.open_session(&session_id, "test").await.unwrap();
+    let session = state
+        .create_or_open_session(&session_id, "test")
+        .await
+        .unwrap();
     let peer_model = lash::ModelSpec::builder("peer-commanded-model")
         .context_window_tokens(8192)
         .build()

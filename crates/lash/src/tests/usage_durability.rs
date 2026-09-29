@@ -134,7 +134,7 @@ fn unreported_holes_survive_close_and_reopen_with_their_attribution() -> Result<
         ))
         .await?;
 
-        let session = core.session("fig2765-hole").open().await?;
+        let session = core.session("fig2765-hole").created().await.open().await?;
         let first = session.send(TurnInput::text("one")).output().await?;
         let second = session.send(TurnInput::text("two")).output().await?;
         let first_call = first.result.llm_calls[0].call_id.0.clone();
@@ -144,7 +144,7 @@ fn unreported_holes_survive_close_and_reopen_with_their_attribution() -> Result<
         assert_eq!(live.len(), 2, "one hole per aborted attempt");
         Box::pin(session.close()).await?;
 
-        let reopened = core.session("fig2765-hole").open().await?;
+        let reopened = core.session("fig2765-hole").created().await.open().await?;
         let mut restored = reopened.unreported_usage_attempts().await;
         // Durable rows carry their holes in canonical key order, so compare the
         // sets rather than the order they happened to be registered in.
@@ -200,11 +200,21 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
         ))
         .await?;
 
-        let session = core.session("fig2765-correction").open().await?;
+        let session = core
+            .session("fig2765-correction")
+            .created()
+            .await
+            .open()
+            .await?;
         session.send(TurnInput::text("one")).output().await?;
         Box::pin(session.close()).await?;
 
-        let reopened = core.session("fig2765-correction").open().await?;
+        let reopened = core
+            .session("fig2765-correction")
+            .created()
+            .await
+            .open()
+            .await?;
         let report = reopened.reconcile_unreported_usage().await?;
         assert_eq!(report.reconciled.len(), 1);
         assert!(report.unresolved.is_empty());
@@ -213,7 +223,12 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
         // boundary, so park is the only thing that can persist it.
         Box::pin(reopened.close()).await?;
 
-        let after = core.session("fig2765-correction").open().await?;
+        let after = core
+            .session("fig2765-correction")
+            .created()
+            .await
+            .open()
+            .await?;
         let totals = after.usage_report().usage;
         assert_eq!(totals.usage.input_tokens, 334);
         assert_eq!(totals.total_tokens, 334);
@@ -233,7 +248,12 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
         Box::pin(after.close()).await?;
 
         // The same survival through park/resume rather than close/open.
-        let resumed_session = core.session("fig2765-correction").open().await?;
+        let resumed_session = core
+            .session("fig2765-correction")
+            .created()
+            .await
+            .open()
+            .await?;
         let parked = Box::pin(resumed_session.park()).await?;
         let resumed = Box::pin(core.resume(parked)).await?;
         assert_eq!(resumed.usage_report().usage, totals);
@@ -309,7 +329,12 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
             usage_durability_core(provider).await?
         };
 
-        let session = core.session("fig2765-cancel").open().await?;
+        let session = core
+            .session("fig2765-cancel")
+            .created()
+            .await
+            .open()
+            .await?;
         session.send(TurnInput::text("one")).output().await?;
         session.send(TurnInput::text("two")).output().await?;
         assert_eq!(session.unreported_usage_attempts().await.len(), 2);
@@ -363,7 +388,12 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
         );
         Box::pin(session.close()).await?;
 
-        let reopened = core.session("fig2765-cancel").open().await?;
+        let reopened = core
+            .session("fig2765-cancel")
+            .created()
+            .await
+            .open()
+            .await?;
         let totals = reopened.usage_report().usage;
         assert_eq!(totals.usage.input_tokens, 333);
         assert_eq!(totals.reconciled_attempts, 2);
@@ -403,14 +433,14 @@ fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result
             }
         };
 
-        let session = core.session(session_id).open().await?;
+        let session = core.session(session_id).created().await.open().await?;
         session.send(TurnInput::text("one")).output().await?;
         Box::pin(session.close()).await?;
         let after_turn = head_revision().await;
 
         // Durable unresolved holes on their own are not pending work: opening
         // and closing again must not bump the head.
-        let quiet = core.session(session_id).open().await?;
+        let quiet = core.session(session_id).created().await.open().await?;
         assert_eq!(quiet.unreported_usage_attempts().await.len(), 1);
         Box::pin(quiet.close()).await?;
         assert_eq!(
@@ -420,7 +450,7 @@ fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result
         );
 
         // One pending correction, one commit.
-        let reconciling = core.session(session_id).open().await?;
+        let reconciling = core.session(session_id).created().await.open().await?;
         reconciling.reconcile_unreported_usage().await?;
         Box::pin(reconciling.close()).await?;
         let after_correction = head_revision().await;
@@ -430,7 +460,7 @@ fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result
             "a pending correction causes exactly one durable commit"
         );
 
-        let quiet_again = core.session(session_id).open().await?;
+        let quiet_again = core.session(session_id).created().await.open().await?;
         assert_eq!(quiet_again.usage_report().usage.usage.input_tokens, 334);
         Box::pin(quiet_again.close()).await?;
         assert_eq!(

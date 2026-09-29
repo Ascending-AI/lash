@@ -14,7 +14,12 @@ pub(super) async fn turn_run_uses_the_engine_host_without_explicit_effects() -> 
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("configured-effect-host").open().await?;
+    let session = core
+        .session("configured-effect-host")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let output = session
         .send(TurnInput::text("inline"))
@@ -45,7 +50,12 @@ pub(super) async fn plain_turn_entry_points_each_run_under_their_own_turn() -> R
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("durable-default-effect-host").open().await?;
+    let session = core
+        .session("durable-default-effect-host")
+        .created()
+        .await
+        .open()
+        .await?;
     let events = RecordingEvents::default();
 
     session
@@ -110,7 +120,12 @@ pub(super) async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("stable-turn-id").open().await?;
+    let session = core
+        .session("stable-turn-id")
+        .created()
+        .await
+        .open()
+        .await?;
 
     session
         .send(TurnInput::text("stable"))
@@ -146,7 +161,12 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("turn-started-cancel-target").open().await?;
+    let session = core
+        .session("turn-started-cancel-target")
+        .created()
+        .await
+        .open()
+        .await?;
     let expected_turn_id = "turn-started-cancel-target-id";
     let handle = session
         .send(TurnInput::text("wait for exact cancellation"))
@@ -201,7 +221,12 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("idle-input-application").open().await?;
+    let session = core
+        .session("idle-input-application")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor = session.observe().current_remote_observation().cursor;
     let empty_admission = session
         .durable()
@@ -291,7 +316,12 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         ),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("durable-input-application-gap").open().await?;
+    let session = core
+        .session("durable-input-application-gap")
+        .created()
+        .await
+        .open()
+        .await?;
     let stale_cursor = session.observe().current_remote_observation().cursor;
     let admission = session
         .durable()
@@ -362,8 +392,18 @@ async fn answering_core(answer: &'static str) -> Result<LashCore> {
 pub(super) async fn a_send_never_answers_from_a_root_another_store_ran() -> Result<()> {
     let first = answering_core("answered by the first store").await?;
     let second = answering_core("answered by the second store").await?;
-    let first_session = first.session("shared-session").open().await?;
-    let second_session = second.session("shared-session").open().await?;
+    let first_session = first
+        .session("shared-session")
+        .created()
+        .await
+        .open()
+        .await?;
+    let second_session = second
+        .session("shared-session")
+        .created()
+        .await
+        .open()
+        .await?;
 
     // The first store's root settles and its driver deposits the report; no
     // handle takes it, so it stays in the mailbox under the shared ids.
@@ -420,7 +460,12 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("request-digest").open().await?;
+    let session = core
+        .session("request-digest")
+        .created()
+        .await
+        .open()
+        .await?;
     let input = "x".repeat(8_000);
     let mut turn_bytes = Vec::new();
     for turn in 0..4 {

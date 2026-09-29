@@ -437,9 +437,8 @@ async fn disabling_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
     .await;
     let session_id = state.current_session_id();
     drop(
-        state
-            .core
-            .session(&session_id)
+        crate::created_session(&state.core, &session_id)
+            .await
             .open()
             .await
             .expect("materialize FIG-1067 cron session"),
@@ -491,9 +490,8 @@ async fn enabling_a_trigger_rearms_its_cron_before_the_route_returns() {
     .await;
     let session_id = state.current_session_id();
     drop(
-        state
-            .core
-            .session(&session_id)
+        crate::created_session(&state.core, &session_id)
+            .await
             .open()
             .await
             .expect("materialize FIG-1067 cron session"),
@@ -566,9 +564,8 @@ async fn deleting_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
     .await;
     let session_id = state.current_session_id();
     drop(
-        state
-            .core
-            .session(&session_id)
+        crate::created_session(&state.core, &session_id)
+            .await
             .open()
             .await
             .expect("materialize FIG-1067 cron session"),
@@ -1021,9 +1018,8 @@ impl lash::persistence::DeploymentStoreDecorator for MetaLossDeploymentStore {}
 
 async fn materialize_cron_test_session(state: &crate::AppState, session_id: &SessionId) {
     drop(
-        state
-            .core
-            .session(session_id)
+        crate::created_session(&state.core, session_id)
+            .await
             .open()
             .await
             .expect("materialize cron test session"),

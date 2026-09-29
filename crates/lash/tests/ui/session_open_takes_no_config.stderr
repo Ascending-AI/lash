@@ -1,0 +1,34 @@
+error[E0599]: no method named `session_spec` found for struct `SessionBuilder` in the current scope
+ --> tests/ui/session_open_takes_no_config.rs:8:10
+  |
+6 |       let _ = core
+  |  _____________-
+7 | |         .session("stated-at-open")
+8 | |         .session_spec(lash::SessionSpec::new().model(model))
+  | |         -^^^^^^^^^^^^ method not found in `SessionBuilder`
+  | |_________|
+  |
+
+error[E0599]: no method named `instructions` found for struct `SessionBuilder` in the current scope
+  --> tests/ui/session_open_takes_no_config.rs:15:44
+   |
+15 |     let _ = core.session("stated-at-open").instructions("prompt").open();
+   |                                            ^^^^^^^^^^^^
+   |
+help: there is a method `instrument` with a similar name
+   |
+15 -     let _ = core.session("stated-at-open").instructions("prompt").open();
+15 +     let _ = core.session("stated-at-open").instrument("prompt").open();
+   |
+
+error[E0599]: no method named `parent` found for struct `SessionBuilder` in the current scope
+  --> tests/ui/session_open_takes_no_config.rs:19:44
+   |
+19 |     let _ = core.session("stated-at-open").parent("parent").open();
+   |                                            ^^^^^^ method not found in `SessionBuilder`
+
+error[E0599]: no method named `plugin_options` found for struct `SessionBuilder` in the current scope
+  --> tests/ui/session_open_takes_no_config.rs:23:44
+   |
+23 |     let _ = core.session("stated-at-open").plugin_options(options).open();
+   |                                            ^^^^^^^^^^^^^^ method not found in `SessionBuilder`

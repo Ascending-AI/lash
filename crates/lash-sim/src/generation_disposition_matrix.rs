@@ -438,7 +438,9 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
         .model(model)
         .build(crate::sim_process_owner())
         .expect("runtime core");
-    let session = core.session("matrix-cap").open().await.expect("session");
+    let session = crate::open_created_session(&core, "matrix-cap")
+        .await
+        .expect("session");
     let turn = engine
         .run_text_turn(&session, "matrix-cap-turn", "answer")
         .await
@@ -502,7 +504,9 @@ async fn protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed() {
         .model(model)
         .build(crate::sim_process_owner())
         .expect("RLM core");
-    let session = core.session("matrix-stop").open().await.expect("session");
+    let session = crate::open_created_session(&core, "matrix-stop")
+        .await
+        .expect("session");
     let turn = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         engine.run_text_turn(

@@ -27,22 +27,55 @@ use lash_remote_protocol::{
 ///
 /// Every facade session's store comes from the core's backend catalog;
 /// there is no way to hand a session a store from anywhere else.
+///
+/// The builder carries only what one open supplies — a provider resolver,
+/// process-local plugin factories, the tool-source policy and
+/// [`enqueue_only`](Self::enqueue_only). A session's config is not among
+/// them: it is stated once, in the [`SessionCreation`] passed to
+/// [`create`](Self::create), and changed afterwards only through
+/// [`update`](crate::admin::SessionConfigAdmin::update).
 pub struct SessionBuilder {
     pub(crate) core: LashCore,
     pub(crate) session_id: SessionId,
-    pub(crate) spec: SessionSpec,
-    pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) provider: Option<ProviderHandle>,
     pub(crate) plugin_factories: Vec<Arc<dyn PluginFactory>>,
-    /// Plugin-keyed, serializable open-time options. They ride the protocol
-    /// materialization seam (the same `PluginOptions` bag a child
-    /// `SessionCreateRequest` carries) so every plugin gets open-time options
-    /// through one hook.
-    pub(crate) plugin_options: PluginOptions,
     /// Per-open override of the core's tool-source policy (FIG-3367).
     pub(crate) tool_source_policy: Option<lash_core::ToolSourcePolicy>,
     /// Set when the host declares this open will not run a turn (FIG-3353).
     pub(crate) tool_surface_open_mode: Option<lash_core::ToolSurfaceOpenMode>,
+}
+
+/// What a session is created with: the argument of
+/// [`SessionBuilder::create`], the only verb that creates a session and the
+/// only one that takes session config (FIG-4112).
+///
+/// Creation writes all of it once, with the session's catalog row, in one
+/// store transaction. Nothing here is restated on open.
+#[derive(Clone, Debug, Default)]
+pub struct SessionCreation {
+    /// The session's config: model, provider pin, prompt, generation and the
+    /// rest of [`SessionSpec`], resolved against the core's policy. Unset
+    /// fields take the core's values. The provider pin is
+    /// [`SessionSpec::provider_id`]; a provider handle given to a later
+    /// [`open`](SessionBuilder::open) only resolves it.
+    pub spec: SessionSpec,
+    /// The session's parent, recorded as its Session Relation (ADR 0089).
+    /// This is the only facade path to a related session: the session is an
+    /// ordinary session with its own Session Binding and its own usage
+    /// ledger — rolling related sessions together is host policy, not a
+    /// facade service. `None` creates a root session.
+    pub parent: Option<SessionId>,
+    /// Plugin-keyed, serializable creation options. The session's protocol
+    /// resolves them at creation — as its first materialization would — and
+    /// the result, the RLM and plugin session config, is recorded with the
+    /// session's initial config head.
+    pub plugin_options: PluginOptions,
+}
+
+impl PromptLayerSink for SessionCreation {
+    fn prompt_layer_mut(&mut self) -> &mut PromptLayer {
+        self.spec.prompt.get_or_insert_with(PromptLayer::new)
+    }
 }
 
 struct ResolvedSessionStore {
@@ -61,42 +94,14 @@ fn empty_runtime_session_state(
 }
 
 impl SessionBuilder {
-    pub fn plugin_options(mut self, plugin_options: PluginOptions) -> Self {
-        self.plugin_options = plugin_options;
-        self
-    }
-
-    /// Merge a single plugin's typed options into the open-time options bag,
-    /// preserving any options already set for other plugin keys.
-    pub fn plugin_option<T: serde::Serialize>(
-        mut self,
-        plugin_id: impl Into<String>,
-        extras: T,
-    ) -> Result<Self> {
-        self.plugin_options
-            .insert_typed(plugin_id, extras)
-            .map_err(EmbedError::ProtocolTurnOptions)?;
-        Ok(self)
-    }
-
-    /// Configures the provider and returns the updated builder.
+    /// The provider this open resolves the session's recorded provider pin
+    /// with. It is a resolver only and records nothing: an open whose
+    /// provider cannot serve the recorded pin is refused with
+    /// [`ProviderMismatch`](lash_core::SessionError::ProviderMismatch).
+    /// The pin itself is stated at creation, by
+    /// [`SessionSpec::provider_id`].
     pub fn provider(mut self, provider: ProviderHandle) -> Self {
-        self.spec = self.spec.provider_id(provider.kind());
         self.provider = Some(provider);
-        self
-    }
-
-    pub fn session_spec(mut self, spec: SessionSpec) -> Self {
-        self.spec = spec;
-        self
-    }
-
-    /// This is the only facade path to a related session (ADR 0089): the
-    /// session that opens is an ordinary session with its own Session Binding
-    /// and its own usage ledger — rolling related sessions together is host
-    /// policy, not a facade service.
-    pub fn parent(mut self, parent_session_id: impl Into<SessionId>) -> Self {
-        self.parent_session_id = Some(parent_session_id.into());
         self
     }
 
@@ -143,18 +148,20 @@ impl SessionBuilder {
         self
     }
 
-    /// Open this session's runtime, creating the session when the id is new.
+    /// Open this session's runtime.
     ///
-    /// Config is baked at creation (FIG-4099). When this open creates the
-    /// session, the builder's durable settings — model, provider, prompt,
-    /// generation, attachment acceptance, and RLM and plugin session config —
-    /// become the session's recorded config, written with its catalog row.
-    /// When the session already exists they are ignored: the open runs with
-    /// the config the session recorded, as recorded, and writes nothing.
-    /// Change a session's config with
+    /// Open never creates: it resolves an existing session through the
+    /// catalog's non-creating seam and writes no catalog row. A session id the
+    /// catalog has never created is refused with
+    /// [`EmbedError::UnknownSession`], and a deleted one with
+    /// [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted).
+    /// Create the session first with [`create`](Self::create).
+    ///
+    /// The session runs with the config it recorded at creation, as recorded,
+    /// and the open writes nothing (FIG-4099). Change a session's config with
     /// [`update`](crate::admin::SessionConfigAdmin::update).
     pub async fn open(self) -> Result<LashSession> {
-        let resolved = self.create_store(self.creation_config()?).await?;
+        let resolved = self.existing_store().await?;
         self.reconcile_process_observer_intents(Some(&resolved.store))
             .await?;
         let state = self.recorded_state(&resolved.store).await?;
@@ -207,42 +214,98 @@ impl SessionBuilder {
         ))
     }
 
-    /// Create this session's durable metadata, then return its **Durable
-    /// Session**.
+    /// Create this session, then return its **Durable Session**.
     ///
-    /// The third terminal verb, and the only one that creates. It writes the
-    /// session's catalog entry and its recorded config — exactly the config
-    /// and relation [`open`](Self::open) would have created it with — in one
-    /// store transaction, and stops there: no runtime, no
-    /// Session Execution Lease, no plugin session, no lifecycle event. Use it
-    /// when a host admits durable input for a session whose first turn has not
-    /// run yet — `core.session(id).create().await?.send(input).await?`
-    /// — instead of reaching into the catalog with a hand-built request.
+    /// The only verb that creates a session, and the only one that takes
+    /// session config (FIG-4112). It writes the session's catalog row and its
+    /// initial config head — `creation`'s spec, relation and resolved plugin
+    /// options — in one store transaction, and stops there: no runtime, no
+    /// Session Execution Lease, no plugin session, no lifecycle event. Run the
+    /// session with [`open`](Self::open), or admit durable input for its first
+    /// turn with `create(creation).await?.send(input)`. The builder's open
+    /// knobs — provider resolver, plugin factories, tool-source policy,
+    /// `enqueue_only` — belong to an open and take no part in creation.
     ///
-    /// Idempotent: creating an id that already exists rebinds it and preserves
-    /// its recorded metadata, config and Session Relation. Creating a *deleted* id is
-    /// refused with the store's typed
+    /// An id the catalog already holds is refused with
+    /// [`EmbedError::SessionAlreadyExists`], always — even when a retry states
+    /// exactly the config the session recorded. The host owns its ids; a host
+    /// that means create-or-open writes that out, treating
+    /// `SessionAlreadyExists` as present:
+    ///
+    /// ```ignore
+    /// match core.session(id.clone()).create(creation).await {
+    ///     Ok(_) | Err(EmbedError::SessionAlreadyExists { .. }) => {}
+    ///     Err(error) => return Err(error),
+    /// }
+    /// let session = core.session(id).open().await?;
+    /// ```
+    ///
+    /// A *deleted* id is refused with the store's typed
     /// [`SessionDeleted`](lash_core::StoreError::SessionDeleted); ids are
     /// single-use.
-    pub async fn create(self) -> Result<DurableSession> {
-        let resolved = self.create_store(self.creation_config()?).await?;
+    pub async fn create(self, creation: SessionCreation) -> Result<DurableSession> {
+        let SessionCreation {
+            spec,
+            parent,
+            plugin_options,
+        } = creation;
+        let mut policy = spec.resolve_against(&self.core.policy);
+        policy.session_id = Some(self.session_id.clone());
+        let mut config = lash_core::PersistedSessionConfig::from(&policy);
+        config.protocol_turn_options = creation_protocol_turn_options(
+            self.core.protocol_factory.as_ref(),
+            &self.session_id,
+            parent.clone(),
+            &plugin_options,
+            self.core.store_factory.fleet_format(),
+        )?;
+        let request = SessionStoreCreateRequest {
+            owning_process_id: None,
+            pending_observer_intents: Vec::new(),
+            session_id: self.session_id.clone(),
+            relation: parent
+                .map(|parent_session_id| lash_core::SessionRelation::Child {
+                    parent_session_id,
+                    caused_by: None,
+                })
+                .unwrap_or_default(),
+            config,
+            head: SessionCreationHead::Config,
+        };
+        let catalog = Arc::clone(&self.core.store_factory);
+        // The insert's own answer decides: only the admission that created the
+        // row created the session. Every other answer about an existing id —
+        // a rebind, or a rebind naming another relation — is the same
+        // refusal, so a retry never adopts a session it did not create.
+        match catalog.admit_session(&request).await {
+            Ok(lash_core::store::SessionAdmission::Created) => {}
+            Ok(lash_core::store::SessionAdmission::Rebound)
+            | Err(lash_core::StoreError::SessionRelationMismatch { .. }) => {
+                return Err(EmbedError::SessionAlreadyExists {
+                    session_id: self.session_id,
+                });
+            }
+            Err(error) => return Err(EmbedError::Store(error)),
+        }
+        let runtime: Arc<dyn lash_core::store::RuntimeStore> = catalog.clone();
+        let store = lash_core::store::SessionStore::new(runtime, self.session_id.clone())?;
         let work = self.core.held_work().await;
         let ingress = self.core.ingress_relay(&work);
         Ok(DurableSession::from_binding(
             self.session_id,
-            resolved.store,
+            store,
             work,
             ingress,
             Arc::clone(&self.core.env.core.control.effect_host),
             Arc::clone(&self.core.live_replay_store),
-            resolved.catalog,
+            catalog,
             Arc::clone(&self.core.env.core.providers.provider_resolver),
         ))
     }
 
     /// This is for advanced hosts that already own a complete state snapshot.
     /// Normal embedders should use [`Self::open`] to resume according to Lash's
-    /// durable history.
+    /// durable history. Like `open`, it never creates: the session must exist.
     pub async fn open_with_state(self, state: RuntimeSessionState) -> Result<LashSession> {
         self.open_supplied_state(state, true).await
     }
@@ -251,16 +314,15 @@ impl SessionBuilder {
     /// drives never run on this runtime. A host that loads a head without the
     /// session's lease to project or watch it opens it this way, so the
     /// session's turns keep running on an admitted open, or on one the
-    /// engine opens itself, and never on the reader's snapshot.
+    /// engine opens itself, and never on the reader's snapshot. Like `open`,
+    /// it never creates: the session must exist.
     pub async fn observe_with_state(self, state: RuntimeSessionState) -> Result<LashSession> {
         self.open_supplied_state(state, false).await
     }
 
     /// The supplied snapshot is the session's state, config included, and
-    /// runs as supplied: when this open creates the session, the snapshot's
-    /// config is what creation records. Only a snapshot that states no config
-    /// at all — no model and no provider — takes the builder's creation
-    /// config.
+    /// runs as supplied. Only a snapshot that states no config at all — no
+    /// model and no provider — takes this open's live policy.
     async fn open_supplied_state(
         self,
         mut state: RuntimeSessionState,
@@ -272,19 +334,12 @@ impl SessionBuilder {
                 requested: self.session_id,
             });
         }
-        let policy = self.session_policy();
-        let creation_config = if state.policy.recorded_provider_id().is_empty()
-            && state.policy.model.id.trim().is_empty()
+        let resolved = self.existing_store().await?;
+        let policy = self.live_policy();
+        if state.policy.recorded_provider_id().is_empty() && state.policy.model.id.trim().is_empty()
         {
             state.policy = policy.clone();
-            self.creation_config()?
-        } else {
-            let mut config = lash_core::PersistedSessionConfig::from(&state.policy);
-            config.protocol_turn_options = (!state.protocol_turn_options.is_empty())
-                .then(|| state.protocol_turn_options.clone());
-            config
-        };
-        let resolved = self.create_store(creation_config).await?;
+        }
         self.reconcile_process_observer_intents(Some(&resolved.store))
             .await?;
         refuse_provider_mismatch(&state, &policy)?;
@@ -292,8 +347,15 @@ impl SessionBuilder {
         Box::pin(self.open_resolved(state, resolved, resident)).await
     }
 
-    fn session_policy(&self) -> SessionPolicy {
-        let mut policy = self.spec.resolve_against(&self.core.policy);
+    /// The live policy this open runs with: the core's, with this open's
+    /// provider resolver named as the provider it serves. It records nothing;
+    /// [`adopt_live_policy`] carries only its live-owned facts onto the
+    /// session's recorded config.
+    fn live_policy(&self) -> SessionPolicy {
+        let mut policy = self.core.policy.clone();
+        if let Some(provider) = &self.provider {
+            policy.provider_id = provider.kind().to_string();
+        }
         policy.session_id = Some(self.session_id.clone());
         policy
     }
@@ -301,13 +363,13 @@ impl SessionBuilder {
     /// The state an existing session opens with: what it recorded, as
     /// recorded (FIG-4099). Only live policy — the turn budget and the host's
     /// execution knobs — follows this open; nothing is written. A catalog row
-    /// with no head predates creation writing one, so this open's creation
-    /// config is the state it starts from.
+    /// with no head — one its creator commits itself — starts from this open's
+    /// live policy.
     async fn recorded_state(
         &self,
         store: &lash_core::store::SessionStore,
     ) -> Result<RuntimeSessionState> {
-        let policy = self.session_policy();
+        let policy = self.live_policy();
         let Some(loaded) = load_persisted_window(store).await? else {
             return Ok(empty_runtime_session_state(self.session_id.clone(), policy));
         };
@@ -323,27 +385,14 @@ impl SessionBuilder {
         Ok(state)
     }
 
-    /// The config this builder bakes into a session it creates (FIG-4099).
-    ///
-    /// This is the one place a builder's creation config is formed: every
-    /// creating verb hands it to the catalog, which writes it as the session's
-    /// initial config head in the same store transaction as the catalog row,
-    /// and only when that transaction creates the row. (`open_with_state` and
-    /// `observe_with_state` record their supplied snapshot's config instead,
-    /// unless it states none.) The builder's plugin options are
-    /// resolved by the session's protocol, as its first materialization would
-    /// resolve them — stated options and the protocol's defaults alike — so
-    /// the recorded head carries the RLM and plugin session config too.
-    fn creation_config(&self) -> Result<lash_core::PersistedSessionConfig> {
-        let mut config = lash_core::PersistedSessionConfig::from(&self.session_policy());
-        config.protocol_turn_options = creation_protocol_turn_options(
-            self.core.protocol_factory.as_ref(),
-            &self.session_id,
-            self.parent_session_id.clone(),
-            &self.plugin_options,
-            self.core.store_factory.fleet_format(),
-        )?;
-        Ok(config)
+    /// Resolve this session's existing store through the catalog's
+    /// non-creating seam: no catalog row is written. Absent is
+    /// [`EmbedError::UnknownSession`]; deleted is
+    /// [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted).
+    async fn existing_store(&self) -> Result<ResolvedSessionStore> {
+        let catalog = Arc::clone(&self.core.store_factory);
+        let store = resolve_existing_session(&catalog, &self.session_id).await?;
+        Ok(ResolvedSessionStore { store, catalog })
     }
 
     async fn open_resolved(
@@ -405,22 +454,25 @@ impl SessionBuilder {
             .holding_tool_child_context_source(Arc::clone(&self.core.tool_child_context_source)),
         );
         env = binding.apply_owner(env);
+        let recorded_parent_session_id =
+            crate::session::recorded_parent_session_id(&binding.store()).await?;
+        // Plugin options are creation config (FIG-4112): creation resolved
+        // them into the recorded protocol options, so an open states none.
         let mut runtime = LashRuntime::from_environment_with_plugin_options(
             &env,
             policy,
             state,
             Some(binding.store()),
-            self.plugin_options.clone(),
+            PluginOptions::default(),
             self.core.drive_owner.clone(),
         )
         .await?;
         // Fire the protocol materialization hook: a session that recorded its
         // protocol options keeps them as recorded; one that recorded none
-        // (it was created without stated plugin options) takes the
-        // protocol's defaults.
+        // takes the protocol's defaults.
         runtime.configure_protocol_on_materialize(
-            &self.plugin_options,
-            self.parent_session_id.is_none(),
+            &PluginOptions::default(),
+            recorded_parent_session_id.is_none(),
         )?;
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
@@ -430,47 +482,11 @@ impl SessionBuilder {
         if resident {
             binding.register_resident(&handle);
         }
-        let recorded_parent_session_id =
-            crate::session::recorded_parent_session_id(&binding.store()).await?;
         Ok(LashSession {
             runtime: handle,
             _process_lifecycle_route: process_lifecycle_route,
             binding,
             parent_session_id: recorded_parent_session_id,
-        })
-    }
-
-    /// Admit this session with `config` as its creation config: the catalog
-    /// records it with the row only when this admission creates the session.
-    async fn create_store(
-        &self,
-        config: lash_core::PersistedSessionConfig,
-    ) -> Result<ResolvedSessionStore> {
-        let request = SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: self.session_id.clone(),
-            relation: self
-                .parent_session_id
-                .as_ref()
-                .map(|parent_session_id| lash_core::SessionRelation::Child {
-                    parent_session_id: parent_session_id.clone(),
-                    caused_by: None,
-                })
-                .unwrap_or_default(),
-            config,
-            head: SessionCreationHead::Config,
-        };
-        let factory = &self.core.store_factory;
-        // Admission is where a store answers a conflicting relation (FIG-1559):
-        // a rebind naming another parent is refused rather than absorbed into
-        // the row the catalog already holds.
-        let store = lash_core::runtime::admit_session_view(factory, &request)
-            .await
-            .map_err(EmbedError::Store)?;
-        Ok(ResolvedSessionStore {
-            store,
-            catalog: Arc::clone(factory),
         })
     }
 }
@@ -491,6 +507,38 @@ pub(crate) async fn recorded_parent_session_id(
                 .parent_session_id()
                 .map(|parent_session_id| SessionId::from(parent_session_id.to_string()))
         }))
+}
+
+/// Resolve `session_id`'s existing store through the catalog's non-creating
+/// seam (ADR 0112 §2: `lookup_session` plus `SessionStore::new`). Nothing is
+/// written: an absent id is [`EmbedError::UnknownSession`] and a deleted one
+/// [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted). Every
+/// verb but [`SessionBuilder::create`] reaches a session this way (FIG-4112).
+pub(crate) async fn resolve_existing_session(
+    catalog: &Arc<dyn lash_core::DeploymentStore>,
+    session_id: &SessionId,
+) -> Result<lash_core::store::SessionStore> {
+    match catalog
+        .lookup_session(session_id)
+        .await
+        .map_err(EmbedError::Store)?
+    {
+        lash_core::store::SessionLookup::Live(_) => {
+            let runtime: Arc<dyn lash_core::store::RuntimeStore> = catalog.clone();
+            Ok(lash_core::store::SessionStore::new(
+                runtime,
+                session_id.clone(),
+            )?)
+        }
+        lash_core::store::SessionLookup::Deleted => {
+            Err(EmbedError::Store(lash_core::StoreError::SessionDeleted {
+                session_id: session_id.clone(),
+            }))
+        }
+        lash_core::store::SessionLookup::Absent => Err(EmbedError::UnknownSession {
+            session_id: session_id.clone(),
+        }),
+    }
 }
 
 /// The state the engine opens `session_id` with: what the session recorded,
@@ -617,12 +665,6 @@ async fn load_persisted_window(
         context: "failed to admit and load store".to_string(),
         source,
     })?)
-}
-
-impl PromptLayerSink for SessionBuilder {
-    fn prompt_layer_mut(&mut self) -> &mut PromptLayer {
-        self.spec.prompt.get_or_insert_with(PromptLayer::new)
-    }
 }
 
 #[derive(Clone)]

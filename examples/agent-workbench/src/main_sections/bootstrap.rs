@@ -452,6 +452,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             authorization: WorkbenchAuthorization::allow_all(),
             approvals,
         };
+        state
+            .ensure_current_session()
+            .await
+            .context("create the workbench's current session")?;
         reconcile_decided_approvals(&state).await;
         // The turns a previous incarnation was following are settled by the
         // session's engine whoever follows them; this process takes them up.

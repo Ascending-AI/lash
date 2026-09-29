@@ -68,7 +68,7 @@ async fn a_cancelled_cell_replays_its_timer_on_a_resident_runtime() -> Result<()
         })
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(SESSION).open().await?;
+    let session = core.session(SESSION).created().await.open().await?;
     let handle = session
         .send(TurnInput::text("sleep until cancelled"))
         .id(ROOT)

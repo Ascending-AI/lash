@@ -57,7 +57,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
     // The follower's own handle may still hold the session's lease a moment
     // after it releases the claim: open through the host's bounded retry.
     let session = state
-        .open_session(&session_id, "test")
+        .create_or_open_session(&session_id, "test")
         .await
         .expect("open multi-frame session");
     let initial_output = session
@@ -96,7 +96,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
     // The follower's own handle may still hold the session's lease a moment
     // after it releases the claim: open through the host's bounded retry.
     let session = state
-        .open_session(&session_id, "test")
+        .create_or_open_session(&session_id, "test")
         .await
         .expect("reopen final follow frame");
     let ordinary_output = session
@@ -233,9 +233,8 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
     state.event_tx = SessionEventRegistry::persistent(product_events_path, 16)
         .expect("open persistent product event registry");
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open frame-switch session");
@@ -410,9 +409,8 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
     state.event_tx = SessionEventRegistry::persistent(product_events_path, 16)
         .expect("open persistent product event registry");
     let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open unobserved-commit session");

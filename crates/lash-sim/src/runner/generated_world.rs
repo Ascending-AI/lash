@@ -379,9 +379,7 @@ impl GeneratedRuntimeWorld {
         let provider_schedule = ScriptedTransportSchedule::new();
         let (core, transport, provider_kind) =
             runtime_core_for_scripts(scripts, backend, Some(provider_schedule.clone()))?;
-        let session = core
-            .session(event.actor_alias.clone())
-            .open()
+        let session = crate::open_created_session(&core, event.actor_alias.clone())
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         if session.session_id() != event.actor_alias {
@@ -1086,9 +1084,7 @@ impl GeneratedRuntimeWorld {
             )) as Arc<dyn lash_core::ToolProvider>)
             .build(crate::sim_process_owner())
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let session = core
-            .session(session_alias.clone())
-            .open()
+        let session = crate::open_created_session(&core, session_alias.clone())
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let turn_session = session.clone();

@@ -104,13 +104,17 @@ pub(crate) async fn admit_turn_input(
 ) -> Result<TurnInputReceipt, AppError> {
     let source_id = format!("workbench-turn-input-{}", uuid::Uuid::new_v4());
     // The Durable Session never creates (ADR 0119), and the workbench admits
-    // input for a session whose first turn may not have run yet. `create()` is
-    // the explicit, idempotent verb for that: it writes the catalog entry and
+    // input for a session whose first turn may not have run yet. It creates the
+    // session explicitly first — create-or-use, since the id may exist — which
     // builds no runtime, so the admission is not a side effect of the send.
+    state
+        .ensure_session(session_id)
+        .await
+        .map_err(|error| state.session_admission_error(session_id, surface, error))?;
     let acceptance = state
         .core
         .session(session_id.clone())
-        .create()
+        .durable()
         .await
         .map_err(|error| state.session_admission_error(session_id, surface, error))?
         .send(input)

@@ -33,12 +33,50 @@ use tokio::sync::{Mutex as TokioMutex, oneshot};
 /// Create a session's durable metadata without building a runtime.
 ///
 /// A Durable Session never creates (ADR 0119), so a test that enqueues to a
-/// session it has not opened creates it first through the facade's third
-/// terminal verb — the same move an in-repo host that relied on
+/// session it has not opened creates it first through the facade's only
+/// creating verb — the same move an in-repo host that relied on
 /// enqueue-materialisation now makes.
 pub(crate) async fn create_catalog_session(core: &LashCore, session_id: &str) -> Result<()> {
-    core.session(session_id).create().await?;
+    core.session(session_id)
+        .create(crate::SessionCreation::default())
+        .await?;
     Ok(())
+}
+
+/// The crate's one test path to a session that may not exist yet (FIG-4112).
+///
+/// Only `create` creates, so a test that is not about creation reaches its
+/// session through this: [`created`](Self::created) creates the builder's
+/// session with the core's config — pinned to the builder's provider, when it
+/// names one — unless the catalog already holds it, then hands the builder
+/// back for its terminal verb. An existing or deleted id is left as it is,
+/// so the verb that follows reports it. Tests about creation call
+/// [`SessionBuilder::create`](crate::SessionBuilder::create) themselves.
+pub(crate) trait CreatedSession: Sized {
+    async fn created(self) -> Self;
+}
+
+impl CreatedSession for crate::SessionBuilder {
+    async fn created(self) -> Self {
+        let mut spec = crate::SessionSpec::default();
+        if let Some(provider) = &self.provider {
+            spec = spec.provider_id(provider.kind());
+        }
+        match self
+            .core
+            .session(self.session_id.clone())
+            .create(crate::SessionCreation {
+                spec,
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(_)
+            | Err(EmbedError::SessionAlreadyExists { .. })
+            | Err(EmbedError::Store(StoreError::SessionDeleted { .. })) => self,
+            Err(error) => panic!("create session `{}`: {error:?}", self.session_id),
+        }
+    }
 }
 
 /// Every node of an ancestry from the head, newest first, fetched a page

@@ -141,8 +141,8 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
         },
     )
     .expect("build core");
-    let session = core
-        .session("slack-live-e2e-full-channel")
+    let session = crate::tests::created_session(&core, "slack-live-e2e-full-channel")
+        .await
         .open()
         .await
         .expect("open session");

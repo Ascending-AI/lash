@@ -52,8 +52,8 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
         .build(crate::test_core_owner())
         .expect("build derived-notes core");
 
-    let session = core
-        .session("workbench-derived-notes")
+    let session = crate::created_session(&core, "workbench-derived-notes")
+        .await
         .open()
         .await
         .expect("open the annotated session");
@@ -76,8 +76,8 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
     // The write-back lands after the turn's own commit, so read it back the
     // way a restarted host would: from durable storage.
     session.close().await.expect("close the annotated session");
-    let session = core
-        .session("workbench-derived-notes")
+    let session = crate::created_session(&core, "workbench-derived-notes")
+        .await
         .open()
         .await
         .expect("reopen the annotated session");
@@ -148,8 +148,8 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
     })
     .await
     .expect("rewind the conversation to the first turn");
-    let rewound = core
-        .session("workbench-derived-notes-rewound")
+    let rewound = crate::created_session(&core, "workbench-derived-notes-rewound")
+        .await
         .open()
         .await
         .expect("open the rewound session");

@@ -17,7 +17,12 @@ async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()>
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let pinning = core.session("provider-pin-conflict").open().await?;
+    let pinning = core
+        .session("provider-pin-conflict")
+        .created()
+        .await
+        .open()
+        .await?;
     pinning
         .send(TurnInput::text("pin the provider"))
         .output()
@@ -31,6 +36,8 @@ async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()>
     let error = match core
         .session("provider-pin-conflict")
         .provider(other_kind_provider())
+        .created()
+        .await
         .open()
         .await
     {
@@ -58,7 +65,12 @@ async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()>
     );
 
     // The refused open changed nothing: the session still runs on its pin.
-    let reopened = core.session("provider-pin-conflict").open().await?;
+    let reopened = core
+        .session("provider-pin-conflict")
+        .created()
+        .await
+        .open()
+        .await?;
     assert_eq!(
         reopened.policy_snapshot().recorded_provider_id(),
         "embed-test"
@@ -66,12 +78,12 @@ async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()>
     Ok(())
 }
 
-/// FIG-1558: a related session opened with `.parent(..)` is admitted through
-/// the same boundary as any other open, so its store request carries the
-/// core's recorded provider pin. A conflicting pin on reopen is refused by
-/// `conflicting_provider_at_open_is_refused_before_any_turn` above.
+/// FIG-1558: a related session — created with a `parent` — is admitted
+/// through the same boundary as any other create, so its store request
+/// carries the core's recorded provider pin. A conflicting pin on open is
+/// refused by `conflicting_provider_at_open_is_refused_before_any_turn` above.
 #[tokio::test]
-async fn related_session_open_records_the_provider_pin() -> Result<()> {
+async fn related_session_create_records_the_provider_pin() -> Result<()> {
     let mut recorded = None;
     let backend = backend_with_catalog(|inner| {
         let (layer, requests) = RecordingAdmissions::over(inner);
@@ -87,12 +99,16 @@ async fn related_session_open_records_the_provider_pin() -> Result<()> {
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let _session = core.session("provider-pin-root").open().await?;
-
-    core.session("provider-pin-child")
-        .parent("provider-pin-root")
-        .open()
+    core.session("provider-pin-root")
+        .create(crate::SessionCreation::default())
         .await?;
+    core.session("provider-pin-child")
+        .create(crate::SessionCreation {
+            parent: Some("provider-pin-root".into()),
+            ..Default::default()
+        })
+        .await?;
+    let _child = core.session("provider-pin-child").open().await?;
     assert_eq!(
         requests
             .lock_recover()
@@ -100,7 +116,7 @@ async fn related_session_open_records_the_provider_pin() -> Result<()> {
             .map(|request| request.config.provider_id.clone())
             .collect::<Vec<_>>(),
         vec!["embed-test".to_string(), "embed-test".to_string()],
-        "a related session opened through the ordinary path carries the \
+        "a related session created through the ordinary path carries the \
          recorded provider pin"
     );
     Ok(())

@@ -107,7 +107,7 @@ pub(crate) async fn start_user_turn(
     let input = workbench_turn_input(state, &request).await?;
     let turn_model = model_spec_from_selection(request.model.clone());
     let session = state
-        .open_session(&request.session_id, "api.turn")
+        .create_or_open_session(&request.session_id, "api.turn")
         .await
         .map_err(AppError::session_open)?;
     apply_model_selection_to_session(state, &session, turn_model, "user_turn").await?;

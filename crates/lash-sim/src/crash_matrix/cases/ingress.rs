@@ -188,7 +188,7 @@ pub async fn a_waiter_follows_its_input_past_a_lost_ask(seed: u64) -> Result<Vec
         let text = invariants::input_text(root);
         world
             .host_op(async move {
-                let session = core.session(session).open().await?;
+                let session = crate::open_created_session(&core, session).await?;
                 session.send(lash::TurnInput::text(text)).id(root).await
             })
             .await

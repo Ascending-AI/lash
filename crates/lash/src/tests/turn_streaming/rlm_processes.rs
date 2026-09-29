@@ -16,6 +16,8 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
         serve_processes(&core);
         let session = core
             .session("rlm-leaf-append-stale-rollback")
+            .created()
+            .await
             .open()
             .await?;
         session
@@ -214,7 +216,12 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     .model(mock_model_spec())
     .tools(Arc::new(FrameStateDeferredTools))
     .build(crate::testing::runtime_lease_owner())?;
-    let first_session = first_core.session(session_id).open().await?;
+    let first_session = first_core
+        .session(session_id)
+        .created()
+        .await
+        .open()
+        .await?;
 
     let root_id = format!("{session_id}:switch-root");
     let switched = first_session
@@ -300,7 +307,12 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let reopened_session = reopened_core.session(session_id).open().await?;
+    let reopened_session = reopened_core
+        .session(session_id)
+        .created()
+        .await
+        .open()
+        .await?;
     let execution_state = reopened_session
         .admin()
         .state()
@@ -427,7 +439,7 @@ pub(super) async fn engine_driven_chained_continue_as_survives_nested_commit_han
         }))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
 
     let output = session
         .send(TurnInput::text("start chained frame handoff"))
@@ -464,7 +476,7 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     let activities = RecordingEvents::default();
     let output = session
         .send(TurnInput::text("switch frames"))
@@ -579,7 +591,12 @@ finish(value);"#,
     ))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-process-control-tool").open().await?;
+    let session = core
+        .session("rlm-process-control-tool")
+        .created()
+        .await
+        .open()
+        .await?;
     let turn_session = session.clone();
     let turn = tokio::spawn(async move {
         turn_session
@@ -660,7 +677,12 @@ finish(value);"#,
     ))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-lashlang-graph-store").open().await?;
+    let session = core
+        .session("rlm-lashlang-graph-store")
+        .created()
+        .await
+        .open()
+        .await?;
     let turn_session = session.clone();
     let turn = tokio::spawn(async move {
         turn_session
@@ -734,7 +756,12 @@ pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-prose-completion").open().await?;
+    let session = core
+        .session("rlm-prose-completion")
+        .created()
+        .await
+        .open()
+        .await?;
     let events = Arc::new(RecordingEvents::default());
 
     let result = session
@@ -776,6 +803,8 @@ pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Re
     serve_processes(&core);
     let session = core
         .session("rlm-finish-required-completion")
+        .created()
+        .await
         .open()
         .await?;
     let events = Arc::new(RecordingEvents::default());
@@ -819,7 +848,12 @@ pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_to
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-failed-code-event").open().await?;
+    let session = core
+        .session("rlm-failed-code-event")
+        .created()
+        .await
+        .open()
+        .await?;
     let events = RecordingEvents::default();
 
     let _result = session
@@ -917,7 +951,12 @@ pub(super) async fn an_after_step_cancel_stops_at_the_step_boundary() -> Result<
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("stop-after-step").open().await?;
+    let session = core
+        .session("stop-after-step")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let handle = session
         .send(TurnInput::text("use the tool, then stop"))
@@ -983,7 +1022,12 @@ pub(super) async fn host_escalates_an_after_step_cancel_to_an_immediate_abort() 
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("escalate-after-step").open().await?;
+    let session = core
+        .session("escalate-after-step")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let handle = session.send(TurnInput::text("hang, then escalate")).await?;
     // This core runs no session work: a waiter drives the input in its own
@@ -1059,7 +1103,12 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
         ))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-process-definition-filter").open().await?;
+    let session = core
+        .session("rlm-process-definition-filter")
+        .created()
+        .await
+        .open()
+        .await?;
     let turn_session = session.clone();
     let turn = tokio::spawn(async move {
         turn_session

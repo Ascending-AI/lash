@@ -4,15 +4,15 @@ error[E0425]: cannot find type `SessionObservation` in crate `lash`
 5 |     let _: Option<lash::SessionObservation> = None;
   |                         ^^^^^^^^^^^^^^^^^^
   |
- ::: $WORKSPACE/crates/lash-core/src/runtime/session_delete.rs
+ ::: src/session.rs
   |
-  | pub enum SessionDeletion {
-  | ------------------------ similarly named enum `SessionDeletion` defined here
+  | pub struct SessionCreation {
+  | -------------------------- similarly named struct `SessionCreation` defined here
   |
-help: an enum with a similar name exists
+help: a struct with a similar name exists
   |
 5 -     let _: Option<lash::SessionObservation> = None;
-5 +     let _: Option<lash::SessionDeletion> = None;
+5 +     let _: Option<lash::SessionCreation> = None;
   |
 
 error[E0425]: cannot find type `SessionCursor` in crate `lash`

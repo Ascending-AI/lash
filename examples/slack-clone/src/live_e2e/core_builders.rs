@@ -294,3 +294,21 @@ pub(super) async fn rlm_core(
         .context("build RLM live-E2E core")?;
     serve_live_core(live, core).await
 }
+
+/// Open a live run's session, creating it first unless a rerun over the same
+/// store already did: only `create` creates (FIG-4112).
+pub(super) async fn create_or_open(
+    core: &lash::LashCore,
+    id: impl Into<lash::SessionId>,
+) -> lash::Result<lash::LashSession> {
+    let id = id.into();
+    match core
+        .session(id.clone())
+        .create(lash::SessionCreation::default())
+        .await
+    {
+        Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
+        Err(error) => return Err(error),
+    }
+    core.session(id).open().await
+}

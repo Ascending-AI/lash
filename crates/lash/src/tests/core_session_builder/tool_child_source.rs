@@ -41,7 +41,12 @@ async fn a_backend_rebuilds_tool_children_under_one_live_core() -> Result<()> {
     let backend = double.lash_backend();
     let first = builder(backend.clone()).build(crate::testing::runtime_lease_owner())?;
     assert_eq!(installed(&first), ContextSourceInstall::Sole);
-    let session = first.session("holds-the-source").open().await?;
+    let session = first
+        .session("holds-the-source")
+        .created()
+        .await
+        .open()
+        .await?;
     assert!(session.binding.holds_tool_child_context_source());
 
     let second = builder(backend.clone()).build(crate::testing::runtime_lease_owner())?;

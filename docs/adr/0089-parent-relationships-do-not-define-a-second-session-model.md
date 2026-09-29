@@ -5,6 +5,13 @@
 Accepted. Ratified on FIG-2872. Completed on FIG-3378: the second running
 model described in the Context no longer exists in code.
 
+Amended 2026-09-29 (FIG-4112): the parent relation is creation-only. A facade
+related session is created with `create(SessionCreation { parent: Some(p), .. })`
+and then opened like any session; the relation is recorded with the catalog
+row and no open can state or change it. A create naming an existing id is
+refused with `SessionAlreadyExists`, whatever parent it names, so the recorded
+relation is never rewritten.
+
 ## Context
 
 Lash has described sessions created from another session as children, managed
@@ -78,8 +85,9 @@ input, but canonical admission and binding are shared by every facade session.
   control, resume, and failure contracts as root sessions.
 - The facade child-administration surface (`SessionAdmin::children`,
   `ChildSessionAdmin`) is removed (FIG-3373): a host-run related session is an
-  ordinary session opened with `SessionBuilder::parent`, its spend records on
-  its own ledger, and rolling related sessions together is host policy.
+  ordinary session created with a `parent` in its `SessionCreation` and then
+  opened (FIG-4112), its spend records on its own ledger, and rolling related
+  sessions together is host policy.
 - Session initialisation stays distinct from catalog `fork_at` (FIG-3377):
   `fork_at` materializes durable fork lineage and retained-frame content under
   its own failure semantics and carries no live-parent plugin-init payload.

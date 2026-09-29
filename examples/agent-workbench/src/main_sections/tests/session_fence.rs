@@ -331,9 +331,8 @@ finish(await handle);
     state.restate_ingress_url = restate_ingress_url;
     let old_session_id = state.current_session_id();
     let turn_text = "start and await the held process";
-    let session = state
-        .core
-        .session(old_session_id.clone())
+    let session = crate::created_session(&state.core, old_session_id.clone())
+        .await
         .open()
         .await
         .expect("open the session the turn will run on");

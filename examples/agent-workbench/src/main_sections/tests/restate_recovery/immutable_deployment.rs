@@ -129,12 +129,18 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
     let drive_epoch_before = session_drive_epoch(&a_path, "sqlite", &a_session_id).await;
 
     endpoint_a.stop().await;
-    // The listener/runtime is gone, but this outer test handle still owns the
-    // original storage clients. Retire those clients before rebuilding A so
-    // the restart models one host generation rather than two live owners of
-    // the same SQLite session store.
-    // The follower is part of that host generation: it goes with it, and the
-    // rebuilt host takes the turn up from its active-turn ledger.
+    // A and B are two deployments of one lash service, so they share one
+    // durable store, as every real fleet's deployments do: B, and A when it is
+    // rebuilt, run over the store set A opened. A session A created is B's
+    // session too, so a call Restate routes to B for it — a drive of A's
+    // session is a new invocation, which goes to the newest deployment —
+    // finds it rather than creating a phantom in a store of its own
+    // (FIG-4112).
+    let shared_store_set = harness_a.store_set;
+    // The listener/runtime is gone; retire this host generation's clients
+    // before rebuilding A. The follower is part of that host generation: it
+    // goes with it, and the rebuilt host takes the turn up from its
+    // active-turn ledger.
     turn_a.follower.abort();
     drop(harness_a.state);
     drop(harness_a.process_env_store);
@@ -168,8 +174,9 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
         })
         .build()
         .into_handle();
-    let harness_b = live_workbench_restate_state_with_provider(
+    let harness_b = live_workbench_restate_state_over_stores(
         &b_path,
+        Arc::clone(&shared_store_set),
         ingress_url.clone(),
         provider_b,
         WorkbenchSessions::fresh(),
@@ -236,13 +243,13 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
         .expect("reopen fixture A persistent session selection");
     let a_active_turns = ActiveTurns::persistent(a_path.join("active-turns.json"))
         .expect("reopen fixture A active-turn routing");
-    let harness_a = live_workbench_restate_state_with_provider_and_database(
+    let harness_a = live_workbench_restate_state_over_stores(
         &a_path,
+        shared_store_set,
         ingress_url,
         a_provider,
         a_sessions,
         a_active_turns,
-        None,
     )
     .await;
     if mutate_reused_endpoint {

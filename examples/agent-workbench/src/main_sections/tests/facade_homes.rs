@@ -141,8 +141,8 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .plugin(plugin)
             .build(crate::test_core_owner())
             .expect("build config change workbench core");
-        let session = core
-            .session("workbench-config-change-session")
+        let session = crate::created_session(&core, "workbench-config-change-session")
+            .await
             .open()
             .await
             .expect("open config change session");
@@ -225,8 +225,8 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
             .plugin(plugin)
             .build(crate::test_core_owner())
             .expect("build context transform workbench core");
-        let session = core
-            .session("workbench-context-transform-session")
+        let session = crate::created_session(&core, "workbench-context-transform-session")
+            .await
             .open()
             .await
             .expect("open context transform session");

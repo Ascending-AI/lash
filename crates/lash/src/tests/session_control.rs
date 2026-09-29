@@ -132,7 +132,7 @@ async fn a_session_close_releases_its_running_roots_execution() -> Result<()> {
         .provider(hold_provider(Arc::clone(&calls)))
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("held-close").open().await?;
+    let session = core.session("held-close").created().await.open().await?;
     let session_id = session.session_id().clone();
     session.send(TurnInput::text("hold this root")).await?;
 

@@ -105,8 +105,13 @@ async fn run_fixture(
         .await
         .map_err(|error| format!("{error:#}"))?;
     let operation = async {
+        let session_id = lash::SessionId::from(format!("valid-empty-{}", uuid::Uuid::new_v4()));
+        core.session(session_id.clone())
+            .create(lash::SessionCreation::default())
+            .await
+            .map_err(|error| error.to_string())?;
         let session = core
-            .session(format!("valid-empty-{}", uuid::Uuid::new_v4()))
+            .session(session_id)
             .open()
             .await
             .map_err(|error| error.to_string())?;

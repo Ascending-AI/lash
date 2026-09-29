@@ -61,8 +61,8 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
         .tools(Arc::new(SeedTools))
         .build(crate::test_core_owner())
         .expect("build the seeding core");
-    let seeded = seeding_core
-        .session(session_id.clone())
+    let seeded = crate::created_session(&seeding_core, session_id.clone())
+        .await
         .open()
         .await
         .expect("seed open");
@@ -120,7 +120,7 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
     };
 
     let opened = state
-        .open_session(&session_id, "tool-loss-test")
+        .create_or_open_session(&session_id, "tool-loss-test")
         .await
         .expect("the session still opens: the default policy tolerates loss");
     opened.close().await.expect("close");
@@ -144,7 +144,7 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
 
     // Opening again does not repeat the row: the id is derived from the loss.
     let again = state
-        .open_session(&session_id, "tool-loss-test")
+        .create_or_open_session(&session_id, "tool-loss-test")
         .await
         .expect("second open");
     again.close().await.expect("close");

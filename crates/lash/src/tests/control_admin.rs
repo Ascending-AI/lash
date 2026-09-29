@@ -140,7 +140,7 @@ impl lash_core::facade_support::ContextCompactor for FixedCompactor {
 #[tokio::test]
 async fn session_operations_delegate_to_runtime() -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("session-ops").open().await?;
+    let session = core.session("session-ops").created().await.open().await?;
 
     session.send(TurnInput::text("usage")).output().await?;
     let usage = session.usage_report();
@@ -194,7 +194,12 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
             .with_context_compactor(100, Arc::new(FixedCompactor)),
     )))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("compact-context").open().await?;
+    let session = core
+        .session("compact-context")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("old durable request"))
         .output()
@@ -388,11 +393,10 @@ async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result
             })),
     )))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("compact-prompt-stack")
-        .instructions("session-layer-guidance-marker")
-        .open()
+    core.session("compact-prompt-stack")
+        .create(crate::SessionCreation::default().instructions("session-layer-guidance-marker"))
         .await?;
+    let session = core.session("compact-prompt-stack").open().await?;
     session
         .send(TurnInput::text("content to compact"))
         .output()
@@ -416,7 +420,12 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("command-idempotency").open().await?;
+    let session = core
+        .session("command-idempotency")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let first = Box::pin(
         session
@@ -456,7 +465,12 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("queue-observation-events").open().await?;
+    let session = core
+        .session("queue-observation-events")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor = session.observe().current_observation().cursor;
 
     let pending = session
@@ -509,7 +523,12 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("pending-input-facade-cancel").open().await?;
+    let session = core
+        .session("pending-input-facade-cancel")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor = session.observe().current_observation().cursor;
     let _hold = held_double(&core)
         .expect("the core runs on its held double")
@@ -604,7 +623,12 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let registry = core.process_registry();
-    let session = core.session("process-observation-events").open().await?;
+    let session = core
+        .session("process-observation-events")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor = session.observe().current_observation().cursor;
     // Keyed, so the replay below presents the same start (ADR 0107).
     let request = lash_core::ProcessStartRequest::new(
@@ -915,7 +939,12 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
         lash_core::facade_support::PluginSpec::new().with_trigger_event(trigger),
     )))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("command-trigger").open().await?;
+    let session = core
+        .session("command-trigger")
+        .created()
+        .await
+        .open()
+        .await?;
     let before = session.admin().state().persist_current().await?;
 
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")?;
@@ -984,7 +1013,12 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
             ),
     )))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("nonblocking-observation").open().await?;
+    let session = core
+        .session("nonblocking-observation")
+        .created()
+        .await
+        .open()
+        .await?;
     let turn_session = session.clone();
     let turn =
         tokio::spawn(async move { turn_session.send(TurnInput::text("blocked")).output().await });
@@ -1034,7 +1068,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("host-cancel").open().await?;
+    let session = core.session("host-cancel").created().await.open().await?;
     let host_process = session
         .admin()
         .processes()
@@ -1097,7 +1131,12 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
     .process_tool_visibility_filter(Arc::new(HideAllProcessTools))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("host-filter-bypass").open().await?;
+    let session = core
+        .session("host-filter-bypass")
+        .created()
+        .await
+        .open()
+        .await?;
     let mut started = Vec::new();
     for label in ["host-filter-signal", "host-filter-cancel"] {
         let process_id = session
@@ -1207,7 +1246,12 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("host-cancel-all").open().await?;
+    let session = core
+        .session("host-cancel-all")
+        .created()
+        .await
+        .open()
+        .await?;
     let mut started = Vec::new();
     for label in ["host-process-a", "host-process-b"] {
         let process_id = session
@@ -1248,7 +1292,12 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
 #[tokio::test]
 async fn observation_updates_after_completed_turn() -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("observation-after-turn").open().await?;
+    let session = core
+        .session("observation-after-turn")
+        .created()
+        .await
+        .open()
+        .await?;
 
     assert!(session.read_view().messages().is_empty());
     session
@@ -1273,7 +1322,12 @@ async fn config_and_tool_mutations_publish_observation_immediately() -> Result<(
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("observation-mutations").open().await?;
+    let session = core
+        .session("observation-mutations")
+        .created()
+        .await
+        .open()
+        .await?;
 
     session
         .admin()
@@ -1317,7 +1371,12 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("config-admin-tool-access").open().await?;
+    let session = core
+        .session("config-admin-tool-access")
+        .created()
+        .await
+        .open()
+        .await?;
     let access = lash_core::SessionToolAccess::ambient()
         .with_hidden_tools(["app_lookup"])
         .expect("valid hidden tool");
@@ -1360,13 +1419,20 @@ async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let _parent = core.session("parent-control").open().await?;
-
-    let child = core
-        .session("child-control")
-        .parent("parent-control")
+    let _parent = core
+        .session("parent-control")
+        .created()
+        .await
         .open()
         .await?;
+
+    core.session("child-control")
+        .create(crate::SessionCreation {
+            parent: Some("parent-control".into()),
+            ..Default::default()
+        })
+        .await?;
+    let child = core.session("child-control").open().await?;
 
     assert_eq!(child.parent_session_id(), Some("parent-control"));
     assert_eq!(child.policy_snapshot().recorded_provider_id(), "embed-test");
@@ -1422,7 +1488,12 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
         let registry = core.process_registry();
-        let _parent = core.session(&parent_session_id).open().await?;
+        let _parent = core
+            .session(&parent_session_id)
+            .created()
+            .await
+            .open()
+            .await?;
 
         let create_process_id = registry
             .register_process(lash_core::ProcessRegistration::new(
@@ -1460,11 +1531,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
         )
         .await?;
 
-        let child = core
-            .session(&child_session_id)
-            .parent(&parent_session_id)
-            .open()
-            .await?;
+        let child = core.session(&child_session_id).open().await?;
 
         assert_eq!(child.session_id(), child_session_id);
         assert!(
@@ -1510,7 +1577,12 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("direct-turn-acceptance").open().await?;
+    let session = core
+        .session("direct-turn-acceptance")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let first = session.send(TurnInput::text("same words")).output().await?;
     let acceptance = first

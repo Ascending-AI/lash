@@ -209,9 +209,8 @@ async fn a_host_event_row_renders_where_it_happened_not_under_the_newest_turn() 
 
     // A committed turn, with the workbench's own user row for it in the product
     // log — the row that survives reconciliation and anchors what follows.
-    let session = state
-        .core
-        .session(session_id.clone())
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
         .open()
         .await
         .expect("open event-ordering session");

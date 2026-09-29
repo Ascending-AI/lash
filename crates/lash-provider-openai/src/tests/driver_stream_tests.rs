@@ -108,11 +108,14 @@ async fn openai_chat_runtime_respects_expose_thinking() {
         [(false, Vec::new()), (true, vec!["private chain"])]
     {
         let (core, _double) = reasoning_visibility_core(expose_thinking).await;
-        let session = core
-            .session(format!("openai-reasoning-visible-{expose_thinking}"))
-            .open()
-            .await
-            .expect("session");
+        let session = crate::tests::sessions::created_session(
+            &core,
+            format!("openai-reasoning-visible-{expose_thinking}"),
+        )
+        .await
+        .open()
+        .await
+        .expect("session");
         let output = session
             .send(lash::TurnInput::text("answer privately"))
             .output()
@@ -166,11 +169,12 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
             "openai-buffered-reasoning-boundaries-test-boot",
         ))
         .expect("core");
-    let session = core
-        .session("openai-buffered-reasoning-boundaries")
-        .open()
-        .await
-        .expect("session");
+    let session =
+        crate::tests::sessions::created_session(&core, "openai-buffered-reasoning-boundaries")
+            .await
+            .open()
+            .await
+            .expect("session");
 
     let output = session
         .send(lash::TurnInput::text("reason in two parts"))

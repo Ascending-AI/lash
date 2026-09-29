@@ -351,7 +351,7 @@ pub(crate) async fn send_turn(
     }
     drop(
         state
-            .open_session(&session_id, "api.turn")
+            .create_or_open_session(&session_id, "api.turn")
             .await
             .map_err(|error| state.session_admission_error(&session_id, "api.turn", error))?,
     );
@@ -843,22 +843,11 @@ pub(crate) async fn reset_chat(
             "replaced_current": replaced_current,
         }),
     );
+    // The new id is fresh: creation records the current model selection.
     let session = state
-        .open_session(&new_session_id, "api.reset")
+        .create_or_open_session(&new_session_id, "api.reset")
         .await
         .map_err(AppError::session_open)?;
-    let selected_model = model_spec_from_selection(state.selected_model());
-    session
-        .admin()
-        .config()
-        .update(lash::SessionConfigPatch {
-            model: Some(selected_model),
-            ..lash::SessionConfigPatch::default()
-        })
-        .await
-        // The setter returns only after the model override is durable; queue
-        // rejection or settlement failure remains an internal control error.
-        .map_err(AppError::internal)?;
     if replaced_current {
         state.messages.lock_recover().clear();
         state.lashlang_execution.clear();

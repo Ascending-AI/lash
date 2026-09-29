@@ -317,11 +317,12 @@ async fn run_case(
         label,
     )
     .await;
-    let session = runtime
-        .session(format!("strict-omission-{label}"))
-        .open()
-        .await
-        .expect("session");
+    let session =
+        crate::tests::sessions::created_session(&runtime, format!("strict-omission-{label}"))
+            .await
+            .open()
+            .await
+            .expect("session");
     let result = session
         .send(TurnInput::text("Call the probe."))
         .output()

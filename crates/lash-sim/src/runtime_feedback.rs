@@ -360,9 +360,7 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
         )
         .build(crate::sim_process_owner())
         .expect("RLM cache regression core");
-    let session = core
-        .session("cache-regression-session")
-        .open()
+    let session = crate::open_created_session(&core, "cache-regression-session")
         .await
         .expect("RLM cache regression session");
     engine
@@ -515,9 +513,7 @@ async fn captured_checkpoint_feedback() -> Vec<LlmRequest> {
         )
         .build(crate::sim_process_owner())
         .expect("RLM cache regression core");
-    let session = core
-        .session("cache-regression-session")
-        .open()
+    let session = crate::open_created_session(&core, "cache-regression-session")
         .await
         .expect("RLM cache regression session");
     engine

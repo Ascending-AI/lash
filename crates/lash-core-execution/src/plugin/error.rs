@@ -86,6 +86,12 @@ pub enum PluginError {
         name: String,
         reason: String,
     },
+    /// A fresh session create named an id the catalog already holds. A
+    /// create never adopts an existing session (FIG-4112); replaying a
+    /// recorded identity is a process run's `SessionTurn` initialisation,
+    /// not a create.
+    #[error("session `{session_id}` already exists")]
+    SessionAlreadyExists { session_id: crate::SessionId },
     #[error("plugin registration error: {0}")]
     Registration(String),
     #[error("plugin invoke error: {0}")]
@@ -335,12 +341,12 @@ impl PluginError {
                 crate::RuntimeErrorCode::SessionExecutionLeaseLost,
                 error.to_string(),
             ),
-            error @ (Self::Session(_) | Self::ProcessExecutionSuperseded { .. }) => {
-                crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::PluginSessionManager,
-                    error.to_string(),
-                )
-            }
+            error @ (Self::Session(_)
+            | Self::SessionAlreadyExists { .. }
+            | Self::ProcessExecutionSuperseded { .. }) => crate::RuntimeError::new(
+                crate::RuntimeErrorCode::PluginSessionManager,
+                error.to_string(),
+            ),
             refused @ (Self::Runtime(_)
             | Self::RuntimeEffectController(_)
             | Self::ProcessCancelConflict { .. }
@@ -433,6 +439,7 @@ impl PluginError {
             | Self::ProcessHandedOver { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
+            | Self::SessionAlreadyExists { .. }
             | Self::ProcessCancelConflict { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }
             | Self::ReservedProcessEvent { .. }

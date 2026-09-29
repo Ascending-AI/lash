@@ -143,8 +143,8 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             .plugin(Arc::new(WorkbenchPluginFactory::new()))
             .build(crate::test_core_owner())
             .expect("build tool control workbench core");
-        let session = core
-            .session("workbench-tool-control-session")
+        let session = crate::created_session(&core, "workbench-tool-control-session")
+            .await
             .open()
             .await
             .expect("open tool control session");

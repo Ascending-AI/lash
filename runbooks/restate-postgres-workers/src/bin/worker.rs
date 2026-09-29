@@ -215,11 +215,7 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = core
-            .session(DEFAULT_SESSION_ID)
-            .open()
-            .await
-            .map_err(turn_error)?;
+        let session = create_or_open_session(core, DEFAULT_SESSION_ID).await?;
         let pool = self.storage.pool();
         let deadline = Instant::now() + Duration::from_secs(120);
         while Instant::now() < deadline {
@@ -272,11 +268,7 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = core
-            .session(turn_session_id(&request.workflow_id))
-            .open()
-            .await
-            .map_err(turn_error)?;
+        let session = create_or_open_session(core, turn_session_id(&request.workflow_id)).await?;
 
         let cursor = session.observe().current_observation().cursor;
         let cursor_text = cursor.as_str().to_string();
@@ -478,11 +470,7 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = core
-            .session(FRAME_CRASH_SESSION_ID)
-            .open()
-            .await
-            .map_err(turn_error)?;
+        let session = create_or_open_session(core, FRAME_CRASH_SESSION_ID).await?;
         let recovered = settled_output(
             session
                 .send(TurnInput::text(format!(
@@ -943,10 +931,27 @@ fn prompt_for_request(request: &TurnRequest) -> String {
 }
 
 async fn open_e2e_session(core: &lash::LashCore) -> HandlerResult<lash::LashSession> {
-    core.session(DEFAULT_SESSION_ID)
-        .open()
+    create_or_open_session(core, DEFAULT_SESSION_ID).await
+}
+
+/// Open `session_id`, creating it first when the catalog does not hold it.
+/// A handler reaches its session the same way on its first delivery and on a
+/// replay, so it means create-or-use; only `create` creates (FIG-4112), and
+/// an existing session is the arm where creation config does not apply.
+async fn create_or_open_session(
+    core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> HandlerResult<lash::LashSession> {
+    let session_id = session_id.into();
+    match core
+        .session(session_id.clone())
+        .create(lash::SessionCreation::default())
         .await
-        .map_err(turn_error)
+    {
+        Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
+        Err(error) => return Err(turn_error(error)),
+    }
+    core.session(session_id).open().await.map_err(turn_error)
 }
 
 async fn wait_for_cancel_gate(pool: &sqlx::PgPool, workflow_id: &str) -> Result<()> {

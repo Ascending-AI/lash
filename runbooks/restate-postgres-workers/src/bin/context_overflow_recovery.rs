@@ -408,7 +408,21 @@ impl Harness {
         })
     }
 
+    /// Open `session_id`, creating it on first use: the recovery scenario
+    /// reaches each session the same way before and after its restart, so it
+    /// means create-or-use (FIG-4112).
     async fn open(&self, session_id: &SessionId) -> Result<lash::LashSession> {
+        match self
+            .core
+            .session(session_id)
+            .create(lash::SessionCreation::default())
+            .await
+        {
+            Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
+            Err(error) => {
+                return Err(error).with_context(|| format!("create session `{session_id}`"));
+            }
+        }
         self.core
             .session(session_id)
             .open()

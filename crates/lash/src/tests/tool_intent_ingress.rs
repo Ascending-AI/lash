@@ -65,7 +65,7 @@ async fn ingress_core_over(
     .model(mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
-    let _session = core.session(SESSION).open().await?;
+    let _session = core.session(SESSION).created().await.open().await?;
     Ok((core, registry, process))
 }
 
@@ -126,7 +126,7 @@ async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
     .model(mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
-    let _session = core.session(SESSION).open().await?;
+    let _session = core.session(SESSION).created().await.open().await?;
     Ok(core)
 }
 
@@ -199,7 +199,7 @@ async fn ingress_core_with_trigger_store(
     .model(mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
-    let _session = core.session(SESSION).open().await?;
+    let _session = core.session(SESSION).created().await.open().await?;
     Ok((core, store, subscription, registry))
 }
 
@@ -479,7 +479,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
     .model(mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
-    let _session = core.session(SESSION).open().await?;
+    let _session = core.session(SESSION).created().await.open().await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
 
     let draft = || {
@@ -1984,7 +1984,7 @@ async fn ingress_engine_core(
     .model(mock_model_spec())
     .plugin(Arc::new(IngressAdmissionEngineFactory))
     .build(crate::testing::runtime_lease_owner())?;
-    let _session = core.session(SESSION).open().await?;
+    let _session = core.session(SESSION).created().await.open().await?;
     Ok((core, registry))
 }
 
@@ -2136,7 +2136,7 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
         .expect("host ingress registers a process")
         .identity;
 
-    let session = core.session(SESSION).open().await?;
+    let session = core.session(SESSION).created().await.open().await?;
     let effect_host = session.effect_host();
     let scoped = effect_host.scoped(lash_core::AdmittedScope::turn(
         SESSION,

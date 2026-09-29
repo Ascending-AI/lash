@@ -1,7 +1,7 @@
 use crate::support::{
     Arc, DeploymentStore, EffectHost, EmbedError, InMemoryLiveReplayStore, LashRuntime,
-    LashSession, LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginOptions,
-    PluginSpec, PluginStack, ProcessRegistry, PromptLayer, PromptLayerSink, ProviderHandle, Result,
+    LashSession, LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginSpec,
+    PluginStack, ProcessRegistry, PromptLayer, PromptLayerSink, ProviderHandle, Result,
     RuntimeEnvironment, RuntimeHandle, RuntimeHostConfig, SessionBuilder, SessionListFilter,
     SessionPolicy, SessionSpec, SessionView, SessionWorkEngine, StaticPluginFactory,
     TerminationPolicy, ToolProvider,
@@ -377,11 +377,8 @@ impl LashCore {
         SessionBuilder {
             core: self.clone(),
             session_id: session_id.into(),
-            spec: SessionSpec::inherit(),
-            parent_session_id: None,
             provider: None,
             plugin_factories: Vec::new(),
-            plugin_options: PluginOptions::default(),
             tool_source_policy: None,
             tool_surface_open_mode: None,
         }

@@ -622,7 +622,7 @@ async fn drive_cells(
         Arc::clone(&requests),
     )?;
     serve_processes(&core);
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     let streamed = Arc::clone(&theatre);
     let turn = tokio::spawn(async move {
         session

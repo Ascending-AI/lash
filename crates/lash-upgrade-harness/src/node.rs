@@ -664,11 +664,21 @@ async fn turn(args: TurnArgs) -> Result<TurnReport> {
     let engine = engine(stores, &args.restate)?;
     let core = core(lash::Backend::new(engine), &ProviderArgs::default())?;
     let session_id = lash::SessionId::from(args.session.clone());
+    // Every turn of a run names the run's session: the first creates it and
+    // the rest use it, written out, since only `create` creates (FIG-4112).
+    match core
+        .session(session_id.clone())
+        .create(lash::SessionCreation::default())
+        .await
+    {
+        Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
+        Err(error) => return Err(anyhow!("create session {}: {error}", args.session)),
+    }
     let session = core
         .session(session_id)
-        .create()
+        .durable()
         .await
-        .map_err(|error| anyhow!("create session {}: {error}", args.session))?;
+        .map_err(|error| anyhow!("resolve session {}: {error}", args.session))?;
     let settle = async {
         let mut input = lash::TurnInput::text(args.message.clone());
         if let Some(text) = &args.attachment {

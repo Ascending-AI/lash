@@ -41,9 +41,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         .trace_level(TraceLevel::Extended)
         .build(crate::sim_process_owner())
         .expect("runtime core");
-    let session = core
-        .session("history-request-snapshot")
-        .open()
+    let session = crate::open_created_session(&core, "history-request-snapshot")
         .await
         .expect("session");
 

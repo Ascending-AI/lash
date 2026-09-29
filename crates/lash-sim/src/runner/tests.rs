@@ -120,11 +120,12 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
             )
             .build(crate::sim_process_owner())
             .expect("RLM prefix-stability core");
-        let session = core
-            .session(format!("prefix-stability-{}", model.replace('/', "-")))
-            .open()
-            .await
-            .expect("RLM prefix-stability session");
+        let session = crate::open_created_session(
+            &core,
+            format!("prefix-stability-{}", model.replace('/', "-")),
+        )
+        .await
+        .expect("RLM prefix-stability session");
 
         let output = engine
             .run_turn(

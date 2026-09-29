@@ -336,8 +336,8 @@ finish("observed through live replay");
         .model(model.clone())
         .build(crate::test_core_owner())
         .expect("build core");
-    let session = core
-        .session("workbench-observation-stream")
+    let session = crate::created_session(&core, "workbench-observation-stream")
+        .await
         .open()
         .await
         .expect("open session");
@@ -431,8 +431,8 @@ finish("gap source");
         )))
         .build(crate::test_core_owner())
         .expect("build core");
-    let session = core
-        .session("workbench-observation-gap")
+    let session = crate::created_session(&core, "workbench-observation-gap")
+        .await
         .open()
         .await
         .expect("open session");
@@ -549,9 +549,8 @@ finish("snapshot cursor");
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let session_id = SessionId::from("workbench-snapshot-cursor");
-    let session = state
-        .core
-        .session(session_id.to_string())
+    let session = crate::created_session(&state.core, session_id.to_string())
+        .await
         .open()
         .await
         .expect("open session");
@@ -698,9 +697,8 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     let session_id = state.current_session_id();
     let mut events = state.event_tx.subscribe(&session_id);
     state.track_turn(&session_id, &TurnId::from("turn-cancel"));
-    let session = state
-        .core
-        .session(&session_id)
+    let session = crate::created_session(&state.core, &session_id)
+        .await
         .open()
         .await
         .expect("open cancelled session");
@@ -797,7 +795,11 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
         ))
         .build(crate::test_core_owner())
         .expect("build core");
-    let session = core.session(session_id).open().await.expect("open session");
+    let session = crate::created_session(&core, session_id)
+        .await
+        .open()
+        .await
+        .expect("open session");
 
     let tool_names = session
         .admin()
@@ -867,7 +869,11 @@ finish({ test: boxes[0], test2: boxes[1] });
         ))
         .build(crate::test_core_owner())
         .expect("build core");
-    let session = core.session(session_id).open().await.expect("open session");
+    let session = crate::created_session(&core, session_id)
+        .await
+        .open()
+        .await
+        .expect("open session");
 
     let output = tokio::time::timeout(
         Duration::from_secs(5),
@@ -964,9 +970,8 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .expect("enqueue account refresh");
     drain_refresh_batch(&state, &receipt).await;
 
-    let reopened = state
-        .core
-        .session(state.current_session_id())
+    let reopened = crate::created_session(&state.core, state.current_session_id())
+        .await
         .open()
         .await
         .expect("reopen session");
@@ -998,9 +1003,8 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .await
         .expect("enqueue removal refresh");
     drain_refresh_batch(&state, &receipt).await;
-    let reopened = state
-        .core
-        .session(state.current_session_id())
+    let reopened = crate::created_session(&state.core, state.current_session_id())
+        .await
         .open()
         .await
         .expect("reopen session after account removal");
@@ -1026,9 +1030,8 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .await
         .expect("enqueue re-add refresh");
     drain_refresh_batch(&state, &receipt).await;
-    let reopened = state
-        .core
-        .session(state.current_session_id())
+    let reopened = crate::created_session(&state.core, state.current_session_id())
+        .await
         .open()
         .await
         .expect("reopen session after account re-add");
@@ -1127,9 +1130,8 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
-    let session = state
-        .core
-        .session(state.current_session_id())
+    let session = crate::created_session(&state.core, state.current_session_id())
+        .await
         .open()
         .await
         .expect("open session");
@@ -1611,6 +1613,9 @@ async fn assert_no_active_lash_restate_invocations(state: &AppState, timeout: Du
 }
 struct LiveWorkbenchRestateHarness {
     state: AppState,
+    /// The durable store set this host runs over; a second deployment of
+    /// the same service shares it.
+    store_set: Arc<dyn lash::StoreSet>,
     process_worker: lash::durability::DurableProcessWorker,
     backend: Arc<WorkbenchRestateBackend>,
     process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
@@ -1664,8 +1669,31 @@ async fn live_workbench_restate_state_with_provider_and_database(
     let stores = WorkbenchStores::open(data_dir, database_url)
         .await
         .expect("open live workbench stores");
-    let core_store_factory = stores.stores.session_store_factory();
-    let store_set = Arc::clone(&stores.stores);
+    live_workbench_restate_state_over_stores(
+        data_dir,
+        stores.stores,
+        restate_ingress_url,
+        provider,
+        sessions,
+        active_turns,
+    )
+    .await
+}
+
+/// A live workbench host over an already-open durable store set: a second
+/// deployment of the same lash service runs over the store the first one
+/// does, as every real fleet's deployments share one durable store.
+async fn live_workbench_restate_state_over_stores(
+    data_dir: &std::path::Path,
+    store_set: Arc<dyn lash::StoreSet>,
+    restate_ingress_url: String,
+    provider: ProviderHandle,
+    sessions: WorkbenchSessions,
+    active_turns: ActiveTurns,
+) -> LiveWorkbenchRestateHarness {
+    record_fixture_owned_data_dir(data_dir);
+    let shared_store_set = Arc::clone(&store_set);
+    let core_store_factory = store_set.session_store_factory();
     let trigger_store = store_set.trigger_store();
     let process_env_store = store_set.process_env_store();
     let trace_path = data_dir.join("trace.jsonl");
@@ -1772,6 +1800,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
     Box::pin(restate::resume_turn_followers(&state)).await;
     LiveWorkbenchRestateHarness {
         state,
+        store_set: shared_store_set,
         process_worker,
         backend,
         process_env_store,
@@ -1879,8 +1908,8 @@ async fn persisted_trigger_route_fires_after_reopening_the_core_inner() {
 
     {
         let core = test_workbench_core(double.lash_backend());
-        let session = core
-            .session(session_id.clone())
+        let session = crate::created_session(&core, session_id.clone())
+            .await
             .open()
             .await
             .expect("open session");
@@ -1893,8 +1922,8 @@ async fn persisted_trigger_route_fires_after_reopening_the_core_inner() {
     // compiled artifacts and the process registry are read back from them.
     let core = test_workbench_core(double.lash_backend());
     crate::tests::install_test_process_worker(&double, &core);
-    let _reopened = core
-        .session(session_id)
+    let _reopened = crate::created_session(&core, session_id)
+        .await
         .open()
         .await
         .expect("reopen session");

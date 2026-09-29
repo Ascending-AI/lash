@@ -73,9 +73,8 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         )
         .await;
         let session_id = state.current_session_id();
-        let session = state
-            .core
-            .session(session_id.clone())
+        let session = crate::created_session(&state.core, session_id.clone())
+            .await
             .open()
             .await
             .expect("open queued-work controls session");
@@ -196,9 +195,8 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
         )
         .await;
         let session_id = state.current_session_id();
-        let session = state
-            .core
-            .session(session_id.clone())
+        let session = crate::created_session(&state.core, session_id.clone())
+            .await
             .open()
             .await
             .expect("open targeted wake session");
@@ -721,9 +719,8 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         )
         .await;
         let session_id = state.current_session_id();
-        let session = state
-            .core
-            .session(session_id.clone())
+        let session = crate::created_session(&state.core, session_id.clone())
+            .await
             .open()
             .await
             .expect("open wake keeps-previous session");

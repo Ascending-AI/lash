@@ -73,8 +73,8 @@ finish(result);
             .build()
             .into_handle();
         let core = approval_test_core(&backend, provider, approvals.clone()).await;
-        let session = core
-            .session("approval-approve")
+        let session = crate::created_session(&core, "approval-approve")
+            .await
             .open()
             .await
             .expect("open approval session");
@@ -196,8 +196,8 @@ finish(result);
             .build()
             .into_handle();
         let core = approval_test_core(&backend, provider, approvals.clone()).await;
-        let session = core
-            .session("approval-repair")
+        let session = crate::created_session(&core, "approval-repair")
+            .await
             .open()
             .await
             .expect("open approval session");
@@ -296,8 +296,8 @@ try {
             .build()
             .into_handle();
         let core = approval_test_core(&backend, provider, approvals.clone()).await;
-        let session = core
-            .session("approval-deny")
+        let session = crate::created_session(&core, "approval-deny")
+            .await
             .open()
             .await
             .expect("open denial session");
@@ -369,8 +369,8 @@ finish(result.status);
             .build()
             .into_handle();
         let core = approval_test_core(&backend, provider.clone(), approvals.clone()).await;
-        let session = core
-            .session("approval-restart")
+        let session = crate::created_session(&core, "approval-restart")
+            .await
             .open()
             .await
             .expect("open restart session");
@@ -453,7 +453,11 @@ try {
         .into_handle();
     let core = approval_test_core(&backend, provider.clone(), approvals.clone()).await;
     let session_id = format!("async-completion-{slug}");
-    let session = core.session(&session_id).open().await.unwrap();
+    let session = crate::created_session(&core, &session_id)
+        .await
+        .open()
+        .await
+        .unwrap();
     let mut turn = tokio::spawn(async move {
         session
             .send(lash::TurnInput::text("Apply async change"))

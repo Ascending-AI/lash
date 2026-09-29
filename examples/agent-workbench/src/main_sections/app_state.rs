@@ -3,38 +3,69 @@ use lash::SessionId;
 use lash::TurnId;
 
 impl AppState {
-    /// A builder for ordinary opens: it states the host's model selection.
+    /// A builder for a session the workbench opens. An open states no config
+    /// and never creates (FIG-4112): the session runs with what it recorded
+    /// at creation, and a turn that selects a different model moves it with
+    /// `apply_model_selection_to_session`.
     pub(crate) fn session_builder(&self, session_id: impl Into<SessionId>) -> lash::SessionBuilder {
-        let session_id = session_id.into();
-        let model = model_spec_from_selection(self.selected_model());
-        self.session_builder_with_spec(
-            session_id,
-            // The selection is creation config: a session this open creates
-            // records it, and an existing session runs with the model it
-            // recorded (FIG-4099). A turn that selects a different model
-            // moves the session with `apply_model_selection_to_session`.
-            lash::SessionSpec::new().model(model),
-        )
+        self.core.session(session_id.into())
     }
 
-    /// A builder for read-only projection opens: it states no model.
+    /// What the workbench creates a session with: the host's model selection
+    /// at the moment of creation.
+    pub(crate) fn session_creation(&self) -> lash::SessionCreation {
+        lash::SessionCreation {
+            spec: lash::SessionSpec::new().model(model_spec_from_selection(self.selected_model())),
+            ..Default::default()
+        }
+    }
+
+    /// Create `session_id` with [`Self::session_creation`] unless the catalog
+    /// already holds it.
     ///
-    /// Opening an existing session writes nothing whatever the spec says
-    /// (FIG-4099); a projection states none so that the process-wide
-    /// selection is never mistaken for the session's recorded model.
-    pub(crate) fn observer_session_builder(
+    /// The workbench owns its session ids and means create-or-use on the
+    /// routes that may name a session whose first turn has not run — a new
+    /// or reset session, a turn, an input admission. Only `create` creates
+    /// (FIG-4112), so the arm where the selection does not apply — the
+    /// session already exists and keeps what it recorded — is written out
+    /// here. A deleted id stays refused.
+    pub(crate) async fn ensure_session(
         &self,
-        session_id: impl Into<SessionId>,
-    ) -> lash::SessionBuilder {
-        self.session_builder_with_spec(session_id.into(), lash::SessionSpec::new())
+        session_id: &SessionId,
+    ) -> Result<(), lash::EmbedError> {
+        match self
+            .core
+            .session(session_id.clone())
+            .create(self.session_creation())
+            .await
+        {
+            Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 
-    fn session_builder_with_spec(
+    /// Create the session the workbench currently serves unless it exists.
+    /// The workbench mints its current id itself, so it creates that session
+    /// when it takes the id up; a retired id stays retired for the routes to
+    /// refuse.
+    pub(crate) async fn ensure_current_session(&self) -> Result<(), lash::EmbedError> {
+        match self.ensure_session(&self.current_session_id()).await {
+            Ok(())
+            | Err(lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
+                ..
+            })) => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// [`Self::ensure_session`], then [`Self::open_session`].
+    pub(crate) async fn create_or_open_session(
         &self,
-        session_id: SessionId,
-        spec: lash::SessionSpec,
-    ) -> lash::SessionBuilder {
-        self.core.session(session_id).session_spec(spec)
+        session_id: &SessionId,
+        surface: &str,
+    ) -> Result<lash::LashSession, lash::EmbedError> {
+        self.ensure_session(session_id).await?;
+        self.open_session(session_id, surface).await
     }
 
     /// `surface` names the caller on the contention traces this open records,
@@ -351,26 +382,30 @@ impl AppState {
         mode: WorkbenchTurnCancelMode,
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
-        let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
-        policy.session_id = Some(session_id.clone());
-        policy.model = model_spec_from_selection(self.selected_model());
-        self.session_store_factory
-            .admit_session(&lash::persistence::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: session_id.clone(),
-                relation: lash::persistence::SessionRelation::Root,
-                config: (&policy).into(),
-                head: lash::persistence::SessionCreationHead::CommittedByCreator,
-            })
-            .await
-            .map_err(|error| {
-                self.session_admission_error(
-                    session_id,
-                    "api.turn.cancel",
-                    lash::EmbedError::Store(error),
-                )
-            })?;
+        // A cancel names a session that exists; it never creates one
+        // (FIG-4112).
+        let refusal = match lash::persistence::SessionCatalogStore::lookup_session(
+            self.session_store_factory.as_ref(),
+            session_id,
+        )
+        .await
+        {
+            Ok(lash::persistence::SessionLookup::Live(_)) => None,
+            Ok(lash::persistence::SessionLookup::Absent) => {
+                Some(lash::EmbedError::UnknownSession {
+                    session_id: session_id.clone(),
+                })
+            }
+            Ok(lash::persistence::SessionLookup::Deleted) => Some(lash::EmbedError::Store(
+                lash::persistence::StoreError::SessionDeleted {
+                    session_id: session_id.clone(),
+                },
+            )),
+            Err(error) => Some(lash::EmbedError::Store(error)),
+        };
+        if let Some(error) = refusal {
+            return Err(self.session_admission_error(session_id, "api.turn.cancel", error));
+        }
         self.session_store_factory
             .read_session_state_version(session_id)
             .await
@@ -1319,6 +1354,9 @@ impl AppError {
         }
         if session_open_is_contended(&error) {
             return temporarily_unavailable_session_open();
+        }
+        if let lash::EmbedError::UnknownSession { session_id } = &error {
+            return Self::not_found(format!("session `{session_id}` does not exist"));
         }
         Self::internal(error)
     }

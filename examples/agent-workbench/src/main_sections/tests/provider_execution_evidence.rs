@@ -202,9 +202,8 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         let double = crate::tests::test_double_backend(0).await;
         let state = recoverable_chat_test_state_with_provider(&double, 64, provider).await;
         let session_id = state.current_session_id();
-        let session = state
-            .core
-            .session(session_id.clone())
+        let session = crate::created_session(&state.core, session_id.clone())
+            .await
             .open()
             .await
             .expect("open provider evidence session");

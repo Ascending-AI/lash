@@ -82,7 +82,12 @@ async fn seed_session_with_a_persisted_tool(
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
-    let granted = granting_core.session(session_id.clone()).open().await?;
+    let granted = granting_core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
     granted
         .send(TurnInput::text("persist a checkpoint with tool state"))
         .output()
@@ -119,7 +124,12 @@ async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let opened = grantless_core.session(session_id.clone()).open().await?;
+    let opened = grantless_core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
 
     let report = opened
         .tool_restore_report()
@@ -159,7 +169,13 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
     .tool_source_policy(lash_core::ToolSourcePolicy::Require)
     .build(crate::testing::runtime_lease_owner())?;
 
-    let refusal = match strict_core.session(session_id.clone()).open().await {
+    let refusal = match strict_core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await
+    {
         Ok(_) => panic!("Require must refuse an open whose persisted member has no source"),
         Err(error) => error,
     };
@@ -197,7 +213,12 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let reopened = tolerant_core.session(session_id.clone()).open().await?;
+    let reopened = tolerant_core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
     Box::pin(reopened.close()).await?;
     Ok(())
 }
@@ -222,6 +243,8 @@ async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     let refusal = match tolerant_core
         .session(session_id.clone())
         .tool_source_policy(lash_core::ToolSourcePolicy::Require)
+        .created()
+        .await
         .open()
         .await
     {
@@ -237,7 +260,12 @@ async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     );
 
     // The same core, without the override, still opens.
-    let opened = tolerant_core.session(session_id.clone()).open().await?;
+    let opened = tolerant_core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
     assert!(
         opened
             .tool_restore_report()

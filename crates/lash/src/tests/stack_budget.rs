@@ -29,7 +29,12 @@ finish({
             ))
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
-        let session = core.session("stack-budget-rlm-lashlang").open().await?;
+        let session = core
+            .session("stack-budget-rlm-lashlang")
+            .created()
+            .await
+            .open()
+            .await?;
         let events = RecordingEvents::default();
 
         let turn = session

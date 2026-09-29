@@ -28,7 +28,12 @@ pub(super) async fn turn_stream_finish_returns_committed_assistant_prose() -> Re
     .provider(semantic_group_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("turn-stream-last-group").open().await?;
+    let session = core
+        .session("turn-stream-last-group")
+        .created()
+        .await
+        .open()
+        .await?;
     let handle = session.send(TurnInput::text("stream groups")).await?;
     let mut stream = handle.events();
 
@@ -56,7 +61,12 @@ pub(super) async fn turn_run_collects_activities_and_returns_committed_assistant
     .provider(semantic_group_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("turn-run-last-group").open().await?;
+    let session = core
+        .session("turn-run-last-group")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let collected = session.send(TurnInput::text("run groups")).output().await?;
 
@@ -82,7 +92,7 @@ pub(super) async fn retry_status_streams_as_semantic_turn_event() -> Result<()> 
     .provider(retry_once_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("retry-status").open().await?;
+    let session = core.session("retry-status").created().await.open().await?;
     let events = RecordingEvents::default();
 
     let result = session
@@ -119,7 +129,7 @@ pub(super) async fn retry_status_streams_as_semantic_turn_event() -> Result<()> 
 #[tokio::test]
 pub(super) async fn control_turn_accepts_prebuilt_turn_input() -> Result<()> {
     let (core, _double) = double_standard_core().await;
-    let session = core.session("raw-turn").open().await?;
+    let session = core.session("raw-turn").created().await.open().await?;
 
     let result = session
         .send(TurnInput::text("raw input"))
@@ -143,7 +153,7 @@ pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Re
     .provider(checkpoint_gated_provider(entered_tx, release_rx))
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("queued-input").open().await?;
+    let session = core.session("queued-input").created().await.open().await?;
     let events = Arc::new(RecordingEvents::default());
     let turn_session = session.clone();
     let turn_events = Arc::clone(&events);
@@ -203,7 +213,7 @@ pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Re
 #[tokio::test]
 pub(super) async fn cancel_before_drive_yields_cancelled_outcome() -> Result<()> {
     let (core, _double) = double_standard_core().await;
-    let session = core.session("pre-cancelled").open().await?;
+    let session = core.session("pre-cancelled").created().await.open().await?;
     let handle = session.send(TurnInput::text("never runs")).await?;
     let receipt = handle.cancel().await?;
     assert!(matches!(receipt, crate::CancelReceipt::Withdrawn(_)));
@@ -228,7 +238,12 @@ pub(super) async fn send_cancel_preserves_explicit_origin_hint() -> Result<()> {
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("cancel-with-origin").open().await?;
+    let session = core
+        .session("cancel-with-origin")
+        .created()
+        .await
+        .open()
+        .await?;
     let handle = session
         .send(TurnInput::text("hang here"))
         .id("origin-root")
@@ -279,7 +294,12 @@ pub(super) async fn an_input_cancel_stops_its_inflight_turn() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
     .expect("core");
-    let session = core.session("cancel-inflight").open().await?;
+    let session = core
+        .session("cancel-inflight")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let handle = session.send(TurnInput::text("hang forever")).await?;
     let input_id = handle.input_id().clone();
@@ -396,7 +416,12 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
         builds: Arc::clone(&builds),
     }))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("queued-work-live-lease").open().await?;
+    let session = core
+        .session("queued-work-live-lease")
+        .created()
+        .await
+        .open()
+        .await?;
     let entered = first_entered.notified();
     let foreground = session.send(TurnInput::text("foreground turn")).await?;
     // This core runs no session work: a waiter drives the input in its own
@@ -460,7 +485,12 @@ pub(super) async fn cancelling_both_sends_stops_the_running_root_and_withdraws_t
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
     .expect("core");
-    let session = core.session("cancel-lock-queue").open().await?;
+    let session = core
+        .session("cancel-lock-queue")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let first = session.send(TurnInput::text("hang one")).await?;
     let first_id = first.input_id().clone();
@@ -509,8 +539,8 @@ pub(super) async fn an_input_cancel_reaches_a_send_through_a_separately_opened_h
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
     .expect("core");
-    let handle_a = core.session("cancel-scope").open().await?;
-    let handle_b = core.session("cancel-scope").open().await?;
+    let handle_a = core.session("cancel-scope").created().await.open().await?;
+    let handle_b = core.session("cancel-scope").created().await.open().await?;
 
     let hanging = handle_a.send(TurnInput::text("hang here")).await?;
     // This core runs no session work: a waiter drives the input in its own
@@ -554,7 +584,12 @@ pub(super) async fn an_input_cancel_commits_the_request_it_was_placed_as() -> Re
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
     .expect("core");
-    let session = core.session("provider-abort-evidence").open().await?;
+    let session = core
+        .session("provider-abort-evidence")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let hanging = session
         .send(TurnInput::text("hang here"))
@@ -600,7 +635,12 @@ pub(super) async fn a_session_cancel_reaches_a_sent_input_its_waiter_drives() ->
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
     .expect("core");
-    let session = core.session("cancel-queued-drain").open().await?;
+    let session = core
+        .session("cancel-queued-drain")
+        .created()
+        .await
+        .open()
+        .await?;
     let handle = session.send(TurnInput::text("hang queued")).await?;
     let input_id = handle.input_id().clone();
 
@@ -652,7 +692,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     let handle = session
         .send(TurnInput::text("hang until session cancellation"))
         .id(turn_id)
@@ -811,7 +851,12 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
     .provider(provider)
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("active-steer-interrupt-cancel").open().await?;
+    let session = core
+        .session("active-steer-interrupt-cancel")
+        .created()
+        .await
+        .open()
+        .await?;
     let active_turn_id = "active-steer-interrupt-turn";
     let primary = session
         .send(TurnInput::text("primary hangs"))
@@ -954,6 +999,8 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("accepted-active-steer-interrupt")
+        .created()
+        .await
         .open()
         .await?;
     let active_turn_id = "accepted-active-steer-turn";
@@ -1087,6 +1134,8 @@ pub(super) async fn checkpoint_admitted_steer_cancel_reaches_its_root() -> Resul
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("checkpoint-admitted-steer-cancel")
+        .created()
+        .await
         .open()
         .await?;
     let active_turn_id = "checkpoint-admitted-steer-turn";
@@ -1188,6 +1237,8 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-active-input-next-iteration")
+            .created()
+            .await
             .open()
             .await?;
         let active_turn_id = "rlm-active-input-turn";
@@ -1261,7 +1312,12 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
 #[tokio::test]
 pub(super) async fn turn_stream_receives_semantic_activities() -> Result<()> {
     let (core, _double) = double_standard_core().await;
-    let session = core.session("semantic-stream").open().await?;
+    let session = core
+        .session("semantic-stream")
+        .created()
+        .await
+        .open()
+        .await?;
     let turn_events = RecordingEvents::default();
 
     let result = session
@@ -1286,7 +1342,7 @@ pub(super) async fn turn_stream_receives_semantic_activities() -> Result<()> {
 #[tokio::test]
 pub(super) async fn run_collects_ordered_assistant_prose_activity() -> Result<()> {
     let (core, _double) = double_standard_core().await;
-    let session = core.session("main").open().await?;
+    let session = core.session("main").created().await.open().await?;
 
     let result = session.send(TurnInput::text("visible")).output().await?;
 
@@ -1334,7 +1390,12 @@ pub(super) async fn core_catalog_and_actual_turn_resolve_the_identical_contract(
         .resolve_contract("app_lookup")
         .expect("core catalog contract");
     let expected = serde_json::to_value(core_contract.as_ref()).expect("serialize core contract");
-    let session = core.session("catalog-agreement").open().await?;
+    let session = core
+        .session("catalog-agreement")
+        .created()
+        .await
+        .open()
+        .await?;
     tools.take_resolved();
 
     let output = session
@@ -1431,7 +1492,12 @@ pub(super) async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Re
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("fanout-tool-events").open().await?;
+    let session = core
+        .session("fanout-tool-events")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let output = session
         .send(TurnInput::text("use tool"))

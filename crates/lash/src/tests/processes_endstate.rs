@@ -892,7 +892,7 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
         .await?
         .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
 
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     let lifecycle_cursor = session.observe().current_observation().cursor;
 
     let report = core
@@ -1261,7 +1261,7 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
         "main",
     )
     .await;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     let process_id = session
         .admin()
         .processes()
@@ -1346,7 +1346,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         "main",
     )
     .await;
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id).created().await.open().await?;
     let process_id = session
         .admin()
         .processes()
@@ -1518,7 +1518,12 @@ finish(handle.id);
         .plugin(Arc::new(CalendarTriggerSurfaceFactory))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-trigger-leaf").open().await?;
+    let session = core
+        .session("rlm-trigger-leaf")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let events = Arc::new(RecordingEvents::default());
     let result = session
@@ -1634,7 +1639,12 @@ finish(await h);
     .plugin(Arc::new(CalendarTriggerSurfaceFactory))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session("rlm-process-registers-trigger").open().await?;
+    let session = core
+        .session("rlm-process-registers-trigger")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let result = session
         .send(TurnInput::text("run the registrar"))

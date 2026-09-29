@@ -11,6 +11,31 @@ pending-input and queued-work reads, cancels and abandons become one set over
 Session Ingress items, and batch ids become item ids, with no aliases. The split
 between the two authorities is unchanged.
 
+Amended 2026-09-29 (FIG-4112, audit G11): exactly one terminal verb creates,
+and it is the only one that takes session config.
+`core.session(id).create(SessionCreation)` writes the catalog row and the
+initial config head in one store transaction: the spec's model, provider pin,
+prompt, generation and the rest of the `SessionSpec`, the relation (`parent`)
+and the plugin options, which the session's protocol resolves into its
+recorded RLM and plugin session config. It returns the session's Durable
+Session and builds no runtime. An existing id is refused with
+`EmbedError::SessionAlreadyExists` — always, even when a retry states exactly
+the recorded config: the host owns its ids — and a deleted one with
+`StoreError::SessionDeleted`. The store's own insert answer
+(`SessionAdmission::Created` or `Rebound`) decides, so of two racing creates
+exactly one succeeds. `open()`, `durable()`, `open_with_state()`,
+`observe_with_state()` and the engine's drive-open resolve an existing session
+through the catalog's non-creating `lookup_session` and never write a catalog
+row; a missing id is `EmbedError::UnknownSession`. The open builder carries
+only open-time knobs: the tool-source policy, `enqueue_only`, process-local
+plugin factories and a provider resolver that must match the recorded pin
+(`ProviderMismatch` otherwise). Config changes after creation go through
+`update(SessionConfigPatch)` (ADR 0030 as amended by FIG-4099). A host that
+means create-or-open writes it out: create, treat `SessionAlreadyExists` as
+present, then open. The remote protocol gains no verb: the serving host maps a
+`RemoteTurnRequest` to create-or-use, then send, and decides whether a request
+may create. The Decision below is edited to match.
+
 Amended 2026-09-24 (FIG-3669), **not yet implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 makes Restate the only effect engine and the SQL stores storage only. This ADR
@@ -48,15 +73,18 @@ never been created silently materialised a session.
 
 The session builder has three terminal verbs, and exactly one of them creates.
 
-* `core.session(id).open()` is unchanged and yields the **live session**.
+* `core.session(id).open()` yields the **live session**. It never creates: a
+  missing id is `EmbedError::UnknownSession` (FIG-4112).
 * `core.session(id).durable()` yields a **Durable Session**: no Session
   Execution Lease, no plugin session, no tool registry, no lifecycle events, no
   observer-intent reconcile, no process admission. It never creates.
-* `core.session(id).create()` writes the session's catalog entry — with exactly
-  the policy and relation `open()` would have used — and returns its Durable
-  Session. It builds no runtime either. It is idempotent, preserving the
-  metadata and Session Relation an existing id already carries, and refuses a
-  deleted id with the store's typed `SessionDeleted`.
+* `core.session(id).create(creation)` writes the session's catalog entry and
+  its initial config head — the `SessionCreation`'s spec, relation and
+  plugin options — in one store transaction, and returns its Durable Session.
+  It builds no runtime either. It refuses an existing id with
+  `EmbedError::SessionAlreadyExists`, leaving the recorded metadata, config and
+  Session Relation untouched, and a deleted id with the store's typed
+  `SessionDeleted` (FIG-4112).
 
 The Durable Session owns every operation that is correct beside another
 process's writer: enqueue turn input (validation, driver wake and receipt
@@ -102,14 +130,14 @@ which are event-driven and carry the outcome.
 ### Acquisition never creates
 
 `durable()` resolves an existing store through the catalog's non-creating seam
-(`open_existing_store_by_id`), at most once per handle and shared by its
-clones; `create_store` is unreachable from a Durable Session. Every queue
+(`lookup_session`), at most once per handle and shared by its clones;
+`admit_session` is unreachable from a Durable Session. Every queue
 operation therefore requires a session id the store already knows. Enqueueing
 to an id that was never created is `EmbedError::UnknownSession`; to a deleted
 one it is `StoreError::SessionDeleted`. Nothing is stored and no driver is
 woken. This is a deliberate behaviour change from `LashCore::enqueue_turn_input`,
 which materialised metadata: a host that enqueued before a first open now
-creates the session first, with `create()`.
+creates the session first, with `create(creation)`.
 
 The three settled reads are an exception in *reporting*, not in authority.
 `exists`, `was_deleted` and `read` exist to answer a question *about* an id, so

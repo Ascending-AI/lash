@@ -1078,16 +1078,9 @@ impl ChannelBot {
         Ok(posted.ts)
     }
 
-    /// Open (or resume) the channel's session.
+    /// Open (or resume) the channel's session, creating it on first use.
     async fn open_session(&self, channel: &str) -> Result<LashSession> {
-        let session = self
-            .core
-            .session(session_id(channel))
-            .open()
-            .await
-            .with_context(|| format!("open session for channel {channel}"))?;
-        threads::ensure_forkable_channel_head(&self.core, &session).await?;
-        Ok(session)
+        threads::open_channel_session(&self.core, channel).await
     }
 
     fn classify(&self, event: &Event) -> (&'static str, Intent) {

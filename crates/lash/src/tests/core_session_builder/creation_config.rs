@@ -1,6 +1,8 @@
-//! FIG-4099: a session's config is baked in when it is created. A reopen runs
-//! with what the session recorded and writes nothing, and every later change
-//! is `update(SessionConfigPatch)`.
+//! FIG-4099, FIG-4112: a session's config is baked in when it is created,
+//! and only `create(SessionCreation)` states it. An open runs with what the
+//! session recorded and writes nothing — it cannot state config at all (the
+//! `session_open_takes_no_config` UI fixture) — and every later change is
+//! `update(SessionConfigPatch)`.
 
 use super::*;
 use lash_sansio::SessionId;
@@ -36,6 +38,16 @@ fn creation_spec() -> crate::SessionSpec {
             seed: Some(7),
             ..Default::default()
         })
+}
+
+/// Create `id` with [`creation_spec`], and nothing else.
+async fn create_with_creation_spec(core: &LashCore, id: &str) -> Result<crate::DurableSession> {
+    core.session(id)
+        .create(crate::SessionCreation {
+            spec: creation_spec(),
+            ..Default::default()
+        })
+        .await
 }
 
 fn capturing_provider(
@@ -120,36 +132,20 @@ fn assert_request_uses_creation_config(request: &lash_core::LlmRequest) {
     assert_eq!(request.generation.seed, Some(7));
 }
 
-/// A reopen whose builder states a different model, prompt, generation and
-/// attachment acceptance opens with the recorded config unchanged, and the
-/// open makes no store write at all.
+/// A reopen opens with the recorded config unchanged, and the open makes no
+/// store write at all.
 #[tokio::test]
-async fn a_reopen_stating_other_config_runs_the_recorded_config_and_writes_nothing() -> Result<()> {
+async fn a_reopen_runs_the_recorded_config_and_writes_nothing() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (core, backend, writes) = counting_core(Arc::clone(&captures)).await?;
-    let session = core
-        .session("reopen-writes-nothing")
-        .session_spec(creation_spec())
-        .open()
-        .await?;
+    create_with_creation_spec(&core, "reopen-writes-nothing").await?;
+    let session = core.session("reopen-writes-nothing").open().await?;
     session.send(TurnInput::text("commit")).output().await?;
     Box::pin(session.close()).await?;
     let before = recorded_config(&backend, "reopen-writes-nothing").await;
 
     writes.lock_recover().clear();
-    let reopened = core
-        .session("reopen-writes-nothing")
-        .session_spec(
-            crate::SessionSpec::new()
-                .model(model_with_attachments("other-model", "other-attachments"))
-                .prompt_layer(guidance("OTHER PROMPT"))
-                .replace_generation(lash_core::GenerationOptions {
-                    seed: Some(9),
-                    ..Default::default()
-                }),
-        )
-        .open()
-        .await?;
+    let reopened = core.session("reopen-writes-nothing").open().await?;
     assert_eq!(
         *writes.lock_recover(),
         Vec::<&str>::new(),
@@ -172,11 +168,8 @@ async fn a_reopen_stating_other_config_runs_the_recorded_config_and_writes_nothi
 async fn update_changes_each_config_field_durably() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (core, backend, _writes) = counting_core(Arc::clone(&captures)).await?;
-    let session = core
-        .session("patch-each-field")
-        .session_spec(creation_spec())
-        .open()
-        .await?;
+    create_with_creation_spec(&core, "patch-each-field").await?;
+    let session = core.session("patch-each-field").open().await?;
     session
         .admin()
         .config()
@@ -229,11 +222,8 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
 async fn a_model_change_through_the_patch_keeps_the_attachment_snapshot() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (core, backend, _writes) = counting_core(captures).await?;
-    let session = core
-        .session("patch-keeps-attachments")
-        .session_spec(creation_spec())
-        .open()
-        .await?;
+    create_with_creation_spec(&core, "patch-keeps-attachments").await?;
+    let session = core.session("patch-keeps-attachments").open().await?;
     let config = session.admin().config();
     config
         .update(crate::SessionConfigPatch {
@@ -278,11 +268,8 @@ async fn a_model_change_through_the_patch_keeps_the_attachment_snapshot() -> Res
 async fn plugin_options_no_plugin_reads_are_refused_typed_and_write_nothing() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (core, backend, writes) = counting_core(captures).await?;
-    let session = core
-        .session("patch-unread-plugin-options")
-        .session_spec(creation_spec())
-        .open()
-        .await?;
+    create_with_creation_spec(&core, "patch-unread-plugin-options").await?;
+    let session = core.session("patch-unread-plugin-options").open().await?;
     session.send(TurnInput::text("commit")).output().await?;
     let before = recorded_config(&backend, "patch-unread-plugin-options").await;
     writes.lock_recover().clear();
@@ -319,22 +306,6 @@ async fn plugin_options_no_plugin_reads_are_refused_typed_and_write_nothing() ->
     Ok(())
 }
 
-/// A session created by `open()` runs its first engine-driven turn with the
-/// creation config.
-#[tokio::test]
-async fn a_session_created_by_open_runs_its_first_turn_with_the_creation_config() -> Result<()> {
-    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (core, _backend, _writes) = counting_core(Arc::clone(&captures)).await?;
-    let session = core
-        .session("created-by-open")
-        .session_spec(creation_spec())
-        .open()
-        .await?;
-    session.send(TurnInput::text("first turn")).output().await?;
-    assert_request_uses_creation_config(&captures.lock_recover()[0]);
-    Ok(())
-}
-
 /// A session created by `create()` records its creation config with its
 /// catalog row, so the first turn of a later `open()` that states nothing
 /// runs with it.
@@ -343,12 +314,7 @@ async fn a_session_created_by_create_runs_its_first_opened_turn_with_the_creatio
 -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (core, backend, _writes) = counting_core(Arc::clone(&captures)).await?;
-    drop(
-        core.session("created-by-create")
-            .session_spec(creation_spec())
-            .create()
-            .await?,
-    );
+    drop(create_with_creation_spec(&core, "created-by-create").await?);
     let (revision, config) = recorded_config(&backend, "created-by-create").await;
     assert_eq!(revision, 0, "creation writes the config head, no frame");
     assert_runs_creation_config(&config.session_policy());
@@ -368,11 +334,7 @@ async fn a_session_created_by_create_runs_its_first_engine_driven_turn_with_the_
 -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (core, _backend, _writes) = counting_core(Arc::clone(&captures)).await?;
-    let durable = core
-        .session("created-then-engine-driven")
-        .session_spec(creation_spec())
-        .create()
-        .await?;
+    let durable = create_with_creation_spec(&core, "created-then-engine-driven").await?;
     durable
         .send(TurnInput::text("the engine opens this session first"))
         .id("engine-driven-root")

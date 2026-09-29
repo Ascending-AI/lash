@@ -8,22 +8,27 @@ const SEED: u64 = 0x5c_f104;
 // change them once they are recorded. TypeScript is the sole RLM language
 // (ADR 0096), so no fact here names one.
 
-/// State a session's termination as creation config, through the
-/// plugin-agnostic options seam (ADR 0066, FIG-4099).
+/// Create `session_id` stating its termination as creation config, through
+/// the plugin-agnostic options seam (ADR 0066, FIG-4099, FIG-4112).
 #[cfg(feature = "rlm")]
-fn stating_termination(
-    builder: crate::SessionBuilder,
+async fn create_stating_termination(
+    core: &LashCore,
+    session_id: &str,
     termination: crate::rlm::RlmTermination,
-) -> crate::SessionBuilder {
-    builder
-        .plugin_option(
-            crate::rlm::RLM_PROTOCOL_PLUGIN_ID,
-            crate::rlm::RlmCreateExtras {
-                termination: Some(termination),
-                ..crate::rlm::RlmCreateExtras::default()
-            },
-        )
-        .expect("the typed RLM session options must serialize")
+) -> crate::Result<crate::DurableSession> {
+    core.session(session_id)
+        .create(crate::SessionCreation {
+            plugin_options: lash_core::PluginOptions::typed(
+                crate::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                crate::rlm::RlmCreateExtras {
+                    termination: Some(termination),
+                    ..crate::rlm::RlmCreateExtras::default()
+                },
+            )
+            .expect("the typed RLM session options must serialize"),
+            ..Default::default()
+        })
+        .await
 }
 
 /// State RLM facts on an open session through the one durable config command
@@ -127,7 +132,12 @@ async fn typescript_is_served_on_the_production_session_path_and_survives_resume
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("rlm-typescript-production").open().await?;
+    let session = core
+        .session("rlm-typescript-production")
+        .created()
+        .await
+        .open()
+        .await?;
     let first = session
         .send(TurnInput::text("compute"))
         .require_finish()?
@@ -200,6 +210,8 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
 
     let session = core
         .session("rlm-typescript-queued-session-command")
+        .created()
+        .await
         .open()
         .await?;
     session
@@ -274,6 +286,8 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
 
     let reopened = core
         .session("rlm-typescript-queued-session-command")
+        .created()
+        .await
         .open()
         .await?;
     assert!(
@@ -326,7 +340,12 @@ async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("rlm-dialect-turn-override").open().await?;
+    let session = core
+        .session("rlm-dialect-turn-override")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("open the session"))
         .require_finish()?
@@ -370,7 +389,12 @@ async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<
 
     // And the durable bag never took the field, so the next open is not
     // refused as a pre-cutover record.
-    let reopened = core.session("rlm-dialect-turn-override").open().await?;
+    let reopened = core
+        .session("rlm-dialect-turn-override")
+        .created()
+        .await
+        .open()
+        .await?;
     assert!(
         reopened
             .read_view()
@@ -398,8 +422,10 @@ async fn create_options_naming_a_dialect_fail_during_session_creation() -> Resul
 
     let error = match core
         .session("rlm-unknown-dialect")
-        .plugin_options(options)
-        .open()
+        .create(crate::SessionCreation {
+            plugin_options: options,
+            ..Default::default()
+        })
         .await
     {
         Ok(_) => panic!("the create contract carries no language choice"),
@@ -449,7 +475,12 @@ async fn projected_bindings_reach_a_served_prompt_once() -> Result<()> {
         .provider(provider)
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("projected-typescript").open().await?;
+    let session = core
+        .session("projected-typescript")
+        .created()
+        .await
+        .open()
+        .await?;
 
     session
         .admin()
@@ -500,7 +531,12 @@ async fn the_typed_read_reports_what_the_session_recorded_and_restating_it_is_a_
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("rlm-typed-read").open().await?;
+    let session = core
+        .session("rlm-typed-read")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let recorded = session.rlm_config().expect("recorded config decodes");
     assert_eq!(
@@ -534,7 +570,12 @@ async fn a_guarded_write_lands_on_an_unrecorded_fact_and_leaves_the_rest_alone()
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("rlm-guarded-write").open().await?;
+    let session = core
+        .session("rlm-guarded-write")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let written = update_rlm_config(
         &session,
@@ -570,7 +611,12 @@ async fn guarded_rlm_fact_set_emits_its_committed_revision() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("rlm-resident-publication").open().await?;
+    let session = core
+        .session("rlm-resident-publication")
+        .created()
+        .await
+        .open()
+        .await?;
     let before = session.observe().current_observation();
 
     update_rlm_config(
@@ -613,12 +659,13 @@ async fn a_guarded_write_that_disagrees_is_refused_with_a_typed_conflict() -> Re
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = stating_termination(
-        core.session("rlm-refused-write"),
+    create_stating_termination(
+        &core,
+        "rlm-refused-write",
         crate::rlm::RlmTermination::FinishRequired { schema: None },
     )
-    .open()
     .await?;
+    let session = core.session("rlm-refused-write").open().await?;
 
     let error = update_rlm_config(
         &session,
@@ -662,9 +709,16 @@ async fn an_invalidated_guarded_write_refuses_a_concurrently_recorded_terminatio
     };
     let stale_core = build_core()?;
     let concurrent_core = build_core()?;
-    let stale = stale_core.session("rlm-stale-guarded-write").open().await?;
+    let stale = stale_core
+        .session("rlm-stale-guarded-write")
+        .created()
+        .await
+        .open()
+        .await?;
     let concurrent = concurrent_core
         .session("rlm-stale-guarded-write")
+        .created()
+        .await
         .open()
         .await?;
     update_rlm_config(
@@ -697,6 +751,8 @@ async fn an_invalidated_guarded_write_refuses_a_concurrently_recorded_terminatio
     let verifier_core = build_core()?;
     let verifier = verifier_core
         .session("rlm-stale-guarded-write")
+        .created()
+        .await
         .open()
         .await?;
     assert_eq!(
@@ -730,10 +786,14 @@ async fn an_invalidated_same_value_guarded_write_publishes_the_reloaded_config()
     let concurrent_core = build_core()?;
     let stale = stale_core
         .session("rlm-stale-same-value-guarded-write")
+        .created()
+        .await
         .open()
         .await?;
     let concurrent = concurrent_core
         .session("rlm-stale-same-value-guarded-write")
+        .created()
+        .await
         .open()
         .await?;
     let termination = crate::rlm::RlmTermination::FinishRequired { schema: None };
@@ -768,14 +828,13 @@ async fn an_invalidated_same_value_guarded_write_publishes_the_reloaded_config()
     Ok(())
 }
 
-/// FIG-4099: RLM facts are creation config. A session created stating a
-/// termination records it with its catalog row; a reopen stating a different
-/// one opens with the recorded fact, unchanged, and writes nothing — it is not
-/// reconciled, and it is not refused.
+/// FIG-4099, FIG-4112: RLM facts are creation config. A session created
+/// stating a termination records it with its catalog row; a reopen, which
+/// cannot state one, opens with the recorded fact, unchanged, and writes
+/// nothing.
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn a_reopen_stating_other_rlm_facts_keeps_the_recorded_ones_and_writes_nothing() -> Result<()>
-{
+async fn a_reopen_keeps_the_recorded_rlm_facts_and_writes_nothing() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
     let mut ledger = None;
@@ -792,9 +851,8 @@ async fn a_reopen_stating_other_rlm_facts_keeps_the_recorded_ones_and_writes_not
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let finish_required = crate::rlm::RlmTermination::FinishRequired { schema: None };
-    let session = stating_termination(core.session("rlm-reopen-ignores"), finish_required.clone())
-        .open()
-        .await?;
+    create_stating_termination(&core, "rlm-reopen-ignores", finish_required.clone()).await?;
+    let session = core.session("rlm-reopen-ignores").open().await?;
     assert_eq!(
         session
             .rlm_config()
@@ -812,12 +870,7 @@ async fn a_reopen_stating_other_rlm_facts_keeps_the_recorded_ones_and_writes_not
     let before = view.load_session_head_meta().await?.expect("head");
 
     writes.lock_recover().clear();
-    let reopened = stating_termination(
-        core.session("rlm-reopen-ignores"),
-        crate::rlm::RlmTermination::Natural,
-    )
-    .open()
-    .await?;
+    let reopened = core.session("rlm-reopen-ignores").open().await?;
     assert_eq!(
         *writes.lock_recover(),
         Vec::<&str>::new(),
@@ -856,7 +909,12 @@ async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("rlm-write-roundtrip").open().await?;
+    let session = core
+        .session("rlm-write-roundtrip")
+        .created()
+        .await
+        .open()
+        .await?;
     update_rlm_config(
         &session,
         crate::rlm::RlmSessionConfig::new()
@@ -866,52 +924,17 @@ async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
     .expect("an unrecorded termination accepts a write");
     Box::pin(session.close()).await?;
 
-    let reopened = core.session("rlm-write-roundtrip").open().await?;
+    let reopened = core
+        .session("rlm-write-roundtrip")
+        .created()
+        .await
+        .open()
+        .await?;
     let recorded = reopened.rlm_config().expect("recorded config decodes");
     assert_eq!(
         recorded.termination,
         Some(crate::rlm::RlmTermination::FinishRequired { schema: None }),
         "the written termination is still recorded after a cold reopen"
-    );
-    Ok(())
-}
-
-/// A host that still states a language at open is refused rather than having
-/// the statement silently dropped.
-///
-/// The create contract has no such field since ADR 0096, and `RlmCreateExtras`
-/// denies unknown keys, so a pre-cutover host learns at its next open instead
-/// of running a session it believes is pinned to something.
-#[cfg(feature = "rlm")]
-#[tokio::test]
-async fn stating_a_dialect_at_open_refuses_instead_of_being_dropped() -> Result<()> {
-    let double = restate_double(SEED).await;
-    let backend = double.lash_backend();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-
-    let session = core.session("rlm-open-refusal").open().await?;
-    Box::pin(session.close()).await?;
-
-    let mut options = lash_core::PluginOptions::default();
-    options.plugins.insert(
-        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-        serde_json::json!({ "dialect": "lashlang" }),
-    );
-    let Err(error) = core
-        .session("rlm-open-refusal")
-        .plugin_options(options)
-        .open()
-        .await
-    else {
-        panic!("a session cannot be opened with a stated language");
-    };
-    assert!(
-        error.to_string().contains("invalid RLM create options")
-            && error.to_string().contains("dialect"),
-        "the refusal must name the retired field: {error}"
     );
     Ok(())
 }

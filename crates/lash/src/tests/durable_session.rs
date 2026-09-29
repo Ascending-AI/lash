@@ -13,6 +13,8 @@ const SEED: u64 = 0xd0a4_b1e5;
 /// makes that a test rather than a claim.
 struct CountingDeploymentStore {
     inner: Arc<dyn DeploymentStore>,
+    /// Every call of the creating seam, whatever it answered.
+    admissions: Arc<AtomicUsize>,
     creates: Arc<AtomicUsize>,
     by_id_opens: Arc<AtomicUsize>,
     /// Delay inside the by-id seam so concurrent callers overlap in it.
@@ -23,6 +25,7 @@ impl CountingDeploymentStore {
     fn new(inner: Arc<dyn DeploymentStore>, open_delay_ms: u64) -> Self {
         Self {
             inner,
+            admissions: Arc::new(AtomicUsize::new(0)),
             creates: Arc::new(AtomicUsize::new(0)),
             by_id_opens: Arc::new(AtomicUsize::new(0)),
             open_delay_ms,
@@ -42,9 +45,10 @@ impl lash_core::store::RuntimeStoreDecorator for CountingDeploymentStore {
         &self,
         request: &lash_core::SessionStoreCreateRequest,
     ) -> std::result::Result<lash_core::store::SessionAdmission, lash_core::StoreError> {
+        self.admissions.fetch_add(1, Ordering::SeqCst);
         let admission = self.inner.admit_session(request).await?;
-        // Admission is idempotent: an open that finds the session answers
-        // `Rebound`, and only `Created` creates.
+        // Only `Created` creates; a create that finds the session answers
+        // `Rebound`, which the facade refuses.
         if admission == lash_core::store::SessionAdmission::Created {
             self.creates.fetch_add(1, Ordering::SeqCst);
         }
@@ -93,17 +97,24 @@ fn counting_core(backend: DecoratedBackend) -> Result<LashCore> {
 async fn durable_acquisition_is_non_creating_and_happens_once_per_handle() -> Result<()> {
     let double = restate_double(SEED).await;
     let (backend, factory) = counting_factory(&double.lash_backend(), 20);
+    let admissions = Arc::clone(&factory.admissions);
     let creates = Arc::clone(&factory.creates);
     let by_id_opens = Arc::clone(&factory.by_id_opens);
     let core = counting_core(backend.clone())?;
 
-    // One create: the open that brings the session into existence.
+    // One create brings the session into existence; the open after it
+    // resolves the existing session and creates nothing. (Its runtime
+    // assembly rebinds the resolved row, which writes nothing.)
+    drop(
+        core.session("durable-acquisition")
+            .create(crate::SessionCreation::default())
+            .await?,
+    );
+    assert_eq!(creates.load(Ordering::SeqCst), 1, "create creates once");
+    assert_eq!(admissions.load(Ordering::SeqCst), 1);
     drop(core.session("durable-acquisition").open().await?);
     let creates_after_open = creates.load(Ordering::SeqCst);
-    assert_eq!(
-        creates_after_open, 1,
-        "open creates the session exactly once"
-    );
+    assert_eq!(creates_after_open, 1, "open creates nothing");
     by_id_opens.store(0, Ordering::SeqCst);
 
     let durable = core.session("durable-acquisition").durable().await?;
@@ -135,6 +146,97 @@ async fn durable_acquisition_is_non_creating_and_happens_once_per_handle() -> Re
         creates_after_open,
         "a Durable Session never reaches the creating seam"
     );
+    Ok(())
+}
+
+/// FIG-4112: every verb but `create` resolves an existing session. Opening an
+/// id the catalog has never created — live, with a supplied state, or as an
+/// observer — is `UnknownSession`, and no catalog row is written.
+#[tokio::test]
+async fn open_of_a_missing_id_is_unknown_session_and_writes_no_row() -> Result<()> {
+    let double = restate_double(SEED).await;
+    let (backend, factory) = counting_factory(&double.lash_backend(), 0);
+    let admissions = Arc::clone(&factory.admissions);
+    let core = counting_core(backend.clone())?;
+    let missing = SessionId::from("never-opened");
+    let is_unknown = |result: Result<crate::LashSession>| match result {
+        Err(EmbedError::UnknownSession { session_id }) => session_id == missing,
+        _ => false,
+    };
+
+    assert!(is_unknown(core.session("never-opened").open().await));
+    let state = || {
+        let mut state =
+            RuntimeSessionState::new(lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded));
+        state.session_id = missing.clone();
+        state
+    };
+    assert!(is_unknown(
+        core.session("never-opened").open_with_state(state()).await
+    ));
+    assert!(is_unknown(
+        core.session("never-opened")
+            .observe_with_state(state())
+            .await
+    ));
+
+    assert_eq!(
+        admissions.load(Ordering::SeqCst),
+        0,
+        "no verb but create reaches the creating seam"
+    );
+    assert!(
+        matches!(
+            lash_core::SessionCatalogStore::lookup_session(factory.as_ref(), &missing)
+                .await
+                .expect("probe the catalog"),
+            lash_core::store::SessionLookup::Absent
+        ),
+        "the refused opens left no session behind"
+    );
+    Ok(())
+}
+
+/// FIG-4112: two creates of one id racing each other produce exactly one
+/// `Ok` and one `SessionAlreadyExists`: the store's insert decides, and the
+/// loser never adopts the winner's session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_creates_of_one_id_give_exactly_one_ok() -> Result<()> {
+    let double = restate_double(SEED).await;
+    let (backend, factory) = counting_factory(&double.lash_backend(), 0);
+    let creates = Arc::clone(&factory.creates);
+    let core = counting_core(backend.clone())?;
+
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let racers = (0..2)
+        .map(|_| {
+            let core = core.clone();
+            let barrier = Arc::clone(&barrier);
+            tokio::spawn(async move {
+                barrier.wait().await;
+                core.session("raced-create")
+                    .create(crate::SessionCreation::default())
+                    .await
+                    .map(drop)
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut created = 0;
+    let mut refused = 0;
+    for racer in racers {
+        match racer.await.expect("create task") {
+            Ok(()) => created += 1,
+            Err(EmbedError::SessionAlreadyExists { session_id })
+                if session_id.as_str() == "raced-create" =>
+            {
+                refused += 1;
+            }
+            Err(error) => panic!("a racing create failed otherwise: {error:?}"),
+        }
+    }
+    assert_eq!((created, refused), (1, 1));
+    assert_eq!(creates.load(Ordering::SeqCst), 1, "the store created once");
+    drop(core.session("raced-create").open().await?);
     Ok(())
 }
 
@@ -185,7 +287,13 @@ async fn durable_operations_on_a_deleted_id_report_the_tombstone() -> Result<()>
     let double = restate_double(SEED).await;
     let (backend, factory) = counting_factory(&double.lash_backend(), 0);
     let core = counting_core(backend.clone())?;
-    drop(core.session("deleted-durable").open().await?);
+    drop(
+        core.session("deleted-durable")
+            .created()
+            .await
+            .open()
+            .await?,
+    );
     lash_core::SessionCatalogStore::delete_session(
         factory.as_ref(),
         &SessionId::from("deleted-durable"),
@@ -266,7 +374,12 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = drive_core.session("checkpointed").open().await?;
+    let session = drive_core
+        .session("checkpointed")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("commit a turn"))
         .output()
@@ -341,7 +454,12 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
         .await?;
     assert_eq!(metadata_only.pending_turn_inputs().await?.len(), 1);
 
-    let session = core.session("sqlite-checkpointed").open().await?;
+    let session = core
+        .session("sqlite-checkpointed")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("commit a turn"))
         .output()
@@ -388,7 +506,12 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("durable-observation").open().await?;
+    let session = core
+        .session("durable-observation")
+        .created()
+        .await
+        .open()
+        .await?;
     let cursor = session.observe().current_observation().cursor;
     // The enqueue must publish `Enqueued` yet stay pending for the cancel:
     // the engine claims admitted input on its own schedule, so the session's
@@ -447,7 +570,12 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-no-runtime");
     // Create the session, then release every runtime: nothing is live.
-    let session = core.session(session_id.clone()).open().await?;
+    let session = core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("commit a turn"))
         .output()
@@ -491,7 +619,12 @@ async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> 
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-beside-writer");
-    let writer = core.session(session_id.clone()).open().await?;
+    let writer = core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
 
     let recorded_parent_before = writer.parent_session_id().map(ToString::to_string);
     // The engine drives an accepted input on its own schedule; hold the
@@ -739,7 +872,12 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
-    let granted = granting_core.session(session_id.clone()).open().await?;
+    let granted = granting_core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
     assert!(
         granted
             .admin()
@@ -998,7 +1136,12 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-held-input");
-    let session = core.session(session_id.clone()).open().await?;
+    let session = core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
     // The engine claims an accepted row on its own schedule: hold the
     // session's drive so the pre-claim read sees the row pending.
     let hold = held_double(&core)
@@ -1101,7 +1244,10 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     // input is seeded through the store port: a facade send would ask the
     // engine to drive, racing the pending read below. A store-seeded row is
     // never scheduled, so nothing claims it before the drive core below.
-    let durable = idle.session("created-then-queued").create().await?;
+    let durable = idle
+        .session("created-then-queued")
+        .create(crate::SessionCreation::default())
+        .await?;
     let accepted = lash_core::runtime::live_session_view(
         &idle.store_factory,
         &SessionId::from("created-then-queued"),
@@ -1161,10 +1307,12 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     Ok(())
 }
 
-/// Creating an id twice is a no-op that keeps the durable facts the first
-/// create recorded, including the Session Relation.
+/// A retried create is refused with `SessionAlreadyExists` — always, even
+/// when it states exactly the config and relation the first create recorded —
+/// and the refusal keeps every durable fact the first create recorded,
+/// including the Session Relation and the queue (FIG-4112).
 #[tokio::test]
-async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()> {
+async fn a_retried_create_is_refused_and_preserves_the_recorded_relation() -> Result<()> {
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
@@ -1173,53 +1321,103 @@ async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    drop(core.session("create-parent").create().await?);
+    drop(
+        core.session("create-parent")
+            .create(crate::SessionCreation::default())
+            .await?,
+    );
+    let creation = || crate::SessionCreation {
+        parent: Some("create-parent".into()),
+        ..Default::default()
+    };
 
-    let _first = core
-        .session("create-idempotent")
-        .parent("create-parent")
-        .create()
-        .await?;
+    let first = core.session("create-retried").create(creation()).await?;
     // Seeded through the store port: a facade send would ask the engine to
-    // drive, racing the pending read after the second create. A store-seeded
-    // row is never scheduled, so nothing claims it before the drive below.
+    // drive, racing the pending read after the retry. A store-seeded row is
+    // never scheduled, so nothing claims it.
     let accepted = lash_core::runtime::live_session_view(
         &core.store_factory,
-        &SessionId::from("create-idempotent"),
+        &SessionId::from("create-retried"),
     )
     .await?
     .expect("the created session has a store")
     .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
-        input_id: Some("idempotent-input".to_string()),
+        input_id: Some("retried-create-input".to_string()),
         ..lash_core::PendingTurnInputDraft::new(
-            SessionId::from("create-idempotent"),
+            SessionId::from("create-retried"),
             lash_core::TurnInputIngress::NextTurn,
-            TurnInput::text("survives the second create"),
+            TurnInput::text("survives the retried create"),
         )
     })
     .await
     .expect("enqueue the pending input");
+    let store = lash_core::runtime::live_session_view(
+        &core.store_factory,
+        &SessionId::from("create-retried"),
+    )
+    .await?
+    .expect("the created session has a store");
+    let recorded_head = || async {
+        store
+            .load_session_head_meta()
+            .await
+            .expect("load the head")
+            .map(|head| (head.head_revision, head.config))
+    };
+    let head_before = recorded_head().await;
+    assert!(head_before.is_some(), "creation wrote the config head");
 
-    // A second create, naming no parent, must not rewrite the relation or drop
-    // the queue.
-    let second = core.session("create-idempotent").create().await?;
+    // The retry states exactly what the first create recorded.
+    let error = core
+        .session("create-retried")
+        .create(creation())
+        .await
+        .err()
+        .expect("a retried create is refused");
+    assert!(
+        matches!(
+            &error,
+            EmbedError::SessionAlreadyExists { session_id }
+                if session_id.as_str() == "create-retried"
+        ),
+        "a retried create is SessionAlreadyExists, got {error:?}"
+    );
+    assert!(
+        error.is_terminal(),
+        "a create never becomes possible by retrying"
+    );
+    // So is a retry naming no parent at all.
+    assert!(matches!(
+        core.session("create-retried")
+            .create(crate::SessionCreation::default())
+            .await
+            .err()
+            .expect("a create naming no parent is refused too"),
+        EmbedError::SessionAlreadyExists { .. }
+    ));
+
     assert_eq!(
-        second
+        recorded_head().await,
+        head_before,
+        "the refused create wrote nothing"
+    );
+    assert_eq!(
+        first
             .pending_turn_inputs()
             .await?
             .iter()
             .map(|read| read.input.input_id.to_string())
             .collect::<Vec<_>>(),
         vec![accepted.input_id.to_string()],
-        "re-creating an existing id keeps its durable queue"
+        "the refused create keeps the durable queue"
     );
-    // `second`'s writer claim is still live; the reopen races its release
+    // `first`'s writer claim may still be live; the open races its release
     // under the double.
-    let reopened = retry_when_claim_frees(|| core.session("create-idempotent").open()).await?;
+    let opened = retry_when_claim_frees(|| core.session("create-retried").open()).await?;
     assert_eq!(
-        reopened.parent_session_id(),
+        opened.parent_session_id(),
         Some("create-parent"),
-        "re-creating an existing id preserves its recorded Session Relation"
+        "the refused create keeps the recorded Session Relation"
     );
     Ok(())
 }
@@ -1237,7 +1435,11 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    drop(core.session("create-deleted").create().await?);
+    drop(
+        core.session("create-deleted")
+            .create(crate::SessionCreation::default())
+            .await?,
+    );
     lash_core::SessionCatalogStore::delete_session(
         factory.as_ref(),
         &SessionId::from("create-deleted"),
@@ -1247,7 +1449,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
 
     let error = core
         .session("create-deleted")
-        .create()
+        .create(crate::SessionCreation::default())
         .await
         .err()
         .expect("creating a retired id is refused");

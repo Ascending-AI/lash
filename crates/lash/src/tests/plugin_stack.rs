@@ -123,7 +123,12 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
     .model(mock_model_spec())
     .plugin(Arc::new(SurfacePluginFactory))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("plugin-surface").open().await?;
+    let session = core
+        .session("plugin-surface")
+        .created()
+        .await
+        .open()
+        .await?;
     let events = RecordingEvents::default();
 
     session
@@ -152,7 +157,12 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
 #[tokio::test]
 async fn embedded_sessions_always_expose_tool_state() -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("dynamic-default").open().await?;
+    let session = core
+        .session("dynamic-default")
+        .created()
+        .await
+        .open()
+        .await?;
 
     let state = session.admin().tools().state().await?;
 
@@ -175,7 +185,7 @@ async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("static-tools").open().await?;
+    let session = core.session("static-tools").created().await.open().await?;
 
     let state = session.admin().tools().state().await?;
 
@@ -194,7 +204,7 @@ async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("tool-state").open().await?;
+    let session = core.session("tool-state").created().await.open().await?;
     let app_tool = lash_core::ToolId::from("tool:app_lookup");
 
     // Members by default.
@@ -248,7 +258,12 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("persisted-tools").open().await?;
+    let session = core
+        .session("persisted-tools")
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .admin()
         .tools()
@@ -278,7 +293,12 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
 
-    let reopened = reopened_core.session("persisted-tools").open().await?;
+    let reopened = reopened_core
+        .session("persisted-tools")
+        .created()
+        .await
+        .open()
+        .await?;
     let state = reopened.admin().tools().state().await?;
     assert_eq!(state.generation(), 9);
 
@@ -353,7 +373,12 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
         .model(mock_model_spec())
         .tools(Arc::new(LongTextTools))
         .build(crate::testing::runtime_lease_owner())?;
-        let standard_session = standard_core.session("standard-projection").open().await?;
+        let standard_session = standard_core
+            .session("standard-projection")
+            .created()
+            .await
+            .open()
+            .await?;
         let standard_events = RecordingEvents::default();
         let _ = standard_session
             .send(TurnInput::text("use tool"))
@@ -389,7 +414,12 @@ finish("done");"#,
                 .model(mock_model_spec())
                 .tools(Arc::new(LongTextTools))
                 .build(crate::testing::runtime_lease_owner())?;
-            let rlm_session = rlm_core.session("rlm-projection").open().await?;
+            let rlm_session = rlm_core
+                .session("rlm-projection")
+                .created()
+                .await
+                .open()
+                .await?;
             let rlm_events = RecordingEvents::default();
             let _ = rlm_session
                 .send(TurnInput::text("use tool"))

@@ -318,11 +318,23 @@ pub(super) async fn host(args: RemoteHostArgs) -> Result<()> {
         let turn_id = request.turn_id.clone();
         let input = lash::TurnInput::try_from(request)
             .map_err(|error| anyhow!("the request's input: {error}"))?;
+        // The remote protocol has no create verb: a `RemoteTurnRequest` names
+        // only its session, and this serving host decides it may create one.
+        // It means create-or-use, written out, since only `create` creates
+        // (FIG-4112): an existing session keeps what it recorded.
+        match core
+            .session(session_id.clone())
+            .create(lash::SessionCreation::default())
+            .await
+        {
+            Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
+            Err(error) => bail!("create session {session_id}: {error}"),
+        }
         let session = core
             .session(session_id.clone())
-            .create()
+            .durable()
             .await
-            .map_err(|error| anyhow!("create session {session_id}: {error}"))?;
+            .map_err(|error| anyhow!("resolve session {session_id}: {error}"))?;
         let handle = session
             .send(input)
             .id(turn_id)
