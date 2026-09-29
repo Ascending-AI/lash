@@ -1,3 +1,7 @@
 # One non-test history call per normalized source line:
 # path  |  line  |  occurrences  # WINDOW turn|reopen|refresh|read-view reason
 # path  |  line  |  occurrences  # PAGED reason
+crates/lash-perf/src/runtime_perf/store.rs  |  self.inner.load_session_window(session_id, selector).await  |  1  # WINDOW reopen decorator observes bounded window loads
+crates/lash-perf/src/runtime_perf/store.rs  |  self.inner.load_ancestors(session_id, anchor, budget).await  |  1  # PAGED decorator forwards caller budget
+crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs  |  .load_session_window(  |  1  # WINDOW reopen checkpoint measurement loads current frame
+runbooks/restate-postgres-workers/src/bin/runner/process_assertions.rs  |  .load_session_window(  |  1  # WINDOW read-view runbook assertion reads current frame

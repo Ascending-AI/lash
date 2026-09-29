@@ -216,7 +216,7 @@ pub async fn history_pages_are_bounded_and_pinned(store: Arc<dyn ConformanceDepl
     commit(store.as_ref(), &mut state).await;
 
     let first = store
-        .load_ancestors(&state.session_id, HistoryAnchor::Head, budget(2, u64::MAX))
+        .load_ancestors(&state.session_id, HistoryAnchor::Head, budget(2, 1_048_576))
         .await
         .expect("first history page");
     assert_eq!(first.nodes.len(), 2);
@@ -227,7 +227,7 @@ pub async fn history_pages_are_bounded_and_pinned(store: Arc<dyn ConformanceDepl
         .load_ancestors(
             &SessionId::from("another-session"),
             HistoryAnchor::Cursor(cursor.clone()),
-            budget(2, u64::MAX),
+            budget(2, 1_048_576),
         )
         .await
         .expect_err("cursor cannot cross sessions");
@@ -246,7 +246,7 @@ pub async fn history_pages_are_bounded_and_pinned(store: Arc<dyn ConformanceDepl
             .load_ancestors(
                 &state.session_id,
                 HistoryAnchor::Cursor(cursor),
-                budget(2, u64::MAX),
+                budget(2, 1_048_576),
             )
             .await
             .expect("continue pinned history");
@@ -312,6 +312,24 @@ pub async fn history_pages_are_bounded_and_pinned(store: Arc<dyn ConformanceDepl
         .expect("one-node history lookup");
     assert_eq!(one.nodes.len(), 1);
     assert_eq!(one.nodes[0].record.node_id, exact.nodes[0].record.node_id);
+
+    let headless = SessionId::from("history-pages-headless");
+    admit(store.as_ref(), &headless).await;
+    let missing = store
+        .load_ancestors(&headless, HistoryAnchor::Head, budget(1, 1024))
+        .await
+        .expect_err("catalog admission alone creates no head row");
+    assert!(matches!(missing, StoreError::SessionNotFound { .. }));
+
+    store
+        .delete_session(&state.session_id)
+        .await
+        .expect("delete paging fixture");
+    let deleted = store
+        .load_ancestors(&state.session_id, HistoryAnchor::Head, budget(1, 1024))
+        .await
+        .expect_err("deleted session has no readable history");
+    assert!(matches!(deleted, StoreError::SessionDeleted { .. }));
 }
 
 /// A corrupt pointer or row never turns a window read into a shorter answer.
@@ -455,5 +473,38 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
             .contains_active_ancestor(&child, &middle[1])
             .await
             .expect("row above ceiling")
+    );
+
+    let grandchild = SessionId::from("history-fork-grandchild");
+    store
+        .fork_session(&ForkSessionRequest {
+            session_id: grandchild.clone(),
+            node_id: middle[0].clone(),
+            relation: SessionRelation::Root,
+            pending_observer_intents: Vec::new(),
+            policy: SessionPolicy::new(TurnBudget::Unbounded),
+        })
+        .await
+        .expect("fork an inherited node through the child lineage");
+    let grandchild_read = window(store.as_ref(), &grandchild).await;
+    assert_eq!(
+        grandchild_read.current_frame_node_id,
+        read.current_frame_node_id
+    );
+    assert_eq!(
+        grandchild_read.window.leaf_node_id,
+        read.window.leaf_node_id
+    );
+    assert!(
+        store
+            .contains_active_ancestor(&grandchild, &middle[0])
+            .await
+            .expect("grandchild inherited fork point")
+    );
+    assert!(
+        !store
+            .contains_active_ancestor(&grandchild, &middle[1])
+            .await
+            .expect("grandchild remains below source ceiling")
     );
 }
