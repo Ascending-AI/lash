@@ -1,4 +1,4 @@
-use lash_core_execution::RuntimePersistence;
+use lash_core_execution::{RuntimeStore, SessionCatalogStore as _};
 use std::sync::Arc;
 #[path = "../../../lash-core/tests/support/queued_claim_atomicity.rs"]
 mod law;
@@ -10,11 +10,16 @@ async fn postgres_a_partial_admission_rolls_back_through_both_entry_points() {
     };
     for entry in law::ENTRIES {
         super::reset(storage.pool()).await;
-        let case = law::prepare(
-            Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-            entry,
-        )
-        .await;
+        storage
+            .store()
+            .admit_session(
+                &lash_core_execution::testing::store_fixtures::root_session_request(
+                    &lash_sansio::SessionId::from("root"),
+                ),
+            )
+            .await
+            .expect("admit queued-claim root");
+        let case = law::prepare(Arc::new(storage.store()) as Arc<dyn RuntimeStore>, entry).await;
         sqlx::query("CREATE OR REPLACE FUNCTION lose_second_bind() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END; $$").execute(storage.pool()).await.unwrap();
         let second = case.ids[1].replace('\'', "''");
         sqlx::query(&format!("CREATE TRIGGER lose_second_bind BEFORE UPDATE OF admitted_root ON lash_queued_work_batches FOR EACH ROW WHEN (OLD.batch_id = '{second}') EXECUTE FUNCTION lose_second_bind()")).execute(storage.pool()).await.unwrap();
@@ -52,8 +57,17 @@ async fn postgres_an_admission_holds_its_rows_across_a_displaced_fence() {
         return;
     };
     super::reset(storage.pool()).await;
+    storage
+        .store()
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(
+                &lash_sansio::SessionId::from("root"),
+            ),
+        )
+        .await
+        .expect("admit queued-claim root");
     law::an_admission_holds_its_rows_across_a_displaced_fence(
-        Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
+        Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
         "postgres",
     )
     .await;

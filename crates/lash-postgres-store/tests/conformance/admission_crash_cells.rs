@@ -25,9 +25,7 @@ async fn crash_runner_fixture() -> Option<(
     reset(storage.pool()).await;
     let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
     let sessions = storage.clone();
-    let make = move |scenario: &str| {
-        Arc::new(sessions.session_store(format!("trace-derived-real-turn:{scenario}")))
-    };
+    let make = move |_scenario: &str| Arc::new(sessions.store());
     Some((
         (lock, storage, attachments, double),
         stores,

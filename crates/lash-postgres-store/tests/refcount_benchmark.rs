@@ -7,13 +7,15 @@ use lash_sansio::SessionId;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lash_core_execution::store::load_persisted_session_state;
+use lash_core_execution::store::{
+    HistoryAnchor, HistoryBudget, SessionStore, WindowSelector, load_session_window_state,
+};
 use lash_core_execution::{
-    ForkSessionRequest, OperationId, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
-    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory,
+    DeploymentStore, ForkSessionRequest, OperationId, RuntimeCommit, RuntimeSessionState,
+    RuntimeStore, SessionCatalogStore as _, SessionHistoryStore as _, SessionRelation,
+    SessionStoreCreateRequest,
 };
 use lash_postgres_store::PostgresStorage;
-use lash_sqlite_store::SqliteSessionStoreFactory;
 
 const DEEP_CHAIN_DEPTH: usize = 256;
 const DEEP_FORK_CHAIN_DEPTH: usize = 64;
@@ -35,13 +37,14 @@ fn operation(session_id: &SessionId, key: &str) -> OperationId {
 }
 
 async fn create_state(
-    factory: &Arc<dyn SessionStoreFactory>,
+    factory: &Arc<dyn DeploymentStore>,
     session_id: &SessionId,
-) -> (Arc<dyn RuntimePersistence>, RuntimeSessionState) {
-    let store = factory
-        .create_store(&request(session_id))
+) -> (Arc<dyn RuntimeStore>, RuntimeSessionState) {
+    factory
+        .admit_session(&request(session_id))
         .await
-        .expect("create benchmark store");
+        .expect("admit benchmark session");
+    let store = Arc::clone(factory) as Arc<dyn RuntimeStore>;
     let state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
@@ -52,7 +55,7 @@ async fn create_state(
 }
 
 async fn commit_state(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     state: &RuntimeSessionState,
     key: &str,
 ) -> (String, String) {
@@ -79,10 +82,10 @@ async fn commit_state(
 }
 
 async fn fork_store(
-    factory: &Arc<dyn SessionStoreFactory>,
+    factory: &Arc<dyn DeploymentStore>,
     node_id: &str,
     session_id: &SessionId,
-) -> Arc<dyn RuntimePersistence> {
+) -> Arc<dyn RuntimeStore> {
     let fork_request = ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
@@ -91,21 +94,14 @@ async fn fork_store(
         policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     factory
-        .fork_at(&fork_request)
+        .fork_session(&fork_request)
         .await
         .expect("fork benchmark session");
-    factory
-        .open_existing_store(&request(session_id))
-        .await
-        .expect("open benchmark fork")
-        .expect("benchmark fork exists")
+    Arc::clone(factory) as Arc<dyn RuntimeStore>
 }
 
-async fn append_child(store: &Arc<dyn RuntimePersistence>, key: &str) {
-    let mut state = load_persisted_session_state(store.as_ref())
-        .await
-        .expect("load benchmark fork")
-        .expect("benchmark fork state exists");
+async fn append_child(store: &Arc<dyn RuntimeStore>, session_id: &SessionId, key: &str) {
+    let mut state = load_state(store, session_id).await;
     state
         .session_graph
         .append_plugin("refcount-benchmark", serde_json::json!({ "key": key }));
@@ -118,8 +114,18 @@ async fn append_child(store: &Arc<dyn RuntimePersistence>, key: &str) {
         .expect("commit benchmark child");
 }
 
+async fn load_state(store: &Arc<dyn RuntimeStore>, session_id: &SessionId) -> RuntimeSessionState {
+    let view = SessionStore::new(Arc::clone(store), session_id.clone())
+        .expect("valid benchmark session id");
+    load_session_window_state(&view, WindowSelector::Current)
+        .await
+        .expect("load benchmark fork")
+        .expect("benchmark fork state exists")
+        .state
+}
+
 async fn create_chain(
-    factory: &Arc<dyn SessionStoreFactory>,
+    factory: &Arc<dyn DeploymentStore>,
     session_id: &SessionId,
     depth: usize,
 ) -> (String, String) {
@@ -135,9 +141,9 @@ async fn create_chain(
 }
 
 async fn create_fork_chain(
-    factory: &Arc<dyn SessionStoreFactory>,
+    factory: &Arc<dyn DeploymentStore>,
     prefix: &str,
-) -> (String, String, Arc<dyn RuntimePersistence>) {
+) -> (String, String, Arc<dyn RuntimeStore>) {
     let source_id = format!("{prefix}-fork-chain-source");
     let (source, mut state) = create_state(factory, &SessionId::from(source_id)).await;
     state.ensure_agent_frame_initialized();
@@ -146,14 +152,14 @@ async fn create_fork_chain(
     for depth in 0..DEEP_FORK_CHAIN_DEPTH {
         let session_id = SessionId::from(format!("{prefix}-fork-chain-{depth}"));
         terminal = fork_store(factory, &leaf_node_id, &session_id).await;
-        append_child(&terminal, &format!("fork-chain-{depth}")).await;
+        append_child(&terminal, &session_id, &format!("fork-chain-{depth}")).await;
         leaf_node_id = terminal
-            .load_session()
+            .load_session_window(&session_id, WindowSelector::Current)
             .await
             .expect("load fork-chain session")
             .expect("fork-chain session exists")
-            .graph
-            .leaf_node_id
+            .window
+            .leaf_node_id()
             .clone()
             .expect("fork-chain leaf")
             .to_string();
@@ -184,7 +190,7 @@ fn print_samples(
     );
 }
 
-async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>, run_id: &str) {
+async fn benchmark_backend(backend: &str, factory: Arc<dyn DeploymentStore>, run_id: &str) {
     let prefix = format!("refcount-bench-{run_id}-{backend}");
     let wide_source_id = format!("{prefix}-wide-source");
     let (wide_source, mut wide_state) =
@@ -194,8 +200,9 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
     factory.pin(&wide_root).await.expect("pin wide root");
     for ordinal in 0..WIDE_SIBLING_COUNT {
         let branch_id = format!("{prefix}-wide-sibling-{ordinal}");
-        let branch = fork_store(&factory, &wide_root, &SessionId::from(branch_id)).await;
-        append_child(&branch, &format!("wide-sibling-{ordinal}")).await;
+        let branch_id = SessionId::from(branch_id);
+        let branch = fork_store(&factory, &wide_root, &branch_id).await;
+        append_child(&branch, &branch_id, &format!("wide-sibling-{ordinal}")).await;
     }
 
     let deep_source_id = format!("{prefix}-deep-source");
@@ -222,10 +229,7 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
 
         let mover_id = format!("{prefix}-wide-mover-{sample}");
         let mover = fork_store(&factory, &wide_root, &SessionId::from(mover_id.clone())).await;
-        let mut mover_state = load_persisted_session_state(mover.as_ref())
-            .await
-            .expect("load wide mover")
-            .expect("wide mover state exists");
+        let mut mover_state = load_state(&mover, &SessionId::from(mover_id.clone())).await;
         mover_state.session_graph.append_plugin(
             "refcount-benchmark",
             serde_json::json!({ "sample": sample }),
@@ -242,7 +246,12 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
 
         let victim_id = format!("{prefix}-wide-victim-{sample}");
         let victim = fork_store(&factory, &wide_root, &SessionId::from(victim_id.clone())).await;
-        append_child(&victim, "wide-delete-child").await;
+        append_child(
+            &victim,
+            &SessionId::from(victim_id.clone()),
+            "wide-delete-child",
+        )
+        .await;
         let started = Instant::now();
         factory
             .delete_session(&SessionId::from(victim_id))
@@ -262,10 +271,8 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
             &SessionId::from(deep_mover_id.clone()),
         )
         .await;
-        let mut deep_mover_state = load_persisted_session_state(deep_mover.as_ref())
-            .await
-            .expect("load deep mover")
-            .expect("deep mover state exists");
+        let mut deep_mover_state =
+            load_state(&deep_mover, &SessionId::from(deep_mover_id.clone())).await;
         deep_mover_state.session_graph.append_plugin(
             "refcount-benchmark",
             serde_json::json!({ "sample": sample }),
@@ -295,18 +302,25 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
         deep_delete.push(started.elapsed());
 
         let started = Instant::now();
-        assert!(
-            fork_chain_terminal
-                .load_node(&fork_chain_root)
-                .await
-                .expect("load fork-chain root")
-                .is_some()
-        );
+        let terminal_id =
+            SessionId::from(format!("{prefix}-fork-chain-{}", DEEP_FORK_CHAIN_DEPTH - 1));
+        let page = fork_chain_terminal
+            .load_ancestors(
+                &terminal_id,
+                HistoryAnchor::Node(fork_chain_root.clone().into()),
+                HistoryBudget {
+                    max_nodes: std::num::NonZeroU32::new(1).expect("one is nonzero"),
+                    max_bytes: std::num::NonZeroU64::new(u64::MAX).expect("max is nonzero"),
+                },
+            )
+            .await
+            .expect("load fork-chain root");
+        assert_eq!(page.nodes.len(), 1);
         fork_chain_load_node.push(started.elapsed());
 
         let started = Instant::now();
         fork_chain_terminal
-            .load_session()
+            .load_session_window(&terminal_id, WindowSelector::Current)
             .await
             .expect("load terminal fork-chain session")
             .expect("terminal fork-chain session exists");
@@ -384,14 +398,23 @@ async fn measured_refcount_replacement_operations() {
     let sqlite_memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open a SQLite memory store set");
-    let backends: Vec<(&str, Arc<dyn SessionStoreFactory>)> = vec![
+    let sqlite_file = lash_sqlite_store::SqliteStoreSet::open(sqlite_dir.path())
+        .await
+        .expect("open SQLite file store set");
+    let backends: Vec<(&str, Arc<dyn DeploymentStore>)> = vec![
         (
             "sqlite_memory",
-            sqlite_memory.session_store_factory() as Arc<dyn SessionStoreFactory>,
+            sqlite_memory
+                .open_store()
+                .await
+                .expect("open SQLite memory store") as Arc<dyn DeploymentStore>,
         ),
         (
             "sqlite",
-            Arc::new(SqliteSessionStoreFactory::new(sqlite_dir.path())),
+            sqlite_file
+                .open_store()
+                .await
+                .expect("open SQLite file store") as Arc<dyn DeploymentStore>,
         ),
         ("postgres", Arc::new(postgres.session_store_factory())),
     ];

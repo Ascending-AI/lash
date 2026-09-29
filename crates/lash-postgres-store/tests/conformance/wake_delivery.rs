@@ -40,7 +40,7 @@ lash_conformance::wake_delivery_crash_tests!({
         storage
             .session_store_factory()
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
-    ) as Arc<dyn SessionStoreFactory>;
+    ) as Arc<dyn DeploymentStore>;
     let registry = Arc::new(
         storage
             .process_registry_with_wake_delivery_config(

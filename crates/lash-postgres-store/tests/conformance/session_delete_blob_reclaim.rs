@@ -15,7 +15,7 @@ lash_conformance::session_delete_blob_reclaim_tests!({
         sync_await(async move {
             reset(storage.pool()).await;
             lash_conformance::SessionDeleteBlobHandles {
-                factory: Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>,
+                factory: Arc::new(storage.session_store_factory()) as Arc<dyn DeploymentStore>,
                 probe: Arc::new(crate::blob_probe::PostgresBlobProbe::new(
                     storage,
                     "fail_session_blob_delete",

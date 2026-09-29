@@ -10,6 +10,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+use lash_core_execution::DeploymentStore as _;
+use lash_core_execution::TurnInputStore as _;
 use lash_core_execution::store::RootStore as _;
 use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
 use lash_core_execution::{LeaseOwnerIdentity, TurnId};
@@ -113,7 +115,11 @@ async fn postgres_persisted_record_decode_classification_checkpoint_when_configu
             .rows_affected(),
         1
     );
-    let checkpoint_error = SessionCommitStore::load_session(&checkpoint_store)
+    let checkpoint_error = checkpoint_store
+        .load_session_window(
+            &checkpoint_session_id,
+            lash_core_execution::store::WindowSelector::Current,
+        )
         .await
         .expect_err("malformed checkpoint MessagePack must refuse");
     assert!(
@@ -169,7 +175,7 @@ fn turn_failure_settlement_query_filters_receipts_without_evidence() {
             .turn_commits
             .select_failure_settlements
             .sql()
-            .contains(r#"result_json LIKE '%"failure_evidence"%'"#),
+            .contains("AND failure_evidence"),
         "the SQL path must exclude receipts that cannot carry failure evidence"
     );
 }
@@ -420,47 +426,6 @@ async fn direct_session_store_defers_missing_identity_validation() {
     );
 }
 
-lash_conformance::unbound_session_meta_tests!({
-    let Some(database_url) = postgres_test_support::database_url() else {
-        eprintln!("skipping unbound session-meta refusal: database URL is not set");
-        return;
-    };
-    let database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
-        .await
-        .expect("connect unbound session-meta storage");
-    let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT tablename FROM pg_tables
-         WHERE schemaname = 'public'
-           AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity')
-         ORDER BY tablename",
-    )
-    .fetch_all(storage.pool())
-    .await
-    .expect("list Lash tables for unbound session-meta reset");
-    let truncate = format!("TRUNCATE {} RESTART IDENTITY CASCADE", tables.join(", "));
-    sqlx::query(&truncate)
-        .execute(storage.pool())
-        .await
-        .expect("reset unbound session-meta tables");
-    for session_id in ["unbound-session-meta-a", "unbound-session-meta-b"] {
-        sqlx::query(
-            "INSERT INTO lash_session_meta
-             (session_id, relation_kind)
-             VALUES ($1, 'root')",
-        )
-        .bind(session_id)
-        .execute(storage.pool())
-        .await
-        .unwrap_or_else(|error| panic!("seed `{session_id}` metadata: {error}"));
-    }
-    let pool = storage.pool().clone();
-    ((database_lock, storage), "PostgreSQL", async move {
-        crate::session_meta::load_session_meta(&pool, None).await
-    })
-});
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidate_order() {
     let Some(database_url) = postgres_test_support::database_url() else {
@@ -680,14 +645,12 @@ async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
         relation: lash_core_execution::SessionRelation::Root,
         policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
-    let first_store = factory
-        .create_store(&request)
+    factory
+        .admit_session(&request)
         .await
-        .expect("create first racing handle");
-    let second_store = factory
-        .create_store(&request)
-        .await
-        .expect("create second racing handle");
+        .expect("admit racing session");
+    let first_store = factory.clone();
+    let second_store = factory.clone();
     let mut first_state = lash_core_execution::RuntimeSessionState {
         session_id: session_id.clone(),
         ..lash_core_execution::RuntimeSessionState::new(request.policy.clone())
@@ -809,10 +772,11 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
         relation: lash_core_execution::SessionRelation::Root,
         policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
-    let stale_store = factory
-        .create_store(&request)
+    factory
+        .admit_session(&request)
         .await
-        .expect("create stale store");
+        .expect("admit stale session");
+    let stale_store = factory.clone();
     let mut state = lash_core_execution::RuntimeSessionState {
         session_id: session_id.clone(),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
@@ -836,7 +800,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
         } if session_id == request.session_id
     ));
 
-    let reuse_error = match factory.create_store(&request).await {
+    let reuse_error = match factory.admit_session(&request).await {
         Ok(_) => panic!("deleted session id must never be reused"),
         Err(error) => error,
     };
@@ -908,7 +872,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         "postgres-attachment-fence-race:{}",
         std::process::id()
     ));
-    let store = std::sync::Arc::new(storage.session_store(&session_id));
+    let store = std::sync::Arc::new(storage.store());
     let factory = storage.session_store_factory();
     let attachment_id =
         lash_core_execution::AttachmentId::parse(format!("fence-race-{}", std::process::id()))
@@ -1050,8 +1014,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     let live_backend = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open a SQLite memory store set");
-    let live_factory =
-        live_backend.session_store_factory() as Arc<dyn lash_core_execution::SessionStoreFactory>;
+    let live_store = live_backend.open_store().await.expect("open live catalog");
     let request = SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -1059,10 +1022,10 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         relation: lash_core_execution::SessionRelation::Root,
         policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
-    let live_store = live_factory
-        .create_store(&request)
+    live_store
+        .admit_session(&request)
         .await
-        .expect("create live root authority");
+        .expect("admit live root authority");
     let blobs = tempfile::tempdir().expect("attachment directory");
     let backend = lash_core_execution::attachments::FileAttachmentStore::new(blobs.path());
     let attachment = lash_core_execution::AttachmentStore::put(
@@ -1170,11 +1133,11 @@ async fn admitted_input_fixture(
     lash_core_execution::store::RootAdmission,
 ) {
     let session_id = SessionId::from(format!("{label}:{}", uuid::Uuid::new_v4()));
-    let store = storage.session_store(&session_id);
+    let store = storage.store();
     store
-        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
-            session_id.as_str(),
-        ))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&session_id),
+        )
         .await
         .expect("admit the fixture session");
     let mut state = lash_core_execution::RuntimeSessionState {
@@ -1502,11 +1465,11 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
 
     let nonce = uuid::Uuid::new_v4().simple().to_string();
     let session_id = SessionId::from(format!("statement-pin-session:{nonce}"));
-    let store = storage.session_store(&session_id);
+    let store = storage.store();
     store
-        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
-            session_id.as_str(),
-        ))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&session_id),
+        )
         .await
         .expect("admit statement-pin session");
     let lease = store
@@ -1677,16 +1640,11 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
                 lash_core_execution::TurnBudget::Unbounded,
             ),
         };
-        let store = factory
-            .create_store(&request)
-            .await
-            .expect("create the parked session's store");
-        store
-            .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
-                session_id.as_str(),
-            ))
+        factory
+            .admit_session(&request)
             .await
             .expect("admit the parked session");
+        let store = factory.clone();
         let state = lash_core_execution::RuntimeSessionState {
             session_id: session_id.clone(),
             ..lash_core_execution::RuntimeSessionState::new(request.policy.clone())
