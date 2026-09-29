@@ -39,7 +39,8 @@ pub fn transport_stream_events(
     crate::session_model::transport_stream_events(provider, requested)
 }
 pub use crate::store::{
-    PersistedSessionRead, SessionHeadMeta, SessionHeadPayload, load_persisted_session_state,
+    LoadedSessionWindow, SessionHeadMeta, SessionHeadPayload, SessionWindowRead, WindowSelector,
+    load_session_window_state,
 };
 pub use crate::tool_dispatch::{
     CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer, execute_final_tool_intents,

@@ -152,14 +152,12 @@ pub trait ReadModelState {
 impl ReadModelState for SessionSnapshot {
     fn read_model(&self) -> crate::session_graph::SessionReadModel {
         self.read_model()
-            .expect("test snapshot frame scope resolves")
     }
 }
 
 impl ReadModelState for RuntimeSessionState {
     fn read_model(&self) -> crate::session_graph::SessionReadModel {
         self.read_model()
-            .expect("test runtime frame scope resolves")
     }
 }
 
@@ -369,20 +367,30 @@ pub struct EmptyTools;
 /// head yet), apply `change`, and commit it as the next revision.
 /// Returns the head that commit wrote.
 pub async fn advance_session_head(
-    store: &dyn crate::RuntimeStore,
+    store: &RecordingStore,
     usage_deltas: &[crate::TokenLedgerEntry],
     change: impl FnOnce(&mut RuntimeSessionState),
 ) -> crate::SessionHeadMeta {
-    let persisted = crate::store::load_persisted_session_state(store)
-        .await
-        .expect("load the persisted session");
+    let session_id = store
+        .session_id()
+        .expect("recording store has a session id");
+    let persisted = crate::SessionHistoryStore::load_session_window(
+        store,
+        &session_id,
+        crate::store::WindowSelector::Current,
+    )
+    .await
+    .expect("load the persisted session window");
     let mut state = match persisted {
-        Some(state) => state,
+        Some(read) => {
+            crate::store::window_state(read, store.fleet_format())
+                .expect("adopt the persisted session window")
+                .state
+        }
         // A session with no committed head: the other writer commits its
         // first one.
         None => {
-            let meta = store
-                .load_session_meta()
+            let meta = crate::SessionCommitStore::load_session_meta(store, &session_id)
                 .await
                 .expect("load the session binding")
                 .expect("the store is bound to a session");
@@ -393,15 +401,13 @@ pub async fn advance_session_head(
         }
     };
     change(&mut state);
-    store
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
-            &state,
-            usage_deltas,
-        ))
-        .await
-        .expect("commit the advanced head");
-    store
-        .load_session_head_meta()
+    crate::SessionCommitStore::commit_runtime_state(
+        store,
+        crate::RuntimeCommit::persisted_state_for_test(&state, usage_deltas),
+    )
+    .await
+    .expect("commit the advanced head");
+    crate::SessionCommitStore::load_session_head_meta(store, &session_id)
         .await
         .expect("read the advanced head")
         .expect("the advanced head exists")
@@ -413,18 +419,19 @@ pub async fn recording_session_store(
     backend: &crate::Backend,
     session_id: impl Into<SessionId>,
 ) -> Arc<RecordingStore> {
-    let store = backend
-        .session_store_factory()
-        .create_store(&crate::SessionStoreCreateRequest {
+    let session_id = session_id.into();
+    let store = backend.session_store_factory();
+    store
+        .admit_session(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: session_id.into(),
+            session_id: session_id.clone(),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         })
         .await
         .expect("create a session store from the backend catalog");
-    Arc::new(RecordingStore::over(store))
+    Arc::new(RecordingStore::over_session(store, session_id))
 }
 
 pub fn test_commit_budget() -> crate::CommitBudget {
@@ -566,7 +573,11 @@ impl TestRuntime {
         initial_state.policy.model.capability.attachment_acceptance = self.attachment_acceptance;
         let attachment_store = Arc::clone(&self.host.core.durability.attachment_store);
         let process_env_store = Arc::clone(&self.host.core.durability.process_env_store);
-        let runtime = match (self.store, self.process_registry) {
+        let store = self.store.map(|store| {
+            crate::store::SessionStore::new(store, initial_state.session_id.clone())
+                .expect("test session id is valid")
+        });
+        let runtime = match (store, self.process_registry) {
             (Some(store), None) => LashRuntime::from_persistent_embedded_state(
                 policy,
                 self.host,
@@ -941,16 +952,17 @@ pub fn reopen_session_runtime<'a>(
     session_id: &'a SessionId,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = LashRuntime> + Send + 'a>> {
     Box::pin(async move {
-        let factory = parent.host.core.session_store_factory();
-        let store = factory
-            .open_existing_store_by_id(session_id)
+        let deployment = parent.host.core.session_store_factory();
+        let store = lash_core_execution::live_session_view(&deployment, session_id)
             .await
             .expect("open child session store")
             .expect("child session store exists");
-        let state = crate::store::load_persisted_session_state(store.as_ref())
-            .await
-            .expect("load child session state")
-            .expect("persisted child session state");
+        let state =
+            crate::store::load_session_window_state(&store, crate::store::WindowSelector::Current)
+                .await
+                .expect("load child session state")
+                .expect("persisted child session state")
+                .state;
         let policy = state.effective_policy().clone();
         let is_root = state.authority.subagent.is_none();
         let plugin_host = parent

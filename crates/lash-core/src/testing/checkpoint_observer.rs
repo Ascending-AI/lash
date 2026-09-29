@@ -6,7 +6,10 @@ use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use crate::store::{RuntimeCommit, RuntimeCommitReceipt, RuntimeStore, RuntimeStoreDecorator, StoreError, WindowSelector};
+use crate::store::{
+    RuntimeCommit, RuntimeCommitReceipt, RuntimeStore, RuntimeStoreDecorator, StoreError,
+    WindowSelector,
+};
 use crate::{AttachmentId, BlobRef, DeploymentStore};
 use lash_core_execution::DeploymentStoreDecorator;
 use serde::{Deserialize, Serialize};
@@ -303,7 +306,6 @@ impl ObservedSessionStoreFactory {
     pub fn new(inner: Arc<dyn DeploymentStore>, collector: CheckpointWriteCollector) -> Self {
         Self { inner, collector }
     }
-
 }
 
 /// Give conformance roles distinct outer handles over one in-memory substrate
@@ -324,85 +326,15 @@ impl RuntimeStoreDecorator for ObservedSessionStoreFactory {
         self.inner.as_ref()
     }
 
-    async fn commit_runtime_state(&self, commit: RuntimeCommit) -> Result<RuntimeCommitReceipt, StoreError> {
+    async fn commit_runtime_state(
+        &self,
+        commit: RuntimeCommit,
+    ) -> Result<RuntimeCommitReceipt, StoreError> {
         observe_commit(self.inner.as_ref(), &self.collector, commit).await
     }
 }
 
 impl DeploymentStoreDecorator for ObservedSessionStoreFactory {}
-
-#[async_trait::async_trait]
-impl crate::store::ControlIntentStore for ObservedSessionStoreFactory {
-    async fn begin_session_close(
-        &self,
-        session_id: &SessionId,
-        at_ms: u64,
-    ) -> std::result::Result<Option<crate::store::ControlIntent>, StoreError> {
-        self.inner.begin_session_close(session_id, at_ms).await
-    }
-
-    async fn claim_intent_application(
-        &self,
-        id: crate::store::ControlIntentId,
-        at_ms: u64,
-    ) -> std::result::Result<crate::store::IntentApplication, StoreError> {
-        self.inner.claim_intent_application(id, at_ms).await
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        id: crate::store::ControlIntentId,
-        claim: &crate::store::ClaimToken,
-        at_ms: u64,
-    ) -> std::result::Result<crate::store::IntentSettle, StoreError> {
-        self.inner.acknowledge_intent(id, claim, at_ms).await
-    }
-
-    async fn record_intent_failure(
-        &self,
-        id: crate::store::ControlIntentId,
-        claim: &crate::store::ClaimToken,
-        error: &str,
-        retryable: bool,
-        at_ms: u64,
-    ) -> std::result::Result<crate::store::IntentSettle, StoreError> {
-        self.inner
-            .record_intent_failure(id, claim, error, retryable, at_ms)
-            .await
-    }
-
-    async fn load_intent(
-        &self,
-        id: crate::store::ControlIntentId,
-    ) -> std::result::Result<Option<crate::store::ControlIntent>, StoreError> {
-        self.inner.load_intent(id).await
-    }
-}
-
-#[async_trait::async_trait]
-// The compile error should direct wrappers to implement the capability, not
-// suggest replacing their factory with this concrete implementation.
-#[diagnostic::do_not_recommend]
-impl crate::AttachmentRootSet for ObservedSessionStoreFactory {
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<std::collections::BTreeSet<AttachmentId>, StoreError> {
-        self.inner
-            .live_attachment_refs(intent_grace_cutoff_epoch_ms)
-            .await
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        attachment_id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
-        self.inner
-            .has_live_attachment_ref(attachment_id, intent_grace_cutoff_epoch_ms)
-            .await
-    }
-}
 
 struct ObservedRuntimeStore {
     inner: Arc<dyn RuntimeStore>,
@@ -417,7 +349,10 @@ impl RuntimeStoreDecorator for ObservedRuntimeStore {
         self.inner.as_ref()
     }
 
-    async fn commit_runtime_state(&self, commit: RuntimeCommit) -> Result<RuntimeCommitReceipt, StoreError> {
+    async fn commit_runtime_state(
+        &self,
+        commit: RuntimeCommit,
+    ) -> Result<RuntimeCommitReceipt, StoreError> {
         observe_commit(self.inner.as_ref(), &self.collector, commit).await
     }
 }
@@ -434,12 +369,11 @@ async fn observe_commit(
     let result = inner.commit_runtime_state(commit).await?;
     collector.record_manifest(&event.session_id, &result.manifest);
     if let Some(state) = event.state.as_mut()
-        && let Some(accepted) = inner.load_session_window(&event.session_id, WindowSelector::Current).await?
+        && let Some(accepted) = inner
+            .load_session_window(&event.session_id, WindowSelector::Current)
+            .await?
     {
-        let read_model = accepted
-            .window
-            .read_model(accepted.current_frame_node_id.as_ref())
-            .expect("accepted current frame must resolve in its validated session graph");
+        let read_model = accepted.window.read_model();
         state.accepted_raw_rows = Some(serde_json::json!({
             "graph_nodes": accepted.window.nodes,
             "graph_leaf_node_id": accepted.window.leaf_node_id,

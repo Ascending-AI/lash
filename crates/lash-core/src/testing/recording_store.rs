@@ -18,8 +18,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use lash_sansio::sync::MutexExt;
 
 use crate::store::{
-    RuntimeCommit, RuntimeCommitReceipt, RuntimeStore, RuntimeStoreDecorator, StoreError,
-    SessionWindowRead, WindowSelector,
+    RuntimeCommit, RuntimeCommitReceipt, RuntimeStore, RuntimeStoreDecorator, SessionWindowRead,
+    StoreError, WindowSelector,
 };
 use crate::{DeploymentStore, SessionId, SessionStoreCreateRequest};
 use lash_core_execution::DeploymentStoreDecorator;
@@ -28,6 +28,7 @@ use lash_core_execution::DeploymentStoreDecorator;
 /// wraps. See the module documentation.
 pub struct RecordingStore {
     inner: Arc<dyn RuntimeStore>,
+    session_id: Mutex<Option<SessionId>>,
     /// Runtime commits the wrapped store applied; an attempt it answered from
     /// an earlier commit's durable receipt is not one.
     pub runtime_commit_count: Mutex<usize>,
@@ -56,6 +57,7 @@ impl RecordingStore {
     pub fn over(inner: Arc<dyn RuntimeStore>) -> Self {
         Self {
             inner,
+            session_id: Mutex::new(None),
             runtime_commit_count: Mutex::new(0),
             runtime_commits: Mutex::new(Vec::new()),
             commit_attempt_count: AtomicUsize::new(0),
@@ -71,6 +73,12 @@ impl RecordingStore {
             forged_head: Mutex::new(None),
             attachment_intents: Mutex::new(Vec::new()),
         }
+    }
+
+    pub fn over_session(inner: Arc<dyn RuntimeStore>, session_id: SessionId) -> Self {
+        let store = Self::over(inner);
+        *store.session_id.lock_recover() = Some(session_id);
+        store
     }
 
     /// Every runtime commit the wrapped store applied, in commit order.
@@ -119,6 +127,10 @@ impl RecordingStore {
     /// The store this one records over.
     pub fn inner(&self) -> &Arc<dyn RuntimeStore> {
         &self.inner
+    }
+
+    pub fn session_id(&self) -> Option<SessionId> {
+        self.session_id.lock_recover().clone()
     }
 
     /// Runtime commits attempted through this store, accepted or not.
@@ -187,7 +199,11 @@ impl RuntimeStoreDecorator for RecordingStore {
         self.inner.as_ref()
     }
 
-    async fn load_session_window(&self, session_id: &SessionId, selector: WindowSelector) -> Result<Option<SessionWindowRead>, StoreError> {
+    async fn load_session_window(
+        &self,
+        session_id: &SessionId,
+        selector: WindowSelector,
+    ) -> Result<Option<SessionWindowRead>, StoreError> {
         let call = self.load_session_count.fetch_add(1, Ordering::SeqCst) + 1;
         {
             let mut fail_on = self.fail_load_session_on_call.lock_recover();
@@ -220,7 +236,10 @@ impl RuntimeStoreDecorator for RecordingStore {
         Ok(Some(read))
     }
 
-    async fn load_session_head_meta(&self, session_id: &SessionId) -> Result<Option<crate::SessionHeadMeta>, StoreError> {
+    async fn load_session_head_meta(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<crate::SessionHeadMeta>, StoreError> {
         self.load_session_head_meta_count
             .fetch_add(1, Ordering::SeqCst);
         if self
@@ -277,6 +296,7 @@ impl RuntimeStoreDecorator for RecordingStore {
         request: &SessionStoreCreateRequest,
     ) -> Result<crate::store::SessionAdmission, StoreError> {
         self.session_admission_count.fetch_add(1, Ordering::SeqCst);
+        *self.session_id.lock_recover() = Some(request.session_id.clone());
         self.inner.admit_session(request).await
     }
 
@@ -351,31 +371,9 @@ impl RecordingSessionStoreFactory {
         }
         let inner: Arc<dyn RuntimeStore> = self.inner.clone();
         let recorded = Arc::new(RecordingStore::over(inner));
+        *recorded.session_id.lock_recover() = Some(session_id.clone());
         stores.push((session_id.clone(), Arc::clone(&recorded)));
         recorded
-    }
-}
-
-#[async_trait::async_trait]
-#[diagnostic::do_not_recommend]
-impl crate::AttachmentRootSet for RecordingSessionStoreFactory {
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, StoreError> {
-        self.inner
-            .live_attachment_refs(intent_grace_cutoff_epoch_ms)
-            .await
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        id: &crate::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
-        self.inner
-            .has_live_attachment_ref(id, intent_grace_cutoff_epoch_ms)
-            .await
     }
 }
 
@@ -387,11 +385,29 @@ impl RuntimeStoreDecorator for RecordingSessionStoreFactory {
         self.inner.as_ref()
     }
 
+    async fn admit_root(
+        &self,
+        request: &crate::store::AdmitRootRequest,
+    ) -> Result<Option<crate::store::RootAdmission>, StoreError> {
+        self.record(request.session_id()).admit_root(request).await
+    }
+
+    async fn admit_at_checkpoint(
+        &self,
+        request: &crate::store::CheckpointAdmissionRequest,
+    ) -> Result<crate::store::CheckpointAdmission, StoreError> {
+        self.record(request.session_id())
+            .admit_at_checkpoint(request)
+            .await
+    }
+
     async fn admit_session(
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<crate::store::SessionAdmission, StoreError> {
-        self.record(&request.session_id).admit_session(request).await
+        self.record(&request.session_id)
+            .admit_session(request)
+            .await
     }
 
     async fn load_session_window(
@@ -399,28 +415,36 @@ impl RuntimeStoreDecorator for RecordingSessionStoreFactory {
         session_id: &SessionId,
         selector: WindowSelector,
     ) -> Result<Option<SessionWindowRead>, StoreError> {
-        self.record(session_id).load_session_window(session_id, selector).await
+        self.record(session_id)
+            .load_session_window(session_id, selector)
+            .await
     }
 
     async fn load_session_head_meta(
         &self,
         session_id: &SessionId,
     ) -> Result<Option<crate::SessionHeadMeta>, StoreError> {
-        self.record(session_id).load_session_head_meta(session_id).await
+        self.record(session_id)
+            .load_session_head_meta(session_id)
+            .await
     }
 
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
-        self.record(&commit.session_id).commit_runtime_state(commit).await
+        self.record(&commit.session_id)
+            .commit_runtime_state(commit)
+            .await
     }
 
     async fn begin_attachment_write(
         &self,
         intent: crate::store::AttachmentIntent,
     ) -> Result<crate::store::AttachmentWriteFence, StoreError> {
-        self.record(&intent.session_id).begin_attachment_write(intent).await
+        self.record(&intent.session_id)
+            .begin_attachment_write(intent)
+            .await
     }
 
     async fn list_queued_work(
@@ -448,53 +472,5 @@ impl DeploymentStoreDecorator for RecordingSessionStoreFactory {
         bound: crate::store::RetentionBound,
     ) -> crate::store::MaintenanceResult<crate::store::RetentionReport> {
         self.inner.reclaim_retained_evidence(bound).await
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::store::ControlIntentStore for RecordingSessionStoreFactory {
-    async fn begin_session_close(
-        &self,
-        session_id: &SessionId,
-        at_ms: u64,
-    ) -> std::result::Result<Option<crate::store::ControlIntent>, StoreError> {
-        self.inner.begin_session_close(session_id, at_ms).await
-    }
-
-    async fn claim_intent_application(
-        &self,
-        id: crate::store::ControlIntentId,
-        at_ms: u64,
-    ) -> std::result::Result<crate::store::IntentApplication, StoreError> {
-        self.inner.claim_intent_application(id, at_ms).await
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        id: crate::store::ControlIntentId,
-        claim: &crate::store::ClaimToken,
-        at_ms: u64,
-    ) -> std::result::Result<crate::store::IntentSettle, StoreError> {
-        self.inner.acknowledge_intent(id, claim, at_ms).await
-    }
-
-    async fn record_intent_failure(
-        &self,
-        id: crate::store::ControlIntentId,
-        claim: &crate::store::ClaimToken,
-        error: &str,
-        retryable: bool,
-        at_ms: u64,
-    ) -> std::result::Result<crate::store::IntentSettle, StoreError> {
-        self.inner
-            .record_intent_failure(id, claim, error, retryable, at_ms)
-            .await
-    }
-
-    async fn load_intent(
-        &self,
-        id: crate::store::ControlIntentId,
-    ) -> std::result::Result<Option<crate::store::ControlIntent>, StoreError> {
-        self.inner.load_intent(id).await
     }
 }

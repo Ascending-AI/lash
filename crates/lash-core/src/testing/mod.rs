@@ -159,9 +159,7 @@ pub(crate) async fn unbound_recording_store() -> runtime_helpers::RecordingStore
 pub(crate) async fn unbound_recording_store_on(
     backend: &lash_sqlite_store::SqliteStoreSet,
 ) -> runtime_helpers::RecordingStore {
-    runtime_helpers::RecordingStore::over(std::sync::Arc::new(
-        backend.open_store().await.expect("open an unbound store"),
-    ))
+    runtime_helpers::RecordingStore::over(crate::StoreSet::session_store_factory(backend))
 }
 
 /// The twin of [`unbound_recording_store`] on the Restate server double: a
@@ -173,13 +171,9 @@ pub(crate) async fn unbound_recording_store_on(
 pub(crate) async fn double_unbound_recording_store(
     double: &lash_restate_test::RestateTestBackend,
 ) -> runtime_helpers::RecordingStore {
-    runtime_helpers::RecordingStore::over(
-        crate::DeploymentStore::open_unbound_store(
-            crate::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
-        )
-        .await
-        .expect("open an unbound store on the double's engine store set"),
-    )
+    runtime_helpers::RecordingStore::over(crate::StoreSet::session_store_factory(
+        double.engine_stores().as_ref(),
+    ))
 }
 
 /// Marks resident state stale for downstream reload-race tests.
@@ -200,4 +194,4 @@ pub fn response_synthesized_from_aborted_stream(
     crate::runtime::response_synthesized_from_aborted_stream(events)
 }
 
-pub use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt;
+pub use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt;
