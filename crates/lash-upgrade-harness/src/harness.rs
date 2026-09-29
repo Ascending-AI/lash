@@ -15,6 +15,7 @@ use serde::de::DeserializeOwned;
 
 use crate::identity::BuildLabel;
 use crate::node::objects::{CallReport, SweepLine, TargetKind};
+use crate::node::process::{HarnessOpReport, ProcessStatusReport};
 use crate::node::provider::{self, EffectRecord};
 use crate::node::remote::ClientReport;
 use crate::node::{ProbeReport, RegisterReport, ServeReady, StoreSpec, TurnReport};
@@ -420,6 +421,66 @@ impl NodeBinary {
         report(&self.path, "call", output)
     }
 
+    /// Start the signal-waiting process through this build's deployment,
+    /// under `key`.
+    pub fn start_process(&self, case: &Case, key: &str) -> Result<HarnessOpReport> {
+        let output = Command::new(&self.path)
+            .arg("process-start")
+            .args(case.restate_args())
+            .args(["--key", key])
+            .output()
+            .with_context(|| format!("run {} process-start", self.label()))?;
+        report(&self.path, "process-start", output)
+    }
+
+    /// Signal `process` through this build's deployment.
+    pub fn signal_process(
+        &self,
+        case: &Case,
+        process: &str,
+        signal_id: &str,
+        payload: &serde_json::Value,
+    ) -> Result<HarnessOpReport> {
+        self.spawn_signal(case, process, signal_id, payload)?.wait()
+    }
+
+    /// [`signal_process`](Self::signal_process) in the background, so two
+    /// builds can signal at once.
+    pub fn spawn_signal(
+        &self,
+        case: &Case,
+        process: &str,
+        signal_id: &str,
+        payload: &serde_json::Value,
+    ) -> Result<PendingSignal> {
+        let child = Command::new(&self.path)
+            .arg("process-signal")
+            .args(case.restate_args())
+            .args(["--process", process, "--signal-id", signal_id])
+            .arg("--payload")
+            .arg(payload.to_string())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("run {} process-signal", self.label()))?;
+        Ok(PendingSignal {
+            path: self.path.clone(),
+            child,
+        })
+    }
+
+    /// Read `process` from the store, as this build does.
+    pub fn process_status(&self, case: &Case, process: &str) -> Result<ProcessStatusReport> {
+        let output = Command::new(&self.path)
+            .arg("process-status")
+            .args(case.store_args())
+            .args(case.restate_args())
+            .args(["--process", process])
+            .output()
+            .with_context(|| format!("run {} process-status", self.label()))?;
+        report(&self.path, "process-status", output)
+    }
+
     /// Start this build's synthetic sweep in the background.
     pub fn spawn_sweep(&self, case: &Case) -> Result<Sweeper> {
         let mut child = Command::new(&self.path)
@@ -482,6 +543,23 @@ impl PendingTurn {
     pub fn wait(self) -> Result<TurnReport> {
         let output = self.child.wait_with_output().context("wait for the turn")?;
         report(&self.path, "turn", output)
+    }
+}
+
+/// A `process-signal` running in the background.
+pub struct PendingSignal {
+    path: PathBuf,
+    child: Child,
+}
+
+impl PendingSignal {
+    /// Wait for the signal's report.
+    pub fn wait(self) -> Result<HarnessOpReport> {
+        let output = self
+            .child
+            .wait_with_output()
+            .context("wait for the signal")?;
+        report(&self.path, "process-signal", output)
     }
 }
 

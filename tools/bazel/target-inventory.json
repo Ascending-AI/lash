@@ -7960,6 +7960,18 @@
     {
       "features": [],
       "kind": "lib",
+      "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_96f49f1b",
+      "package": "lash-internal-lashlang-runtime"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_c6afd639",
+      "package": "lash-internal-lashlang-runtime"
+    },
+    {
+      "features": [],
+      "kind": "lib",
       "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_de212ece",
       "package": "lash-internal-lashlang-runtime"
     },
@@ -10498,6 +10510,28 @@
       ],
       "kind": "test",
       "label": "//crates/lash-regress:integration__test__fv_7f10c809",
+      "package": "lash-regress"
+    },
+    {
+      "features": [
+        "backend-pikevm",
+        "default",
+        "std",
+        "utf16"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-regress:lash-regress",
+      "package": "lash-regress"
+    },
+    {
+      "features": [
+        "backend-pikevm",
+        "default",
+        "std",
+        "utf16"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-regress:lash-regress",
       "package": "lash-regress"
     },
     {
@@ -16495,7 +16529,7 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-typescript:lash-typescript__fv_ac903a72",
+      "label": "//crates/lash-typescript:lash-typescript__fv_aa2f6661",
       "package": "lash-internal-typescript"
     },
     {
@@ -16507,7 +16541,7 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-typescript:lash-typescript__fv_cc9edda0",
+      "label": "//crates/lash-typescript:lash-typescript__fv_ac903a72",
       "package": "lash-internal-typescript"
     },
     {
@@ -16633,35 +16667,41 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-upgrade-harness:lash-upgrade-harness__fv_11ec8a4e",
-      "package": "lash-upgrade-harness"
+      "label": "//crates/lash-typescript:lash-typescript__fv_cc9edda0",
+      "package": "lash-internal-typescript"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-typescript:lash-typescript__fv_fa6328b7",
+      "package": "lash-internal-typescript"
     },
     {
       "features": [
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-upgrade-harness:lash-upgrade-harness__fv_34aa138e",
+      "label": "//crates/lash-upgrade-harness:lash-upgrade-harness__fv_4579e8b7",
+      "package": "lash-upgrade-harness"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-upgrade-harness:lash-upgrade-harness__fv_f145ebe0",
+      "package": "lash-upgrade-harness"
+    },
+    {
+      "features": [
+        "synthetic-next"
+      ],
+      "kind": "unit-test",
+      "label": "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test__fv_4579e8b7",
       "package": "lash-upgrade-harness"
     },
     {
       "features": [],
       "kind": "unit-test",
-      "label": "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test__fv_11ec8a4e",
-      "package": "lash-upgrade-harness"
-    },
-    {
-      "features": [
-        "synthetic-next"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test__fv_34aa138e",
-      "package": "lash-upgrade-harness"
-    },
-    {
-      "features": [],
-      "kind": "bin",
-      "label": "//crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_11ec8a4e",
+      "label": "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test__fv_f145ebe0",
       "package": "lash-upgrade-harness"
     },
     {
@@ -16669,13 +16709,13 @@
         "synthetic-next"
       ],
       "kind": "bin",
-      "label": "//crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_34aa138e",
+      "label": "//crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_4579e8b7",
       "package": "lash-upgrade-harness"
     },
     {
       "features": [],
-      "kind": "bin-unit-test",
-      "label": "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test__fv_11ec8a4e",
+      "kind": "bin",
+      "label": "//crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_f145ebe0",
       "package": "lash-upgrade-harness"
     },
     {
@@ -16683,13 +16723,13 @@
         "synthetic-next"
       ],
       "kind": "bin-unit-test",
-      "label": "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test__fv_34aa138e",
+      "label": "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test__fv_4579e8b7",
       "package": "lash-upgrade-harness"
     },
     {
       "features": [],
-      "kind": "test",
-      "label": "//crates/lash-upgrade-harness:phase_a__test__fv_11ec8a4e",
+      "kind": "bin-unit-test",
+      "label": "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test__fv_f145ebe0",
       "package": "lash-upgrade-harness"
     },
     {
@@ -16697,13 +16737,13 @@
         "synthetic-next"
       ],
       "kind": "test",
-      "label": "//crates/lash-upgrade-harness:phase_a__test__fv_34aa138e",
+      "label": "//crates/lash-upgrade-harness:phase_a__test__fv_4579e8b7",
       "package": "lash-upgrade-harness"
     },
     {
       "features": [],
       "kind": "test",
-      "label": "//crates/lash-upgrade-harness:rolling__test__fv_11ec8a4e",
+      "label": "//crates/lash-upgrade-harness:phase_a__test__fv_f145ebe0",
       "package": "lash-upgrade-harness"
     },
     {
@@ -16711,7 +16751,13 @@
         "synthetic-next"
       ],
       "kind": "test",
-      "label": "//crates/lash-upgrade-harness:rolling__test__fv_34aa138e",
+      "label": "//crates/lash-upgrade-harness:rolling__test__fv_4579e8b7",
+      "package": "lash-upgrade-harness"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash-upgrade-harness:rolling__test__fv_f145ebe0",
       "package": "lash-upgrade-harness"
     },
     {
@@ -17075,6 +17121,17 @@
     },
     {
       "features": [
+        "default",
+        "restate",
+        "sqlite",
+        "typescript"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_1d73d61b",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
         "synthetic-next"
       ],
       "kind": "lib",
@@ -17170,17 +17227,6 @@
       ],
       "kind": "lib",
       "label": "//crates/lash:lash__fv_77dacba4",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "restate",
-        "sqlite",
-        "synthetic-next"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_7bf43a73",
       "package": "lash-runtime"
     },
     {
@@ -17345,20 +17391,22 @@
     },
     {
       "features": [
-        "default",
-        "restate",
-        "sqlite"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_e6a48bae",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
         "rlm"
       ],
       "kind": "lib",
       "label": "//crates/lash:lash__fv_eb5eea1a",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "restate",
+        "sqlite",
+        "synthetic-next",
+        "typescript"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_f95d95fc",
       "package": "lash-runtime"
     },
     {
@@ -18484,6 +18532,12 @@
       "package": "lash-internal-lashlang"
     },
     {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lashlang:lashlang__fv_00dd1b17",
+      "package": "lash-internal-lashlang"
+    },
+    {
       "features": [
         "testing"
       ],
@@ -18791,6 +18845,14 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lashlang:lashlang__fv_d981e6dd",
+      "package": "lash-internal-lashlang"
+    },
+    {
+      "features": [
+        "synthetic-next"
+      ],
+      "kind": "lib",
+      "label": "//crates/lashlang:lashlang__fv_df109314",
       "package": "lash-internal-lashlang"
     },
     {
@@ -21486,12 +21548,15 @@
         "clap",
         "lash-internal-core",
         "lash-internal-core-store",
+        "lash-internal-lashlang",
+        "lash-internal-lashlang-runtime",
         "lash-internal-postgres-store",
         "lash-internal-remote-protocol",
         "lash-internal-restate",
         "lash-internal-sqlite-store",
         "lash-runtime",
         "reqwest",
+        "restate-sdk",
         "rusqlite",
         "serde",
         "serde_json",
