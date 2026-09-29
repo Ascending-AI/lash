@@ -2,7 +2,7 @@
 //! Root reconciliation is the layer-1 operation also used by terminal evidence
 //! reclamation, so this witness can run at every head in the stack.
 use lash_core::facade_support::{SessionAttachmentStore, reclaim_unreferenced_attachments};
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_core::testing::store_fixtures::session_store_request;
 use lash_core::*;
 use pretty_assertions::assert_eq;

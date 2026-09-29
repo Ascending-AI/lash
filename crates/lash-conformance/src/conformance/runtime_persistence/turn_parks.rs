@@ -9,7 +9,7 @@
 //! keeps both and counts the refusal in `attempts`.
 
 use super::*;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 
 fn park(
     session_id: &SessionId,

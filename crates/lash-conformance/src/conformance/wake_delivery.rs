@@ -1,7 +1,7 @@
 use super::*;
 use crate::testing::TestClock;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;

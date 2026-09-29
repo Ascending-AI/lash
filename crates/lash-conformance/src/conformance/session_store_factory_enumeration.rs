@@ -1,6 +1,6 @@
 use super::session_store_factory::session_store_request;
 use super::*;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 

@@ -1,6 +1,6 @@
 //! L-D1 through L-D4: the recorded session close and its retained tombstone.
 
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 

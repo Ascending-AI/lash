@@ -329,12 +329,23 @@ pub(super) async fn assert_usage_conservation(
         }
     }
 
-    let actual_entries = store
-        .load_session()
-        .await
-        .map_err(|error| error.to_string())?
-        .map(|session| session.token_ledger)
-        .unwrap_or_default();
+    let mut actual_entries = Vec::new();
+    let mut after = None;
+    while model.has_session {
+        let page = store
+            .load_usage_ledger_page(
+                &session_id(),
+                after.as_ref(),
+                std::num::NonZeroU32::new(128).expect("positive page limit"),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        actual_entries.extend(page.rows.into_iter().map(|row| row.entry));
+        match page.next {
+            Some(next) => after = Some(next),
+            None => break,
+        }
+    }
     let expected_durable = usage_by_source_model(model.durable_usage.values());
     if usage_by_source_model(actual_entries.iter()) != expected_durable {
         return Err(

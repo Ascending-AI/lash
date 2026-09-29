@@ -48,7 +48,7 @@
 //!
 //! Integrator class: conformance-suite embedders (ADR 0051 class 4).
 
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;

@@ -1,7 +1,7 @@
 //! Cross-layer attachment owner / cold effect-replay conformance.
 
 use super::*;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;

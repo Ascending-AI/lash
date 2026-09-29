@@ -2,7 +2,7 @@ use super::*;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION;
 use lash_core::store::IngressSettlement;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use pretty_assertions::assert_eq;
 
 /// A backend must mint refs for checkpoint bodies and resolve those refs after

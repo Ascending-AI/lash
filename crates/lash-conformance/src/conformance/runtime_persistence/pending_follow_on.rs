@@ -4,7 +4,7 @@
 //! head's current frame on every head write.
 
 use super::*;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use pretty_assertions::assert_eq;
 
 const SESSION: &str = "follow-on";

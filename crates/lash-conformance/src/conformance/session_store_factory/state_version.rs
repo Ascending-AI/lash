@@ -1,4 +1,4 @@
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_sansio::SessionId;
 use std::sync::Arc;
 

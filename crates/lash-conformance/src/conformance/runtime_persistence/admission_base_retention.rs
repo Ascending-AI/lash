@@ -9,7 +9,7 @@
 //! retains another.
 
 use super::*;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use pretty_assertions::assert_eq;
 
 /// Commit a checkpoint whose tool state carries `generation`, returning its

@@ -6,7 +6,7 @@
 use super::*;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use lash_core::store::{AdmittedHead, IngressSettlement};
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use pretty_assertions::assert_eq;
 
 fn batch_ids(admission: &lash_core::store::RootAdmission) -> Vec<String> {

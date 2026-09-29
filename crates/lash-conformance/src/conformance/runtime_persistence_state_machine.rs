@@ -20,7 +20,7 @@ use crate::{
     RuntimeSessionState, RuntimeStore, RuntimeUsageDeltaIdentity, StoreError, ToolState, TurnId,
     TurnInput, TurnInputIngress, facade_support::ToolStateFacadeOps,
 };
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestRunner};
@@ -1564,7 +1564,7 @@ async fn assert_model_agreement(
     }
 
     let loaded = store
-        .load_session()
+        .load_session_window(&session_id(), crate::store::WindowSelector::Current)
         .await
         .map_err(|error| error.to_string())?;
     if !model.has_session {
@@ -1629,7 +1629,7 @@ async fn assert_model_agreement(
 
 async fn session_snapshot(store: &dyn RuntimeStore) -> Result<serde_json::Value, String> {
     let loaded = store
-        .load_session()
+        .load_session_window(&session_id(), crate::store::WindowSelector::Current)
         .await
         .map_err(|error| error.to_string())?;
     let head = loaded.map(|loaded| {
@@ -1641,10 +1641,10 @@ async fn session_snapshot(store: &dyn RuntimeStore) -> Result<serde_json::Value,
         serde_json::json!({
             "head_revision": loaded.head_revision,
             "current_frame_node_id": loaded.current_frame_node_id,
-            "graph": loaded.graph,
+            "graph": loaded.window,
             "checkpoint_ref": loaded.checkpoint_ref,
             "checkpoint": checkpoint,
-            "token_ledger": loaded.token_ledger,
+            "usage": loaded.usage,
         })
     });
     Ok(serde_json::json!({

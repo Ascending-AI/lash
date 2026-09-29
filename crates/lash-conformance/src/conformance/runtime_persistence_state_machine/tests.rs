@@ -40,7 +40,9 @@ impl DroppingQueueListing {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for DroppingQueueListing {
-    fn inner(&self) -> &(dyn RuntimeStore + '_) {
+    type Inner = dyn RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -73,15 +75,16 @@ async fn one_pending_batch_world(
     let backend = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("memory store set");
-    let inner = backend
-        .session_store_factory()
-        .create_store(&super::session_store_request(
+    let deployment = backend.session_store_factory();
+    deployment
+        .admit_session(&super::session_store_request(
             &SessionId::from(SESSION_ID),
             "runtime-persistence-model",
             crate::SessionRelation::Root,
         ))
         .await
         .expect("create the modeled session store");
+    let inner: Arc<dyn RuntimeStore> = deployment;
     let store = Arc::new(DroppingQueueListing {
         inner,
         listing,

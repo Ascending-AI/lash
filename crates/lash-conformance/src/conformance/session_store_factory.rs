@@ -9,7 +9,7 @@ use super::session_store_factory_vacuum::{
     session_store_factory_vacuums_organic_retained_tombstone,
 };
 use super::*;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;

@@ -5,7 +5,7 @@
 
 use super::*;
 use lash_core::store::{AdmittedHead, DriveFence, RootAdmission};
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use pretty_assertions::assert_eq;
 
 /// Admit `root` on `head` under `fence`, which must reach its head.

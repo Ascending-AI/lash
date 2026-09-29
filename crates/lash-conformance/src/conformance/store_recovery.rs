@@ -1,7 +1,7 @@
 //! Durable store-recovery laws over fresh persistence handles.
 
 use super::*;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::time::Duration;

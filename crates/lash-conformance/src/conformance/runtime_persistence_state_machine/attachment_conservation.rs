@@ -32,13 +32,14 @@ impl RuntimePersistenceStateMachineHandles {
         attachment_backend: Arc<dyn crate::AttachmentStore>,
         process_owner_liveness_wired: bool,
     ) -> Result<Self, crate::StoreError> {
-        let runtime = session_factory
-            .create_store(&super::session_store_request(
+        session_factory
+            .admit_session(&super::session_store_request(
                 &SessionId::from(SESSION_ID),
                 "runtime-persistence-model",
                 crate::SessionRelation::Root,
             ))
             .await?;
+        let runtime: Arc<dyn RuntimeStore> = session_factory.clone();
         Ok(Self {
             runtime,
             session_factory,
@@ -141,11 +142,12 @@ async fn commit_with_attachment_refs(
             "runtime-persistence-attachment-{seed}-{}",
             model.attachment_session_sequence
         ));
-        let store = handles
+        handles
             .session_factory
-            .create_store(&session_request(&session_id))
+            .admit_session(&session_request(&session_id))
             .await
             .map_err(|error| error.to_string())?;
+        let store: Arc<dyn RuntimeStore> = handles.session_factory.clone();
         (None, session_id, 0, store)
     } else {
         let index = usize::from(session_selection) % model.attachment_sessions.len();
@@ -260,11 +262,12 @@ async fn put_attachment_intent(
         "runtime-persistence-intent-{seed}-{}",
         model.attachment_session_sequence
     ));
-    let store = handles
+    handles
         .session_factory
-        .create_store(&session_request(&session_id))
+        .admit_session(&session_request(&session_id))
         .await
         .map_err(|error| error.to_string())?;
+    let store: Arc<dyn RuntimeStore> = handles.session_factory.clone();
     let facade = Arc::new(crate::SessionAttachmentStore::new(
         Arc::clone(&handles.attachment_backend),
         Arc::new(lash_core::testing::conformance_support::PersistenceManifestAdapter(store)),
@@ -484,12 +487,17 @@ async fn open_session(
     handles: &RuntimePersistenceStateMachineHandles,
     session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimeStore>, String> {
-    handles
+    match handles
         .session_factory
-        .open_existing_store(&session_request(session_id))
+        .lookup_session(session_id)
         .await
         .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("surviving attachment session `{session_id}` could not be reopened"))
+    {
+        crate::store::SessionLookup::Live(_) => Ok(handles.session_factory.clone()),
+        _ => Err(format!(
+            "surviving attachment session `{session_id}` could not be reopened"
+        )),
+    }
 }
 
 async fn backend_ids(

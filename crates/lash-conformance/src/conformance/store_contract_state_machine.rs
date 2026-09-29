@@ -14,7 +14,7 @@ use crate::{
     process_wake_batch_draft,
 };
 use generated_prefix::generated_prefix;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_sansio::{ProcessId, SessionId};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};

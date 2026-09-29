@@ -6,7 +6,7 @@
 use super::drive_admission::{DriveParts, on_tier};
 use lash_core::engine::*;
 use lash_core::store::*;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_sansio::{SessionId, TurnId};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
