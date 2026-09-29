@@ -1,5 +1,5 @@
 use super::*;
-use crate::DeploymentStore as _;
+use crate::SessionCatalogStore as _;
 use pretty_assertions::assert_eq;
 use std::sync::atomic::{AtomicBool, Ordering};
 

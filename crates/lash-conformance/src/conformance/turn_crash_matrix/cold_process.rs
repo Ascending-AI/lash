@@ -449,7 +449,6 @@ async fn recover_turn_cancel_closure(
 /// parent process compares that `turn_complete` summary with the outcome table.
 #[expect(
     clippy::expect_used,
-    clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn cold_process_real_turn_driver(

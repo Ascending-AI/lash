@@ -1,4 +1,8 @@
 //! History laws shared by the SQLite and PostgreSQL catalogs (ADR 0112 §14).
+#![expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::Arc;

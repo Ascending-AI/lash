@@ -6,7 +6,6 @@ use pretty_assertions::assert_eq;
 /// ruled durable end state.
 #[expect(
     clippy::expect_used,
-    clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn run_crash_matrix_case(

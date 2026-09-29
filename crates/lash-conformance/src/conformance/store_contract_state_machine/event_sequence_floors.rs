@@ -98,7 +98,7 @@ mod floor_tests {
             .expect("memory backend");
         let handles = StoreContractHandles {
             registry: backend.process_registry() as Arc<dyn crate::ProcessRegistry>,
-            runtime: Arc::new(backend.open_store().await.expect("durable-core store"))
+            runtime: backend.open_store().await.expect("durable-core store")
                 as Arc<dyn crate::RuntimeStore>,
         };
         (backend, handles)
