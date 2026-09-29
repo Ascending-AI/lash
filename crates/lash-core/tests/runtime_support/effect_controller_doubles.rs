@@ -576,6 +576,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                             ..LlmResponse::default()
                         })),
                         text_streamed: false,
+                        capture: None,
                         call_record: None,
                         stream: Box::default(),
                     })
