@@ -19847,8 +19847,7 @@
         "lash-internal-sansio",
         "proptest",
         "serde_json",
-        "tokio",
-        "tracing"
+        "tokio"
       ],
       "doc": "//crates/lash-llm-transport:lash-llm-transport__doc",
       "manifest": "crates/lash-llm-transport/Cargo.toml",
