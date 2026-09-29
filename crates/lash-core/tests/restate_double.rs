@@ -104,26 +104,6 @@ async fn a_kernel_turn_finishes_in_an_open_handler() {
     Box::pin(a_turn_finishes_in_an_open_handler(&double)).await;
 }
 
-/// The same door under serial scheduling: the lent handler parks on its
-/// release, which the server sees, so the turn's own frames keep the turn
-/// and no stall preemption is needed.
-#[tokio::test(flavor = "current_thread")]
-async fn a_kernel_turn_finishes_in_an_open_handler_under_serial_scheduling() {
-    let double = lash_restate_test::backend(
-        0x2b,
-        lash_restate_test::ServerConfig::default()
-            .scheduling(lash_restate_test::Scheduling::Serial),
-    )
-    .await
-    .expect("server double");
-    Box::pin(a_turn_finishes_in_an_open_handler(&double)).await;
-    assert_eq!(
-        double.server().stats().stall_preemptions,
-        0,
-        "the open handler ran fully sequenced"
-    );
-}
-
 async fn a_turn_finishes_in_an_open_handler(double: &lash_restate_test::RestateTestBackend) {
     let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {

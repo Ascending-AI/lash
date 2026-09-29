@@ -245,9 +245,8 @@ impl RestateTestBackend {
         decorate_stores: impl FnOnce(Arc<dyn StoreSet>) -> Arc<dyn StoreSet>,
     ) -> Result<Self, BackendError> {
         let first_label = first_label.into();
-        // The double is deterministic under its seed, so its registrar mints
-        // the sequential test ids: one seed names the same processes on
-        // every run.
+        // Sequential test IDs keep process names simple within a run. Attempt
+        // interleaving is concurrent and can change which process gets an ID.
         let stores = Arc::new(
             lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(
                 lash_sqlite_store::SqliteStoreSetOptions {

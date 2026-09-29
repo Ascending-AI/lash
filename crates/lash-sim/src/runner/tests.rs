@@ -269,63 +269,14 @@ fn full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler(
     );
 }
 
-// Seeds the per-PR run of `serial_engine_lane_is_deterministic_across_seeds`
-// covers; the full `SERIAL_LANE_SWEEP_SEEDS`-seed sweep runs in the
-// confidence gate's sim unit suite and via `just sim-serial-sweep`, or
-// anywhere with `LASH_SIM_SERIAL_LANE_SEEDS` set.
-const SERIAL_LANE_PER_PR_SEEDS: usize = 4;
-const SERIAL_LANE_SWEEP_SEEDS: u64 = 20;
-
-/// The serial lane on the server double delivers one boundary sequence,
-/// reaches one outcome and grants the server's turn in one order, with no
-/// stall preemption, per seed: `SERIAL_LANE_PER_PR_SEEDS` seeds (one under
-/// `LASH_QUICK`; the full `SERIAL_LANE_SWEEP_SEEDS`-seed sweep under
-/// `LASH_SIM_SERIAL_LANE_SEEDS`), each run twice.
-#[test]
-fn serial_engine_lane_is_deterministic_across_seeds() {
-    let seeds = std::env::var("LASH_SIM_SERIAL_LANE_SEEDS")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or_else(|| crate::quick_seed_sweep(SERIAL_LANE_PER_PR_SEEDS));
-    assert!(
-        seeds > 0,
-        "LASH_SIM_SERIAL_LANE_SEEDS must be greater than zero"
-    );
-    eprintln!(
-        "serial-lane determinism coverage is bounded: seeds={seeds} \
-         omitted_seeds=all seeds outside seeds 0..{seeds}; \
-         the full sweep is LASH_SIM_SERIAL_LANE_SEEDS={SERIAL_LANE_SWEEP_SEEDS}"
-    );
-    for seed in 0_u64..seeds as u64 {
-        let run = || {
-            run_serial_lane(generate_workload(seed, "fast-random", 48).expect("workload"))
-                .expect("serial lane run")
-        };
-        let first = run();
-        let second = run();
-        let verdict = serial_engine_determinism(seed, &first, &second);
-        assert!(verdict.is_passed(), "{}", verdict.message);
-        assert!(
-            !first.schedule_trace.is_empty(),
-            "seed {seed}: the serial lane ran no attempt on the server"
-        );
-        assert!(
-            first
-                .delivered
-                .iter()
-                .any(|(_, kind)| *kind == BoundaryKind::DurableEffect),
-            "seed {seed}: the serial lane delivered no durable effect"
-        );
-    }
-}
-
 #[tokio::test]
 async fn runtime_completion_serialization_mutation_guard() {
     let seed = regression_corpus_seed("full-random", 12);
     let workload = generate_workload(seed, "full-random", 384).expect("workload");
-    let mut world = GeneratedRuntimeWorld::serial(workload.seed)
+    let mut world = GeneratedRuntimeWorld::new(workload.seed)
         .await
-        .expect("serial world");
+        .expect("runtime world");
+    world.serialize_provider_turns = true;
 
     let (events, _summary) = drive_generated_workload(&mut world, &workload)
         .await
@@ -1079,11 +1030,6 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
     assert_eq!(report.seed_salt.as_deref(), Some("search-test-salt"));
     assert_eq!(report.seed_source, "salted_exploration");
     assert_eq!(report.counts.generated_seeds, owned);
-    let attempted = (0..seeds)
-        .filter(|index| SimShard::new(1, 2).expect("shard").selects(*index) && index % 20 == 0)
-        .count();
-    assert_eq!(report.determinism_sample.attempted_seeds, attempted);
-    assert_eq!(report.determinism_sample.reproduced_identically, attempted);
     assert_eq!(
         report.counts.real_observation_oracles + report.counts.model_property_oracles,
         report.counts.oracle_passes + report.counts.oracle_failures
@@ -1118,142 +1064,6 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
         !tmp.path().join(GENERATED_SIM_EVENTS).exists(),
         "search mode must not retain the delivered-boundary log"
     );
-}
-
-#[tokio::test]
-async fn determinism_projection_canonicalizes_entropy_but_keeps_state_semantics() {
-    fn replace_string(value: &mut Value, from: &str, to: &str) {
-        match value {
-            Value::Object(object) => {
-                for value in object.values_mut() {
-                    replace_string(value, from, to);
-                }
-            }
-            Value::Array(values) => {
-                for value in values {
-                    replace_string(value, from, to);
-                }
-            }
-            Value::String(value) if value == from => *value = to.to_string(),
-            _ => {}
-        }
-    }
-
-    let workload = generate_workload(5, "fast-random", 24).expect("workload");
-    let first = run_generated_workload_for_fixture(workload, "bundle")
-        .await
-        .expect("trace");
-    let mut scheduler_change: SimulationTrace =
-        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
-            .expect("trace clone");
-    scheduler_change.events[0].scheduler.min_scheduled_at = 987_654;
-    require_identical_simulation_rerun(0, &first, &scheduler_change)
-        .expect_err("scheduler timing mutation must be red");
-    let mut entropy_only: SimulationTrace =
-        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
-            .expect("trace clone");
-    let state = entropy_only
-        .durable_writes
-        .iter_mut()
-        .filter_map(|write| write.state.as_mut())
-        .find(|state| {
-            state
-                .submitted_graph_append
-                .pointer("/nodes/0/node_id")
-                .and_then(Value::as_str)
-                .is_some()
-        })
-        .expect("checkpoint graph state");
-    let node_id = state
-        .submitted_graph_append
-        .pointer("/nodes/0/node_id")
-        .and_then(Value::as_str)
-        .expect("node id")
-        .to_string();
-    let replacement = format!("entropy-replacement-{node_id}");
-    for event in &mut entropy_only.events {
-        replace_string(&mut event.payload, &node_id, &replacement);
-        replace_string(&mut event.observed, &node_id, &replacement);
-    }
-    for write in &mut entropy_only.durable_writes {
-        if let Some(state) = &mut write.state {
-            for value in [
-                &mut state.submitted_graph_append,
-                &mut state.submitted_turn_state,
-                &mut state.submitted_usage_rows,
-            ] {
-                replace_string(value, &node_id, &replacement);
-            }
-            if let Some(value) = &mut state.accepted_raw_rows {
-                replace_string(value, &node_id, &replacement);
-            }
-            if let Some(value) = &mut state.accepted_read_model {
-                replace_string(value, &node_id, &replacement);
-            }
-        }
-    }
-    require_identical_simulation_rerun(0, &first, &entropy_only)
-        .expect("runtime identity entropy must canonicalize");
-
-    let mut semantic_change: SimulationTrace =
-        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
-            .expect("trace clone");
-    let turn_state = semantic_change
-        .durable_writes
-        .iter_mut()
-        .filter_map(|write| write.state.as_mut())
-        .map(|state| &mut state.submitted_turn_state)
-        .find(|turn_state| turn_state.get("token_usage").is_some())
-        .expect("submitted turn state");
-    turn_state["token_usage"]["input_tokens"] = json!(999_999);
-    let error = require_identical_simulation_rerun(0, &first, &semantic_change)
-        .expect_err("semantic checkpoint-state mutation must be red");
-    let message = error.to_string();
-    assert!(message.contains("durable_writes"));
-    assert!(message.contains("state"));
-
-    let mut graph_count_change: SimulationTrace =
-        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
-            .expect("trace clone");
-    let read_model = graph_count_change
-        .durable_writes
-        .iter_mut()
-        .filter_map(|write| write.state.as_mut())
-        .filter_map(|state| state.accepted_read_model.as_mut())
-        .next()
-        .expect("accepted read model");
-    read_model["graph_node_count"] = json!(4_242);
-    require_identical_simulation_rerun(0, &first, &graph_count_change)
-        .expect_err("graph-node-count mutation must be red");
-
-    let mut messages_change: SimulationTrace =
-        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
-            .expect("trace clone");
-    let read_model = messages_change
-        .durable_writes
-        .iter_mut()
-        .filter_map(|write| write.state.as_mut())
-        .filter_map(|state| state.accepted_read_model.as_mut())
-        .next()
-        .expect("accepted read model");
-    read_model["messages"] = json!([{"mutated": true}]);
-    require_identical_simulation_rerun(0, &first, &messages_change)
-        .expect_err("read-model messages mutation must be red");
-
-    let mut ledger_change: SimulationTrace =
-        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
-            .expect("trace clone");
-    let usage = ledger_change
-        .durable_writes
-        .iter_mut()
-        .filter_map(|write| write.state.as_mut())
-        .filter_map(|state| state.accepted_raw_rows.as_mut())
-        .filter_map(|raw| raw.pointer_mut("/token_ledger/0/usage/output_tokens"))
-        .next()
-        .expect("accepted token-ledger usage");
-    *usage = json!(31_337);
-    require_identical_simulation_rerun(0, &first, &ledger_change)
-        .expect_err("accepted token-ledger usage mutation must be red");
 }
 
 #[test]
@@ -1939,14 +1749,14 @@ fn runtime_completion_ready_gates_provider_tool_and_durable_boundaries() {
     assert!(runtime_completion_ready(&provider_two, &state));
     assert!(runtime_completion_ready(&tool, &state));
 
-    // Under the serial discipline a handler boundary never starts beside a
+    // With provider-turn serialization a handler boundary never starts beside a
     // live provider turn of any session.
-    let mut serial = RuntimeCompletionState {
+    let mut serialized = RuntimeCompletionState {
         serialize_provider_turns: true,
         ..RuntimeCompletionState::default()
     };
     for alias in ["session-001", "session-002"] {
-        serial.observe(&test_delivered(
+        serialized.observe(&test_delivered(
             0,
             &format!("{alias}:ingress"),
             alias,
@@ -1954,17 +1764,17 @@ fn runtime_completion_ready_gates_provider_tool_and_durable_boundaries() {
             json!({}),
         ));
     }
-    assert!(runtime_completion_ready(&durable, &serial));
-    serial.provider_started("session-002");
-    assert!(!runtime_completion_ready(&durable, &serial));
-    serial.observe(&test_delivered(
+    assert!(runtime_completion_ready(&durable, &serialized));
+    serialized.provider_started("session-002");
+    assert!(!runtime_completion_ready(&durable, &serialized));
+    serialized.observe(&test_delivered(
         1,
         "session-002:provider:001",
         "session-002",
         BoundaryKind::Provider,
         json!({}),
     ));
-    assert!(runtime_completion_ready(&durable, &serial));
+    assert!(runtime_completion_ready(&durable, &serialized));
 }
 
 #[test]
@@ -2258,89 +2068,4 @@ async fn confidence_seed_cancellation_replays_exact_outcome() {
         crate::replay::replay_trace(Path::new("predecessor"), &predecessor),
         Err(crate::replay::ReplayError::IncompatibleTrace(_))
     ));
-}
-
-/// FIG-3053. Seed `0xfefec57c311b17fb` is the `fast-random` search-mode
-/// determinism sample that exposed a host-timing leak into recorded simulator
-/// evidence: two runs of this workload agreed on every delivery and every
-/// delivery order, yet recorded different `scheduler.pending_before` for a
-/// delivery both runs made at the same simulated time. The cause was that a
-/// provider turn's completion boundary was scheduled from whichever host pass
-/// first observed its join handle as finished, so a busy machine — a CI shard
-/// running the whole crate's tests in one process — could insert a
-/// future-dated completion one or more deliveries earlier and change the queue
-/// depth every delivery in between recorded.
-///
-/// The fix stages harvested completions and admits them on a purely logical
-/// condition, so this pins the property that makes the flake impossible rather
-/// than trying to re-race it: the same workload driven on runtimes with
-/// deliberately different task-poll behaviour must produce byte-identical
-/// simulator evidence.
-#[test]
-fn provider_completion_entry_does_not_depend_on_host_task_poll_timing() {
-    const SEED: u64 = 0xfefe_c57c_311b_17fb;
-
-    fn drive(multi_threaded: bool) -> SimulationTrace {
-        run_on_sim_harness_stack(
-            "fig-3053-provider-completion-entry",
-            SIM_HARNESS_STACK_LIMIT_BYTES,
-            move || {
-                let mut builder = if multi_threaded {
-                    let mut builder = tokio::runtime::Builder::new_multi_thread();
-                    builder.worker_threads(4);
-                    builder
-                } else {
-                    tokio::runtime::Builder::new_current_thread()
-                };
-                let runtime = builder
-                    .enable_all()
-                    .build()
-                    .map_err(FixedScriptRunnerError::Io)?;
-                let workload = generate_workload(SEED, "fast-random", 24)
-                    .map_err(|err| FixedScriptRunnerError::Assertion(err.to_string()))?;
-                runtime.block_on(run_generated_workload_for_fixture(
-                    workload,
-                    "fig-3053-bundle",
-                ))
-            },
-        )
-        .expect("drive seed-fefec57c311b17fb")
-    }
-
-    // A current-thread runtime polls a spawned provider turn only when the
-    // driver itself yields; four worker threads poll it in parallel with the
-    // driver. If completion entry were still decided by the first pass that
-    // observes a finished handle, these two would disagree on the queue depth
-    // recorded for the deliveries between the turn finishing and its
-    // completion's scheduled time.
-    let current_thread = drive(false);
-    let multi_thread = drive(true);
-    // The scheduler record is the simulator's own evidence: which boundary was
-    // delivered, when, out of how deep a queue, and under which seed. All of it
-    // must be a function of the workload. (Runtime-generated identities inside
-    // the durable writes are a separate, already-canonicalized concern and are
-    // not what this seed regressed on.)
-    let scheduler_evidence = |trace: &SimulationTrace| {
-        trace
-            .events
-            .iter()
-            .map(|event| (event.boundary_id.clone(), event.at, event.scheduler.clone()))
-            .collect::<Vec<_>>()
-    };
-    let first = scheduler_evidence(&current_thread);
-    let second = scheduler_evidence(&multi_thread);
-    let difference = first
-        .iter()
-        .zip(second.iter())
-        .position(|(left, right)| left != right);
-    assert!(
-        difference.is_none() && first.len() == second.len(),
-        "seed-{SEED:016x} recorded different scheduler evidence under two host runtimes: \
-         {} deliveries vs {}; first difference at index {:?}: {:?} vs {:?}",
-        first.len(),
-        second.len(),
-        difference,
-        difference.map(|index| &first[index]),
-        difference.map(|index| &second[index]),
-    );
 }

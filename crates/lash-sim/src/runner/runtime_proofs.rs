@@ -453,6 +453,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session_id = result.state.session_id.clone();
     let turn_index = result.state.turn_index;
+    engine.restate().server().settle().await;
 
     Ok(PendingToolCompletionProof {
         schema: "lash.sim.pending-tool-completion-proof.v1",

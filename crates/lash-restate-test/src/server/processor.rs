@@ -114,9 +114,6 @@ pub struct Stats {
     pub retries: u64,
     pub crashes: u64,
     pub timers_fired: u64,
-    /// Serial scheduling: turns taken from a holder that stalled without
-    /// the server seeing why (see the `serial` module docs).
-    pub stall_preemptions: u64,
 }
 
 /// The effective invoker retry policy of one handler.
@@ -160,8 +157,6 @@ pub struct State {
     pub timers: BTreeMap<(u64, u64, u64), TimerAction>,
     pub crash_plan: CrashPlan,
     pub stats: Stats,
-    /// The serial scheduler, under [`Scheduling::Serial`](super::Scheduling::Serial).
-    pub serial: Option<super::serial::Serial>,
     /// Virtual time at the last move, and the wall instant it happened: auto
     /// advance lets virtual time flow at wall speed from here.
     pub anchor: (u64, std::time::Instant),
@@ -186,9 +181,8 @@ impl State {
         self.anchor.0.saturating_add(elapsed)
     }
 
-    pub fn new(seed: u64, start_ms: u64, scheduling: super::Scheduling) -> Self {
+    pub fn new(seed: u64, start_ms: u64) -> Self {
         Self {
-            serial: (scheduling == super::Scheduling::Serial).then(super::serial::Serial::default),
             anchor: (start_ms, std::time::Instant::now()),
             frame_received_us: 0,
             shut: false,
@@ -212,9 +206,6 @@ impl State {
     /// outside request that waits to land go, to a 503.
     pub(super) fn shut_down(&mut self) {
         self.shut = true;
-        if let Some(serial) = &mut self.serial {
-            serial.shut_down();
-        }
     }
 
     pub(super) fn touch(&mut self, key: InvKey) {
@@ -502,12 +493,6 @@ impl State {
             let _ = sender.send(entry.frame.encode());
         }
         let probe = Arc::new(InputProbe::default());
-        let (start_gate, started) = if self.serial.is_some() {
-            let (gate, started) = tokio::sync::oneshot::channel();
-            (Some(gate), Some(started))
-        } else {
-            (None, None)
-        };
         let invocation = &mut self.invocations[key.0];
         let wake = Arc::clone(&sh.activity);
         let body = AttemptBody::new(
@@ -523,16 +508,13 @@ impl State {
             invocation.target.handler.clone(),
             body,
             Arc::clone(&probe),
-            started,
         ));
         invocation.status = Status::Running(LiveAttempt::new(
             number,
             (!always_replay).then_some(sender),
             probe,
             handle,
-            start_gate,
         ));
-        self.make_ready((key, number));
         self.stats.attempts += 1;
         if number > 1 || journal_len > 1 {
             self.stats.replays += 1;
@@ -630,7 +612,6 @@ impl State {
         if let Status::Running(attempt) = &mut self.invocations[key.0].status {
             attempt.close();
         }
-        self.delivered(key);
     }
 
     // ---------------------------------------------------------------------
@@ -729,7 +710,6 @@ impl State {
             _ => false,
         };
         self.touch(key);
-        self.delivered(key);
         if resume {
             self.start_attempt(sh, key);
         }
@@ -772,7 +752,6 @@ impl State {
             return Flow::Stop;
         }
         self.frame_received_us = received_us;
-        self.progressed();
         let site = self.crash_site(key, &frame);
         // A random crash's draw is keyed to the frame it would hit, so one
         // seed crashes the same frames however attempts interleave.
@@ -911,7 +890,6 @@ impl State {
                                 .encode(),
                             );
                         }
-                        self.delivered(key);
                     }
                 }
                 Ok(Flow::Continue)
@@ -1082,13 +1060,6 @@ impl State {
     /// Register `waiter` for `key`'s completion, answering at once if it
     /// already completed.
     pub fn add_waiter(&mut self, sh: &Arc<Shared>, key: InvKey, waiter: Waiter) {
-        if let Waiter::Ingress {
-            ticket: Some(ticket),
-            ..
-        } = &waiter
-        {
-            self.ingress_awaits(*ticket, key);
-        }
         if let Status::Completed(outcome) = &self.invocations[key.0].status {
             let outcome = outcome.clone();
             self.answer_waiter(sh, waiter, &outcome);
@@ -1119,13 +1090,8 @@ impl State {
                 notification_template::Id::CompletionId(completion_id),
                 Self::outcome_result(outcome),
             ),
-            Waiter::Ingress { sender, ticket } => {
+            Waiter::Ingress { sender } => {
                 let _ = sender.send(outcome.clone());
-                // Answered: the handler that issued it waits on the turn
-                // from here on, not on the server.
-                if let Some(ticket) = ticket {
-                    self.ingress_ended(ticket);
-                }
             }
         }
     }
@@ -1459,12 +1425,10 @@ impl State {
                 Status::Running(attempt) => {
                     attempt.is_open()
                         && attempt.probe.is_idle()
-                        && !attempt.has_held_work()
                         && invocation.pending_runs.is_empty()
                 }
                 _ => true,
             })
-            && !self.serial_pending()
     }
 
     pub fn timers(&self) -> Vec<TimerView> {

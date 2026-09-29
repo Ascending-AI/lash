@@ -5,62 +5,14 @@
 use std::sync::Arc;
 
 use http_body_util::BodyExt;
-use tokio::sync::oneshot;
 
 use super::Shared;
 use super::body::{AttemptBody, InputProbe};
 use super::model::InvKey;
 use super::processor::Flow;
-use super::serial::Turn;
 use crate::protocol::FrameDecoder;
 
-tokio::task_local! {
-    /// The attempt whose task is running: the server it belongs to (by
-    /// address) and its turn. Ingress requests a handler issues read it.
-    static CURRENT: (usize, Turn);
-}
-
-/// The turn of the attempt whose task is running this code, if it belongs
-/// to `shared`'s server.
-pub(super) fn current_turn(shared: &Arc<Shared>) -> Option<Turn> {
-    let server = Arc::as_ptr(shared) as usize;
-    CURRENT
-        .try_with(|(owner, turn)| (*owner == server).then_some(*turn))
-        .ok()
-        .flatten()
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one attempt's whole identity, handed from the processor to its task"
-)]
 pub(super) async fn run(
-    shared: Arc<Shared>,
-    key: InvKey,
-    number: u32,
-    service: String,
-    handler: String,
-    body: AttemptBody,
-    probe: Arc<InputProbe>,
-    started: Option<oneshot::Receiver<()>>,
-) {
-    // Serial scheduling: the attempt does not touch its handler before it
-    // first holds the turn.
-    if let Some(started) = started
-        && started.await.is_err()
-    {
-        return;
-    }
-    let server = Arc::as_ptr(&shared) as usize;
-    CURRENT
-        .scope(
-            (server, (key, number)),
-            drive(shared, key, number, service, handler, body, probe),
-        )
-        .await;
-}
-
-async fn drive(
     shared: Arc<Shared>,
     key: InvKey,
     number: u32,
@@ -185,10 +137,7 @@ async fn drive(
             let pending = matches!(polled, Ok(std::task::Poll::Pending));
             probe.set_response_drained(pending);
             if pending {
-                // Decide the turn at the park itself, not whenever the
-                // scheduler's task next runs: by then work outside the
-                // server (a store call) may have woken the handler again.
-                shared.parked();
+                shared.activity.notify_waiters();
             }
             match polled {
                 Ok(std::task::Poll::Ready(frame)) => std::task::Poll::Ready(Ok(frame)),
@@ -219,12 +168,6 @@ async fn drive(
         loop {
             match decoder.next_frame() {
                 Ok(Some(frame)) => {
-                    // Serial scheduling: an attempt that gave the turn up
-                    // while its handler went on (a watch in flight beside
-                    // its own work, say) writes once it holds the turn.
-                    if shared.config.scheduling == super::Scheduling::Serial {
-                        shared.await_turn((key, number), super::Wake::Outside).await;
-                    }
                     if shared.on_frame(key, number, frame, received_us) == Flow::Stop {
                         return;
                     }

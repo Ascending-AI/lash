@@ -3,7 +3,6 @@
 //! (cancel, kill, resume, purge, the `sys_invocation` query), served in process.
 
 use std::sync::{Arc, Weak};
-use std::task::Poll;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -58,91 +57,27 @@ impl HttpTransport for IngressTransport {
         if shared.lock().shut {
             return Ok(error(503, "the Restate test server has shut down"));
         }
-        // Serial scheduling: a request a handler issues frees the turn for
-        // the invocations it may wait on, and the handler resumes only once
-        // its attempt holds the turn again.
-        let turn = shared.current_turn();
-        if turn.is_some() {
-            // The SDK writes a `ctx.run`'s command before it polls the
-            // closure, but the attempt task applies it only once the handler
-            // yields: yield once, so the run this request is issued from is
-            // on the journal when the request is attributed to it.
-            tokio::task::yield_now().await;
-        }
-        let waiting = turn.map(|turn| (turn, shared.ingress_began(turn)));
-        // A caller may drop the request before it answers (a `select!`, a
-        // timeout): its handler no longer waits on it.
-        let mut abandoned = waiting.map(|(_, ticket)| Abandoned {
-            shared: Arc::clone(&shared),
-            ticket,
-            answered: false,
-        });
-        let routes = Routes {
-            shared: Arc::clone(&shared),
-            ticket: waiting.map(|(_, ticket)| ticket),
-        };
         let message = request
             .response_start_timeout_message
             .clone()
             .unwrap_or_else(|| format!("{} timed out", request.url));
-        let outside = shared.config.scheduling == super::Scheduling::Serial && turn.is_none();
-        let response = run_with_timeout(
+        run_with_timeout(
             async {
-                if !outside {
-                    return Ok(routes.route(request).await);
+                Ok(Routes {
+                    shared: Arc::clone(&shared),
                 }
-                // Serial scheduling: land between turns. A route reaches the
-                // server in its first poll — it submits, signals or reads
-                // under the lock before it first waits — so the request has
-                // landed once that poll returns.
-                let landing = routes
-                    .shared
-                    .wait_to_land(&request.url, &request.body)
-                    .await;
-                let mut route = std::pin::pin!(routes.route(request));
-                let first = std::future::poll_fn(|cx| Poll::Ready(route.as_mut().poll(cx))).await;
-                drop(landing);
-                Ok(match first {
-                    Poll::Ready(response) => response,
-                    Poll::Pending => route.await,
-                })
+                .route(request)
+                .await)
             },
             timeout,
             &message,
         )
-        .await;
-        if let Some((turn, ticket)) = waiting {
-            if let Some(abandoned) = &mut abandoned {
-                abandoned.answered = true;
-            }
-            shared.ingress_ended(turn, ticket).await;
-        }
-        response
-    }
-}
-
-/// Serial scheduling: a handler's ingress request its caller dropped
-/// unanswered ends there, so the server does not count the handler as
-/// waiting on it.
-struct Abandoned {
-    shared: Arc<Shared>,
-    ticket: u64,
-    answered: bool,
-}
-
-impl Drop for Abandoned {
-    fn drop(&mut self) {
-        if !self.answered {
-            self.shared.ingress_abandoned(self.ticket);
-        }
+        .await
     }
 }
 
 struct Routes {
     shared: Arc<Shared>,
-    /// The serial scheduler's ticket of the request, when an attempt's
-    /// handler issued it.
-    ticket: Option<u64>,
 }
 
 fn respond(status: u16, body: impl Into<Bytes>) -> HttpResponse {
@@ -398,14 +333,7 @@ impl Routes {
             let id = state.invocations[invocation.0].id.as_str().to_owned();
             let receiver = (!send && submitted != Submitted::WorkflowRunExists).then(|| {
                 let (sender, receiver) = oneshot::channel();
-                state.add_waiter(
-                    &self.shared,
-                    invocation,
-                    Waiter::Ingress {
-                        sender,
-                        ticket: self.ticket,
-                    },
-                );
+                state.add_waiter(&self.shared, invocation, Waiter::Ingress { sender });
                 receiver
             });
             (receiver, submitted, id)
@@ -454,14 +382,7 @@ impl Routes {
                 _ => {}
             }
             let (sender, receiver) = oneshot::channel();
-            state.add_waiter(
-                &self.shared,
-                invocation,
-                Waiter::Ingress {
-                    sender,
-                    ticket: self.ticket,
-                },
-            );
+            state.add_waiter(&self.shared, invocation, Waiter::Ingress { sender });
             receiver
         };
         match receiver.await {

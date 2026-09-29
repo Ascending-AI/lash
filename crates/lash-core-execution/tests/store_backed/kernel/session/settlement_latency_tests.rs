@@ -436,7 +436,6 @@ async fn deferred_leaves_settle_in_completion_order_not_launch_order() {
     let double =
         crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
-    let _gate = double.server().outside_gates().enter();
     let handler = double
         .open_handler(crate::AdmittedScope::turn(
             SessionId::from("session"),
@@ -552,7 +551,6 @@ async fn drain_slot_handshake_batch() -> crate::session::ToolBatchReplies {
     let double =
         crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
-    let _gate = double.server().outside_gates().enter();
     let handler = double
         .open_handler(crate::AdmittedScope::turn(
             SessionId::from("session"),
@@ -597,7 +595,6 @@ async fn completion_order_follows_the_delays_in_both_directions() {
     let double =
         crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
-    let _gate = double.server().outside_gates().enter();
     let handler = double
         .open_handler(crate::AdmittedScope::turn(
             SessionId::from("session"),
@@ -748,7 +745,6 @@ async fn mixed_batch(
     let double =
         crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
-    let _gate = double.server().outside_gates().enter();
     let controller = probe_controller(&backend);
     let handler = double
         .open_handler(crate::AdmittedScope::turn(

@@ -104,9 +104,7 @@ pub(crate) async fn memory_backend() -> crate::Backend {
 /// engine over a SQLite memory store set, the twin of [`memory_backend`] for a
 /// kernel test whose effects run on an engine. Hold the double to the end of
 /// the test and never build a core over the handle itself (FIG-3723); a turn
-/// runs on `double.open_handler(scope)`'s scoped controller. Under
-/// `Scheduling::Serial`, a scripted provider that waits on the test holds
-/// `double.server().outside_gates().enter()` across the wait.
+/// runs on `double.open_handler(scope)`'s scoped controller.
 #[cfg(test)]
 pub(crate) async fn kernel_double(
     seed: u64,

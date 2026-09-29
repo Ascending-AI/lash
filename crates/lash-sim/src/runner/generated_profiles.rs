@@ -2,7 +2,6 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use crate::scheduler::PendingRuntimeBoundary;
-use crate::trace::value_digest;
 
 /// Anti-vacuity: across the whole generated seed set, the interleaving,
 /// suspend/resume, and transport-mutation boundary classes must EACH appear at
@@ -55,10 +54,9 @@ fn assert_generated_class_coverage(
 ///
 /// `Evidence` writes the full per-seed artifact set (trace, replay report,
 /// minimize package, cross-backend SQLite re-run) for every seed. `Search`
-/// runs every seed live with the full oracle set plus an in-memory
-/// determinism replay, persists a complete reproducibility package under
-/// `failures/seed-<hex>/` only when a seed fails, and fails the run with the
-/// exact replay command.
+/// runs every seed live with the full oracle set and trace replay, persists a
+/// complete failure package under `failures/seed-<hex>/` only when a seed
+/// fails, and fails the run with the exact replay command.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SimRunMode {
     Evidence,
@@ -165,11 +163,6 @@ struct GeneratedRunLabels {
     configured_seeds: usize,
     mode: SimRunMode,
     seed_source: SimSeedSource,
-}
-
-struct DeterminismFailure {
-    error: String,
-    rerun: SimulationTrace,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -342,16 +335,6 @@ async fn run_generated_evidence_profile(
         std::fs::write(&minimize_report_path, serde_json::to_vec_pretty(&minimize)?)?;
         let minimize_report_sha256 = file_sha256(&minimize_report_path)?;
         let minimized_trace_sha256 = file_sha256(&minimize.minimized_trace_path)?;
-        // The serial lane: the same workload twice on a server double that
-        // runs one attempt at a time. One seed must reach one outcome through
-        // one grant order, with no stall.
-        let serial_first = run_serial_lane(generate_workload(seed, profile, boundary_limit)?)?;
-        let serial_second = run_serial_lane(generate_workload(seed, profile, boundary_limit)?)?;
-        let serial_verdict = serial_engine_determinism(seed, &serial_first, &serial_second);
-        if !serial_verdict.is_passed() {
-            return Err(FixedScriptRunnerError::Assertion(serial_verdict.message));
-        }
-        oracle_verdicts.push(serial_verdict);
         replay_reports.push(GeneratedReplayArtifact {
             seed,
             trace_path: relative_path(artifact_root, &trace_path),
@@ -448,12 +431,6 @@ async fn run_generated_evidence_profile(
         seed_source: labels.seed_source.source_name(),
         seed_salt: labels.seed_source.salt().map(ToString::to_string),
         seed_corpus: labels.seed_source.corpus(),
-        determinism_sample: GeneratedDeterminismSample {
-            policy: "not_applicable_to_evidence_mode",
-            selected_seed_indices: Vec::new(),
-            attempted_seeds: 0,
-            reproduced_identically: 0,
-        },
         generator_version: GENERATOR_VERSION,
         script_bundle_hash: fixed_manifest.script_bundle_hash.clone(),
         provider_manifest_path: GENERATED_SIM_PROVIDER_MANIFEST,
@@ -507,7 +484,7 @@ async fn run_generated_evidence_profile(
 }
 
 /// High-volume seed search over the generated DST world. Every seed runs live
-/// with the full oracle set plus an in-memory determinism replay; passing
+/// with the full oracle set plus trace replay; passing
 /// seeds retain no per-seed artifacts, and the first failing seed persists a
 /// complete reproducibility package under `failures/seed-<hex>/` (trace,
 /// replay evidence, failing oracles, final summary, minimized regression
@@ -571,13 +548,6 @@ async fn run_generated_search_profile(
     let mut interleaving_depth_max = 0usize;
     let mut interleaving_depth_min = usize::MAX;
 
-    let selected_determinism_indices = indexed_seeds
-        .iter()
-        .filter_map(|(index, _)| (index % 20 == 0).then_some(*index))
-        .collect::<Vec<_>>();
-    let mut determinism_attempted = 0usize;
-    let mut reproduced_identically = 0usize;
-
     // A time budget bounds the sweep between seeds: a seed that starts always
     // runs to completion, and the loop stops cleanly once the budget is spent.
     let sweep_started = Instant::now();
@@ -626,7 +596,7 @@ async fn run_generated_search_profile(
             }
         }
 
-        // In-memory determinism replay for every search seed. The replay
+        // Trace replay for every search seed. The replay
         // check emits no verdict row, but it is an evaluated oracle check and
         // joins the census under its own oracle id.
         let replay_outcome = replay_trace(&trace_path, &trace);
@@ -637,35 +607,8 @@ async fn run_generated_search_profile(
                 Err(_) => OracleStatus::Failed,
             },
         );
-        let determinism_failure = if seed_index % 20 == 0 {
-            determinism_attempted += 1;
-            let rerun = run_generated_workload(
-                generate_workload(seed, profile, boundary_limit)?,
-                &fixed_manifest.script_bundle_hash,
-                &labels.shard,
-            )
-            .await?;
-            match require_identical_simulation_rerun(seed_index, &trace, &rerun) {
-                Ok(()) => {
-                    reproduced_identically += 1;
-                    oracle_census
-                        .record_unverdicted(REPLAY_DETERMINISM_ORACLE, OracleStatus::Passed);
-                    None
-                }
-                Err(err) => {
-                    oracle_census
-                        .record_unverdicted(REPLAY_DETERMINISM_ORACLE, OracleStatus::Failed);
-                    Some(DeterminismFailure {
-                        error: err.to_string(),
-                        rerun,
-                    })
-                }
-            }
-        } else {
-            None
-        };
         reached_seeds += 1;
-        if trace.oracle.is_passed() && replay_outcome.is_ok() && determinism_failure.is_none() {
+        if trace.oracle.is_passed() && replay_outcome.is_ok() {
             continue;
         }
 
@@ -698,30 +641,6 @@ async fn run_generated_search_profile(
                 )?;
             }
         }
-        let determinism_rerun_trace_path = if let Some(failure) = &determinism_failure {
-            let rerun_trace_path = seed_dir.join("determinism-rerun-trace.json");
-            write_trace(&rerun_trace_path, &failure.rerun)?;
-            let divergence = json!({
-                "schema": "lash.sim.search-determinism-divergence.v1",
-                "seed": seed,
-                "seed_index": seed_index,
-                "profile": profile,
-                "shard": labels.shard,
-                "seed_source": labels.seed_source.source_name(),
-                "seed_salt": labels.seed_source.salt(),
-                "seed_corpus": labels.seed_source.corpus(),
-                "error": failure.error,
-                "first_trace": relative_path(artifact_root, &trace_path),
-                "rerun_trace": relative_path(artifact_root, &rerun_trace_path),
-            });
-            std::fs::write(
-                seed_dir.join("determinism-divergence.json"),
-                serde_json::to_vec_pretty(&divergence)?,
-            )?;
-            Some(relative_path(artifact_root, &rerun_trace_path))
-        } else {
-            None
-        };
         let failing_oracles = trace
             .oracles
             .iter()
@@ -740,7 +659,7 @@ async fn run_generated_search_profile(
         let minimize_summary = if trace.oracle.is_passed() {
             json!({
                 "skipped":
-                    "in-memory determinism replay diverged; minimization targets a failing oracle"
+                    "trace replay diverged; minimization targets a failing oracle"
             })
         } else {
             let minimize_dir = seed_dir.join("minimize");
@@ -759,9 +678,7 @@ async fn run_generated_search_profile(
                 Err(err) => json!({ "error": err.to_string() }),
             }
         };
-        let failure_reason = if let Some(failure) = &determinism_failure {
-            failure.error.clone()
-        } else if trace.oracle.is_passed() {
+        let failure_reason = if trace.oracle.is_passed() {
             match &replay_outcome {
                 Err(err) => err.to_string(),
                 Ok(_) => unreachable!("failing search seed with passing oracle and passing replay"),
@@ -784,7 +701,6 @@ async fn run_generated_search_profile(
             "seed_salt": labels.seed_source.salt(),
             "seed_corpus": labels.seed_source.corpus(),
             "reason": failure_reason,
-            "determinism_rerun_trace": determinism_rerun_trace_path,
             "replay_command": replay_command,
             "regenerate_command": format!(
                 "cargo run -p lash-sim --locked -- run --out <artifact-root> --profile {profile} --seed {seed} --max-boundaries {boundary_limit}"
@@ -836,12 +752,6 @@ async fn run_generated_search_profile(
         seed_source: labels.seed_source.source_name(),
         seed_salt: labels.seed_source.salt().map(ToString::to_string),
         seed_corpus: labels.seed_source.corpus(),
-        determinism_sample: GeneratedDeterminismSample {
-            policy: "global_seed_index_mod_20_equals_zero",
-            selected_seed_indices: selected_determinism_indices,
-            attempted_seeds: determinism_attempted,
-            reproduced_identically,
-        },
         generator_version: GENERATOR_VERSION,
         script_bundle_hash: fixed_manifest.script_bundle_hash.clone(),
         provider_manifest_path: GENERATED_SIM_PROVIDER_MANIFEST,
@@ -976,279 +886,6 @@ pub(super) fn regression_corpus_seed(profile: &str, seed_index: usize) -> u64 {
     let mut bytes = [0_u8; 8];
     bytes.copy_from_slice(&digest[..8]);
     u64::from_le_bytes(bytes)
-}
-
-pub(super) fn require_identical_simulation_rerun(
-    seed_index: usize,
-    first: &SimulationTrace,
-    second: &SimulationTrace,
-) -> Result<(), FixedScriptRunnerError> {
-    let first = determinism_projection(first)?;
-    let second = determinism_projection(second)?;
-    if first != second {
-        let difference = first_json_difference("$", &first, &second)
-            .unwrap_or_else(|| "unknown difference".to_string());
-        return Err(FixedScriptRunnerError::Assertion(format!(
-            "simulator nondeterminism: seed index {seed_index}, seed-{:016x} did not reproduce identically; {difference}; first={}; rerun={}",
-            first["seed"].as_u64().unwrap_or_default(),
-            value_digest(&first),
-            value_digest(&second)
-        )));
-    }
-    Ok(())
-}
-
-pub(super) fn determinism_projection(trace: &SimulationTrace) -> Result<Value, serde_json::Error> {
-    let mut value = serde_json::to_value(trace)?;
-    let mut canonicalizer = CheckpointStateCanonicalizer::default();
-    if let Some(events) = value.get_mut("events").and_then(Value::as_array_mut) {
-        for event in events {
-            // Provider futures are harvested on the first host scheduler pass
-            // that observes completion, so this diagnostic virtual timestamp is
-            // not part of the deterministic simulator decision stream.
-            if let Some(observed) = event.get_mut("observed").and_then(Value::as_object_mut) {
-                observed.remove("sim_clock");
-            }
-            // Runtime-generated identities can also appear in scheduled
-            // payloads. Canonicalize identity entropy only; event timing is
-            // simulator evidence and remains byte-for-byte comparable.
-            canonicalizer.canonicalize_event_identity(event);
-        }
-    }
-    if let Some(writes) = value
-        .get_mut("durable_writes")
-        .and_then(Value::as_array_mut)
-    {
-        for write in writes {
-            let attributed_session = write
-                .get("attributed_session_id")
-                .and_then(Value::as_str)
-                .map(ToString::to_string);
-            if let Some(attributed_session) = attributed_session {
-                // Separately executed contract proofs allocate a fresh real
-                // runtime session id on every execution, then attribute the
-                // accepted write to a stable generated session. The raw UUID is
-                // entropy by contract; its stable attribution is the simulator
-                // identity checked here.
-                write["session_id"] = Value::String(attributed_session);
-            }
-            if let Some(state) = write.get_mut("state") {
-                canonicalizer.canonicalize_checkpoint_state(state);
-            }
-        }
-    }
-    Ok(value)
-}
-
-#[derive(Default)]
-struct CheckpointStateCanonicalizer {
-    node_ids: BTreeMap<String, String>,
-    session_uuids: BTreeMap<String, String>,
-    embedded_uuids: BTreeMap<String, String>,
-    embedded_hashes: BTreeMap<String, String>,
-    message_ids: BTreeMap<String, String>,
-}
-
-impl CheckpointStateCanonicalizer {
-    fn canonicalize_event_identity(&mut self, value: &mut Value) {
-        self.canonicalize(value, None, false);
-    }
-
-    fn canonicalize_checkpoint_state(&mut self, value: &mut Value) {
-        self.canonicalize(value, None, true);
-    }
-
-    fn canonicalize(&mut self, value: &mut Value, key: Option<&str>, checkpoint_timestamps: bool) {
-        match value {
-            Value::Object(object) => {
-                for (key, value) in object {
-                    self.canonicalize(value, Some(key), checkpoint_timestamps);
-                }
-            }
-            Value::Array(values) => {
-                for value in values {
-                    self.canonicalize(value, key, checkpoint_timestamps);
-                }
-            }
-            Value::String(raw) if key.is_some_and(is_node_identity_field) => {
-                *raw = canonical_alias(&mut self.node_ids, raw, "node");
-            }
-            Value::String(raw) if key == Some("session_id") && looks_like_uuid(raw.as_str()) => {
-                *raw = canonical_alias(&mut self.session_uuids, raw, "session-uuid");
-            }
-            Value::String(raw)
-                if checkpoint_timestamps && key.is_some_and(is_checkpoint_timestamp_field) =>
-            {
-                *raw = "<canonical-timestamp>".to_string();
-            }
-            Value::String(raw) if raw.starts_with("m_turn_") => {
-                *raw = canonical_alias(&mut self.message_ids, raw, "message");
-            }
-            Value::String(raw) => {
-                *raw = canonicalize_embedded_hashes(&mut self.embedded_hashes, raw);
-                *raw = canonicalize_embedded_uuids(&mut self.embedded_uuids, raw);
-            }
-            Value::Number(number)
-                if checkpoint_timestamps && key.is_some_and(is_checkpoint_timestamp_field) =>
-            {
-                *number = serde_json::Number::from(0);
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Digest-shaped identities a run derives from its own identity entropy, as
-/// `(marker, alias prefix)`: each is a marker then 64 hex digits.
-///
-/// `ti:` is a provisioned turn-input id, a digest of the turn acceptance's
-/// effect address (FIG-3513). That address carries the runtime-minted turn
-/// UUID, so the id differs on every execution exactly as the UUID does, and
-/// it reaches durable state bare (`origin.input_id`) and embedded in message
-/// and part ids (`m_ingress_ti:<hex>`, `m_ingress_ti:<hex>.p0`).
-const IDENTITY_DIGEST_MARKERS: &[(&str, &str)] = &[
-    ("sha256:", "sha256"),
-    ("blake3:", "blake3"),
-    ("ti:", "turn-input"),
-];
-
-fn canonicalize_embedded_hashes(aliases: &mut BTreeMap<String, String>, raw: &str) -> String {
-    let mut canonical = raw.to_string();
-    for (marker, prefix) in IDENTITY_DIGEST_MARKERS {
-        let mut search_from = 0usize;
-        while let Some(relative) = canonical[search_from..].find(marker) {
-            let marker_start = search_from + relative;
-            let hash_start = marker_start + marker.len();
-            let hash_end = hash_start + 64;
-            // A marker glued to a preceding word character is part of some
-            // other token (`multi:`), not an identity digest.
-            let at_boundary = canonical[..marker_start]
-                .chars()
-                .next_back()
-                .is_none_or(|character| !character.is_ascii_alphanumeric());
-            let Some(hash) = canonical.get(hash_start..hash_end) else {
-                break;
-            };
-            if !at_boundary || !hash.chars().all(|character| character.is_ascii_hexdigit()) {
-                search_from = hash_start;
-                continue;
-            }
-            let alias_key = format!("{marker}{hash}");
-            let alias = canonical_alias(aliases, &alias_key, prefix);
-            canonical.replace_range(hash_start..hash_end, &alias);
-            search_from = hash_start + alias.len();
-        }
-    }
-    canonical
-}
-
-fn canonicalize_embedded_uuids(aliases: &mut BTreeMap<String, String>, raw: &str) -> String {
-    let mut canonical = raw.to_string();
-    let mut search_from = 0usize;
-    while search_from + 36 <= canonical.len() {
-        let Some((start, uuid)) = (search_from..=canonical.len() - 36).find_map(|start| {
-            let candidate = canonical.get(start..start + 36)?;
-            looks_like_uuid(candidate).then(|| (start, candidate.to_string()))
-        }) else {
-            break;
-        };
-        let alias = canonical_alias(aliases, &uuid, "uuid");
-        canonical.replace_range(start..start + 36, &alias);
-        search_from = start + alias.len();
-    }
-    canonical
-}
-
-fn canonical_alias(aliases: &mut BTreeMap<String, String>, raw: &str, prefix: &str) -> String {
-    if let Some(alias) = aliases.get(raw) {
-        return alias.clone();
-    }
-    let alias = format!("<{prefix}-{:03}>", aliases.len() + 1);
-    aliases.insert(raw.to_string(), alias.clone());
-    alias
-}
-
-fn is_node_identity_field(key: &str) -> bool {
-    matches!(
-        key,
-        "node_id"
-            | "parent_node_id"
-            | "leaf_node_id"
-            | "graph_leaf_node_id"
-            | "current_frame_node_id"
-            | "agent_frame_id"
-            | "turn_id"
-            | "source_turn_id"
-            | "active_frame_ids"
-            | "duplicate_node_ids"
-            | "cycle_node_ids"
-            | "nodes_without_agent_frame"
-            | "node_agent_frame_ids_without_record"
-    )
-}
-
-fn is_checkpoint_timestamp_field(key: &str) -> bool {
-    // Generated v3 checkpoint graph rows are the only currently observed
-    // wall-clock timestamp entropy. Event scheduler and deferral `*_at`
-    // fields are virtual-time semantics and are deliberately not listed.
-    key == "timestamp"
-}
-
-fn looks_like_uuid(value: &str) -> bool {
-    value.len() == 36
-        && value
-            .chars()
-            .enumerate()
-            .all(|(index, character)| match index {
-                8 | 13 | 18 | 23 => character == '-',
-                _ => character.is_ascii_hexdigit(),
-            })
-}
-
-fn first_json_difference(path: &str, first: &Value, second: &Value) -> Option<String> {
-    match (first, second) {
-        (Value::Object(first), Value::Object(second)) => {
-            let keys = first.keys().chain(second.keys()).collect::<BTreeSet<_>>();
-            for key in keys {
-                let child_path = format!("{path}.{key}");
-                match (first.get(key), second.get(key)) {
-                    (Some(first), Some(second)) => {
-                        if let Some(difference) = first_json_difference(&child_path, first, second)
-                        {
-                            return Some(difference);
-                        }
-                    }
-                    (first, second) => {
-                        return Some(format!(
-                            "first difference at {child_path}: first={first:?}; rerun={second:?}"
-                        ));
-                    }
-                }
-            }
-            None
-        }
-        (Value::Array(first), Value::Array(second)) => {
-            if first.len() != second.len() {
-                return Some(format!(
-                    "first difference at {path}.length: first={}; rerun={}",
-                    first.len(),
-                    second.len()
-                ));
-            }
-            for (index, (first, second)) in first.iter().zip(second).enumerate() {
-                if let Some(difference) =
-                    first_json_difference(&format!("{path}[{index}]"), first, second)
-                {
-                    return Some(difference);
-                }
-            }
-            None
-        }
-        _ if first != second => Some(format!(
-            "first difference at {path}: first={first}; rerun={second}"
-        )),
-        _ => None,
-    }
 }
 
 pub(super) fn provider_matrix(
@@ -1390,64 +1027,6 @@ mod seed_tests {
     use super::*;
 
     #[test]
-    fn determinism_projection_canonicalizes_blake3_identity_entropy() {
-        let first = canonicalize_embedded_hashes(
-            &mut BTreeMap::new(),
-            &format!("process:lashlang:v3:blake3:{}", "a".repeat(64)),
-        );
-        let rerun = canonicalize_embedded_hashes(
-            &mut BTreeMap::new(),
-            &format!("process:lashlang:v3:blake3:{}", "b".repeat(64)),
-        );
-
-        assert_eq!(first, rerun);
-        assert_eq!(first, "process:lashlang:v3:blake3:<blake3-001>");
-    }
-
-    #[test]
-    fn determinism_projection_canonicalizes_provisioned_turn_input_ids() {
-        let mut first_aliases = BTreeMap::new();
-        let mut rerun_aliases = BTreeMap::new();
-        let first_id = format!("ti:{}", "a".repeat(64));
-        let rerun_id = format!("ti:{}", "b".repeat(64));
-        for (first, rerun, expected) in [
-            (
-                first_id.clone(),
-                rerun_id.clone(),
-                "ti:<turn-input-001>".to_string(),
-            ),
-            (
-                format!("m_ingress_{first_id}"),
-                format!("m_ingress_{rerun_id}"),
-                "m_ingress_ti:<turn-input-001>".to_string(),
-            ),
-            (
-                format!("m_ingress_{first_id}.p0"),
-                format!("m_ingress_{rerun_id}.p0"),
-                "m_ingress_ti:<turn-input-001>.p0".to_string(),
-            ),
-        ] {
-            let first = canonicalize_embedded_hashes(&mut first_aliases, &first);
-            let rerun = canonicalize_embedded_hashes(&mut rerun_aliases, &rerun);
-            assert_eq!(first, rerun);
-            assert_eq!(first, expected);
-        }
-
-        // Two distinct inputs keep distinct aliases, so a rerun that swaps
-        // which input a message names still diverges.
-        assert_eq!(
-            canonicalize_embedded_hashes(&mut first_aliases, &format!("ti:{}", "c".repeat(64))),
-            "ti:<turn-input-002>"
-        );
-        // A marker inside another word is not an identity digest.
-        let glued = format!("multi:{}", "d".repeat(64));
-        assert_eq!(
-            canonicalize_embedded_hashes(&mut BTreeMap::new(), &glued),
-            glued
-        );
-    }
-
-    #[test]
     fn salted_seed_runs_explore_disjoint_seed_sets_and_reproduce_by_index() {
         let first = (0..1_000)
             .map(|index| generated_seed("full-random", "run-a", index))
@@ -1472,25 +1051,6 @@ mod seed_tests {
             regression_corpus_seed("full-random", 12)
         );
         assert_eq!(corpus.corpus(), Some(WEEKLY_REGRESSION_CORPUS));
-    }
-
-    #[tokio::test]
-    async fn determinism_sample_rejects_an_injected_nondeterminism_source() {
-        let workload = generate_workload(5, "fast-random", 24).expect("workload");
-        let first = run_generated_workload_for_fixture(workload, "bundle")
-            .await
-            .expect("first run");
-        let mut injected = first.clone();
-        let event = injected
-            .events
-            .iter_mut()
-            .find(|event| event.kind == BoundaryKind::Provider)
-            .expect("provider event");
-        event.observed["injected_os_entropy"] = json!(fastrand::u64(..));
-
-        let error = require_identical_simulation_rerun(0, &first, &injected)
-            .expect_err("injected nondeterminism must fail loudly");
-        assert!(error.to_string().contains("simulator nondeterminism"));
     }
 
     #[test]
@@ -1534,7 +1094,6 @@ mod seed_tests {
         );
         assert_eq!(report.counts.reached_seeds, 0);
         assert_eq!(report.counts.boundary_events, 0);
-        assert_eq!(report.determinism_sample.attempted_seeds, 0);
         assert!(tmp.path().join(GENERATED_SIM_SUMMARY).exists());
     }
 }

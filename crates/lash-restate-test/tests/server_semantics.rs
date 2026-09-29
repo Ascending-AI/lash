@@ -1,6 +1,6 @@
 //! The server double's own semantics, on small handlers: the Restate
 //! behaviours lash builds on, each checked in streaming and in always-replay
-//! mode, under concurrent and serial scheduling.
+//! mode, under concurrent scheduling.
 
 #![expect(
     clippy::unwrap_used,
@@ -19,9 +19,9 @@ use std::time::Duration;
 
 use lash_http_transport::{HttpMethod, HttpRequest, read_http_body_bytes};
 use lash_restate_test::{
-    AttemptDispatch, CrashPoint, CrashRule, DeploymentHooks, DeploymentId, OutsideGates, Refusal,
-    RemoveDeploymentError, RestateTestServer, ResumeDeployment, ResumeRefusal, Scheduling,
-    ServerConfig, TimeMode,
+    AttemptDispatch, CrashPoint, CrashRule, DeploymentHooks, DeploymentId, Refusal,
+    RemoveDeploymentError, RestateTestServer, ResumeDeployment, ResumeRefusal, ServerConfig,
+    TimeMode,
 };
 use restate_sdk::prelude::*;
 
@@ -153,42 +153,6 @@ impl Flaky {
     }
 }
 
-/// How many `Gauge/work` handlers are between their two journaled steps
-/// right now, and the most there have ever been at once.
-static GAUGE: Mutex<(usize, usize)> = Mutex::new((0, 0));
-
-struct Gauge;
-
-#[restate_sdk::service]
-impl Gauge {
-    /// Journals a step, does a little wall-clock work outside the journal
-    /// while counted in [`GAUGE`], and journals a second step.
-    #[handler]
-    async fn work(&self, ctx: Context<'_>, Json(tag): Json<String>) -> HandlerResult<Json<String>> {
-        let first = ctx
-            .run(|| async move { Ok(format!("{tag}:in")) })
-            .name("in")
-            .await?;
-        {
-            let mut gauge = GAUGE
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            gauge.0 += 1;
-            gauge.1 = gauge.1.max(gauge.0);
-        }
-        tokio::time::sleep(Duration::from_millis(2)).await;
-        GAUGE
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .0 -= 1;
-        let second = ctx
-            .run(|| async move { Ok(format!("{first}:out")) })
-            .name("out")
-            .await?;
-        Ok(Json(second))
-    }
-}
-
 /// The server's ingress transport, for a handler that calls the ingress
 /// itself — as lash's handlers do when they resolve a durable wait.
 static INGRESS: Mutex<Option<RestateTestServer>> = Mutex::new(None);
@@ -232,22 +196,14 @@ impl Relay {
     }
 }
 
-/// [`INGRESS`] for [`Beside`], so its law runs beside the relay's.
+/// Ingress for a request spawned beside a handler.
 static BESIDE_INGRESS: Mutex<Option<RestateTestServer>> = Mutex::new(None);
-
-/// The gates [`Beside`] declares its wait to, when its law declares it.
-static BESIDE_GATES: Mutex<Option<OutsideGates>> = Mutex::new(None);
 
 struct Beside;
 
 #[restate_sdk::service]
 impl Beside {
-    /// From inside a `ctx.run`, waits on a task it spawned beside itself —
-    /// as lash's gate watches do — that calls `Counter/{key}/add` through
-    /// the server's ingress. The spawned task does not carry the attempt, so
-    /// its request lands as one from outside every attempt, while the
-    /// handler waits on it without being blocked on the server. When its
-    /// law declares [`BESIDE_GATES`], the wait is declared an outside gate.
+    /// Waits inside `ctx.run` for a spawned task that calls ingress.
     #[handler]
     async fn ask(&self, ctx: Context<'_>, Json(key): Json<String>) -> HandlerResult<Json<String>> {
         let server = BESIDE_INGRESS
@@ -255,13 +211,8 @@ impl Beside {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
             .unwrap();
-        let gates = BESIDE_GATES
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
         let answer = ctx
             .run(|| async move {
-                let _gate = gates.as_ref().map(OutsideGates::enter);
                 let task = tokio::spawn(async move {
                     post(&server, &format!("Counter/{key}/add"), "1").await.1
                 });
@@ -280,7 +231,6 @@ fn endpoint() -> Endpoint {
         .bind(Caller)
         .bind(Resolver)
         .bind(Flaky)
-        .bind(Gauge)
         .bind(Relay)
         .bind(Beside)
         .build()
@@ -309,7 +259,7 @@ async fn server(config: ServerConfig) -> RestateTestServer {
     RestateTestServer::start(endpoint(), config).await.unwrap()
 }
 
-fn modes() -> [ServerConfig; 6] {
+fn modes() -> [ServerConfig; 4] {
     [
         ServerConfig::default(),
         ServerConfig::default().always_replay(true),
@@ -317,11 +267,6 @@ fn modes() -> [ServerConfig; 6] {
         ServerConfig::default()
             .protocol(lash_restate_test::ProtocolVersion::V7)
             .always_replay(true),
-        ServerConfig::default().scheduling(Scheduling::Serial),
-        ServerConfig::default()
-            .protocol(lash_restate_test::ProtocolVersion::V7)
-            .always_replay(true)
-            .scheduling(Scheduling::Serial),
     ]
 }
 
@@ -552,72 +497,11 @@ async fn cancelling_a_suspended_workflow_ends_it_as_cancelled() {
     assert_eq!(server.outcome(&id), Some(Err((409, "cancelled".into()))));
 }
 
-#[tokio::test]
-async fn one_seed_reproduces_the_same_journals() {
-    let mut digests = Vec::new();
-    for _ in 0..3 {
-        let server = server(ServerConfig::default().with_seed(42)).await;
-        post(&server, "Caller/twice", "\"d\"").await;
-        post(&server, "Caller/await_awakeable", "").await;
-        server.settle().await;
-        digests.push(server.journal_digest());
-    }
-    assert!(
-        digests.windows(2).all(|pair| pair[0] == pair[1]),
-        "{digests:?}"
-    );
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn serial_scheduling_runs_one_attempt_at_a_time_in_one_seeded_order() {
-    let mut traces = Vec::new();
-    for _ in 0..3 {
-        *GAUGE.lock().unwrap() = (0, 0);
-        let server = server(
-            ServerConfig::default()
-                .with_seed(11)
-                .scheduling(Scheduling::Serial),
-        )
-        .await;
-        for index in 0..6 {
-            assert_eq!(
-                post(&server, "Gauge/work/send", &format!("\"{index}\""))
-                    .await
-                    .0,
-                202
-            );
-        }
-        server.settle().await;
-        let completed = server
-            .invocations()
-            .iter()
-            .filter(|view| view.status == "completed")
-            .count();
-        assert_eq!(
-            completed,
-            6,
-            "{:#?} {:?}",
-            server.invocations(),
-            server.schedule_trace()
-        );
-        assert_eq!(GAUGE.lock().unwrap().1, 1, "one handler ran at a time");
-        assert_eq!(server.stats().stall_preemptions, 0);
-        traces.push(server.schedule_trace());
-    }
-    assert!(traces[0].len() >= 6, "{:?}", traces[0]);
-    assert!(
-        traces.windows(2).all(|pair| pair[0] == pair[1]),
-        "one seed grants the turn in one order: {traces:?}"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_handler_waiting_on_its_own_ingress_request_yields_the_serial_turn() {
+async fn a_handler_waiting_on_its_own_ingress_request_completes() {
     for config in [
-        ServerConfig::default().scheduling(Scheduling::Serial),
-        ServerConfig::default()
-            .always_replay(true)
-            .scheduling(Scheduling::Serial),
+        ServerConfig::default(),
+        ServerConfig::default().always_replay(true),
     ] {
         let server = server(config).await;
         *INGRESS.lock().unwrap() = Some(server.clone());
@@ -625,62 +509,33 @@ async fn a_handler_waiting_on_its_own_ingress_request_yields_the_serial_turn() {
             post(&server, "Relay/ask", "\"relay\"").await,
             (200, "\"1\"".into())
         );
-        // Outside any `ctx.run` too: parked on its own request, whose
-        // target is ready, the handler gives the turn to that target.
         assert_eq!(
             post(&server, "Relay/ask_direct", "\"direct\"").await,
             (200, "\"1\"".into())
         );
-        // The relay's requests are attributed to its attempt, so the turn
-        // moves to the counter at once instead of after a stall.
-        assert_eq!(server.stats().stall_preemptions, 0);
         *INGRESS.lock().unwrap() = None;
     }
 }
 
-/// A handler inside a `ctx.run` waits on a task it spawned, whose request
-/// lands as one from outside every attempt. Declared as an outside gate,
-/// the wait lets that request land between turns with no stall, in one
-/// order per seed on a current-thread runtime; undeclared, the request
-/// still lands, once the holder has stalled.
+/// A handler inside `ctx.run` waits on a spawned task whose ingress request
+/// must complete before the handler can finish.
 #[tokio::test]
-async fn an_outside_request_a_holder_waits_on_lands_at_a_declared_gate_or_after_a_stall() {
-    let mut traces = Vec::new();
-    for declared in [true, true, true, false] {
-        for config in [
-            ServerConfig::default()
-                .with_seed(7)
-                .scheduling(Scheduling::Serial),
-            ServerConfig::default()
-                .with_seed(7)
-                .always_replay(true)
-                .scheduling(Scheduling::Serial),
-        ] {
-            let server = server(config).await;
-            *BESIDE_INGRESS.lock().unwrap() = Some(server.clone());
-            *BESIDE_GATES.lock().unwrap() = declared.then(|| server.outside_gates());
-            let answer = tokio::time::timeout(
-                Duration::from_secs(20),
-                post(&server, "Beside/ask", "\"beside\""),
-            )
-            .await
-            .expect("the outside request lands");
-            assert_eq!(answer, (200, "\"1\"".into()));
-            let stalls = server.stats().stall_preemptions;
-            if declared {
-                assert_eq!(stalls, 0, "a declared gate lands the request between turns");
-                traces.push(server.schedule_trace());
-            } else {
-                assert!(stalls >= 1, "an undeclared wait lands only after a stall");
-            }
-            *BESIDE_GATES.lock().unwrap() = None;
-            *BESIDE_INGRESS.lock().unwrap() = None;
-        }
+async fn a_spawned_request_completes_while_its_handler_waits() {
+    for config in [
+        ServerConfig::default(),
+        ServerConfig::default().always_replay(true),
+    ] {
+        let server = server(config).await;
+        *BESIDE_INGRESS.lock().unwrap() = Some(server.clone());
+        let answer = tokio::time::timeout(
+            Duration::from_secs(20),
+            post(&server, "Beside/ask", "\"beside\""),
+        )
+        .await
+        .expect("the spawned request completes");
+        assert_eq!(answer, (200, "\"1\"".into()));
+        *BESIDE_INGRESS.lock().unwrap() = None;
     }
-    assert!(
-        traces.chunks(2).all(|runs| runs == &traces[..2]),
-        "one seed grants the turn in one order: {traces:?}"
-    )
 }
 
 // ---------------------------------------------------------------------------

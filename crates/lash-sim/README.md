@@ -17,11 +17,9 @@ the replay evidence. The `run` command has two modes:
 
 - `--mode evidence` (default): every seed writes trace/replay/minimize
   artifacts plus a best-effort review transcript (`.trace.txt`, with path and
-  SHA-256 recorded when present), and runs the workload twice more in the
-  SERIAL lane (below). Roughly minutes per seed; this is the bounded evidence
-  lane.
+  SHA-256 recorded when present). This is the bounded evidence lane.
 - `--mode search`: every seed runs live with the full oracle set plus an
-  in-memory determinism replay; nothing is persisted per passing seed. A
+  trace replay; nothing is persisted per passing seed. A
   failing seed writes a complete reproducibility package under
   `failures/seed-<hex>/` (trace, best-effort `transcript.txt`, replay report,
   failing oracle, final summary, minimized regression package) and fails the
@@ -32,12 +30,8 @@ Every turn and every effect boundary of a generated world runs where a
 deployment runs it: inside a handler of lash-restate's engine on the
 in-process Restate server double (`lash-restate-test`), seeded by the
 workload's seed, on virtual time (`backend::SimEngine`). SQLite is storage
-only. The search lane's server runs live attempts concurrently, so sessions
-interleave as they would against a real server; the serial lane
-(`sim.oracle.serial-engine-determinism.v1`) runs one live provider turn at a
-time on a server that runs one attempt at a time, and requires two runs of one
-seed to deliver the same boundaries, reach the same outcome and grant the
-server's turn in the same order, with no stall preemption.
+only. Server attempts run concurrently, so sessions interleave as they would
+against a real server. A failed run records its full history.
 
 Count-based runs partition deterministically with `--shard <i>/<n>`: shard
 `i/n` owns every seed index where `index % n == i - 1`, so the union of all
@@ -98,7 +92,7 @@ bound, not a discovered runtime invariant violation.
   framing layer and the Anthropic/Google stream parsers.
 - The fixed runtime proofs, the agent contracts and the provider, feedback
   and logical-turn laws run each turn on the same engine, under their own
-  seeds with serial scheduling. SQLite and PostgreSQL appear only as stores.
+  seeds with concurrent scheduling. SQLite and PostgreSQL appear only as stores.
 - The real SQLite transaction wrapper has a production-absent, `testing`
   feature-gated fault controller. `lash-sim backend-faults` deterministically
   injects aborts after `BEGIN IMMEDIATE` and before commit, a commit-boundary
@@ -211,12 +205,7 @@ The deferred cross-backend suites run in their named service gates.
   cover the complete point set per PR, while the full soak runs 256 seeds to
   vary the deterministic 1-to-8-commit prefix. Reports explicitly list any
   scenario omitted by a caller-supplied seed bound.
-- The serial-engine determinism unit test runs a bounded seed set per PR
-  (`LASH_SIM_SERIAL_LANE_SEEDS`, default 4): the twenty-seed sweep it used to
-  pay on every run now lives in the confidence gate's sim unit suite and in
-  `just sim-serial-sweep`, which sets the variable to the full count. The
-  generated lanes still run the same `sim.oracle.serial-engine-determinism.v1`
-  oracle on every seed they execute.
+
 
 ## Global invariants
 

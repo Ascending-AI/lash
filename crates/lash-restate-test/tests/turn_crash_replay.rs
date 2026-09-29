@@ -108,8 +108,6 @@ type InvocationJournal = (
 #[derive(Debug)]
 struct Run {
     answer: String,
-    /// The accepted input's id, minted afresh by every execution.
-    input_id: String,
     llm_calls: usize,
     tool_executions: usize,
     crashes: u64,
@@ -252,7 +250,6 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         .collect();
     Run {
         answer,
-        input_id: receipt.input_id.to_string(),
         llm_calls: llm_calls.load(Ordering::SeqCst),
         tool_executions: tool_executions.load(Ordering::SeqCst),
         crashes: server.stats().crashes,
@@ -373,41 +370,4 @@ async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
         violations.is_empty(),
         "crash points that did not recover (FIG-3678):\n{violations:#?}"
     );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn one_seed_reproduces_the_turn_journals_and_ids() {
-    let first = run_turn(7, None).await;
-    let second = run_turn(7, None).await;
-    // One seed gives the root — driven by one workflow — the same id and the
-    // same journal of commands and notifications, and the same answer.
-    // Invocations that race each other stay as concurrent as on a real
-    // server: a durable-wait index read may land before or after another
-    // invocation's registration, and lash then takes a different path (an
-    // extra index call, a different wait), so the full invocation set is not
-    // a function of the seed. Payload bytes also differ where lash records a
-    // fresh call id or a measured duration in a `ctx.run` result (FIG-3672).
-    // The accepted input's id is minted afresh by every acceptance, and the
-    // drive's admission and seal names carry it, so it is compared as a
-    // placeholder.
-    let turn_journal = |run: &Run| {
-        run.journals
-            .iter()
-            .find(|(_, service, _, _, _)| service == TURN_DRIVER_SERVICE)
-            .map(|(id, _, _, _, entries)| {
-                let entries: Vec<_> = entries
-                    .iter()
-                    .map(|(ty, name)| {
-                        (
-                            *ty,
-                            name.as_ref()
-                                .map(|name| name.replace(&run.input_id, "<input>")),
-                        )
-                    })
-                    .collect();
-                (id.clone(), entries)
-            })
-    };
-    assert_eq!(turn_journal(&first), turn_journal(&second));
-    assert_eq!(first.answer, second.answer);
 }
