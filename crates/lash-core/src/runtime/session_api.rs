@@ -865,16 +865,29 @@ impl LashRuntime {
                     .as_deref()
                     .unwrap_or_default(),
             );
-            let result = self
-                .open_agent_frame(
-                    crate::OpenAgentFrameRequest::new(
-                        frame_key.clone(),
-                        crate::AgentFrameReason::compaction(),
-                    )
-                    .with_initial_nodes(compaction.initial_nodes),
+            // The key is core's, derived from the compaction and the frame
+            // current at its recorded base, as a pressure frame's is: it names
+            // a new frame, or on a redrive the frame this compaction's own
+            // first execution committed, whose receipt the commit meets. It
+            // never names a historical frame, so the open skips the store's
+            // historical-frame refusal a caller-named key needs, which would
+            // refuse that redrive: the recorded base is resident, and the
+            // store's head already holds the frame (ADR 0112 §7).
+            if let Some(pending) = self.state.pending_follow_on.as_ref() {
+                return Err(PluginOperationInvokeError::Unknown(
+                    pending.pending_error(&self.state.session_id).to_string(),
+                ));
+            }
+            let result = open_agent_frame_in_state_with_clock(
+                &mut self.state,
+                crate::OpenAgentFrameRequest::new(
+                    frame_key.clone(),
+                    crate::AgentFrameReason::compaction(),
                 )
-                .await
-                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+                .with_initial_nodes(compaction.initial_nodes),
+                self.host.core.clock.as_ref(),
+            )
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
             if result.opened {
                 self.stamp_live_plugin_state();
             }
