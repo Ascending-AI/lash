@@ -1,6 +1,6 @@
 use super::*;
 use lash_core_execution::{
-    ArtifactReferrer, HostArtifactPin, ModuleArtifactStore as _, ReferrerClaim,
+    ArtifactCleanup, ArtifactReferrer, HostArtifactPin, ModuleArtifactStore as _, ReferrerClaim,
     ResolvedArtifactCleanup,
 };
 
@@ -182,5 +182,64 @@ async fn postgres_referrer_fence_refuses_a_late_publisher() {
             .await
             .expect("read reclaimed bytes")
             .is_none()
+    );
+}
+
+#[tokio::test]
+async fn postgres_ended_cleanup_arms_a_fence_before_delivery() {
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let store = storage.lashlang_artifact_store();
+    let (referrer, claim) = host_pin();
+    let artifact_ref = "artifact-host-pin-release";
+    store
+        .publish_module_artifact(&claim, artifact_ref, b"bytes")
+        .await
+        .expect("publish under live host pin");
+    lash_core_execution::store::ArtifactCleanupLedger::arm_cleanup(
+        storage.artifact_cleanup().as_ref(),
+        &ArtifactCleanup::ended(referrer, Vec::new(), None),
+        42,
+    )
+    .await
+    .expect("arm ended cleanup");
+    assert!(matches!(
+        store
+            .publish_module_artifact(&claim, artifact_ref, b"bytes")
+            .await,
+        Err(lash_core_execution::ArtifactStoreError::ReferrerEnded { .. })
+    ));
+}
+
+#[tokio::test]
+async fn postgres_artifact_read_refuses_an_undecodable_referrer_id() {
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let store = storage.lashlang_artifact_store();
+    let (_, claim) = host_pin();
+    let artifact_ref = "artifact-corrupt-edge";
+    store
+        .publish_module_artifact(&claim, artifact_ref, b"bytes")
+        .await
+        .expect("publish under live host pin");
+    sqlx::query(
+        "UPDATE lash_artifact_referrer_edges SET referrer_id = 'invalid-host-pin'
+         WHERE namespace = 'lashlang_module' AND artifact_ref = $1",
+    )
+    .bind(artifact_ref)
+    .execute(storage.pool())
+    .await
+    .expect("inject undecodable stored referrer");
+    let error = store
+        .get_module_artifact(artifact_ref)
+        .await
+        .expect_err("corrupt edge must refuse the read");
+    assert!(
+        error.to_string().contains("data is corrupt"),
+        "wrong read error: {error}"
     );
 }

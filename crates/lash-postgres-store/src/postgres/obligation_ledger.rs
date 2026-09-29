@@ -205,6 +205,20 @@ pub(crate) async fn arm_cleanup_tx(
         }
         CleanupUpsert::Keep => {}
     }
+    if cleanup.plan.is_ended() {
+        sqlx::query(
+            crate::artifact_store::artifact_sql()
+                .fences
+                .insert_fence
+                .sql(),
+        )
+        .bind(kind)
+        .bind(&referrer_id)
+        .bind(sql_i64("referrer end instant", now_ms)?)
+        .execute(&mut *conn)
+        .await
+        .map_err(store_sqlx_error)?;
+    }
     Ok(id)
 }
 

@@ -114,8 +114,8 @@ async fn is_fenced_tx(
 }
 
 fn decode_edge_referrer(row: &PgRow) -> Result<ArtifactReferrer, ArtifactStoreError> {
-    let kind: String = row.try_get(2).map_err(backend)?;
-    let id: String = row.try_get(3).map_err(backend)?;
+    let kind: String = row.try_get("referrer_kind").map_err(backend)?;
+    let id: String = row.try_get("referrer_id").map_err(backend)?;
     ArtifactReferrer::decode(&kind, &id).map_err(|error| {
         StoreError::StoredDataCorrupt {
             record_kind: "artifact_referrer_edge",
@@ -314,6 +314,15 @@ impl PostgresLashlangArtifactStore {
         namespace: &str,
         artifact_ref: &str,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+        let edges = sqlx::query(artifact_sql().edges.select_artifact_edges.sql())
+            .bind(namespace)
+            .bind(artifact_ref)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(backend)?;
+        for row in &edges {
+            decode_edge_referrer(row)?;
+        }
         sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
             .bind(namespace)
             .bind(artifact_ref)
