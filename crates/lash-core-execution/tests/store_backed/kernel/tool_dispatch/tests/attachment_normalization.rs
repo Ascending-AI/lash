@@ -140,7 +140,7 @@ async fn durable_attachment_context<'h>(
     plugins: Arc<PluginSession>,
 ) -> (
     ToolDispatchContext<'h>,
-    Arc<dyn crate::RuntimePersistence>,
+    Arc<dyn crate::RuntimeStore>,
     Arc<dyn crate::AttachmentStore>,
 ) {
     let backend = crate::support::memory_store_backend().await;
@@ -152,10 +152,10 @@ async fn durable_attachment_context<'h>(
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
-    let persistence = factory
-        .create_store(&request)
+    crate::SessionCatalogStore::admit_session(factory.as_ref(), &request)
         .await
         .expect("create the manifest store");
+    let persistence: Arc<dyn crate::RuntimeStore> = factory.clone();
     let backend: Arc<dyn crate::AttachmentStore> = backend.attachment_store();
     let attachment_store = Arc::new(crate::SessionAttachmentStore::new(
         Arc::clone(&backend),
@@ -181,7 +181,7 @@ fn deny_probe_attachment(
 
 async fn assert_policy_denial_left_no_attachment_state(
     outcome: &ToolDispatchOutcome,
-    persistence: &Arc<dyn crate::RuntimePersistence>,
+    persistence: &Arc<dyn crate::RuntimeStore>,
     backend: &Arc<dyn crate::AttachmentStore>,
     authorized: &Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
 ) {

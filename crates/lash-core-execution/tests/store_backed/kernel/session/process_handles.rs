@@ -61,7 +61,7 @@ mod tests {
         source: crate::AttachmentSource,
     ) -> (
         ToolInvocationReply,
-        Arc<dyn crate::RuntimePersistence>,
+        Arc<dyn crate::RuntimeStore>,
         Arc<dyn crate::AttachmentStore>,
         Arc<DenyProcessAwaitAttachments>,
     ) {
@@ -117,10 +117,10 @@ mod tests {
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         };
-        let persistence = factory
-            .create_store(&request)
+        crate::SessionCatalogStore::admit_session(factory.as_ref(), &request)
             .await
             .expect("create real in-memory manifest store");
+        let persistence: Arc<dyn crate::RuntimeStore> = factory.clone();
         let attachment_backend = backend.attachment_store();
         let attachment_store = Arc::new(crate::SessionAttachmentStore::new(
             Arc::clone(&attachment_backend),

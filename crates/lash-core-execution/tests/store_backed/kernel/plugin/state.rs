@@ -2,21 +2,37 @@ mod tests {
     use std::sync::Arc;
 
     use crate::SessionId;
-    use crate::support::prelude::*;
 
-    /// A fresh session store in a memory backend, for the session the
-    /// test commits.
-    async fn session_store(session_id: &str) -> Arc<dyn crate::RuntimePersistence> {
-        crate::support::memory_store_set()
+    /// A memory backend's catalog holding the session the test commits.
+    async fn session_store(session_id: &str) -> Arc<dyn crate::RuntimeStore> {
+        let catalog = crate::support::memory_store_set()
             .await
-            .session_store_factory()
-            .create_store(&crate::testing::store_fixtures::session_store_request(
+            .session_store_factory();
+        crate::SessionCatalogStore::admit_session(
+            catalog.as_ref(),
+            &crate::testing::store_fixtures::session_store_request(
                 &SessionId::from(session_id),
                 "model",
                 crate::SessionRelation::Root,
-            ))
+            ),
+        )
+        .await
+        .expect("admit the session");
+        catalog
+    }
+
+    /// The session's current window on `store`, as runtime state.
+    async fn load_state(
+        store: &Arc<dyn crate::RuntimeStore>,
+        session_id: &str,
+    ) -> crate::RuntimeSessionState {
+        let view = crate::store::SessionStore::new(Arc::clone(store), SessionId::from(session_id))
+            .expect("a valid session id");
+        crate::store::load_session_window_state(&view, crate::store::WindowSelector::Current)
             .await
-            .expect("create the session store")
+            .unwrap()
+            .unwrap()
+            .state
     }
 
     #[tokio::test]
@@ -86,10 +102,7 @@ mod tests {
         .await
         .unwrap();
         state.apply_persisted_commit_result(receipt);
-        let loaded = crate::store::load_persisted_session_state(store.as_ref())
-            .await
-            .unwrap()
-            .unwrap();
+        let loaded = load_state(&store, "capture-race").await;
         assert_eq!(
             loaded.plugin_state().unwrap().plugins["mock"].values["value"],
             serde_json::json!(1)
@@ -108,10 +121,7 @@ mod tests {
         .await
         .unwrap();
         state.apply_persisted_commit_result(receipt);
-        let loaded = crate::store::load_persisted_session_state(store.as_ref())
-            .await
-            .unwrap()
-            .unwrap();
+        let loaded = load_state(&store, "capture-race").await;
         assert_eq!(
             loaded.plugin_state().unwrap().plugins["mock"].values["value"],
             serde_json::json!(2)
