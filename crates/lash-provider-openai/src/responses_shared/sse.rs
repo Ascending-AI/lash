@@ -212,6 +212,14 @@ pub fn process_sse_event(
     Ok(())
 }
 
+pub fn parse_sse_payload(
+    provider: &str,
+    payload: &str,
+    state: &mut ResponsesStreamState,
+) -> Result<(), LlmTransportError> {
+    frame_sse_payload(payload, |raw| process_sse_event(provider, raw, state, None))
+}
+
 #[cfg(test)]
 mod tool_input_tests {
     use super::*;
@@ -289,12 +297,4 @@ mod tool_input_tests {
         assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputEnd { call, raw_arguments } if call.tool_name.is_none() && raw_arguments == "{\"q\":\"x\"}")));
         assert!(parts.is_empty());
     }
-}
-
-pub fn parse_sse_payload(
-    provider: &str,
-    payload: &str,
-    state: &mut ResponsesStreamState,
-) -> Result<(), LlmTransportError> {
-    frame_sse_payload(payload, |raw| process_sse_event(provider, raw, state, None))
 }

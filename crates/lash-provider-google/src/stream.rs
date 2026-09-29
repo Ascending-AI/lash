@@ -693,7 +693,7 @@ mod tool_input_tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(tool_events.len(), 6);
-        for (ordinal, events) in tool_events.chunks_exact(3).enumerate() {
+        for (ordinal, events) in tool_events.as_chunks::<3>().0.iter().enumerate() {
             assert!(
                 matches!(events[0], LlmStreamEvent::ToolInputStart { call } if call.ordinal == ordinal as u64)
             );
