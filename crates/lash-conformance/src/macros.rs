@@ -5,6 +5,7 @@ mod generation_drain;
 mod obligation_relay;
 mod session_ingress;
 mod tool_batch;
+mod tool_call_identity;
 mod tool_child;
 mod turn_crash;
 mod turn_ingress;

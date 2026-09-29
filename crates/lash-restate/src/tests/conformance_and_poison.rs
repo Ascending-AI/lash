@@ -474,6 +474,25 @@ lash_conformance::batch_sugar_tests!(
     }
 );
 
+// FIG-4079's tool-call identity laws on the live endpoint: each turn runs in
+// a probe handler, and a crash is a failed handler attempt Restate
+// redelivers.
+lash_conformance::tool_call_identity_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        // Restate state outlives a run, so each run names its own sessions.
+        let tier = lash_conformance::ToolCallIdentityTier {
+            prefix: format!("restate-tool-call-identity-{}", harness.run_nonce()),
+            effect_host: harness.endpoint_host(),
+            stores: harness.law_stores(),
+            runner: harness.turn_runner(),
+        };
+        (harness, tier)
+    }
+);
+
 // FIG-3547's segment re-drive law on the live endpoint: the segments run in
 // the endpoint's `LashProcessWorkflow`, a crash is a failed attempt Restate
 // delivers again, and a lost substrate is the invocation killed and purged
