@@ -1,5 +1,5 @@
 //! Tool loss at open is a typed fact the host receives, and `Require` is an
-//! explicit refusal with a named contract (FIG-3367, ADR 0097).
+//! explicit refusal with a named contract (FIG-3367, ADR 0119).
 
 use super::*;
 use lash_sansio::SessionId;

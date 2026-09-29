@@ -550,7 +550,6 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
     .with_execution_env_ref(Some(persist_recovery_env_ref().await))
     .with_wake_session_id(Some(SessionId::from("wake-smoke")))
     .with_start_key(Some(lash_core::StartKey::for_host(
-        lash_core::StartKeyOwner::HOST,
         "background-smoke-start",
     )));
     let execution_context = ProcessExecutionContext::default().with_causal_invocation(Some(
@@ -620,7 +619,6 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
             .map(|registration| registration.start_key.clone())
             .collect::<Vec<_>>(),
         vec![Some(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
             "background-smoke-start"
         ))]
     );
@@ -1378,10 +1376,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     .with_extra_event_types([process_wake_event_type()])
     .with_execution_env_ref(Some(env_ref))
     .with_wake_session_id(Some(creator_scope.session_id.clone()))
-    .with_start_key(Some(lash_core::StartKey::for_host(
-        lash_core::StartKeyOwner::HOST,
-        "recovery-start",
-    )));
+    .with_start_key(Some(lash_core::StartKey::for_host("recovery-start")));
 
     let RuntimeEffectOutcome::Process {
         result:

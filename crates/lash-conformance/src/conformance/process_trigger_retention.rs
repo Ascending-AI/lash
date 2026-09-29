@@ -501,6 +501,7 @@ async fn start_and_bind_delivery(
     reservation: &crate::TriggerDeliveryReservation,
 ) -> ProcessId {
     let start_key = crate::StartKey::for_trigger_delivery(
+        crate::DERIVED_START_KEYS,
         &reservation.occurrence.occurrence_id,
         &reservation.subscription.subscription_id,
         &reservation.subscription.incarnation,

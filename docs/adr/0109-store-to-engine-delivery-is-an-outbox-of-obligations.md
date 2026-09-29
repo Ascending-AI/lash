@@ -3,12 +3,14 @@
 ## Status
 
 Accepted 2026-09-27 (FIG-3600 S8). It records Sam's S8 rulings of that date.
-**Not yet implemented** beyond the foundation (§1's vocabulary, relay loop and
-leader lease). The per-ledger slices under *Slice plan* build the rest, and
-each slice updates this status when it lands. Landed: S8-D, the two-phase
+Amended 2026-09-29 (FIG-4125, item 14): the foundation and the named lanes below
+are implemented. The per-ledger slices under *Slice plan* retain their own
+status. Landed: S8-D, the two-phase
 session delete (§4); S8-S, scope close on the root row (§3, §6); S8-C,
 control intents; S8-P, parent-end plans (§3); S8-I, ingress (§3, §7);
-S8 process start (FIG-3918).
+S8 process start (FIG-3918); and `ArtifactCleanup` delivery. Generation
+drain reads obligations of one build generation; it is not deployment drain
+([ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)).
 
 **Process start is implemented.** Registration arms `ProcessStart` on each
 Lash-executed process in the same SQL transaction. The relay submits its
@@ -621,3 +623,12 @@ native-specific recovery: the native in-process engine gets only the minimal
 `deliver` its tests need to compile and pass, and FIG-3668 deletes it after
 S8. Laws may target the Restate double first; native-only recovery tests are
 not ported forward.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 14: `ArtifactCleanup` is an obligation kind in the landed vocabulary.
+[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) and
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) amend
+cleanup and compatibility. Generation drain is not deployment drain; this ADR's
+status reflects implemented obligation lanes, while 1.0 compatibility work
+remains in ADR 0115.

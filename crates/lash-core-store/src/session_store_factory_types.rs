@@ -46,7 +46,7 @@ pub struct ForkSessionReceipt {
 /// ([`SessionCatalogStore::lookup_session`](crate::store::SessionCatalogStore::lookup_session)).
 ///
 /// `Absent` and `Deleted` are answers. A catalog that cannot answer returns
-/// `Err`, never `Absent` (ADR 0097's negative-answer rule).
+/// `Err`, never `Absent` (ADR 0119's negative-answer rule).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionLookup {
     /// Durable metadata exists and no deletion tombstone does.

@@ -40,9 +40,8 @@ The DDL is a published artifact and the live catalog is the authority.
 schema. `PostgresStorage::schema_ddl()` returns those bytes verbatim, so the
 artifact and the DDL lash executes cannot drift apart. The artifact is
 creation-only, idempotent, and unqualified — no `public.`, no `DROP` — so a host
-can apply it into any schema with nothing but `CREATE`, and it carries all three
-seed rows a working database needs, including a 32-byte await-event signing
-secret drawn from the server's strong RNG. Hosts copy the bytes; they never
+can apply it into any schema with nothing but `CREATE`, and it carries the
+seed rows a working database needs. Hosts copy the bytes; they never
 transcribe them.
 
 `crates/lash-postgres-store/teardown.sql` is the companion artifact for the
@@ -164,16 +163,16 @@ the valve could downgrade them, a host that adopted it for a structural false
 positive would later open silently against a pre-cutover database — process events
 with no completion-authority payload, manifest rows naming a blob layout that
 cannot be read — which is the corruption the boundary exists to prevent. The
-signing-secret row is likewise a data precondition outside the valve: without it
-there is no key to authenticate durable promises with, so there is nothing for open
-to return.
+catalog-identity row is likewise a data precondition outside the valve: without
+it the store has no identity to hand its session catalogs, so there is nothing
+for open to return.
 
 `PostgresStorage::verify_schema_for(&pool)` exposes the same check as a structured
 report without failing and without opening, so a host gates its own migration CI on
 it and a production open becomes the backstop that never fires rather than the place
 drift is discovered. It deliberately takes a pool rather than a constructed store:
 opening is strictly harder than verifying — open additionally demands a matching
-version stamp and a usable signing secret, either of which can be exactly what a
+version stamp and the catalog-identity row, either of which can be exactly what a
 migration produced wrongly — so a check reachable only through a successful open
 could not describe the databases it exists to describe.
 
@@ -286,9 +285,9 @@ verify against; shape-checking there would be lash verifying itself.
   `docs/agents/way-of-working.md`. That includes the early returns: the
   lash-managed version preflight, including migration-divergence and source-shape
   denials before any migration DDL. Those events add the artifact names or rendered
-  source findings that caused the refusal. Both signing-secret refusals are covered
-  too. The admission is recorded
-  only after the secret read succeeds, so a database with an unusable secret cannot
+  source findings that caused the refusal. The missing-catalog-identity refusal
+  is covered too. The admission is recorded
+  only after the identity read succeeds, so a database with no identity row cannot
   log an admit and then refuse the open — decision evidence that contradicts the
   outcome is worse than none.
 
@@ -299,6 +298,13 @@ verify against; shape-checking there would be lash verifying itself.
   in any mode, so recommending it would be advice a host cannot follow. Recreating
   from the artifact resolves every finding class anyway, so withholding it costs
   nothing.
-- The await-event signing secret is a data precondition rather than a shape, so
-  `SchemaCheck::WarnOnly` does not relax it: without the row there is no secret
-  to authenticate promises with, and the store cannot construct itself.
+- The catalog identity is a data precondition rather than a shape, so
+  `SchemaCheck::WarnOnly` does not relax it: without the row the store has no
+  identity to work under, and the store cannot construct itself.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 17: [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) makes
+the old provisioning enum historical.
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs the
+Expanded constraint check. FIG-4123 owns the signing-secret seed text.

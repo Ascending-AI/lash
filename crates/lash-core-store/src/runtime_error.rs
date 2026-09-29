@@ -229,6 +229,14 @@ pub enum RuntimeErrorCode {
     /// source key is re-presented with a submission whose digest differs from
     /// the one the row was admitted under (FIG-3544).
     DurableIdentityConflict,
+    /// A host start key is bound to a retained process that another start
+    /// made (ADR 0107): the retry presented a different start. The refusal
+    /// names the key and nothing else, since the key is global and the
+    /// retained process may be another originator's.
+    ProcessStartKeyConflict,
+    /// A host rail was handed a start key of a family lash derives for its
+    /// own start paths (ADR 0107): a host mints only host keys.
+    StartKeyFamilyRefused,
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose terminal target has been replaced by a retention tombstone.
     ProcessNoLongerRetained,
@@ -611,6 +619,8 @@ impl RuntimeErrorCode {
             Self::ProcessParentEnded => "process_parent_ended",
             Self::ProcessCancelConflict => "process_cancel_conflict",
             Self::DurableIdentityConflict => "durable_identity_conflict",
+            Self::ProcessStartKeyConflict => "process_start_key_conflict",
+            Self::StartKeyFamilyRefused => "start_key_family_refused",
             Self::ProcessNoLongerRetained => "process_no_longer_retained",
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
             Self::ProcessSignalWaitCancelled => "process_signal_wait_cancelled",
@@ -856,6 +866,8 @@ impl RuntimeErrorCode {
         Self::ProcessParentEnded,
         Self::ProcessCancelConflict,
         Self::DurableIdentityConflict,
+        Self::ProcessStartKeyConflict,
+        Self::StartKeyFamilyRefused,
         Self::ProcessNoLongerRetained,
         Self::ProcessRegistryUnavailable,
         Self::ProcessSignalWaitCancelled,
@@ -1043,6 +1055,8 @@ impl RuntimeErrorCode {
             "process_parent_ended" => Self::ProcessParentEnded,
             "process_cancel_conflict" => Self::ProcessCancelConflict,
             "durable_identity_conflict" => Self::DurableIdentityConflict,
+            "process_start_key_conflict" => Self::ProcessStartKeyConflict,
+            "start_key_family_refused" => Self::StartKeyFamilyRefused,
             "process_no_longer_retained" => Self::ProcessNoLongerRetained,
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
             "process_signal_wait_cancelled" => Self::ProcessSignalWaitCancelled,

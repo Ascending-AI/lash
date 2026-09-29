@@ -1,4 +1,4 @@
-# ADR 0093: Native reasoning retention is frame-scoped
+# ADR 0118: Native reasoning retention is frame-scoped
 
 ## Status
 

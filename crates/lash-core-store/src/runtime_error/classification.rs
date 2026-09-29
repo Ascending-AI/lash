@@ -211,6 +211,10 @@ impl RuntimeErrorCode {
             Self::ProcessCancelConflict => Terminal,
             // the identity is durably bound to different content.
             Self::DurableIdentityConflict => Terminal,
+            // the host key is durably bound to another start.
+            Self::ProcessStartKeyConflict => Terminal,
+            // the key's family is fixed by how it was derived.
+            Self::StartKeyFamilyRefused => Terminal,
             // the target was replaced by a retention tombstone.
             Self::ProcessNoLongerRetained => Terminal,
             // a newer incarnation durably superseded this one.

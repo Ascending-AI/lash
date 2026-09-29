@@ -144,7 +144,7 @@ version. A version mismatch is a typed error that identifies the component and
 names drain or recreation as the remedy, allowing any later cutover to be
 scoped per component.
 
-Component hashes remain SHA-256 over the uncompressed logical bytes;
+Component hashes use BLAKE3 with the `lash-blob/v2` domain over the uncompressed logical bytes;
 compression happens only after hashing. The commit budget counts the root body
 plus the bodies of changed leaves. Unchanged leaf refs are free. Leaves and the
 root commit in the same transaction. Git's loose-object design admits a race
@@ -201,3 +201,11 @@ or recreated.
 - Keyed leaves make Restate-style lazy hydration possible: a resumed execution
   could load a value only when it is accessed, reducing restore I/O and working
   state. The payoff is preserved, but lazy hydration itself is deferred.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 4: The pre-1.0 freeze changes stored shapes in place without version bumps
+or upcasters;
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs the
+1.0 cut. The hash correction above records the current `lash-blob/v2` BLAKE3
+identity.

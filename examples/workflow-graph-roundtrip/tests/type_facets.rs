@@ -8,7 +8,6 @@ fn facet_diagnostic_http_json_golden_is_exact() {
     let diagnostic = TypeDiagnostic {
         node_id: "node-1".to_string(),
         kind: "incompatible_expected_literal".to_string(),
-        class: "definite".to_string(),
         slot: Some("arg[0][\"query\"]".to_string()),
         message: "expected enum, got incompatible literal \"bad\"".to_string(),
         span: Some(lash::rlm::lang::Span { start: 4, end: 9 }),
@@ -18,7 +17,6 @@ fn facet_diagnostic_http_json_golden_is_exact() {
         serde_json::json!({
             "nodeId": "node-1",
             "kind": "incompatible_expected_literal",
-            "class": "definite",
             "slot": "arg[0][\"query\"]",
             "message": "expected enum, got incompatible literal \"bad\"",
             "span": { "start": 4, "end": 9 }
@@ -114,6 +112,13 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let saved: SaveWorkflowResponse = response.json().await.expect("saved typed document");
     assert_eq!(saved.document.source, canonical_source);
+    assert_eq!(saved.document.version, document.version + 1);
+    assert!(saved.document.nodes.iter().any(|node| {
+        node.data
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == "unknown_object_field")
+    }));
     assert_eq!(
         saved.document.facet_schema_version,
         Some(lash::rlm::lang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)

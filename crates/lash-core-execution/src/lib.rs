@@ -803,7 +803,7 @@ pub use runtime::{
     SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionId, SessionListFilter,
     SessionRelationKind, SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest,
     SessionSummary, SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey,
-    StartKeyOwner, StoreRealization, TokenLedgerEntry, ToolAttemptLaunch, ToolIntentOutcomeSink,
+    StoreRealization, TokenLedgerEntry, ToolAttemptLaunch, ToolIntentOutcomeSink,
     ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity, TurnActivityId,
     TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
     TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
@@ -891,6 +891,7 @@ pub use tool_provider::{
     ToolPrepareContext, ToolProgressReporter, ToolProgressSink, ToolProvider, TurnToolCapture,
 };
 
+pub(crate) use lash_core_store::process_identity::StartKeyDerivation;
 pub(crate) use tool_provider::ToolContext;
 
 #[doc(hidden)]
@@ -898,6 +899,7 @@ pub mod core_internal {
     pub use crate::direct_completion_client::{DirectCompletionService, DirectExecutionPosition};
     pub use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
     pub use crate::runtime::effect::executor::{sleep_duration, sleep_with_cancellation};
+    pub use lash_core_store::process_identity::StartKeyDerivation;
     pub fn attach_process_invocation_correlation(
         turn_context: &mut crate::TurnContext,
         process_id: &crate::ProcessId,

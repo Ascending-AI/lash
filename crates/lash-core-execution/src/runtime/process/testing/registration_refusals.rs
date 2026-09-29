@@ -30,12 +30,8 @@ const FIXTURE_ENV_REF: &str = concat!(
 pub const REFUSAL_FIXTURE_START_KEY: &str = "refusal-fixture";
 
 fn host_registration(input: ProcessInput) -> ProcessRegistration {
-    ProcessRegistration::new(input, ProcessProvenance::host(), Lifetime::Detached).with_start_key(
-        Some(crate::StartKey::for_host(
-            crate::StartKeyOwner::HOST,
-            REFUSAL_FIXTURE_START_KEY,
-        )),
-    )
+    ProcessRegistration::new(input, ProcessProvenance::host(), Lifetime::Detached)
+        .with_start_key(Some(crate::StartKey::for_host(REFUSAL_FIXTURE_START_KEY)))
 }
 
 /// A registration core accepts, and the base every fixture below mutates.

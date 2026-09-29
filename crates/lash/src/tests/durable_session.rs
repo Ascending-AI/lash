@@ -1,5 +1,5 @@
 //! Durable Session: acquisition, refusals, observation, and coexistence with a
-//! live writer (FIG-3366, ADR 0097).
+//! live writer (FIG-3366, ADR 0119).
 
 use super::*;
 use lash_sansio::SessionId;

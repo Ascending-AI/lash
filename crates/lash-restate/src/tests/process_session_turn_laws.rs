@@ -763,7 +763,8 @@ async fn a_start_in_a_process_owned_session_records_its_owner_above_the_session(
         lash_core::ProcessOriginator::session(lash_core::SessionScope::new(child.as_str())),
         lash_core::Lifetime::Detached,
     )
-    .keyed_in(&scoped);
+    .keyed_in(&scoped)
+    .expect("a keyless host start is keyed in its scope");
     let started = parent
         .process_service()
         .expect("parent process service")

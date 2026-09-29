@@ -211,10 +211,11 @@ pub fn session_owner_namespace(session_id: impl AsRef<str>) -> String {
 /// process and a pruned process's id can never address a successor.
 ///
 /// There is deliberately no construction from an arbitrary string: an id is
-/// either minted ([`ProcessId::from_minted`], called only by the registrar) or
-/// parsed back from bytes a registrar minted ([`ProcessId::parse`], which is
-/// also what deserialization runs), and both enforce the one spelling,
-/// `p_` followed by 32 lowercase hex digits of a UUIDv7.
+/// either minted (only by the registrar, under its [`ProcessIdRegistrar`]
+/// authority) or parsed back from bytes a registrar minted
+/// ([`ProcessId::parse`], which is also what deserialization runs), and both
+/// enforce the one spelling, `p_` followed by 32 lowercase hex digits of a
+/// UUIDv7.
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 #[serde(transparent)]
@@ -242,10 +243,31 @@ impl std::fmt::Display for InvalidProcessId {
 
 impl std::error::Error for InvalidProcessId {}
 
+/// The process registrar's authority to mint a process id.
+///
+/// Only the registrar's mint (`lash_core_store::ProcessIdMint`) holds it: no
+/// facade re-exports it, so host, tool and plugin code cannot mint an id,
+/// only parse one a registrar minted. A test names a process it never
+/// registered with [`ProcessId::fixture`].
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct ProcessIdRegistrar(());
+
+impl ProcessIdRegistrar {
+    /// The one authority the registrar's mint holds.
+    #[doc(hidden)]
+    pub const REGISTRAR: Self = Self(());
+}
+
 impl ProcessId {
-    /// The id for one freshly minted UUIDv7. Only the process registrar calls
-    /// this, inside the transaction that registers the process.
-    pub fn from_minted(uuid_v7: u128) -> Self {
+    /// The id for one freshly minted UUIDv7, minted by the process registrar
+    /// inside the transaction that registers the process.
+    #[doc(hidden)]
+    pub fn minted(_registrar: ProcessIdRegistrar, uuid_v7: u128) -> Self {
+        Self::from_minted(uuid_v7)
+    }
+
+    pub(crate) fn from_minted(uuid_v7: u128) -> Self {
         Self(format!("{PROCESS_ID_PREFIX}{uuid_v7:032x}"))
     }
 

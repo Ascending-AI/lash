@@ -338,9 +338,13 @@ impl<'run> ScopedEffectController<'run> {
     /// durable handler replays it: the key is derived rather than drawn, so a
     /// replay of the run issues the same starts under the same keys and is
     /// returned the processes they registered.
-    pub fn next_keyless_start_key(&self) -> crate::StartKey {
+    pub(crate) fn next_keyless_start_key(&self) -> crate::StartKey {
         let ordinal = self.keyless_starts.fetch_add(1, Ordering::SeqCst);
-        crate::StartKey::for_keyless_host(self.admitted.scope(), ordinal)
+        crate::StartKey::for_keyless_host(
+            crate::StartKeyDerivation::LASH_START_PATHS,
+            self.admitted.scope(),
+            ordinal,
+        )
     }
 
     /// The process this controller's scope is, when it is one.

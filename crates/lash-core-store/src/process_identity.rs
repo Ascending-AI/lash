@@ -13,7 +13,10 @@ use std::fmt;
 /// drive never calls it, it reads the id back off the start's recorded result.
 #[must_use]
 pub fn mint_process_id() -> ProcessId {
-    ProcessId::from_minted(uuid::Uuid::now_v7().as_u128())
+    ProcessId::minted(
+        lash_sansio::identity::ProcessIdRegistrar::REGISTRAR,
+        uuid::Uuid::now_v7().as_u128(),
+    )
 }
 
 /// Where a process registrar's minted ids come from.
@@ -48,7 +51,10 @@ impl ProcessIdMint {
     pub fn sequential_id_for_testing(ordinal: u64) -> ProcessId {
         // Version 7 in the version nibble and the RFC 4122 variant, around a
         // counter where UUIDv7 carries its random bits.
-        ProcessId::from_minted(u128::from(ordinal) | (0x7_u128 << 76) | (0b10_u128 << 62))
+        ProcessId::minted(
+            lash_sansio::identity::ProcessIdRegistrar::REGISTRAR,
+            u128::from(ordinal) | (0x7_u128 << 76) | (0b10_u128 << 62),
+        )
     }
 
     /// Mint the id of one newly registered process.
@@ -71,14 +77,20 @@ impl ProcessIdMint {
 /// starting a second one, and after the process is pruned the same key starts
 /// a new process with a new id.
 ///
-/// A key is trusted: a retry under a retained key returns the retained process
-/// whatever it submitted, without comparing or staging the retry's content.
+/// A key lash derives from an admitted operation (a tool intent, a trigger
+/// delivery) is trusted: a retry under it returns the retained process
+/// whatever it submitted. A host's key (one it supplied, or its keyless
+/// start's derived key) fences its start: a retry under it returns the
+/// retained process only if it presents the same start, and is otherwise a
+/// [`StartKeyConflict`](crate::runtime_error::RuntimeErrorCode::ProcessStartKeyConflict)
+/// that names nothing but the key.
 ///
 /// Every key is a framed digest in one family, with each start path in its own
 /// namespace, so a host-supplied key can never collide with one lash derives
 /// for a tool intent or trigger start. The digest is over admitted
 /// operation identity only — never over submitted content, source or compiler
-/// identity, or the minted result.
+/// identity, or the minted result. Only [`StartKey::for_host`] is open to a
+/// host; every other family is derived under a [`StartKeyDerivation`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct StartKey(String);
@@ -94,13 +106,17 @@ pub const START_KEY_FAMILY_VERSION: u8 = 1;
 /// The start path a key was derived for. Each has its own tag in the preimage
 /// and its own name in the rendered key, so no key derived on one path can
 /// equal one derived on another.
+///
+/// Tag 2 is burned: it was the orchestration-call namespace, deleted with
+/// orchestrating tool bodies (ADR 0116), and no namespace may take it again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StartKeyNamespace {
     /// A start declared by a recorded tool intent.
     ToolIntent,
     /// The one start of a trigger delivery.
     TriggerDelivery,
-    /// A key a host or remote caller supplied, scoped to its owner.
+    /// A key a host or remote caller supplied: the same bytes are one key
+    /// across the store set, whoever presents them.
     Host,
     /// The nth keyless host start of one admitted scope.
     KeylessHost,
@@ -133,19 +149,23 @@ impl StartKeyNamespace {
     }
 }
 
-/// Who owns a host-supplied start key: the key is scoped to its owner, so two
-/// sessions (or two host scopes) that pick the same key start two processes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StartKeyOwner<'a> {
-    /// A host start, optionally under a host scope.
-    Host { scope: Option<&'a str> },
-    /// A start a session originated.
-    Session { session_id: &'a crate::SessionId },
-}
+/// The authority to derive a key in one of lash's own start families, or to
+/// read a rendered key back from text.
+///
+/// Only lash's own start paths hold one: the tool-intent and trigger-delivery
+/// realizations and the host rails' keyless ordinal, in the execution crate,
+/// and the remote protocol's decoding of a record's key. Neither the `lash`
+/// facade nor the runtime crate's root re-exports it, so host and plugin code
+/// cannot name it: a host mints only [`StartKey::for_host`] keys, and a host
+/// rail refuses any other family.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct StartKeyDerivation(());
 
-impl StartKeyOwner<'static> {
-    /// An unscoped host start.
-    pub const HOST: Self = Self::Host { scope: None };
+impl StartKeyDerivation {
+    /// The one authority lash's own start paths derive under.
+    #[doc(hidden)]
+    pub const LASH_START_PATHS: Self = Self(());
 }
 
 /// A string that is not a start key this build derives.
@@ -177,7 +197,10 @@ impl StartKey {
     /// The key of a start declared by a recorded tool intent: the model's
     /// `processes.start`, and every leaf that declares a start. The intent's
     /// replay key is its admitted operation identity.
-    pub fn for_tool_intent(identity: &crate::ToolIntentIdentity) -> Self {
+    pub fn for_tool_intent(
+        _derivation: StartKeyDerivation,
+        identity: &crate::ToolIntentIdentity,
+    ) -> Self {
         Self::derive(StartKeyNamespace::ToolIntent, |encoder| {
             encoder.string(&identity.replay_key);
         })
@@ -186,6 +209,7 @@ impl StartKey {
     /// The key of the one start a trigger delivery makes: its occurrence and
     /// the exact subscription revision the delivery was reserved against.
     pub fn for_trigger_delivery(
+        _derivation: StartKeyDerivation,
         occurrence_id: &str,
         subscription_id: &str,
         subscription_incarnation: &str,
@@ -200,20 +224,12 @@ impl StartKey {
     }
 
     /// The key a host or remote caller supplies for an idempotent start:
-    /// arbitrary bytes, scoped to the start's owner, in a namespace no
-    /// lash-derived key shares. The same bytes under two owners are two keys.
-    pub fn for_host(owner: StartKeyOwner<'_>, key: impl AsRef<[u8]>) -> Self {
+    /// arbitrary bytes in a namespace no lash-derived key shares. Lash mixes
+    /// nothing into it, so the same bytes are one key across the store set,
+    /// whoever presents them (ADR 0107): the start's originator, lifetime and
+    /// wake target are content the key fences, never part of the key.
+    pub fn for_host(key: impl AsRef<[u8]>) -> Self {
         Self::derive(StartKeyNamespace::Host, |encoder| {
-            match owner {
-                StartKeyOwner::Host { scope } => {
-                    encoder.tag(1);
-                    encoder.optional(scope, |encoder, scope| encoder.string(scope));
-                }
-                StartKeyOwner::Session { session_id } => {
-                    encoder.tag(2);
-                    encoder.string(session_id);
-                }
-            }
             encoder.bytes(key.as_ref());
         })
     }
@@ -224,7 +240,11 @@ impl StartKey {
     /// key and a durable handler replays it: the key is derived from the
     /// admitted scope and the start's ordinal within the run, never drawn at
     /// random, so a replay re-issues the same key.
-    pub fn for_keyless_host(scope: &crate::ExecutionScope, ordinal: u32) -> Self {
+    pub fn for_keyless_host(
+        _derivation: StartKeyDerivation,
+        scope: &crate::ExecutionScope,
+        ordinal: u32,
+    ) -> Self {
         Self::derive(StartKeyNamespace::KeylessHost, |encoder| {
             write_scope(encoder, scope);
             encoder.u32(ordinal);
@@ -233,7 +253,7 @@ impl StartKey {
 
     /// Whether a start under this key must present the retained process's
     /// content. A host's key (supplied or keyless) is a claim the host makes,
-    /// so a retry under it with different content is a conflict; a key lash
+    /// so a retry under it with a different start is a conflict; a key lash
     /// derives from an admitted operation is trusted and returns the retained
     /// process whatever the retry submitted.
     pub fn fences_content(&self) -> bool {
@@ -241,6 +261,12 @@ impl StartKey {
             self.namespace(),
             Some(StartKeyNamespace::Host | StartKeyNamespace::KeylessHost)
         )
+    }
+
+    /// Whether this is a key a host supplied ([`Self::for_host`]): the only
+    /// family a host rail accepts on a request.
+    pub fn is_host_supplied(&self) -> bool {
+        self.namespace() == Some(StartKeyNamespace::Host)
     }
 
     fn namespace(&self) -> Option<StartKeyNamespace> {
@@ -262,7 +288,11 @@ impl StartKey {
     ///
     /// [`InvalidStartKey`] for anything that is not a rendered key of this
     /// family and version.
-    pub fn parse(value: &str) -> Result<Self, InvalidStartKey> {
+    pub fn parse(_derivation: StartKeyDerivation, value: &str) -> Result<Self, InvalidStartKey> {
+        Self::parse_rendered(value)
+    }
+
+    pub(crate) fn parse_rendered(value: &str) -> Result<Self, InvalidStartKey> {
         let candidate = Self(value.to_string());
         let valid = candidate.namespace().is_some_and(|namespace| {
             value
@@ -314,7 +344,7 @@ impl<'de> Deserialize<'de> for StartKey {
         D: serde::Deserializer<'de>,
     {
         let value = String::deserialize(deserializer)?;
-        Self::parse(&value).map_err(serde::de::Error::custom)
+        Self::parse_rendered(&value).map_err(serde::de::Error::custom)
     }
 }
 

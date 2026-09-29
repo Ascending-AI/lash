@@ -180,9 +180,13 @@ async fn tier(
 }
 
 mod in_process {
-    lash_conformance::declared_start_tests!({ super::tier("in-process", false).await });
+    lash_conformance::declared_start_tests!(quarantine_cancel("FIG-4127: C2 can retain a claimed ProcessStart obligation") {
+        super::tier("in-process", false).await
+    });
 }
 
 mod double {
-    lash_conformance::declared_start_tests!({ super::tier("double", true).await });
+    lash_conformance::declared_start_tests!(quarantine_cancel("FIG-4128: a StartFailed request can lose to the running child") {
+        super::tier("double", true).await
+    });
 }

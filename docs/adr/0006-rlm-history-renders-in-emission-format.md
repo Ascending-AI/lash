@@ -36,3 +36,8 @@ The root cause is a representation mismatch — the input history format differs
 - **Keep the meta-format, add an anti-echo system instruction.** Rejected: it patches the representation mismatch with prose instead of removing it; weaker models still imitate the salient in-context format.
 - **Native tool-call transport (cell as `tool_use`, result as `tool_result`).** Rejected: it pushes lashlang source into a JSON-string argument — the encoding code-as-action exists to avoid — and contradicts RLM's deliberate empty tool array (`tools: Arc::new(Vec::new())`, `tool_choice: LlmToolChoice::None`). It buys no caching or robustness the in-format text rendering lacks.
 - **Two assistant messages (prose, then cell) instead of folding.** Rejected: back-to-back assistant turns do not match how the model emits and stress provider role-alternation; folding yields clean `User → Assistant → User` alternation, one step per pair.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 23: [ADR 0116](0116-tools-are-opaque.md) supersedes the old tool-output
+rendering path. The emission-format rule for RLM cells survives.

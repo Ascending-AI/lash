@@ -50,3 +50,11 @@ accepted empty identities fail at decode rather than being translated.
 - Read and rewrite callers make whole-history access visible with `None`.
 - Serialized scope-bearing records cannot carry two encodings for absence.
 - Hosts with legacy empty frame identities must discard or recreate that data.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 19:
+[ADR 0112](0112-the-store-is-multi-session-and-a-session-is-resident-from-its-current-frame.md)
+supersedes this API sketch for the FIG-1628 phase-one target. The integration
+branch has not landed on main, so this remains the current implementation until
+that cutover.

@@ -305,3 +305,9 @@ silent no-op, which is a semantic change wearing a refactor's clothes.
 head statements would have collapsed 44 forks at a stroke and invalidated every
 existing database; the names stay frozen and the 44 entries are the price,
 written down.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 27: The one-owner rule covers storage tables and their SQL. Migration SQL
+is exempt from the normal per-table statement ownership check; migrations may
+need to alter tables owned by multiple store modules.

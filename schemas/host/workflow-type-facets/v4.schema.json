@@ -223,14 +223,6 @@
       "minItems": 2,
       "type": "array"
     },
-    "WorkflowDiagnosticClass": {
-      "description": "Whether a diagnostic blocks save under ADR 0073's gradual typing rule.",
-      "enum": [
-        "definite",
-        "advisory"
-      ],
-      "type": "string"
-    },
     "WorkflowDiagnosticKind": {
       "description": "Closed host-facing vocabulary for linker diagnostics.",
       "enum": [
@@ -366,9 +358,6 @@
     },
     "WorkflowTypeDiagnostic": {
       "properties": {
-        "class": {
-          "$ref": "#/definitions/WorkflowDiagnosticClass"
-        },
         "kind": {
           "$ref": "#/definitions/WorkflowDiagnosticKind"
         },
@@ -399,7 +388,6 @@
         }
       },
       "required": [
-        "class",
         "kind",
         "message",
         "node_id"

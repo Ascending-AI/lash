@@ -1124,7 +1124,7 @@ impl crate::ProcessService for GatedProcessService {
                 .to_string(),
             _ => "<unlabelled>".to_string(),
         };
-        let identity = match &request.start_key {
+        let identity = match request.start_key() {
             Some(start_key) => format!("start:{start_key}"),
             None => "start:<keyless>".to_string(),
         };

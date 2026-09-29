@@ -154,20 +154,11 @@ fn receiver_calls<'a>(expression: &'a Expr, calls: &mut Vec<&'a Expr>) {
 pub struct WorkflowTypeDiagnostic {
     pub node_id: WorkflowNodeId,
     pub kind: WorkflowDiagnosticKind,
-    pub class: WorkflowDiagnosticClass,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<WorkflowSlotPath>,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub span: Option<Span>,
-}
-
-/// Whether a diagnostic blocks save under ADR 0073's gradual typing rule.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowDiagnosticClass {
-    Definite,
-    Advisory,
 }
 
 /// Closed host-facing vocabulary for linker diagnostics.
@@ -279,10 +270,6 @@ impl WorkflowDiagnosticKind {
         Self::ModuleHash,
         Self::InvalidAst,
     ];
-
-    pub fn class(self) -> WorkflowDiagnosticClass {
-        WorkflowDiagnosticClass::Definite
-    }
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -445,7 +432,6 @@ pub fn projected_node_type_facets(
             .map(|diagnostic| WorkflowTypeDiagnostic {
                 node_id: id.clone(),
                 kind: WorkflowDiagnosticKind::from_link_error(&diagnostic.error),
-                class: WorkflowDiagnosticKind::from_link_error(&diagnostic.error).class(),
                 slot: diagnostic_slot(&diagnostic.path, &facts.expected_arguments),
                 message: diagnostic.error.to_string(),
                 span: diagnostic.span,
@@ -476,11 +462,6 @@ mod tests {
             .map(|kind| kind.as_str())
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(spellings.len(), 50);
-        assert!(
-            WorkflowDiagnosticKind::ALL
-                .into_iter()
-                .all(|kind| kind.class() == WorkflowDiagnosticClass::Definite)
-        );
     }
 
     #[test]

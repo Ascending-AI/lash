@@ -370,10 +370,7 @@ where
             lash_core::SubscriptionRevisionId::new("sub".into(), "incarnation".into(), 1)
                 .expect("subscription revision"),
         ),
-        ArtifactReferrer::Start(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            "canonical-start",
-        )),
+        ArtifactReferrer::Start(lash_core::StartKey::for_host("canonical-start")),
         ArtifactReferrer::Execution(journal),
         ArtifactReferrer::HostPin(HostArtifactPin::mint()),
         ArtifactReferrer::DefinitionRevision(

@@ -21,6 +21,7 @@
 //! | [`artifact_reachability`] | `artifact_refs`, `artifact_referrer_edges`, `artifact_referrer_fences` and `artifact_cleanup_obligations` |
 //! | [`tool_call_identity`] | tool-body runs ([`Fact::ToolExecuted`]) and the committed transcript's tool calls |
 //! | [`input_settlement`] | `pending_turn_inputs`, `queued_work_batches`, `session_roots` and `session_root_inputs` |
+//! | [`start_originator`] | the host's process starts, each with the originator it requested and the one the answered process carries ([`Fact::ProcessStartAnswered`]) |
 //!
 //! Store rows are read raw, through the SQLite store's test-only
 //! `read_rows_for_testing` (`lash-sqlite-store`, `testing` feature), the
@@ -47,6 +48,7 @@ mod input_settlement;
 mod obligations_settled;
 pub mod quarantine;
 mod snapshot;
+mod start_originator;
 mod tool_call_identity;
 
 #[cfg(test)]
@@ -216,6 +218,15 @@ pub enum Fact {
         session: String,
         result_digest: String,
     },
+    /// A host process start answered: the process, whether the registrar
+    /// created it or found it, the originator the request carried and the
+    /// one the answered process carries.
+    ProcessStartAnswered {
+        process: String,
+        disposition: String,
+        requested_originator: String,
+        answered_originator: String,
+    },
     /// An effect the harness ran through a counted executor.
     EffectRan {
         effect: String,
@@ -236,7 +247,7 @@ impl Fact {
                 Some(&call.session)
             }
             Self::CompletionResolved { session, .. } => Some(session),
-            Self::EffectRan { .. } => None,
+            Self::EffectRan { .. } | Self::ProcessStartAnswered { .. } => None,
         }
     }
 }
@@ -327,6 +338,29 @@ pub fn completion_key_label(key: &lash_core::AwaitEventKey) -> String {
     serde_json::to_string(key).unwrap_or_else(|_| format!("{key:?}"))
 }
 
+/// Record that a host start requested under `requested` was answered with
+/// `receipt`, whose process the registry holds as `answered`.
+pub fn record_start_answered(
+    recorder: &HistoryRecorder,
+    requested: &lash_core::ProcessOriginator,
+    receipt: &lash_core::ProcessStartReceipt,
+    answered: &lash_core::ProcessRecord,
+) {
+    let originator = |originator: &lash_core::ProcessOriginator| {
+        serde_json::to_string(originator).unwrap_or_else(|_| format!("{originator:?}"))
+    };
+    recorder.record(Fact::ProcessStartAnswered {
+        process: receipt.process_id.to_string(),
+        disposition: match receipt.disposition {
+            lash_core::ProcessRegistrationDisposition::Created => "created",
+            lash_core::ProcessRegistrationDisposition::Existing => "existing",
+        }
+        .to_owned(),
+        requested_originator: originator(requested),
+        answered_originator: originator(&answered.provenance.originator),
+    });
+}
+
 /// The digest a committed tool result's text is compared by.
 #[must_use]
 pub fn result_digest(content: &str) -> String {
@@ -399,6 +433,7 @@ pub static CHECKERS: &[&dyn HistoryChecker] = &[
     &artifact_reachability::ArtifactReachability,
     &tool_call_identity::ToolCallIdentity,
     &input_settlement::InputSettlement,
+    &start_originator::StartOriginator,
 ];
 
 /// Every checker's verdict on one history.
@@ -635,6 +670,7 @@ pub async fn check_crash_world(
     let relayed = world.tick().await.is_ok();
     world.quiesce().await;
     let mut history = History::new(scenario, world.seed());
+    history.extend_from(world.history());
     history.relay_ran = relayed;
     history.now_ms = Some(world.now_ms());
     if let Err(error) = history

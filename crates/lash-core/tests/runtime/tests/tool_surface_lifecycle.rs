@@ -1203,10 +1203,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )
-                .with_start_key(Some(lash_core::StartKey::for_host(
-                    lash_core::StartKeyOwner::HOST,
-                    process_id,
-                ))),
+                .with_start_key(Some(lash_core::StartKey::for_host(process_id))),
                 options,
                 lash_core::ProcessOpScope::new(handler.scoped()),
             )
@@ -2172,10 +2169,7 @@ fn payload_gated_request(
         standard_test_policy(),
     ))
     .with_observers([session_id])
-    .with_start_key(Some(lash_core::StartKey::for_host(
-        lash_core::StartKeyOwner::HOST,
-        label,
-    )))
+    .with_host_start_key(label)
 }
 
 async fn started_row_identity(
@@ -2200,7 +2194,7 @@ async fn no_rows_registered(registry: &Arc<dyn lash_core::ProcessRegistry>, labe
     .await
     .expect("read registered rows");
     for label in labels {
-        let key = lash_core::StartKey::for_host(lash_core::StartKeyOwner::HOST, label);
+        let key = lash_core::StartKey::for_host(label);
         assert!(
             rows.iter().all(|row| row.start_key.as_ref() != Some(&key)),
             "a refused start must journal and register nothing: {label}"
@@ -2466,7 +2460,7 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
         matches!(&recorded_no_env, lash_core::PluginError::Session(message)
         if *message == format!(
             "process `start {}` requires a captured execution env",
-            lash_core::StartKey::for_host(lash_core::StartKeyOwner::HOST, "recorded-no-env")
+            lash_core::StartKey::for_host("recorded-no-env")
         )),
         "the no-env recorded refusal keeps the pre-existing typed shape: {recorded_no_env}"
     );

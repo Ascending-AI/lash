@@ -23,13 +23,15 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                 Ok(tx_outcome((|| {
                     // While the process minted for a key is retained, a
                     // start under the same key returns that process untouched
-                    // (ADR 0107); a host's key must also present its content.
+                    // (ADR 0107); a host's key must also present its start,
+                    // wake target included.
                     if let Some(start_key) = registration.start_key.as_ref()
                         && let Some(existing) = Self::load_process_by_start_key_conn(tx, start_key)?
                     {
                         lash_core_execution::runtime::check_retained_start(
                             &registration,
                             &existing,
+                            Self::wake_session_id_conn(tx, &existing.id)?.as_ref(),
                         )?;
                         return Ok(lash_core_execution::ProcessRegistrationOutcome::existing(
                             existing,

@@ -270,7 +270,7 @@ fn started_process_id(outcome: &crate::ToolIntentExecutionOutcome) -> (ProcessId
                     .expect("a start outcome names its process id"),
             )
             .expect("a minted process id"),
-            crate::StartKey::for_tool_intent(identity),
+            crate::StartKey::for_tool_intent(crate::StartKeyDerivation::LASH_START_PATHS, identity),
         ),
         other => panic!("expected an executed start intent, got {other:?}"),
     }

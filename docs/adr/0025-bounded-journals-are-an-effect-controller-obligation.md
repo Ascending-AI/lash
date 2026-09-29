@@ -1,5 +1,10 @@
 # Bounded journals are an effect-controller obligation
 
+Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
+passages are historical under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+The non-SQL decision and host-policy rules here survive.
+
 Amended 2026-09-24 (FIG-3669), **partly implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 makes Restate the only effect engine and the SQL stores storage only. This ADR

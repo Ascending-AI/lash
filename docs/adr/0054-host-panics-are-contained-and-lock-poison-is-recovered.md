@@ -54,3 +54,10 @@ updated state.
   the operation that owns them rather than by a generic poison-error taxonomy.
 - Adding host calls to an in-memory write transaction violates this ADR and
   requires hoisting those calls out of the critical section.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 23:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+supersedes obsolete SQL effect-engine assumptions. The host panic-containment
+rule survives.

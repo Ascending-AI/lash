@@ -105,7 +105,6 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
     .with_execution_env_ref(Some(process_env_ref))
     .with_wake_session_id(Some(SessionId::from("session")))
     .with_start_key(Some(lash_core::StartKey::for_host(
-        lash_core::StartKeyOwner::HOST,
         "lashlang-process-start",
     )));
 

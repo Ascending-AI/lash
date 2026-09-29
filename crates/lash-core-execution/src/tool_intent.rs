@@ -205,7 +205,10 @@ impl StartProcessIntent {
     pub fn into_request(&self, identity: &ToolIntentIdentity) -> crate::ProcessStartRequest {
         self.declaration
             .clone()
-            .into_request(crate::StartKey::for_tool_intent(identity))
+            .into_request(crate::StartKey::for_tool_intent(
+                crate::StartKeyDerivation::LASH_START_PATHS,
+                identity,
+            ))
     }
 }
 
@@ -852,8 +855,14 @@ mod tests {
             let rederived = rederive_tool_intent_identity(&derived).expect("re-derived identity");
             proptest::prop_assert_eq!(&derived, &rederived);
             proptest::prop_assert_eq!(
-                crate::StartKey::for_tool_intent(&derived),
-                crate::StartKey::for_tool_intent(&rederived)
+                crate::StartKey::for_tool_intent(
+                    crate::StartKeyDerivation::LASH_START_PATHS,
+                    &derived
+                ),
+                crate::StartKey::for_tool_intent(
+                    crate::StartKeyDerivation::LASH_START_PATHS,
+                    &rederived
+                )
             );
         }
     }

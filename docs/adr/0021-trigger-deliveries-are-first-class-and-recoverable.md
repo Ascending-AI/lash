@@ -155,3 +155,13 @@ A host could therefore persist a subscription it could neither export to a peer 
 back, and the repository held two tests asserting opposite rules on the same input. The wire
 now follows its owner: the labels are independent, and the wire validator says nothing about
 their relationship.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 10:
+[ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md),
+[ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md),
+[ADR 0110](0110-the-engine-owns-process-recovery.md) and
+[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) govern
+process identity, lifetime, recovery and artifact ownership. Earlier
+substrate-specific language here is historical.

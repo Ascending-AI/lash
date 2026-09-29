@@ -2,6 +2,11 @@
 
 ## Status
 
+Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
+passages are historical under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+The non-SQL decision and host-policy rules here survive.
+
 Decided 2026-09-21 (FIG-3392). **Implemented.** FIG-2266 built the invocation
 driver; FIG-3396 the accepted-work and protected-close recovery, in four ordered
 parts — FIG-3408 (§3, the retained child request), FIG-3409 (§4/§5, the
@@ -1356,3 +1361,10 @@ The width ceiling quoted from `crates/lash-protocol-standard/src/lib.rs` is
 superseded: a `batch` wrapper takes at most 64 members, configurable
 downward, and the flattened group is admitted whole against the retained-work
 bound ([ADR 0116](0116-tools-are-opaque.md) §2.5).
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 11: The queued-run recovery sketch below is historical. `QueuedRun` is
+gone; [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
+governs ingress and [ADR 0110](0110-the-engine-owns-process-recovery.md) governs
+process recovery.

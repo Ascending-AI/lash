@@ -1,5 +1,10 @@
 # 0094: Child lifecycle is a registration fact settled by scope end
 
+Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
+passages are historical under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+The non-SQL decision and host-policy rules here survive.
+
 Status: Accepted
 
 Amended 2026-09-24 (FIG-3669), **not yet implemented**:

@@ -213,3 +213,9 @@ prefix survives: the manifest has no exact node-to-attachment edge. The
 write-token lifecycle requires the PostgreSQL component-84 and SQLite session-55
 reject-and-recreate schema boundaries; the reachability retention rule itself
 does not change.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 7: The lease-generation reclaim prescription above is superseded by
+[ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)'s drive
+fence. A newer lease generation alone does not authorize reclaim.

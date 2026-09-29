@@ -109,6 +109,10 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     // FIG-4092: an ADR-0007 scenario coverage entry names its test through a
     // function pointer, so a deleted test fails compilation.
     t.compile_fail("tests/ui/scenario_coverage_index_stores_fn_pointers.rs");
+    // FIG-4111: only the host rails mint host start keys, and only the
+    // registrar mints a process id.
+    t.compile_fail("tests/ui/model_code_cannot_mint_a_host_start_key.rs");
+    t.compile_fail("tests/ui/process_id_minting_is_sealed.rs");
     if cfg!(feature = "rlm") {
         // FIG-1979: the dialect has one carrier, and a memory limit cannot be
         // spelled as an instruction budget.

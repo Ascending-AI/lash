@@ -1,0 +1,49 @@
+error[E0433]: cannot find `StartKeyDerivation` in `process`
+  --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:10:55
+   |
+10 |     let _ = StartKey::for_keyless_host(lash::process::StartKeyDerivation::LASH_START_PATHS);
+   |                                                       ^^^^^^^^^^^^^^^^^^ could not find `StartKeyDerivation` in `process`
+
+error[E0599]: no method named `start` found for struct `AttemptProcessReads` in the current scope
+ --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:7:33
+  |
+7 |     let _ = context.processes().start(request.clone());
+  |                                 ^^^^^ method not found in `AttemptProcessReads`
+
+error[E0624]: method `with_start_key` is private
+ --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:8:29
+  |
+8 |     let _ = request.clone().with_start_key(Some(StartKey::for_host("model-chosen")));
+  |                             ^^^^^^^^^^^^^^ private method
+  |
+ ::: $WORKSPACE/crates/lash-core-execution/src/runtime/process/model/start_request.rs
+  |
+  |     pub(crate) fn with_start_key(mut self, start_key: Option<crate::StartKey>) -> Self {
+  |     ---------------------------------------------------------------------------------- private method defined here
+
+error[E0616]: field `start_key` of struct `ProcessStartRequest` is private
+ --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:9:22
+  |
+9 |     let _ = &request.start_key;
+  |                      ^^^^^^^^^ private field
+  |
+help: a method `start_key` also exists, call it with parentheses
+  |
+9 |     let _ = &request.start_key();
+  |                               ++
+
+error[E0061]: this function takes 3 arguments but 1 argument was supplied
+  --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:10:13
+   |
+10 |     let _ = StartKey::for_keyless_host(lash::process::StartKeyDerivation::LASH_START_PATHS);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^----------------------------------------------------- two arguments of type `&ExecutionScope` and `u32` are missing
+   |
+note: associated function defined here
+  --> $WORKSPACE/crates/lash-core-store/src/process_identity.rs
+   |
+   |     pub fn for_keyless_host(
+   |            ^^^^^^^^^^^^^^^^
+help: provide the arguments
+   |
+10 |     let _ = StartKey::for_keyless_host(lash::process::StartKeyDerivation::LASH_START_PATHS, /* &ExecutionScope */, /* u32 */);
+   |                                                                                           ++++++++++++++++++++++++++++++++++

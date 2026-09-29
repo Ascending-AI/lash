@@ -64,10 +64,10 @@ consumers in sync" into a compile error instead of a code-review hope.
 
 - **Adding a tool-reporting channel is one edit at the seam,** not one per
   protocol driver. Everything downstream inherits the new record.
-- **A new `TurnEvent` variant is compile-forced** into `TraceEvent::kind()`, the
-  trace-viewer `RenderModel` *(Superseded on this point by the 2026-08-21 removal note.)*,
-  and `TryFrom<TurnEvent> for RemoteTurnEvent`. The exhaustive match is the drift
-  guard; there is no version number on `TurnEvent` itself.
+- **A new `TurnEvent` variant is compile-forced** into the exhaustive
+  `TryFrom<TurnEvent> for RemoteTurnEvent` mapping. `TraceEvent::kind()` is
+  exhaustive over trace events, but no exhaustive `TurnEvent`-to-`TraceEvent`
+  conversion exists. There is no version number on `TurnEvent` itself.
 - **Exec-diagnostic detail stays additive.** The `exec_code_completed`
   diagnostic carries its per-tool `tool_calls` list inside the free-form
   `ProtocolStep` payload, so richer per-tool reporting shipped without bumping
@@ -90,3 +90,9 @@ consumers in sync" into a compile error instead of a code-review hope.
   this point by the 2026-08-21 removal note.)*, the OTel span names, and the
   JSONL tags to agree. A renamed field or new variant drifts silently.
   `TraceEvent::kind()` plus exhaustive matches make the same drift a build failure.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 26: The closed `TraceEvent` vocabulary and its kind mapping are exhaustive
+within trace, but compilation does not force every `TurnEvent` to map to a
+`TraceEvent`. The mapping claim above is narrowed accordingly.

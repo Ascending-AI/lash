@@ -105,3 +105,9 @@ rather than silently inheriting a no-op.
   no-longer-retained information. After tombstone compaction, the same id is
   indistinguishable from an unknown process. The retention and compaction
   windows must be comfortably longer than any await.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 22: Sink registration is scoped to the current observer; it is not
+installed once for all process lifetimes. The durable event page remains the
+source of truth.

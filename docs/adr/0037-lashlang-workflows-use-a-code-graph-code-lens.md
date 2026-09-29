@@ -66,12 +66,12 @@ depth-first IR walk order. A text-only host may derive paths such as
 brackets, quotes, and empty field names cannot collide with structural
 segments. Rendering consumes the IR directly and parses no expression text.
 
-Facet diagnostics carry an optional slot path, a closed diagnostic kind, and a
-serialized `definite` or `advisory` class. `definite` diagnostics block a save
-under ADR 0073. A diagnostic carries a slot only when its exact AST path
-matches a projected slot. `TypeExpr` is closed: a host refuses an unknown
-variant or an unknown field inside a variant payload after accepting the graph
-or facet carrier version.
+Facet diagnostics are type errors with an optional slot path and a closed
+diagnostic kind. Lash reports type errors; whether a workflow with errors saves
+as a draft is the editor's policy. A diagnostic carries a slot only when its
+exact AST path matches a projected slot. `TypeExpr` is closed: a host refuses
+an unknown variant or an unknown field inside a variant payload after accepting
+the graph or facet carrier version.
 
 Canonical text belongs to a dialect and is derived, non-authoritative output.
 A host text edit enters through that dialect's existing fragment parser, which

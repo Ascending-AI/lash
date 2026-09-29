@@ -221,6 +221,7 @@ async fn start_process(
 ) -> Result<ProcessId, String> {
     let core = world.core()?;
     let restate = world.engine().clone();
+    let requested = request.originator.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let started = world
         .host_op(async move {
@@ -236,7 +237,6 @@ async fn start_process(
                                 core.processes()
                                     .start(request, scoped)
                                     .await
-                                    .map(|receipt| receipt.process_id)
                                     .map_err(|error| error.to_string()),
                             );
                         })
@@ -246,7 +246,11 @@ async fn start_process(
         })
         .await;
     match rx.try_recv() {
-        Ok(started) => started,
+        Ok(Ok(receipt)) => {
+            world.record_start_answered(&requested, &receipt).await;
+            Ok(receipt.process_id)
+        }
+        Ok(Err(error)) => Err(error),
         Err(_) => Err(format!("the start did not answer: {started:?}")),
     }
 }

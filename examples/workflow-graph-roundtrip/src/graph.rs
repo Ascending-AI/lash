@@ -544,7 +544,6 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
                     .map(|diagnostic| TypeDiagnostic {
                         node_id: diagnostic.node_id.to_string(),
                         kind: diagnostic_kind_text(diagnostic.kind),
-                        class: diagnostic_class_text(diagnostic.class),
                         slot: diagnostic.slot.as_ref().map(ToString::to_string),
                         message: diagnostic.message.clone(),
                         span: diagnostic.span,
@@ -1098,13 +1097,6 @@ fn diagnostic_kind_text(kind: lash::rlm::lang::WorkflowDiagnosticKind) -> String
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))
         .unwrap_or_else(|| "invalid_diagnostic_kind".to_string())
-}
-
-fn diagnostic_class_text(class: lash::rlm::lang::WorkflowDiagnosticClass) -> String {
-    serde_json::to_value(class)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_else(|| "definite".to_string())
 }
 
 fn node_ids(graph: &WorkflowSubgraph) -> Vec<String> {

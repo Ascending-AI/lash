@@ -876,7 +876,7 @@ pub mod process {
         ProcessTerminalWait, ProcessToolIntents, ProcessWakeDelivery, ProcessWakeOutbox,
         ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
         SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError,
-        SessionScope, StartCx, StartCxError, StartKey, StartKeyOwner, WatchedRegistry,
+        SessionScope, StartCx, StartCxError, StartKey, WatchedRegistry,
         facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
         facade_support::ObservedProcessEventLite, facade_support::ObservedProcessEventPage,
         facade_support::ObservedProcessEventReadOutcome, facade_support::ObservedWorkItem,

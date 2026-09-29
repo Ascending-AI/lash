@@ -616,10 +616,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_start_key(Some(lash_core::StartKey::for_host(
-        lash_core::StartKeyOwner::HOST,
-        "observed-process",
-    )))
+    .with_host_start_key("observed-process")
     .with_observers(["process-observation-events".to_string()]);
     let started = session
         .admin()
@@ -695,8 +692,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     // FIG-3611: once a keyed process is pruned, the same key starts a new
     // process under a new id, and the pruned id still answers as pruned — it
     // never addresses the successor (ADR 0107).
-    let reused_key =
-        lash_core::StartKey::for_host(lash_core::StartKeyOwner::HOST, "remote-paged-reused");
+    let reused_key = lash_core::StartKey::for_host("remote-paged-reused");
     let registration = || {
         lash_core::ProcessRegistration::new(
             lash_core::ProcessInput::External {
@@ -1550,6 +1546,117 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
             .as_ref()
             .expect("the second direct turn is admitted too")
             .input_id
+    );
+    Ok(())
+}
+
+/// A core whose processes are external rows a test settles by hand, and a
+/// host start request under it.
+async fn host_start_core() -> Result<LashCore> {
+    let provider = mock_provider();
+    let session_spec = provider_session_spec(&provider);
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        noop_process_work_backend().await.into(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .session_spec(session_spec)
+    .provider(provider)
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
+    Ok(core)
+}
+
+fn external_host_start(metadata: serde_json::Value) -> lash_core::ProcessStartRequest {
+    lash_core::ProcessStartRequest::new(
+        lash_core::ProcessInput::External { metadata },
+        lash_core::ProcessOriginator::host(),
+        lash_core::Lifetime::Detached,
+    )
+}
+
+/// ADR 0107 (FIG-4111), `model_code_cannot_mint_a_host_start_key`'s runtime
+/// half: a host rail accepts only a host key. A request that arrives with a
+/// key of a family lash derives for its own start paths — here a tool
+/// intent's, the one a model's `processes.start` realizes under — is refused
+/// as `start_key_family_refused`, never answered with that intent's process.
+///
+/// Red on the parent commit, where the facade adopted any key a request
+/// carried.
+#[tokio::test]
+async fn a_host_rail_refuses_a_derived_family_start_key() -> Result<()> {
+    let core = host_start_core().await?;
+    let intent_key = lash_core::StartKey::for_tool_intent(
+        lash_core::core_internal::StartKeyDerivation::LASH_START_PATHS,
+        &lash_core::derive_tool_intent_identity(
+            &SessionId::from("model-session"),
+            "turn-1",
+            Some("call-1"),
+            0,
+        )
+        .expect("the intent identity derives"),
+    );
+    let mut wire = serde_json::to_value(external_host_start(serde_json::Value::Null))
+        .expect("encode the request");
+    wire["start_key"] = serde_json::Value::String(intent_key.as_str().to_owned());
+    let request: lash_core::ProcessStartRequest =
+        serde_json::from_value(wire).expect("a rendered key decodes");
+    assert_eq!(request.start_key(), Some(&intent_key));
+    let error = core
+        .processes()
+        .start(
+            request,
+            runtime_operation_scope(&core, "derived-family-start").await,
+        )
+        .await
+        .expect_err("a host rail refuses a derived-family key");
+    assert!(
+        matches!(
+            &error,
+            EmbedError::Plugin(lash_core::PluginError::Runtime(runtime))
+                if runtime.code == lash_core::RuntimeErrorCode::StartKeyFamilyRefused
+        ),
+        "the refusal is typed: {error:?}"
+    );
+    Ok(())
+}
+
+/// ADR 0107 (FIG-4111, the study's C6): a host start is addressed by its key,
+/// so two starts in one scope under one host key are one start. The second,
+/// presenting another start, is the typed start-key conflict a retry under a
+/// retained key gets, never a replay divergence of the scope's journal.
+#[tokio::test]
+async fn a_second_host_start_in_one_scope_under_its_key_conflicts() -> Result<()> {
+    let core = host_start_core().await?;
+    let scoped = runtime_operation_scope(&core, "one-scope-two-starts").await;
+    let first = external_host_start(serde_json::json!({"report": "first"}))
+        .with_host_start_key("one-scope-key");
+    let started = core
+        .processes()
+        .start(first.clone(), scoped.clone())
+        .await?;
+    let again = core.processes().start(first, scoped.clone()).await?;
+    assert_eq!(again.process_id, started.process_id);
+    let error = core
+        .processes()
+        .start(
+            external_host_start(serde_json::json!({"report": "second"}))
+                .with_host_start_key("one-scope-key"),
+            scoped,
+        )
+        .await
+        .expect_err("another start under the scope's key conflicts");
+    assert!(
+        matches!(
+            &error,
+            EmbedError::Plugin(lash_core::PluginError::StartKeyConflict { start_key })
+                if *start_key == lash_core::StartKey::for_host("one-scope-key")
+        ),
+        "the refusal is the typed start-key conflict: {error:?}"
+    );
+    assert!(
+        !error.to_string().contains(started.process_id.as_str()),
+        "the conflict names no process: {error}"
     );
     Ok(())
 }

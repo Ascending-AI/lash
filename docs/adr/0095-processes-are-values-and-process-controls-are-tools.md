@@ -271,3 +271,13 @@ The refusal of a **raw** handle at an element position is unchanged —
 handle cannot be awaited directly; call `processes.await(handle)` and await that
 call, so the durable wait settles with the rest of the batch" — and that repair
 is now literally what the group does.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 10:
+[ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md),
+[ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md),
+[ADR 0110](0110-the-engine-owns-process-recovery.md) and
+[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) govern the
+process identity, lifetime, recovery and artifact ownership details. The
+value-oriented host API survives.

@@ -381,7 +381,10 @@ macro_rules! process_registry_tests {
                 (lifecycle_transition_refusals_are_backend_invariant, "transition-refusals"),
                 (external_ref_is_written_compare_and_set_by_segment_ordinal, "external-ref-compare-and-set"),
                 (a_start_key_reports_created_then_existing_and_is_trusted, "start-key-disposition"),
-                (a_host_start_key_is_scoped_to_its_owner_and_fences_its_content, "host-start-key-owner"),
+                (a_host_start_key_is_global_and_fences_its_originator, "host-start-key-global"),
+                (a_start_key_conflict_names_no_retained_process, "start-key-conflict-content-free"),
+                (a_host_retry_with_another_wake_target_conflicts, "host-start-key-wake-target"),
+                (a_host_start_key_after_prune_starts_new_for_any_originator, "host-start-key-after-prune"),
                 (keyless_starts_are_always_new, "keyless-starts"),
                 (concurrent_starts_under_one_key_register_one_process, "concurrent-start-key"),
                 (caller_departure_state_machine, "caller-departure"),
@@ -1244,6 +1247,27 @@ macro_rules! process_prune_start_staging_tests {
                 let (_fixture_guard, registry, env_store) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(registry, env_store).await;
+            }
+        )*
+    };
+}
+
+/// Register the start-staging laws a global start key needs (FIG-4111). The
+/// fixture yields `(guard, process registry, artifact referrer ports)`.
+#[macro_export]
+macro_rules! process_start_staging_tests {
+    ($fixture:block) => {
+        $crate::process_start_staging_tests!(@catalogue $fixture; [
+            (a_refused_start_never_strands_a_concurrent_start_under_its_key, "refused-start-concurrent-stager"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, registry, ports) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(registry, ports).await;
             }
         )*
     };

@@ -439,8 +439,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     );
 
-    let start_key =
-        lash::process::StartKey::for_host(lash::process::StartKeyOwner::HOST, process_id);
+    let start_key = lash::process::StartKey::for_host(process_id);
     let registration = ProcessRegistration::new(
         input,
         ProcessProvenance::host(),

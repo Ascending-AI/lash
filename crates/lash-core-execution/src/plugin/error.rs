@@ -57,6 +57,12 @@ pub enum PluginError {
         start_key: Option<crate::StartKey>,
         parent: crate::ScopeId,
     },
+    /// A host start key is bound to a retained process another start made
+    /// (ADR 0107): the retry presented a different start. A host key is
+    /// global, so the retained process may be another originator's; the
+    /// refusal names the key and nothing of the process it is bound to.
+    #[error("process start key `{start_key}` is bound to another start")]
+    StartKeyConflict { start_key: crate::StartKey },
     /// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]
     InvalidToolDiscovery { operation: String },
@@ -304,6 +310,7 @@ impl PluginError {
             | Self::RuntimeEffectController(_)
             | Self::ProcessCancelConflict { .. }
             | Self::ParentEnded { .. }
+            | Self::StartKeyConflict { .. }
             | Self::InvalidToolDiscovery { .. }
             | Self::InvalidBatchMaximum { .. }
             | Self::ResidentToolContractUnavailable { .. }
@@ -389,6 +396,7 @@ impl PluginError {
             | Self::ProcessAlreadyTerminal { .. }
             | Self::ProcessHandedOver { .. }
             | Self::ParentEnded { .. }
+            | Self::StartKeyConflict { .. }
             | Self::ProcessCancelConflict { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }
             | Self::ReservedProcessEvent { .. }

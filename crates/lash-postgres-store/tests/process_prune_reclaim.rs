@@ -80,6 +80,22 @@ lash_conformance::process_prune_reclaim_tests!({
     (database_lock, "postgres", factory, registry, probe)
 });
 
+lash_conformance::process_start_staging_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres refused-start staging law: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
+        Arc::new(storage.lashlang_artifact_store()),
+        Arc::new(storage.process_env_store()),
+        storage.artifact_cleanup(),
+        Arc::new(lash_core_execution::facade_support::SystemClock),
+    );
+    (database_lock, registry, ports)
+});
+
 lash_conformance::process_prune_start_staging_tests!({
     let Some((database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres prune and late-transfer law: database URL is not set");

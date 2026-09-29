@@ -220,3 +220,9 @@ in the shared conformance law rather than papered over.
   resolved selector wholesale: an observer removed before the intent is
   cleared can be added again, because clearing the durable host decision is
   the commit point.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 7: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
+governs drive-fenced claim supersession. Earlier lease-generation reclaim text
+is historical; session IDs remain single-use.

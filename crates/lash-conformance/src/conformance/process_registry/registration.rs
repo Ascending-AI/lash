@@ -31,6 +31,7 @@ pub async fn a_start_key_reports_created_then_existing_and_is_trusted(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let key = crate::StartKey::for_tool_intent(
+        crate::DERIVED_START_KEYS,
         &crate::derive_tool_intent_identity(
             &crate::SessionId::from("start-key-disposition"),
             "start-key-disposition",
@@ -88,58 +89,75 @@ pub async fn a_start_key_reports_created_then_existing_and_is_trusted(
     );
 }
 
-/// ADR 0107: a host's start key is the host's claim, scoped to the start's
-/// owner. The same raw key from two sessions starts two processes, never one
-/// session's process returned to the other; and the same key from one owner
-/// with different content is a typed durable-identity conflict, never a
-/// silent return of the retained process.
+/// A registration under the host key `bytes`, originated by `session` and
+/// waking `wake`: the shape the host-key laws below vary one field of.
+fn host_keyed(bytes: &str, session: &str, wake: Option<&str>) -> ProcessRegistration {
+    let mut registration = registration("host-key")
+        .with_start_key(Some(crate::StartKey::for_host(bytes)))
+        .with_wake_session_id(wake.map(SessionId::from));
+    registration.input = std::sync::Arc::new(ProcessInput::External {
+        metadata: serde_json::json!({"report": "nightly", "secret": "input-metadata-of-a"}),
+    });
+    registration.provenance = ProcessProvenance::new(crate::ProcessOriginator::session(
+        crate::SessionScope::new(session),
+    ));
+    registration
+}
+
+fn assert_start_key_conflict(error: &PluginError, bytes: &str) {
+    assert!(
+        matches!(
+            error,
+            PluginError::StartKeyConflict { start_key }
+                if *start_key == crate::StartKey::for_host(bytes)
+        ),
+        "the refusal is the typed start-key conflict naming the key: {error:?}"
+    );
+}
+
+/// ADR 0107 (FIG-4111): a host's start key is global and fences its start.
+/// Lash mixes nothing into a host key, so the same bytes from another
+/// originator are the same key; a start under it returns the retained process
+/// only to the start that made it, and the other originator's start is a
+/// typed [`PluginError::StartKeyConflict`] that leaves the retained row as it
+/// was. The same originator with other content is the same conflict.
+///
+/// Red on the parent commit, where the key was scoped to its owner and
+/// session B's bytes silently started a second process.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_host_start_key_is_scoped_to_its_owner_and_fences_its_content(
+pub async fn a_host_start_key_is_global_and_fences_its_originator(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let under = |session: &str| {
-        let session_id = crate::SessionId::from(session);
-        let key = crate::StartKey::for_host(
-            crate::StartKeyOwner::Session {
-                session_id: &session_id,
-            },
-            "nightly-report",
-        );
-        let mut registration = registration("host-key-owner").with_start_key(Some(key));
-        registration.provenance = ProcessProvenance::new(crate::ProcessOriginator::session(
-            crate::SessionScope::new(session_id.clone()),
-        ));
-        registration
-    };
+    let bytes = "global-host-key";
     let first = registry
-        .register_process_reporting_disposition(under("host-key-session-a"), &[])
+        .register_process_reporting_disposition(host_keyed(bytes, "host-key-session-a", None), &[])
         .await
-        .expect("session A starts under its key");
-    let other_owner = registry
-        .register_process_reporting_disposition(under("host-key-session-b"), &[])
-        .await
-        .expect("session B starts under the same raw key");
+        .expect("session A starts under the key");
     assert_eq!(
-        other_owner.disposition,
-        crate::ProcessRegistrationDisposition::Created,
-        "the same raw key under another owner is another key"
+        first.disposition,
+        crate::ProcessRegistrationDisposition::Created
     );
-    assert_ne!(other_owner.record.id, first.record.id);
+
+    let other_originator = registry
+        .register_process_reporting_disposition(host_keyed(bytes, "host-key-session-b", None), &[])
+        .await
+        .expect_err("the same bytes from another originator are the same key, and fence it");
+    assert_start_key_conflict(&other_originator, bytes);
 
     let repeat = registry
-        .register_process_reporting_disposition(under("host-key-session-a"), &[])
+        .register_process_reporting_disposition(host_keyed(bytes, "host-key-session-a", None), &[])
         .await
-        .expect("an identical host retry is idempotent");
+        .expect("an identical retry from the originator is idempotent");
     assert_eq!(
         repeat.disposition,
         crate::ProcessRegistrationDisposition::Existing
     );
     assert_eq!(repeat.record.id, first.record.id);
 
-    let mut changed = under("host-key-session-a");
+    let mut changed = host_keyed(bytes, "host-key-session-a", None);
     changed.input = std::sync::Arc::new(ProcessInput::External {
         metadata: serde_json::json!({"suite": "changed-host-content"}),
     });
@@ -147,16 +165,164 @@ pub async fn a_host_start_key_is_scoped_to_its_owner_and_fences_its_content(
         .register_process_reporting_disposition(changed, &[])
         .await
         .expect_err("a changed-content host retry under a retained key is refused");
-    assert!(
-        crate::is_durable_identity_conflict(&error),
-        "the refusal is the typed durable-identity conflict: {error}"
-    );
+    assert_start_key_conflict(&error, bytes);
+
     let retained = registry
         .get_process(&first.record.id)
         .await
         .expect("read the retained process")
-        .expect("the retained process survives the refused retry");
-    assert_eq!(retained.input, first.record.input);
+        .expect("the retained process survives the refused starts");
+    assert_eq!(retained, first.record, "A's row is unchanged");
+    let rows = registry
+        .list_processes(&crate::ProcessListFilter::default())
+        .await
+        .expect("list processes");
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.start_key.as_ref() == Some(&crate::StartKey::for_host(bytes)))
+            .count(),
+        1,
+        "one process holds the key"
+    );
+}
+
+/// ADR 0107 (FIG-4111): a start-key conflict names the key and nothing else.
+/// A host key is global, so the process it is bound to may be another
+/// originator's: the refusal's `Display`, its `Debug` and the runtime error it
+/// becomes at the effect boundary omit the retained process's id, originator
+/// and input metadata.
+///
+/// Red on the parent commit, whose durable-identity conflict named the
+/// retained process's id.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_start_key_conflict_names_no_retained_process(registry: Arc<dyn ProcessRegistry>) {
+    let bytes = "content-free-conflict";
+    let retained = registry
+        .register_process(host_keyed(bytes, "conflict-owner-session", None))
+        .await
+        .expect("the owner starts under the key");
+    let error = registry
+        .register_process_reporting_disposition(
+            host_keyed(bytes, "conflict-other-session", None),
+            &[],
+        )
+        .await
+        .expect_err("another originator's start under the key conflicts");
+    assert_start_key_conflict(&error, bytes);
+    let runtime = crate::RuntimeEffectControllerError::from(error.clone()).into_runtime_error();
+    assert_eq!(runtime.code.as_str(), "process_start_key_conflict");
+    assert!(runtime.is_terminal() && !runtime.is_retryable());
+    let turn_failure = error
+        .clone()
+        .into_turn_failure(crate::RuntimeErrorCode::Plugin);
+    for rendered in [
+        error.to_string(),
+        format!("{error:?}"),
+        runtime.to_string(),
+        format!("{runtime:?}"),
+        turn_failure.to_string(),
+        format!("{turn_failure:?}"),
+    ] {
+        for leaked in [
+            retained.id.as_str(),
+            "conflict-owner-session",
+            "input-metadata-of-a",
+        ] {
+            assert!(
+                !rendered.contains(leaked),
+                "the conflict leaks `{leaked}` of the retained process: {rendered}"
+            );
+        }
+    }
+}
+
+/// ADR 0107 (FIG-4111): the wake target is part of the start a host key
+/// fences. A retry from the same originator naming another wake session would
+/// otherwise be told its start exists while the retained process's work
+/// lands on the first session.
+///
+/// Red on the parent commit, which never compared the wake target and
+/// answered the retry `Existing`.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_host_retry_with_another_wake_target_conflicts(registry: Arc<dyn ProcessRegistry>) {
+    let bytes = "wake-target-fence";
+    let first = registry
+        .register_process(host_keyed(bytes, "wake-owner", Some("wake-first")))
+        .await
+        .expect("start waking the first session");
+    let repeat = registry
+        .register_process_reporting_disposition(
+            host_keyed(bytes, "wake-owner", Some("wake-first")),
+            &[],
+        )
+        .await
+        .expect("an identical retry is idempotent");
+    assert_eq!(repeat.record.id, first.id);
+    for other_wake in [Some("wake-second"), None] {
+        let error = registry
+            .register_process_reporting_disposition(
+                host_keyed(bytes, "wake-owner", other_wake),
+                &[],
+            )
+            .await
+            .expect_err("a retry naming another wake target is refused");
+        assert_start_key_conflict(&error, bytes);
+    }
+}
+
+/// ADR 0107 (FIG-4111): once a host key's process is pruned, the key starts a
+/// new process with a new id for any originator, and the pruned process's
+/// handle refuses as no longer retained, never as the new process.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_host_start_key_after_prune_starts_new_for_any_originator(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let bytes = "global-key-after-prune";
+    let first = registry
+        .register_process(host_keyed(bytes, "prune-owner-a", None))
+        .await
+        .expect("A starts under the key");
+    registry
+        .complete_process(
+            &first.id,
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!({"process": "a"}),
+            )),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete A's process");
+    registry
+        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune A's process");
+
+    let second = registry
+        .register_process_reporting_disposition(host_keyed(bytes, "prune-other-b", None), &[])
+        .await
+        .expect("B starts under the pruned process's key");
+    assert_eq!(
+        second.disposition,
+        crate::ProcessRegistrationDisposition::Created,
+        "a pruned process no longer holds its key, for any originator"
+    );
+    assert_ne!(second.record.id, first.id, "a minted id is never reused");
+    assert!(
+        matches!(
+            registry.get_process(&first.id).await,
+            Err(PluginError::ProcessNoLongerRetained { .. })
+        ),
+        "A's handle refuses; it never resolves to B's process"
+    );
 }
 
 /// ADR 0107: a keyless start is always new, and every registration mints a
@@ -193,7 +359,7 @@ pub async fn keyless_starts_are_always_new(registry: Arc<dyn ProcessRegistry>) {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry>) {
-    let key = crate::StartKey::for_host(crate::StartKeyOwner::HOST, "observer-registration");
+    let key = crate::StartKey::for_host("observer-registration");
     let record = registry
         .register_process_with_observers(
             registration("observer-registration").with_start_key(Some(key.clone())),
@@ -275,16 +441,14 @@ pub async fn concurrent_starts_under_one_key_register_one_process(
     for (round, differing_content) in [("identical", false), ("differing", true)] {
         let key = if differing_content {
             crate::StartKey::for_trigger_delivery(
+                crate::DERIVED_START_KEYS,
                 &format!("concurrent-start-key-{round}"),
                 "concurrent-start-subscription",
                 "incarnation",
                 1,
             )
         } else {
-            crate::StartKey::for_host(
-                crate::StartKeyOwner::HOST,
-                format!("concurrent-start-key-{round}"),
-            )
+            crate::StartKey::for_host(format!("concurrent-start-key-{round}"))
         };
         let start = Arc::new(tokio::sync::Barrier::new(RACERS));
         let mut racers = Vec::with_capacity(RACERS);
@@ -338,7 +502,7 @@ pub async fn concurrent_starts_under_one_key_register_one_process(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_start_key_after_prune_starts_a_new_process(registry: Arc<dyn ProcessRegistry>) {
-    let key = crate::StartKey::for_host(crate::StartKeyOwner::HOST, "start-key-after-prune");
+    let key = crate::StartKey::for_host("start-key-after-prune");
     let first = registry
         .register_process(registration("start-key-after-prune").with_start_key(Some(key.clone())))
         .await

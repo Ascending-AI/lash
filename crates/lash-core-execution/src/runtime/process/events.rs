@@ -1122,7 +1122,7 @@ mod cancellation_identity_tests {
 
     #[test]
     fn cancellation_replay_identity_has_pinned_bounded_grammar() {
-        let process_ref = ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | 1);
+        let process_ref = crate::ProcessIdMint::sequential_id_for_testing(1);
         let request = CancelRequest::new(CancelOrigin::OperatorRequested, "λ".repeat(3_200), 10);
         let key = cancellation_replay_key(&process_ref, &request);
         assert_eq!(
@@ -1149,7 +1149,7 @@ mod cancellation_identity_tests {
             ..request.clone()
         };
         assert_ne!(key, cancellation_replay_key(&process_ref, &other_origin));
-        let other_process = ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | 2);
+        let other_process = crate::ProcessIdMint::sequential_id_for_testing(2);
         assert_ne!(key, cancellation_replay_key(&other_process, &request));
     }
 

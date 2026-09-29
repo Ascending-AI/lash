@@ -5,7 +5,7 @@
 //! whether it can mint the key that routing needs
 //! ([`AwaitEventResolver::prepare_completion_key`]), and the registry the key
 //! was minted in decides whether a *presented* key is one of its own (the
-//! HMAC issuer check inside `resolve`/`peek`/`await`). Those are three
+//! key-validity check inside `resolve`/`peek`/`await`). Those are three
 //! pairwise boundaries: every (routing mode × host kind × registry identity)
 //! pair has a ruling, and every incompatible pair refuses **before** a key is
 //! issued.

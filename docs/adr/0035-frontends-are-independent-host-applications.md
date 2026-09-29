@@ -18,3 +18,9 @@ changes to Lash must remain usable without private workspace paths. A private
 support crate stays in the Host Application repository while that host is its
 only real consumer; it moves into Lash only when it becomes a stable,
 frontend-independent contract with credible use by another host.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 23: [ADR 0079](0079-one-promised-package-facade-owns-the-api.md) governs
+the promised Lash package API. Independent frontend ownership and host policy
+remain as stated here.

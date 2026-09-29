@@ -2179,11 +2179,16 @@ fn trigger_subscription_record() -> lash_core::TriggerSubscriptionRecord {
     }
 }
 
-/// ADR 0107: a remote caller's raw key is scoped to the start's originator,
-/// and a record's `start_key_digest` echoed back as a caller's key is refused
-/// rather than hashed again into a key that starts a second process.
+/// ADR 0107: a remote caller's raw key is global: the same bytes are one host
+/// key whichever originator sends them, and exactly the key a host minting
+/// those bytes gets. A record's `start_key_digest` echoed back as a caller's
+/// key is refused rather than hashed again into a key that starts a second
+/// process.
+///
+/// Red on the parent commit, where the conversion mixed the originator into
+/// the key and session B's bytes derived another key.
 #[test]
-fn a_remote_start_key_is_scoped_to_its_originator_and_never_rehashed() {
+fn a_remote_start_key_is_global_and_never_rehashed() {
     let remote_start = |session: &str, start_key: &str| {
         let mut remote =
             RemoteProcessStartRequest::try_from(lash_core::ProcessStartRequest::external(
@@ -2198,7 +2203,8 @@ fn a_remote_start_key_is_scoped_to_its_originator_and_never_rehashed() {
     let key_of = |remote: RemoteProcessStartRequest| {
         lash_core::ProcessStartRequest::try_from(remote)
             .expect("core start")
-            .start_key
+            .start_key()
+            .cloned()
             .expect("a caller's key is kept")
     };
     let session_a = key_of(remote_start("session-a", "nightly-report"));
@@ -2207,11 +2213,17 @@ fn a_remote_start_key_is_scoped_to_its_originator_and_never_rehashed() {
         session_a,
         "one caller's retry re-derives its key"
     );
-    assert_ne!(
+    assert_eq!(
         key_of(remote_start("session-b", "nightly-report")),
         session_a,
-        "the same raw key under another originator is another key"
+        "the same raw key from another originator is the same key"
     );
+    assert_eq!(
+        session_a,
+        lash_core::StartKey::for_host("nightly-report"),
+        "a remote key is the host key of the caller's bytes, nothing mixed in"
+    );
+    assert!(session_a.is_host_supplied());
 
     let echoed = remote_start("session-a", session_a.as_str());
     let error = lash_core::ProcessStartRequest::try_from(echoed)

@@ -44,7 +44,7 @@
   );
 
   const availableVars = $derived(node.data.availableVars ?? []);
-  // Derived, read-only type diagnostics for THIS node (definite type errors).
+  // Derived, read-only type errors for this node.
   const diagnostics = $derived(nodeDiagnostics(node));
   const hasDiag = $derived(diagnostics.length > 0);
   const diagFields = $derived(new Set(diagnostics.map((d) => diagnosticFieldHint(d.kind)).filter(Boolean)));
@@ -1045,7 +1045,7 @@
     color: var(--text-faint);
   }
 
-  /* inline type diagnostics — definite errors surfaced on the node */
+  /* inline type errors surfaced on the node */
   .wf-diag {
     margin-top: 8px;
     display: flex;
@@ -1111,7 +1111,7 @@
     letter-spacing: 0.03em;
   }
 
-  /* definite type error — red left rail + ring so the node reads as broken */
+  /* type error — red left rail + ring so the node reads as broken */
   .wf-node.has-diag {
     border-color: color-mix(in srgb, var(--rose) 55%, var(--line));
     border-left-color: var(--rose);

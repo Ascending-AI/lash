@@ -292,10 +292,9 @@ fn measure_hardening_identity_phases(
     let (_, phase) =
         measure_runtime_perf_phase("store_hardening.identity.process_registration", || {
             for index in 0..HARDENING_IDENTITY_ITERATIONS {
-                std::hint::black_box(lash_core::StartKey::for_host(
-                    lash_core::StartKeyOwner::HOST,
-                    format!("identity-process-{turn_index}-{index}"),
-                ));
+                std::hint::black_box(lash_core::StartKey::for_host(format!(
+                    "identity-process-{turn_index}-{index}"
+                )));
             }
             Ok(())
         })?;

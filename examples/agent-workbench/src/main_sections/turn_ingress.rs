@@ -103,7 +103,7 @@ pub(crate) async fn admit_turn_input(
     surface: &str,
 ) -> Result<TurnInputReceipt, AppError> {
     let source_id = format!("workbench-turn-input-{}", uuid::Uuid::new_v4());
-    // The Durable Session never creates (ADR 0097), and the workbench admits
+    // The Durable Session never creates (ADR 0119), and the workbench admits
     // input for a session whose first turn may not have run yet. `create()` is
     // the explicit, idempotent verb for that: it writes the catalog entry and
     // builds no runtime, so the admission is not a side effect of the send.

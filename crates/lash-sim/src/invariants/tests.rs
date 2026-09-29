@@ -94,8 +94,11 @@ fn the_clean_history_keeps_every_invariant_and_gives_each_facts() {
     let report = check(&history);
     assert!(report.passed(), "{}", report.failure());
     for (invariant, observed) in &report.observed {
-        if *invariant == "artifact-reachable-or-collected" {
-            // The pending-tool turn stores no artifact; its red fixture adds one.
+        if *invariant == "artifact-reachable-or-collected"
+            || *invariant == "an-existing-start-is-answered-only-to-its-originator"
+        {
+            // The pending-tool turn stores no artifact and makes no host
+            // start; each red fixture adds its own.
             continue;
         }
         assert!(
@@ -386,4 +389,43 @@ fn a_quarantine_entry_covers_only_its_own_violation() {
                 && violation.detail.contains(entry.detail_contains)
         })
     );
+}
+
+/// FIG-4111: a host key is global, so an `Existing` answer to a start from one
+/// originator for a process another originator started is the leak the
+/// registrar's originator comparison exists to prevent.
+#[test]
+fn an_existing_start_answered_to_another_originator_is_caught() {
+    let mut history = clean();
+    let answered = |disposition: &str, requested: &str| Fact::ProcessStartAnswered {
+        process: "p_0192000000007000800000000000abcd".to_owned(),
+        disposition: disposition.to_owned(),
+        requested_originator: requested.to_owned(),
+        answered_originator: r#"{"type":"session","session_id":"a"}"#.to_owned(),
+    };
+    history.push(answered(
+        "created",
+        r#"{"type":"session","session_id":"a"}"#,
+    ));
+    history.push(answered(
+        "existing",
+        r#"{"type":"session","session_id":"a"}"#,
+    ));
+    let kept = check_with(
+        &history,
+        &[checker(
+            "an-existing-start-is-answered-only-to-its-originator",
+        )],
+    );
+    assert!(kept.passed(), "{}", kept.failure());
+    history.push(answered(
+        "existing",
+        r#"{"type":"session","session_id":"b"}"#,
+    ));
+    let at = history.records.len() - 1;
+    let report = assert_caught(
+        &history,
+        "an-existing-start-is-answered-only-to-its-originator",
+    );
+    assert_eq!(report.violations[0].records, vec![at]);
 }

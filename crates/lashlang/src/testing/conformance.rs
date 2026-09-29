@@ -111,10 +111,7 @@ pub async fn abandoned_start_reclaims_module(store: Arc<dyn ModuleArtifactStore>
     let artifact = module("abandoned");
     let bytes = artifact.to_store_bytes().expect("module bytes");
     let key = artifact.module_ref().as_str();
-    let start = lash_core_execution::StartKey::for_host(
-        lash_core_execution::StartKeyOwner::HOST,
-        "abandoned-module",
-    );
+    let start = lash_core_execution::StartKey::for_host("abandoned-module");
     let journal = lash_core_execution::ExecutionScope::runtime_operation("abandoned-module")
         .journal_identity()
         .expect("starter journal");

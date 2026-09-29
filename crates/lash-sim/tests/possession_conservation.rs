@@ -196,12 +196,7 @@ impl PossessionWorld {
                                 },
                             )),
                         )
-                        .with_start_key(Some(
-                            lash_core::StartKey::for_host(
-                                lash_core::StartKeyOwner::HOST,
-                                format!("{opener_name}-{child}"),
-                            ),
-                        )),
+                        .with_host_start_key(format!("{opener_name}-{child}")),
                         "engine",
                         Some(child.to_string()),
                     )

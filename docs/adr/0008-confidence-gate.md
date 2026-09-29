@@ -103,3 +103,10 @@ CI and local development the same language for confidence.
   `lash-postgres-store` production-facing session-store APIs.
 - Workflow artifact uploads are attempt-qualified. Operators must inspect and
   retain the first failing attempt even when a later attempt passes.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+G2: [ADR 0044](0044-tests-must-be-independent-of-what-they-test.md) supersedes
+the deterministic-simulation claim for lash-sim. Its randomised runs use virtual
+skipped time and dump full history on checker failure; seeds alone do not
+reproduce scheduling.

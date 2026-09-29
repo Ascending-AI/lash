@@ -139,3 +139,10 @@ maintenance command resets a store automatically.
 - **Accept the status quo (drop everything, TTL recovers).** Rejected after the
   audit: TTL-only release put a fixed 30s floor under every drain and failover
   path and was not a policy the host chose.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 23:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+supersedes the SQL effect-engine assumptions. This ADR still assigns operational
+policy to the host.

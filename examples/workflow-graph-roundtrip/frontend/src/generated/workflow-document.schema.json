@@ -349,9 +349,6 @@
     },
     "TypeDiagnostic": {
       "properties": {
-        "class": {
-          "type": "string"
-        },
         "kind": {
           "type": "string"
         },
@@ -379,7 +376,6 @@
         }
       },
       "required": [
-        "class",
         "kind",
         "message",
         "nodeId"

@@ -641,7 +641,7 @@ the stamp and the wire protect the readers that come later.
    reads the deployment at the URI and then acts on what it finds:
    - none: register without force;
    - one that serves this build's generation names (`…_g<G>`): register with
-     force, because this is a redeploy of the same build;
+     force, because builds sharing G promise replay-equivalent journals;
    - any other: refuse with
      `RestateRegistrationError::EndpointServesAnotherGeneration { uri, held, local }`.
 2. **One namespace across the roll.** N and N+1 bind under the same ADR 0111
@@ -655,9 +655,12 @@ the stamp and the wire protect the readers that come later.
    routing (`crates/lash-restate/src/process/mod.rs:1261`) and the
    successor-window check (`crates/lash-restate/src/process/workflow/lanes.rs:93`)
    stay as they are.
-5. **A journal never moves to another build.** A continuation, parked turn
-   or segment state outside the serving build's read range parks and routes
-   to its writer's `G`. The VM fence
+5. **A journal stays within its replay-equivalent generation.** Any build
+   sharing `G` must replay the same recorded steps identically. A change to
+   recorded step logic, order, names or effects bumps `JOURNAL_LOGIC_EPOCH`;
+   `G` is not a binary fingerprint. A continuation, parked turn or segment
+   state outside the serving build's read range parks and routes to its
+   writer's `G`. The VM fence
    (`crates/lashlang/src/runtime/vm/continuation.rs:1511`) is never relaxed.
 6. **Rollback.** Register N's build at a fresh URI, which makes it the
    newest deployment for new invocations. N+1's deployment stays registered,
@@ -769,7 +772,7 @@ The obligations are:
 | Restate journals and inputs (`EFFECT_JOURNAL`, `RESTATE_PROCESS_JOURNAL`, `LASH_SESSION_DRIVE`, `JOURNAL_LOGIC_EPOCH`, and the other D rows) | D | Route to the writer. The sentinel parks a foreign journal before any effect. |
 | Restate handler wire | `RESTATE_WIRE_VERSION`, C | §3.1. |
 | Remote protocol | `REMOTE_PROTOCOL_VERSION`, C | §4. |
-| Trace JSONL | `TRACE_SCHEMA_VERSION`, C | Every record carries its version. A sink writes its own build's version; trace is per process and no lash code reads it back. Readers accept every version they know, ignore unknown optional fields and skip unknown event kinds, counting them: trace is observational and carries no executable variant. |
+| Trace JSONL | `TRACE_SCHEMA_VERSION`, C | Every record carries its version. A sink writes its own build's version; lash-trace can read JSONL back. Readers accept every version they know, ignore unknown optional fields and skip unknown event kinds, counting them: trace is observational and carries no executable variant. |
 | Process cursors | `PROCESS_CURSOR_VERSION`, C (registered at the cut) | Minted at the `F`-selected version, so a cursor survives rollback. A cursor outside the read range is refused typed, and the host contract is to list again from a fresh cursor. |
 | `lashctl --json` | new: `LASHCTL_JSON_SCHEMA_VERSION`, C | Every command prints `{"schema_version":1,"command":…,"result":…,"error":…}` and exits with a pinned code: 0 done, 1 unexpected failure, 2 usage, 3 refused precondition, 4 incompatible store, 5 not yet (a drain still pending, or a wait timed out). `result` shapes are DTOs owned by `lashctl`, never internal status types. |
 | Derived projections (`WORKFLOW_GRAPH_SCHEMA`, `WORKFLOW_TYPE_FACET`) | M | Regenerate from the module. Refuse a newer stamp typed. |
@@ -1037,3 +1040,12 @@ cutover integrations.
   SQLite blobs and module artifacts gain envelopes. Old stores are refused
   and recreated. A journal in flight at the deploy drains on the build that
   wrote it (ADR 0106).
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Items 4 and 27; G1: Builds sharing drain generation G must replay each other's
+journals identically. G is not a binary fingerprint. A change to recorded step
+logic, order, names or effects bumps `JOURNAL_LOGIC_EPOCH`. During the pre-1.0
+freeze, shapes change in place. The CI replay check enforcing the same-G
+contract is built and enabled at the 1.0 cut (FIG-4097). Lash-trace reads JSONL
+back, as reflected in the trace row above.

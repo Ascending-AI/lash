@@ -73,3 +73,9 @@ than durable supersession proof plus receipt retention. Session deletion will
 remove that session's roots and edges without reclaiming attachment edges still
 reachable through another session's shared historical prefix. The tool-call
 accounting ruling and its attachment-preservation bounds are unchanged.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 23: [ADR 0079](0079-one-promised-package-facade-owns-the-api.md) governs
+the promised facade. The shared accounting rule survives for current tool
+execution.

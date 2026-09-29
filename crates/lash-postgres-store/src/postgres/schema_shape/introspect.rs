@@ -570,7 +570,7 @@ pub(crate) fn normalize_predicate(predicate: &str) -> String {
 
 /// These are invisible to any structural comparison and lash cannot run without
 /// them: a missing `lash_process_change_clock` row breaks every process-registry
-/// write, and the await-event signing secret authenticates every durable promise.
+/// write.
 ///
 /// Each row is looked up by its `singleton = TRUE` key rather than by table
 /// non-emptiness. `CHECK (singleton)` is deliberately outside the verified scope,

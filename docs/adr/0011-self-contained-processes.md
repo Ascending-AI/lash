@@ -1,5 +1,10 @@
 # Self-contained processes: capture-at-creation, no session binding, host-policy lifecycle
 
+Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
+passages are historical under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+The non-SQL decision and host-policy rules here survive.
+
 A Runtime Process is a standalone durable entity — id, input, captured execution
 environment, event log, status, leases. It never holds a live reference to the session
 that created it: the execution environment (plugin options, policy, lashlang

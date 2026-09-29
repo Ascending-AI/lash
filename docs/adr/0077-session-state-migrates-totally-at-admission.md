@@ -2,6 +2,11 @@
 
 ## Status
 
+Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
+passages are historical under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+The non-SQL decision and host-policy rules here survive.
+
 Accepted. Ratified on FIG-874; this ADR defines the store-owned quadrant of
 that compatibility doctrine.
 
@@ -227,3 +232,11 @@ This decision does not create a universal storage version:
 - Backend implementations own transaction and locking mechanics, while core
   owns the converter chain, projection membership, deterministic semantics, and
   conformance laws.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 18: The history rule has
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) as its 1.0
+floor: 1.0 must read the 1.1 migration shape during a roll. Lease-era status
+text is retired under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).

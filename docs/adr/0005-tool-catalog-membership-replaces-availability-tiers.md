@@ -25,3 +25,9 @@ The ladder compressed three independent concerns onto one ordered scale: whether
 - **Keep the ladder, rename `Searchable` → `Deferred`.** Rejected: treats the symptom (a mechanism-coupled name) without fixing the cause (one enum doing three jobs).
 - **Resident-but-searchable tier with on-demand promotion.** Rejected: if the kernel already holds the tool it is effectively callable; "searchable" only suppresses request tokens, which is host budgeting, not availability.
 - **`discover`/`catalogue` methods on the resolver.** Rejected: enumeration and previews are host concerns delivered through ordinary prompt contributions and host tools; the resolver stays resolve-only.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 23: [ADR 0083](0083-rlm-native-tool-channel.md) supersedes the catalog
+claims about how RLM tools reach the model. The host still decides catalog
+membership.

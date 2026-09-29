@@ -774,3 +774,10 @@ tool bodies, and the body lint that policed orchestrating bodies is deleted.
 The `batch` expansion runs in the standard protocol driver, as a pure
 function of the recorded response and the turn's admitted configuration
 ([ADR 0116](0116-tools-are-opaque.md) §2.1).
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 4: The old version-bump and refusal prescription in §12 is historical
+during the pre-1.0 freeze. Durable shapes change in place until
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) establishes
+the 1.0 baseline. FIG-4110 owns §6.

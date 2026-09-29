@@ -9,7 +9,7 @@
   // vertical CARD FLOW. A non-technical person reads the workflow top-to-bottom
   // as a stack of big cards connected by a rail, and tweaks each card's values in
   // place. It consumes the SAME draft document the canvas does; edits flow
-  // through the same commit/save path (App owns dirty/history/Save-block).
+  // through the same commit/save path (App owns dirty/history/Save).
   let { doc, onCommit, onDelete, onInsert } = $props();
 
   setContext('stepsHandlers', {

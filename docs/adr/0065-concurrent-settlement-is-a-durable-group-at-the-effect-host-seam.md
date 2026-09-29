@@ -2,6 +2,11 @@
 
 ## Status
 
+Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
+passages are historical under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+The non-SQL decision and host-policy rules here survive.
+
 Accepted. Amended 2026-08-19 (FIG-1578): a group carries envelopes and nothing
 else, and what runs a child is the host's registered `GroupExecutors` resolver
 rather than a caller-supplied executor vec paired with the group.

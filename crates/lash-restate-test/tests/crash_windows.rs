@@ -8,7 +8,7 @@
 //!   but before its result did, or before the successor's send did. The
 //!   redrive carries the process to its terminal through exactly one
 //!   successor invocation per segment, and no tool call runs twice.
-//! * **The presentation put (ADR 0100).** A tool child's presentation step
+//! * **The presentation put (ADR 0120).** A tool child's presentation step
 //!   retains the full output as a content-addressed session artifact inside
 //!   the journaled `PresentToolResult` effect, so the `put` lands before the
 //!   effect's outcome does. The deployment dies between the two: the redrive
