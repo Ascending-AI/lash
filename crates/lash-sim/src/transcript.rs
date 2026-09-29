@@ -416,8 +416,8 @@ mod tests {
     use lash_core::{
         PluginState, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
         ProcessEventSemanticsSpec, ProcessEventType, ProcessValueSelector, ProcessWakeSpec,
-        ProjectionWatermark, RuntimeSessionState, SessionCatalogStore as _, SessionRelation,
-        SessionStoreCreateRequest, ToolState,
+        ProjectionWatermark, RuntimeSessionState, SessionCatalogStore as _, SessionCreationHead,
+        SessionRelation, SessionStoreCreateRequest, ToolState,
     };
 
     use super::*;
@@ -632,7 +632,8 @@ mod tests {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("mutation-session"),
                 relation: SessionRelation::Root,
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                head: SessionCreationHead::CommittedByCreator,
             })
             .await
             .expect("create observed store");

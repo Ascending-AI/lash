@@ -207,7 +207,7 @@ pub(crate) use process_identity::process_wake_turn_cause;
 pub(crate) use runtime_error::RuntimeEffectReplayMismatchReport;
 
 pub(crate) use session_identity::{
-    OpenAgentFrameRequest, OpenAgentFrameResult, SessionStoreCreateRequest,
+    OpenAgentFrameRequest, OpenAgentFrameResult, SessionCreationHead, SessionStoreCreateRequest,
 };
 pub(crate) use session_policy::ApplyConfigPatch;
 #[allow(unused_imports)]

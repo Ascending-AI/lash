@@ -12,8 +12,8 @@ use lash_core_execution::store::GraphAppend;
 use lash_core_execution::{
     AttachmentId, CommitBudget, CommitBudgetLimit, PersistedSessionConfig, ProtocolEvent,
     RuntimeCommit, RuntimeSessionState, RuntimeStore, SessionCatalogStore as _,
-    SessionHistoryRecord, SessionNodePayload, SessionNodeRecord, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest,
+    SessionCreationHead, SessionHistoryRecord, SessionNodePayload, SessionNodeRecord,
+    SessionPolicy, SessionRelation, SessionStoreCreateRequest,
 };
 use lash_postgres_store::PostgresStorage;
 use lash_sqlite_store::SqliteStoreSet;
@@ -427,9 +427,11 @@ async fn measured_commit_size_curve() {
                                 pending_observer_intents: Vec::new(),
                                 session_id: session_id.clone(),
                                 relation: SessionRelation::Root,
-                                policy: SessionPolicy::new(
+                                config: SessionPolicy::new(
                                     lash_core_execution::TurnBudget::Unbounded,
-                                ),
+                                )
+                                .into(),
+                                head: SessionCreationHead::CommittedByCreator,
                             })
                             .await
                             .expect("create SQLite benchmark store");
@@ -443,9 +445,11 @@ async fn measured_commit_size_curve() {
                                 pending_observer_intents: Vec::new(),
                                 session_id: session_id.clone(),
                                 relation: SessionRelation::Root,
-                                policy: SessionPolicy::new(
+                                config: SessionPolicy::new(
                                     lash_core_execution::TurnBudget::Unbounded,
-                                ),
+                                )
+                                .into(),
+                                head: SessionCreationHead::CommittedByCreator,
                             })
                             .await
                             .expect("create PostgreSQL benchmark session");

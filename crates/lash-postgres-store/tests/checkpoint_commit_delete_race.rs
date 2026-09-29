@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use lash_core_execution::{
     HydratedCheckpointComponent, RuntimeCommit, RuntimeSessionState, SessionCatalogStore,
-    SessionCommitStore, SessionRelation, SessionStoreCreateRequest, StoreError,
+    SessionCommitStore, SessionCreationHead, SessionRelation, SessionStoreCreateRequest,
+    StoreError,
 };
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck};
 use sqlx::postgres::PgPoolOptions;
@@ -66,7 +67,11 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         .expect("create delete victim");
     let mut victim_state = RuntimeSessionState {
         session_id: SessionId::from("commit-delete-victim"),
-        ..RuntimeSessionState::new(request(&SessionId::from("commit-delete-victim")).policy)
+        ..RuntimeSessionState::new(
+            request(&SessionId::from("commit-delete-victim"))
+                .config
+                .session_policy(),
+        )
     };
     victim_state.ensure_agent_frame_initialized();
     let mut victim_commit = RuntimeCommit::persisted_state_for_test(&victim_state, &[]);
@@ -86,7 +91,11 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         .expect("create commit target");
     let mut target_state = RuntimeSessionState {
         session_id: SessionId::from("commit-delete-target"),
-        ..RuntimeSessionState::new(request(&SessionId::from("commit-delete-target")).policy)
+        ..RuntimeSessionState::new(
+            request(&SessionId::from("commit-delete-target"))
+                .config
+                .session_policy(),
+        )
     };
     target_state.ensure_agent_frame_initialized();
     let mut target_commit = RuntimeCommit::persisted_state_for_test(&target_state, &[]);
@@ -259,6 +268,8 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
+            .into(),
+        head: SessionCreationHead::CommittedByCreator,
     }
 }

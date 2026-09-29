@@ -29,7 +29,8 @@ lash_conformance::cancelled_turn_withheld_input_tests!({
                     lash_conformance::CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID,
                 ),
                 relation: lash_core::SessionRelation::Root,
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                head: lash_core::SessionCreationHead::CommittedByCreator,
             },
         )
         .await

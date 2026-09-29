@@ -528,7 +528,8 @@ impl DurableProcessWorker {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: crate::SessionRelation::default(),
-                policy: policy.clone(),
+                config: policy.clone().into(),
+                head: crate::SessionCreationHead::CommittedByCreator,
             })
             .await
             .map_err(|err| {

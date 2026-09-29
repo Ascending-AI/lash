@@ -400,7 +400,8 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                 pending_observer_intents: Vec::new(),
                 session_id: seed_session_id.clone(),
                 relation: lash_core::SessionRelation::Root,
-                policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                config: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+                head: lash_core::SessionCreationHead::CommittedByCreator,
             },
         )
         .await?;

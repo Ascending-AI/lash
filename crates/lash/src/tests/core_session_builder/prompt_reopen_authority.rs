@@ -156,8 +156,10 @@ async fn open_with_state_without_builder_prompt_renders_supplied_snapshot_prompt
     Ok(())
 }
 
+/// FIG-4099: the supplied snapshot is the session's config; a builder prompt
+/// stated beside it is not reconciled over it.
 #[tokio::test]
-async fn open_with_state_builder_prompt_replaces_supplied_snapshot_prompt() -> Result<()> {
+async fn open_with_state_runs_the_supplied_snapshot_prompt_not_the_builders() -> Result<()> {
     use crate::PromptLayerSink as _;
 
     let supplied = lash_core::PromptLayer::new().with_contribution(
@@ -186,13 +188,16 @@ async fn open_with_state_builder_prompt_replaces_supplied_snapshot_prompt() -> R
     let requests = captures.lock_recover();
     assert_eq!(requests.len(), 1);
     let rendered = rendered_system_prompt(&requests[0]);
-    assert!(rendered.contains("OPEN WITH STATE NEW PROMPT"));
-    assert!(!rendered.contains("OPEN WITH STATE OLD PROMPT"));
+    assert!(rendered.contains("OPEN WITH STATE OLD PROMPT"));
+    assert!(!rendered.contains("OPEN WITH STATE NEW PROMPT"));
     Ok(())
 }
 
+/// FIG-4099: a reopen runs with what the session recorded — for a head from
+/// before prompt persistence, no session prompt — and a host prompt stated at
+/// the reopen is ignored.
 #[tokio::test]
-async fn legacy_promptless_head_with_host_prompt_renders_host_prompt_in_memory() -> Result<()> {
+async fn legacy_promptless_head_ignores_a_reopen_host_prompt_in_memory() -> Result<()> {
     use crate::PromptLayerSink as _;
 
     let backend = backend_from_literal_head(LEGACY_PROMPTLESS_HEAD_JSON).await;
@@ -215,8 +220,8 @@ async fn legacy_promptless_head_with_host_prompt_renders_host_prompt_in_memory()
     let requests = captures.lock_recover();
     assert_eq!(requests.len(), 1);
     assert!(
-        rendered_system_prompt(&requests[0]).contains("HOST SUPPLIED AT REOPEN"),
-        "literal pre-FIG-1376 bytes must retain main's host-prompt behavior"
+        !rendered_system_prompt(&requests[0]).contains("HOST SUPPLIED AT REOPEN"),
+        "a reopen never reconciles the host prompt over the recorded config"
     );
     Ok(())
 }
@@ -315,38 +320,84 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_in_m
     Ok(())
 }
 
+/// FIG-4099: a host prompt stated at a reopen is ignored and writes nothing;
+/// the prompt changes through `update(SessionConfigPatch)`, which recommits it.
 #[tokio::test]
-async fn new_host_prompt_overrides_and_recommits_old_prompt_in_memory() -> Result<()> {
+async fn a_reopen_host_prompt_is_ignored_and_update_recommits_the_prompt_in_memory() -> Result<()> {
     use crate::PromptLayerSink as _;
 
     let old = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Old", "OLD STORED PROMPT"),
     );
-    let (backend, store) =
-        backend_seeded(prompt_probe_state(&SessionId::from("host-reprompt"), old)).await;
+    let (backend, store) = backend_seeded(prompt_probe_state(
+        &SessionId::from("host-reprompt"),
+        old.clone(),
+    ))
+    .await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let trace = tempfile::NamedTempFile::new().expect("composition trace");
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .instructions("CORE DEFAULT MUST NOT WIN")
     .provider(prompt_capture_provider(Arc::clone(&captures)))
     .model(mock_model_spec())
     .trace_jsonl_path(trace.path())
     .build(crate::testing::runtime_lease_owner())?;
 
+    let before = store
+        .load_session_head_meta()
+        .await?
+        .expect("seeded session head");
     let session = core
         .session("host-reprompt")
         .instructions("NEW HOST PROMPT")
         .open()
         .await?;
+    let after_open = store
+        .load_session_head_meta()
+        .await?
+        .expect("seeded session head");
+    assert_eq!(
+        after_open.head_revision, before.head_revision,
+        "the reopen wrote nothing"
+    );
+    assert_eq!(after_open.config, before.config, "the reopen wrote nothing");
     session.send(TurnInput::text("probe")).output().await?;
     core.flush_trace_sink()?;
-
     {
         let requests = captures.lock_recover();
         let rendered = rendered_system_prompt(&requests[0]);
+        assert!(rendered.contains("OLD STORED PROMPT"));
+        assert!(!rendered.contains("NEW HOST PROMPT"));
+    }
+    let composition_events = || {
+        lash_trace::parse_jsonl_records::<serde_json::Value>(
+            &std::fs::read_to_string(trace.path()).expect("read composition trace"),
+        )
+        .expect("composition trace records")
+        .into_iter()
+        .filter(|record| record["type"] == "composition_changed")
+        .count()
+    };
+    let events_before_update = composition_events();
+
+    let new = lash_core::PromptLayer::new().with_contribution(
+        lash_core::PromptContribution::guidance("New", "NEW HOST PROMPT"),
+    );
+    session
+        .admin()
+        .config()
+        .update(crate::SessionConfigPatch::with_prompt(new.clone()))
+        .await?;
+    session
+        .send(TurnInput::text("probe again"))
+        .output()
+        .await?;
+    core.flush_trace_sink()?;
+    {
+        let requests = captures.lock_recover();
+        let rendered = rendered_system_prompt(&requests[1]);
         assert!(rendered.contains("NEW HOST PROMPT"));
         assert!(!rendered.contains("OLD STORED PROMPT"));
     }
@@ -354,16 +405,16 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_in_memory() -> Resul
         .load_session_window(lash_core::store::WindowSelector::Current)
         .await?
         .expect("recommitted session head");
-    let committed = read.config.prompt.expect("new host prompt is present");
-    assert!(format!("{committed:?}").contains("NEW HOST PROMPT"));
-    let composition_events = lash_trace::parse_jsonl_records::<serde_json::Value>(
-        &std::fs::read_to_string(trace.path()).expect("read composition trace"),
-    )
-    .expect("composition trace records")
-    .into_iter()
-    .filter(|record| record["type"] == "composition_changed")
-    .count();
-    assert_eq!(composition_events, 1, "the changed composition is emitted");
+    assert_eq!(
+        read.config.prompt,
+        Some(new),
+        "the update recommitted the prompt"
+    );
+    assert_eq!(
+        composition_events() - events_before_update,
+        1,
+        "the changed composition is emitted once"
+    );
     Ok(())
 }
 
@@ -396,7 +447,8 @@ async fn sqlite_prompt_probe_store(
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
-            policy: policy.clone(),
+            config: policy.clone().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await
@@ -455,7 +507,7 @@ async fn sqlite_store_from_literal_legacy_head() -> (
 }
 
 #[tokio::test]
-async fn legacy_promptless_head_with_host_prompt_renders_host_prompt_sqlite() -> Result<()> {
+async fn legacy_promptless_head_ignores_a_reopen_host_prompt_sqlite() -> Result<()> {
     use crate::PromptLayerSink as _;
 
     let (_stores, backend, _) = sqlite_store_from_literal_legacy_head().await;
@@ -473,7 +525,7 @@ async fn legacy_promptless_head_with_host_prompt_renders_host_prompt_sqlite() ->
         .open()
         .await?;
     session.send(TurnInput::text("probe")).output().await?;
-    assert!(rendered_system_prompt(&captures.lock_recover()[0]).contains("SQLITE HOST PROMPT"));
+    assert!(!rendered_system_prompt(&captures.lock_recover()[0]).contains("SQLITE HOST PROMPT"));
     Ok(())
 }
 
@@ -566,7 +618,7 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_sqli
 }
 
 #[tokio::test]
-async fn new_host_prompt_overrides_and_recommits_old_prompt_sqlite() -> Result<()> {
+async fn a_reopen_host_prompt_is_ignored_and_update_recommits_the_prompt_sqlite() -> Result<()> {
     use crate::PromptLayerSink as _;
 
     let old = lash_core::PromptLayer::new().with_contribution(
@@ -575,106 +627,53 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_sqlite() -> Result<(
     let (_stores, backend, store) =
         sqlite_prompt_probe_store(&SessionId::from("sqlite-host-reprompt"), old).await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let trace = tempfile::NamedTempFile::new().expect("SQLite composition trace");
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(prompt_capture_provider(Arc::clone(&captures)))
     .model(mock_model_spec())
-    .trace_jsonl_path(trace.path())
     .build(crate::testing::runtime_lease_owner())?;
-    core.session("sqlite-host-reprompt")
+    let before = store
+        .load_session_head_meta()
+        .await?
+        .expect("seeded SQLite head");
+    let session = core
+        .session("sqlite-host-reprompt")
         .instructions("SQLITE NEW HOST PROMPT")
         .open()
-        .await?
-        .send(TurnInput::text("probe"))
-        .output()
         .await?;
-    core.flush_trace_sink()?;
+    let after_open = store
+        .load_session_head_meta()
+        .await?
+        .expect("seeded SQLite head");
+    assert_eq!(
+        after_open.head_revision, before.head_revision,
+        "the reopen wrote nothing"
+    );
+    assert_eq!(after_open.config, before.config, "the reopen wrote nothing");
+    session.send(TurnInput::text("probe")).output().await?;
     let rendered = rendered_system_prompt(&captures.lock_recover()[0]);
-    assert!(rendered.contains("SQLITE NEW HOST PROMPT"));
-    assert!(!rendered.contains("SQLITE OLD PROMPT"));
+    assert!(rendered.contains("SQLITE OLD PROMPT"));
+    assert!(!rendered.contains("SQLITE NEW HOST PROMPT"));
+
+    let new = lash_core::PromptLayer::new().with_contribution(
+        lash_core::PromptContribution::guidance("New", "SQLITE NEW HOST PROMPT"),
+    );
+    session
+        .admin()
+        .config()
+        .update(crate::SessionConfigPatch::with_prompt(new.clone()))
+        .await?;
+    drop(session);
     let committed = store
         .load_session_window(lash_core::store::WindowSelector::Current)
         .await?
         .expect("recommitted SQLite head");
-    assert!(
-        format!("{:?}", committed.config.prompt.expect("present prompt"))
-            .contains("SQLITE NEW HOST PROMPT")
+    assert_eq!(
+        committed.config.prompt,
+        Some(new),
+        "the update recommitted the prompt"
     );
-    let composition_events = lash_trace::parse_jsonl_records::<serde_json::Value>(
-        &std::fs::read_to_string(trace.path()).expect("read SQLite composition trace"),
-    )
-    .expect("SQLite composition trace records")
-    .into_iter()
-    .filter(|record| record["type"] == "composition_changed")
-    .count();
-    assert_eq!(composition_events, 1, "the changed composition is emitted");
-    Ok(())
-}
-
-#[tokio::test]
-async fn successive_reopens_with_distinct_host_prompts_each_recommit_sqlite() -> Result<()> {
-    let old = lash_core::PromptLayer::new().with_contribution(
-        lash_core::PromptContribution::guidance("Old", "SQLITE ORIGINAL PROMPT"),
-    );
-    let (_stores, backend, store) =
-        sqlite_prompt_probe_store(&SessionId::from("sqlite-reseed-twice"), old).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-
-    Box::pin(
-        core.session("sqlite-reseed-twice")
-            .instructions("FIRST RECONCILED PROMPT")
-            .open()
-            .await?
-            .close(),
-    )
-    .await?;
-
-    // A second reopen carrying a different reconciled seed is a new logical
-    // operation: the content-addressed identity admits it as a fresh commit
-    // instead of tripping the journaled-determinism guard (FIG-1875).
-    Box::pin(
-        core.session("sqlite-reseed-twice")
-            .instructions("SECOND RECONCILED PROMPT")
-            .open()
-            .await?
-            .close(),
-    )
-    .await?;
-
-    let head = store
-        .load_session_window(lash_core::store::WindowSelector::Current)
-        .await?
-        .expect("reseeded SQLite head");
-    assert!(
-        format!("{:?}", head.config.prompt.as_ref().expect("present prompt"))
-            .contains("SECOND RECONCILED PROMPT"),
-        "the second reconciled seed is durable"
-    );
-
-    // Reopening with the seed the head already carries settles nothing.
-    let before = head.head_revision;
-    Box::pin(
-        core.session("sqlite-reseed-twice")
-            .instructions("SECOND RECONCILED PROMPT")
-            .open()
-            .await?
-            .close(),
-    )
-    .await?;
-    let after = store
-        .load_session_window(lash_core::store::WindowSelector::Current)
-        .await?
-        .expect("unchanged SQLite head")
-        .head_revision;
-    assert_eq!(after, before, "a matching reopen seed settles nothing");
     Ok(())
 }

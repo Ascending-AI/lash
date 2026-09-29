@@ -228,14 +228,6 @@ impl SessionAdmin {
         )))
     }
 
-    #[cfg(feature = "rlm")]
-    pub(crate) async fn await_command_drive(
-        &self,
-        receipt: lash_core::runtime::SessionCommandReceipt,
-    ) -> Result<()> {
-        self.await_command_drive_with_previous(receipt, None).await
-    }
-
     async fn await_command_drive_with_previous(
         &self,
         receipt: lash_core::runtime::SessionCommandReceipt,

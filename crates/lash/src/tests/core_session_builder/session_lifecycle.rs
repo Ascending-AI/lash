@@ -2077,7 +2077,9 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
 
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Result<()> {
+/// FIG-4099: a model change is a config patch, and the patched model reaches
+/// every runtime consumer. (It used to be a reopen that stated the model.)
+async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
     use lash_subagents::Capability as _;
 
     let session_id = "reconcile-open";
@@ -2121,10 +2123,19 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
         .model(builder_model.clone())
         .plugin(probe_factory)
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session(session_id)
-        .session_spec(crate::SessionSpec::new().model(builder_model.clone()))
-        .open()
+    let session = core.session(session_id).open().await?;
+    assert_eq!(
+        session.policy_snapshot().model.id,
+        "top-level-model",
+        "the reopen runs the recorded model"
+    );
+    session
+        .admin()
+        .config()
+        .update(crate::SessionConfigPatch {
+            model: Some(builder_model.clone()),
+            ..crate::SessionConfigPatch::default()
+        })
         .await?;
 
     let policy = session.policy_snapshot();

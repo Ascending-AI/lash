@@ -96,7 +96,7 @@ async fn committed_checkpoint(
         .expect("create blob-reclaim session");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let leaf_node_id = state
@@ -175,7 +175,7 @@ pub(super) async fn commit_content_aliased_checkpoint_roots(
         .expect("create dependent content-alias session");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
@@ -365,7 +365,7 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
         session_id: SessionId::from("delete-shared-fork"),
         node_id: committed.leaf_node_id.into(),
         relation: crate::SessionRelation::Root,
-        policy: committed.request.policy.clone(),
+        policy: committed.request.config.session_policy(),
     };
     handles
         .factory
@@ -558,7 +558,7 @@ async fn attachment_prefix_retention(
     .await;
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     state.session_graph.append_message(crate::Message {
@@ -587,7 +587,7 @@ async fn attachment_prefix_retention(
         session_id: SessionId::from("attachment-prefix-child"),
         node_id: leaf_node_id.clone(),
         relation: crate::SessionRelation::Root,
-        policy: request.policy.clone(),
+        policy: request.config.session_policy(),
     };
     handles
         .factory

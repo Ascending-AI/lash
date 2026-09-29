@@ -17,6 +17,8 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
             pending_observer_intents: request.pending_observer_intents.clone(),
         };
         let created_at_ms = self.clock.timestamp_ms();
+        let head = request.head;
+        let config = request.config.clone();
         self.conn
             .write_flow(move |tx| {
                 let fleet_format = tx.fleet();
@@ -30,6 +32,24 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                         fleet_format,
                     )?;
                     if inserted {
+                        if head == lash_core_execution::SessionCreationHead::Config {
+                            // The creator's config is baked in with the catalog
+                            // row, in this transaction (FIG-4099).
+                            let created_head = lash_core_execution::store::SessionHeadMeta::created(
+                                &meta.session_id,
+                                config.clone(),
+                                fleet_format,
+                            );
+                            crate::conn::cached_execute(
+                                tx,
+                                crate::session_sql::session_sql().head.insert_created.sql(),
+                                rusqlite::params![
+                                    created_head.session_id.as_str(),
+                                    encode_json(&created_head.payload())?,
+                                ],
+                            )
+                            .map_err(crate::sqlite_error)?;
+                        }
                         return Ok(lash_core_execution::SessionAdmission::Created);
                     }
                     let recorded = session_meta::load_recorded_lineage(tx, &meta.session_id)?

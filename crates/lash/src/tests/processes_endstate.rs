@@ -271,7 +271,8 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await?;
@@ -387,7 +388,8 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
             pending_observer_intents: Vec::new(),
             session_id: late_session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await?;

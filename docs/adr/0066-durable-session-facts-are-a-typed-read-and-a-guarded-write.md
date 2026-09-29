@@ -10,8 +10,9 @@ deleted the dialect fact. `RlmSessionConfig` and `RlmCreateExtras` carry only
 `rlm_plugin_session_dialect`, `rlm_session_dialect` and the post-open dialect
 comparison are gone, and a recorded session config that still names a `dialect`
 is refused with the typed `RlmSessionConfigDecodeError::RetiredDialectField`.
-The guarded set-if-unset write (`set_rlm_config_if_unset`) stands for the
-remaining facts. The dialect text below is historical.
+The guarded set-if-unset write stands for the remaining facts; since FIG-4099
+it is `update(SessionConfigPatch)`, not `set_rlm_config_if_unset` (see the
+amendment below). The dialect text below is historical.
 
 ## Context
 
@@ -233,3 +234,52 @@ substitution `RlmDialect::from_language_id` refuses at the front. Absence stays 
 distinct answer from malformed — a session that recorded nothing *is* running the
 default — and `RlmSessionReadViewExt::rlm_config` returns a `Result` for the same
 reason.
+
+## Amendment (FIG-4099, 2026-09-29): creation config and one write path
+
+Durable RLM facts are creation config. A session's creator states them through
+the plugin-agnostic options seam (`SessionBuilder::plugin_option` keyed by
+`RLM_PROTOCOL_PLUGIN_ID`), and they are recorded with the session's catalog row
+in its initial config head. A reopen's statement is neither applied nor refused:
+the session keeps what it recorded, so the open-time conflict that surfaced as
+an untyped `SessionError::Protocol(String)` is gone. Every creating path —
+`open()` of a new id, `create()`, `open_with_state()`/`observe_with_state()` and
+the engine's own drive-open — passes the creator's config to the catalog as
+`SessionStoreCreateRequest::config`, and the store writes it as the session's
+initial config head in the same transaction as the catalog row
+(`SessionHeadMeta::created`). The request says which head it carries:
+host-facing creation states `SessionCreationHead::Config`, so the head is on
+disk before the session is first materialized, and it includes the protocol turn
+options the session's protocol resolves at creation (the RLM session config
+among them). A core runtime binding state it was handed states
+`SessionCreationHead::CommittedByCreator`, and its first commit writes the head,
+so only the row is written at admission. Admitting an id that already exists
+writes no config either way. The facade forms that config in one place,
+`SessionBuilder::creation_config`. A reopen reads the recorded head and writes
+nothing: there is no reconciliation, no seed write and no report, and builder
+config stated on a reopen is ignored. Only live policy follows an open (the
+session binding, turn budget, autonomy, no-progress budget and charge safety),
+and a builder provider that cannot serve the recorded pin is still refused typed
+(`ProviderMismatch`) without a write. Every later change is the one durable
+command, `update(SessionConfigPatch)`, which covers provider, model, prompt,
+generation, attachment acceptance and plugin session config.
+
+The guarded write is that config command. `set_rlm_config_if_unset`,
+`RlmSessionConfigError` and the facade's separate RLM setter are deleted; a
+host states facts with `lash::rlm::rlm_session_config_patch` and applies them
+with `SessionConfigAdmin::update`. The engine is still
+`apply_rlm_session_config_if_unset`, now behind the protocol's
+`apply_session_config_patch` hook: a fact is written only where the session
+recorded nothing, restating it is a no-op, and a different value is refused
+with the typed `RlmSessionConfigConflict`, carried as
+`SessionError::SessionConfigRefused` and read with
+`lash::rlm::rlm_session_config_conflict`. The patch settles through the
+commanded config write, so a successful return means the fact is durable.
+
+This supersedes: "Open-time parameters are reserved for ADR 0030 host-wins
+configuration (model, turn budget, generation)" — model, prompt and generation
+are creation config too, and the turn budget is live policy; "Durability is
+unchanged: the pin lands with the session's next commit" and "the fact still
+lands only with the session's next commit" — a creator's facts land with the
+catalog row and a patch's facts land when it settles; and the Context's
+description of model and generation as re-passed at every open.

@@ -18,7 +18,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
     let store = factory.admit_view(&request).await.unwrap();
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let usage = crate::TokenLedgerEntry {
@@ -75,7 +75,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
     let live = factory.admit_view(&live_request).await.unwrap();
     let mut live_state = crate::RuntimeSessionState {
         session_id: live_request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(live_request.policy.clone())
+        ..crate::RuntimeSessionState::new(live_request.config.session_policy())
     };
     live_state.ensure_agent_frame_initialized();
     let live_commit = crate::RuntimeCommit::persisted_state_for_test(&live_state, &[]);

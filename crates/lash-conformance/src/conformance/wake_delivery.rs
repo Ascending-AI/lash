@@ -314,7 +314,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(target_session_id.to_string()),
         relation: crate::SessionRelation::Root,
-        policy: crate::SessionPolicy {
+        config: crate::SessionPolicy {
             model: crate::ModelSpec::builder("wake-crash-model")
                 .context_window_tokens(200_000)
                 .build()
@@ -327,7 +327,9 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
             charge_safety: Default::default(),
             prompt: crate::PromptLayer::new(),
             generation: crate::GenerationOptions::default(),
-        },
+        }
+        .into(),
+        head: crate::SessionCreationHead::CommittedByCreator,
     };
     let target = factory
         .admit_view(&request)
@@ -417,10 +419,12 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(authority_target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
-            policy: crate::SessionPolicy {
+            config: crate::SessionPolicy {
                 session_id: Some(SessionId::from(authority_target_session_id.to_string())),
-                ..request.policy.clone()
-            },
+                ..request.config.session_policy()
+            }
+            .into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("create authority wake target");
@@ -1182,7 +1186,8 @@ async fn missing_target_is_deferred_and_rearmed(
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("create missing-target retry receiver");
@@ -1232,7 +1237,8 @@ async fn sender_floor_lifetime(
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("create sender-floor lifetime target");
@@ -1957,7 +1963,8 @@ async fn target_gone_is_a_typed_discard(
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(target_session_id.to_string()),
         relation: crate::SessionRelation::Root,
-        policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+        head: crate::SessionCreationHead::CommittedByCreator,
     };
     factory
         .admit_view(&target_request)

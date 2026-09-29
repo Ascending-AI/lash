@@ -27,7 +27,7 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
         .expect("create retained-tombstone source");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let leaf_node_id = state
@@ -64,7 +64,7 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
             session_id: SessionId::from("retained-tombstone-fork"),
             node_id: leaf_node_id.clone(),
             relation: crate::SessionRelation::Root,
-            policy: request.policy,
+            policy: request.config.session_policy(),
         })
         .await
         .expect_err("a retained tombstone must not be forkable");
@@ -207,7 +207,7 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
 
     let mut state_c = crate::RuntimeSessionState {
         session_id: req_c.session_id.clone(),
-        ..crate::RuntimeSessionState::new(req_c.policy.clone())
+        ..crate::RuntimeSessionState::new(req_c.config.session_policy())
     };
     state_c.ensure_agent_frame_initialized();
     let leaf_c = state_c
@@ -226,7 +226,7 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
 
     let mut state_d = crate::RuntimeSessionState {
         session_id: req_d.session_id.clone(),
-        ..crate::RuntimeSessionState::new(req_d.policy.clone())
+        ..crate::RuntimeSessionState::new(req_d.config.session_policy())
     };
     state_d.ensure_agent_frame_initialized();
     let leaf_d = state_d
@@ -319,7 +319,7 @@ pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
 
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let leaf = state

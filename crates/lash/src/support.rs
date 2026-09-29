@@ -4,9 +4,9 @@ pub(crate) use async_trait::async_trait;
 pub(crate) use lash_core::plugin::StaticPluginFactory;
 pub(crate) use lash_core::runtime::{EffectHost, RuntimeSessionState, ScopedEffectController};
 pub(crate) use lash_core::{
-    LiveReplayStore, MessageRole, ProcessHandleView, ProcessWorkWiring, SessionListFilter,
-    SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionSummary, SessionWorkEngine,
-    facade_support::InMemoryLiveReplayStore, facade_support::LashRuntime,
+    LiveReplayStore, MessageRole, ProcessHandleView, ProcessWorkWiring, SessionCreationHead,
+    SessionListFilter, SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionSummary,
+    SessionWorkEngine, facade_support::InMemoryLiveReplayStore, facade_support::LashRuntime,
     facade_support::PluginHost, facade_support::PluginSpec, facade_support::PluginStack,
     facade_support::RuntimeEnvironment, facade_support::RuntimeHandle,
     facade_support::RuntimeHostConfig, facade_support::RuntimeObservation,

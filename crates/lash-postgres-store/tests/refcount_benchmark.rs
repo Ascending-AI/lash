@@ -12,7 +12,7 @@ use lash_core_execution::store::{
 };
 use lash_core_execution::{
     DeploymentStore, ForkSessionRequest, OperationId, RuntimeCommit, RuntimeSessionState,
-    RuntimeStore, SessionRelation, SessionStoreCreateRequest,
+    RuntimeStore, SessionCreationHead, SessionRelation, SessionStoreCreateRequest,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -27,7 +27,9 @@ fn request(session_id: impl Into<SessionId>) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.into(),
         relation: SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
+            .into(),
+        head: SessionCreationHead::CommittedByCreator,
     }
 }
 

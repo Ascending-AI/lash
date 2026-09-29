@@ -285,7 +285,8 @@ async fn admit_root_session(
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
-            policy: policy.clone(),
+            config: policy.clone().into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         })
         .await
         .unwrap_or_else(|error| panic!("admit session {session_id}: {error}"));

@@ -14,8 +14,8 @@ use lash_core::plugin::{PluginFactory, RecordedSessionConfig};
 use lash_core::testing::TestTurnDrive as _;
 use lash_core::{
     CommitBudget, LlmOutputPart, LlmResponse, ModelSpec, QueuedWorkBatchingConfig,
-    RuntimeSessionState, SessionPolicy, SessionRelation, SessionStoreCreateRequest, TurnBudget,
-    TurnInput,
+    RuntimeSessionState, SessionCreationHead, SessionPolicy, SessionRelation,
+    SessionStoreCreateRequest, TurnBudget, TurnInput,
 };
 use lash_protocol_rlm::{
     CodeRenderer, CodeRendererSlot, InstructionBound, MemoryBound, RlmChannel,
@@ -312,7 +312,8 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                     pending_observer_intents: Vec::new(),
                     session_id: session_id.clone(),
                     relation: SessionRelation::Root,
-                    policy: policy(),
+                    config: policy().into(),
+                    head: SessionCreationHead::CommittedByCreator,
                 },
             )
             .await

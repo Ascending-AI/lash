@@ -246,7 +246,9 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id),
         relation: lash_core_execution::SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
+            .into(),
+        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     }
 }
 

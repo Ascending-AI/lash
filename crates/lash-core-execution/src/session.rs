@@ -314,10 +314,55 @@ pub enum SessionError {
         /// The full restore report, including the classes that did not refuse.
         report: Box<crate::ToolRestoreReport>,
     },
+    /// A [`SessionConfigPatch`](crate::runtime) change the session refused
+    /// before anything was written (FIG-4099). The refusal is the typed error
+    /// the refusing party raised: the session's protocol for plugin-keyed
+    /// options (the RLM protocol refuses a conflicting durable fact with its
+    /// `RlmSessionConfigConflict`), or [`PluginOptionsUnaccepted`] when no
+    /// plugin reads a stated key. Match it with
+    /// [`SessionConfigRefusal::downcast_ref`], never on its message.
+    #[error("session config change refused: {0}")]
+    SessionConfigRefused(SessionConfigRefusal),
     #[error(transparent)]
     Plugin(#[from] crate::PluginError),
     #[error("protocol error: {0}")]
     Protocol(String),
+}
+
+/// The typed reason a session config change was refused; see
+/// [`SessionError::SessionConfigRefused`].
+#[derive(Debug)]
+pub struct SessionConfigRefusal(Box<dyn std::error::Error + Send + Sync + 'static>);
+
+impl SessionConfigRefusal {
+    pub fn new(refusal: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self(Box::new(refusal))
+    }
+
+    /// The refusal as the refusing party's own error type, when it is `T`.
+    pub fn downcast_ref<T: std::error::Error + 'static>(&self) -> Option<&T> {
+        self.0.downcast_ref::<T>()
+    }
+}
+
+impl std::fmt::Display for SessionConfigRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for SessionConfigRefusal {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref())
+    }
+}
+
+/// A session config change stated plugin-keyed options that no plugin of the
+/// session reads, so applying it would silently drop them (FIG-4099).
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("no plugin of this session accepts session config for {}", plugin_ids.join(", "))]
+pub struct PluginOptionsUnaccepted {
+    pub plugin_ids: Vec<String>,
 }
 
 impl From<lash_core_store::session_policy::ProviderPinMismatch> for SessionError {

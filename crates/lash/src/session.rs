@@ -9,10 +9,10 @@ use crate::support::{
     Arc, EffectHost, EmbedError, LashCore, LashRuntime, PluginBinding, PluginFactory,
     PluginOperations, PluginOptions, ProcessHandleView, PromptLayer, PromptLayerSink,
     ProviderHandle, Result, RuntimeErrorCode, RuntimeHandle, RuntimeObservation,
-    RuntimeSessionState, SessionAdmin, SessionCursor, SessionError, SessionObservation,
-    SessionObservationSubscription, SessionPolicy, SessionReadView, SessionResume, SessionScope,
-    SessionSpec, SessionStoreCreateRequest, SessionUsageReport, ToolManifest, ToolState, TurnInput,
-    build_plugin_host, refuse_foreign_backend_factories,
+    RuntimeSessionState, SessionAdmin, SessionCreationHead, SessionCursor, SessionError,
+    SessionObservation, SessionObservationSubscription, SessionPolicy, SessionReadView,
+    SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest, SessionUsageReport,
+    ToolManifest, ToolState, TurnInput, build_plugin_host, refuse_foreign_backend_factories,
 };
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
@@ -143,15 +143,22 @@ impl SessionBuilder {
         self
     }
 
+    /// Open this session's runtime, creating the session when the id is new.
+    ///
+    /// Config is baked at creation (FIG-4099). When this open creates the
+    /// session, the builder's durable settings — model, provider, prompt,
+    /// generation, attachment acceptance, and RLM and plugin session config —
+    /// become the session's recorded config, written with its catalog row.
+    /// When the session already exists they are ignored: the open runs with
+    /// the config the session recorded, as recorded, and writes nothing.
+    /// Change a session's config with
+    /// [`update`](crate::admin::SessionConfigAdmin::update).
     pub async fn open(self) -> Result<LashSession> {
-        let policy = self.session_policy();
-        let resolved = self.create_store(&policy).await?;
+        let resolved = self.create_store(self.creation_config()?).await?;
         self.reconcile_process_observer_intents(Some(&resolved.store))
             .await?;
-        let (state, reopened_persisted_config) = self
-            .load_or_default_state(&policy, Some(&resolved.store))
-            .await?;
-        Box::pin(self.open_resolved(state, resolved, reopened_persisted_config, true)).await
+        let state = self.recorded_state(&resolved.store).await?;
+        Box::pin(self.open_resolved(state, resolved, true)).await
     }
 
     async fn reconcile_process_observer_intents(
@@ -204,21 +211,21 @@ impl SessionBuilder {
     /// Session**.
     ///
     /// The third terminal verb, and the only one that creates. It writes the
-    /// session's catalog entry with exactly the policy and relation
-    /// [`open`](Self::open) would have used, and stops there: no runtime, no
+    /// session's catalog entry and its recorded config — exactly the config
+    /// and relation [`open`](Self::open) would have created it with — in one
+    /// store transaction, and stops there: no runtime, no
     /// Session Execution Lease, no plugin session, no lifecycle event. Use it
     /// when a host admits durable input for a session whose first turn has not
     /// run yet — `core.session(id).create().await?.send(input).await?`
     /// — instead of reaching into the catalog with a hand-built request.
     ///
     /// Idempotent: creating an id that already exists rebinds it and preserves
-    /// its recorded metadata and Session Relation. Creating a *deleted* id is
+    /// its recorded metadata, config and Session Relation. Creating a *deleted* id is
     /// refused with the store's typed
     /// [`SessionDeleted`](lash_core::StoreError::SessionDeleted); ids are
     /// single-use.
     pub async fn create(self) -> Result<DurableSession> {
-        let policy = self.session_policy();
-        let resolved = self.create_store(&policy).await?;
+        let resolved = self.create_store(self.creation_config()?).await?;
         let work = self.core.held_work().await;
         let ingress = self.core.ingress_relay(&work);
         Ok(DurableSession::from_binding(
@@ -249,35 +256,40 @@ impl SessionBuilder {
         self.open_supplied_state(state, false).await
     }
 
+    /// The supplied snapshot is the session's state, config included, and
+    /// runs as supplied: when this open creates the session, the snapshot's
+    /// config is what creation records. Only a snapshot that states no config
+    /// at all — no model and no provider — takes the builder's creation
+    /// config.
     async fn open_supplied_state(
         self,
         mut state: RuntimeSessionState,
         resident: bool,
     ) -> Result<LashSession> {
-        let policy = self.session_policy();
-        let resolved = self.create_store(&policy).await?;
-        self.reconcile_process_observer_intents(Some(&resolved.store))
-            .await?;
         if state.session_id != self.session_id {
             return Err(EmbedError::StoreSessionMismatch {
                 loaded: state.session_id,
                 requested: self.session_id,
             });
         }
-        let supplied_prompt = state.policy.prompt.clone();
-        let supplied_model = state.policy.model.clone();
-        let supplied_generation = state.policy.generation.clone();
-        reconcile_loaded_state_policy(
-            &mut state,
-            &policy,
-            self.spec.prompt.is_some(),
-            Some(&supplied_prompt),
-            self.spec.model.is_some(),
-            Some(&supplied_model),
-            self.spec.generation.as_ref(),
-            Some(&supplied_generation),
-        )?;
-        Box::pin(self.open_resolved(state, resolved, None, resident)).await
+        let policy = self.session_policy();
+        let creation_config = if state.policy.recorded_provider_id().is_empty()
+            && state.policy.model.id.trim().is_empty()
+        {
+            state.policy = policy.clone();
+            self.creation_config()?
+        } else {
+            let mut config = lash_core::PersistedSessionConfig::from(&state.policy);
+            config.protocol_turn_options = (!state.protocol_turn_options.is_empty())
+                .then(|| state.protocol_turn_options.clone());
+            config
+        };
+        let resolved = self.create_store(creation_config).await?;
+        self.reconcile_process_observer_intents(Some(&resolved.store))
+            .await?;
+        refuse_provider_mismatch(&state, &policy)?;
+        adopt_live_policy(&mut state, &policy);
+        Box::pin(self.open_resolved(state, resolved, resident)).await
     }
 
     fn session_policy(&self) -> SessionPolicy {
@@ -286,64 +298,58 @@ impl SessionBuilder {
         policy
     }
 
-    /// Resolve the state to open with, plus the persisted head config when
-    /// this open resumes an existing durable session. The persisted config is
-    /// what the open-time seed is later settled against (seed-then-write,
-    /// FIG-1875): the reconciled policy is the seed, and any difference from
-    /// the head is guard-written before the session handle is returned.
-    async fn load_or_default_state(
-        &self,
-        policy: &SessionPolicy,
-        store: Option<&lash_core::store::SessionStore>,
-    ) -> Result<(
-        RuntimeSessionState,
-        Option<lash_core::PersistedSessionConfig>,
-    )> {
-        let state = match store {
-            Some(store) => {
-                let loaded = self.load_persisted_state(store).await?;
-                let Some(loaded) = loaded else {
-                    return Ok((
-                        empty_runtime_session_state(self.session_id.clone(), policy.clone()),
-                        None,
-                    ));
-                };
-                let mut state = loaded.state;
-                if state.session_id != self.session_id {
-                    return Err(EmbedError::StoreSessionMismatch {
-                        loaded: state.session_id,
-                        requested: self.session_id.clone(),
-                    });
-                }
-                reconcile_loaded_state_policy(
-                    &mut state,
-                    policy,
-                    self.spec.prompt.is_some(),
-                    loaded.config.prompt.as_ref(),
-                    self.spec.model.is_some(),
-                    Some(&loaded.config.model),
-                    self.spec.generation.as_ref(),
-                    Some(&loaded.config.generation),
-                )?;
-                return Ok((state, Some(loaded.config)));
-            }
-            None => empty_runtime_session_state(self.session_id.clone(), policy.clone()),
-        };
-        Ok((state, None))
-    }
-
-    async fn load_persisted_state(
+    /// The state an existing session opens with: what it recorded, as
+    /// recorded (FIG-4099). Only live policy — the turn budget and the host's
+    /// execution knobs — follows this open; nothing is written. A catalog row
+    /// with no head predates creation writing one, so this open's creation
+    /// config is the state it starts from.
+    async fn recorded_state(
         &self,
         store: &lash_core::store::SessionStore,
-    ) -> Result<Option<lash_core::store::LoadedSessionWindow>> {
-        load_persisted_window(store).await
+    ) -> Result<RuntimeSessionState> {
+        let policy = self.session_policy();
+        let Some(loaded) = load_persisted_window(store).await? else {
+            return Ok(empty_runtime_session_state(self.session_id.clone(), policy));
+        };
+        let mut state = loaded.state;
+        if state.session_id != self.session_id {
+            return Err(EmbedError::StoreSessionMismatch {
+                loaded: state.session_id,
+                requested: self.session_id.clone(),
+            });
+        }
+        refuse_provider_mismatch(&state, &policy)?;
+        adopt_live_policy(&mut state, &policy);
+        Ok(state)
+    }
+
+    /// The config this builder bakes into a session it creates (FIG-4099).
+    ///
+    /// This is the one place a builder's creation config is formed: every
+    /// creating verb hands it to the catalog, which writes it as the session's
+    /// initial config head in the same store transaction as the catalog row,
+    /// and only when that transaction creates the row. (`open_with_state` and
+    /// `observe_with_state` record their supplied snapshot's config instead,
+    /// unless it states none.) The builder's plugin options are
+    /// resolved by the session's protocol, as its first materialization would
+    /// resolve them — stated options and the protocol's defaults alike — so
+    /// the recorded head carries the RLM and plugin session config too.
+    fn creation_config(&self) -> Result<lash_core::PersistedSessionConfig> {
+        let mut config = lash_core::PersistedSessionConfig::from(&self.session_policy());
+        config.protocol_turn_options = creation_protocol_turn_options(
+            self.core.protocol_factory.as_ref(),
+            &self.session_id,
+            self.parent_session_id.clone(),
+            &self.plugin_options,
+            self.core.store_factory.fleet_format(),
+        )?;
+        Ok(config)
     }
 
     async fn open_resolved(
         self,
         state: RuntimeSessionState,
         resolved: ResolvedSessionStore,
-        reopened_persisted_config: Option<lash_core::PersistedSessionConfig>,
         resident: bool,
     ) -> Result<LashSession> {
         let policy = state.effective_policy().clone();
@@ -408,22 +414,14 @@ impl SessionBuilder {
             self.core.drive_owner.clone(),
         )
         .await?;
-        // Fire the protocol materialization hook for this root/builder open
-        // (including resume): the protocol plugin applies and defaults its
-        // per-session options at open time.
+        // Fire the protocol materialization hook: a session that recorded its
+        // protocol options keeps them as recorded; one that recorded none
+        // (it was created without stated plugin options) takes the
+        // protocol's defaults.
         runtime.configure_protocol_on_materialize(
             &self.plugin_options,
             self.parent_session_id.is_none(),
         )?;
-        // Seed-then-write (FIG-1875): the reopen reconciliation above is an
-        // explicit host-seed precedence applied once; guard-write any
-        // difference from the persisted head so the durable head is true
-        // again by the end of open. Adoption thereafter is head-wins with no
-        // preservation lists.
-        if let Some(persisted_config) = reopened_persisted_config.as_ref() {
-            lash_core::facade_support::settle_reopen_seeded_config(&mut runtime, persisted_config)
-                .await?;
-        }
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::clone(&self.core.live_replay_store),
@@ -442,7 +440,12 @@ impl SessionBuilder {
         })
     }
 
-    async fn create_store(&self, policy: &SessionPolicy) -> Result<ResolvedSessionStore> {
+    /// Admit this session with `config` as its creation config: the catalog
+    /// records it with the row only when this admission creates the session.
+    async fn create_store(
+        &self,
+        config: lash_core::PersistedSessionConfig,
+    ) -> Result<ResolvedSessionStore> {
         let request = SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
@@ -455,7 +458,8 @@ impl SessionBuilder {
                     caused_by: None,
                 })
                 .unwrap_or_default(),
-            policy: policy.clone(),
+            config,
+            head: SessionCreationHead::Config,
         };
         let factory = &self.core.store_factory;
         // Admission is where a store answers a conflicting relation (FIG-1559):
@@ -489,21 +493,23 @@ pub(crate) async fn recorded_parent_session_id(
         }))
 }
 
+/// The state the engine opens `session_id` with: what the session recorded,
+/// as recorded, with the engine's live policy (FIG-4099). A catalog row with
+/// no head starts from `policy`.
 pub(crate) async fn load_state_from_store(
     session_id: &SessionId,
     policy: &SessionPolicy,
     store: &lash_core::store::SessionStore,
 ) -> Result<RuntimeSessionState> {
-    let loaded = lash_core::store::load_session_window_state(
+    let Some(loaded) = lash_core::store::load_session_window_state(
         store,
         lash_core::store::WindowSelector::Current,
     )
     .await
     .map_err(EmbedError::Store)?
-    .unwrap_or_else(|| lash_core::store::LoadedSessionWindow {
-        state: empty_runtime_session_state(session_id, policy.clone()),
-        config: lash_core::PersistedSessionConfig::new(policy.turn_budget),
-    });
+    else {
+        return Ok(empty_runtime_session_state(session_id, policy.clone()));
+    };
     let mut state = loaded.state;
     if state.session_id != session_id {
         return Err(EmbedError::StoreSessionMismatch {
@@ -511,79 +517,89 @@ pub(crate) async fn load_state_from_store(
             requested: session_id.clone(),
         });
     }
-    reconcile_loaded_state_policy(
-        &mut state,
-        policy,
-        false,
-        loaded.config.prompt.as_ref(),
-        false,
-        Some(&loaded.config.model),
-        None,
-        Some(&loaded.config.generation),
-    )?;
+    adopt_live_policy(&mut state, policy);
     Ok(state)
 }
 
-/// Reconcile the host's freshly resolved policy with presence-aware durable facts.
+/// The protocol turn options a session is created with (FIG-4099): what the
+/// session's protocol plugin resolves `plugin_options` to at the session's
+/// first materialization — the stated facts and the protocol's defaults —
+/// computed before the catalog write so they are baked into the creation
+/// head. `None` when the core runs no protocol plugin.
+pub(crate) fn creation_protocol_turn_options(
+    protocol_factory: Option<&Arc<dyn PluginFactory>>,
+    session_id: &SessionId,
+    parent_session_id: Option<SessionId>,
+    plugin_options: &PluginOptions,
+    fleet_format: lash_core::FleetFormat,
+) -> Result<Option<lash_core::ProtocolTurnOptions>> {
+    let Some(protocol_factory) = protocol_factory else {
+        return Ok(None);
+    };
+    let is_root_session = parent_session_id.is_none();
+    let plugin_host = build_plugin_host(Some(protocol_factory), &[], Vec::new())?;
+    let plugins = plugin_host
+        .build_session_with_parent(
+            session_id.clone(),
+            parent_session_id,
+            lash_core::plugin::SessionCreationConfig {
+                authority: lash_core::plugin::SessionAuthorityContext {
+                    plugin_options: plugin_options.clone(),
+                    ..Default::default()
+                },
+                protocol_turn_options: lash_core::ProtocolTurnOptions::default(),
+            },
+        )
+        .map_err(EmbedError::Plugin)?;
+    let mut options = lash_core::ProtocolTurnOptions::default();
+    plugins
+        .protocol_session()
+        .configure_runtime_on_materialize(
+            lash_core::plugin::ProtocolRuntimeContext::new(&mut options, fleet_format),
+            lash_core::plugin::ProtocolSessionMaterialization {
+                plugin_options,
+                is_root_session,
+            },
+        )?;
+    Ok(Some(options))
+}
+
+/// Carry an open's live policy onto recorded state (FIG-4099).
 ///
-/// ADR 0030's single resolution point: the host supplies the session's
-/// configuration when it constructs *or reopens* a session, and that value is
-/// reconciled before the runtime starts. Presence is what carries authority:
-/// a spec field the host explicitly set at this open wins over the durable
-/// head, while an unset field keeps the durable value — core defaults are
-/// construction-time fallbacks, not per-open seeds, so an incidental reopen
-/// with a default spec never reverts a settled mid-run
-/// [`update_session_config`](lash_core::facade_support::LashRuntime::update_session_config)
-/// change. The turn budget stays host/live-owned and always follows the
-/// resolved policy. A present generation overlay resolves against the durable
-/// options: merge preserves unspecified options, while replace/clear explicitly
-/// discard them. The already-resolved core defaults are not reopen intent.
+/// The recorded config — provider, model, attachment acceptance, prompt,
+/// generation — is the session's and stays as recorded. The facts ADR 0030
+/// leaves live-owned follow the open: its session binding, the turn budget,
+/// autonomy, the no-progress budget and the charge-safety policy.
 ///
-/// The recorded `provider_id` is a durable fact, not host-wins config (ADR
-/// 0066): an open that names no provider inherits it, and an open naming a
-/// *different* provider is refused here with
-/// [`SessionError::ProviderMismatch`] instead of having its request discarded
-/// and the conflict deferred to the first turn. A present host prompt wins;
-/// otherwise a present persisted prompt fills the gap. Legacy heads with no
-/// prompt field keep the host/core reconstruction, and explicit persisted
-/// empty layers remain authoritative when the host supplies no replacement.
-/// The persisted model fills an unset host model only when the head actually
-/// recorded one (non-empty id), mirroring how the core builder only fills an
-/// empty model.
-#[allow(clippy::too_many_arguments)]
-fn reconcile_loaded_state_policy(
-    state: &mut RuntimeSessionState,
-    policy: &SessionPolicy,
-    host_prompt_is_present: bool,
-    persisted_prompt: Option<&PromptLayer>,
-    host_model_is_present: bool,
-    persisted_model: Option<&lash_core::ModelSpec>,
-    host_generation: Option<&lash_core::facade_support::GenerationOverlay>,
-    persisted_generation: Option<&lash_core::GenerationOptions>,
-) -> Result<()> {
-    let settled_provider_id = SessionPolicy::settle_provider_pin(
+/// A head that records no model or no provider pin — a creator that stated
+/// none, or a head written before creation recorded config by a first commit
+/// that carried an empty config — has nothing to keep for that fact, so the
+/// open's value fills the absence in memory. Nothing is written; the
+/// session's next commit records what it ran with.
+fn adopt_live_policy(state: &mut RuntimeSessionState, policy: &SessionPolicy) {
+    if state.policy.model.id.trim().is_empty() {
+        state.policy.model = policy.model.clone();
+    }
+    if state.policy.recorded_provider_id().is_empty() {
+        state.policy.provider_id = policy.provider_id.clone();
+    }
+    state.policy.session_id = policy.session_id.clone();
+    state.policy.autonomous = policy.autonomous;
+    state.policy.turn_budget = policy.turn_budget;
+    state.policy.no_progress_budget = policy.no_progress_budget;
+    state.policy.charge_safety = policy.charge_safety.clone();
+}
+
+/// Refuse an open whose live provider cannot serve the session's recorded
+/// provider pin (ADR 0066). The pin is only read here, never written: an open
+/// that names no provider, or the recorded one, passes.
+fn refuse_provider_mismatch(state: &RuntimeSessionState, policy: &SessionPolicy) -> Result<()> {
+    SessionPolicy::settle_provider_pin(
         &state.session_id,
         state.policy.recorded_provider_id(),
         policy.recorded_provider_id(),
     )
     .map_err(lash_core::SessionError::from)?;
-    state.policy = policy.clone();
-    state.policy.provider_id = settled_provider_id;
-    if !host_prompt_is_present && let Some(persisted_prompt) = persisted_prompt {
-        state.policy.prompt = persisted_prompt.clone();
-    }
-    if !host_model_is_present
-        && let Some(persisted_model) = persisted_model
-        && !persisted_model.id.is_empty()
-    {
-        state.policy.model = persisted_model.clone();
-    }
-    if let Some(persisted_generation) = persisted_generation {
-        state.policy.generation = match host_generation {
-            Some(overlay) => overlay.resolve(persisted_generation),
-            None => persisted_generation.clone(),
-        };
-    }
     Ok(())
 }
 
@@ -1336,223 +1352,8 @@ fn live_replay_error(err: lash_core::LiveReplayStoreError) -> EmbedError {
 }
 
 #[cfg(test)]
-mod reconcile_tests {
+mod observation_stream_tests {
     use super::*;
-
-    fn model(id: &str) -> lash_core::ModelSpec {
-        lash_core::ModelSpec::builder(id)
-            .context_window_tokens(200_000)
-            .build()
-            .expect("valid test model")
-    }
-
-    /// An explicitly present host spec wins for reopen-selected fields,
-    /// including generation options: ADR 0030 resolves the session model at
-    /// open, so a reopen that names a model cannot pair it with the store's
-    /// old sampling. The recorded provider id survives from the store.
-    /// Authority is presence-aware for prompt, model, and generation alike.
-    #[test]
-    fn present_host_spec_wins_over_loaded_state_including_generation() {
-        let persisted_prompt = lash_core::PromptLayer::new().with_contribution(
-            lash_core::PromptContribution::guidance("Persisted", "persisted prompt"),
-        );
-        let mut state = RuntimeSessionState {
-            session_id: SessionId::from("session"),
-            policy: SessionPolicy {
-                provider_id: "recorded-provider".to_string(),
-                model: model("recorded-model"),
-                prompt: persisted_prompt.clone(),
-                generation: lash_core::GenerationOptions {
-                    seed: Some(7),
-                    ..Default::default()
-                },
-                ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-            },
-            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-            ))
-        };
-        let host = SessionPolicy {
-            // This open names the provider the session already recorded; the
-            // pin is unaffected and the other fields reconcile as usual.
-            provider_id: "recorded-provider".to_string(),
-            model: model("host-model"),
-            prompt: lash_core::PromptLayer::new().with_contribution(
-                lash_core::PromptContribution::guidance("Host", "host prompt"),
-            ),
-            generation: lash_core::GenerationOptions {
-                seed: Some(11),
-                ..Default::default()
-            },
-            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        };
-
-        let persisted_model = model("recorded-model");
-        let persisted_generation = lash_core::GenerationOptions {
-            seed: Some(7),
-            ..Default::default()
-        };
-        reconcile_loaded_state_policy(
-            &mut state,
-            &host,
-            true,
-            Some(&persisted_prompt),
-            true,
-            Some(&persisted_model),
-            Some(&lash_core::facade_support::GenerationOverlay::Merge(
-                host.generation.clone(),
-            )),
-            Some(&persisted_generation),
-        )
-        .expect("an open naming the recorded provider reconciles");
-
-        assert_eq!(state.policy.provider_id, "recorded-provider");
-        assert_eq!(state.policy.model.id, "host-model");
-        assert_eq!(state.policy.generation, host.generation);
-        assert_eq!(state.policy.prompt, host.prompt);
-    }
-
-    /// An unset host spec field keeps the durable head's value: core defaults
-    /// are construction-time fallbacks, not per-open seeds, so an incidental
-    /// reopen with a default spec never reverts a settled mid-run config
-    /// change. The persisted model only fills the gap when the head actually
-    /// recorded one (non-empty id).
-    #[test]
-    fn absent_host_spec_fields_keep_the_durable_head_values() {
-        let mut state = RuntimeSessionState {
-            session_id: SessionId::from("session"),
-            policy: SessionPolicy {
-                provider_id: "recorded-provider".to_string(),
-                model: model("recorded-model"),
-                generation: lash_core::GenerationOptions {
-                    seed: Some(7),
-                    ..Default::default()
-                },
-                ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-            },
-            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-            ))
-        };
-        let host = SessionPolicy {
-            // An open that names no provider inherits the recorded pin.
-            provider_id: String::new(),
-            model: model("core-default-model"),
-            generation: lash_core::GenerationOptions::default(),
-            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        };
-        let persisted_model = model("recorded-model");
-        let persisted_generation = lash_core::GenerationOptions {
-            seed: Some(7),
-            ..Default::default()
-        };
-
-        reconcile_loaded_state_policy(
-            &mut state,
-            &host,
-            false,
-            None,
-            false,
-            Some(&persisted_model),
-            None,
-            Some(&persisted_generation),
-        )
-        .expect("an open naming no provider inherits the pin");
-
-        assert_eq!(state.policy.provider_id, "recorded-provider");
-        assert_eq!(state.policy.model.id, "recorded-model");
-        assert_eq!(state.policy.generation, persisted_generation);
-
-        // A head that never recorded a model (empty id) does not override the
-        // resolved host model.
-        let mut unrecorded = RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        ));
-        unrecorded.session_id = SessionId::from("session");
-        let empty_model = lash_core::ModelSpec::default();
-        reconcile_loaded_state_policy(
-            &mut unrecorded,
-            &host,
-            false,
-            None,
-            false,
-            Some(&empty_model),
-            None,
-            None,
-        )
-        .expect("an unrecorded head reconciles");
-        assert_eq!(unrecorded.policy.model.id, "core-default-model");
-    }
-
-    #[test]
-    fn host_provider_wins_when_the_durable_config_has_not_recorded_one() {
-        let mut state = RuntimeSessionState {
-            session_id: SessionId::from("session"),
-            policy: SessionPolicy {
-                provider_id: String::new(),
-                model: model("uncommitted-model"),
-                ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-            },
-            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-            ))
-        };
-        let host = SessionPolicy {
-            provider_id: "host-provider".to_string(),
-            model: model("host-model"),
-            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        };
-
-        reconcile_loaded_state_policy(&mut state, &host, false, None, true, None, None, None)
-            .expect("an unrecorded pin adopts the host's provider");
-
-        assert_eq!(state.policy.provider_id, "host-provider");
-        assert_eq!(state.policy.model.id, "host-model");
-    }
-
-    /// FIG-1558: the recorded pin is a durable fact. An open naming a
-    /// different provider is refused here, at open, instead of being discarded
-    /// and re-discovered as a stringified runtime error on the first turn.
-    #[test]
-    fn conflicting_host_provider_is_refused_rather_than_discarded() {
-        let mut state = RuntimeSessionState {
-            session_id: SessionId::from("session"),
-            policy: SessionPolicy {
-                provider_id: "recorded-provider".to_string(),
-                model: model("recorded-model"),
-                ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-            },
-            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-            ))
-        };
-        let host = SessionPolicy {
-            provider_id: "host-provider".to_string(),
-            model: model("host-model"),
-            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        };
-
-        let error =
-            reconcile_loaded_state_policy(&mut state, &host, false, None, true, None, None, None)
-                .expect_err("a conflicting provider must be refused at open");
-        match error {
-            EmbedError::Session(SessionError::ProviderMismatch {
-                expected,
-                actual,
-                session_id,
-            }) => {
-                assert_eq!(expected, "recorded-provider");
-                assert_eq!(actual, "host-provider");
-                assert_eq!(session_id.as_str(), "session");
-            }
-            other => panic!("expected a typed provider-pin refusal, got: {other:?}"),
-        }
-        assert_eq!(
-            state.policy.provider_id, "recorded-provider",
-            "the refused open leaves the loaded policy untouched"
-        );
-        assert_eq!(state.policy.model.id, "recorded-model");
-    }
 
     #[tokio::test]
     async fn remote_observation_event_stream_advances_sequence_past_events() {

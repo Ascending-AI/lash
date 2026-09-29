@@ -85,7 +85,8 @@ pub use session_manager::{
 mod session_ops;
 use lash_core_store::session_store_factory_types;
 pub use session_store_factory_types::{
-    ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionStoreCreateRequest,
+    ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionCreationHead,
+    SessionStoreCreateRequest,
 };
 #[cfg(feature = "testing")]
 pub mod state;

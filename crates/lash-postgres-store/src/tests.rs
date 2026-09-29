@@ -660,7 +660,9 @@ async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: lash_core_execution::SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
+            .into(),
+        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     };
     factory
         .admit_session(&request)
@@ -670,7 +672,7 @@ async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
     let second_store = factory.clone();
     let mut first_state = lash_core_execution::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::new(request.policy.clone())
+        ..lash_core_execution::RuntimeSessionState::new(request.config.session_policy())
     };
     first_state.ensure_agent_frame_initialized();
     let second_state = first_state.clone();
@@ -787,7 +789,9 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: lash_core_execution::SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
+            .into(),
+        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     };
     factory
         .admit_session(&request)
@@ -1050,7 +1054,9 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("postgres-wrong-database-live-attachment"),
         relation: lash_core_execution::SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
+            .into(),
+        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     };
     live_store
         .admit_session(&request)
@@ -1784,9 +1790,11 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
-            policy: lash_core_execution::SessionPolicy::new(
+            config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
-            ),
+            )
+            .into(),
+            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
         };
         factory
             .admit_session(&request)
@@ -1795,7 +1803,7 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
         let store = factory.clone();
         let state = lash_core_execution::RuntimeSessionState {
             session_id: session_id.clone(),
-            ..lash_core_execution::RuntimeSessionState::new(request.policy.clone())
+            ..lash_core_execution::RuntimeSessionState::new(request.config.session_policy())
         };
         store
             .commit_runtime_state(

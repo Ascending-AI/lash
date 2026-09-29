@@ -39,7 +39,8 @@ pub async fn fork_observer_intent_transient_failure(backend: crate::Backend) {
                 source_session_id: SessionId::from("fork-observer-transient-source"),
                 source_node_id: "fork-observer-transient-node".into(),
             },
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("create fork session with pending observer intent");

@@ -5,8 +5,8 @@ use std::sync::Arc;
 use super::helpers::node_readable;
 use crate::store::{HistoryAnchor, HistoryBudget, SessionStore, WindowSelector};
 use crate::{
-    DeploymentStore, ForkSessionRequest, RuntimeCommit, RuntimeSessionState, SessionRelation,
-    SessionStoreCreateRequest, StoreError,
+    DeploymentStore, ForkSessionRequest, RuntimeCommit, RuntimeSessionState, SessionCreationHead,
+    SessionRelation, SessionStoreCreateRequest, StoreError,
 };
 
 use super::DeploymentViewExt as _;
@@ -97,7 +97,8 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
-        policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+        head: SessionCreationHead::CommittedByCreator,
     }
 }
 

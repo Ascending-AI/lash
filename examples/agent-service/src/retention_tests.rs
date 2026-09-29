@@ -5,8 +5,8 @@ use std::time::{Duration, SystemTime};
 
 use lash::persistence::{
     AttachmentReclamationPolicy, AttachmentStore, DeploymentStore, EmptyRootSetPolicy,
-    PendingTurnInputDraft, SessionRelation, SessionStoreCreateRequest, TurnInputIngress,
-    TurnInputStateKind,
+    PendingTurnInputDraft, SessionCreationHead, SessionRelation, SessionStoreCreateRequest,
+    TurnInputIngress, TurnInputStateKind,
 };
 use lash::{TurnBudget, TurnInput, runtime::SessionPolicy};
 use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStoreSet};
@@ -28,7 +28,8 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("retention-session"),
         relation: SessionRelation::Root,
-        policy: SessionPolicy::new(TurnBudget::Unbounded),
+        config: SessionPolicy::new(TurnBudget::Unbounded).into(),
+        head: SessionCreationHead::CommittedByCreator,
     };
     let catalog: Arc<dyn DeploymentStore> = factory.clone();
     let session_store = {

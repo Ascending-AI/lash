@@ -54,7 +54,21 @@ impl PostgresStore {
             self.fleet_format,
         )
         .await?;
-        if !inserted {
+        if inserted && request.head == lash_core_execution::SessionCreationHead::Config {
+            // The creator's config is baked in with the catalog row, in this
+            // transaction (FIG-4099).
+            let created_head = lash_core_execution::store::SessionHeadMeta::created(
+                &request.session_id,
+                request.config.clone(),
+                self.fleet_format,
+            );
+            sqlx::query(session_sql().head.insert_created.sql())
+                .bind(request.session_id.as_str())
+                .bind(encode_json(&created_head.payload())?)
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        } else if !inserted {
             let recorded =
                 crate::session_meta::load_recorded_lineage_tx(&mut tx, &request.session_id)
                     .await?

@@ -8,8 +8,9 @@ use lash::process::{WakeDeliveryDriver, process_wake_source_key};
 use lash_core::{
     ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType, ProcessIdentity,
     ProcessInput, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
-    ProcessWakeDelivery, ProcessWakeSpec, SessionCatalogStore as _, SessionRelation,
-    SessionStoreCreateRequest, WakeDeliveryConfig, WakeDeliveryState, WakeDiscardReason,
+    ProcessWakeDelivery, ProcessWakeSpec, SessionCatalogStore as _, SessionCreationHead,
+    SessionRelation, SessionStoreCreateRequest, WakeDeliveryConfig, WakeDeliveryState,
+    WakeDiscardReason,
 };
 use lash_postgres_store::PostgresStorage;
 use serde_json::json;
@@ -159,7 +160,8 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
                 relation: SessionRelation::Root,
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                head: SessionCreationHead::CommittedByCreator,
             })
             .await
             .with_context(|| format!("create retarget session `{session_id}`"))?;
@@ -297,7 +299,8 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SESSION_ID.to_string()),
             relation: SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: SessionCreationHead::CommittedByCreator,
         })
         .await
         .context("create crash-recovery wake target")?;

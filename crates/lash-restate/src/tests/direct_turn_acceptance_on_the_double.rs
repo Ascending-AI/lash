@@ -27,7 +27,8 @@ lash_conformance::direct_turn_acceptance_tests!({
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("root"),
                 relation: lash_core::SessionRelation::Root,
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                head: lash_core::SessionCreationHead::CommittedByCreator,
             },
         )
         .await

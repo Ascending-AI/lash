@@ -9,8 +9,8 @@ use crate::backend_fault::{
     BackendFaultArm, BackendFaultKind, BackendFaultLane, BackendFaultObservation, BackendFaultPoint,
 };
 use lash_core::{
-    DeploymentStore, OperationId, RuntimeCommit, RuntimeSessionState, RuntimeStore, SessionPolicy,
-    SessionRelation, SessionStoreCreateRequest, StoreError,
+    DeploymentStore, OperationId, RuntimeCommit, RuntimeSessionState, RuntimeStore,
+    SessionCreationHead, SessionPolicy, SessionRelation, SessionStoreCreateRequest, StoreError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -977,7 +977,8 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        config: SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+        head: SessionCreationHead::CommittedByCreator,
     }
 }
 

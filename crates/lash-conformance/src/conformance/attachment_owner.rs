@@ -602,7 +602,7 @@ fn session_request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: crate::SessionRelation::Root,
-        policy: crate::SessionPolicy {
+        config: crate::SessionPolicy {
             model: crate::ModelSpec::builder("attachment-owner-conformance-model")
                 .context_window_tokens(8_192)
                 .build()
@@ -610,7 +610,9 @@ fn session_request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
             provider_id: "attachment-owner-conformance".to_string(),
             session_id: Some(SessionId::from(session_id.to_string())),
             ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
-        },
+        }
+        .into(),
+        head: crate::SessionCreationHead::CommittedByCreator,
     }
 }
 

@@ -52,7 +52,8 @@ async fn bind_state_to_store(
         session_id: state.session_id.clone(),
         relation,
         pending_observer_intents: Vec::new(),
-        policy: state.policy.clone(),
+        config: state.policy.clone().into(),
+        head: crate::SessionCreationHead::CommittedByCreator,
         owning_process_id: None,
     };
     store
@@ -634,7 +635,6 @@ impl LashRuntime {
             "protocol-materialization",
             "record-config",
         );
-        let protocol_only_first_commit = self.state.checkpoint_ref.is_none();
         let fleet_format = self.fleet_format();
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
@@ -645,9 +645,6 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        if protocol_only_first_commit {
-            commit.config = crate::PersistedSessionConfig::new(self.state.policy.turn_budget);
-        }
         // Stamp last: the semantic-boundary identity hashes the commit's
         // canonical request content, so it must ride the final config.
         commit
@@ -925,7 +922,8 @@ mod tests {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
-            policy: policy.clone(),
+            config: policy.clone().into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         };
         let backend = crate::testing::memory_store_set().await;
         let factory: std::sync::Arc<dyn crate::DeploymentStore> = backend.session_store_factory();
@@ -972,7 +970,8 @@ mod tests {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
-            policy: policy.clone(),
+            config: policy.clone().into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         };
         let backend = crate::testing::memory_store_backend().await;
         let factory = backend.session_store_factory();
@@ -1047,7 +1046,8 @@ mod tests {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
                 relation: crate::SessionRelation::Root,
-                policy: policy.clone(),
+                config: policy.clone().into(),
+                head: crate::SessionCreationHead::CommittedByCreator,
             })
             .await
             .expect("create session store before parking");

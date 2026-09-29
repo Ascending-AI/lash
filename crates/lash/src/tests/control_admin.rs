@@ -1449,11 +1449,13 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                     parent_session_id: parent_session_id.clone(),
                     caused_by: None,
                 },
-                policy: lash_core::SessionPolicy {
+                config: lash_core::SessionPolicy {
                     provider_id: mock_provider().kind().to_string(),
                     model: mock_model_spec(),
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-                },
+                }
+                .into(),
+                head: lash_core::SessionCreationHead::CommittedByCreator,
             },
         )
         .await?;

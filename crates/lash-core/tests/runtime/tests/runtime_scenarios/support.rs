@@ -207,7 +207,8 @@ impl RuntimeScenarioContext {
                 pending_observer_intents: Vec::new(),
                 session_id: self.session_id.clone(),
                 relation: lash_core::SessionRelation::Root,
-                policy: self.state.policy.clone(),
+                config: self.state.policy.clone().into(),
+                head: lash_core::SessionCreationHead::CommittedByCreator,
             })
             .await
             .expect("bind runtime scenario session");

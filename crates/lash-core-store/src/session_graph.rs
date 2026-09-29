@@ -465,6 +465,21 @@ pub struct PersistedSessionConfig {
 }
 
 impl PersistedSessionConfig {
+    /// The session policy this config records: its durable fields over a
+    /// neutral policy with the recorded turn budget. Live-owned policy (the
+    /// session binding, autonomy, the no-progress budget, charge safety) is
+    /// not config and starts neutral.
+    pub fn session_policy(&self) -> crate::SessionPolicy {
+        let mut policy = crate::SessionPolicy::new(self.turn_budget);
+        policy.provider_id = self.provider_id.clone();
+        policy.model = self.model.clone();
+        if let Some(prompt) = self.prompt.as_ref() {
+            policy.prompt = prompt.clone();
+        }
+        policy.generation = self.generation.clone();
+        policy
+    }
+
     /// Builds an empty persisted config carrying the required per-turn budget.
     ///
     /// Store implementors reading durable session heads populate the provider
@@ -483,6 +498,12 @@ impl PersistedSessionConfig {
             protocol_turn_options: None,
             config_revision: 0,
         }
+    }
+}
+
+impl From<crate::SessionPolicy> for PersistedSessionConfig {
+    fn from(policy: crate::SessionPolicy) -> Self {
+        Self::from(&policy)
     }
 }
 

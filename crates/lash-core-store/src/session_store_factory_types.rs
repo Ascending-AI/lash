@@ -1,5 +1,5 @@
 use crate::session_identity::SessionRelation;
-pub use crate::session_identity::SessionStoreCreateRequest;
+pub use crate::session_identity::{SessionCreationHead, SessionStoreCreateRequest};
 use crate::session_policy::SessionPolicy;
 use crate::{NodeId, SessionId};
 

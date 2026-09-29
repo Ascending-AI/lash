@@ -164,15 +164,6 @@ pub mod facade_support {
         registry.resolve_catalog_contract(name)
     }
 
-    /// Guard-write the facade's reopen-reconciled seed to the durable head
-    /// (seed-then-write, FIG-1875). Facade `open` is the only caller.
-    pub async fn settle_reopen_seeded_config(
-        runtime: &mut crate::LashRuntime,
-        persisted: &crate::PersistedSessionConfig,
-    ) -> Result<(), crate::SessionError> {
-        runtime.settle_reopen_seeded_config(persisted).await
-    }
-
     pub use crate::attachments::AttachmentGcFence;
     pub use crate::attachments::AttachmentReclamationPolicy;
     pub use crate::attachments::AttachmentReclamationReport;
@@ -762,9 +753,9 @@ pub use runtime::{
     RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeBoundController, ScopeGrant, ScopeId, ScopeRef,
     ScopeStorageError, ScopedEffectController, SegmentHandover, SegmentProgress,
-    SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionAdministration, SessionCursor,
-    SessionCursorError, SessionDeleteContext, SessionDeleteExecution, SessionDriver, SessionId,
-    SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
+    SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionAdministration, SessionCreationHead,
+    SessionCursor, SessionCursorError, SessionDeleteContext, SessionDeleteExecution, SessionDriver,
+    SessionId, SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
     SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
     SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionSummary,
     SessionUsageTotals, SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey,
@@ -806,8 +797,9 @@ pub(crate) use session::RuntimeExecutionProcessEventContext;
 pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
 pub use session::{
-    ExecRequest, RuntimeExecutionContext, SessionError, ToolDispatchSurface, ToolSurfaceDrift,
-    ToolSurfaceDriftKind, resolve_trigger_owner_scope, tool_dispatch_surface,
+    ExecRequest, PluginOptionsUnaccepted, RuntimeExecutionContext, SessionConfigRefusal,
+    SessionError, ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind,
+    resolve_trigger_owner_scope, tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

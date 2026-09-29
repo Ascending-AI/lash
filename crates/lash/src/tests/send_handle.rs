@@ -772,7 +772,8 @@ async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            policy,
+            config: (&policy).into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await?;

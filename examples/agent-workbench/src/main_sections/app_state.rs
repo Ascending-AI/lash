@@ -9,19 +9,19 @@ impl AppState {
         let model = model_spec_from_selection(self.selected_model());
         self.session_builder_with_spec(
             session_id,
-            // Model selection is host authority on every open. Supplying it in
-            // the spec also lets queued turns consume their existing FIFO head
-            // without inserting a config command behind that same turn.
+            // The selection is creation config: a session this open creates
+            // records it, and an existing session runs with the model it
+            // recorded (FIG-4099). A turn that selects a different model
+            // moves the session with `apply_model_selection_to_session`.
             lash::SessionSpec::new().model(model),
         )
     }
 
     /// A builder for read-only projection opens: it states no model.
     ///
-    /// A spec-stated model is durable authority — the open seed is settled
-    /// against the head (seed-then-write, FIG-1875) — so a GET projection
-    /// that restated the process-wide selection would *write* config over
-    /// whatever the session last settled. Observation must never mutate.
+    /// Opening an existing session writes nothing whatever the spec says
+    /// (FIG-4099); a projection states none so that the process-wide
+    /// selection is never mistaken for the session's recorded model.
     pub(crate) fn observer_session_builder(
         &self,
         session_id: impl Into<SessionId>,
@@ -360,7 +360,8 @@ impl AppState {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
-                policy,
+                config: (&policy).into(),
+                head: lash::persistence::SessionCreationHead::CommittedByCreator,
             })
             .await
             .map_err(|error| {

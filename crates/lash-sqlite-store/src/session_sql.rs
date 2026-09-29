@@ -212,6 +212,11 @@ lash_store_sql::statements! {
                           pending_follow_on_json)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
 
+        /// The config-only head a creating admission writes beside the
+        /// catalog row (FIG-4099): revision 0, no leaf, no checkpoint.
+        insert_created = "INSERT INTO session_head (session_id, head_json, head_revision)
+                 VALUES (?1, ?2, 0)";
+
         insert_fork = "INSERT INTO session_head
                  (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
                  VALUES (?1, ?2, 0, ?3, ?4)";

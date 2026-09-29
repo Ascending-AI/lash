@@ -382,7 +382,7 @@ pub async fn capture_commit_publishes_exact_partial(
     );
     let mut state = RuntimeSessionState {
         session_id: turn.session_id.clone(),
-        ..RuntimeSessionState::new(request.policy)
+        ..RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let operation = crate::store::OperationId::new(
@@ -452,7 +452,7 @@ pub async fn capture_retention_waits_for_deletion(factory: Arc<dyn DeploymentSto
     );
     let mut state = RuntimeSessionState {
         session_id: turn.session_id.clone(),
-        ..RuntimeSessionState::new(request.policy)
+        ..RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let operation = crate::store::OperationId::new(

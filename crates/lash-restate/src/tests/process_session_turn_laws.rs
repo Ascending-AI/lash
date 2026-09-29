@@ -148,7 +148,8 @@ async fn parent_runtime(
             session_id: parent.clone(),
             relation: lash_core::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: policy.clone(),
+            config: policy.clone().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await
@@ -302,7 +303,8 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
                 })
                 .relation,
             pending_observer_intents: Vec::new(),
-            policy: recovery_session_policy(),
+            config: recovery_session_policy().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await

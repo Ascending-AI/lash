@@ -240,7 +240,7 @@ fn state(id: &str) -> RuntimeSessionState {
     let req = session_store_request(&SessionId::from(id), "probe", SessionRelation::Root);
     let mut state = RuntimeSessionState {
         session_id: id.into(),
-        ..RuntimeSessionState::new(req.policy)
+        ..RuntimeSessionState::new(req.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     state
@@ -1426,7 +1426,7 @@ async fn commit_turn_owned_intent(
 ) {
     let mut state = RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..RuntimeSessionState::new(request.policy.clone())
+        ..RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);

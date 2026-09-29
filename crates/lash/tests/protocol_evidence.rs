@@ -1328,16 +1328,6 @@ fn drain_area_witnesses() {
         });
         // W0359: lash::rlm::RlmSessionConfig::final_answer_format [function]
         let _ = lash::rlm::RlmSessionConfig::final_answer_format;
-        // W0360: lash::rlm::RlmSessionConfigError::Session [variant]
-        variant_witness(|value: &lash::rlm::RlmSessionConfigError| {
-            matches!(value, lash::rlm::RlmSessionConfigError::Session(..))
-        });
-        // W0361: lash::rlm::RlmSessionConfigError::Session::0 [field]
-        field_witness(|value: &lash::rlm::RlmSessionConfigError| {
-            if let lash::rlm::RlmSessionConfigError::Session(f0) = value {
-                let _ = f0;
-            }
-        });
         // W0362: lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat [variant]
         variant_witness(|value: &lash::rlm::RlmSessionConfigConflict| {
             matches!(

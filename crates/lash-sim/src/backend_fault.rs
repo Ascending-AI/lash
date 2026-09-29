@@ -10,8 +10,8 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use lash_core::{
-    DeploymentStore, OperationId, RuntimeCommit, RuntimeSessionState, RuntimeStore, SessionPolicy,
-    SessionRelation, SessionStoreCreateRequest, StoreError,
+    DeploymentStore, OperationId, RuntimeCommit, RuntimeSessionState, RuntimeStore,
+    SessionCreationHead, SessionPolicy, SessionRelation, SessionStoreCreateRequest, StoreError,
 };
 use lash_postgres_store::testing::{PostgresFaultArm, PostgresFaultInjector, PostgresFaultPoint};
 use lash_sqlite_store::testing::{SqliteFaultArm, SqliteFaultInjector, SqliteFaultPoint};
@@ -511,7 +511,8 @@ impl GeneratedBackendFaultHarness {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
                 relation: SessionRelation::Root,
-                policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                config: SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                head: SessionCreationHead::CommittedByCreator,
             })
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;

@@ -334,9 +334,11 @@ async fn session_listing_statement_count_is_session_count_invariant() {
                 },
                 session_id: session_id.clone(),
                 relation: relation.clone(),
-                policy: lash_core_execution::SessionPolicy::new(
+                config: lash_core_execution::SessionPolicy::new(
                     lash_core_execution::TurnBudget::Unbounded,
-                ),
+                )
+                .into(),
+                head: lash_core_execution::SessionCreationHead::CommittedByCreator,
             })
             .await
             .expect("create session listing fixture");
@@ -426,7 +428,8 @@ async fn durable_state(
         .admit_session(&SessionStoreCreateRequest {
             session_id: session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
-            policy: state.policy.clone(),
+            config: state.policy.clone().into(),
+            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
             pending_observer_intents: Vec::new(),
             owning_process_id: None,
         })
@@ -645,7 +648,9 @@ async fn catalog_lookup_and_repeated_admission_share_a_readable_snapshot() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("catalog-lookup"),
         relation: lash_core_execution::SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
+            .into(),
+        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     };
     assert!(matches!(
         store.admit_session(&request).await.expect("admit session"),
@@ -677,7 +682,9 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("corrupt-session-meta"),
         relation: lash_core_execution::SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
+            .into(),
+        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     };
 
     store
@@ -986,7 +993,9 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
     let request = |session_id: &str| SessionStoreCreateRequest {
         session_id: SessionId::from(session_id),
         relation: lash_core_execution::SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
+            .into(),
+        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
         pending_observer_intents: Vec::new(),
         owning_process_id: None,
     };

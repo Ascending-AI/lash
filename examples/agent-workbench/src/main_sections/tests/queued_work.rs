@@ -89,7 +89,8 @@ fn workbench_lists_and_controls_individual_queued_batches() {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
-                policy: session.policy_snapshot(),
+                config: session.policy_snapshot().into(),
+                head: lash::persistence::SessionCreationHead::CommittedByCreator,
             })
             .await
             .expect("open queued-work controls store");
@@ -207,7 +208,8 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
-                policy: session.policy_snapshot(),
+                config: session.policy_snapshot().into(),
+                head: lash::persistence::SessionCreationHead::CommittedByCreator,
             })
             .await
             .expect("open targeted wake receiver");
@@ -433,7 +435,8 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(deleted_target_id.to_string()),
                 relation: lash::persistence::SessionRelation::Root,
-                policy: session.policy_snapshot(),
+                config: session.policy_snapshot().into(),
+                head: lash::persistence::SessionCreationHead::CommittedByCreator,
             })
             .await
             .expect("create wake target before deletion");

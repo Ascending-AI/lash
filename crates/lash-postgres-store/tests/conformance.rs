@@ -447,9 +447,11 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                     pending_observer_intents: Vec::new(),
                     session_id,
                     relation: lash_core_execution::SessionRelation::Root,
-                    policy: lash_core_execution::SessionPolicy::new(
+                    config: lash_core_execution::SessionPolicy::new(
                         lash_core_execution::TurnBudget::Unbounded,
-                    ),
+                    )
+                    .into(),
+                    head: lash_core_execution::SessionCreationHead::CommittedByCreator,
                 };
                 let open_factory = open_storage
                     .session_store_factory()
@@ -913,9 +915,11 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core_execution::SessionRelation::Root,
-            policy: lash_core_execution::SessionPolicy::new(
+            config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
-            ),
+            )
+            .into(),
+            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("admit source-lock target");
@@ -1482,9 +1486,11 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SESSION_ID.to_string()),
             relation: lash_core_execution::SessionRelation::default(),
-            policy: lash_core_execution::SessionPolicy::new(
+            config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
-            ),
+            )
+            .into(),
+            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("admit clocked Postgres session");

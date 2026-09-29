@@ -937,7 +937,8 @@ mod plugin_state_boundary_tests {
                 owning_process_id: None,
                 session_id: "event-state".into(),
                 relation: crate::SessionRelation::Root,
-                policy: policy.clone(),
+                config: policy.clone().into(),
+                head: crate::SessionCreationHead::CommittedByCreator,
                 pending_observer_intents: vec![],
             },
         )

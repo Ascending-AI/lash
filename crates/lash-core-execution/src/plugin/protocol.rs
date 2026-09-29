@@ -57,21 +57,52 @@ pub trait ProtocolSessionPlugin: Send + Sync {
         ))
     }
 
-    /// Fires on every session materialization — root/builder open (including
-    /// resume) and child create — so a protocol plugin can apply and default
-    /// its per-session options at open time (apply-at-open semantics).
+    /// Fires on every session materialization — creation, reopen and child
+    /// create — so a protocol plugin can fill its per-session options.
     ///
     /// The [`ProtocolSessionMaterialization`] descriptor carries the
-    /// plugin-keyed options that reached this materialization (builder options
-    /// for root opens, request options for child create) and whether this is a
+    /// plugin-keyed options that reached this materialization (the creator's
+    /// options, or a child create's request options) and whether this is a
     /// root session. The plugin reads/writes durable protocol turn options
     /// through [`ProtocolRuntimeContext`].
+    ///
+    /// Config is baked at creation (FIG-4099): options stated here apply only
+    /// to a session that has recorded none. A session that recorded its
+    /// options keeps them as recorded, whatever this materialization states;
+    /// a later change goes through
+    /// [`apply_session_config_patch`](Self::apply_session_config_patch).
     fn configure_runtime_on_materialize(
         &self,
         _ctx: ProtocolRuntimeContext<'_>,
         _materialization: ProtocolSessionMaterialization<'_>,
     ) -> Result<(), crate::SessionError> {
         Ok(())
+    }
+
+    /// Apply the plugin-keyed options of a `SessionConfigPatch` to the
+    /// session's recorded protocol turn options, returning the options to
+    /// record (FIG-4099).
+    ///
+    /// This is the one durable write path for protocol and plugin session
+    /// config after creation: the runtime settles the returned value through
+    /// the commanded config patch, compare-and-set on the config revision.
+    /// A change the protocol will not make is refused typed, as
+    /// [`SessionError::SessionConfigRefused`](crate::SessionError::SessionConfigRefused);
+    /// nothing is written. The default reads no plugin options, so it refuses
+    /// every stated key with [`PluginOptionsUnaccepted`](crate::PluginOptionsUnaccepted).
+    fn apply_session_config_patch(
+        &self,
+        recorded: &crate::ProtocolTurnOptions,
+        plugin_options: &PluginOptions,
+    ) -> Result<crate::ProtocolTurnOptions, crate::SessionError> {
+        if plugin_options.plugins.is_empty() {
+            return Ok(recorded.clone());
+        }
+        Err(crate::SessionError::SessionConfigRefused(
+            crate::SessionConfigRefusal::new(crate::PluginOptionsUnaccepted {
+                plugin_ids: plugin_options.plugins.keys().cloned().collect(),
+            }),
+        ))
     }
 
     /// Runs inside a recorded turn effect. Replay serves its recorded decision

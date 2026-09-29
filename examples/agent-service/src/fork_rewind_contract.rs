@@ -4,7 +4,8 @@ use lash::SessionId;
 
 use lash::persistence::{
     DeploymentStore, LeaseOwnerIdentity, RuntimeCommit, RuntimeSessionState, RuntimeStore,
-    SessionCatalogStore, SessionRelation, SessionStore, SessionStoreCreateRequest,
+    SessionCatalogStore, SessionCreationHead, SessionRelation, SessionStore,
+    SessionStoreCreateRequest,
 };
 use std::sync::Arc;
 
@@ -71,7 +72,8 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SOURCE_SESSION.to_string()),
             relation: SessionRelation::Root,
-            policy: source_policy.clone(),
+            config: source_policy.clone().into(),
+            head: SessionCreationHead::CommittedByCreator,
         },
     )
     .await;
@@ -82,10 +84,12 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(FOREIGN_TARGET.to_string()),
             relation: SessionRelation::Root,
-            policy: SessionPolicy {
+            config: SessionPolicy {
                 session_id: Some(SessionId::from(FOREIGN_TARGET.to_string())),
                 ..source_policy.clone()
-            },
+            }
+            .into(),
+            head: SessionCreationHead::CommittedByCreator,
         },
     )
     .await;

@@ -217,7 +217,8 @@ impl Fixture {
                 session_id: session.clone(),
                 relation: lash_core::SessionRelation::Root,
                 pending_observer_intents: vec![],
-                policy: lash_core::testing::mock_session_policy(),
+                config: lash_core::testing::mock_session_policy().into(),
+                head: lash_core::SessionCreationHead::CommittedByCreator,
                 owning_process_id: None,
             },
         )

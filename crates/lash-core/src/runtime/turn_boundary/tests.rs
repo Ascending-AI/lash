@@ -368,7 +368,8 @@ async fn leased_boundary(
             pending_observer_intents: Vec::new(),
             session_id: state.session_id.clone(),
             relation: crate::SessionRelation::Root,
-            policy: state.policy.clone(),
+            config: state.policy.clone().into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("admit turn-boundary test session");

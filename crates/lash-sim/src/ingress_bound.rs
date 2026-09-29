@@ -105,7 +105,8 @@ async fn world() -> World {
             session_id: session.clone(),
             relation: lash_core::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
             owning_process_id: None,
         })
         .await

@@ -36,7 +36,8 @@ async fn authorize_restate_completion_closure(
             pending_observer_intents: Vec::new(),
             session_id: address.session_id.clone(),
             relation: lash::persistence::SessionRelation::Root,
-            policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
+            config: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded).into(),
+            head: lash::persistence::SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("create live Restate catalog session");
@@ -574,7 +575,8 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                     pending_observer_intents: Vec::new(),
                     session_id: late_address.session_id.clone(),
                     relation: lash::persistence::SessionRelation::Root,
-                    policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
+                    config: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded).into(),
+                    head: lash::persistence::SessionCreationHead::CommittedByCreator,
                 })
                 .await
                 .expect("create late live Restate catalog session");

@@ -673,7 +673,7 @@ impl SessionGraphScenario {
                 session_id: SessionId::from(physical_id.clone()),
                 node_id: node_id.clone(),
                 relation,
-                policy: request.policy.clone(),
+                policy: request.config.session_policy(),
             })
             .await;
         if !retained {
@@ -767,7 +767,7 @@ impl SessionGraphScenario {
                 session_id: SessionId::from(physical_id.clone()),
                 node_id: node_id.clone(),
                 relation,
-                policy: request.policy.clone(),
+                policy: request.config.session_policy(),
             })
             .await
             .map_err(|error| error.to_string())?;
@@ -1291,7 +1291,7 @@ impl SessionGraphScenario {
                 session_id: SessionId::from(probe_id.clone()),
                 node_id: pinned_node_id.to_string().into(),
                 relation: request.relation.clone(),
-                policy: request.policy.clone(),
+                policy: request.config.session_policy(),
             })
             .await
             .map_err(|error| {
@@ -1370,8 +1370,8 @@ async fn property_runtime(
         .map_err(|error| error.to_string())?
         .unwrap_or_else(|| crate::RuntimeSessionState {
             session_id: request.session_id.clone(),
-            policy: request.policy.clone(),
-            ..crate::RuntimeSessionState::new(request.policy.clone())
+            policy: request.config.session_policy(),
+            ..crate::RuntimeSessionState::new(request.config.session_policy())
         });
     let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
     let plugins = match state.plugin_state() {
@@ -1394,7 +1394,7 @@ async fn property_runtime(
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
     crate::LashRuntime::from_persistent_embedded_state(
-        request.policy.clone(),
+        request.config.session_policy(),
         runtime_host,
         runtime_services,
         state,

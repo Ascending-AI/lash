@@ -369,7 +369,8 @@ pub(super) async fn selected_observer_intents(
                 source_node_id: "foreign-history-provenance".into(),
             },
             pending_observer_intents: vec![intent.clone()],
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: SessionCreationHead::CommittedByCreator,
         };
         let source_id = SessionId::from(format!("selected-history-{nonce}-{index}"));
         let source_request = SessionStoreCreateRequest {
@@ -377,12 +378,13 @@ pub(super) async fn selected_observer_intents(
             session_id: source_id.clone(),
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: request.policy.clone(),
+            config: request.config.clone(),
+            head: SessionCreationHead::CommittedByCreator,
         };
         let source = admit_test_session(factory.clone(), &source_request)
             .await
             .expect("history source");
-        let mut state = RuntimeSessionState::new(request.policy.clone());
+        let mut state = RuntimeSessionState::new(request.config.session_policy());
         state.session_id = source_id.clone();
         state.ensure_agent_frame_initialized();
         source
@@ -405,7 +407,7 @@ pub(super) async fn selected_observer_intents(
                 node_id,
                 relation: request.relation.clone(),
                 pending_observer_intents: request.pending_observer_intents.clone(),
-                policy: request.policy.clone(),
+                policy: request.config.session_policy(),
             })
             .await
             .expect("fork deleted-writer history with exact intent");

@@ -393,6 +393,33 @@ impl SessionHeadMeta {
         self
     }
 
+    /// The head a creating admission writes beside the catalog row, in the
+    /// same store transaction (FIG-4099): the creator's config at config
+    /// revision `0`, and nothing else — no frame, no checkpoint, no leaf, at
+    /// head revision `0`. The session's first commit publishes over it like
+    /// over an absent head, and every open before that reads the config the
+    /// creator stated instead of re-deriving one.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    pub fn created(
+        session_id: &SessionId,
+        mut config: crate::PersistedSessionConfig,
+        fleet_format: FleetFormat,
+    ) -> Self {
+        config.config_revision = 0;
+        Self {
+            schema_version: fleet_format
+                .writer_version(crate::surface_format!(SESSION_HEAD_META_SCHEMA_VERSION)),
+            session_id: session_id.clone(),
+            head_revision: 0,
+            config,
+            current_frame_node_id: None,
+            checkpoint_ref: None,
+            leaf_node_id: None,
+            pending_follow_on: None,
+        }
+    }
+
     /// The session's identity is owned by the row key the caller bound the
     /// query to, never by the payload: `session_id` is taken from
     /// `session_id` and the payload's copy is a checked redundancy. A payload

@@ -704,13 +704,37 @@ pub struct SessionStoreCreateRequest {
     pub session_id: SessionId,
     pub relation: SessionRelation,
     pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
-    pub policy: SessionPolicy,
+    /// The session's config as its creator states it.
+    pub config: crate::PersistedSessionConfig,
+    /// What a creating admission writes beside the catalog row: whether
+    /// [`Self::config`] is baked in as the session's initial head.
+    pub head: SessionCreationHead,
     /// The process that runs this session as its own: the `SessionTurn`
     /// process whose start created it (FIG-3607 R1). Recorded once, at
     /// creation, as `session_meta.owning_process_id`; a start made in one of
     /// the session's turns records that process's lineage above the session.
     pub owning_process_id: Option<crate::ProcessId>,
 }
+/// What an admission that creates a session records beside its catalog row
+/// (FIG-4099).
+///
+/// A request that finds the session already created writes neither: the
+/// recorded config is authoritative, and later changes go through the
+/// commanded `ApplyConfigPatch`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionCreationHead {
+    /// Creation bakes the request's config in: the store writes it as the
+    /// session's initial config head in the same transaction as the catalog
+    /// row, so every later open — and the engine's own drive-open — runs with
+    /// the config the creator stated. Every creating verb of a session's
+    /// host API states this.
+    Config,
+    /// The creator commits the session's first head itself — a runtime
+    /// binding the complete state it was handed, or a child session's
+    /// initialisation — so the store writes only the catalog row.
+    CommittedByCreator,
+}
+
 impl SessionStoreCreateRequest {
     pub fn parent_session_id(&self) -> Option<&str> {
         self.relation.parent_session_id()

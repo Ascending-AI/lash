@@ -189,7 +189,7 @@ async fn the_session_roster_survives_the_web_process() {
     // second reopens.
     let double = crate::tests::test_double_backend(0).await;
     let created_ids = {
-        let provider = scripted_cells_provider("workbench-roster-restart-first", Vec::new());
+        let provider = scripted_cells_provider("workbench-roster-restart", Vec::new());
         let mut state = queued_send_test_state(&double, provider).await;
         state.sessions = WorkbenchSessions::persistent(session_id_path.clone()).expect("roster");
         state.sessions.ensure(&state.current_session_id());
@@ -210,9 +210,10 @@ async fn the_session_roster_survives_the_web_process() {
     };
 
     // A new web process over the same data directory: new AppState, new roster
-    // handle, same files.
+    // handle, same files. Its provider serves the pin the sessions recorded
+    // when they were created (FIG-4099).
     let provider = scripted_cells_provider(
-        "workbench-roster-restart-second",
+        "workbench-roster-restart",
         vec!["<typescript>\nfinish(\"restarted\");\n</typescript>".to_string()],
     );
     let mut state = queued_send_test_state(&double, provider).await;

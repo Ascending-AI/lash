@@ -29,7 +29,8 @@ pub fn session_ingress_session_request() -> crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session(),
         relation: crate::SessionRelation::Root,
-        policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+        head: crate::SessionCreationHead::CommittedByCreator,
     }
 }
 

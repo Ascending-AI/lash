@@ -133,8 +133,17 @@ pub struct ApplyConfigPatch {
     pub base_config_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    /// The model the session runs from here on. Applying it retains the
+    /// session's attachment-acceptance snapshot (ADR 0026): only
+    /// [`Self::attachment_acceptance`] replaces that.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<crate::ModelSpec>,
+    /// The attachment-acceptance snapshot the session renders attachments
+    /// against, replaced whole. Applied after [`Self::model`], so one patch
+    /// can change both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment_acceptance:
+        Option<std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<crate::PromptLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -175,6 +184,7 @@ impl ApplyConfigPatch {
             base_config_revision: 0,
             provider_id: None,
             model: None,
+            attachment_acceptance: None,
             prompt: None,
             generation: None,
             turn_budget: None,
@@ -197,6 +207,9 @@ impl ApplyConfigPatch {
             provider_id: (previous.provider_id != next.provider_id)
                 .then(|| next.provider_id.clone()),
             model: (previous.model != next.model).then(|| next.model.clone()),
+            attachment_acceptance: (previous.model.capability.attachment_acceptance
+                != next.model.capability.attachment_acceptance)
+                .then(|| next.model.capability.attachment_acceptance.clone()),
             prompt: (previous.prompt != next.prompt).then(|| next.prompt.clone()),
             generation: (previous.generation != next.generation)
                 .then(|| crate::GenerationOverlay::Replace(next.generation.clone())),
@@ -245,6 +258,9 @@ impl ApplyConfigPatch {
         if let Some(model) = self.model.as_ref() {
             policy.replace_model_retaining_attachment_acceptance(model.clone());
         }
+        if let Some(snapshot) = self.attachment_acceptance.as_ref() {
+            policy.model.capability.attachment_acceptance = snapshot.clone();
+        }
         if let Some(prompt) = self.prompt.as_ref() {
             policy.prompt = prompt.clone();
         }
@@ -259,6 +275,7 @@ impl ApplyConfigPatch {
     pub fn is_empty(&self) -> bool {
         self.provider_id.is_none()
             && self.model.is_none()
+            && self.attachment_acceptance.is_none()
             && self.prompt.is_none()
             && self.generation.is_none()
             && self.turn_budget.is_none()

@@ -14,6 +14,12 @@
 > saying the store is not a carrier of generation intent, and that only
 > `provider_id` comes from the record, describe the state before FIG-1875.
 
+> **Amended 2026-09-29 (FIG-4099):** generation is creation config. A reopen
+> runs with the recorded generation and writes nothing; the host spec's
+> overlay applies only when it creates the session, and a later change is
+> `update(SessionConfigPatch { generation: Some(overlay), .. })`, with the same
+> merge/replace vocabulary. See the amendment at the end.
+
 `GenerationOptions` is caller intent, but only the one-shot direct path had a caller-owned
 slot for it. Agent sessions synthesized their options from provider configuration —
 copying `ProviderOptions.max_output_tokens` onto the request, where the adapter's own
@@ -194,3 +200,35 @@ un-send a call. A mixed-model session clears incompatible intent with
 
 The paragraphs above that call omission silent-but-reported, and the rejected
 typed pre-flight check, describe the state before this amendment.
+
+## Amendment (FIG-4099, 2026-09-29): the host's config applies at creation
+
+"Reopen follows ADR 0030 … the host's configuration wins" is superseded, as is
+the FIG-1875 banner's per-option merge of the host's overlay on reopen.
+Generation, like the model and the prompt, is baked into the session's config
+when the session is created, and the recorded value is authoritative on every
+reopen. Every creating path — `open()` of a new id, `create()`,
+`open_with_state()`/`observe_with_state()` and the engine's own drive-open —
+passes the creator's config to the catalog as
+`SessionStoreCreateRequest::config`, and the store writes it as the session's
+initial config head in the same transaction as the catalog row
+(`SessionHeadMeta::created`). The request says which head it carries:
+host-facing creation states `SessionCreationHead::Config`, so the head is on
+disk before the session is first materialized, and it includes the protocol turn
+options the session's protocol resolves at creation (the RLM session config
+among them). A core runtime binding state it was handed states
+`SessionCreationHead::CommittedByCreator`, and its first commit writes the head,
+so only the row is written at admission. Admitting an id that already exists
+writes no config either way. The facade forms that config in one place,
+`SessionBuilder::creation_config`. A reopen reads the recorded head and writes
+nothing: there is no reconciliation, no seed write and no report, and builder
+config stated on a reopen is ignored. Only live policy follows an open (the
+session binding, turn budget, autonomy, no-progress budget and charge safety),
+and a builder provider that cannot serve the recorded pin is still refused typed
+(`ProviderMismatch`) without a write. Every later change is the one durable
+command, `update(SessionConfigPatch)`, which covers provider, model, prompt,
+generation, attachment acceptance and plugin session config.
+
+The `GenerationOverlay` vocabulary is unchanged and is now spelled on the
+patch: `Merge` keeps unstated recorded options, `Replace` discards them, and a
+default `Replace` clears.

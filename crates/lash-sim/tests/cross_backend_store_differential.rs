@@ -28,9 +28,10 @@ use lash_core::{
     LeaseOwnerIdentity, PendingTurnInputDraft, PluginNamespaceState, PluginState,
     ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent, QueuedWorkAuthority,
     QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
-    SessionCatalogStore as _, SessionHistoryRecord, SessionMeta, SessionNodePayload,
-    SessionNodeRecord, SessionRelation, SessionStoreCreateRequest, StoreError, TokenLedgerEntry,
-    TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputIngress, TurnInputStateKind,
+    SessionCatalogStore as _, SessionCreationHead, SessionHistoryRecord, SessionMeta,
+    SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest, StoreError,
+    TokenLedgerEntry, TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputIngress,
+    TurnInputStateKind,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -1103,7 +1104,8 @@ impl BackendRunner {
             pending_observer_intents: Vec::new(),
             session_id: self.session_id.clone(),
             relation: SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: SessionCreationHead::CommittedByCreator,
         }
     }
 
@@ -1977,7 +1979,8 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(format!("fig-1242-storage-failure:{}", run_nonce())),
         relation: SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+        head: SessionCreationHead::CommittedByCreator,
     };
 
     let sqlite_case_root = sqlite_root.join("storage-failure-mapping");
@@ -2154,7 +2157,8 @@ async fn runners_for_case_with_clock(
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: relation.clone(),
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+        head: SessionCreationHead::CommittedByCreator,
     };
     let expected_meta = SessionMeta {
         owning_process_id: Some(differential_process_owner_id()),

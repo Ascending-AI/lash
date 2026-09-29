@@ -97,7 +97,7 @@ async fn related_session_open_records_the_provider_pin() -> Result<()> {
         requests
             .lock_recover()
             .iter()
-            .map(|request| request.policy.recorded_provider_id().to_string())
+            .map(|request| request.config.provider_id.clone())
             .collect::<Vec<_>>(),
         vec!["embed-test".to_string(), "embed-test".to_string()],
         "a related session opened through the ordinary path carries the \

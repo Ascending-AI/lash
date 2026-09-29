@@ -31,8 +31,8 @@ impl AppState {
     /// [`lash::SessionBuilder::observe_with_state`], which admits nothing,
     /// claims nothing, and is never a runtime the session's drives run on. The builder is still
     /// [`Self::observer_session_builder`]: no model statement, so observing a
-    /// session never writes config authority over its settled head
-    /// (FIG-3144, FIG-3151).
+    /// session never restates the process-wide selection as its config
+    /// (FIG-3144, FIG-3151, FIG-4099).
     pub(crate) async fn open_session_for_observation(
         &self,
         session_id: &SessionId,
@@ -69,7 +69,8 @@ impl AppState {
             // A session with no durable head yet: the same empty state the
             // `/api/state` projection falls back to, so an observer that
             // attaches before the first commit sees what the snapshot does.
-            let mut state = lash::persistence::RuntimeSessionState::new(request.policy.clone());
+            let mut state =
+                lash::persistence::RuntimeSessionState::new(request.config.session_policy());
             state.session_id = session_id.clone();
             state
         });
@@ -91,7 +92,8 @@ pub(crate) fn state_store_request(
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: lash::persistence::SessionRelation::Root,
-        policy,
+        config: (&policy).into(),
+        head: lash::persistence::SessionCreationHead::CommittedByCreator,
     }
 }
 
@@ -139,7 +141,8 @@ pub(crate) async fn read_state_projection(
     };
     let has_durable_head = loaded.is_some();
     let persisted = loaded.unwrap_or_else(|| {
-        let mut persisted = lash::persistence::RuntimeSessionState::new(request.policy);
+        let mut persisted =
+            lash::persistence::RuntimeSessionState::new(request.config.session_policy());
         persisted.session_id = SessionId::from(session_id.to_string());
         persisted
     });

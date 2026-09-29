@@ -45,7 +45,7 @@ pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
             .admit_view(&request)
             .await
             .expect("create first-lifetime process-owned session store");
-        let mut state = crate::RuntimeSessionState::new(request.policy.clone());
+        let mut state = crate::RuntimeSessionState::new(request.config.session_policy());
         state.session_id = session_id.clone();
         state.append_active_conversation_messages(&[crate::Message {
             id: format!("first-lifetime-message-{index}"),
@@ -172,7 +172,7 @@ pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
             .admit_view(&request)
             .await
             .expect("the successor binds its own session ids");
-        let mut state = crate::RuntimeSessionState::new(request.policy.clone());
+        let mut state = crate::RuntimeSessionState::new(request.config.session_policy());
         state.session_id = session_id.clone();
         state.append_active_conversation_messages(&[crate::Message {
             id: format!("successor-message-{index}"),

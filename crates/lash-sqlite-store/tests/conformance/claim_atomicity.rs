@@ -18,9 +18,11 @@ async fn sqlite_a_partial_admission_rolls_back_through_both_entry_points() {
                 pending_observer_intents: Vec::new(),
                 session_id: "root".into(),
                 relation: lash_core_execution::SessionRelation::Root,
-                policy: lash_core_execution::SessionPolicy::new(
+                config: lash_core_execution::SessionPolicy::new(
                     lash_core_execution::TurnBudget::Unbounded,
-                ),
+                )
+                .into(),
+                head: lash_core_execution::SessionCreationHead::CommittedByCreator,
             })
             .await
             .unwrap();
@@ -59,9 +61,11 @@ async fn sqlite_an_admission_holds_its_rows_across_a_displaced_fence() {
             pending_observer_intents: Vec::new(),
             session_id: "root".into(),
             relation: lash_core_execution::SessionRelation::Root,
-            policy: lash_core_execution::SessionPolicy::new(
+            config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
-            ),
+            )
+            .into(),
+            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
         })
         .await
         .unwrap();

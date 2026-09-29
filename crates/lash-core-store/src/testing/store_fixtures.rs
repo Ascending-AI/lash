@@ -90,7 +90,7 @@ pub fn session_store_request(
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation,
-        policy: crate::SessionPolicy {
+        config: crate::SessionPolicy {
             model: crate::ModelSpec::builder(model_id)
                 .context_window_tokens(200_000)
                 .build()
@@ -103,7 +103,9 @@ pub fn session_store_request(
             charge_safety: Default::default(),
             prompt: crate::PromptLayer::new(),
             generation: crate::GenerationOptions::default(),
-        },
+        }
+        .into(),
+        head: crate::SessionCreationHead::CommittedByCreator,
     }
 }
 

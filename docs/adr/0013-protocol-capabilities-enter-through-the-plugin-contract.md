@@ -33,3 +33,45 @@ A protocol acquires runtime capabilities only through the uniform plugin contrac
   Engines contribute behavior; the Host Application owns deployment capability claims.
 - **Keep the facade installer but make it public API.** Rejected: the facade stays the integration point and RLM stays special; does not meet the goal.
 - **Resolve option defaults at read time instead of apply-at-open.** Rejected: less code, but silently re-answers a durable question on every read and changes observed behavior of existing sessions whenever a default changes.
+
+## Amendment (FIG-4099, 2026-09-29): plugin options are creation config
+
+Session Plugin Options are applied when the session is created, not on every
+open. The seam is unchanged — the protocol plugin still resolves and defaults
+them in `configure_runtime_on_materialize` — but a session that recorded its
+protocol options keeps them exactly as recorded, whatever a later
+materialization states: the RLM plugin applies stated options and fills its
+defaults only for a session that has recorded none. A facade creation resolves
+the builder's plugin options through the protocol plugin before the catalog
+write, so they land in the initial config head with the catalog row. Every
+creating path — `open()` of a new id, `create()`,
+`open_with_state()`/`observe_with_state()` and the engine's own drive-open —
+passes the creator's config to the catalog as
+`SessionStoreCreateRequest::config`, and the store writes it as the session's
+initial config head in the same transaction as the catalog row
+(`SessionHeadMeta::created`). The request says which head it carries:
+host-facing creation states `SessionCreationHead::Config`, so the head is on
+disk before the session is first materialized, and it includes the protocol turn
+options the session's protocol resolves at creation (the RLM session config
+among them). A core runtime binding state it was handed states
+`SessionCreationHead::CommittedByCreator`, and its first commit writes the head,
+so only the row is written at admission. Admitting an id that already exists
+writes no config either way. The facade forms that config in one place,
+`SessionBuilder::creation_config`. A reopen reads the recorded head and writes
+nothing: there is no reconciliation, no seed write and no report, and builder
+config stated on a reopen is ignored. Only live policy follows an open (the
+session binding, turn budget, autonomy, no-progress budget and charge safety),
+and a builder provider that cannot serve the recorded pin is still refused typed
+(`ProviderMismatch`) without a write. Every later change is the one durable
+command, `update(SessionConfigPatch)`, which covers provider, model, prompt,
+generation, attachment acceptance and plugin session config.
+
+A change after creation reaches the protocol through the new
+`ProtocolSessionPlugin::apply_session_config_patch` hook, fed by
+`SessionConfigPatch::plugin_options`; a change the protocol will not make is
+refused typed as `SessionError::SessionConfigRefused`, and a key no plugin
+reads is refused as `PluginOptionsUnaccepted`.
+
+This supersedes "Semantics are **apply-at-open**: options are re-resolved on
+every open, and durable state records the last applied value" in the Decision,
+and the "open-time options" wording in the Consequences.

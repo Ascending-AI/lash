@@ -737,7 +737,8 @@ pub(super) async fn verify_independent_session_meta_layout(
             pending_observer_intents: case.meta.pending_observer_intents.clone(),
             session_id: case.meta.session_id.clone(),
             relation: case.meta.relation.clone(),
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: SessionCreationHead::CommittedByCreator,
         };
         sqlite_stores.push(
             admit_test_session(sqlite_factory.clone(), &request)

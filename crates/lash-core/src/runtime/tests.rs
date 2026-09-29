@@ -18,7 +18,8 @@ pub(crate) mod helpers {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("recording-factory-gc"),
             relation: crate::SessionRelation::Root,
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         };
         crate::store::SessionCatalogStore::admit_session(&factory, &request)
             .await

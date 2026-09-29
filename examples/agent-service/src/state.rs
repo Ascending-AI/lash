@@ -71,15 +71,30 @@ impl AppStateData {
         // language at its open: there is nothing left to pin, and a bag that
         // still records the retired `dialect` field is refused by the protocol
         // as an incompatible format rather than served under another language.
+        //
+        // The model is creation config: it is baked into the session the
+        // first time the chat opens, and a reopen runs with what the session
+        // recorded (FIG-4099). A chat whose model changed since then moves
+        // its session with the one durable config command.
         let session = self
             .core
             .session(chat_id)
-            .session_spec(lash::SessionSpec::inherit().model(model))
+            .session_spec(lash::SessionSpec::inherit().model(model.clone()))
             .plugin::<DemoPlugin>(DemoPluginConfig {
                 db: Arc::clone(&self.db),
             })
             .open()
             .await?;
+        if session.policy_snapshot().model != model {
+            session
+                .admin()
+                .config()
+                .update(lash::SessionConfigPatch {
+                    model: Some(model),
+                    ..lash::SessionConfigPatch::default()
+                })
+                .await?;
+        }
         self.record_tool_loss_notice(chat_id, &session).await?;
         Ok(session)
     }

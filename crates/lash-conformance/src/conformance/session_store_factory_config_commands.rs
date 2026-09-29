@@ -250,8 +250,8 @@ async fn commit_session_command_claim_with(
         .expect("load config-command state")
         .unwrap_or_else(|| crate::RuntimeSessionState {
             session_id: request.session_id.clone(),
-            policy: request.policy.clone(),
-            ..crate::RuntimeSessionState::new(request.policy.clone())
+            policy: request.config.session_policy(),
+            ..crate::RuntimeSessionState::new(request.config.session_policy())
         });
     state.ensure_agent_frame_initialized();
     adjust(&mut state);
@@ -432,8 +432,8 @@ async fn runtime_for_config_settlement(
         .expect("load config-settlement state")
         .unwrap_or_else(|| crate::RuntimeSessionState {
             session_id: request.session_id.clone(),
-            policy: request.policy.clone(),
-            ..crate::RuntimeSessionState::new(request.policy.clone())
+            policy: request.config.session_policy(),
+            ..crate::RuntimeSessionState::new(request.config.session_policy())
         });
     state.ensure_agent_frame_initialized();
     let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
@@ -469,7 +469,7 @@ async fn runtime_for_config_settlement(
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
     crate::LashRuntime::from_persistent_embedded_state(
-        request.policy.clone(),
+        request.config.session_policy(),
         runtime_host,
         runtime_services,
         state,

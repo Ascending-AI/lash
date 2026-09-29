@@ -459,7 +459,8 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("orphaned-fork-source"),
         relation: lash_core::SessionRelation::Root,
-        policy: source_policy.clone(),
+        config: source_policy.clone().into(),
+        head: lash_core::SessionCreationHead::CommittedByCreator,
     };
     let source = lash_core::runtime::admit_session_view(&factory, &source_request)
         .await
@@ -571,7 +572,8 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("fork-observer-source"),
             relation: lash_core::SessionRelation::Root,
-            policy: policy.clone(),
+            config: policy.clone().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await
@@ -980,7 +982,8 @@ async fn duplicate_only_fork_intents_are_canonical(
             pending_observer_intents: Vec::new(),
             session_id: source_session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            policy: policy.clone(),
+            config: policy.clone().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await?;
@@ -1100,7 +1103,8 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             ],
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await?;
@@ -1220,7 +1224,8 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                     source_session_id: SessionId::from(format!("nested-source-{case}")),
                     source_node_id: format!("nested-source-node-{case}").into(),
                 },
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                head: lash_core::SessionCreationHead::CommittedByCreator,
             },
         )
         .await?;
@@ -1388,7 +1393,8 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("generation-fork-source"),
             relation: lash_core::SessionRelation::Root,
-            policy: source_policy.clone(),
+            config: source_policy.clone().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await

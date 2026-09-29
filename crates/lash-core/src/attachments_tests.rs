@@ -239,7 +239,8 @@ async fn committed_factory_attachment() -> (
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("explicit-root-factory"),
         relation: crate::SessionRelation::Root,
-        policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+        head: crate::SessionCreationHead::CommittedByCreator,
     };
     let store = crate::runtime::admit_session_view(&factory, &request)
         .await
@@ -1232,7 +1233,8 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: crate::SessionRelation::Root,
-        policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+        head: crate::SessionCreationHead::CommittedByCreator,
     };
     let store = crate::runtime::admit_session_view(&factory, &request)
         .await

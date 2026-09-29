@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 
 use lash_core::store::{RuntimeCommitReceipt, RuntimeStoreDecorator};
 use lash_core::{
-    DeploymentStore, DeploymentStoreDecorator, RuntimeCommit, SessionStoreCreateRequest, StoreError,
+    DeploymentStore, DeploymentStoreDecorator, RuntimeCommit, SessionCreationHead,
+    SessionStoreCreateRequest, StoreError,
 };
 
 /// One measured store for the catalog. Its node counter holds no identities.
@@ -353,7 +354,8 @@ impl RuntimePerfStore {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: SessionCreationHead::CommittedByCreator,
         };
         self.admit_session(&request).await?;
         Ok(Arc::new(self.clone()))

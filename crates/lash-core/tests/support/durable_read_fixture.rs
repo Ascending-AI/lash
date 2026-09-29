@@ -84,12 +84,12 @@ use lash_core::{
     ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
     ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
     ProtocolTurnOptions, RuntimeCommit, RuntimeSessionState, SegmentHandover, SessionAppendNode,
-    SessionNodePayload, SessionPolicy, SessionRelation, SessionScope, SessionStoreCreateRequest,
-    StoreError, TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
-    TriggerDeliveryReservation, TriggerDeliveryReservationOutcome, TriggerInputBinding,
-    TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope,
-    TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress,
-    WaitKind, WaitState,
+    SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
+    SessionStoreCreateRequest, StoreError, TokenLedgerEntry, TokenUsage, TriggerCommand,
+    TriggerCommandOutcome, TriggerDeliveryReservation, TriggerDeliveryReservationOutcome,
+    TriggerInputBinding, TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest,
+    TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
+    TurnInput, TurnInputIngress, WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1317,7 +1317,8 @@ fn fixture_session_request(session_id: &SessionId) -> SessionStoreCreateRequest 
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        config: SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+        head: SessionCreationHead::CommittedByCreator,
     }
 }
 

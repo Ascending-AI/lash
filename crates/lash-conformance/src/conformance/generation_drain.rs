@@ -65,7 +65,8 @@ impl AdmittedRoot {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: crate::SessionRelation::Root,
-                policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+                head: crate::SessionCreationHead::CommittedByCreator,
             })
             .await
             .expect("create the law's session");

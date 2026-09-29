@@ -82,7 +82,7 @@ pub async fn session_tool_access_durable_recovery(
         .expect("admit the explicit-tool-access session");
     let mut state = crate::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.authority.tool_access =
         crate::SessionToolAccess::restricted([]).expect("restricted empty is valid");

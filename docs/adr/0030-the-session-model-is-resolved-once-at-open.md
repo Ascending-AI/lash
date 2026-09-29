@@ -81,3 +81,37 @@ configuration with no guard write, and FIG-2520 disposes of both:
   Historical frames stay durable history; switching one back into service would
   require a commanded config patch that nothing supports today. Reopening the
   current frame remains an idempotent no-op.
+
+## Amendment (FIG-4099, 2026-09-29): config is baked at creation
+
+The resolution point moves from "construction or reopen" to creation alone. The
+host supplies the session's config when it creates the session, and the recorded
+config is authoritative on every reopen. Every creating path — `open()` of a new
+id, `create()`, `open_with_state()`/`observe_with_state()` and the engine's own
+drive-open — passes the creator's config to the catalog as
+`SessionStoreCreateRequest::config`, and the store writes it as the session's
+initial config head in the same transaction as the catalog row
+(`SessionHeadMeta::created`). The request says which head it carries:
+host-facing creation states `SessionCreationHead::Config`, so the head is on
+disk before the session is first materialized, and it includes the protocol turn
+options the session's protocol resolves at creation (the RLM session config
+among them). A core runtime binding state it was handed states
+`SessionCreationHead::CommittedByCreator`, and its first commit writes the head,
+so only the row is written at admission. Admitting an id that already exists
+writes no config either way. The facade forms that config in one place,
+`SessionBuilder::creation_config`. A reopen reads the recorded head and writes
+nothing: there is no reconciliation, no seed write and no report, and builder
+config stated on a reopen is ignored. Only live policy follows an open (the
+session binding, turn budget, autonomy, no-progress budget and charge safety),
+and a builder provider that cannot serve the recorded pin is still refused typed
+(`ProviderMismatch`) without a write. Every later change is the one durable
+command, `update(SessionConfigPatch)`, which covers provider, model, prompt,
+generation, attachment acceptance and plugin session config.
+
+This supersedes the sentence above that the host supplies the Session Model
+"when it constructs or reopens a session", and the whole seed-then-write
+amendment (FIG-1896): `settle_reopen_seeded_config`, its content-addressed
+reopen seed operation and the facade's host-wins/persisted-wins merge
+(`reconcile_loaded_state_policy`) are deleted. The persisted Session Model is
+no longer only "what this session last executed with" for a host to read back:
+it is the session's model until a config patch changes it.

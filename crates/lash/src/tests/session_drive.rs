@@ -388,7 +388,8 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await?;

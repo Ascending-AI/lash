@@ -403,9 +403,17 @@ impl LashRuntime {
         };
         let requires_hydration = match store.load_session_head_meta().await {
             Ok(Some(head)) => {
+                // The config-only head a creating admission writes (FIG-4099)
+                // carries no graph: a runtime still at revision 0 has not
+                // fallen behind it, whatever unpersisted initial frame it
+                // holds.
+                let created_only = head.head_revision == 0
+                    && head.leaf_node_id.is_none()
+                    && head.checkpoint_ref.is_none();
                 let moved = self.state.head_revision != head.head_revision
-                    || head.leaf_node_id != self.state.session_graph.leaf_node_id
-                    || head.checkpoint_ref != self.state.checkpoint_ref;
+                    || (!created_only
+                        && (head.leaf_node_id != self.state.session_graph.leaf_node_id
+                            || head.checkpoint_ref != self.state.checkpoint_ref));
                 // A recovery raise rewrites the pending follow-on without
                 // moving the head revision (ADR 0101 §3), so the fact is
                 // taken from the head even when nothing else moved.

@@ -32,14 +32,18 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         crate::StoreError::InvalidSessionId { .. }
     ));
 
-    let request = session_store_request(
-        &SessionId::from("admission-created"),
-        "admission-model",
-        crate::SessionRelation::Child {
-            parent_session_id: SessionId::from("admission-parent"),
-            caused_by: None,
-        },
-    );
+    // A host API's creating verb bakes its config in (FIG-4099).
+    let request = crate::SessionStoreCreateRequest {
+        head: crate::SessionCreationHead::Config,
+        ..session_store_request(
+            &SessionId::from("admission-created"),
+            "admission-model",
+            crate::SessionRelation::Child {
+                parent_session_id: SessionId::from("admission-parent"),
+                caused_by: None,
+            },
+        )
+    };
     assert_eq!(
         factory
             .admit_session(&request)
@@ -66,6 +70,86 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         .expect("admission must durably materialize metadata");
     assert_eq!(created_meta.session_id, request.session_id);
     assert_eq!(created_meta.relation, request.relation);
+
+    // Config is baked at creation (FIG-4099): the creating admission wrote
+    // the creator's config as the session's initial head, at head and config
+    // revision 0 with no frame, in the transaction that wrote the row; the
+    // rebind above wrote nothing over it.
+    let created_head = store
+        .load_session_head_meta()
+        .await
+        .expect("load the created head")
+        .expect("a creating admission writes the config head");
+    let mut expected_config = request.config.clone();
+    expected_config.config_revision = 0;
+    assert_eq!(created_head.config, expected_config);
+    assert_eq!(created_head.head_revision, 0);
+    assert_eq!(created_head.current_frame_node_id, None);
+    assert_eq!(created_head.checkpoint_ref, None);
+    assert_eq!(created_head.leaf_node_id, None);
+    let restated = crate::SessionStoreCreateRequest {
+        config: crate::PersistedSessionConfig::from(&crate::SessionPolicy {
+            model: crate::ModelSpec::builder("a-rebinding-model")
+                .context_window_tokens(1_000)
+                .build()
+                .expect("model spec"),
+            ..request.config.session_policy()
+        }),
+        ..request.clone()
+    };
+    assert_eq!(
+        factory
+            .admit_session(&restated)
+            .await
+            .expect("rebind with other config"),
+        crate::SessionAdmission::Rebound
+    );
+    assert_eq!(
+        store
+            .load_session_head_meta()
+            .await
+            .expect("reload the head")
+            .expect("the head survives a rebind")
+            .config,
+        expected_config,
+        "a rebinding admission never writes config"
+    );
+    // A creator that commits its own first head writes only the row.
+    let self_committing = session_store_request(
+        &SessionId::from("admission-self-committing"),
+        "admission-model",
+        crate::SessionRelation::Root,
+    );
+    assert_eq!(
+        self_committing.head,
+        crate::SessionCreationHead::CommittedByCreator
+    );
+    assert_eq!(
+        factory
+            .admit_session(&self_committing)
+            .await
+            .expect("admit a self-committing session"),
+        crate::SessionAdmission::Created
+    );
+    assert!(
+        factory
+            .live_view(&self_committing.session_id)
+            .await
+            .expect("look up the self-committing session")
+            .expect("the admitted session is live")
+            .load_session_head_meta()
+            .await
+            .expect("load its head")
+            .is_none(),
+        "a self-committing creator's admission writes no head"
+    );
+    let loaded =
+        crate::store::load_session_window_state(&store, crate::store::WindowSelector::Current)
+            .await
+            .expect("a config-only head loads as a window")
+            .expect("the created session has a window");
+    assert_eq!(loaded.config, expected_config);
+    assert_eq!(loaded.state.policy.model, request.config.model);
 
     // `Root` declares no lineage, so it always rebinds and writes nothing.
     assert_eq!(

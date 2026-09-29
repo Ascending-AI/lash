@@ -71,3 +71,34 @@ wire, and a combination a wire cannot carry is refused.
 The sentences above that list `default_effort`, `aliases` and
 `ReasoningDisableEncoding`, and those that describe the alias-normalized effort
 being written back, describe the state before this amendment.
+
+## Amendment (FIG-4099, 2026-09-29): one write path for the snapshot
+
+The attachment-acceptance snapshot is creation config: it is recorded with the
+session's model when the session is created, and a reopen never replaces it —
+the facade's reopen merge, which replaced the whole model (snapshot included)
+when a reopen stated an explicit model, is deleted. After creation the only
+writer is `update(SessionConfigPatch)`. A patch's `model` retains the session's
+snapshot, as this ADR requires; the snapshot changes only through the patch's
+own `attachment_acceptance` field, which the durable `ApplyConfigPatch` carries
+beside the model and applies after it. Every creating path — `open()` of a new
+id, `create()`, `open_with_state()`/`observe_with_state()` and the engine's own
+drive-open — passes the creator's config to the catalog as
+`SessionStoreCreateRequest::config`, and the store writes it as the session's
+initial config head in the same transaction as the catalog row
+(`SessionHeadMeta::created`). The request says which head it carries:
+host-facing creation states `SessionCreationHead::Config`, so the head is on
+disk before the session is first materialized, and it includes the protocol turn
+options the session's protocol resolves at creation (the RLM session config
+among them). A core runtime binding state it was handed states
+`SessionCreationHead::CommittedByCreator`, and its first commit writes the head,
+so only the row is written at admission. Admitting an id that already exists
+writes no config either way. The facade forms that config in one place,
+`SessionBuilder::creation_config`. A reopen reads the recorded head and writes
+nothing: there is no reconciliation, no seed write and no report, and builder
+config stated on a reopen is ignored. Only live policy follows an open (the
+session binding, turn budget, autonomy, no-progress budget and charge safety),
+and a builder provider that cannot serve the recorded pin is still refused typed
+(`ProviderMismatch`) without a write. Every later change is the one durable
+command, `update(SessionConfigPatch)`, which covers provider, model, prompt,
+generation, attachment acceptance and plugin session config.

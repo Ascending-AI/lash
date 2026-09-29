@@ -115,7 +115,8 @@ mod tests {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("session"),
             relation: crate::SessionRelation::Root,
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         };
         crate::SessionCatalogStore::admit_session(factory.as_ref(), &request)
             .await

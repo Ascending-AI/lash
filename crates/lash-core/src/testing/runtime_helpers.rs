@@ -412,7 +412,8 @@ pub async fn recording_session_store(
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: crate::SessionRelation::Root,
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("create a session store from the backend catalog");

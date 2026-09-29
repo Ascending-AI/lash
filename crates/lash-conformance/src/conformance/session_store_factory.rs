@@ -172,7 +172,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
             output_tokens: 7,
             ..Default::default()
         },
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.append_active_conversation_messages(&[crate::Message {
         id: "read-only-session-message".to_string(),
@@ -529,7 +529,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         .expect("stale handle metadata");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     stale
@@ -722,7 +722,8 @@ pub async fn process_prune_deletes_owned_session_stores(
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: crate::SessionRelation::default(),
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         };
         let store = factory
             .admit_view(&request)
@@ -930,7 +931,8 @@ pub async fn process_prune_deletes_owned_session_stores(
                 pending_observer_intents: Vec::new(),
                 session_id,
                 relation: crate::SessionRelation::default(),
-                policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+                head: crate::SessionCreationHead::CommittedByCreator,
             })
             .await
             .expect("the next process creates its own sessions");
@@ -1270,7 +1272,7 @@ async fn session_store_factory_rejects_writes_after_delete(
 
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     assert_deleted_write(
@@ -1622,7 +1624,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .expect("create graph parent intruder");
     let mut first_state = crate::RuntimeSessionState {
         session_id: first_request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(first_request.policy.clone())
+        ..crate::RuntimeSessionState::new(first_request.config.session_policy())
     };
     first_state.ensure_agent_frame_initialized();
     first
@@ -1638,7 +1640,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .expect("owner frame node id");
     let mut second_state = crate::RuntimeSessionState {
         session_id: second_request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(second_request.policy.clone())
+        ..crate::RuntimeSessionState::new(second_request.config.session_policy())
     };
     second_state.ensure_agent_frame_initialized();
     let second_result = second
@@ -1671,7 +1673,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         persisted_node_ids: second_state.persisted_node_ids,
         session_id: second_state.session_id,
         current_frame_node_id: Some(foreign_parent),
-        ..crate::RuntimeSessionState::new(second_request.policy.clone())
+        ..crate::RuntimeSessionState::new(second_request.config.session_policy())
     };
     let commit = crate::RuntimeCommit::persisted_state_with_graph_commit(
         &state,
@@ -1722,7 +1724,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .expect("create fork source");
     let mut state = crate::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(source_request.policy.clone())
+        ..crate::RuntimeSessionState::new(source_request.config.session_policy())
     };
     state.set_execution_state_snapshot(Some(vec![0xFA, 0xCE].into()));
     state.ensure_agent_frame_initialized();
@@ -1810,7 +1812,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         session_id: SessionId::from("aaa-fork-delete-first"),
         node_id: source_tip_node_id.clone(),
         relation: crate::SessionRelation::Root,
-        policy: source_request.policy.clone(),
+        policy: source_request.config.session_policy(),
     };
     factory
         .fork_session(&delete_first_request)
@@ -1844,7 +1846,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             session_id: SessionId::from("fork-unretained"),
             node_id: unpinned_past_node_id.clone(),
             relation: crate::SessionRelation::Root,
-            policy: source_request.policy.clone(),
+            policy: source_request.config.session_policy(),
         })
         .await
         .expect_err("unpinned past turn must not be forkable");
@@ -1859,7 +1861,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         session_id: SessionId::from("fork-branch"),
         node_id: root_node_id.clone(),
         relation: crate::SessionRelation::Root,
-        policy: source_request.policy.clone(),
+        policy: source_request.config.session_policy(),
     };
     let forked = factory
         .fork_session(&fork_request)
@@ -1879,7 +1881,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
                 source_session_id: SessionId::from("no-such-session"),
                 source_node_id: "no-such-node".into(),
             },
-            policy: source_request.policy.clone(),
+            policy: source_request.config.session_policy(),
         })
         .await
         .expect("fork relation lineage must not gate a retained fork point");
@@ -1897,7 +1899,8 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             pending_observer_intents: Vec::new(),
             session_id: fork_request.session_id.clone(),
             relation: fork_request.relation.clone(),
-            policy: fork_request.policy.clone(),
+            config: fork_request.policy.clone().into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("open fork")
@@ -1996,7 +1999,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             session_id: source_request.session_id.clone(),
             node_id: root_node_id,
             relation: crate::SessionRelation::Root,
-            policy: source_request.policy.clone(),
+            policy: source_request.config.session_policy(),
         })
         .await
         .expect_err("forking must reject a previously deleted target session id");
@@ -2021,7 +2024,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .expect("create deleted session");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let frame = state

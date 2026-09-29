@@ -94,7 +94,8 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::default(),
-                policy,
+                config: (&policy).into(),
+                head: lash_core::SessionCreationHead::CommittedByCreator,
             },
         )
         .await
@@ -234,7 +235,8 @@ async fn parked_work_merges_parked_turns_and_processes() {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::default(),
-            policy,
+            config: (&policy).into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await
@@ -497,7 +499,8 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
             pending_observer_intents: Vec::new(),
             session_id: turn_session.clone(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await
@@ -663,7 +666,8 @@ async fn a_closing_session_holds_a_generation_drain_until_its_physical_delete() 
             pending_observer_intents: Vec::new(),
             session_id: session.clone(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await

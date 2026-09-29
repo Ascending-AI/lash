@@ -1,7 +1,8 @@
 use super::build_plugin_host;
 use crate::support::{
     Arc, DeploymentStore, LashRuntime, LiveReplayStore, PluginFactory, RuntimeEnvironment,
-    RuntimeHandle, SessionPolicy, SessionRelation, SessionStoreCreateRequest, async_trait,
+    RuntimeHandle, SessionCreationHead, SessionPolicy, SessionRelation, SessionStoreCreateRequest,
+    async_trait,
 };
 use lash_sansio::SessionId;
 
@@ -118,6 +119,17 @@ impl CoreSessionDriver {
     ) -> std::result::Result<RuntimeHandle, OpenFailure> {
         let mut policy = self.config.policy.clone();
         policy.session_id = Some(session_id.clone());
+        let mut creation_config = lash_core::PersistedSessionConfig::from(&policy);
+        creation_config.protocol_turn_options = crate::session::creation_protocol_turn_options(
+            self.config.protocol_factory.as_ref(),
+            session_id,
+            None,
+            &lash_core::PluginOptions::default(),
+            self.config.store_factory.fleet_format(),
+        )
+        .map_err(|error| {
+            OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))
+        })?;
         let store = lash_core::runtime::admit_session_view(
             &self.config.store_factory,
             &SessionStoreCreateRequest {
@@ -125,7 +137,8 @@ impl CoreSessionDriver {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: SessionRelation::default(),
-                policy: policy.clone(),
+                config: creation_config,
+                head: SessionCreationHead::Config,
             },
         )
         .await
@@ -188,10 +201,11 @@ impl CoreSessionDriver {
                 error => lash_core::PluginError::Session(error.to_string()),
             })
         })?;
-        // The protocol applies and pins its per-session options on every
-        // open, as a host's open does: a session the engine opens first (a
-        // send to a session no host committed yet) records them with its
-        // first commit, so a later open rematerializes it.
+        // A session the engine opens first (a send to a session no host
+        // created) is created here with the core's config, like any creating
+        // open (FIG-4099). The protocol fills its defaults only for a
+        // session that recorded no protocol options; a recorded session
+        // keeps what it recorded.
         runtime
             .configure_protocol_on_materialize(
                 &lash_core::PluginOptions::default(),

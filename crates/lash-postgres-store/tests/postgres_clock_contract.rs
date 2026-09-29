@@ -14,9 +14,9 @@ use lash_core_execution::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputReadStatus,
     PendingTurnInputSuffixCancelOutcome, QueuedWorkStore, RuntimeCommit, RuntimeSessionState,
-    SessionCatalogStore as _, SessionCommitStore, SessionRelation, SessionStoreCreateRequest,
-    TurnId, TurnInput, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputStore,
-    facade_support::SessionCommand,
+    SessionCatalogStore as _, SessionCommitStore, SessionCreationHead, SessionRelation,
+    SessionStoreCreateRequest, TurnId, TurnInput, TurnInputCheckpointBoundary, TurnInputIngress,
+    TurnInputStore, facade_support::SessionCommand,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -251,9 +251,11 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
             pending_observer_intents: Vec::new(),
             session_id: session.clone(),
             relation: SessionRelation::Root,
-            policy: lash_core_execution::SessionPolicy::new(
+            config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
-            ),
+            )
+            .into(),
+            head: SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("create skewed-clock session store");
@@ -522,9 +524,11 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.clone()),
             relation: SessionRelation::Root,
-            policy: lash_core_execution::SessionPolicy::new(
+            config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
-            ),
+            )
+            .into(),
+            head: SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("create final-commit session store");

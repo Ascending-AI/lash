@@ -231,7 +231,8 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         .admit_session(&lash_core_execution::SessionStoreCreateRequest {
             session_id: state.session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
-            policy: state.policy.clone(),
+            config: state.policy.clone().into(),
+            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
             pending_observer_intents: Vec::new(),
             owning_process_id: None,
         })
@@ -564,7 +565,9 @@ async fn unwired_sqlite_catalog_keeps_process_owned_intents_immortal() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("unwired-process-owner"),
         relation: lash_core_execution::SessionRelation::default(),
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
+            .into(),
+        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     };
     store.admit_session(&request).await.expect("admit session");
     let attachment_id = lash_core_execution::AttachmentId::parse("unwired-process-attachment")

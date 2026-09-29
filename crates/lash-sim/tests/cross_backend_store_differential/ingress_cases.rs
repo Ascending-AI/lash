@@ -42,7 +42,8 @@ async fn ingress_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: SessionCreationHead::CommittedByCreator,
         },
     )
     .await

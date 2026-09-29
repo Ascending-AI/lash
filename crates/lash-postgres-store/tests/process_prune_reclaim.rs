@@ -211,9 +211,11 @@ async fn postgres_process_prune_removes_an_admitted_roots_record() {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core_execution::SessionRelation::default(),
-            policy: lash_core_execution::SessionPolicy::new(
+            config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
-            ),
+            )
+            .into(),
+            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
         })
         .await
         .expect("create process-owned session");

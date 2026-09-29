@@ -10,8 +10,8 @@ use lash_core::testing::TestTurnDrive as _;
 use lash_core::testing::runtime_helpers::RecordingSink;
 use lash_core::{
     CommitBudget, LlmOutputPart, LlmResponse, ModelSpec, PluginRuntimeEvent,
-    QueuedWorkBatchingConfig, RuntimeSessionState, SessionNodePayload, SessionPolicy,
-    SessionRelation, SessionStoreCreateRequest, TurnBudget, TurnInput,
+    QueuedWorkBatchingConfig, RuntimeSessionState, SessionCreationHead, SessionNodePayload,
+    SessionPolicy, SessionRelation, SessionStoreCreateRequest, TurnBudget, TurnInput,
 };
 use lash_protocol_rlm::{
     InstructionBound, MemoryBound, RlmChannel, RlmProtocolPluginConfig, RlmProtocolPluginFactory,
@@ -54,7 +54,8 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                     pending_observer_intents: Vec::new(),
                     session_id: session_id.clone(),
                     relation: SessionRelation::Root,
-                    policy: policy.clone(),
+                    config: policy.clone().into(),
+                    head: SessionCreationHead::CommittedByCreator,
                 },
             )
             .await

@@ -63,7 +63,7 @@ fn state_referencing(session_id: &SessionId, reference: &AttachmentRef) -> Runti
     );
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(request.policy)
+        ..RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     state.session_graph.append_message(Message {

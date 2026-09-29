@@ -752,7 +752,8 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
-            policy: standard_test_policy(),
+            config: standard_test_policy().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await

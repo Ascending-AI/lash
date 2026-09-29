@@ -23,7 +23,7 @@ async fn law(store: Arc<dyn ConformanceDeployment>, expected: TurnCommitOutcome)
     store.admit_session(&request).await.expect("admit session");
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(request.policy)
+        ..RuntimeSessionState::new(request.config.session_policy())
     };
     let turn_id = TurnId::from("outcome-turn");
     let operation = OperationId::turn(&session_id, turn_id.as_str(), "final");

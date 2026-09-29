@@ -1211,7 +1211,8 @@ mod tests {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::Root,
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                head: lash_core::SessionCreationHead::CommittedByCreator,
             })
             .await
             .expect("create the probe's inner store");

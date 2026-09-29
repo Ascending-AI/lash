@@ -1339,7 +1339,8 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
             relation: lash_core::SessionRelation::default(),
-            policy: recovery_session_policy(),
+            config: recovery_session_policy().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await
@@ -1459,13 +1460,15 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
             relation: lash_core::SessionRelation::default(),
-            policy: lash_core::SessionPolicy {
+            config: lash_core::SessionPolicy {
                 model: lash_core::ModelSpec::builder("mock-model")
                     .context_window_tokens(200_000)
                     .build()
                     .expect("model spec"),
                 ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-            },
+            }
+            .into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await

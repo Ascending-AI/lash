@@ -435,7 +435,8 @@ async fn surface_runners(
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(SURFACE_RUNTIME_SESSION),
         relation: SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+        head: SessionCreationHead::CommittedByCreator,
     };
     let sqlite_store = Arc::new(SqliteStore::open(&sqlite_runtime_root).await.unwrap());
     sqlite_store.admit_session(&session_request).await.unwrap();

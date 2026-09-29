@@ -41,9 +41,9 @@ use lash_core::plugin::{
 use lash_core::store::{RuntimeCommitReceipt, RuntimeStoreDecorator};
 use lash_core::{
     AppendSessionNodesRequest, CommitBudget, DeploymentStore, LlmOutputPart, LlmResponse,
-    ModelSpec, PersistedSessionConfig, ProtocolTurnOptions, QueuedWorkBatchingConfig,
-    RuntimeCommit, RuntimeSessionState, RuntimeStore, SessionAppendNode, SessionPolicy,
-    SessionRelation, SessionStoreCreateRequest, StoreError, TurnBudget, TurnInput,
+    ModelSpec, ProtocolTurnOptions, QueuedWorkBatchingConfig, RuntimeCommit, RuntimeSessionState,
+    RuntimeStore, SessionAppendNode, SessionCreationHead, SessionPolicy, SessionRelation,
+    SessionStoreCreateRequest, StoreError, TurnBudget, TurnInput,
 };
 use lash_protocol_rlm::{
     InstructionBound, MemoryBound, RlmProtocolPluginConfig, RlmProtocolPluginFactory, RlmSeed,
@@ -58,9 +58,6 @@ enum CommitFault {
     None,
     /// The commit is refused before it reaches the backend.
     FailNext,
-    /// The commit lands, its acknowledgement is lost, and the retry replays
-    /// the durable receipt.
-    ReplayNext,
 }
 
 struct FaultStore {
@@ -117,10 +114,6 @@ impl RuntimeStoreDecorator for FaultStore {
             CommitFault::FailNext => Err(StoreError::Backend(
                 "injected commit failure (FIG-2521)".to_string(),
             )),
-            CommitFault::ReplayNext => {
-                self.inner.commit_runtime_state(commit.clone()).await?;
-                self.inner.commit_runtime_state(commit).await
-            }
         }
     }
 }
@@ -499,7 +492,8 @@ impl Backend {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: SessionRelation::Root,
-            policy: policy(),
+            config: policy().into(),
+            head: SessionCreationHead::CommittedByCreator,
         };
         let base = lash_core::runtime::admit_session_view(&self.factory, &request)
             .await
@@ -705,63 +699,6 @@ async fn follow_on_failure_then_resident_reload(backend: Backend) {
         0,
         "{}: the old frame's seed must not leak into the switched frame",
         backend.label
-    );
-}
-
-/// (b) The reopen-seed guard write replays its durable receipt; the runtime
-/// discards its local seed and reloads the durable head on the frame the
-/// plugin already holds.
-async fn reopen_seed_receipt_replay(backend: Backend) {
-    let script = Arc::new(Script {
-        responses: vec!["after replay".to_string()],
-        ..Script::default()
-    });
-    let SeededSession {
-        mut runtime,
-        plugins,
-        store,
-        snapshot,
-        prompt,
-    } = Box::pin(backend.seeded_session("reopen-seed", Arc::clone(&script))).await;
-
-    let mut persisted = PersistedSessionConfig::from(&policy());
-    persisted.model = ModelSpec::builder("fig2521-previous-model")
-        .context_window_tokens(100_000)
-        .build()
-        .expect("model spec");
-    store.arm(CommitFault::ReplayNext);
-    lash_core::facade_support::settle_reopen_seeded_config(&mut runtime, &persisted)
-        .await
-        .unwrap_or_else(|error| {
-            panic!(
-                "{}: reopen-seed receipt replay must reload the same frame: {error:?}",
-                backend.label
-            )
-        });
-    assert_eq!(*store.fault.lock_recover(), CommitFault::None);
-
-    let replayed_prompt = projected_prompt(&runtime, &plugins).await;
-    assert_eq!(replayed_prompt, prompt, "{}", backend.label);
-    let replayed_snapshot = runtime
-        .snapshot_execution_state()
-        .await
-        .expect("snapshot")
-        .expect("execution state");
-    assert_eq!(replayed_snapshot, snapshot, "{}", backend.label);
-
-    let run = drive(&mut runtime, TurnInput::text("go"), "fig2521-after-replay")
-        .await
-        .expect("turn after replay");
-    assert!(
-        matches!(run.outcome, TurnOutcome::Finished(_)),
-        "{:?}",
-        run.outcome
-    );
-    let last_request = script.requests.lock_recover().last().cloned().unwrap();
-    assert_eq!(
-        count(&last_request, "`projected_original`"),
-        1,
-        "{last_request}"
     );
 }
 
@@ -984,16 +921,6 @@ async fn rlm_follow_on_failure_then_resident_reload_rebinds_the_frame_seed_on_sq
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_reopen_seed_receipt_replay_reloads_the_same_frame_on_memory() {
-    Box::pin(reopen_seed_receipt_replay(Backend::memory().await)).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_reopen_seed_receipt_replay_reloads_the_same_frame_on_sqlite() {
-    Box::pin(reopen_seed_receipt_replay(Backend::sqlite().await)).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_faulted_append_rollback_discards_the_unpersisted_binding_on_memory() {
     Box::pin(faulted_append_rollback(Backend::memory().await)).await;
 }
@@ -1134,7 +1061,8 @@ async fn storeless_runtime(
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("fig2521-detached"),
                 relation: SessionRelation::Root,
-                policy: policy(),
+                config: policy().into(),
+                head: SessionCreationHead::CommittedByCreator,
             },
         )
         .await

@@ -259,7 +259,7 @@ async fn abandoned_branch_scenario(
         session_id: SessionId::from(format!("{prefix}-branch")),
         node_id: fork_point.clone().into(),
         relation: crate::SessionRelation::Root,
-        policy: source_request.policy.clone(),
+        policy: source_request.config.session_policy(),
     };
     factory
         .fork_session(&branch_request)
@@ -270,7 +270,8 @@ async fn abandoned_branch_scenario(
         pending_observer_intents: Vec::new(),
         session_id: branch_request.session_id.clone(),
         relation: branch_request.relation.clone(),
-        policy: branch_request.policy.clone(),
+        config: branch_request.policy.clone().into(),
+        head: crate::SessionCreationHead::CommittedByCreator,
     };
     let branch = factory
         .live_view_for(&branch_open_request)
@@ -439,8 +440,8 @@ async fn append_conformance_runtime(
         .expect("load session state for the append conformance runtime")
         .unwrap_or_else(|| crate::RuntimeSessionState {
             session_id: request.session_id.clone(),
-            policy: request.policy.clone(),
-            ..crate::RuntimeSessionState::new(request.policy.clone())
+            policy: request.config.session_policy(),
+            ..crate::RuntimeSessionState::new(request.config.session_policy())
         });
     // The protocol-session capability is embedder-supplied; the in-tree fake is
     // enough here because this suite never runs a turn.
@@ -465,7 +466,7 @@ async fn append_conformance_runtime(
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
     crate::LashRuntime::from_persistent_embedded_state(
-        request.policy.clone(),
+        request.config.session_policy(),
         runtime_host,
         runtime_services,
         state,

@@ -226,7 +226,7 @@ pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authori
     .await;
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
@@ -523,7 +523,7 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
     // alone cannot veto final settlement under ADR 0029.
     let stale_state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     let (mut stale_commit, _) = crate::RuntimeCommit::persisted_state_for_test(&stale_state, &[])
         .with_operation(crate::OperationId::turn(
@@ -1076,7 +1076,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(factory: Arc<dyn crate:
         if matches!(path, RepairPath::Commit) {
             let mut state = crate::RuntimeSessionState {
                 session_id: request.session_id.clone(),
-                ..crate::RuntimeSessionState::new(request.policy.clone())
+                ..crate::RuntimeSessionState::new(request.config.session_policy())
             };
             state.ensure_agent_frame_initialized();
             let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
@@ -1865,7 +1865,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
 
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])

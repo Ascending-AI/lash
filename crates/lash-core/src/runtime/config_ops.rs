@@ -9,8 +9,15 @@ use std::sync::Arc;
 
 use super::LashRuntime;
 
-/// A mid-run configuration change: what to make true of the session from here
-/// on, leaving everything else alone.
+/// A configuration change: what to make true of the session from here on,
+/// leaving everything else alone.
+///
+/// This is the one durable write path for session config after creation
+/// (FIG-4099). A session's config is baked in when it is created; a reopen
+/// runs with what the session recorded and writes nothing, so every later
+/// change — model, provider, prompt, generation, attachment acceptance, and
+/// protocol or plugin session config — is one of these, settled through the
+/// commanded config patch.
 ///
 /// The route is a provider id, never a live handle (FIG-3600 ruling 7): the
 /// host's provider resolver must already serve it, or the change is refused
@@ -26,9 +33,22 @@ use super::LashRuntime;
 #[derive(Clone, Debug, Default)]
 pub struct SessionConfigPatch {
     pub provider_id: Option<String>,
+    /// The model to run from here on. It retains the session's
+    /// attachment-acceptance snapshot (ADR 0026): a model change never
+    /// replaces how the session renders attachments.
     pub model: Option<crate::ModelSpec>,
+    /// Replaces the session's attachment-acceptance snapshot, whole. This is
+    /// the only way to change it; it applies after [`Self::model`].
+    pub attachment_acceptance: Option<Arc<crate::AttachmentCapabilitySnapshot>>,
     pub prompt: Option<crate::PromptLayer>,
     pub generation: Option<crate::GenerationOverlay>,
+    /// Plugin-keyed session config — the protocol's durable session facts
+    /// among them — applied by the session's protocol to what it recorded
+    /// ([`ProtocolSessionPlugin::apply_session_config_patch`](crate::plugin::ProtocolSessionPlugin::apply_session_config_patch)).
+    /// A change the protocol will not make, or a key no plugin reads, is
+    /// refused typed as [`SessionError::SessionConfigRefused`] and nothing is
+    /// written.
+    pub plugin_options: Option<crate::PluginOptions>,
 }
 
 impl SessionConfigPatch {
@@ -39,45 +59,6 @@ impl SessionConfigPatch {
             ..Self::default()
         }
     }
-}
-
-/// Content-addressed identity for the reopen seed commit (FIG-1875).
-///
-/// The identity pairs the base head revision with the hash of the commit
-/// intent — the reconciled seed config and graph — following the
-/// `initial-park` precedent in [`super::state::boundary_operation`]'s audit
-/// table: an exact retry of the same seed against the same head replays under
-/// the journaled-determinism guard, while different content (a later reopen
-/// with a different seed, or the same seed against an advanced head) mints a
-/// different operation and commits fresh. A per-session constant identity
-/// would instead make the guard refuse every second differing reopen.
-fn reopen_seed_operation(
-    state: &crate::RuntimeSessionState,
-    commit_budget: crate::CommitBudget,
-    fleet_format: crate::FleetFormat,
-) -> Result<crate::OperationId, crate::StoreError> {
-    let preview_operation = super::state::boundary_operation(
-        &state.session_id,
-        "session-open-preview",
-        "record-seeded-config",
-    );
-    let mut graph = state.pending_graph_commit();
-    graph.derive_node_ids(&state.session_id, &preview_operation)?;
-    let preview =
-        crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
-            state,
-            graph,
-            &[],
-            preview_operation,
-            commit_budget,
-            fleet_format,
-        )?;
-    let content_hash = preview.turn_commit_hash()?;
-    Ok(super::state::boundary_operation(
-        &state.session_id,
-        &format!("base:{}:content:{content_hash}", state.head_revision),
-        "record-seeded-config",
-    ))
 }
 
 impl LashRuntime {
@@ -103,6 +84,9 @@ impl LashRuntime {
         if let Some(model) = patch.model {
             candidate.replace_model_retaining_attachment_acceptance(model);
         }
+        if let Some(snapshot) = patch.attachment_acceptance {
+            candidate.model.capability.attachment_acceptance = snapshot;
+        }
         if let Some(prompt) = patch.prompt {
             candidate.prompt = prompt;
         }
@@ -110,15 +94,21 @@ impl LashRuntime {
         if let Some(generation) = patch.generation {
             candidate.generation = generation.resolve(&candidate.generation);
         }
+        // Resolved before anything settles, so a refusal writes nothing.
+        let protocol_turn_options = match patch.plugin_options.as_ref() {
+            Some(plugin_options) => self.patched_protocol_turn_options(plugin_options)?,
+            None => None,
+        };
         candidate = self
             .resolve_session_config_mutations(previous.clone(), candidate)
             .await;
-        let durable_patch = ApplyConfigPatch::between(
+        let mut durable_patch = ApplyConfigPatch::between(
             &previous,
             &candidate,
             self.state.config_revision,
             self.fleet_format(),
         );
+        durable_patch.protocol_turn_options = protocol_turn_options;
         if !durable_patch.is_empty() {
             self.settle_config_patch(durable_patch).await?;
         }
@@ -131,6 +121,31 @@ impl LashRuntime {
         self.notify_session_config_changed(previous)
             .await
             .map_err(|error| SessionError::Protocol(error.to_string()))
+    }
+
+    /// The protocol turn options a patch's plugin-keyed options make true,
+    /// or `None` when they restate what the session recorded.
+    fn patched_protocol_turn_options(
+        &self,
+        plugin_options: &crate::PluginOptions,
+    ) -> Result<Option<crate::ProtocolTurnOptions>, SessionError> {
+        let recorded = self.state.effective_protocol_turn_options();
+        let next = match self.session.as_ref() {
+            Some(session) => session
+                .plugins()
+                .protocol_session()
+                .apply_session_config_patch(recorded, plugin_options)?,
+            None if plugin_options.plugins.is_empty() => recorded.clone(),
+            None => {
+                return Err(SessionError::SessionConfigRefused(
+                    crate::SessionConfigRefusal::new(crate::PluginOptionsUnaccepted {
+                        plugin_ids: plugin_options.plugins.keys().cloned().collect(),
+                    }),
+                ));
+            }
+        };
+        let next = next.restamped_for_fleet(self.fleet_format());
+        Ok((next != self.state.protocol_turn_options).then_some(next))
     }
 
     /// Submit a durable config patch and map its settlement to the session
@@ -169,92 +184,6 @@ impl LashRuntime {
                 format!("session config command refused at the drain: {code:?}"),
             )),
         }
-    }
-
-    /// Guard-write the facade's open-time seed to the durable head
-    /// (seed-then-write, FIG-1875).
-    ///
-    /// ADR 0030's reopen reconciliation is an explicit host-seed precedence
-    /// applied exactly once, before the runtime starts. Adoption is
-    /// head-authoritative with no preservation lists, so the seed must not
-    /// stay resident-only: this settles the difference between the persisted
-    /// head config and the freshly reconciled policy through the commanded
-    /// durable write, making the durable head true again by the end of open.
-    /// A reopen whose seed matches the head settles nothing. No turn can be
-    /// active this early, so the seed publishes as one direct fenced head
-    /// commit (the same guard-write shape as protocol materialization)
-    /// rather than a mid-run session command.
-    ///
-    /// The commit identity is content-addressed (the `initial-park` pattern):
-    /// a retry of the same reconciled seed against the same head replays the
-    /// original commit through the determinism guard, while a later reopen
-    /// with a different seed — or against an advanced head — hashes to a new
-    /// operation and is admitted as a new commit.
-    ///
-    /// Facade-only: reached through [`crate::facade_support`].
-    pub async fn settle_reopen_seeded_config(
-        &mut self,
-        persisted: &crate::PersistedSessionConfig,
-    ) -> Result<(), SessionError> {
-        let policy = &self.state.policy;
-        // A legacy promptless head (`prompt: None`) matches a default-empty
-        // resident prompt layer: neither carries prompt content, so treating
-        // them as differing would mint a spurious open-time commit.
-        let prompt_differs = match persisted.prompt.as_ref() {
-            Some(prompt) => prompt != &policy.prompt,
-            None => policy.prompt != crate::PromptLayer::default(),
-        };
-        let seed_differs = persisted.provider_id != policy.provider_id
-            || persisted.model != policy.model
-            || prompt_differs
-            || persisted.generation != policy.generation;
-        if !seed_differs {
-            return Ok(());
-        }
-        let Some(store) = self.services.store.clone() else {
-            return Ok(());
-        };
-        // A differing seed is a config write, so it advances the config
-        // revision by one (ADR 0101 §12): a patch written against the pre-seed
-        // revision must not compare-and-set onto the seeded config.
-        self.state.config_revision = self.state.config_revision.saturating_add(1);
-        let operation = reopen_seed_operation(
-            &self.state,
-            self.host.core.durability.commit_budget,
-            self.fleet_format(),
-        )
-        .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let fleet_format = self.fleet_format();
-        let (commit, persisted_node_ids) =
-            crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
-                &mut self.state,
-                &[],
-                operation,
-                self.host.core.durability.commit_budget,
-                fleet_format,
-            )
-            .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let result = store
-            .commit_runtime_state_verified(commit)
-            .await
-            .map_err(|source| {
-                super::session_commit_error(
-                    "failed to record the reopen-seeded session config",
-                    source,
-                )
-            })?;
-        if result.receipt_replayed {
-            // A receipt proves this seed settled once, not that its config is
-            // still current. A delayed retry may race a later config command;
-            // discard the local seed and adopt the durable head in full.
-            self.invalidate_resident_session_state();
-            self.reload_invalidated_resident_session_state_for_session()
-                .await?;
-        } else {
-            self.state.apply_persisted_commit_result(result);
-            self.state.mark_node_ids_persisted(persisted_node_ids);
-        }
-        Ok(())
     }
 
     /// Override protocol-owned turn options for this session through the
@@ -493,52 +422,5 @@ impl LashRuntime {
         self.tool_restore_report = Some(report.clone());
         self.stamp_live_plugin_state();
         Ok(report)
-    }
-}
-
-#[cfg(test)]
-mod reopen_seed_identity_tests {
-    use super::reopen_seed_operation;
-    use crate::SessionId;
-
-    #[test]
-    fn reopen_seed_identity_is_stable_for_replay_and_distinguishes_seeds() {
-        let mut state = crate::RuntimeSessionState {
-            session_id: SessionId::from("reopen-seed-identity"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-            ))
-        };
-        state.ensure_agent_frame_initialized();
-        let budget = crate::CommitBudget::bounded(1024 * 1024, 512);
-        let first = reopen_seed_operation(&state, budget, crate::FleetFormat::current())
-            .expect("first seed identity");
-
-        let mut retry_state = state.clone();
-        let retry = reopen_seed_operation(&retry_state, budget, crate::FleetFormat::current())
-            .expect("retry seed identity");
-        retry_state.head_revision = 41;
-        let advanced = reopen_seed_operation(&retry_state, budget, crate::FleetFormat::current())
-            .expect("advanced seed identity");
-
-        let mut changed_state = retry_state;
-        changed_state.policy.prompt = crate::PromptLayer::new().with_contribution(
-            crate::PromptContribution::guidance("Host", "A DIFFERENT RECONCILED SEED"),
-        );
-        let changed = reopen_seed_operation(&changed_state, budget, crate::FleetFormat::current())
-            .expect("changed seed identity");
-
-        assert_eq!(
-            first, retry,
-            "the same seed against the same base must retain replay identity"
-        );
-        assert_ne!(
-            first, advanced,
-            "a new base head must mint a fresh identity"
-        );
-        assert_ne!(
-            advanced, changed,
-            "a different reconciled seed must not reuse the first receipt"
-        );
     }
 }

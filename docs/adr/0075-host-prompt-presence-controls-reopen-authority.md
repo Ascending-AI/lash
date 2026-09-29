@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted.
+Accepted. Amended 2026-09-29 (FIG-4099): the reopen authority matrix is
+superseded — a reopen runs with the recorded prompt and writes nothing. See
+the amendment at the end.
 
 ## Context
 
@@ -68,3 +70,46 @@ model, or provider mutations that have not yet committed.
   constructing durable configuration ad hoc is forbidden.
 - The complete persisted session configuration, including its prompt, counts
   toward the Runtime Commit byte budget.
+
+## Amendment (FIG-4099, 2026-09-29): the recorded prompt is authoritative
+
+Prompt presence no longer controls reopen authority, because a reopen has no
+authority over config at all. The session prompt is baked into the session's
+config when it is created; a reopen runs with the recorded prompt, and a host
+session prompt stated at the reopen is ignored. Every creating path — `open()`
+of a new id, `create()`, `open_with_state()`/`observe_with_state()` and the
+engine's own drive-open — passes the creator's config to the catalog as
+`SessionStoreCreateRequest::config`, and the store writes it as the session's
+initial config head in the same transaction as the catalog row
+(`SessionHeadMeta::created`). The request says which head it carries:
+host-facing creation states `SessionCreationHead::Config`, so the head is on
+disk before the session is first materialized, and it includes the protocol turn
+options the session's protocol resolves at creation (the RLM session config
+among them). A core runtime binding state it was handed states
+`SessionCreationHead::CommittedByCreator`, and its first commit writes the head,
+so only the row is written at admission. Admitting an id that already exists
+writes no config either way. The facade forms that config in one place,
+`SessionBuilder::creation_config`. A reopen reads the recorded head and writes
+nothing: there is no reconciliation, no seed write and no report, and builder
+config stated on a reopen is ignored. Only live policy follows an open (the
+session binding, turn budget, autonomy, no-progress budget and charge safety),
+and a builder provider that cannot serve the recorded pin is still refused typed
+(`ProviderMismatch`) without a write. Every later change is the one durable
+command, `update(SessionConfigPatch)`, which covers provider, model, prompt,
+generation, attachment acceptance and plugin session config.
+
+The matrix above is superseded by one rule: the effective session prompt layer
+is the recorded one. A legacy head with no prompt field reopens with an empty
+session layer, which renders like a fresh session's ordinary reconstruction;
+an explicitly empty committed layer stays empty; and "committed at the next
+boundary" no longer happens, because the host prompt is not applied. The live
+core prompt is unchanged: it is not session config, it is always rendered
+beneath the session layer, and a redeployed core prompt still reaches existing
+sessions.
+
+The laws in `core_session_builder/prompt_reopen_authority.rs` now pin this:
+`legacy_promptless_head_ignores_a_reopen_host_prompt_{in_memory,sqlite}`,
+`open_with_state_runs_the_supplied_snapshot_prompt_not_the_builders` and
+`a_reopen_host_prompt_is_ignored_and_update_recommits_the_prompt_{in_memory,sqlite}`.
+The test names cited in the Context above describe the state before this
+amendment.

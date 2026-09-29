@@ -388,7 +388,7 @@ pub mod persistence {
         QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
         QueuedWorkBatchPayloads, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem,
         QueuedWorkKind, QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState,
-        SessionCommandPayload, SessionCursorError, SessionStoreCreateRequest,
+        SessionCommandPayload, SessionCreationHead, SessionCursorError, SessionStoreCreateRequest,
         TurnInputAdmissionMode, TurnInputCheckpointBoundary, TurnInputCompletion,
         TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
         TurnLaneAdmissionPolicy, TurnWorkPayload,

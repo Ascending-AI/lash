@@ -15,10 +15,10 @@ use lash_core::testing::TestTurnDrive as _;
 use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
     AttachmentStorePersistence, CommitBudget, LlmOutputPart, LlmResponse, ModelSpec,
-    QueuedWorkBatchingConfig, RuntimeSessionState, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, StoredAttachment, StoredBlobRef, ToolAttemptOutcome, ToolCall,
-    ToolCallOutput, ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcomeDone,
-    ToolProvider, TurnBudget, TurnInput,
+    QueuedWorkBatchingConfig, RuntimeSessionState, SessionCreationHead, SessionPolicy,
+    SessionRelation, SessionStoreCreateRequest, StoredAttachment, StoredBlobRef,
+    ToolAttemptOutcome, ToolCall, ToolCallOutput, ToolContract, ToolDefinition, ToolId,
+    ToolManifest, ToolOutcomeDone, ToolProvider, TurnBudget, TurnInput,
 };
 use lash_protocol_standard::render::{ToolOutputRendererSlot, ToolRenderParams};
 use lash_protocol_standard::{
@@ -430,7 +430,8 @@ fn journaled_standard_presentation_replays_without_render_or_retention_io() {
                     pending_observer_intents: Vec::new(),
                     session_id: session_id.clone(),
                     relation: SessionRelation::Root,
-                    policy: policy(),
+                    config: policy().into(),
+                    head: SessionCreationHead::CommittedByCreator,
                 },
             )
             .await
@@ -589,7 +590,8 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                     pending_observer_intents: Vec::new(),
                     session_id: session_id.clone(),
                     relation: SessionRelation::Root,
-                    policy: policy(),
+                    config: policy().into(),
+                    head: SessionCreationHead::CommittedByCreator,
                 },
             )
             .await

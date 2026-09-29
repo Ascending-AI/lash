@@ -61,8 +61,9 @@ fn with_rlm_termination(
 /// configuration, or it labels the wrong value precisely in the case the label
 /// exists to disambiguate.
 ///
-/// The write half of the pair is
-/// [`RlmSessionExt::set_rlm_config_if_unset`].
+/// The write half of the pair is the session config patch: state the facts
+/// with [`rlm_session_config_patch`] and apply it with
+/// [`SessionConfigAdmin::update`](crate::admin::SessionConfigAdmin::update).
 ///
 /// The read is strict (FIG-1979): a bag that does not decode is an error, not
 /// an empty config. A swallowed decode failure reads as "this session recorded
@@ -85,142 +86,71 @@ impl RlmSessionReadViewExt for lash_core::SessionReadView {
     }
 }
 
-/// A guarded write that a session refused, or that could not reach the session.
-#[cfg(feature = "rlm")]
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum RlmSessionConfigError {
-    /// The session already recorded a different value for that fact.
-    Conflict(lash_rlm_types::RlmSessionConfigConflict),
-    /// The write never got as far as the durable facts.
-    Session(EmbedError),
-}
-
-#[cfg(feature = "rlm")]
-impl std::fmt::Display for RlmSessionConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Conflict(conflict) => write!(f, "{conflict}"),
-            Self::Session(error) => write!(f, "{error}"),
-        }
-    }
-}
-
-#[cfg(feature = "rlm")]
-impl std::error::Error for RlmSessionConfigError {}
-
-#[cfg(feature = "rlm")]
-impl From<EmbedError> for RlmSessionConfigError {
-    fn from(error: EmbedError) -> Self {
-        Self::Session(error)
-    }
-}
-
-/// The durable RLM facts of an opened session: a typed read and a guarded
-/// set-if-unset write (ADR 0066).
+/// The durable RLM facts of an opened session, read as recorded (ADR 0066).
 ///
-/// There is no RLM-specific *request* API for any of these. A host that wants a
-/// fact *asserted* compares [`RlmSessionExt::rlm_config`] against what it
-/// requires and refuses loudly; a host that wants to *prefer* a value calls
-/// [`RlmSessionExt::set_rlm_config_if_unset`] and lets the recorded value win.
-/// Both are one line of host code, and neither can smooth a mismatch away by
-/// accident.
+/// A session's RLM facts are baked in when it is created, from the creator's
+/// plugin options keyed by [`RLM_PROTOCOL_PLUGIN_ID`], and a reopen never
+/// changes them (FIG-4099). Every later change is the one durable config
+/// command: [`rlm_session_config_patch`] states the facts, and
+/// [`SessionConfigAdmin::update`](crate::admin::SessionConfigAdmin::update) applies
+/// them as a guarded set-if-unset — a fact is written only where the session
+/// recorded nothing, restating a recorded fact is a no-op, and a *different*
+/// value is refused with the typed [`RlmSessionConfigConflict`]
+/// ([`rlm_session_config_conflict`] reads it off the error). A host that
+/// wants a fact *asserted* compares [`RlmSessionExt::rlm_config`] against
+/// what it requires and refuses loudly.
 ///
 /// There is no language among these facts: TypeScript is the sole RLM dialect
 /// (ADR 0096), so a session neither states nor records one, and a session that
 /// still carries a recorded `dialect` is refused as an incompatible format
-/// rather than read. Create-time facts that the protocol plugin needs before
-/// any post-open write can reach it are stated through the plugin-agnostic
-/// [`SessionBuilder::plugin_option`](crate::SessionBuilder::plugin_option) seam
-/// keyed by [`RLM_PROTOCOL_PLUGIN_ID`], and applied by the same guarded
-/// set-if-unset engine with the same typed conflict. Reading the recorded facts
-/// *before* opening is FIG-1556's preflight surface, not this one.
+/// rather than read.
 #[cfg(feature = "rlm")]
-#[async_trait::async_trait]
 pub trait RlmSessionExt {
     /// The RLM config this session recorded, as recorded.
     fn rlm_config(
         &self,
     ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigDecodeError>;
-
-    /// Restating a fact the session already recorded is a no-op, so this is
-    /// safe to call on every open. Stating a *different* value is refused with
-    /// [`RlmSessionConfigError::Conflict`] — the write never lands and the
-    /// session keeps what it recorded.
-    ///
-    /// The write settles through the commanded durable session-config path
-    /// (FIG-2479): a successful return means the head accepted the stated
-    /// facts, and only then does resident state publish them.
-    async fn set_rlm_config_if_unset(
-        &self,
-        requested: lash_rlm_types::RlmSessionConfig,
-    ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigError>;
 }
 
 #[cfg(feature = "rlm")]
-#[async_trait::async_trait]
 impl RlmSessionExt for crate::LashSession {
     fn rlm_config(
         &self,
     ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigDecodeError> {
         self.read_view().rlm_config()
     }
+}
 
-    async fn set_rlm_config_if_unset(
-        &self,
-        requested: lash_rlm_types::RlmSessionConfig,
-    ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigError> {
-        for _ in 0..3 {
-            let writer = self.runtime.writer();
-            let mut runtime = writer.lock().await;
-            let mut resolved = None;
-            let update = Box::pin(runtime.update_protocol_turn_options(|current| {
-                let recorded = lash_protocol_rlm::rlm_session_config(current).map_err(|err| {
-                    RlmSessionConfigError::Session(EmbedError::Session(SessionError::Protocol(
-                        err.to_string(),
-                    )))
-                })?;
-                let next =
-                    lash_protocol_rlm::apply_rlm_session_config_if_unset(&recorded, &requested)
-                        .map_err(RlmSessionConfigError::Conflict)?;
-                let mut options = lash_protocol_rlm::rlm_session_config_options(&next)
-                    .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))?;
-                if let Some(channel) = current.payload.get("channel") {
-                    options.payload["channel"] = channel.clone();
-                }
-                resolved = Some(next);
-                Ok::<ProtocolTurnOptions, RlmSessionConfigError>(options)
-            }))
-            .await;
-            if !matches!(update, Err(SessionError::SessionCommandPending(_))) {
-                self.runtime.publish_from(&runtime);
-            }
-            drop(runtime);
-            match update {
-                Ok(Ok(_)) => {
-                    return resolved.ok_or_else(|| {
-                        RlmSessionConfigError::Session(EmbedError::Session(SessionError::Protocol(
-                            "RLM config update did not resolve its value".into(),
-                        )))
-                    });
-                }
-                Ok(Err(error)) => return Err(error),
-                Err(SessionError::SessionCommandPending(receipt)) => {
-                    self.admin()
-                        .await_command_drive(receipt)
-                        .await
-                        .map_err(RlmSessionConfigError::Session)?;
-                }
-                Err(error) => {
-                    return Err(RlmSessionConfigError::Session(EmbedError::Session(error)));
-                }
-            }
-        }
-        Err(RlmSessionConfigError::Session(EmbedError::Session(
-            SessionError::Protocol(
-                "RLM config kept enqueuing after its engine drive settled".into(),
-            ),
-        )))
+/// A session config patch that states `config`'s RLM facts, and nothing else
+/// (FIG-4099).
+///
+/// Apply it with [`SessionConfigAdmin::update`](crate::admin::SessionConfigAdmin::update);
+/// a stated fact that conflicts with the recorded one is refused typed, and
+/// [`rlm_session_config_conflict`] reads the conflict off the error.
+#[cfg(feature = "rlm")]
+pub fn rlm_session_config_patch(
+    config: &lash_rlm_types::RlmSessionConfig,
+) -> Result<crate::SessionConfigPatch> {
+    let plugin_options = lash_core::PluginOptions::typed(
+        RLM_PROTOCOL_PLUGIN_ID,
+        lash_rlm_types::RlmCreateExtras::from(config),
+    )
+    .map_err(EmbedError::ProtocolTurnOptions)?;
+    Ok(crate::SessionConfigPatch {
+        plugin_options: Some(plugin_options),
+        ..crate::SessionConfigPatch::default()
+    })
+}
+
+/// The RLM fact conflict an [`update`](crate::admin::SessionConfigAdmin::update) was
+/// refused with, if that is why it was refused.
+#[cfg(feature = "rlm")]
+pub fn rlm_session_config_conflict(
+    error: &EmbedError,
+) -> Option<&lash_rlm_types::RlmSessionConfigConflict> {
+    match error {
+        EmbedError::Session(SessionError::SessionConfigRefused(refusal)) => refusal.downcast_ref(),
+        _ => None,
     }
 }
 

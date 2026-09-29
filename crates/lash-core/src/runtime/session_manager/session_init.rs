@@ -309,7 +309,8 @@ async fn bind_session_store(
             session_id: plan.session_id.clone(),
             relation: plan.relation.clone(),
             pending_observer_intents: plan.pending_observer_intents.clone(),
-            policy: plan.policy.clone(),
+            config: plan.policy.clone().into(),
+            head: crate::SessionCreationHead::CommittedByCreator,
             owning_process_id: plan.owning_process_id.clone(),
         },
     )

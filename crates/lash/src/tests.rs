@@ -130,7 +130,8 @@ pub(crate) async fn backend_seeded_with_config(
             pending_observer_intents: Vec::new(),
             session_id: state.session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            policy: state.policy.clone(),
+            config: state.policy.clone().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
     .await
@@ -230,6 +231,74 @@ impl lash_core::store::RuntimeStoreDecorator for RecordingAdmissions {
 }
 
 impl lash_core::DeploymentStoreDecorator for RecordingAdmissions {}
+
+/// Serves the catalog it wraps and names every session write it serves: an
+/// admission that creates a session, a runtime commit and a session-meta save.
+/// A test clears the ledger, acts, and asserts the act wrote nothing — not
+/// merely that the values it reads back are equal.
+pub(crate) struct CountingWrites {
+    inner: Arc<dyn lash_core::DeploymentStore>,
+    writes: Arc<std::sync::Mutex<Vec<&'static str>>>,
+}
+
+impl CountingWrites {
+    /// A counting layer and the ledger it will fill.
+    pub(crate) fn over(
+        inner: Arc<dyn lash_core::DeploymentStore>,
+    ) -> (
+        Arc<dyn lash_core::DeploymentStore>,
+        Arc<std::sync::Mutex<Vec<&'static str>>>,
+    ) {
+        let writes = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let layer = Arc::new(Self {
+            inner,
+            writes: Arc::clone(&writes),
+        });
+        (layer, writes)
+    }
+
+    fn record(&self, write: &'static str) {
+        self.writes.lock_recover().push(write);
+    }
+}
+
+#[async_trait]
+impl lash_core::store::RuntimeStoreDecorator for CountingWrites {
+    type Inner = dyn lash_core::DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
+    }
+
+    async fn admit_session(
+        &self,
+        request: &lash_core::SessionStoreCreateRequest,
+    ) -> std::result::Result<lash_core::store::SessionAdmission, StoreError> {
+        let admission = self.inner.admit_session(request).await?;
+        if admission == lash_core::store::SessionAdmission::Created {
+            self.record("create");
+        }
+        Ok(admission)
+    }
+
+    async fn commit_runtime_state(
+        &self,
+        commit: lash_core::RuntimeCommit,
+    ) -> std::result::Result<lash_core::store::RuntimeCommitReceipt, StoreError> {
+        self.record("commit");
+        self.inner.commit_runtime_state(commit).await
+    }
+
+    async fn save_session_meta(
+        &self,
+        meta: lash_core::SessionMeta,
+    ) -> std::result::Result<(), StoreError> {
+        self.record("session_meta");
+        self.inner.save_session_meta(meta).await
+    }
+}
+
+impl lash_core::DeploymentStoreDecorator for CountingWrites {}
 
 #[derive(Default)]
 struct RecordingEvents {

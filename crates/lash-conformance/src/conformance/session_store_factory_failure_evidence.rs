@@ -85,7 +85,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         crate::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
-    let mut policy = request.policy.clone();
+    let mut policy = request.config.session_policy();
     policy.session_id = Some(SessionId::from(SESSION_ID.to_string()));
     let state = crate::RuntimeSessionState {
         session_id: SessionId::from(SESSION_ID.to_string()),
