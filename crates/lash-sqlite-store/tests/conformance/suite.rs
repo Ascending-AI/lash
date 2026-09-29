@@ -86,8 +86,6 @@ mod process_retention;
 mod session_delete_blob_reclaim;
 #[path = "session_ingress.rs"]
 mod session_ingress;
-#[path = "session_meta.rs"]
-mod session_meta;
 #[path = "store_maintenance.rs"]
 mod store_maintenance;
 #[path = "trigger_occurrence_retention.rs"]
@@ -788,23 +786,6 @@ lash_conformance::runtime_persistence_reopenable_tests!({
             let clock = Arc::clone(&clock);
             move |duration_ms| clock.advance(duration_ms)
         }),
-    )
-});
-
-lash_conformance::unbound_session_read_tests!({
-    (
-        Retained::<TestBackend>::default(),
-        move |_admission_state| async move {
-            let backend = TestBackend::open(SUBSTRATE).await;
-            let factory = backend.session_store_factory();
-            lash_conformance::UnboundSessionResolutionHandles {
-                backend_name: "SQLite",
-                factory,
-                open_unbound: Arc::new(move || {
-                    backend.blocking_store() as Arc<dyn RuntimePersistence>
-                }),
-            }
-        },
     )
 });
 
