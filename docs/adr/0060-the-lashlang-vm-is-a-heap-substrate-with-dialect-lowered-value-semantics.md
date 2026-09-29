@@ -173,3 +173,10 @@ compatibility decoder exists at any of these version boundaries.
 - A dialect that needs something the substrate cannot express must argue it at
   the substrate, where both dialects will get it, rather than forking the
   machine. Adding a second VM is a decision that reopens this ADR.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 24: [ADR 0091](0091-one-lowering-walk-owns-expression-semantics.md) and
+[ADR 0064](0064-the-typescript-dialect-is-broad-and-every-gap-is-an-explicit-ruling.md)
+supersede the older lowering and language-scope sketches. The heap-VM ownership
+rule survives.

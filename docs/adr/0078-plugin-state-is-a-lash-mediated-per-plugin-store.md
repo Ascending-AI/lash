@@ -452,3 +452,9 @@ Invariant 6 is a wholesale deletion for that reason.
   and derived indexes remain the plugin's business; what changes is that they
   are now unambiguously *derived*, rebuilt in `session_ready` from the store,
   and never a thing lash is asked to persist.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 22: The lash-mediated plugin store contract applies to current store
+contents. It does not promise retention of values already reclaimed under host
+policy.

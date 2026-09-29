@@ -78,3 +78,9 @@ wholesale instead of hand-forwarding method-by-method.
   (`crates/lash-core-store/src/store/runtime_persistence_decorator.rs`), so
   a defaulted component method can no longer drift past the decorator and
   silently resolve to the trait's own default.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 22: The pre-cutover registry composition below is historical under
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md). Scoped
+registration and the current process lifetime contract govern.

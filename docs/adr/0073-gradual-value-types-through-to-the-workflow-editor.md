@@ -128,3 +128,12 @@ facet schema version independently of the graph schema version (`workflow_graph.
 - Linear FIG-326 (map) and FIG-327…FIG-333 (research + decisions, with full resolution rationale).
 - Panel evidence: `scratchpad/valuetype-assertions.md`, `scratchpad/bounded-vs-expansion.md`.
 - ADR 0026 (capability is host-supplied data); the workflow-graph lens ADR.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 24: D2 and D4 are historical design sketches where
+[ADR 0091](0091-one-lowering-walk-owns-expression-semantics.md) and
+[ADR 0064](0064-the-typescript-dialect-is-broad-and-every-gap-is-an-explicit-ruling.md)
+give the later lowering and dialect contracts. FIG-4105 owns D1 and
+[ADR 0037](0037-lashlang-workflows-use-a-code-graph-code-lens.md)'s join-helper
+amendment.

@@ -178,3 +178,9 @@ re-derives it through the same one function, which is what makes
 - Sharing is not merely discouraged: a persisted state that expresses it is
   refused at both ends, so nothing downstream has to decide how shared ownership
   would restore.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 22: The pre-cutover store shape below is historical under
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md). The
+exclusively-owned-copy rule survives.
