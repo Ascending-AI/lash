@@ -1041,13 +1041,12 @@ impl ChatStreamState {
             .and_then(|function| function.get("arguments"))
             .and_then(Value::as_str)
             && !arguments.is_empty()
+            && let Some(call) = Self::tool_input_identity(tool_call)
         {
-            if let Some(call) = Self::tool_input_identity(tool_call) {
-                self.block_events.push(LlmStreamEvent::ToolInputDelta {
-                    call,
-                    text: arguments.to_string(),
-                });
-            }
+            self.block_events.push(LlmStreamEvent::ToolInputDelta {
+                call,
+                text: arguments.to_string(),
+            });
         }
     }
 
