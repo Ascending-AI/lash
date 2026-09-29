@@ -33,7 +33,7 @@ lash_conformance::attachment_owner_degraded_tests!({
     let catalog = Arc::new(SqliteStore::open(dir.path()).await.unwrap())
         as Arc<dyn lash_core_execution::DeploymentStore>;
     let attachments = Arc::new(
-        lash_core_execution::facade_support::FileAttachmentSqliteStore::new(
+        lash_core_execution::facade_support::FileAttachmentStore::new(
             dir.path().join("attachments"),
         ),
     ) as Arc<dyn lash_core_execution::AttachmentStore>;

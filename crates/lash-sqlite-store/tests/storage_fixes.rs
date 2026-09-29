@@ -24,9 +24,9 @@ use lash_core_execution::runtime::{ProcessWakeDelivery, QueuedWorkBatchDraft, Ru
 use lash_core_execution::store::RootStore as _;
 use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt;
 use lash_core_execution::{
-    AttachmentRootSet, LeaseOwnerIdentity, PluginState, QueuedWorkStore, RuntimeCommit,
-    RuntimeInvocation, RuntimeSessionState, SessionCatalogStore, SessionCommitStore, StoreError,
-    ToolState,
+    AttachmentManifest, AttachmentRootSet, LeaseOwnerIdentity, PluginState, QueuedWorkStore,
+    RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCatalogStore, SessionCommitStore,
+    StoreError, ToolState,
 };
 use lash_sqlite_store::SqliteStore;
 

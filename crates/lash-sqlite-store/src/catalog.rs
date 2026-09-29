@@ -101,7 +101,8 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
         lash_core_execution::store::validate_session_id(session_id)?;
         let session_id = session_id.clone();
         self.read_connection()
-            .read(move |conn| {
+            .call(move |conn| {
+                let meta = crate::session_meta::load_session_meta(conn, Some(&session_id));
                 let deleted = conn
                     .query_row(
                         crate::session_sql::session_sql()
@@ -116,14 +117,12 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                 if deleted {
                     return Ok(Ok(lash_core_execution::SessionLookup::Deleted));
                 }
-                Ok(
-                    crate::session_meta::load_session_meta(conn, Some(&session_id)).map(|meta| {
-                        meta.map_or(
-                            lash_core_execution::SessionLookup::Absent,
-                            lash_core_execution::SessionLookup::Live,
-                        )
-                    }),
-                )
+                Ok(meta.map(|meta| {
+                    meta.map_or(
+                        lash_core_execution::SessionLookup::Absent,
+                        lash_core_execution::SessionLookup::Live,
+                    )
+                }))
             })
             .await
             .map_err(sqlite_error)?

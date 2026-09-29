@@ -4,12 +4,12 @@
 #![allow(clippy::disallowed_methods)]
 
 use lash_core_execution::store::GraphAppend;
+use lash_core_execution::store::WindowSelector;
 use lash_core_execution::{
-    FleetFormatStore, Message, MessageRole, ModelSpec, Part, PluginState, RuntimeCommit,
-    RuntimeSessionState, SessionCatalogStore, SessionCommitStore, SessionHistoryStore,
-    SessionLookup, SessionPolicy, SessionStoreCreateRequest, StoreError, StoreMaintenance,
-    TokenLedgerEntry, TokenUsage, ToolState, TurnInputStore, WindowSelector,
-    facade_support::shared_parts,
+    FleetFormatStore, ModelSpec, PluginState, RuntimeCommit, RuntimeSessionState,
+    SessionCatalogStore, SessionCommitStore, SessionHistoryStore, SessionLookup, SessionPolicy,
+    SessionStoreCreateRequest, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage,
+    ToolState, TurnInputStore,
 };
 use lash_sansio::SessionId;
 use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStore};
@@ -41,19 +41,6 @@ fn persisted_tool_state_at_generation(generation: u64) -> ToolState {
         "tools": {}
     }))
     .expect("deserialize persisted tool state")
-}
-
-fn user_message(id: &str, content: &str) -> Message {
-    Message {
-        id: id.to_string(),
-        role: MessageRole::User,
-        parts: shared_parts(vec![Part::text(
-            format!("{id}.p0"),
-            content.to_string(),
-            None,
-        )]),
-        origin: None,
-    }
 }
 
 async fn factory_state(
@@ -416,13 +403,13 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     assert_ne!(first_node_id, second_node_id);
     assert!(
         first
-            .contains_active_ancestor(&first_state.session_id, &first_node_id)
+            .contains_active_ancestor(&first_state.session_id, &first_node_id.to_string().into())
             .await
             .unwrap()
     );
     assert!(
         second
-            .contains_active_ancestor(&second_state.session_id, &second_node_id)
+            .contains_active_ancestor(&second_state.session_id, &second_node_id.to_string().into())
             .await
             .unwrap()
     );
@@ -590,7 +577,7 @@ fn raw_node_ids(root: &Path, sql: &str) -> Vec<String> {
 async fn commit_single_root_node(
     factory: &Arc<SqliteStore>,
     session_id: &SessionId,
-) -> (Arc<SqliteStore>, String) {
+) -> (Arc<SqliteStore>, lash_core_execution::NodeId) {
     let store = admit_store(
         factory,
         &SessionStoreCreateRequest {
@@ -614,7 +601,7 @@ async fn commit_single_root_node(
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit root node");
-    (store, leaf.to_string())
+    (store, leaf)
 }
 
 /// Unpinning a pinned leaf *after* its owning session was deleted tombstones a
@@ -646,7 +633,7 @@ async fn sqlite_delete_reclaims_tombstone_orphaned_by_unpin_after_owner_delete()
 
     assert_eq!(
         resident_tombstoned_node_ids(&root),
-        vec![leaf.clone()],
+        vec![leaf.to_string()],
         "the unpin must tombstone the deleted owner's leaf"
     );
 
@@ -661,7 +648,7 @@ async fn sqlite_delete_reclaims_tombstone_orphaned_by_unpin_after_owner_delete()
         "a delete must reclaim tombstones owned by already-deleted sessions"
     );
     assert!(
-        !resident_graph_node_ids(&root).contains(&leaf),
+        !resident_graph_node_ids(&root).contains(&leaf.to_string()),
         "the orphaned tombstone row must be physically gone, not just hidden"
     );
 }
@@ -735,7 +722,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
         .await
         .expect("delete parent session");
     assert!(
-        resident_graph_node_ids(&root).contains(&parent_leaf),
+        resident_graph_node_ids(&root).contains(&parent_leaf.to_string()),
         "the parent's node survives its own delete while the fork child hangs off it"
     );
 

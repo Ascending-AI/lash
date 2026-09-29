@@ -3,9 +3,10 @@
 //! replay rebuilt same-request retries and refuse differing canonical content.
 //! Exercise real SQLite receipt adjudication with an intervening committed head.
 
+use lash_core_execution::store::WindowSelector;
 use lash_core_execution::{
     ExecutionScope, FleetFormatStore, OperationId, RuntimeCommit, RuntimeSessionState,
-    SessionCommitStore, SessionHistoryStore, SessionPolicy, StoreError, TurnBudget, WindowSelector,
+    SessionCommitStore, SessionHistoryStore, SessionPolicy, StoreError, TurnBudget,
 };
 use lash_sqlite_store::SqliteStore;
 
