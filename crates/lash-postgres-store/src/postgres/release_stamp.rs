@@ -18,7 +18,7 @@
 //! opening one database would otherwise stamp it from two unrelated clocks.
 
 use lash_core_execution::{StoreComponentVersion, StoreReleaseStamp, StoreReleaseState};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Postgres, Transaction};
 
 use crate::SCHEMA_COMPONENT;
 use crate::session_sql::session_sql;
@@ -82,10 +82,13 @@ pub(crate) async fn write(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx
 /// [`StoreReleaseState::Unstamped`]: it records no writing release because no
 /// build that stamps has written it. A read that fails for any other reason is
 /// [`StoreReleaseState::Unreadable`] — an undecided stamp is not an absent one.
-pub(crate) async fn read(pool: &PgPool) -> StoreReleaseState {
+async fn read<'e, E>(executor: E) -> StoreReleaseState
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
     let row: Result<Option<(String, String, i64)>, sqlx::Error> =
         sqlx::query_as(session_sql().release_stamp.select_stamp.sql())
-            .fetch_optional(pool)
+            .fetch_optional(executor)
             .await;
     match row {
         Ok(Some((release, encoded, written_at_epoch_ms))) => {
@@ -109,6 +112,17 @@ pub(crate) async fn read(pool: &PgPool) -> StoreReleaseState {
             reason: err.to_string(),
         },
     }
+}
+
+/// Keep optional relation errors local to this probe, preserving the caller's
+/// snapshot for fleet and compatibility facts even when the query fails.
+pub(crate) async fn read_state_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<StoreReleaseState, sqlx::Error> {
+    let mut probe = sqlx::Acquire::begin(tx).await?;
+    let state = read(&mut *probe).await;
+    probe.rollback().await?;
+    Ok(state)
 }
 
 /// The writing release alone, read inside the verifying open transaction.

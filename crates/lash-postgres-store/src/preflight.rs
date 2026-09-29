@@ -12,8 +12,8 @@
 //! and it emits schema-gate telemetry — each of which can be exactly what a broken
 //! deployment fails at, and none of which a probe may perform. Nothing here
 //! calls a `PostgresStorage` constructor. The only statements this module's own
-//! code path reaches are the shared advisory-lock acquisition and the
-//! `pg_catalog` reads inside `verify_schema_for`'s `REPEATABLE READ`
+//! code path reaches are the shared advisory-lock acquisition and the shape,
+//! compatibility, release and fleet reads in one `REPEATABLE READ READ ONLY`
 //! transaction: no DDL, no version stamp, no seed row, no write. The durable
 //! walk in [`walk`] adds only plain `SELECT`s over lash's own tables, two of
 //! them inside an explicitly `READ ONLY` transaction — see that module for why
@@ -33,7 +33,7 @@ use lash_core_execution::{
 };
 use sqlx::postgres::{PgPool, PgPoolOptions};
 
-use crate::PostgresStorage;
+use crate::schema::SchemaObservation;
 use lash_core_execution::compat::{self, CompatAdmission, ComponentId, StampRead};
 
 pub(crate) mod walk;
@@ -153,6 +153,79 @@ fn redact_location(database_url: &str) -> String {
     }
 }
 
+fn project_schema_status(
+    observation: SchemaObservation,
+    descriptor: &compat::CompatDescriptor,
+    location: String,
+) -> StoreSchemaStatus {
+    let SchemaObservation {
+        report,
+        stamp,
+        admission_findings,
+        release,
+        fleet_format,
+    } = observation;
+    let min_reader = match &stamp {
+        StampRead::Present(stamp) => Some(i64::from(stamp.min_reader)),
+        _ => None,
+    };
+    #[cfg(feature = "synthetic-next")]
+    let synthetic_expanded = matches!(
+        &stamp,
+        StampRead::Present(stamp) if stamp.version == descriptor.writes.max()
+    );
+    let verdict = match compat::admit(descriptor, stamp) {
+        Err(refusal) => StoreSchemaVerdict::Refused { refusal },
+        Ok(CompatAdmission::Provision) => StoreSchemaVerdict::Absent,
+        #[cfg(feature = "synthetic-next")]
+        Ok(CompatAdmission::Native) if synthetic_expanded => {
+            let findings = admission_findings;
+            if findings.is_empty() {
+                StoreSchemaVerdict::Matches
+            } else {
+                StoreSchemaVerdict::Refused {
+                    refusal: compat::CompatRefusal::ShapeRefused {
+                        component: descriptor.component.as_str().to_owned(),
+                        findings,
+                        writing_release: None,
+                    },
+                }
+            }
+        }
+        Ok(CompatAdmission::Native) if report.is_conformant() => StoreSchemaVerdict::Matches,
+        Ok(CompatAdmission::Native) => StoreSchemaVerdict::Unreadable {
+            reason: report.to_string(),
+        },
+        Ok(CompatAdmission::Expanded { version }) => {
+            let findings = admission_findings;
+            if findings.is_empty() {
+                StoreSchemaVerdict::Expanded {
+                    found: i64::from(version),
+                }
+            } else {
+                StoreSchemaVerdict::Refused {
+                    refusal: compat::CompatRefusal::ShapeRefused {
+                        component: descriptor.component.as_str().to_owned(),
+                        findings,
+                        writing_release: None,
+                    },
+                }
+            }
+        }
+    };
+    StoreSchemaStatus {
+        databases: vec![StoreSchemaDatabase {
+            name: COMPONENT_DATABASE_NAME.to_string(),
+            location,
+            expected: i64::from(descriptor.reads.max()),
+            min_reader,
+            verdict,
+        }],
+        release,
+        fleet_format,
+    }
+}
+
 #[async_trait]
 impl StorePreflight for PostgresStorePreflight {
     fn backend(&self) -> StoreBackend {
@@ -162,81 +235,15 @@ impl StorePreflight for PostgresStorePreflight {
     }
 
     async fn schema_status(&self) -> Result<StoreSchemaStatus, StoreError> {
-        let report = PostgresStorage::verify_schema_for(&self.pool).await?;
         let descriptor = compat::descriptor(ComponentId::POSTGRES).ok_or_else(|| {
             StoreError::Backend("missing PostgreSQL compatibility descriptor".into())
         })?;
-        let stamp = if report.schema.is_some() {
-            crate::schema::read_compat_stamp(&self.pool, true).await
-        } else {
-            StampRead::Absent { populated: false }
-        };
-        let min_reader = match &stamp {
-            StampRead::Present(stamp) => Some(i64::from(stamp.min_reader)),
-            _ => None,
-        };
-        #[cfg(feature = "synthetic-next")]
-        let synthetic_expanded = matches!(
-            &stamp,
-            StampRead::Present(stamp) if stamp.version == descriptor.writes.max()
-        );
-        let verdict = match compat::admit(descriptor, stamp) {
-            Err(refusal) => StoreSchemaVerdict::Refused { refusal },
-            Ok(CompatAdmission::Provision) => StoreSchemaVerdict::Absent,
-            #[cfg(feature = "synthetic-next")]
-            Ok(CompatAdmission::Native) if synthetic_expanded => {
-                let mut tx = self.pool.begin().await.map_err(crate::store_sqlx_error)?;
-                let findings =
-                    crate::schema_shape::synthetic_next_findings(&mut tx, &report).await?;
-                tx.commit().await.map_err(crate::store_sqlx_error)?;
-                if findings.is_empty() {
-                    StoreSchemaVerdict::Matches
-                } else {
-                    StoreSchemaVerdict::Refused {
-                        refusal: compat::CompatRefusal::ShapeRefused {
-                            component: descriptor.component.as_str().to_owned(),
-                            findings,
-                            writing_release: None,
-                        },
-                    }
-                }
-            }
-            Ok(CompatAdmission::Native) if report.is_conformant() => StoreSchemaVerdict::Matches,
-            Ok(CompatAdmission::Native) => StoreSchemaVerdict::Unreadable {
-                reason: report.to_string(),
-            },
-            Ok(CompatAdmission::Expanded { version }) => {
-                let mut tx = self.pool.begin().await.map_err(crate::store_sqlx_error)?;
-                let findings = crate::schema_shape::expanded_findings(&mut tx, &report).await?;
-                tx.commit().await.map_err(crate::store_sqlx_error)?;
-                if findings.is_empty() {
-                    StoreSchemaVerdict::Expanded {
-                        found: i64::from(version),
-                    }
-                } else {
-                    StoreSchemaVerdict::Refused {
-                        refusal: compat::CompatRefusal::ShapeRefused {
-                            component: descriptor.component.as_str().to_owned(),
-                            findings,
-                            writing_release: None,
-                        },
-                    }
-                }
-            }
-        };
-        let release = crate::release_stamp::read(&self.pool).await;
-        let fleet_format = crate::fleet_format::read(&self.pool).await;
-        Ok(StoreSchemaStatus {
-            databases: vec![StoreSchemaDatabase {
-                name: COMPONENT_DATABASE_NAME.to_string(),
-                location: self.location.clone(),
-                expected: i64::from(descriptor.reads.max()),
-                min_reader,
-                verdict,
-            }],
-            release,
-            fleet_format,
-        })
+        let observation = crate::schema::observe_schema(&self.pool, descriptor).await?;
+        Ok(project_schema_status(
+            observation,
+            descriptor,
+            self.location.clone(),
+        ))
     }
 
     /// Walk one page of one durable surface over this handle's pool.

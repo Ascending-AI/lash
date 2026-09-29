@@ -18,7 +18,7 @@
 use lash_core_execution::compat::VersionRange;
 
 use lash_core_execution::{FleetFormat, FleetFormatState, StoreError};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Postgres, Transaction};
 
 use crate::session_sql::session_sql;
 
@@ -103,10 +103,13 @@ pub(crate) async fn seed(
 /// build that writes one has opened it. A read that fails for any other
 /// reason is [`FleetFormatState::Unreadable`] — an undecided row is not an
 /// absent one.
-pub(crate) async fn read(pool: &PgPool) -> FleetFormatState {
+pub(crate) async fn read<'e, E>(executor: E) -> FleetFormatState
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
     let row: Result<Option<i32>, sqlx::Error> =
         sqlx::query_scalar(session_sql().fleet_format.select_fleet_format.sql())
-            .fetch_optional(pool)
+            .fetch_optional(executor)
             .await;
     match row {
         Ok(Some(version)) => match u32::try_from(i64::from(version)) {
@@ -121,6 +124,17 @@ pub(crate) async fn read(pool: &PgPool) -> FleetFormatState {
             reason: err.to_string(),
         },
     }
+}
+
+/// Roll a failed optional probe back to its savepoint so an unreadable fleet
+/// relation cannot abort the schema observation's transaction.
+pub(crate) async fn read_state_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<FleetFormatState, sqlx::Error> {
+    let mut probe = sqlx::Acquire::begin(tx).await?;
+    let state = read(&mut *probe).await;
+    probe.rollback().await?;
+    Ok(state)
 }
 
 /// `42P01 undefined_table` — the database predates the row rather than being

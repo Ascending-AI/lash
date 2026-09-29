@@ -266,6 +266,13 @@ pub(crate) fn missing_catalog_identity_error() -> StoreError {
 pub(crate) async fn verify_schema_under_advisory_lock(
     pool: &PgPool,
 ) -> Result<SchemaReport, StoreError> {
+    let mut connection = schema_observation_connection(pool).await?;
+    let verified = verify_within_repeatable_read(&mut connection).await;
+    let _ = sqlx::Connection::close(connection).await;
+    verified
+}
+
+async fn schema_observation_connection(pool: &PgPool) -> Result<sqlx::PgConnection, StoreError> {
     let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
     // Detached rather than borrowed from the pool, because the lock this takes is
     // *session*-scoped: a future cancelled between the lock and the unlock would
@@ -274,18 +281,84 @@ pub(crate) async fn verify_schema_under_advisory_lock(
     // closed when it drops — on the error and cancellation paths as much as the
     // happy one — and the backend releases the session lock with it.
     let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
-    let verified = async {
-        sqlx::query("SELECT pg_advisory_lock_shared($1, $2)")
-            .bind(lock_namespace)
-            .bind(lock_key)
-            .execute(&mut connection)
+    sqlx::query("SELECT pg_advisory_lock_shared($1, $2)")
+        .bind(lock_namespace)
+        .bind(lock_key)
+        .execute(&mut connection)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(connection)
+}
+
+/// Facts used by preflight, all read under the schema key in one snapshot.
+pub(crate) struct SchemaObservation {
+    pub(crate) report: SchemaReport,
+    pub(crate) stamp: lash_core_execution::compat::StampRead,
+    pub(crate) admission_findings: Vec<String>,
+    pub(crate) release: lash_core_execution::StoreReleaseState,
+    pub(crate) fleet_format: lash_core_execution::FleetFormatState,
+}
+
+pub(crate) async fn observe_schema(
+    pool: &PgPool,
+    descriptor: &lash_core_execution::compat::CompatDescriptor,
+) -> Result<SchemaObservation, StoreError> {
+    let mut connection = schema_observation_connection(pool).await?;
+    let observed = observe_within_repeatable_read(&mut connection, descriptor).await;
+    let _ = sqlx::Connection::close(connection).await;
+    observed
+}
+
+async fn observe_within_repeatable_read(
+    connection: &mut sqlx::PgConnection,
+    descriptor: &lash_core_execution::compat::CompatDescriptor,
+) -> Result<SchemaObservation, StoreError> {
+    use lash_core_execution::compat::{CompatAdmission, StampRead};
+
+    let mut tx = sqlx::Connection::begin(connection)
+        .await
+        .map_err(store_sqlx_error)?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let report = verify_schema_shape(&mut tx).await?;
+    let stamp = if report.schema.is_some() {
+        // A malformed compatibility relation must yield Unreadable without
+        // aborting the snapshot needed by the remaining probes.
+        let mut probe = sqlx::Acquire::begin(&mut tx)
             .await
             .map_err(store_sqlx_error)?;
-        verify_within_repeatable_read(&mut connection).await
-    }
-    .await;
-    let _ = sqlx::Connection::close(connection).await;
-    verified
+        let stamp = read_compat_stamp(&mut *probe, true).await;
+        probe.rollback().await.map_err(store_sqlx_error)?;
+        stamp
+    } else {
+        StampRead::Absent { populated: false }
+    };
+    let admission_findings = match lash_core_execution::compat::admit(descriptor, stamp.clone()) {
+        #[cfg(feature = "synthetic-next")]
+        Ok(CompatAdmission::Native) if matches!(&stamp, StampRead::Present(stamp) if stamp.version == descriptor.writes.max()) => {
+            crate::schema_shape::synthetic_next_findings(&mut tx, &report).await?
+        }
+        Ok(CompatAdmission::Expanded { .. }) => {
+            crate::schema_shape::expanded_findings(&mut tx, &report).await?
+        }
+        _ => Vec::new(),
+    };
+    let release = crate::release_stamp::read_state_in_tx(&mut tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let fleet_format = crate::fleet_format::read_state_in_tx(&mut tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    tx.commit().await.map_err(store_sqlx_error)?;
+    Ok(SchemaObservation {
+        report,
+        stamp,
+        admission_findings,
+        release,
+        fleet_format,
+    })
 }
 
 /// Reads the schema inside one `REPEATABLE READ` transaction.
