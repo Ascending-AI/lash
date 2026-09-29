@@ -11,14 +11,17 @@
 //!   then runs in the new frame on resident state.
 //! - **`continue_as`.** The turn's own `AgentFrameSwitch` outcome, opened by
 //!   the turn's commit; the task runs as a follow-on physical turn.
-//! - **`/compact`.** An administrative compaction: a compactor returns seed
-//!   nodes and core opens and commits the frame. Its laws kill it only
-//!   before its commit (see [`frame_open_redrive_tests`]).
+//! - **`/compact`.** An administrative compaction: core records the head
+//!   and frame it compacts as one recorded step, a compactor returns seed
+//!   nodes over that base, and core opens and commits the frame through an
+//!   idempotent fenced write the compaction names. A redrive replays the
+//!   recorded base, reads the summary back over it and meets the commit's
+//!   receipt, even after the commit moved the head.
 //!
 //! Each law kills the execution at one point and redrives it on the tier's
-//! runner: after the summarizer's completion is journaled but before the
-//! frame's commit, after the frame's commit, before and after the turn's
-//! commit. However the execution dies, the session ends with one frame per
+//! runner: before `/compact`'s summarizer runs, after the summarizer's
+//! completion is journaled but before the frame's commit, after the frame's
+//! commit, before and after the turn's commit. However the execution dies, the session ends with one frame per
 //! open, chained in order (each frame's predecessor is the frame current at
 //! its open), each seed once, one summarizer call per compaction and one
 //! model call per physical turn, and every commit made exactly once. A
@@ -161,9 +164,12 @@ impl crate::ToolProvider for SwitchTool {
 /// Where a law kills the execution under test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameOpenCrash {
+    /// `/compact`'s base is recorded; its summarizer has not run.
+    BeforeSummary,
     /// The summarizer's completion is journaled; the frame's commit is not.
     AfterSummary,
-    /// The pressure frame's own commit is durable; the turn has not run.
+    /// The frame's own commit is durable: the pressure frame's, before its
+    /// turn runs, or `/compact`'s, before it reports.
     AfterFrameCommit,
     /// The turn's model and tool effects are journaled; its commit is not.
     BeforeTurnCommit,
@@ -257,6 +263,7 @@ async fn summarize(
         tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
         model_variant: policy.model.variant.clone(),
         model_capability: policy.model.capability.clone(),
+        extra_body: policy.model.extra_body.clone(),
         generation: policy.generation.clone(),
         scope: crate::LlmRequestScope::new(
             session_id.clone(),
@@ -314,8 +321,9 @@ impl crate::plugin::ContextPressureHook for ThresholdCompaction {
 }
 
 /// `/compact`'s compactor: one direct summarizer completion. Its crashing
-/// copy dies right after the completion.
+/// copies die right before or right after the completion.
 struct SummaryCompactor {
+    crash_before_summary: bool,
     crash_after_summary: bool,
 }
 
@@ -329,6 +337,9 @@ impl crate::plugin::ContextCompactor for SummaryCompactor {
         &self,
         ctx: &crate::plugin::CompactionContext<'_>,
     ) -> Result<Option<crate::plugin::ContextCompaction>, crate::plugin::ContextError> {
+        if self.crash_before_summary {
+            panic!("injected crash before the summary, after the compaction's base is recorded");
+        }
         let seed = summarize(
             &ctx.session_id,
             ctx.state.policy(),
@@ -435,6 +446,7 @@ async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate
             .with_context_compactor(
                 100,
                 Arc::new(SummaryCompactor {
+                    crash_before_summary: crash == Some(FrameOpenCrash::BeforeSummary),
                     crash_after_summary,
                 }),
             ),
@@ -459,7 +471,12 @@ async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate
     )
     .await
     .expect("build the frame-open conformance runtime");
-    if let Some(crash) = crash.filter(|crash| *crash != FrameOpenCrash::AfterSummary) {
+    if let Some(crash) = crash.filter(|crash| {
+        !matches!(
+            crash,
+            FrameOpenCrash::BeforeSummary | FrameOpenCrash::AfterSummary
+        )
+    }) {
         runtime.set_turn_phase_probe(Arc::new(CrashProbe::new(crash)));
     }
     runtime
@@ -947,7 +964,10 @@ pub async fn a_pressure_frame_restarts_the_live_execution_state(
 }
 
 /// `/compact`, killed at `crash` and redriven, opens its frame once: one
-/// summarizer call, one compaction frame, one commit.
+/// summarizer call, one compaction frame, one commit. Killed after its
+/// commit, the redrive loads the moved head, replays the recorded base and
+/// the summary over it, and meets the commit's receipt instead of opening a
+/// second frame from the moved head (FIG-4133).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1012,8 +1032,10 @@ pub async fn a_compaction_frame_opens_once_whatever_its_crash(
                 "{}-compact",
                 law.prefix
             ))),
+            // Killed after its commit, the crashing attempt runs the whole
+            // compaction and dies before it reports.
             compaction(
-                (crash == FrameOpenCrash::AfterSummary).then_some(crash),
+                (crash != FrameOpenCrash::AfterFrameCommit).then_some(crash),
                 None,
             ),
             compaction(None, Some(tx)),
@@ -1118,11 +1140,9 @@ macro_rules! frame_open_execution_state_tests {
 
 /// Register the frame-open laws (FIG-4110) on the standard protocol: the
 /// protocol laws of [`frame_open_protocol_redrive_tests`], and `/compact`
-/// killed after its summary. (`/compact` killed after its commit is not
-/// registered: its redrive reads the moved head, from which it cannot tell a
-/// redrive from a repeated compaction under the same scope, and opens a
-/// second frame.) The fixture hands back a
-/// guard, a prefix, the tier's effect host, the store set under test and its
+/// killed before its summary, after its summary and after its commit
+/// (FIG-4133). The fixture hands back a guard, a prefix, the tier's effect
+/// host, the store set under test and its
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
 #[macro_export]
 macro_rules! frame_open_redrive_tests {
@@ -1139,7 +1159,9 @@ macro_rules! frame_open_redrive_tests {
             )
         });
         $crate::frame_open_redrive_tests!(@compact [$(#[$attr])*] $fixture;
-            (a_compaction_crashed_after_its_summary_opens_once, AfterSummary));
+            (a_compaction_crashed_before_its_summary_opens_once, BeforeSummary),
+            (a_compaction_crashed_after_its_summary_opens_once, AfterSummary),
+            (a_compaction_crashed_after_its_commit_opens_once, AfterFrameCommit));
     };
     (@compact [$($attrs:tt)*] $fixture:block; ($name:ident, $crash:ident) $(, $rest:tt)*) => {
         $($attrs)*

@@ -221,6 +221,8 @@ pub struct RemoteGenerationReceipt {
     pub thinking_summary: RemoteGenerationOptionOutcome,
     #[serde(default)]
     pub thinking_visibility: RemoteGenerationOptionOutcome,
+    #[serde(default)]
+    pub passthrough: RemoteGenerationOptionOutcome,
 }
 
 /// Mirror of the core `GenerationOptionOutcome`.
@@ -484,6 +486,8 @@ impl RemoteLlmResponse {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteModelIntent {
     pub model: String,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub variant: RemoteReasoningSelection,
     /// Host-supplied capability metadata for the model (mirrors the core
@@ -694,6 +698,7 @@ impl RemoteModelIntent {
     pub fn new(model: impl Into<String>) -> Self {
         Self {
             model: model.into(),
+            extra_body: serde_json::Map::new(),
             variant: RemoteReasoningSelection::ProviderDefault,
             capability: RemoteModelCapability::default(),
             provider: None,

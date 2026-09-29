@@ -125,6 +125,7 @@ fn request() -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: crate::attachment_test_capability(),
+        extra_body: Default::default(),
         generation: Default::default(),
         scope: LlmRequestScope::new("session", "frame", "request"),
         output_spec: None,

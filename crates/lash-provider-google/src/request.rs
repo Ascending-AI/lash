@@ -552,7 +552,21 @@ impl GoogleOAuthProvider {
         }
         // Cloud Code reports cached-token usage, but Lash emits no
         // prompt-cache directive in this request dialect.
-        let receipt = policy.receipt(req, &emission);
+        let passthrough = merge_extra_body(
+            &mut request["request"],
+            &req.extra_body,
+            &reserved_generation_paths(
+                req,
+                "/generationConfig/stopSequences",
+                "/generationConfig/temperature",
+            ),
+        )?;
+        let mut receipt = policy.receipt(req, &emission);
+        receipt.passthrough = if !provider.extra_headers.is_empty() {
+            lash_core::GenerationOptionOutcome::Applied
+        } else {
+            passthrough
+        };
         Ok((request, receipt))
     }
 

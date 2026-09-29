@@ -211,6 +211,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: crate::attachment_test_capability(),
+        extra_body: Default::default(),
         scope: LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",
@@ -221,6 +222,126 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         generation: lash_core::GenerationOptions::default(),
         provider_trace: None,
     }
+}
+
+#[test]
+fn chat_and_responses_passthrough_refuse_owned_and_suppressed_controls() {
+    let chat = OpenAiCompatibleProvider::new("key", "https://example.test");
+    let responses = OpenAiProvider::new("key");
+    let base = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    for endpoint in [
+        CompletionEndpoint::ChatCompletions,
+        CompletionEndpoint::Responses,
+    ] {
+        let build = |req: &LlmRequest| match endpoint {
+            CompletionEndpoint::ChatCompletions => chat.build_chat_request_body(req, true),
+            CompletionEndpoint::Responses => responses.build_responses_request_body(req, true),
+        };
+        let written_array = match endpoint {
+            CompletionEndpoint::ChatCompletions => json!({"messages":[]}),
+            CompletionEndpoint::Responses => json!({"input":[]}),
+        };
+        for extra in [
+            json!({"model":"other"}),
+            written_array,
+            json!({"model":null}),
+        ] {
+            let mut req = base.clone();
+            req.extra_body = extra.as_object().cloned().unwrap();
+            let error = build(&req).unwrap_err();
+            assert_eq!(
+                error.code.as_ref().map(ToString::to_string).as_deref(),
+                Some("lash:passthrough_conflict")
+            );
+        }
+        let mut req = base.clone();
+        req.generation.stop_sequences = vec!["END".into()];
+        req.generation.suppress_stop_sequences_for_protocol();
+        req.extra_body = json!({"stop":["END"]}).as_object().cloned().unwrap();
+        assert!(build(&req).unwrap_err().message.contains("/stop"));
+        let mut req = base.clone();
+        req.model_capability.sampling = lash_core::SamplingCapability::Pinned;
+        req.extra_body = json!({"temperature":0.3}).as_object().cloned().unwrap();
+        assert!(build(&req).unwrap_err().message.contains("/temperature"));
+        let mut req = base.clone();
+        let nested = match endpoint {
+            CompletionEndpoint::ChatCompletions => {
+                json!({"stream_options":{"include_usage":false}})
+            }
+            CompletionEndpoint::Responses => {
+                req.output_spec = Some(LlmOutputSpec::JsonObject);
+                json!({"text":{"format":{"type":"other"}}})
+            }
+        };
+        req.extra_body = nested.as_object().cloned().unwrap();
+        assert!(build(&req).is_err());
+        let mut req = base.clone();
+        req.extra_body = json!({"host":{"nested":true}})
+            .as_object()
+            .cloned()
+            .unwrap();
+        assert_eq!(build(&req).unwrap()["host"]["nested"], true);
+    }
+}
+
+#[test]
+fn openai_route_headers_refuse_case_variant_of_adapter_header() {
+    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    let compatible = OpenAiCompatibleProvider::new("key", "https://example.test")
+        .with_extra_headers(vec![("aUtHoRiZaTiOn".into(), "other".into())]);
+    let route = compatible.route_identity(&req.model);
+    let error = crate::driver::build_request_body(
+        &compatible,
+        &req,
+        CompletionEndpoint::ChatCompletions,
+        false,
+        &route,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.code.as_ref().map(ToString::to_string).as_deref(),
+        Some("lash:passthrough_conflict")
+    );
+    let native = OpenAiProvider::new("key")
+        .with_extra_headers(vec![("cOnTeNt-TyPe".into(), "other".into())]);
+    let route = native.route_identity(&req.model);
+    let error = crate::driver::build_request_body(
+        &native.inner,
+        &req,
+        CompletionEndpoint::Responses,
+        false,
+        &route,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.code.as_ref().map(ToString::to_string).as_deref(),
+        Some("lash:passthrough_conflict")
+    );
+}
+
+#[test]
+fn route_headers_stay_out_of_the_persisted_session_config() {
+    let provider = OpenAiCompatibleProvider::new("key", "https://example.test")
+        .with_extra_headers(vec![("x-host-credential".into(), "header-sentinel".into())]);
+    let mut policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
+    policy.provider_id = provider.kind().into();
+    policy.model = lash_core::ModelSpec::builder("model")
+        .context_window_tokens(1024)
+        .extra_body(
+            json!({"host_route":{"enabled":true}})
+                .as_object()
+                .cloned()
+                .unwrap(),
+        )
+        .build()
+        .unwrap();
+    let row = serde_json::to_value(lash_core::PersistedSessionConfig::from(&policy)).unwrap();
+    assert_eq!(
+        row["model"]["extra_body"],
+        json!({"host_route":{"enabled":true}})
+    );
+    assert!(!row.to_string().contains("header-sentinel"));
+    assert!(!row.to_string().contains("x-host-credential"));
 }
 
 fn count_object_key(value: &Value, key: &str) -> usize {
@@ -711,8 +832,19 @@ fn providers_serialize_distinct_config_shapes() {
 fn openai_compatible_wire_config_serializes_only_when_customized() {
     let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1");
     assert!(provider.serialize_config().get("wire").is_none());
+    provider.wire.extra_headers = vec![("x-host-secret".into(), "header-sentinel".into())].into();
+    let snapshot = provider.serialize_config();
+    assert!(snapshot.get("wire").is_none());
+    assert!(!snapshot.to_string().contains("header-sentinel"));
+    assert!(
+        !serde_json::to_string(&provider.wire)
+            .unwrap()
+            .contains("header-sentinel")
+    );
     provider.wire.query_params.push(("v".into(), "1".into()));
-    assert!(provider.serialize_config().get("wire").is_some());
+    let snapshot = provider.serialize_config();
+    assert!(snapshot.get("wire").is_some());
+    assert!(!snapshot.to_string().contains("header-sentinel"));
 }
 
 #[test]

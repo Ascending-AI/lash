@@ -123,6 +123,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             tool_choice: LlmToolChoice::Auto,
             model_variant: ctx.config.model_variant.clone(),
             model_capability: ctx.config.model_capability.clone(),
+            extra_body: ctx.config.extra_body.clone(),
             scope: LlmRequestScope::new(
                 ctx.config.session_id.clone(),
                 ctx.config.agent_frame_id.clone(),

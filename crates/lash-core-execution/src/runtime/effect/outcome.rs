@@ -268,6 +268,7 @@ mod tests {
             tool_choice: crate::llm::types::LlmToolChoice::Auto,
             model_variant: crate::ReasoningSelection::ProviderDefault,
             model_capability: Default::default(),
+            extra_body: Default::default(),
             generation: Default::default(),
             scope: crate::LlmRequestScope::new("request-session", "frame", "request"),
             output_spec: None,

@@ -56,6 +56,11 @@ pub struct ScopedEffectController<'run> {
     /// controller, so the nth keyless start of one run is keyed the same on
     /// every replay ([`Self::next_keyless_start_key`]).
     pub(in crate::runtime::effect::executor) keyless_starts: Arc<AtomicU32>,
+    /// How many administrative compactions this controller has run, shared
+    /// by its clones, so the nth compaction of one run records its base
+    /// under the same key on every replay
+    /// ([`Self::next_compaction_ordinal`]).
+    pub(in crate::runtime::effect::executor) compactions: Arc<AtomicU32>,
 }
 
 /// A replayed language command's say over the journal writes made under it
@@ -347,6 +352,17 @@ impl<'run> ScopedEffectController<'run> {
         )
     }
 
+    /// The ordinal of the next administrative compaction run through this
+    /// controller among this run's compactions (FIG-4133).
+    ///
+    /// A handler re-runs from the top on every replay with a fresh
+    /// controller, so a redriven compaction draws the ordinal its first
+    /// execution drew and replays the base it recorded, while a second
+    /// compaction in the same run draws the next one and records its own.
+    pub fn next_compaction_ordinal(&self) -> u32 {
+        self.compactions.fetch_add(1, Ordering::SeqCst)
+    }
+
     /// The process this controller's scope is, when it is one.
     pub fn admitted_process(&self) -> Option<&crate::ProcessId> {
         self.admitted.process_id()
@@ -362,6 +378,7 @@ impl<'run> ScopedEffectController<'run> {
             admitted,
             journal_guard: None,
             keyless_starts: Arc::default(),
+            compactions: Arc::default(),
         })
     }
 
@@ -378,6 +395,7 @@ impl<'run> ScopedEffectController<'run> {
             admitted,
             journal_guard: None,
             keyless_starts: Arc::default(),
+            compactions: Arc::default(),
         })
     }
 
@@ -395,6 +413,7 @@ impl<'run> ScopedEffectController<'run> {
             admitted,
             journal_guard: None,
             keyless_starts: Arc::default(),
+            compactions: Arc::default(),
         })
     }
 
@@ -512,6 +531,7 @@ impl<'run> ScopedEffectController<'run> {
             admitted: self.admitted.clone(),
             journal_guard: self.journal_guard.clone(),
             keyless_starts: Arc::clone(&self.keyless_starts),
+            compactions: Arc::clone(&self.compactions),
         })
     }
 

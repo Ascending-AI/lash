@@ -277,6 +277,7 @@ fn remote_llm_response_json_round_trips() {
             parallel_tool_calls: RemoteGenerationOptionOutcome::NotRequested,
             thinking_summary: RemoteGenerationOptionOutcome::NotRequested,
             thinking_visibility: RemoteGenerationOptionOutcome::NotRequested,
+            passthrough: RemoteGenerationOptionOutcome::NotRequested,
         }),
         expose_thinking: Some(false),
     };
@@ -299,6 +300,7 @@ fn remote_llm_response_json_round_trips() {
             "parallel_tool_calls": "not_requested",
             "thinking_summary": "not_requested",
             "thinking_visibility": "not_requested",
+            "passthrough": "not_requested",
         })
     );
     let decoded = serde_json::from_value::<Envelope<RemoteLlmResponse>>(value)

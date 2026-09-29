@@ -35,6 +35,7 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         no_progress_budget: Default::default(),
         model_variant: crate::ReasoningSelection::ProviderDefault,
         model_capability: crate::llm::capability::ModelCapability::default(),
+        extra_body: Default::default(),
         generation: crate::llm::types::GenerationOptions::default(),
         autonomous: false,
         tool_specs: Vec::new().into(),

@@ -59,6 +59,7 @@ pub(crate) fn test_config_with_protocol_turn_options(
         no_progress_budget: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
+        extra_body: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         autonomous: false,
         tool_specs: Vec::new().into(),

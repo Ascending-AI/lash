@@ -626,6 +626,7 @@ fn request() -> LlmRequest {
         tool_choice: Default::default(),
         model_variant: Default::default(),
         model_capability: Default::default(),
+        extra_body: Default::default(),
         generation: GenerationOptions::default(),
         scope: LlmRequestScope::new("panic-test", "panic-test:frame", "panic-test:request"),
         output_spec: None,

@@ -165,6 +165,7 @@ pub struct GoogleOAuthProvider {
     /// after its call; this keeps the lookup to once per provider.
     pub(crate) resolved_project_id: Arc<OnceLock<String>>,
     pub options: ProviderOptions,
+    pub extra_headers: lash_llm_transport::ExtraHeaders,
     pub stream_termination: StreamTermination,
     pub(crate) transport: Arc<dyn LlmHttpTransport>,
 }
@@ -215,6 +216,7 @@ impl GoogleOAuthProvider {
             project_id: None,
             resolved_project_id: Arc::new(OnceLock::new()),
             options: ProviderOptions::default(),
+            extra_headers: Default::default(),
             stream_termination: StreamTermination::EofTolerated,
             transport: Arc::clone(&DEFAULT_HTTP_TRANSPORT),
         }
@@ -246,6 +248,11 @@ impl GoogleOAuthProvider {
 
     pub fn with_options(mut self, options: ProviderOptions) -> Self {
         self.options = options;
+        self
+    }
+
+    pub fn with_extra_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.extra_headers = headers.into();
         self
     }
 

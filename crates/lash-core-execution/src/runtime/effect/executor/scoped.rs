@@ -60,6 +60,7 @@ impl<'run> ScopedEffectController<'run> {
                 admitted: self.admitted,
                 journal_guard: self.journal_guard,
                 keyless_starts: self.keyless_starts,
+                compactions: self.compactions,
             }),
         }
     }

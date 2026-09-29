@@ -353,6 +353,7 @@ fn receipt_joins_requested_settings_with_adapter_emission() {
             parallel_tool_calls: GenerationOptionOutcome::Applied,
             thinking_summary: GenerationOptionOutcome::Applied,
             thinking_visibility: GenerationOptionOutcome::Applied,
+            passthrough: GenerationOptionOutcome::NotRequested,
         }
     );
     assert!(receipt.fully_honored());

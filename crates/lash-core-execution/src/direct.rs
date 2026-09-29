@@ -54,6 +54,8 @@ pub struct DirectRequest {
     pub model_variant: crate::ReasoningSelection,
     #[serde(default, skip_serializing_if = "ModelCapability::is_empty")]
     pub model_capability: ModelCapability,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub messages: Vec<DirectMessage>,
     #[serde(default)]
@@ -98,6 +100,7 @@ impl DirectRequest {
             model: model.into(),
             model_variant: crate::ReasoningSelection::ProviderDefault,
             model_capability: ModelCapability::default(),
+            extra_body: serde_json::Map::new(),
             messages: vec![DirectMessage {
                 role: DirectRole::User,
                 parts: vec![DirectPart::Text(prompt.into())],
@@ -336,6 +339,7 @@ pub fn build_llm_request(
         model: _,
         model_variant,
         model_capability,
+        extra_body,
         messages,
         output,
         generation,
@@ -416,6 +420,7 @@ pub fn build_llm_request(
         tool_choice: LlmToolChoice::None,
         model_variant,
         model_capability,
+        extra_body,
         generation,
         scope,
         output_spec,
@@ -1063,6 +1068,22 @@ mod tests {
             llm_request.stream_events.is_some(),
             "providers that require streaming need a no-op sender even when direct caller did not request one"
         );
+    }
+
+    #[test]
+    fn direct_extra_body_is_per_call() {
+        let provider = TestProvider::default().into_handle();
+        let mut first = DirectRequest::text("model", "first");
+        first.extra_body = json!({"route":{"host":true}}).as_object().cloned().unwrap();
+        let first = build_llm_request(&provider, first, "model".into()).unwrap();
+        let second = build_llm_request(
+            &provider,
+            DirectRequest::text("model", "second"),
+            "model".into(),
+        )
+        .unwrap();
+        assert_eq!(first.extra_body["route"], json!({"host":true}));
+        assert!(second.extra_body.is_empty());
     }
 }
 

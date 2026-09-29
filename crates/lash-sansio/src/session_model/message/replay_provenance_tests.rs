@@ -63,6 +63,7 @@ fn replay_request_from_reopened_message(
         tool_choice: crate::llm::types::LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: Default::default(),
+        extra_body: Default::default(),
         generation: Default::default(),
         scope: crate::llm::types::LlmRequestScope::new("session-1", "frame-1", "request-1"),
         output_spec: None,

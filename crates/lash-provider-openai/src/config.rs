@@ -30,6 +30,9 @@ pub enum OpenAiReasoningDialect {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OpenAiWireConfig {
+    /// Runtime-only headers for this provider route.
+    #[serde(default, skip_serializing)]
+    pub extra_headers: lash_llm_transport::ExtraHeaders,
     pub auth_header_name: String,
     pub auth_value_prefix: String,
     /// Static query parameters appended to every request. Values MUST be
@@ -41,6 +44,7 @@ pub struct OpenAiWireConfig {
 impl Default for OpenAiWireConfig {
     fn default() -> Self {
         Self {
+            extra_headers: Default::default(),
             auth_header_name: "Authorization".to_string(),
             auth_value_prefix: "Bearer ".to_string(),
             query_params: Vec::new(),

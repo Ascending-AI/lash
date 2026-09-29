@@ -538,6 +538,7 @@ async fn summarize_compaction_prefix(
         tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
         model_variant: snapshot.policy.model.variant.clone(),
         model_capability: snapshot.policy.model.capability.clone(),
+        extra_body: Default::default(),
         generation: snapshot.policy.generation.clone(),
         scope: lash_core::LlmRequestScope::new(
             session_id.clone(),

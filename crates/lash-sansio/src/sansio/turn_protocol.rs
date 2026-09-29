@@ -722,6 +722,7 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             },
             model_variant: ctx.config.model_variant.clone(),
             model_capability: ctx.config.model_capability.clone(),
+            extra_body: ctx.config.extra_body.clone(),
             generation: ctx.config.generation.clone(),
             scope: crate::llm::types::LlmRequestScope::new(
                 ctx.config.session_id.clone(),
@@ -841,6 +842,7 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub no_progress_budget: crate::NoProgressBudget,
     pub model_variant: crate::ReasoningSelection,
     pub model_capability: crate::llm::capability::ModelCapability,
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
     pub generation: crate::llm::types::GenerationOptions,
     pub autonomous: bool,
     pub tool_specs: Arc<Vec<LlmToolSpec>>,

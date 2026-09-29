@@ -101,4 +101,16 @@ impl RuntimeEffectOutcome {
             )),
         }
     }
+
+    pub fn into_compaction_base(
+        self,
+    ) -> Result<super::CompactionBase, RuntimeEffectControllerError> {
+        match self {
+            Self::RecordCompactionBase { base } => Ok(*base),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::RecordCompactionBase,
+                other.kind(),
+            )),
+        }
+    }
 }

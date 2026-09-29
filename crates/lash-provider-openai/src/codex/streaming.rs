@@ -23,6 +23,7 @@ use lash_core::llm::types::{
     LlmTerminalReason, LlmUsage, ProviderRouteIdentity,
 };
 use lash_core::provider::{LlmTimeouts, Provider, ProviderOptions, StreamTermination};
+use lash_llm_transport::merge_extra_headers;
 use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response, emit_stream_progress};
 use lash_llm_transport::timeouts::response_start_timeout;
 use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
@@ -750,6 +751,7 @@ impl Provider for CodexProvider {
                     id.expose_secret().to_string(),
                 ));
             }
+            merge_extra_headers(&mut headers, &provider.extra_headers, false)?;
             let http_request = LlmHttpRequest {
                 method: LlmHttpMethod::Post,
                 url: provider.responses_url.clone(),

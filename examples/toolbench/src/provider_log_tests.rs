@@ -42,6 +42,7 @@ fn request() -> LlmRequest {
         tool_choice: Default::default(),
         model_variant: Default::default(),
         model_capability: Default::default(),
+        extra_body: Default::default(),
         generation: Default::default(),
         scope: LlmRequestScope::new("s", "f", "r"),
         output_spec: None,

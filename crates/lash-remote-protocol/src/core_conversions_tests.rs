@@ -247,6 +247,10 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             sampling: core_llm::SamplingCapability::Pinned,
             reasoning_retention: Default::default(),
         },
+        extra_body: serde_json::Map::from_iter([(
+            "host_option".to_string(),
+            serde_json::json!({"enabled": true}),
+        )]),
         generation: core_llm::GenerationOptions {
             output_token_cap: NonZeroUsize::new(42),
             temperature: Some(
@@ -281,6 +285,10 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         remote_json["model_intent"]["capability"]["cache_control"],
         serde_json::json!("anthropic")
     );
+    assert_eq!(
+        remote_json["model_intent"]["extra_body"],
+        serde_json::json!({"host_option":{"enabled":true}})
+    );
     let remote: RemoteLlmRequest =
         serde_json::from_value(remote_json).expect("deserialize remote request");
     remote.validate().expect("valid remote request");
@@ -294,6 +302,10 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     );
     assert!(core.model_capability.native_mid_conversation_system);
     assert_eq!(core.model, "gpt-test");
+    assert_eq!(
+        core.extra_body["host_option"],
+        serde_json::json!({"enabled":true})
+    );
     assert_eq!(
         core.model_variant,
         core_llm::ReasoningSelection::Effort("fast".to_string())
@@ -390,37 +402,8 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     assert_eq!(core.response_metadata, response_metadata);
 }
 
-#[test]
-fn remote_model_intent_and_process_model_spec_round_trip_reasoning_selections() {
-    for selection in [
-        RemoteReasoningSelection::ProviderDefault,
-        RemoteReasoningSelection::Disabled,
-        RemoteReasoningSelection::Effort("high".to_string()),
-    ] {
-        let intent = RemoteModelIntent {
-            model: "remote-model".to_string(),
-            variant: selection.clone(),
-            capability: RemoteModelCapability::default(),
-            provider: None,
-            metadata: HashMap::new(),
-        };
-        let intent_json = serde_json::to_value(&intent).expect("serialize model intent");
-        let intent_round_trip: RemoteModelIntent =
-            serde_json::from_value(intent_json).expect("deserialize model intent");
-        assert_eq!(intent_round_trip.variant, selection);
-
-        let spec = RemoteProcessModelSpec {
-            id: "remote-model".to_string(),
-            variant: selection.clone(),
-            capability: RemoteModelCapability::default(),
-            limits: RemoteProcessModelLimits::default(),
-        };
-        let spec_json = serde_json::to_value(&spec).expect("serialize process model spec");
-        let spec_round_trip: RemoteProcessModelSpec =
-            serde_json::from_value(spec_json).expect("deserialize process model spec");
-        assert_eq!(spec_round_trip.variant, selection);
-    }
-}
+#[path = "core_conversions_tests/model_passthrough.rs"]
+mod model_passthrough;
 
 #[test]
 fn prompt_layer_round_trips_without_protocol_crate_depending_on_core_by_default() {

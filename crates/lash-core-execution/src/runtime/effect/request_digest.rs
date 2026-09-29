@@ -37,6 +37,7 @@ macro_rules! journaled_request {
             tool_choice: &$request.tool_choice,
             model_variant: &$request.model_variant,
             model_capability: &$request.model_capability,
+            extra_body: &$request.extra_body,
             generation: &$request.generation,
             scope: &$request.scope,
             output_spec: &$request.output_spec,
@@ -102,6 +103,7 @@ struct JournaledLlmRequest<'a> {
     tool_choice: &'a LlmToolChoice,
     model_variant: &'a crate::ReasoningSelection,
     model_capability: &'a crate::ModelCapability,
+    extra_body: &'a serde_json::Map<String, serde_json::Value>,
     generation: &'a crate::GenerationOptions,
     scope: &'a crate::LlmRequestScope,
     output_spec: &'a Option<LlmOutputSpec>,
@@ -165,6 +167,7 @@ mod tests {
             tool_choice: LlmToolChoice::None,
             model_variant: Default::default(),
             model_capability: Default::default(),
+            extra_body: Default::default(),
             generation: Default::default(),
             scope: crate::LlmRequestScope::new("session", "session:frame", "request"),
             output_spec: None,
@@ -248,5 +251,63 @@ mod tests {
             .is_ok(),
             "the same transcript replays"
         );
+    }
+
+    #[test]
+    fn extra_body_is_journaled_in_both_request_forms_and_changes_diverge() {
+        for before_call in [false, true] {
+            let make = |entries: &[(&str, i32)]| {
+                let mut spec = request(transcript("same"));
+                spec.extra_body = entries
+                    .iter()
+                    .map(|(key, value)| ((*key).to_string(), serde_json::json!(value)))
+                    .collect();
+                let mut envelope = llm_call(transcript("same"));
+                envelope.command = if before_call {
+                    RuntimeEffectCommand::BeforeLlmCall {
+                        request: Box::new(spec.into_request(None, None)),
+                    }
+                } else {
+                    RuntimeEffectCommand::LlmCall {
+                        provider_id: "digest-provider".into(),
+                        request: Box::new(spec),
+                    }
+                };
+                envelope.canonical_form().expect("canonical")
+            };
+            let recorded = make(&[("b", 2), ("a", 1)]);
+            let same = make(&[("a", 1), ("b", 2)]);
+            assert!(
+                validate_replayed_effect_envelope(
+                    &recorded,
+                    &same,
+                    crate::RuntimeErrorCode::EffectReplayDivergence,
+                    None
+                )
+                .is_ok()
+            );
+            let changed = make(&[("a", 1), ("b", 3)]);
+            let error = validate_replayed_effect_envelope(
+                &recorded,
+                &changed,
+                crate::RuntimeErrorCode::EffectReplayDivergence,
+                None,
+            )
+            .expect_err("changed body diverges");
+            assert_eq!(
+                error.summary.expect("summary").first_divergent_paths,
+                ["command.request.extra_body.b"]
+            );
+            let journaled: Value = serde_json::from_str(recorded.json()).expect("json");
+            assert_eq!(
+                journaled["command"]["request"]["extra_body"],
+                serde_json::json!({"a":1,"b":2})
+            );
+            assert!(
+                journaled["command"]["request"]
+                    .get("extra_headers")
+                    .is_none()
+            );
+        }
     }
 }

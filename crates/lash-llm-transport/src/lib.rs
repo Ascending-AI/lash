@@ -4,6 +4,7 @@ pub mod cache_regression;
 pub mod conformance;
 pub mod http;
 pub mod normalize;
+pub mod passthrough;
 #[cfg(feature = "proptest-support")]
 pub mod proptest_support;
 pub mod response_metadata;
@@ -21,6 +22,10 @@ pub use normalize::{
     openai_terminal_reason_from_chat_finish_reason, openai_terminal_reason_from_chat_value,
     openai_terminal_reason_from_response_value, openai_usage_from_response_value,
     openai_usage_from_usage_value, serialize_options_tail, terminal_reason_from_parts,
+};
+pub use passthrough::{
+    ExtraHeaders, merge_extra_body, merge_extra_headers, reserved_generation_paths,
+    validate_extra_headers,
 };
 pub use response_metadata::ResponseMetadataCapture;
 pub use timeouts::{

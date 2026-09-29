@@ -846,10 +846,12 @@ pub struct GenerationReceipt {
     /// `expose_thinking`'s local half: reasoning output published to the host.
     #[serde(default)]
     pub thinking_visibility: GenerationOptionOutcome,
+    #[serde(default)]
+    pub passthrough: GenerationOptionOutcome,
 }
 
 impl GenerationReceipt {
-    fn rows(&self) -> [GenerationOptionOutcome; 9] {
+    fn rows(&self) -> [GenerationOptionOutcome; 10] {
         [
             self.output_token_cap,
             self.temperature,
@@ -860,6 +862,7 @@ impl GenerationReceipt {
             self.parallel_tool_calls,
             self.thinking_summary,
             self.thinking_visibility,
+            self.passthrough,
         ]
     }
 
@@ -896,6 +899,8 @@ pub struct LlmRequest {
     pub model_variant: crate::llm::capability::ReasoningSelection,
     #[serde(default)]
     pub model_capability: crate::llm::capability::ModelCapability,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub generation: GenerationOptions,
     pub scope: LlmRequestScope,

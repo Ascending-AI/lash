@@ -101,9 +101,17 @@ impl LlmToolsProvider {
             .map_err(|err| format!("failed to read current session model: {err}"))?;
         // An override model carries the override capability (empty when the
         // host supplied none); the session model carries the session's.
-        let (model, model_capability) = match self.model.clone() {
-            Some(model) => (model, self.model_capability.clone().unwrap_or_default()),
-            None => (session_model.model, session_model.model_capability),
+        let (model, model_capability, extra_body) = match self.model.clone() {
+            Some(model) => (
+                model,
+                self.model_capability.clone().unwrap_or_default(),
+                Default::default(),
+            ),
+            None => (
+                session_model.model,
+                session_model.model_capability,
+                session_model.extra_body,
+            ),
         };
         let model_variant = self
             .model_variant
@@ -129,6 +137,7 @@ impl LlmToolsProvider {
                     model,
                     model_variant,
                     model_capability,
+                    extra_body,
                     messages: vec![
                         DirectMessage {
                             role: DirectRole::User,

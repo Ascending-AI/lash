@@ -188,6 +188,7 @@ pub(super) fn projection_test_config(
         no_progress_budget: Default::default(),
         model_variant: Default::default(),
         model_capability: Default::default(),
+        extra_body: Default::default(),
         generation,
         autonomous: false,
         tool_specs: Arc::new(Vec::new()),

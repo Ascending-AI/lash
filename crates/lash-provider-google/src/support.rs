@@ -34,7 +34,8 @@ pub(crate) use lash_llm_transport::util::{
 };
 pub(crate) use lash_llm_transport::{
     LlmHttpRequest, LlmHttpTransport, ReqwestLlmHttpTransport, ResponseMetadataCapture,
-    first_header_value, read_http_body_text,
+    first_header_value, merge_extra_body, merge_extra_headers, read_http_body_text,
+    reserved_generation_paths, validate_extra_headers,
 };
 pub(crate) use lash_provider_auth::{
     CredentialCallError, CredentialError, CredentialExecuteError, Lease,

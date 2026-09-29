@@ -17,6 +17,7 @@ pub struct AnthropicProvider {
     pub api_key: Redacted,
     pub base_url: Option<String>,
     pub options: ProviderOptions,
+    pub extra_headers: lash_llm_transport::ExtraHeaders,
     pub stream_termination: StreamTermination,
     pub(crate) transport: Arc<dyn LlmHttpTransport>,
 }
@@ -27,6 +28,7 @@ impl AnthropicProvider {
             api_key: Redacted::new(api_key),
             base_url: None,
             options: ProviderOptions::default(),
+            extra_headers: Default::default(),
             stream_termination: StreamTermination::RequireTerminalEvidence,
             transport: Arc::clone(&DEFAULT_HTTP_TRANSPORT),
         }
@@ -39,6 +41,11 @@ impl AnthropicProvider {
 
     pub fn with_options(mut self, options: ProviderOptions) -> Self {
         self.options = options;
+        self
+    }
+
+    pub fn with_extra_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.extra_headers = headers.into();
         self
     }
 

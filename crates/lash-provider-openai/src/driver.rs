@@ -110,6 +110,15 @@ pub(crate) fn build_request_body(
     stream: bool,
     origin_route: &ProviderRouteIdentity,
 ) -> Result<BuiltRequest, LlmTransportError> {
+    let mut reserved_headers = vec![
+        provider.wire.auth_header_name.as_str(),
+        "content-type",
+        "accept",
+    ];
+    if provider.resolved_compat(endpoint).cache_session_affinity {
+        reserved_headers.push("x-client-request-id");
+    }
+    validate_extra_headers(&provider.wire.extra_headers, &reserved_headers, false)?;
     let mut built = match endpoint {
         CompletionEndpoint::Responses => {
             provider.build_responses_request_for_route(req, stream, origin_route)?
@@ -378,6 +387,7 @@ pub(crate) async fn complete(
     if compat.cache_session_affinity {
         headers.push(("x-client-request-id".to_string(), request_id.clone()));
     }
+    merge_extra_headers(&mut headers, &provider.wire.extra_headers, false)?;
     let http_request = LlmHttpRequest {
         method: http_method,
         url: url.clone(),

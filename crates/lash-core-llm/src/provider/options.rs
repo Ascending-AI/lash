@@ -431,6 +431,7 @@ impl ResolvedGenerationPolicy {
             ),
             // Every adapter gates local reasoning publication on this option.
             thinking_visibility: Outcome::from_emission(self.expose_thinking, true),
+            passthrough: Outcome::NotRequested,
         }
     }
 }

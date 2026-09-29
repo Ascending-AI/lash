@@ -68,6 +68,7 @@ fn request() -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: crate::attachment_test_capability(),
+        extra_body: Default::default(),
         generation: lash_core::GenerationOptions {
             output_token_cap: std::num::NonZeroUsize::new(4_096),
             ..lash_core::GenerationOptions::default()

@@ -325,6 +325,14 @@
           ],
           "default": "not_requested"
         },
+        "passthrough": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        },
         "reasoning": {
           "allOf": [
             {

@@ -24,6 +24,7 @@ fn request_with_inline_attachment(mime: &str) -> LlmRequest {
         tool_choice: Default::default(),
         model_variant: Default::default(),
         model_capability: crate::attachment_test_capability(),
+        extra_body: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",

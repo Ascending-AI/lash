@@ -1602,6 +1602,7 @@ fn direct_llm_request(request_id: &str) -> lash_core::LlmRequest {
         tool_choice: lash_core::llm::types::LlmToolChoice::None,
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
+        extra_body: Default::default(),
         scope: lash_core::LlmRequestScope::new(SESSION, format!("{SESSION}:frame"), request_id),
         output_spec: None,
         stream_events: None,
