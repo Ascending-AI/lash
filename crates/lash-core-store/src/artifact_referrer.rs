@@ -562,6 +562,14 @@ pub enum ArtifactStoreId {
     Engine(String),
 }
 
+impl ArtifactStoreId {
+    /// The store behind the module artifact port.
+    #[must_use]
+    pub const fn module() -> Self {
+        Self::LashlangModule
+    }
+}
+
 /// One artifact, by the store that holds it and its reference there.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,

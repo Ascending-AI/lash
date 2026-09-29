@@ -324,7 +324,7 @@ impl crate::ProcessEngine for Engine {
         _payload: &serde_json::Value,
     ) -> Result<Vec<ArtifactName>, PluginError> {
         Ok(vec![
-            name(ArtifactStoreId::LashlangModule, "mod-start"),
+            name(ArtifactStoreId::module(), "mod-start"),
             name(ArtifactStoreId::Engine(ENGINE_KIND.to_owned()), "own-start"),
         ])
     }
@@ -456,9 +456,9 @@ async fn an_ended_referrer_hands_every_store_its_own_carries() {
         to: to.clone(),
     };
     let carries = vec![
-        carry(name(ArtifactStoreId::LashlangModule, "mod-b")),
+        carry(name(ArtifactStoreId::module(), "mod-b")),
         carry(name(ArtifactStoreId::ProcessEnv, "env-a")),
-        carry(name(ArtifactStoreId::LashlangModule, "mod-a")),
+        carry(name(ArtifactStoreId::module(), "mod-a")),
         carry(name(ArtifactStoreId::Engine(ENGINE_KIND.to_owned()), "own")),
     ];
     assert_eq!(
@@ -562,7 +562,7 @@ async fn a_registered_start_carries_the_retained_record_onto_it() {
         modules,
         vec![resolved(
             &start,
-            vec![carry(name(ArtifactStoreId::LashlangModule, "mod-start"))]
+            vec![carry(name(ArtifactStoreId::module(), "mod-start"))]
         )]
     );
     assert_eq!(

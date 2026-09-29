@@ -325,7 +325,7 @@ impl ArtifactCleanupRelay {
             .end_module_referrer(&ResolvedArtifactCleanup::for_store(
                 referrer,
                 carries,
-                &ArtifactStoreId::LashlangModule,
+                &ArtifactStoreId::module(),
             ))
             .await
             .map_err(store_failure("module store"))?;
