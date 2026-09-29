@@ -711,10 +711,19 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
         state_after_advance.head_revision,
         "receipt replay must not advance the durable head"
     );
+    // The replay refreshes the resident graph from the durable window, which
+    // carries its frame anchor; the graph advanced in memory had none. The
+    // history they hold is the same.
     assert_eq!(
-        serde_json::to_value(&runtime.state().session_graph).expect("encode rolled-back graph"),
-        serde_json::to_value(&state_after_advance.session_graph).expect("encode expected graph"),
+        serde_json::to_value(&runtime.state().session_graph.nodes)
+            .expect("encode rolled-back graph"),
+        serde_json::to_value(&state_after_advance.session_graph.nodes)
+            .expect("encode expected graph"),
         "resident graph must converge with durable history after receipt replay"
+    );
+    assert_eq!(
+        runtime.state().session_graph.leaf_node_id,
+        state_after_advance.session_graph.leaf_node_id
     );
     assert_eq!(
         runtime

@@ -767,9 +767,11 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
         1,
         "the invalidation reload performs exactly one full durable read"
     );
+    // The drive admission's pending-follow-on probe answers from the head,
+    // and the root then verifies its epoch once after the full reload.
     assert_eq!(
         store.load_session_head_meta_count() - head_probes_before,
-        1,
+        2,
         "the drive verifies its epoch once after the full freshness reload"
     );
     assert_eq!(
