@@ -18,6 +18,8 @@ macro_rules! turn_capture_tests {
             (capture_base_advance_removes_old_tail, "base"),
             (capture_seal_is_first_writer_wins, "seal"),
             (capture_commit_publishes_exact_partial, "commit"),
+            (capture_retention_waits_for_deletion, "retention"),
+            (capture_deletion_reclaims_staging_frames, "deletion"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

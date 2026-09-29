@@ -22,6 +22,7 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
         enumerated_blob_count: 4,
         retained_blob_count: 1,
         deleted_blob_count: 2,
+        removed_capture_frame_count: 0,
     };
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.into(),

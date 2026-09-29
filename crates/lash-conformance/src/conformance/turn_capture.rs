@@ -381,3 +381,109 @@ pub async fn capture_commit_publishes_exact_partial(
             .receipt_replayed
     );
 }
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_retention_waits_for_deletion(
+    factory: Arc<dyn SessionStoreFactory>,
+    label: &str,
+) {
+    let (store, turn) = fixture(Arc::clone(&factory), label).await;
+    let lease = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &lease, 0, text_frames()).await;
+    let partial = store
+        .seal_turn_capture(&SealTurnCapture {
+            turn: turn.clone(),
+            root: turn.turn_id.clone(),
+            reason: StopReason::UserCancel,
+            recorded_watermark: None,
+        })
+        .await
+        .expect("seal")
+        .into_partial();
+    let request = lash_core::testing::store_fixtures::session_store_request(
+        &turn.session_id,
+        "capture-model",
+        SessionRelation::Root,
+    );
+    let mut state = RuntimeSessionState {
+        session_id: turn.session_id.clone(),
+        ..RuntimeSessionState::new(request.policy)
+    };
+    state.ensure_agent_frame_initialized();
+    let operation = crate::store::OperationId::new(
+        lash_core::ExecutionScope::turn(turn.session_id.clone(), turn.turn_id.clone()),
+        "commit",
+    );
+    let mut commit =
+        crate::RuntimeCommit::persisted_state_with_operation_for_testing(&state, &[], operation);
+    commit.stopped_partial = Some(StoppedPartialCommit::of(&partial));
+    store.commit_runtime_state(commit).await.expect("commit");
+
+    let all = crate::RetentionBound {
+        committed_before_epoch_ms: u64::MAX,
+    };
+    assert_eq!(
+        factory
+            .reclaim_retained_evidence(all)
+            .await
+            .expect("live sweep")
+            .removed_stopped_partial_count,
+        0
+    );
+    factory
+        .delete_session(&turn.session_id)
+        .await
+        .expect("delete session");
+    assert!(matches!(
+        store
+            .read_stopped_partial(&StoppedPartialReadRequest {
+                session_id: turn.session_id.clone(),
+                turn: turn.turn_id,
+            })
+            .await,
+        Err(StoreError::SessionDeleted { .. })
+    ));
+    let report = factory
+        .reclaim_retained_evidence(all)
+        .await
+        .expect("deleted sweep");
+    assert_eq!(report.removed_stopped_partial_count, 1);
+    assert_eq!(
+        factory
+            .reclaim_retained_evidence(all)
+            .await
+            .expect("sweep replay")
+            .removed_stopped_partial_count,
+        0
+    );
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_deletion_reclaims_staging_frames(
+    factory: Arc<dyn SessionStoreFactory>,
+    label: &str,
+) {
+    let (store, turn) = fixture(Arc::clone(&factory), label).await;
+    let lease = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &lease, 0, text_frames()).await;
+    let report = factory
+        .delete_session(&turn.session_id)
+        .await
+        .expect("delete session");
+    assert_eq!(report.removed_capture_frame_count, 3);
+    assert!(matches!(
+        store
+            .read_stopped_partial(&StoppedPartialReadRequest {
+                session_id: turn.session_id,
+                turn: turn.turn_id,
+            })
+            .await,
+        Err(StoreError::SessionDeleted { .. })
+    ));
+}
