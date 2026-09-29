@@ -450,6 +450,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn relay_stalls_an_unknown_obligation_kind_without_settling_it() {
+        let relay = AlwaysDelivers(PageLedger {
+            page: Mutex::new(vec![claimed(
+                "foreign",
+                ObligationKey::decode_label("synthetic_next", Vec::new()),
+            )]),
+            settled: Mutex::new(Vec::new()),
+        });
+        let pass = relay_due(&relay, &TestClock::new(1_000), NonZeroUsize::MIN)
+            .await
+            .expect("the page remains readable");
+        assert_eq!(pass.claimed, 1);
+        assert_eq!(pass.stalled, 1);
+        assert_eq!(pass.delivered, 0);
+        let settlements = relay
+            .0
+            .settled
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(matches!(
+            settlements.as_slice(),
+            [(id, ObligationSettlement::Stall { reason: StallReason::Undecodable, .. })]
+                if id.as_str() == "foreign"
+        ));
+    }
+
+    #[tokio::test]
     async fn a_row_whose_key_does_not_decode_stalls_and_the_page_goes_on() {
         let relay = AlwaysDelivers(PageLedger {
             page: Mutex::new(vec![

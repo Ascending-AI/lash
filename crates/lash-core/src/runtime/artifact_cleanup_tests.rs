@@ -718,6 +718,39 @@ async fn a_missing_carry_is_refused_and_a_store_fault_is_retried() {
 }
 
 #[tokio::test]
+async fn cleanup_never_counts_an_undecodable_edge_as_absent() {
+    let harness = harness();
+    let cleanup = ArtifactCleanup::ended(host_pin(), Vec::new(), None);
+    let (id, key) = harness.arm(cleanup);
+    *harness
+        .applied
+        .module_failure
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(|| ArtifactStoreError::Incompatible {
+            refusal: crate::compat::CompatRefusal::UnknownVocabulary {
+                surface: "artifact referrer edge kind".to_owned(),
+                label: "synthetic_next".to_owned(),
+            },
+        });
+    assert!(matches!(
+        harness.relay.deliver(&id, &key, 1).await,
+        Err(DeliveryFailure::Undecodable(error)) if error.contains("synthetic_next")
+    ));
+    assert!(
+        harness
+            .ledger
+            .rows
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(&id)
+    );
+    let (_, modules, engine) = harness.applied();
+    assert!(modules.is_empty(), "the module store did not apply cleanup");
+    assert!(engine.is_empty(), "later stores were not asked");
+}
+
+#[tokio::test]
 async fn a_guard_that_does_not_fit_its_referrer_is_undecodable() {
     let harness = harness();
     let mismatched = ArtifactCleanup {

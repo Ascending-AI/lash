@@ -12,8 +12,22 @@ pub(super) fn module_ref(
     host_requirements_ref: &HostRequirementsRef,
     exports: &ModuleExports,
 ) -> ModuleRef {
+    module_ref_for_family(
+        LASHLANG_SEMANTIC_HASH_VERSION,
+        program,
+        host_requirements_ref,
+        exports,
+    )
+}
+
+pub(super) fn module_ref_for_family(
+    family: &str,
+    program: &Program,
+    host_requirements_ref: &HostRequirementsRef,
+    exports: &ModuleExports,
+) -> ModuleRef {
     let mut writer = HashWriter::new();
-    writer.atom(LASHLANG_SEMANTIC_HASH_VERSION);
+    writer.atom(family);
     writer.atom("module");
     writer.atom(IR_ATOM);
     writer.atom(host_requirements_ref.as_str());

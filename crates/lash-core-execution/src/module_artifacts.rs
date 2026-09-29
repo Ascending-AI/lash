@@ -57,6 +57,11 @@ pub enum ArtifactStoreError {
         record_kind: &'static str,
         message: String,
     },
+    /// A stored vocabulary label written by a newer compatible release.
+    #[error("{refusal}")]
+    Incompatible {
+        refusal: crate::compat::CompatRefusal,
+    },
     #[error("artifact store backend error: {0}")]
     Backend(String),
 }
@@ -80,6 +85,7 @@ impl From<crate::StoreError> for ArtifactStoreError {
                 record_kind,
                 message,
             },
+            crate::StoreError::Incompatible { refusal } => Self::Incompatible { refusal },
             other => Self::Backend(other.to_string()),
         }
     }
@@ -102,6 +108,9 @@ impl From<ArtifactStoreError> for crate::PluginError {
                     crate::RuntimeErrorCode::RuntimeStoreCorrupt,
                     error.to_string(),
                 ))
+            }
+            ArtifactStoreError::Incompatible { .. } => {
+                crate::PluginError::Invoke(error.to_string())
             }
             // The store did not answer: a fact about this attempt.
             ArtifactStoreError::Backend(_) => crate::PluginError::Session(error.to_string()),
