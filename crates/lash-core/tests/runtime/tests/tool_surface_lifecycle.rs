@@ -9,6 +9,16 @@ use lash_sansio::sync::MutexExt;
 
 const SEED: u64 = 0x5_c402;
 
+async fn create_fixture_session(store: &dyn lash_core::RuntimeStore, session_id: &str) {
+    lash_core::testing::runtime_helpers::create_runtime_fixture_session(
+        store,
+        &SessionId::from(session_id),
+        &standard_test_policy(),
+    )
+    .await
+    .expect("create the runtime fixture session");
+}
+
 async fn set_tool_access_through_drive(
     runtime: &mut LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
@@ -308,8 +318,8 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
         .expect("resume runtime");
     assert_eq!(
         store.session_admission_count(),
-        admissions_before_resume + 1,
-        "resume must pass through durable admission"
+        admissions_before_resume,
+        "resume must only look up the existing session"
     );
     let state = resumed.export_persistence_state();
     assert_eq!(state.session_id, expected.session_id);
@@ -362,6 +372,7 @@ async fn park_resume_restores_tool_and_subagent_authority() {
         )
         .expect("initial authority plugin session");
     let store = double_unbound_recording_store(&double).await;
+    create_fixture_session(store.as_ref(), "authority-child").await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("authority-worker", "authority-boot");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
@@ -432,6 +443,7 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
         )
         .expect("narrower live-authority plugin session");
     let store = double_unbound_recording_store(&double).await;
+    create_fixture_session(store.as_ref(), "persisted-broader").await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("persisted-worker", "persisted-boot");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
@@ -484,6 +496,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
     let store = double_unbound_recording_store(&double).await;
+    create_fixture_session(store.as_ref(), "mutable-authority-requests").await;
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -586,14 +599,13 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
     let provider: Arc<dyn lash_core::ToolProvider> = surface;
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
+    let store = double_unbound_recording_store(&double).await;
+    create_fixture_session(store.as_ref(), "mutable-authority-discovery").await;
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("mutable-authority-discovery")),
-        Some(session_view(
-            double_unbound_recording_store(&double).await,
-            "mutable-authority-discovery",
-        )),
+        Some(session_view(store, "mutable-authority-discovery")),
         lash_core::testing::runtime_lease_owner(),
     )
     .await
@@ -645,6 +657,7 @@ async fn updated_tool_access_survives_park_and_resume() {
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
     let store = double_unbound_recording_store(&double).await;
+    create_fixture_session(store.as_ref(), "updated-authority-resume").await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("updated-authority-worker", "boot");
     let mut runtime = LashRuntime::from_environment(
         &env,
@@ -682,6 +695,7 @@ async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
     let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
     let env = runtime_environment(&backend, plugin_host);
     let store = double_unbound_recording_store(&double).await;
+    create_fixture_session(store.as_ref(), "tool-access-no-op").await;
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -1441,6 +1455,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
     let store = double_unbound_recording_store(&double).await;
+    create_fixture_session(store.as_ref(), "persisted-live-surface").await;
     let store_dyn: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let owner = lash_core::LeaseOwnerIdentity::opaque("surface-test-worker", "surface-test-boot");
 
@@ -1841,6 +1856,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     let provider: Arc<dyn lash_core::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
     let store = double_unbound_recording_store(&double).await;
+    create_fixture_session(store.as_ref(), "cold-hidden-child").await;
     let plugins = build_hidden_session(
         plugin_host.as_ref(),
         &SessionId::from("cold-hidden-child"),
@@ -1935,6 +1951,7 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
     let store = double_unbound_recording_store(&double).await;
+    create_fixture_session(store.as_ref(), "orphan-lifecycle").await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("orphan-test-worker", "orphan-test-boot");
     let mut runtime = LashRuntime::from_environment(
         &env,

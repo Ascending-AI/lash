@@ -36,8 +36,7 @@ pub(in crate::runtime) fn initial_park_operation(
 
 async fn bind_state_to_store(
     store: &crate::store::SessionStore,
-    state: &mut RuntimeSessionState,
-    relation: crate::SessionRelation,
+    state: &RuntimeSessionState,
 ) -> Result<(), SessionError> {
     if *store.session_id() != state.session_id {
         return Err(SessionError::Store {
@@ -48,51 +47,35 @@ async fn bind_state_to_store(
             },
         });
     }
-    let request = crate::SessionStoreCreateRequest {
-        session_id: state.session_id.clone(),
-        relation,
-        pending_observer_intents: Vec::new(),
-        config: state.policy.clone().into(),
-        head: crate::SessionCreationHead::CommittedByCreator,
-        owning_process_id: None,
-    };
-    store
+    let lookup = store
         .store()
-        .admit_session(&request)
+        .lookup_session(&state.session_id)
         .await
         .map_err(|source| SessionError::Store {
             context: format!("failed to bind session `{}` to its store", state.session_id),
             source,
         })?;
-    store
-        .load_session_meta()
-        .await
-        .map_err(|source| SessionError::Store {
-            context: format!(
-                "failed to verify session `{}` store binding",
-                state.session_id
-            ),
-            source,
-        })?
-        .ok_or_else(|| SessionError::Store {
-            context: format!(
-                "failed to verify session `{}` store binding",
-                state.session_id
-            ),
-            source: crate::StoreError::SessionBindingNotMaterialized {
-                session_id: state.session_id.clone(),
-            },
-        })?;
-    Ok(())
+    let source = match lookup {
+        crate::store::SessionLookup::Live(_) => return Ok(()),
+        crate::store::SessionLookup::Absent => crate::StoreError::SessionNotFound {
+            session_id: state.session_id.clone(),
+        },
+        crate::store::SessionLookup::Deleted => crate::StoreError::SessionDeleted {
+            session_id: state.session_id.clone(),
+        },
+    };
+    Err(SessionError::Store {
+        context: format!("failed to bind session `{}` to its store", state.session_id),
+        source,
+    })
 }
 
 async fn bind_state_to_store_with_trace(
     host: &crate::RuntimeHostConfig,
     store: &crate::store::SessionStore,
-    state: &mut RuntimeSessionState,
-    relation: crate::SessionRelation,
+    state: &RuntimeSessionState,
 ) -> Result<(), SessionError> {
-    let result = bind_state_to_store(store, state, relation).await;
+    let result = bind_state_to_store(store, state).await;
     if let Err(SessionError::Store { source, .. }) = &result {
         crate::trace::emit_store_error(
             &host.tracing.trace_sink,
@@ -113,7 +96,6 @@ pub(in crate::runtime) struct RuntimePersistenceBindings {
 
 pub(in crate::runtime) struct RuntimeSessionAssembly {
     state: RuntimeSessionState,
-    relation: crate::SessionRelation,
     runtime_lease_owner: crate::LeaseOwnerIdentity,
     runtime_lease_executor_id: String,
 }
@@ -121,12 +103,10 @@ pub(in crate::runtime) struct RuntimeSessionAssembly {
 impl RuntimeSessionAssembly {
     pub(in crate::runtime) fn new(
         state: RuntimeSessionState,
-        relation: crate::SessionRelation,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self {
             state,
-            relation,
             runtime_lease_owner,
             runtime_lease_executor_id: uuid::Uuid::new_v4().to_string(),
         }
@@ -139,7 +119,6 @@ impl RuntimeSessionAssembly {
     ) -> Self {
         Self {
             state,
-            relation: crate::SessionRelation::Root,
             runtime_lease_owner,
             runtime_lease_executor_id,
         }
@@ -379,16 +358,10 @@ impl LashRuntime {
         policy: SessionPolicy,
         host: EmbeddedRuntimeHost,
         services: PersistentRuntimeServices,
-        mut state: RuntimeSessionState,
+        state: RuntimeSessionState,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, SessionError> {
-        bind_state_to_store_with_trace(
-            &host.core,
-            &services.store(),
-            &mut state,
-            crate::SessionRelation::Root,
-        )
-        .await?;
+        bind_state_to_store_with_trace(&host.core, &services.store(), &state).await?;
         Self::from_host_state(
             policy,
             host.into(),
@@ -404,16 +377,10 @@ impl LashRuntime {
         policy: SessionPolicy,
         host: ProcessRuntimeHost,
         services: PersistentRuntimeServices,
-        mut state: RuntimeSessionState,
+        state: RuntimeSessionState,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, SessionError> {
-        bind_state_to_store_with_trace(
-            &host.embedded().core,
-            &services.store(),
-            &mut state,
-            crate::SessionRelation::Root,
-        )
-        .await?;
+        bind_state_to_store_with_trace(&host.embedded().core, &services.store(), &state).await?;
         Self::from_host_state(
             policy,
             host.into(),
@@ -442,8 +409,7 @@ impl LashRuntime {
         session: RuntimeSessionAssembly,
     ) -> Result<Self, SessionError> {
         let RuntimeSessionAssembly {
-            mut state,
-            relation,
+            state,
             runtime_lease_owner,
             runtime_lease_executor_id,
         } = session;
@@ -453,8 +419,7 @@ impl LashRuntime {
         } = persistence;
         if let Some(store) = store.as_ref()
             && let Err(error) =
-                bind_state_to_store_with_trace(&embedded_host.core, store, &mut state, relation)
-                    .await
+                bind_state_to_store_with_trace(&embedded_host.core, store, &state).await
         {
             return Err(error);
         }
@@ -800,7 +765,7 @@ impl LashRuntime {
 
 #[cfg(test)]
 mod tests {
-    use super::{bind_state_to_store, initial_park_operation, initial_park_preview};
+    use super::{initial_park_operation, initial_park_preview};
     use crate::SessionError;
     use crate::SessionId;
 
@@ -914,49 +879,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_deletion_refusal_keeps_its_type_through_runtime_binding() {
-        let session_id = "deleted-during-runtime-binding";
-        let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-        let request = crate::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.to_string()),
-            relation: crate::SessionRelation::Root,
-            config: policy.clone().into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
-        };
-        let backend = crate::testing::memory_store_set().await;
-        let factory: std::sync::Arc<dyn crate::DeploymentStore> = backend.session_store_factory();
-        let store = crate::runtime::admit_session_view(&factory, &request)
-            .await
-            .expect("create session store before deletion");
-        factory
-            .delete_session(&SessionId::from(session_id))
-            .await
-            .expect("delete session before runtime binding");
-        let mut state = crate::RuntimeSessionState {
-            session_id: SessionId::from(session_id.to_string()),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-            ))
-        };
-
-        let error = bind_state_to_store(&store, &mut state, crate::SessionRelation::Root)
-            .await
-            .expect_err("runtime binding must refuse a retired session");
-
-        assert!(matches!(
-            error,
-            SessionError::Store {
-                source: crate::StoreError::SessionDeleted {
-                    session_id: deleted_session_id,
-                },
-                ..
-            } if deleted_session_id == session_id
-        ));
-    }
-
-    #[tokio::test]
     async fn park_commit_preserves_a_concurrent_session_deletion_refusal() {
         use crate::runtime::tests::helpers::{
             EmptyTools, plugin_session_with_tools, standard_test_policy, test_host_config,
@@ -975,7 +897,7 @@ mod tests {
         };
         let backend = crate::testing::memory_store_backend().await;
         let factory = backend.session_store_factory();
-        let store = crate::runtime::admit_session_view(&factory, &request)
+        let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
             .await
             .expect("create session store before parking");
         let runtime_host = test_host_config(&backend);
@@ -1040,17 +962,19 @@ mod tests {
         let policy = standard_test_policy();
         let backend = crate::testing::memory_store_backend().await;
         let factory = backend.session_store_factory();
-        factory
-            .admit_session(&crate::SessionStoreCreateRequest {
+        crate::testing::runtime_helpers::create_session_store(
+            &factory,
+            &crate::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
                 relation: crate::SessionRelation::Root,
                 config: policy.clone().into(),
                 head: crate::SessionCreationHead::CommittedByCreator,
-            })
-            .await
-            .expect("create session store before parking");
+            },
+        )
+        .await
+        .expect("create session store before parking");
         let store = Arc::new(crate::testing::runtime_helpers::RecordingStore::over(
             factory,
         ));

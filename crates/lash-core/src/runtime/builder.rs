@@ -351,11 +351,7 @@ impl EmbeddedRuntimeBuilder {
             plugins,
             persistence,
             work,
-            super::lifecycle::RuntimeSessionAssembly::new(
-                state,
-                crate::SessionRelation::Root,
-                self.runtime_lease_owner,
-            ),
+            super::lifecycle::RuntimeSessionAssembly::new(state, self.runtime_lease_owner),
         )
         .await
     }

@@ -19,6 +19,7 @@ mod driver_install;
 mod prompt_reopen_authority;
 #[cfg(all(test, feature = "rlm"))]
 mod rlm_session_facts;
+mod runtime_assembly;
 #[cfg(test)]
 mod runtime_dependencies;
 #[cfg(test)]

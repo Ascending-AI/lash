@@ -398,6 +398,53 @@ pub async fn advance_session_head(
         .expect("the advanced head exists")
 }
 
+/// Create a runtime fixture's missing session explicitly; an existing fixture
+/// is reopened through lookup and a tombstone is never reused.
+pub async fn create_runtime_fixture_session(
+    store: &dyn crate::RuntimeStore,
+    session_id: &SessionId,
+    policy: &crate::SessionPolicy,
+) -> Result<(), crate::StoreError> {
+    match store.lookup_session(session_id).await? {
+        crate::store::SessionLookup::Live(_) => return Ok(()),
+        crate::store::SessionLookup::Deleted => {
+            return Err(crate::StoreError::SessionDeleted {
+                session_id: session_id.clone(),
+            });
+        }
+        crate::store::SessionLookup::Absent => {}
+    }
+    assert_eq!(
+        store
+            .admit_session(&crate::SessionStoreCreateRequest {
+                session_id: session_id.clone(),
+                relation: crate::SessionRelation::Root,
+                pending_observer_intents: Vec::new(),
+                config: policy.clone().into(),
+                head: crate::SessionCreationHead::CommittedByCreator,
+                owning_process_id: None,
+            })
+            .await?,
+        crate::store::SessionAdmission::Created,
+        "runtime fixture already exists",
+    );
+    Ok(())
+}
+
+/// Create a fresh fixture session explicitly, refusing accidental fixture reuse.
+pub async fn create_session_store(
+    factory: &Arc<dyn crate::DeploymentStore>,
+    request: &crate::SessionStoreCreateRequest,
+) -> Result<crate::store::SessionStore, crate::StoreError> {
+    assert_eq!(
+        factory.admit_session(request).await?,
+        crate::store::SessionAdmission::Created,
+        "fixture session already exists",
+    );
+    let runtime: Arc<dyn crate::RuntimeStore> = factory.clone();
+    crate::store::SessionStore::new(runtime, request.session_id.clone())
+}
+
 /// A fresh root session store for `session_id` from `backend`'s catalog,
 /// under a [`RecordingStore`].
 pub async fn recording_session_store(
@@ -559,6 +606,11 @@ impl TestRuntime {
         initial_state.policy.model.capability.attachment_acceptance = self.attachment_acceptance;
         let attachment_store = Arc::clone(&self.host.core.durability.attachment_store);
         let process_env_store = Arc::clone(&self.host.core.durability.process_env_store);
+        if let Some(store) = self.store.as_ref() {
+            create_runtime_fixture_session(store.as_ref(), &initial_state.session_id, &policy)
+                .await
+                .expect("create the runtime fixture session");
+        }
         let store = self.store.map(|store| {
             crate::store::SessionStore::new(store, initial_state.session_id.clone())
                 .expect("test session id is valid")

@@ -275,6 +275,13 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
     }]);
 
     let store = double_unbound_recording_store(&double).await;
+    lash_core::testing::runtime_helpers::create_runtime_fixture_session(
+        store.as_ref(),
+        &SessionId::from("root"),
+        &standard_test_policy(),
+    )
+    .await
+    .expect("create the runtime fixture session");
     let plugins = plugin_session_with_tools(&SessionId::from("root"), Arc::new(EmptyTools));
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
@@ -420,6 +427,13 @@ async fn park_returns_error_when_final_commit_fails() {
     let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(&double).await;
+    lash_core::testing::runtime_helpers::create_runtime_fixture_session(
+        store.as_ref(),
+        &SessionId::from("park-session"),
+        &standard_test_policy(),
+    )
+    .await
+    .expect("create the runtime fixture session");
     let plugins = plugin_session_with_tools(&SessionId::from("park-session"), Arc::new(EmptyTools));
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
@@ -463,6 +477,13 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(&double).await;
+    lash_core::testing::runtime_helpers::create_runtime_fixture_session(
+        store.as_ref(),
+        &SessionId::from("root"),
+        &standard_test_policy(),
+    )
+    .await
+    .expect("create the runtime fixture session");
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let plugin_host =
@@ -610,6 +631,13 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
     let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(&double).await;
+    lash_core::testing::runtime_helpers::create_runtime_fixture_session(
+        store.as_ref(),
+        &SessionId::from("root"),
+        &standard_test_policy(),
+    )
+    .await
+    .expect("create the runtime fixture session");
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let plugin_host =
@@ -746,6 +774,13 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
     let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(&double).await;
+    lash_core::testing::runtime_helpers::create_runtime_fixture_session(
+        store.as_ref(),
+        &SessionId::from("root"),
+        &standard_test_policy(),
+    )
+    .await
+    .expect("create the runtime fixture session");
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let plugin_host =
@@ -819,6 +854,13 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
     let backend = double.lash_backend();
     let session_id = "deleted-during-append-rollback";
     let store = double_unbound_recording_store(&double).await;
+    lash_core::testing::runtime_helpers::create_runtime_fixture_session(
+        store.as_ref(),
+        &SessionId::from(session_id),
+        &standard_test_policy(),
+    )
+    .await
+    .expect("create the runtime fixture session");
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let fail_restore = Arc::new(AtomicBool::new(false));
@@ -933,6 +975,13 @@ async fn completed_turns_are_persisted_in_session_graph() {
     }]);
 
     let store = double_unbound_recording_store(&double).await;
+    lash_core::testing::runtime_helpers::create_runtime_fixture_session(
+        store.as_ref(),
+        &SessionId::from("root"),
+        &standard_test_policy(),
+    )
+    .await
+    .expect("create the runtime fixture session");
     let base_provider: Arc<dyn lash_core::ToolProvider> = Arc::new(EmptyTools);
     let base_provider_factory = Arc::clone(&base_provider);
     let plugin_host =

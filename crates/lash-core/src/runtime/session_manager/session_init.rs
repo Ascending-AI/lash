@@ -241,7 +241,6 @@ async fn materialize_session_init(
         current.host.work.clone(),
         crate::runtime::lifecycle::RuntimeSessionAssembly::new(
             initial_state,
-            plan.relation.clone(),
             current.runtime_lease_owner.clone(),
         ),
     )

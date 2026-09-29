@@ -117,7 +117,7 @@ pub enum EmbedError {
     /// Wraps the trace flush failure.
     TraceFlush(#[from] lash_trace::TraceSinkError),
     #[error("runtime session error: {0}")]
-    Session(#[from] SessionError),
+    Session(#[source] SessionError),
     #[error("runtime turn error: {0}")]
     Runtime(#[from] lash_core::RuntimeError),
     #[error("runtime plugin/control error: {0}")]
@@ -148,6 +148,18 @@ pub enum EmbedError {
         /// The generation this deployment runs.
         generation: lash_core::engine::BuildGeneration,
     },
+}
+
+impl From<SessionError> for EmbedError {
+    fn from(error: SessionError) -> Self {
+        match error {
+            SessionError::Store {
+                source: lash_core::StoreError::SessionNotFound { session_id },
+                ..
+            } => Self::UnknownSession { session_id },
+            error => Self::Session(error),
+        }
+    }
 }
 
 impl From<SendError> for EmbedError {

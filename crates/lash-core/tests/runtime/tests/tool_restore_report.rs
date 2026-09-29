@@ -108,13 +108,20 @@ fn owner(label: &str) -> lash_core::LeaseOwnerIdentity {
     lash_core::LeaseOwnerIdentity::opaque(format!("fig3367-{label}"), "fig3367-boot")
 }
 
-async fn open_runtime(
+async fn create_or_open_fixture_runtime(
     backend: &lash_core::Backend,
     session_id: &SessionId,
     store: &Arc<dyn lash_core::RuntimeStore>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     policy: lash_core::ToolSourcePolicy,
 ) -> Result<LashRuntime, lash_core::SessionError> {
+    lash_core::testing::runtime_helpers::create_runtime_fixture_session(
+        store.as_ref(),
+        session_id,
+        &standard_test_policy(),
+    )
+    .await
+    .expect("create the tool restoration fixture session");
     let env = environment(backend, tools, policy);
     // Mirror what the facade's `open()` does: load the current window first,
     // then build the runtime on the loaded state. Passing a default state instead would restore
@@ -140,7 +147,7 @@ async fn open_runtime(
     .await
 }
 
-/// Same open sequence as [`open_runtime`], but on an environment the
+/// Same open sequence as [`create_or_open_fixture_runtime`], but on an environment the
 /// host has already built — used to open under
 /// [`ToolSurfaceOpenMode::PreservePersisted`](lash_core::ToolSurfaceOpenMode).
 async fn open_runtime_on(
@@ -200,7 +207,7 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
     let store = double_unbound_store(&double).await;
 
     // Step 1: open with the source and record a deliberate opt-out of beta.
-    let mut granted = open_runtime(
+    let mut granted = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -242,7 +249,7 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
 
     // Step 2: open on a core that does not carry the source. Tolerate, so the
     // session opens and the report names the loss.
-    let grantless = open_runtime(
+    let grantless = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -328,7 +335,7 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
     assert!(!beta.member, "and its opt-out is still an opt-out");
 
     // Step 4: the source returns.
-    let regranted = open_runtime(
+    let regranted = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -373,7 +380,7 @@ async fn seed_opted_out_session(
     session_id: &SessionId,
     store: &Arc<dyn lash_core::RuntimeStore>,
 ) -> u64 {
-    let mut granted = open_runtime(
+    let mut granted = create_or_open_fixture_runtime(
         backend,
         session_id,
         store,
@@ -442,7 +449,7 @@ async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
     let store = double_unbound_store(&double).await;
 
     // Step 1: open with the source, opt out of beta, park.
-    let mut granted = open_runtime(
+    let mut granted = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -522,7 +529,7 @@ async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
 
     // Step 4: the source returns. The snapshot was never orphaned, so the
     // restore adopts it unchanged and both tools are catalog members.
-    let regranted = open_runtime(
+    let regranted = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -605,7 +612,7 @@ async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
     assert_persisted_surface_unchanged(&store, &session_id, persisted_generation).await;
 
     // The source returns: nothing was ever orphaned, so the restore is clean.
-    let regranted = open_runtime(
+    let regranted = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -815,7 +822,7 @@ async fn alias_replacement_is_reported_as_superseded_and_never_refuses() {
     let session_id = SessionId::from("fig3367-superseded");
     let store = double_unbound_store(&double).await;
 
-    let granted = open_runtime(
+    let granted = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -826,7 +833,7 @@ async fn alias_replacement_is_reported_as_superseded_and_never_refuses() {
     .expect("granted open");
     Box::pin(granted.park()).await.expect("park");
 
-    let replaced = open_runtime(
+    let replaced = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -862,7 +869,7 @@ async fn an_opt_out_only_snapshot_does_not_refuse_under_require() {
     let session_id = SessionId::from("fig3367-opt-out-only");
     let store = double_unbound_store(&double).await;
 
-    let mut granted = open_runtime(
+    let mut granted = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -880,7 +887,7 @@ async fn an_opt_out_only_snapshot_does_not_refuse_under_require() {
         .expect("apply the opt-out");
     Box::pin(granted.park()).await.expect("park");
 
-    let strict = open_runtime(
+    let strict = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -909,7 +916,7 @@ async fn require_refuses_a_direct_construction_that_lost_a_member() {
     let session_id = SessionId::from("fig3367-require-direct");
     let store = double_unbound_store(&double).await;
 
-    let granted = open_runtime(
+    let granted = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -923,7 +930,7 @@ async fn require_refuses_a_direct_construction_that_lost_a_member() {
         .await
         .head_revision;
 
-    let refusal = match open_runtime(
+    let refusal = match create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -951,7 +958,7 @@ async fn require_refuses_a_direct_construction_that_lost_a_member() {
         head_after, head_before,
         "a refused open commits no config or state"
     );
-    let reopened = open_runtime(
+    let reopened = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -972,7 +979,7 @@ async fn require_refuses_a_resume_that_lost_a_member() {
     let session_id = SessionId::from("fig3367-require-resume");
     let store = double_unbound_store(&double).await;
 
-    let granted = open_runtime(
+    let granted = create_or_open_fixture_runtime(
         &backend,
         &session_id,
         &store,
@@ -1130,7 +1137,7 @@ async fn live_require_runtime(
     let surface = MutableTools::new(vec![(ALPHA_ID, ALPHA_NAME)]);
     let tools: Arc<dyn lash_core::ToolProvider> =
         Arc::clone(&surface) as Arc<dyn lash_core::ToolProvider>;
-    let mut runtime = open_runtime(
+    let mut runtime = create_or_open_fixture_runtime(
         backend,
         session_id,
         store,

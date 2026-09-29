@@ -242,7 +242,7 @@ async fn committed_factory_attachment() -> (
         config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
         head: crate::SessionCreationHead::CommittedByCreator,
     };
-    let store = crate::runtime::admit_session_view(&factory, &request)
+    let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
         .await
         .expect("create attachment-aware store");
     let backend = substrate.attachment_store();
@@ -1227,7 +1227,7 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
         config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
         head: crate::SessionCreationHead::CommittedByCreator,
     };
-    let store = crate::runtime::admit_session_view(&factory, &request)
+    let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
         .await
         .expect("create attachment-aware store");
     let backend = substrate.attachment_store();
