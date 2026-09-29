@@ -109,10 +109,10 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
     async fn list_sessions(
         &self,
         filter: &SessionListFilter,
-    ) -> Result<Vec<SessionSummary>, StoreError> {
+    ) -> Result<Vec<SessionView>, StoreError> {
         let filter = filter.clone();
         self.read_connection()
-            .call(move |conn| crate::session_listing::list_session_summaries(conn, &filter))
+            .call(move |conn| crate::session_listing::list_session_views(conn, &filter))
             .await
             .map_err(sqlite_error)
     }

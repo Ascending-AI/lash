@@ -4,7 +4,7 @@
 //! create, find, enumerate, fork and delete sessions; each one either takes
 //! the session it acts on or spans the catalog, and says which.
 use super::{MaintenanceResult, SessionAdmission, SessionBlobReclaimReport, StoreError};
-use crate::session_catalog::{SessionListFilter, SessionSummary};
+use crate::session_catalog::{SessionListFilter, SessionView};
 use crate::session_store_factory_types::{
     ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionLookup, SessionStoreCreateRequest,
 };
@@ -48,7 +48,7 @@ pub trait SessionCatalogStore: Send + Sync {
     async fn list_sessions(
         &self,
         filter: &SessionListFilter,
-    ) -> Result<Vec<SessionSummary>, StoreError>;
+    ) -> Result<Vec<SessionView>, StoreError>;
 
     /// Add a new session head at a retained point without writing graph
     /// nodes. `request.session_id` names the new session.

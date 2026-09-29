@@ -281,8 +281,8 @@ pub use process::{
     ProcessLifecycle, ProcessLineage, ProcessListFilter, ProcessListMode, ProcessLiveReferenceView,
     ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator,
     ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessPruneReport, ProcessQuery,
-    ProcessRecord, ProcessRegistrar, ProcessRegistration, ProcessRegistrationDisposition,
-    ProcessRegistrationOutcome, ProcessRegistrationProbe, ProcessRegistrationRefusal,
+    ProcessRecord, ProcessRegistrar, ProcessRegistration, ProcessRegistrationOutcome,
+    ProcessRegistrationProbe, ProcessRegistrationReceipt, ProcessRegistrationRefusal,
     ProcessRegistry, ProcessRegistryBinding, ProcessRegistryCursor, ProcessResumeRefusal,
     ProcessRetention, ProcessRunOutcome, ProcessScopeFenceHosts, ProcessSegmentKey, ProcessService,
     ProcessSessionDeleteReport, ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration,
@@ -318,7 +318,7 @@ pub use process::{
     ProcessEventLogTestSupport, ProcessRegistryTestSupport, TestProcessRegistryWriteExt,
     accepted_process_registration, fail_parent_end_once, refused_process_registrations,
 };
-pub use process::{ConsumerHold, SessionTurnResult};
+pub use process::{ConsumerHold, SessionTurnOutcome};
 pub use process::{ProcessStartStores, RegisteredProcessStart, register_process_start};
 pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{

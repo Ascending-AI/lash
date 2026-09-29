@@ -77,7 +77,7 @@ where
     // write after the send is journaled too, so a replay after the process
     // was pruned reads what the live start wrote and never the store.
     let realization = started.realization();
-    let created_here = started.disposition == lash_core::ProcessRegistrationDisposition::Created;
+    let created_here = started.disposition == lash_core::ProcessRegistrationOutcome::Created;
     let record = started.record;
     let process_id = record.id.clone();
     // Registration armed the row's `ProcessStart` obligation; the journaled

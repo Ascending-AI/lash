@@ -110,12 +110,12 @@ pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
     // The key is free again: its next start mints a successor with its own
     // id, and the pruned id refuses rather than resolving to the successor.
     let second = registry
-        .register_process_reporting_disposition(start(), &[])
+        .register_process_reporting_outcome(start(), &[])
         .await
         .expect("start again under the pruned process's key");
     assert_eq!(
-        second.disposition,
-        crate::ProcessRegistrationDisposition::Created,
+        second.outcome,
+        crate::ProcessRegistrationOutcome::Created,
         "a pruned process no longer holds its key"
     );
     assert_ne!(second.record.id, first.id, "a minted id is never reused");

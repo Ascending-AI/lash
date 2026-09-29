@@ -111,7 +111,7 @@ pub enum ProcessInput {
         create_request: Box<crate::SessionCreateRequest>,
         turn_input: Box<crate::TurnInput>,
         /// What the runner answers when the child turn finishes.
-        result: SessionTurnResult,
+        result: SessionTurnOutcome,
     },
     External {
         #[serde(default)]
@@ -126,7 +126,7 @@ pub enum ProcessInput {
 /// finished turn is projected differently.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SessionTurnResult {
+pub enum SessionTurnOutcome {
     /// The runner answers the child's `AssembledTurn`, with the process and
     /// child-session ids beside it.
     Turn,
@@ -859,7 +859,7 @@ impl StoreRealization {
 /// put the row there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProcessRegistrationDisposition {
+pub enum ProcessRegistrationOutcome {
     /// This call inserted the row.
     Created,
     /// A row with this registration's fingerprint was already recorded; the
@@ -867,20 +867,20 @@ pub enum ProcessRegistrationDisposition {
     Existing,
 }
 
-/// A registered process record together with [`ProcessRegistrationDisposition`].
+/// A registered process record together with its [`ProcessRegistrationOutcome`].
 #[derive(Clone, Debug)]
-pub struct ProcessRegistrationOutcome {
+pub struct ProcessRegistrationReceipt {
     /// The registered record, newly created or already recorded.
     pub record: ProcessRecord,
-    pub disposition: ProcessRegistrationDisposition,
+    pub outcome: ProcessRegistrationOutcome,
 }
 
-impl ProcessRegistrationOutcome {
+impl ProcessRegistrationReceipt {
     /// A record this call inserted.
     pub fn created(record: ProcessRecord) -> Self {
         Self {
             record,
-            disposition: ProcessRegistrationDisposition::Created,
+            outcome: ProcessRegistrationOutcome::Created,
         }
     }
 
@@ -888,12 +888,12 @@ impl ProcessRegistrationOutcome {
     pub fn existing(record: ProcessRecord) -> Self {
         Self {
             record,
-            disposition: ProcessRegistrationDisposition::Existing,
+            outcome: ProcessRegistrationOutcome::Existing,
         }
     }
 
     pub fn is_created(&self) -> bool {
-        self.disposition == ProcessRegistrationDisposition::Created
+        self.outcome == ProcessRegistrationOutcome::Created
     }
 }
 
@@ -1205,12 +1205,12 @@ pub struct ProcessStartReceipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_key: Option<StartKey>,
     /// Whether this start created the process.
-    pub disposition: ProcessRegistrationDisposition,
+    pub disposition: ProcessRegistrationOutcome,
 }
 
 impl ProcessStartReceipt {
     /// The receipt of a start that registered `record` with `disposition`.
-    pub fn of(record: &ProcessRecord, disposition: ProcessRegistrationDisposition) -> Self {
+    pub fn of(record: &ProcessRecord, disposition: ProcessRegistrationOutcome) -> Self {
         Self {
             process_id: record.id.clone(),
             start_key: record.start_key.clone(),

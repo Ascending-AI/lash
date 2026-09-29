@@ -376,7 +376,7 @@ where
                     Ok(lash_core::runtime::RegisteredProcessStart {
                         env_ref: record.env_ref.clone(),
                         record,
-                        disposition: lash_core::ProcessRegistrationDisposition::Existing,
+                        disposition: lash_core::ProcessRegistrationOutcome::Existing,
                     })
                 }
                 Err(error) => {

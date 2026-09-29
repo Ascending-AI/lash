@@ -116,7 +116,7 @@ pub use process::{
     ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry,
     ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance,
     ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
-    ProcessRegistrationDisposition, ProcessRegistrationOutcome, ProcessRegistrationProbe,
+    ProcessRegistrationOutcome, ProcessRegistrationProbe, ProcessRegistrationReceipt,
     ProcessRegistrationRefusal, ProcessRegistry, ProcessRegistryBinding, ProcessRegistryCursor,
     ProcessResumeRefusal, ProcessRetention, ProcessRunOutcome, ProcessScopeFenceHosts,
     ProcessSegmentKey, ProcessService, ProcessSessionDeleteReport, ProcessSignature,
@@ -158,7 +158,7 @@ pub use process::{
     TestProcessRegistryWriteExt, accepted_process_registration, fail_parent_end_once,
     refused_process_registrations,
 };
-pub use process::{ConsumerHold, SessionTurnResult};
+pub use process::{ConsumerHold, SessionTurnOutcome};
 pub use queued_drain_policy::default_queued_drain_policy;
 pub(crate) use queued_drain_policy::shared_drain_mode_policy;
 pub use queued_drain_policy::{

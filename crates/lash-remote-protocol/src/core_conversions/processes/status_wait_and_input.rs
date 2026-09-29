@@ -267,20 +267,20 @@ impl TryFrom<RemoteProcessInput> for lash_core::ProcessInput {
     }
 }
 
-impl From<lash_core::SessionTurnResult> for crate::RemoteSessionTurnResult {
-    fn from(value: lash_core::SessionTurnResult) -> Self {
+impl From<lash_core::SessionTurnOutcome> for crate::RemoteSessionTurnOutcome {
+    fn from(value: lash_core::SessionTurnOutcome) -> Self {
         match value {
-            lash_core::SessionTurnResult::Turn => Self::Turn,
-            lash_core::SessionTurnResult::FinalValue { schema } => Self::FinalValue { schema },
+            lash_core::SessionTurnOutcome::Turn => Self::Turn,
+            lash_core::SessionTurnOutcome::FinalValue { schema } => Self::FinalValue { schema },
         }
     }
 }
 
-impl From<crate::RemoteSessionTurnResult> for lash_core::SessionTurnResult {
-    fn from(value: crate::RemoteSessionTurnResult) -> Self {
+impl From<crate::RemoteSessionTurnOutcome> for lash_core::SessionTurnOutcome {
+    fn from(value: crate::RemoteSessionTurnOutcome) -> Self {
         match value {
-            crate::RemoteSessionTurnResult::Turn => Self::Turn,
-            crate::RemoteSessionTurnResult::FinalValue { schema } => Self::FinalValue { schema },
+            crate::RemoteSessionTurnOutcome::Turn => Self::Turn,
+            crate::RemoteSessionTurnOutcome::FinalValue { schema } => Self::FinalValue { schema },
         }
     }
 }

@@ -30,8 +30,8 @@ error[E0599]: no method named `session_exists` found for struct `LashCore` in th
 help: there is a method `sessions` with a similar name, but with different arguments
   --> src/core.rs
    |
-   |     pub async fn sessions(&self) -> Result<Vec<SessionSummary>> {
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |     pub async fn sessions(&self) -> Result<Vec<SessionView>> {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error[E0599]: no method named `await_queued_work_batch` found for struct `DurableSession` in the current scope
   --> tests/ui/queue_operations_left_lash_session.rs:20:10

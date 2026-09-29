@@ -986,7 +986,7 @@ pub enum ProcessEffectOutcome {
         // effect executor.
         record: Box<ProcessRecord>,
         /// Whether this start created the process or found it registered.
-        disposition: crate::ProcessRegistrationDisposition,
+        disposition: crate::ProcessRegistrationOutcome,
     },
     List {
         entries: Vec<ProcessRecord>,

@@ -60,7 +60,7 @@ fn registration_for(child: &SessionId) -> ProcessRegistration {
                 .with_session_id(child),
             ),
             turn_input: Box::new(lash_core::TurnInput::text("run the child turn")),
-            result: lash_core::SessionTurnResult::Turn,
+            result: lash_core::SessionTurnOutcome::Turn,
         },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,

@@ -276,8 +276,8 @@ fn project_trigger_process_input(
             identity.tag(3);
             identity.string(definition_key);
             match result {
-                crate::SessionTurnResult::Turn => identity.tag(1),
-                crate::SessionTurnResult::FinalValue { schema } => {
+                crate::SessionTurnOutcome::Turn => identity.tag(1),
+                crate::SessionTurnOutcome::FinalValue { schema } => {
                     identity.tag(2);
                     identity.optional(schema.as_ref(), project_process_schema_leaf);
                 }

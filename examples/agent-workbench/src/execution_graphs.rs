@@ -580,7 +580,7 @@ mod tests {
                     definition_key: "agent-workbench-subagent:v1".to_string(),
                     create_request: Box::new(create_request),
                     turn_input: Box::new(lash::TurnInput::text("run child")),
-                    result: lash::process::SessionTurnResult::Turn,
+                    result: lash::process::SessionTurnOutcome::Turn,
                 },
                 lash::process::ProcessProvenance::session(lash::process::SessionScope::new("root")),
                 lash::process::Lifetime::Detached,
@@ -710,7 +710,7 @@ mod tests {
                     definition_key: "agent-workbench-subagent:v1".to_string(),
                     create_request: Box::new(create_request),
                     turn_input: Box::new(lash::TurnInput::text("run child")),
-                    result: lash::process::SessionTurnResult::Turn,
+                    result: lash::process::SessionTurnOutcome::Turn,
                 },
                 lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                     current_session_id,

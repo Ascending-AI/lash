@@ -27,7 +27,7 @@ pub(crate) async fn list_sessions(
     }
     let mut sessions = Vec::with_capacity(rostered.len());
     for entry in rostered {
-        sessions.push(SessionSummary {
+        sessions.push(SessionView {
             current: entry.session_id == current_session_id,
             session_id: entry.session_id,
             name: entry.name,
@@ -49,7 +49,7 @@ pub(crate) async fn list_sessions(
 pub(crate) async fn create_session(
     State(state): State<AppState>,
     Json(request): Json<SessionCreateRequest>,
-) -> Result<Json<SessionSummary>, AppError> {
+) -> Result<Json<SessionView>, AppError> {
     let session_id = new_session_id();
     let name = match request.name.as_deref().map(str::trim) {
         None | Some("") => session_id.to_string(),
@@ -84,7 +84,7 @@ pub(crate) async fn create_session(
             "name": entry.name,
         }),
     );
-    Ok(Json(SessionSummary {
+    Ok(Json(SessionView {
         current: session_id == state.current_session_id(),
         session_id: session_id.clone(),
         name: entry.name,
@@ -99,7 +99,7 @@ pub(crate) async fn create_session(
 pub(crate) async fn select_session(
     State(state): State<AppState>,
     Json(request): Json<SessionSelectRequest>,
-) -> Result<Json<SessionSummary>, AppError> {
+) -> Result<Json<SessionView>, AppError> {
     let session_id = state
         .admit_session(
             &SessionQuery {
@@ -121,7 +121,7 @@ pub(crate) async fn select_session(
         "api.sessions.selected",
         json!({ "session_id": session_id }),
     );
-    Ok(Json(SessionSummary {
+    Ok(Json(SessionView {
         current: true,
         session_id: session_id.clone(),
         name: entry.name,

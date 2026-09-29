@@ -359,8 +359,8 @@ pub fn record_start_answered(
     recorder.record(Fact::ProcessStartAnswered {
         process: receipt.process_id.to_string(),
         disposition: match receipt.disposition {
-            lash_core::ProcessRegistrationDisposition::Created => "created",
-            lash_core::ProcessRegistrationDisposition::Existing => "existing",
+            lash_core::ProcessRegistrationOutcome::Created => "created",
+            lash_core::ProcessRegistrationOutcome::Existing => "existing",
         }
         .to_owned(),
         requested_originator: originator(requested),

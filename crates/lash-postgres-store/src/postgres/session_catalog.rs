@@ -3,7 +3,7 @@ use crate::*;
 pub(crate) async fn list_sessions(
     pool: &PgPool,
     filter: &SessionListFilter,
-) -> Result<Vec<SessionSummary>, StoreError> {
+) -> Result<Vec<SessionView>, StoreError> {
     let rows = sqlx::query(
         crate::session_sql::session_sql()
             .meta_postgres
@@ -13,7 +13,7 @@ pub(crate) async fn list_sessions(
     .fetch_all(pool)
     .await
     .map_err(store_sqlx_error)?;
-    let mut summaries = Vec::with_capacity(rows.len());
+    let mut views = Vec::with_capacity(rows.len());
     for row in rows {
         let stored = crate::session_meta::stored_relation_from_row(&row)?;
         let relation_label = stored.relation_kind.clone();
@@ -23,7 +23,7 @@ pub(crate) async fn list_sessions(
             "fork" => SessionRelationKind::Fork,
             other => {
                 return Err(StoreError::StoredDataCorrupt {
-                    record_kind: "SessionSummary",
+                    record_kind: "SessionView",
                     message: format!("unknown relation_kind `{other}`"),
                 });
             }
@@ -38,31 +38,23 @@ pub(crate) async fn list_sessions(
                 row.get("observer_intent_rows_json"),
             )?)
         };
-        let summary = SessionSummary {
+        let view = SessionView {
             session_id: SessionId::from(row.get::<String, _>("session_id")),
-            created_at_ms: u64_from_sql(
-                "SessionSummary",
-                "created_at_ms",
-                row.get("created_at_ms"),
-            )?,
+            created_at_ms: u64_from_sql("SessionView", "created_at_ms", row.get("created_at_ms"))?,
             last_commit_at_ms: row
                 .get::<Option<i64>, _>("last_commit_at_ms")
-                .map(|value| u64_from_sql("SessionSummary", "last_commit_at_ms", value))
+                .map(|value| u64_from_sql("SessionView", "last_commit_at_ms", value))
                 .transpose()?,
-            head_revision: u64_from_sql(
-                "SessionSummary",
-                "head_revision",
-                row.get("head_revision"),
-            )?,
+            head_revision: u64_from_sql("SessionView", "head_revision", row.get("head_revision"))?,
             relation,
             durable_relation,
             parent_session_id,
             deleted,
         };
-        if !filter.matches(&summary) {
+        if !filter.matches(&view) {
             continue;
         }
-        summaries.push(summary);
+        views.push(view);
     }
-    Ok(summaries)
+    Ok(views)
 }

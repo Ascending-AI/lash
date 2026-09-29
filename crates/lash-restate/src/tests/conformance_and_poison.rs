@@ -2017,7 +2017,7 @@ pub(super) fn session_turn_registration() -> ProcessRegistration {
                 lash_core::PluginOptions::default(),
             )),
             turn_input: Box::new(lash_core::TurnInput::text("test child turn")),
-            result: lash_core::SessionTurnResult::Turn,
+            result: lash_core::SessionTurnOutcome::Turn,
         },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,

@@ -68,8 +68,8 @@ pub use model::{
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
     ProcessIdMint, ProcessIdentity, ProcessInput, ProcessLineage, ProcessListFilter,
     ProcessListMode, ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistrationDisposition,
-    ProcessRegistrationOutcome, ProcessSessionDeleteReport, ProcessSpawnProvenance,
+    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistrationOutcome,
+    ProcessRegistrationReceipt, ProcessSessionDeleteReport, ProcessSpawnProvenance,
     ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt,
     ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone,
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
@@ -78,7 +78,7 @@ pub use model::{
     load_process_execution_env, mint_process_id, process_child_session_id,
     process_runtime_session_ids, publish_process_execution_env,
 };
-pub use model::{ConsumerHold, SessionTurnResult};
+pub use model::{ConsumerHold, SessionTurnOutcome};
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
     ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState, ProcessWorkObserver,

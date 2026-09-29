@@ -94,20 +94,20 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
     }
 }
 
-impl From<lash_core::ProcessRegistrationDisposition> for RemoteProcessStartDisposition {
-    fn from(value: lash_core::ProcessRegistrationDisposition) -> Self {
+impl From<lash_core::ProcessRegistrationOutcome> for RemoteProcessStartOutcome {
+    fn from(value: lash_core::ProcessRegistrationOutcome) -> Self {
         match value {
-            lash_core::ProcessRegistrationDisposition::Created => Self::Created,
-            lash_core::ProcessRegistrationDisposition::Existing => Self::Existing,
+            lash_core::ProcessRegistrationOutcome::Created => Self::Created,
+            lash_core::ProcessRegistrationOutcome::Existing => Self::Existing,
         }
     }
 }
 
-impl From<RemoteProcessStartDisposition> for lash_core::ProcessRegistrationDisposition {
-    fn from(value: RemoteProcessStartDisposition) -> Self {
+impl From<RemoteProcessStartOutcome> for lash_core::ProcessRegistrationOutcome {
+    fn from(value: RemoteProcessStartOutcome) -> Self {
         match value {
-            RemoteProcessStartDisposition::Created => Self::Created,
-            RemoteProcessStartDisposition::Existing => Self::Existing,
+            RemoteProcessStartOutcome::Created => Self::Created,
+            RemoteProcessStartOutcome::Existing => Self::Existing,
         }
     }
 }

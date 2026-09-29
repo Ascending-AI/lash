@@ -65,7 +65,7 @@ fn started_record(
     outcome: RuntimeEffectOutcome,
 ) -> (
     lash_core::ProcessRecord,
-    lash_core::ProcessRegistrationDisposition,
+    lash_core::ProcessRegistrationOutcome,
 ) {
     let RuntimeEffectOutcome::Process {
         result: ProcessEffectOutcome::Start {
@@ -99,7 +99,7 @@ pub(super) async fn a_cancel_at_the_registration_await_still_submits_the_registe
     assert_eq!(record.id, stored.id);
     assert_eq!(
         disposition,
-        lash_core::ProcessRegistrationDisposition::Existing,
+        lash_core::ProcessRegistrationOutcome::Existing,
         "a row whose registration answer was lost is taken as retained"
     );
     assert_eq!(start.submissions(), 1, "the registered row is submitted");

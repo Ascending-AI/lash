@@ -40,29 +40,29 @@ pub async fn a_start_key_reports_created_then_existing_and_is_trusted(
         ),
     );
     let first = registry
-        .register_process_reporting_disposition(
+        .register_process_reporting_outcome(
             registration("start-key-disposition").with_start_key(Some(key.clone())),
             &[],
         )
         .await
         .expect("first registration");
     assert_eq!(
-        first.disposition,
-        crate::ProcessRegistrationDisposition::Created,
+        first.outcome,
+        crate::ProcessRegistrationOutcome::Created,
         "the call that inserted the row created it"
     );
     assert_eq!(first.record.start_key.as_ref(), Some(&key));
 
     let repeat = registry
-        .register_process_reporting_disposition(
+        .register_process_reporting_outcome(
             registration("start-key-disposition").with_start_key(Some(key.clone())),
             &[],
         )
         .await
         .expect("a repeat under a retained key is idempotent");
     assert_eq!(
-        repeat.disposition,
-        crate::ProcessRegistrationDisposition::Existing,
+        repeat.outcome,
+        crate::ProcessRegistrationOutcome::Existing,
         "a repeat returns the row the first call created"
     );
     assert_eq!(repeat.record.id, first.record.id);
@@ -74,13 +74,10 @@ pub async fn a_start_key_reports_created_then_existing_and_is_trusted(
         metadata: serde_json::json!({"suite": "changed-content-retry"}),
     });
     let retried = registry
-        .register_process_reporting_disposition(changed, &[])
+        .register_process_reporting_outcome(changed, &[])
         .await
         .expect("a changed-content retry under a derived key is not a refusal");
-    assert_eq!(
-        retried.disposition,
-        crate::ProcessRegistrationDisposition::Existing
-    );
+    assert_eq!(retried.outcome, crate::ProcessRegistrationOutcome::Existing);
     assert_eq!(retried.record.id, first.record.id);
     assert_eq!(
         retried.record.input, first.record.input,
@@ -132,28 +129,22 @@ pub async fn a_host_start_key_is_global_and_fences_its_originator(
 ) {
     let bytes = "global-host-key";
     let first = registry
-        .register_process_reporting_disposition(host_keyed(bytes, "host-key-session-a", None), &[])
+        .register_process_reporting_outcome(host_keyed(bytes, "host-key-session-a", None), &[])
         .await
         .expect("session A starts under the key");
-    assert_eq!(
-        first.disposition,
-        crate::ProcessRegistrationDisposition::Created
-    );
+    assert_eq!(first.outcome, crate::ProcessRegistrationOutcome::Created);
 
     let other_originator = registry
-        .register_process_reporting_disposition(host_keyed(bytes, "host-key-session-b", None), &[])
+        .register_process_reporting_outcome(host_keyed(bytes, "host-key-session-b", None), &[])
         .await
         .expect_err("the same bytes from another originator are the same key, and fence it");
     assert_start_key_conflict(&other_originator, bytes);
 
     let repeat = registry
-        .register_process_reporting_disposition(host_keyed(bytes, "host-key-session-a", None), &[])
+        .register_process_reporting_outcome(host_keyed(bytes, "host-key-session-a", None), &[])
         .await
         .expect("an identical retry from the originator is idempotent");
-    assert_eq!(
-        repeat.disposition,
-        crate::ProcessRegistrationDisposition::Existing
-    );
+    assert_eq!(repeat.outcome, crate::ProcessRegistrationOutcome::Existing);
     assert_eq!(repeat.record.id, first.record.id);
 
     let mut changed = host_keyed(bytes, "host-key-session-a", None);
@@ -161,7 +152,7 @@ pub async fn a_host_start_key_is_global_and_fences_its_originator(
         metadata: serde_json::json!({"suite": "changed-host-content"}),
     });
     let error = registry
-        .register_process_reporting_disposition(changed, &[])
+        .register_process_reporting_outcome(changed, &[])
         .await
         .expect_err("a changed-content host retry under a retained key is refused");
     assert_start_key_conflict(&error, bytes);
@@ -204,10 +195,7 @@ pub async fn a_start_key_conflict_names_no_retained_process(registry: Arc<dyn Pr
         .await
         .expect("the owner starts under the key");
     let error = registry
-        .register_process_reporting_disposition(
-            host_keyed(bytes, "conflict-other-session", None),
-            &[],
-        )
+        .register_process_reporting_outcome(host_keyed(bytes, "conflict-other-session", None), &[])
         .await
         .expect_err("another originator's start under the key conflicts");
     assert_start_key_conflict(&error, bytes);
@@ -256,7 +244,7 @@ pub async fn a_host_retry_with_another_wake_target_conflicts(registry: Arc<dyn P
         .await
         .expect("start waking the first session");
     let repeat = registry
-        .register_process_reporting_disposition(
+        .register_process_reporting_outcome(
             host_keyed(bytes, "wake-owner", Some("wake-first")),
             &[],
         )
@@ -265,10 +253,7 @@ pub async fn a_host_retry_with_another_wake_target_conflicts(registry: Arc<dyn P
     assert_eq!(repeat.record.id, first.id);
     for other_wake in [Some("wake-second"), None] {
         let error = registry
-            .register_process_reporting_disposition(
-                host_keyed(bytes, "wake-owner", other_wake),
-                &[],
-            )
+            .register_process_reporting_outcome(host_keyed(bytes, "wake-owner", other_wake), &[])
             .await
             .expect_err("a retry naming another wake target is refused");
         assert_start_key_conflict(&error, bytes);
@@ -306,12 +291,12 @@ pub async fn a_host_start_key_after_prune_starts_new_for_any_originator(
         .expect("prune A's process");
 
     let second = registry
-        .register_process_reporting_disposition(host_keyed(bytes, "prune-other-b", None), &[])
+        .register_process_reporting_outcome(host_keyed(bytes, "prune-other-b", None), &[])
         .await
         .expect("B starts under the pruned process's key");
     assert_eq!(
-        second.disposition,
-        crate::ProcessRegistrationDisposition::Created,
+        second.outcome,
+        crate::ProcessRegistrationOutcome::Created,
         "a pruned process no longer holds its key, for any originator"
     );
     assert_ne!(second.record.id, first.id, "a minted id is never reused");
@@ -334,12 +319,12 @@ pub async fn keyless_starts_are_always_new(registry: Arc<dyn ProcessRegistry>) {
     let mut ids = std::collections::BTreeSet::new();
     for _ in 0..3 {
         let outcome = registry
-            .register_process_reporting_disposition(registration("keyless"), &[])
+            .register_process_reporting_outcome(registration("keyless"), &[])
             .await
             .expect("keyless registration");
         assert_eq!(
-            outcome.disposition,
-            crate::ProcessRegistrationDisposition::Created,
+            outcome.outcome,
+            crate::ProcessRegistrationOutcome::Created,
             "a keyless start never finds an existing process"
         );
         assert_eq!(outcome.record.start_key, None);
@@ -464,7 +449,7 @@ pub async fn concurrent_starts_under_one_key_register_one_process(
                 }
                 start.wait().await;
                 registry
-                    .register_process_reporting_disposition(racer, &[])
+                    .register_process_reporting_outcome(racer, &[])
                     .await
             }));
         }
@@ -475,7 +460,7 @@ pub async fn concurrent_starts_under_one_key_register_one_process(
             let outcome = racer.await.expect("concurrent registration task").expect(
                 "a concurrent start under one key is idempotent, never a raw constraint error",
             );
-            if outcome.disposition == crate::ProcessRegistrationDisposition::Created {
+            if outcome.outcome == crate::ProcessRegistrationOutcome::Created {
                 created += 1;
             }
             ids.insert(outcome.record.id);
@@ -520,15 +505,15 @@ pub async fn a_start_key_after_prune_starts_a_new_process(registry: Arc<dyn Proc
         .expect("prune the first process");
 
     let second = registry
-        .register_process_reporting_disposition(
+        .register_process_reporting_outcome(
             registration("start-key-after-prune").with_start_key(Some(key)),
             &[],
         )
         .await
         .expect("start again under the pruned process's key");
     assert_eq!(
-        second.disposition,
-        crate::ProcessRegistrationDisposition::Created,
+        second.outcome,
+        crate::ProcessRegistrationOutcome::Created,
         "a pruned process no longer holds its key"
     );
     assert_ne!(second.record.id, first.id, "a minted id is never reused");

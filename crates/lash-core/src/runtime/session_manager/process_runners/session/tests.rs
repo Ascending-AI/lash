@@ -153,7 +153,7 @@ fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
         &SessionId::from("failing-child"),
         turn,
         state,
-        &crate::SessionTurnResult::Turn,
+        &crate::SessionTurnOutcome::Turn,
     );
     let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
         panic!("a failed child turn must project a tool failure");
@@ -242,7 +242,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
             test_lineage(&process_id, &predecessor_request),
             predecessor_request,
             crate::TurnInput::text("run"),
-            crate::SessionTurnResult::Turn,
+            crate::SessionTurnOutcome::Turn,
             test_process_execution_write_authority(process_id.clone()),
             host_process_scope(&runtime.host.core, &process_id),
             tokio_util::sync::CancellationToken::new(),
@@ -304,7 +304,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         &child_session_id,
         turn,
         crate::ProcessStatus::Cancelled,
-        &crate::SessionTurnResult::FinalValue { schema: None },
+        &crate::SessionTurnOutcome::FinalValue { schema: None },
     );
     assert_child_turn_cancellation(&runner_output, &evidence);
 
@@ -372,7 +372,7 @@ fn test_lineage(
 /// Project one ended child turn through the runner under `result`.
 fn project_turn(
     turn: crate::AssembledTurn,
-    result: &crate::SessionTurnResult,
+    result: &crate::SessionTurnOutcome,
 ) -> crate::ToolCallOutput {
     let state = process_terminal_state_for_turn(&turn);
     output_from_process_turn(
@@ -403,7 +403,7 @@ fn projected_failure(output: crate::ToolCallOutput) -> crate::ToolFailure {
 /// answers its caller with, so the tool no longer re-derives it.
 #[test]
 fn spawn_agent_projects_final_value() {
-    let untyped = crate::SessionTurnResult::FinalValue { schema: None };
+    let untyped = crate::SessionTurnOutcome::FinalValue { schema: None };
 
     // Final value, tool value and trimmed assistant text are the value.
     let value = serde_json::json!({ "answer": 42 });
@@ -460,7 +460,7 @@ fn spawn_agent_projects_final_value() {
     );
 
     // The declared schema is checked: a match passes, a mismatch fails.
-    let typed = crate::SessionTurnResult::FinalValue {
+    let typed = crate::SessionTurnOutcome::FinalValue {
         schema: Some(serde_json::json!({
             "type": "object",
             "properties": { "answer": { "type": "integer" } },
@@ -522,7 +522,7 @@ fn spawn_agent_projects_final_value() {
     let failure = projected_failure(project_turn(switched.clone(), &untyped));
     assert_eq!(failure.code, "process_session_turn_frame_switch");
     // Under `Turn` the same frame switch is the assembled turn, unchanged.
-    let turn = project_turn(switched, &crate::SessionTurnResult::Turn);
+    let turn = project_turn(switched, &crate::SessionTurnOutcome::Turn);
     assert!(turn.value_for_projection().get("turn").is_some());
 
     // A stopped child never projects a value.

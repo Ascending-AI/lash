@@ -120,7 +120,7 @@ impl SimTriggerHarness {
                 .collect();
             let process = self
                 .registry
-                .register_process_reporting_disposition(registration, &observers)
+                .register_process_reporting_outcome(registration, &observers)
                 .await
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
             self.store

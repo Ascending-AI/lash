@@ -83,7 +83,7 @@ fn session_turn_input(definition_key: &str) -> ProcessInput {
             .with_session_id("refusal-fixture-child"),
         ),
         turn_input: Box::new(crate::TurnInput::empty()),
-        result: crate::SessionTurnResult::Turn,
+        result: crate::SessionTurnOutcome::Turn,
     }
 }
 

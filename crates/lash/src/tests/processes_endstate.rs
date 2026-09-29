@@ -732,7 +732,7 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
         .await?;
     assert_eq!(
         started.disposition,
-        lash_core::ProcessRegistrationDisposition::Created,
+        lash_core::ProcessRegistrationOutcome::Created,
         "the first start under its key creates the process"
     );
     assert!(
@@ -751,7 +751,7 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     assert_eq!(
         retried,
         lash_core::ProcessStartReceipt {
-            disposition: lash_core::ProcessRegistrationDisposition::Existing,
+            disposition: lash_core::ProcessRegistrationOutcome::Existing,
             ..started
         },
         "a retry under the same key answers the same process, found not created"

@@ -3,7 +3,7 @@ use crate::support::{
     LashSession, LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginOptions,
     PluginSpec, PluginStack, ProcessRegistry, PromptLayer, PromptLayerSink, ProviderHandle, Result,
     RuntimeEnvironment, RuntimeHandle, RuntimeHostConfig, SessionBuilder, SessionListFilter,
-    SessionPolicy, SessionSpec, SessionSummary, SessionWorkEngine, StaticPluginFactory,
+    SessionPolicy, SessionSpec, SessionView, SessionWorkEngine, StaticPluginFactory,
     TerminationPolicy, ToolProvider,
 };
 use lash_core::Backend;
@@ -1276,7 +1276,7 @@ impl LashCore {
     /// checkpoints, or mutate catalog generations.
     /// Results are ordered by creation time and then session id, and include
     /// permanent deletion tombstones.
-    pub async fn sessions(&self) -> Result<Vec<SessionSummary>> {
+    pub async fn sessions(&self) -> Result<Vec<SessionView>> {
         self.sessions_filtered(SessionListFilter::default()).await
     }
 
@@ -1284,10 +1284,7 @@ impl LashCore {
     ///
     /// Like [`Self::sessions`], this query never opens a session or acquires
     /// execution authority.
-    pub async fn sessions_filtered(
-        &self,
-        filter: SessionListFilter,
-    ) -> Result<Vec<SessionSummary>> {
+    pub async fn sessions_filtered(&self, filter: SessionListFilter) -> Result<Vec<SessionView>> {
         self.store_factory
             .list_sessions(&filter)
             .await

@@ -22,7 +22,7 @@ use super::events::{
 use super::model::{
     ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority, ProcessExternalRef,
     ProcessId, ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRegistration,
-    ProcessRegistrationOutcome, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
+    ProcessRegistrationReceipt, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
     SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceView;
@@ -222,7 +222,7 @@ pub trait ProcessRegistrar: Send + Sync {
         observers: &[SessionId],
     ) -> Result<ProcessRecord, PluginError> {
         Ok(self
-            .register_process_reporting_disposition(registration, observers)
+            .register_process_reporting_outcome(registration, observers)
             .await?
             .record)
     }
@@ -236,11 +236,11 @@ pub trait ProcessRegistrar: Send + Sync {
     /// later failure by writing a terminal onto the row it registered must know
     /// the difference, or a retry will terminalise the first attempt's row —
     /// and its running work — on the second attempt's behalf.
-    async fn register_process_reporting_disposition(
+    async fn register_process_reporting_outcome(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
-    ) -> Result<ProcessRegistrationOutcome, PluginError>;
+    ) -> Result<ProcessRegistrationReceipt, PluginError>;
 
     /// Bind the effect host whose scope-retirement fence this registry lifts
     /// when a process id is registered again (ADR 0049).

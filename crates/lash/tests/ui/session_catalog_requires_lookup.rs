@@ -3,7 +3,7 @@
 //! `Absent` is a durable negative answer, not a fallback for a catalog that
 //! cannot resolve an id. The missing method must remain a compile error.
 
-use lash::{SessionId, SessionListFilter, SessionSummary};
+use lash::{SessionId, SessionListFilter, SessionView};
 use lash::persistence::{
     ForkPoint, ForkSessionReceipt, ForkSessionRequest, MaintenanceResult, SessionAdmission,
     SessionBlobReclaimReport, SessionCatalogStore, SessionStoreCreateRequest, StoreError,
@@ -23,7 +23,7 @@ impl SessionCatalogStore for SilentLookup {
     async fn list_sessions(
         &self,
         _filter: &SessionListFilter,
-    ) -> Result<Vec<SessionSummary>, StoreError> {
+    ) -> Result<Vec<SessionView>, StoreError> {
         unreachable!()
     }
 

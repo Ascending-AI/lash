@@ -1,15 +1,15 @@
-//! Session-catalog summary listing over the durable-core catalog.
+//! Session-catalog view listing over the durable-core catalog.
 
-use lash_core_execution::{SessionListFilter, SessionRelationKind, SessionSummary};
+use lash_core_execution::{SessionListFilter, SessionRelationKind, SessionView};
 use lash_sansio::SessionId;
 use rusqlite::Connection;
 
 use crate::{sqlite_conversion_error, stored_data_corrupt, u64_from_sql};
 
-pub(crate) fn list_session_summaries(
+pub(crate) fn list_session_views(
     conn: &Connection,
     filter: &SessionListFilter,
-) -> rusqlite::Result<Vec<SessionSummary>> {
+) -> rusqlite::Result<Vec<SessionView>> {
     let mut stmt = conn.prepare_cached(
         crate::session_sql::session_sql()
             .meta_sqlite
@@ -24,7 +24,7 @@ pub(crate) fn list_session_summaries(
             "fork" => SessionRelationKind::Fork,
             other => {
                 return Err(sqlite_conversion_error(stored_data_corrupt(
-                    "SessionSummary",
+                    "SessionView",
                     format!("unknown relation_kind `{other}`"),
                 )));
             }
@@ -39,26 +39,26 @@ pub(crate) fn list_session_summaries(
                     .map_err(sqlite_conversion_error)?,
             )
         };
-        Ok(SessionSummary {
+        Ok(SessionView {
             session_id: SessionId::from(row.get::<_, String>(0)?),
-            created_at_ms: u64_from_sql("SessionSummary", "created_at_ms", row.get(17)?)?,
+            created_at_ms: u64_from_sql("SessionView", "created_at_ms", row.get(17)?)?,
             last_commit_at_ms: row
                 .get::<_, Option<i64>>(18)?
-                .map(|value| u64_from_sql("SessionSummary", "last_commit_at_ms", value))
+                .map(|value| u64_from_sql("SessionView", "last_commit_at_ms", value))
                 .transpose()?,
-            head_revision: u64_from_sql("SessionSummary", "head_revision", row.get(19)?)?,
+            head_revision: u64_from_sql("SessionView", "head_revision", row.get(19)?)?,
             relation,
             durable_relation,
             parent_session_id,
             deleted,
         })
     })?;
-    let mut summaries = Vec::new();
+    let mut views = Vec::new();
     for row in rows {
-        let summary = row?;
-        if filter.matches(&summary) {
-            summaries.push(summary);
+        let view = row?;
+        if filter.matches(&view) {
+            views.push(view);
         }
     }
-    Ok(summaries)
+    Ok(views)
 }

@@ -230,11 +230,11 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
-    async fn register_process_reporting_disposition(
+    async fn register_process_reporting_outcome(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
-    ) -> Result<lash_core_execution::ProcessRegistrationOutcome, PluginError> {
+    ) -> Result<lash_core_execution::ProcessRegistrationReceipt, PluginError> {
         let mut observers = observers.to_vec();
         observers.sort();
         observers.dedup();
@@ -257,7 +257,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                 &existing,
                 existing_wake.as_ref(),
             )?;
-            return Ok(lash_core_execution::ProcessRegistrationOutcome::existing(
+            return Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
                 existing,
             ));
         }
@@ -386,7 +386,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                 &winner,
                 winner_wake.as_ref(),
             )?;
-            return Ok(lash_core_execution::ProcessRegistrationOutcome::existing(
+            return Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
                 winner,
             ));
         }
@@ -425,7 +425,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             .await?;
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core_execution::ProcessRegistrationOutcome::created(
+        Ok(lash_core_execution::ProcessRegistrationReceipt::created(
             record,
         ))
     }

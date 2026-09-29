@@ -1,9 +1,9 @@
 use crate::SessionId;
 use crate::session_identity::SessionRelation;
 
-/// Coarse durable relation carried by a host-facing session summary.
+/// Coarse durable relation carried by a host-facing session view.
 ///
-/// The summary deliberately projects only the relation shape and immediate
+/// The view deliberately projects only the relation shape and immediate
 /// parent. Causal details and fork anchors remain part of the full session
 /// metadata loaded when a host opens one session.
 #[derive(
@@ -39,7 +39,7 @@ impl SessionRelationKind {
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-pub struct SessionSummary {
+pub struct SessionView {
     pub session_id: SessionId,
     pub created_at_ms: u64,
     /// Time of the most recent settled runtime commit, or `None` before the
@@ -80,15 +80,13 @@ pub struct SessionListFilter {
 }
 
 impl SessionListFilter {
-    pub fn matches(&self, summary: &SessionSummary) -> bool {
+    pub fn matches(&self, view: &SessionView) -> bool {
         self.relation
-            .is_none_or(|relation| relation == summary.relation)
-            && self
-                .deleted
-                .is_none_or(|deleted| deleted == summary.deleted)
+            .is_none_or(|relation| relation == view.relation)
+            && self.deleted.is_none_or(|deleted| deleted == view.deleted)
             && self.caused_by.as_ref().is_none_or(|caused_by| {
                 matches!(
-                    &summary.durable_relation,
+                    &view.durable_relation,
                     Some(SessionRelation::Child {
                         caused_by: recorded,
                         ..

@@ -828,7 +828,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
     async fn list_sessions(
         &self,
         filter: &SessionListFilter,
-    ) -> Result<Vec<SessionSummary>, StoreError> {
+    ) -> Result<Vec<SessionView>, StoreError> {
         crate::session_catalog::list_sessions(&self.pool, filter).await
     }
 }

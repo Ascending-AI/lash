@@ -11,7 +11,7 @@ use super::*;
 use lash_core::{ProcessListFilter, ProcessStatusFilter};
 
 /// The id and disposition each attempt's start returned, in attempt order.
-type StartedIds = Arc<Mutex<Vec<(ProcessId, lash_core::ProcessRegistrationDisposition)>>>;
+type StartedIds = Arc<Mutex<Vec<(ProcessId, lash_core::ProcessRegistrationOutcome)>>>;
 
 /// The process-start envelope a host start issues under `scoped`: a start is
 /// addressed by its key.
@@ -166,10 +166,7 @@ pub(super) async fn a_parent_replay_after_its_child_was_pruned_returns_the_recor
         started[1], started[0],
         "the replay returns the recorded id and disposition, never a second minted id"
     );
-    assert_eq!(
-        started[0].1,
-        lash_core::ProcessRegistrationDisposition::Created
-    );
+    assert_eq!(started[0].1, lash_core::ProcessRegistrationOutcome::Created);
     assert_eq!(
         retained_processes(&registry).await,
         Vec::<ProcessId>::new(),
@@ -234,10 +231,7 @@ pub(super) async fn a_keyless_host_start_replays_to_the_process_it_started(seed:
         "the replayed keyless start returns the process it started, and its recorded \
          disposition: a live re-registration under the same key would find it `Existing`"
     );
-    assert_eq!(
-        started[0].1,
-        lash_core::ProcessRegistrationDisposition::Created
-    );
+    assert_eq!(started[0].1, lash_core::ProcessRegistrationOutcome::Created);
     assert_eq!(
         retained_processes(&registry).await,
         vec![started[0].0.clone()],
@@ -299,13 +293,10 @@ pub(super) async fn a_replayed_host_start_binds_its_recorded_process(seed: u64) 
                     .await
                     .expect("retention prunes A's process");
                 let b = registry
-                    .register_process_reporting_disposition(b, &[])
+                    .register_process_reporting_outcome(b, &[])
                     .await
                     .expect("B starts under the freed key");
-                assert_eq!(
-                    b.disposition,
-                    lash_core::ProcessRegistrationDisposition::Created
-                );
+                assert_eq!(b.outcome, lash_core::ProcessRegistrationOutcome::Created);
                 *taken_by_b.lock().unwrap() = Some(b.record.id);
                 panic!("A's handler dies after B took the key");
             })
@@ -355,7 +346,7 @@ pub(super) async fn a_replayed_host_start_binds_its_recorded_process(seed: u64) 
     );
 
     let live = registry
-        .register_process_reporting_disposition(under("originator-a"), &[])
+        .register_process_reporting_outcome(under("originator-a"), &[])
         .await
         .expect_err("a live start of A's request meets B's process under the key");
     assert!(

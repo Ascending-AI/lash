@@ -56,7 +56,7 @@ use lash_core_execution::{
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLiveReferenceView,
     ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
     ProcessStartOutcome, ProcessStarted, SessionCommitStore, SessionListFilter, SessionMeta,
-    SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest, SessionSummary, StoreError,
+    SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest, SessionView, StoreError,
     StoreMaintenance, TokenLedgerEntry, VacuumReport, facade_support::ProcessStartPlan,
     facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
     facade_support::registry_transitions,

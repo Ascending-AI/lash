@@ -78,7 +78,7 @@ use lash_core_execution::{
     ProcessExternalRef, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy,
     ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
     ProcessStarted, SessionCommitStore, SessionListFilter, SessionMeta, SessionStoreCreateRequest,
-    SessionSummary, StoreError, StoreMaintenance, VacuumReport, facade_support::ProcessStartPlan,
+    SessionView, StoreError, StoreMaintenance, VacuumReport, facade_support::ProcessStartPlan,
     facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
     facade_support::registry_transitions,
 };

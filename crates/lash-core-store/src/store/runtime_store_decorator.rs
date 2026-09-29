@@ -1,6 +1,6 @@
 use super::*;
 use crate::SessionId;
-use crate::session_catalog::{SessionListFilter, SessionSummary};
+use crate::session_catalog::{SessionListFilter, SessionView};
 use crate::session_store_factory_types::{
     ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionLookup, SessionStoreCreateRequest,
 };
@@ -53,7 +53,7 @@ macro_rules! runtime_store_operations {
             SessionCatalogStore {
                 [catalog] fn admit_session(&self, request: &SessionStoreCreateRequest) -> Result<SessionAdmission, StoreError>;
                 [catalog] fn lookup_session(&self, session_id: &SessionId) -> Result<SessionLookup, StoreError>;
-                [catalog] fn list_sessions(&self, filter: &SessionListFilter) -> Result<Vec<SessionSummary>, StoreError>;
+                [catalog] fn list_sessions(&self, filter: &SessionListFilter) -> Result<Vec<SessionView>, StoreError>;
                 [catalog] fn fork_session(&self, request: &ForkSessionRequest) -> Result<ForkSessionReceipt, StoreError>;
                 [catalog] fn pin(&self, node_id: &crate::NodeId) -> Result<ForkPoint, StoreError>;
                 [catalog] fn unpin(&self, node_id: &crate::NodeId) -> Result<(), StoreError>;

@@ -121,7 +121,7 @@ impl RegisteredProcess for crate::ProcessRecord {
     }
 }
 
-impl RegisteredProcess for crate::ProcessRegistrationOutcome {
+impl RegisteredProcess for crate::ProcessRegistrationReceipt {
     fn registered_process_id(&self) -> &crate::ProcessId {
         &self.record.id
     }
@@ -161,15 +161,15 @@ macro_rules! delegate_process_registrar {
                 $registration_hook
             }
 
-            async fn register_process_reporting_disposition(
+            async fn register_process_reporting_outcome(
                 &self,
                 registration: $crate::ProcessRegistration,
                 observers: &[$crate::SessionId],
-            ) -> Result<$crate::ProcessRegistrationOutcome, $crate::PluginError> {
+            ) -> Result<$crate::ProcessRegistrationReceipt, $crate::PluginError> {
                 let $registration_self = self;
                 let $registration_call = self
                     .$inner
-                    .register_process_reporting_disposition(registration, observers);
+                    .register_process_reporting_outcome(registration, observers);
                 $registration_hook
             }
 

@@ -21,7 +21,7 @@ impl RuntimeSessionServices {
         lineage: crate::ProcessLineage,
         mut create_request: crate::SessionCreateRequest,
         turn_input: crate::TurnInput,
-        result: crate::SessionTurnResult,
+        result: crate::SessionTurnOutcome,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: tokio_util::sync::CancellationToken,
@@ -338,14 +338,14 @@ fn process_turn_failure_raw(
 /// Project the child's ended turn onto the process's answer.
 ///
 /// A cancelled or failed child answers its own cancellation or failure under
-/// every [`crate::SessionTurnResult`]. A finished child answers its assembled
+/// every [`crate::SessionTurnOutcome`]. A finished child answers its assembled
 /// turn under `Turn`, and its final value under `FinalValue`.
 fn output_from_process_turn(
     process_id: &crate::ProcessId,
     child_session_id: &SessionId,
     turn: crate::AssembledTurn,
     state: crate::ProcessStatus,
-    result: &crate::SessionTurnResult,
+    result: &crate::SessionTurnOutcome,
 ) -> crate::ToolCallOutput {
     if state == crate::ProcessStatus::Cancelled {
         let cancellation = match &turn.outcome {
@@ -370,12 +370,12 @@ fn output_from_process_turn(
         return crate::ToolCallOutput::failure(failure_from_process_turn(&turn));
     }
     match result {
-        crate::SessionTurnResult::Turn => crate::ToolCallOutput::success(serde_json::json!({
+        crate::SessionTurnOutcome::Turn => crate::ToolCallOutput::success(serde_json::json!({
             "process_id": process_id,
             "child_session_id": child_session_id,
             "turn": turn,
         })),
-        crate::SessionTurnResult::FinalValue { schema } => {
+        crate::SessionTurnOutcome::FinalValue { schema } => {
             match final_value_of_turn(&turn)
                 .and_then(|value| checked_final_value(value, schema.as_ref()))
             {

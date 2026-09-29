@@ -3,11 +3,11 @@ use lash_core_execution::ScopeId;
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
-    async fn register_process_reporting_disposition(
+    async fn register_process_reporting_outcome(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
-    ) -> Result<lash_core_execution::ProcessRegistrationOutcome, lash_core_execution::PluginError>
+    ) -> Result<lash_core_execution::ProcessRegistrationReceipt, lash_core_execution::PluginError>
     {
         let mut observers = observers.to_vec();
         observers.sort();
@@ -33,7 +33,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                             &existing,
                             Self::wake_session_id_conn(tx, &existing.id)?.as_ref(),
                         )?;
-                        return Ok(lash_core_execution::ProcessRegistrationOutcome::existing(
+                        return Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
                             existing,
                         ));
                     }
@@ -142,7 +142,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                             fleet_format,
                         )?;
                     }
-                    Ok(lash_core_execution::ProcessRegistrationOutcome::created(
+                    Ok(lash_core_execution::ProcessRegistrationReceipt::created(
                         record,
                     ))
                 })()))

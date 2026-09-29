@@ -4,7 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use crate::session_listing::list_session_summaries;
+use crate::session_listing::list_session_views;
 
 /// `process <name>(<param>: str) -> str { finish <param> }`, the publishable
 /// one-process module these store fixtures need. ADR 0096 retired the Lashlang
@@ -281,7 +281,7 @@ fn count_session_list_statement(event: rusqlite::trace::TraceEvent<'_>) {
     }
 }
 
-async fn traced_session_list(store: &SqliteStore) -> (Vec<SessionSummary>, usize) {
+async fn traced_session_list(store: &SqliteStore) -> (Vec<SessionView>, usize) {
     let conn = SqliteConnection::open_readonly(store.location.target())
         .await
         .expect("open session catalog for statement tracing");
@@ -292,7 +292,7 @@ async fn traced_session_list(store: &SqliteStore) -> (Vec<SessionSummary>, usize
                 rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
                 Some(count_session_list_statement as fn(rusqlite::trace::TraceEvent<'_>)),
             );
-            let result = list_session_summaries(conn, &SessionListFilter::default());
+            let result = list_session_views(conn, &SessionListFilter::default());
             conn.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
             result
         })

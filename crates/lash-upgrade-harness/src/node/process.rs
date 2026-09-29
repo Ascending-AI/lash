@@ -135,8 +135,7 @@ impl UpgradeHarnessProcesses for HarnessProcesses {
                 Ok(Json(HarnessReply::Started {
                     build,
                     process_id: receipt.process_id.to_string(),
-                    created: receipt.disposition
-                        == lash_core::ProcessRegistrationDisposition::Created,
+                    created: receipt.disposition == lash_core::ProcessRegistrationOutcome::Created,
                 }))
             }
             HarnessOp::Signal {

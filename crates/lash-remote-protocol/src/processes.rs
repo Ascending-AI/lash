@@ -269,8 +269,8 @@ pub enum RemoteProcessInput {
         #[serde(default)]
         create_request: serde_json::Value,
         turn_input: RemoteTurnInput,
-        #[serde(default, skip_serializing_if = "RemoteSessionTurnResult::is_turn")]
-        result: RemoteSessionTurnResult,
+        #[serde(default, skip_serializing_if = "RemoteSessionTurnOutcome::is_turn")]
+        result: RemoteSessionTurnOutcome,
     },
     External {
         #[serde(default)]
@@ -281,7 +281,7 @@ pub enum RemoteProcessInput {
 /// What a remote `SessionTurn` process answers when its child turn ends.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RemoteSessionTurnResult {
+pub enum RemoteSessionTurnOutcome {
     /// The child's assembled turn.
     #[default]
     Turn,
@@ -292,7 +292,7 @@ pub enum RemoteSessionTurnResult {
     },
 }
 
-impl RemoteSessionTurnResult {
+impl RemoteSessionTurnOutcome {
     pub(crate) fn is_turn(&self) -> bool {
         matches!(self, Self::Turn)
     }
@@ -1460,7 +1460,7 @@ pub struct RemoteProcessStartReceipt {
     /// reports it (`start_key_digest`); absent for an unkeyed start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_key_digest: Option<String>,
-    pub disposition: RemoteProcessStartDisposition,
+    pub disposition: RemoteProcessStartOutcome,
 }
 
 impl RemoteProcessStartReceipt {
@@ -1477,7 +1477,7 @@ impl RemoteProcessStartReceipt {
 /// its key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum RemoteProcessStartDisposition {
+pub enum RemoteProcessStartOutcome {
     /// This start created the process.
     Created,
     /// A start under the same key had already created it.

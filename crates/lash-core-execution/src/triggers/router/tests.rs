@@ -178,7 +178,7 @@ fn trigger_definition_identity_golden_corpus() {
                 crate::PluginOptions::default(),
             )),
             turn_input: Box::new(crate::TurnInput::empty()),
-            result: crate::SessionTurnResult::FinalValue {
+            result: crate::SessionTurnOutcome::FinalValue {
                 schema: Some(serde_json::json!({})),
             },
         },
@@ -192,7 +192,7 @@ fn trigger_definition_identity_golden_corpus() {
                 crate::PluginOptions::default(),
             )),
             turn_input: Box::new(crate::TurnInput::empty()),
-            result: crate::SessionTurnResult::Turn,
+            result: crate::SessionTurnOutcome::Turn,
         },
     ];
     let owners = [

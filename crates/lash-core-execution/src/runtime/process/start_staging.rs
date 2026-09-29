@@ -239,7 +239,7 @@ pub struct RegisteredProcessStart {
     /// registrar retains under the start key.
     pub record: ProcessRecord,
     /// Whether the registrar created the row for this start.
-    pub disposition: crate::ProcessRegistrationDisposition,
+    pub disposition: crate::ProcessRegistrationOutcome,
     /// The execution environment the start's registration names once staged.
     pub env_ref: Option<ProcessExecutionEnvRef>,
 }
@@ -248,9 +248,7 @@ impl RegisteredProcessStart {
     /// The registry's verdict: a coalesced start is reported as a replay
     /// rather than a fresh start (FIG-3070).
     pub fn realization(&self) -> StoreRealization {
-        StoreRealization::from_wrote(
-            self.disposition == crate::ProcessRegistrationDisposition::Created,
-        )
+        StoreRealization::from_wrote(self.disposition == crate::ProcessRegistrationOutcome::Created)
     }
 }
 
@@ -351,10 +349,10 @@ async fn stage_and_register(
     let submitted_input = Arc::clone(&registration.input);
     let registered = stores
         .registry
-        .register_process_reporting_disposition(registration, observers)
+        .register_process_reporting_outcome(registration, observers)
         .await?;
-    let disposition = registered.disposition;
-    let created = disposition == crate::ProcessRegistrationDisposition::Created;
+    let disposition = registered.outcome;
+    let created = disposition == crate::ProcessRegistrationOutcome::Created;
     let record = registered.record;
     let process_claim =
         ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(record.id.clone()))

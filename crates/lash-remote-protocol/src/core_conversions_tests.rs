@@ -681,7 +681,7 @@ fn process_start_requests_round_trip_core_values() {
                 .with_session_id("child-session"),
             ),
             turn_input: Box::new(lash_core::TurnInput::text("hello child")),
-            result: lash_core::SessionTurnResult::FinalValue {
+            result: lash_core::SessionTurnOutcome::FinalValue {
                 schema: Some(serde_json::json!({ "type": "object" })),
             },
         },
@@ -773,12 +773,12 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
 
     let started = lash_core::ProcessStartReceipt::of(
         &process_record(&lash_sansio::ProcessId::fixture("process:start-result")),
-        lash_core::ProcessRegistrationDisposition::Existing,
+        lash_core::ProcessRegistrationOutcome::Existing,
     );
     let start_result = RemoteProcessStartReceipt::from(started.clone());
     assert_eq!(
         start_result.disposition,
-        RemoteProcessStartDisposition::Existing
+        RemoteProcessStartOutcome::Existing
     );
     let core = lash_core::ProcessStartReceipt::try_from(start_result).expect("core start result");
     assert_eq!(core, started);

@@ -468,6 +468,7 @@ jobs:
           python3 scripts/test_bazel_source_ownership.py
           python3 scripts/test_bazel_diagnostics.py
           python3 scripts/check_feature_coverage.py check
+          python3 scripts/check_outcome_suffixes.py
           python3 scripts/test_check_test262_ratchet.py
           python3 scripts/test_check_format_registry.py
           python3 scripts/test_generate_workflow_schemas.py

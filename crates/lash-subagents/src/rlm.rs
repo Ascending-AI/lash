@@ -124,7 +124,7 @@ impl RlmSubagentToolsProvider {
     /// A subagent spawn *is* a process that runs a child lash session. The
     /// body declares that one `ProcessInput::SessionTurn` start and parks on
     /// it; the runtime launches the start, and the child's final value — the
-    /// SessionTurn runner's projection under `SessionTurnResult::FinalValue` —
+    /// SessionTurn runner's projection under `SessionTurnOutcome::FinalValue` —
     /// resolves the call. Going through the process worker re-supplies the
     /// live parent provider, gives the child durability and makes it
     /// recoverable, the same generic path every other session turn takes.
@@ -155,7 +155,7 @@ impl RlmSubagentToolsProvider {
                 definition_key: SUBAGENT_SESSION_TURN_DEFINITION.to_string(),
                 create_request: prepared.create_request,
                 turn_input: Box::new(prepared.turn_input),
-                result: lash_core::SessionTurnResult::FinalValue {
+                result: lash_core::SessionTurnOutcome::FinalValue {
                     schema: prepared.output_schema,
                 },
             },

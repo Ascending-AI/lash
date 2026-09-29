@@ -499,7 +499,7 @@ mod tests {
                     definition_key: "observation-test-session-turn:v1".to_string(),
                     create_request: Box::new(child_request),
                     turn_input: Box::new(TurnInput::items([InputItem::text("run child")])),
-                    result: crate::SessionTurnResult::Turn,
+                    result: crate::SessionTurnOutcome::Turn,
                 },
                 "session_turn",
                 "researcher",

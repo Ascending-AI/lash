@@ -148,7 +148,7 @@ pub use lash_core::{
     PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
     ProcessId, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
     QueuedWorkBatchingConfig, Resolution, ResolveOutcome, SessionCreateRequest, SessionError,
-    SessionId, SessionListFilter, SessionRelationKind, SessionStartPoint, SessionSummary,
+    SessionId, SessionListFilter, SessionRelationKind, SessionStartPoint, SessionView,
     TurnActivity, TurnActivityId, TurnBudget, TurnCause, TurnEvent, TurnFailureEvidence,
     TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput, TurnInputApplication,
     facade_support::GenerationOverlay, facade_support::PluginStack, facade_support::SessionCommand,
@@ -193,7 +193,7 @@ pub mod prelude {
         PromptLayerSink, Result, SendBuilder, SendHandle, SendOutcome, SessionBuilder,
         SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch,
         SessionCreateRequest, SessionDeleteReport, SessionDeletion, SessionListFilter,
-        SessionRelationKind, SessionSpec, SessionStartPoint, SessionSummary, SessionTriggerAdmin,
+        SessionRelationKind, SessionSpec, SessionStartPoint, SessionTriggerAdmin, SessionView,
         ToolAdmin, TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget,
         TurnCause, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
         TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStatus, TurnStop,
@@ -738,7 +738,7 @@ pub mod remote {
             RemoteProcessOriginatorFilter, RemoteProcessPark, RemoteProcessPluginOptions,
             RemoteProcessProvenance, RemoteProcessRecord, RemoteProcessResumeRefusal,
             RemoteProcessSignalReceipt, RemoteProcessSignalRequest, RemoteProcessSignature,
-            RemoteProcessStartDisposition, RemoteProcessStartReceipt, RemoteProcessStartRequest,
+            RemoteProcessStartOutcome, RemoteProcessStartReceipt, RemoteProcessStartRequest,
             RemoteProcessStarted, RemoteProcessStatus, RemoteProcessStatusFilter,
             RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec,
             RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
@@ -749,7 +749,8 @@ pub mod remote {
             RemoteProcessWorkSnapshot, RemoteRecordedRender, RemoteRuntimeAttribution,
             RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeReplayAttribution,
             RemoteRuntimeSubject, RemoteScopeGrant, RemoteScopeId, RemoteSessionScope,
-            RemoteSessionTurnResult, RemoteStartLifetime, RemoteToolFailureClass, RemoteTurnBudget,
+            RemoteSessionTurnOutcome, RemoteStartLifetime, RemoteToolFailureClass,
+            RemoteTurnBudget,
         };
     }
 
@@ -841,7 +842,7 @@ pub mod process {
         ProcessObservationHub, ProcessObservationItem, ProcessObservationProjection,
         ProcessObservationSnapshot, ProcessObservationSubscription,
     };
-    pub use lash_core::SessionTurnResult;
+    pub use lash_core::SessionTurnOutcome;
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
     /// Process-registry and event types that complete the store and engine signature closure.
@@ -872,12 +873,12 @@ pub mod process {
         ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
         ProcessOriginator, ProcessOriginatorFilter, ProcessProvenance, ProcessPruneReport,
         ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
-        ProcessRegistrationDisposition, ProcessRegistry, ProcessRegistryCursor,
-        ProcessResumeRefusal, ProcessRetention, ProcessService, ProcessSessionDeleteReport,
-        ProcessSignature, ProcessStartOptions, ProcessStartReceipt, ProcessStartRequest,
-        ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalPublication,
-        ProcessTerminalWait, ProcessToolIntents, ProcessWakeDelivery, ProcessWakeOutbox,
-        ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
+        ProcessRegistrationOutcome, ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal,
+        ProcessRetention, ProcessService, ProcessSessionDeleteReport, ProcessSignature,
+        ProcessStartOptions, ProcessStartReceipt, ProcessStartRequest, ProcessStarted,
+        ProcessStatus, ProcessStatusFilter, ProcessTerminalPublication, ProcessTerminalWait,
+        ProcessToolIntents, ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec,
+        ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
         SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError,
         SessionScope, StartCx, StartCxError, StartKey, WatchedRegistry,
         facade_support::ObservedProcess, facade_support::ObservedProcessEvent,

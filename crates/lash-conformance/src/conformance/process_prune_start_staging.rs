@@ -250,7 +250,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
     let started_b = started_b.expect("B registers under the key");
     assert_eq!(
         started_b.disposition,
-        crate::ProcessRegistrationDisposition::Created
+        crate::ProcessRegistrationOutcome::Created
     );
     assert_eq!(started_b.record.env_ref.as_ref(), Some(&env_b));
 
@@ -449,7 +449,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
     );
     assert_eq!(
         started_b.disposition,
-        crate::ProcessRegistrationDisposition::Created
+        crate::ProcessRegistrationOutcome::Created
     );
     assert_eq!(started_b.record.env_ref.as_ref(), Some(&env_b));
     assert_eq!(

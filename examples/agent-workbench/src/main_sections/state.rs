@@ -440,7 +440,7 @@ pub(crate) struct SessionSelectRequest {
 
 /// One session as the selector renders it.
 #[derive(Clone, Debug, Serialize)]
-pub(crate) struct SessionSummary {
+pub(crate) struct SessionView {
     pub(crate) session_id: SessionId,
     pub(crate) name: String,
     pub(crate) created_at_ms: i64,
@@ -451,7 +451,7 @@ pub(crate) struct SessionSummary {
 /// The session list.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct SessionListResponse {
-    pub(crate) sessions: Vec<SessionSummary>,
+    pub(crate) sessions: Vec<SessionView>,
     pub(crate) current_session_id: SessionId,
 }
 

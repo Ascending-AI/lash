@@ -1021,7 +1021,7 @@ pub async fn declared_start_crash_at_every_launch_boundary(tier: DeclaredStartTi
         };
         assert_eq!(
             result,
-            &crate::SessionTurnResult::FinalValue { schema: None },
+            &crate::SessionTurnOutcome::FinalValue { schema: None },
             "{boundary:?}: the child's configuration is the declared one"
         );
         let _ = world
