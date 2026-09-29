@@ -470,6 +470,10 @@ lash_conformance::tool_call_identity_tests!(
             effect_host: harness.endpoint_host(),
             stores: harness.law_stores(),
             runner: harness.turn_runner(),
+            rlm: vec![drift_law_rlm_factory()],
+            process_rlm: super::tool_call_identity_on_the_double::process_rlm(
+                &harness.law_backend(),
+            ),
         };
         (harness, tier)
     }

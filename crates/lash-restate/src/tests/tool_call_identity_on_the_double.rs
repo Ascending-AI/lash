@@ -69,6 +69,19 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
             });
     }
 
+    /// Process segments run in the double's process workflow: the worker is
+    /// installed there, and the runtime's own port only observes the
+    /// registry that workflow writes terminals into.
+    fn process_work(
+        &self,
+        watched: lash_core::WatchedRegistry,
+        worker: lash_core_worker::DurableProcessWorker,
+    ) -> lash_core::ProcessWorkWiring {
+        self.backend.install_process_worker(worker);
+        let port = Arc::new(lash_core::NoProcessWork::new(&watched));
+        lash_core::ProcessWorkWiring::new(watched, port)
+    }
+
     /// The replay keys of every run the double journaled that names `scope`'s
     /// session, in journal order across invocations: a turn's group children
     /// journal in invocations of their own.
@@ -133,6 +146,31 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
     }
 }
 
+/// The RLM protocol with its process lifecycle on, over `backend`'s
+/// artifacts, and the process controls a cell's `processes.start` needs.
+pub(super) fn process_rlm(
+    backend: &lash_core::Backend,
+) -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
+    vec![
+        Arc::new(
+            lash_protocol_rlm::RlmProtocolPluginFactory::new(
+                lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                    .channel(lash_protocol_rlm::RlmChannel::Cell)
+                    .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                    .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                    .build(),
+                backend,
+            )
+            .with_process_lifecycle(true),
+        ),
+        Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
+        ),
+    ]
+}
+
 #[expect(
     clippy::disallowed_methods,
     reason = "test fixture: `LASH_RESTATE_TEST_SEED` replays one printed seed of the server double"
@@ -166,13 +204,16 @@ async fn tier(
     )
     .await
     .unwrap_or_else(|error| panic!("start the Restate server double: {error}"));
+    let backend = double.lash_backend();
     let tier = lash_conformance::ToolCallIdentityTier {
         prefix: format!("identity-{label}-{seed}"),
-        effect_host: double.lash_backend().effect_host() as Arc<dyn EffectHost>,
+        effect_host: backend.effect_host() as Arc<dyn EffectHost>,
         stores: Arc::clone(double.engine_stores()),
         runner: Arc::new(DoubleTurnRunner {
             backend: double.clone(),
         }),
+        rlm: vec![super::conformance_and_poison::drift_law_rlm_factory()],
+        process_rlm: process_rlm(&backend),
     };
     (double, tier)
 }

@@ -25,8 +25,14 @@ use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{SessionId, TurnId};
 
+mod admission;
+mod drift;
 mod laws;
+mod replay;
+pub use admission::*;
+pub use drift::*;
 pub use laws::*;
+pub use replay::*;
 
 /// What a registering tier hands every tool-call identity law.
 #[derive(Clone)]
@@ -38,6 +44,13 @@ pub struct ToolCallIdentityTier {
     pub stores: Arc<dyn crate::StoreSet>,
     /// Runs each turn, and crashes and redrives it.
     pub runner: Arc<dyn crate::ConformanceTurnRunner>,
+    /// The RLM protocol plugin factories the code-cell laws run under: the
+    /// part of the tier this crate cannot construct.
+    pub rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
+    /// The RLM protocol with its process lifecycle on, and the process
+    /// controls a cell's `processes.start` needs: what the process-admission
+    /// law's cells run under.
+    pub process_rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 }
 
 /// How long a turn gets before the law fails rather than hangs.
@@ -56,6 +69,10 @@ const PROBE: &str = "identity_probe";
 
 /// The probe that parks on its completion key and resolves it itself.
 const DEFERRED: &str = "identity_deferred";
+
+/// The probe whose prepare phase seals a fresh payload each time it runs, and
+/// whose body waits on the law's gate before its effect.
+const DRIFTING: &str = "identity_drifting";
 
 /// The tool-facing identity one attempt saw.
 ///
@@ -97,6 +114,8 @@ pub(crate) struct Execution {
     /// The call's `label` argument: which logical call the law meant.
     pub(crate) label: String,
     pub(crate) identity: AttemptIdentity,
+    /// The payload the call's prepare phase sealed.
+    pub(crate) prepared: serde_json::Value,
     /// The completion key a deferred probe parked on.
     pub(crate) completion_key: Option<crate::AwaitEventKey>,
 }
@@ -132,6 +151,8 @@ pub(crate) struct Witness {
     /// Bodies that started, by label, including those still running.
     started: std::sync::Mutex<Vec<String>>,
     gate: Gate,
+    /// How many times the drifting probe's prepare phase ran.
+    pub(crate) prepares: AtomicUsize,
 }
 
 impl Witness {
@@ -185,6 +206,15 @@ pub(crate) struct ProbeArgs {
     /// The first attempt reports a retryable failure after its effect.
     #[serde(default)]
     pub(crate) fail_first: bool,
+    /// The call's result switches the turn to a follow-on agent frame whose
+    /// task is [`follow_on_task`] of the label.
+    #[serde(default)]
+    pub(crate) switch: bool,
+}
+
+/// The task of the follow-on frame a switching probe opens.
+pub(crate) fn follow_on_task(label: &str) -> String {
+    format!("tool-call identity follow-on frame of {label}")
 }
 
 impl ProbeArgs {
@@ -248,6 +278,7 @@ impl IdentityProbes {
         self.witness.record(Execution {
             label: args.label.clone(),
             identity,
+            prepared: call.context.prepared_payload().clone(),
             completion_key: Some(key.clone()),
         });
         // The call resolves its own key with its own label: a call that reads
@@ -269,20 +300,33 @@ impl IdentityProbes {
 #[async_trait::async_trait]
 impl crate::ToolProvider for IdentityProbes {
     fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        [PROBE, DEFERRED]
+        [PROBE, DEFERRED, DRIFTING]
             .into_iter()
             .map(|name| probe_definition(name).manifest())
             .collect()
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        [PROBE, DEFERRED]
+        [PROBE, DEFERRED, DRIFTING]
             .contains(&name)
             .then(|| Arc::new(probe_definition(name).contract()))
     }
 
     fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
         tool_id == probe_definition(DEFERRED).id()
+    }
+
+    async fn prepare_tool_call(
+        &self,
+        call: crate::ToolPrepareCall<'_>,
+    ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
+        let drifting = call.tool_id == *probe_definition(DRIFTING).id();
+        let mut prepared = crate::PreparedToolCall::identity(call.tool_id, call.pending);
+        if drifting {
+            let seal = self.witness.prepares.fetch_add(1, Ordering::SeqCst) + 1;
+            prepared.prepared_payload = serde_json::json!({ "seal": seal });
+        }
+        Ok(prepared)
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -295,11 +339,17 @@ impl crate::ToolProvider for IdentityProbes {
         if call.name() == DEFERRED {
             return self.deferred(&call, args, identity).await;
         }
+        if call.name() == DRIFTING {
+            // Nothing has happened yet: the gate holds the call between its
+            // admission and its effect.
+            self.witness.gate.passed().await;
+        }
         // The recorded execution is the probe's effect; a held probe's gate
         // then holds its outcome back from the journal.
         self.witness.record(Execution {
             label: args.label.clone(),
             identity: identity.clone(),
+            prepared: call.context.prepared_payload().clone(),
             completion_key: None,
         });
         if args.hold {
@@ -314,7 +364,49 @@ impl crate::ToolProvider for IdentityProbes {
             ))
             .into();
         }
-        crate::ToolOutcome::ok(serde_json::json!({ "label": args.label })).into()
+        let output = crate::ToolCallOutput::success(serde_json::json!({ "label": args.label }));
+        if !args.switch {
+            return crate::ToolAttemptOutcome::done_without_intents(
+                crate::ToolOutcomeDone::from_output(output),
+            );
+        }
+        let Ok(frame_key) = crate::FrameKey::from_caller_material(&args.label) else {
+            return crate::ToolOutcome::err_fmt("a probe's label is frame material").into();
+        };
+        crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::from_output(
+            output.with_control(crate::ToolControl::SwitchAgentFrame {
+                frame_key,
+                initial_nodes: Vec::new(),
+                task: Some(follow_on_task(&args.label)),
+            }),
+        ))
+    }
+}
+
+/// Compacts a session to one fixed summary: a compaction without a model
+/// call.
+struct FixedCompactor;
+
+#[async_trait::async_trait]
+impl crate::facade_support::ContextCompactor for FixedCompactor {
+    fn id(&self) -> &'static str {
+        "conformance.tool_call_identity.compactor"
+    }
+
+    async fn compact(
+        &self,
+        _ctx: &crate::facade_support::CompactionContext<'_>,
+    ) -> Result<Option<crate::facade_support::ContextCompaction>, crate::facade_support::ContextError>
+    {
+        Ok(Some(crate::facade_support::ContextCompaction::new(vec![
+            lash_core::SessionAppendNode::message(
+                lash_core::PluginMessage::text(lash_core::MessageRole::Assistant, SUMMARY)
+                    .with_origin(lash_core::MessageOrigin::Plugin {
+                        plugin_id: "conformance_tool_call_identity".to_string(),
+                        transient: false,
+                    }),
+            ),
+        ])))
     }
 }
 
@@ -348,6 +440,11 @@ pub(crate) fn raw_call(
     }
 }
 
+/// A model response that is one code cell.
+pub(crate) fn cell(source: &str) -> crate::LlmResponse {
+    text(&format!("<typescript>\n{source}\n</typescript>"))
+}
+
 pub(crate) fn text(text: &str) -> crate::LlmResponse {
     crate::LlmResponse {
         parts: vec![crate::LlmOutputPart::Text {
@@ -366,17 +463,48 @@ pub(crate) struct World {
     pub(crate) session_id: SessionId,
     pub(crate) witness: Arc<Witness>,
     pub(crate) model_calls: Arc<AtomicUsize>,
+    /// What the model answers in each segment it is asked in: the text that
+    /// opens the segment (a turn's input, a follow-on frame's task) and the
+    /// answers, in order.
+    scripts: Arc<std::sync::Mutex<Vec<(String, Arc<Vec<crate::LlmResponse>>)>>>,
+    protocol: Protocol,
+    /// The process registry the session starts processes in.
+    process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
+    /// The process registry and work the session starts processes on.
+    processes: Option<WorldProcesses>,
 }
 
+/// Which protocol a law's session runs under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Protocol {
+    /// The standard protocol: the model calls tools natively.
+    Standard,
+    /// RLM: the model answers with code cells.
+    Code,
+    /// RLM whose cells can start Lashlang processes.
+    CodeWithProcesses,
+}
+
+/// A world's process registry and the work wiring the tier's engine runs its
+/// processes' segments with.
+#[derive(Clone)]
+struct WorldProcesses {
+    registry: Arc<dyn crate::ProcessRegistry>,
+    wiring: crate::ProcessWorkWiring,
+}
+
+/// What the model answers in a segment no script opens: a compaction's
+/// summary request.
+const SUMMARY: &str = "tool-call identity law summary";
+
 /// One turn of a law's session: its id, what the user says, and what the
-/// model answers, in order. A request is answered by how many answers this
-/// turn already holds, so a replay that asks again is answered as the first
-/// execution was.
+/// model answers, in order. A request is answered by how many answers its
+/// segment already holds, so a replay that asks again is answered as the
+/// first execution was.
 #[derive(Clone)]
 pub(crate) struct ScriptedTurn {
     pub(crate) turn_id: TurnId,
     pub(crate) input: String,
-    pub(crate) responses: Arc<Vec<crate::LlmResponse>>,
 }
 
 impl World {
@@ -386,7 +514,67 @@ impl World {
             session_id: SessionId::from(format!("{}-{law}", tier.prefix)),
             witness: Arc::new(Witness::default()),
             model_calls: Arc::new(AtomicUsize::new(0)),
+            scripts: Arc::default(),
+            protocol: Protocol::Standard,
+            process_registry: None,
+            processes: None,
         }
+    }
+
+    /// A world whose session runs under the tier's RLM protocol: the model
+    /// answers with code cells.
+    pub(crate) fn code(tier: &ToolCallIdentityTier, law: &str) -> Self {
+        Self {
+            protocol: Protocol::Code,
+            ..Self::new(tier, law)
+        }
+    }
+
+    /// A world whose code cells start Lashlang processes, whose segments the
+    /// tier's engine runs on a worker over the same plugins.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: the worker is built from the setup above"
+    )]
+    pub(crate) fn code_with_processes(tier: &ToolCallIdentityTier, law: &str) -> Self {
+        let registry = tier.stores.process_registry();
+        let mut world = Self {
+            protocol: Protocol::CodeWithProcesses,
+            process_registry: Some(Arc::clone(&registry)),
+            ..Self::new(tier, law)
+        };
+        let (config, factories) = world.host_and_factories();
+        let mut policy = crate::testing::mock_session_policy();
+        policy.session_id = Some(world.session_id.clone());
+        // One watch, two consumers: the runtime's process port and the
+        // worker observe the same registry handle.
+        let watched = crate::facade_support::watch_process_registry(registry);
+        let worker = lash_core_worker::DurableProcessWorker::new(
+            lash_core_worker::DurableProcessWorkerConfig::new(
+                Arc::new(crate::facade_support::PluginHost::new(factories)),
+                config,
+                crate::ProcessWorkWiring::new(
+                    watched.clone(),
+                    Arc::new(crate::NoProcessWork::new(&watched)),
+                ),
+                Arc::new(crate::NoSessionWork::new()),
+                crate::testing::runtime_lease_owner(),
+            )
+            .with_session_policy(policy),
+        )
+        .expect("build the tool-call identity process worker");
+        world.processes = Some(WorldProcesses {
+            registry: Arc::clone(watched.registry()),
+            wiring: tier.runner.process_work(watched, worker),
+        });
+        world
+    }
+
+    /// The model answers the segment `opening` opens with `responses`.
+    pub(crate) fn script(&self, opening: &str, responses: Vec<crate::LlmResponse>) {
+        self.scripts
+            .lock_recover()
+            .push((opening.to_string(), Arc::new(responses)));
     }
 
     pub(crate) fn runner(&self) -> &Arc<dyn crate::ConformanceTurnRunner> {
@@ -394,10 +582,11 @@ impl World {
     }
 
     pub(crate) fn turn(&self, name: &str, responses: Vec<crate::LlmResponse>) -> ScriptedTurn {
+        let input = format!("tool-call identity law: {name}");
+        self.script(&input, responses);
         ScriptedTurn {
             turn_id: TurnId::from(format!("{}-{name}", self.session_id)),
-            input: format!("tool-call identity law: {name}"),
-            responses: Arc::new(responses),
+            input,
         }
     }
 
@@ -405,31 +594,42 @@ impl World {
         crate::admit(crate::ExecutionScope::turn(&self.session_id, &turn.turn_id))
     }
 
-    fn model(&self, turn: &ScriptedTurn) -> crate::testing::TestProvider {
-        let responses = Arc::clone(&turn.responses);
+    /// The one model of the law's world. A request belongs to the segment
+    /// its last user-segment message opens, and is answered by how many
+    /// answers follow that message; a segment no script opens is a
+    /// compaction's summary request.
+    fn model(&self) -> crate::testing::TestProvider {
+        let scripts = Arc::clone(&self.scripts);
         let model_calls = Arc::clone(&self.model_calls);
         crate::testing::TestProvider::builder()
             .kind("stub")
             .complete(move |request| {
-                let responses = Arc::clone(&responses);
-                let model_calls = Arc::clone(&model_calls);
-                async move {
-                    model_calls.fetch_add(1, Ordering::SeqCst);
-                    // This turn's answers follow its user input, the last
-                    // message that starts a user segment.
-                    let this_turn = request
-                        .messages
+                model_calls.fetch_add(1, Ordering::SeqCst);
+                let opened = request
+                    .messages
+                    .iter()
+                    .rposition(|message| message.starts_user_segment);
+                let script = opened.and_then(|opened| {
+                    let opening = message_text(&request.messages[opened]);
+                    scripts
+                        .lock_recover()
                         .iter()
-                        .rposition(|message| message.starts_user_segment)
-                        .map_or(0, |input| input + 1);
-                    let answered = request.messages[this_turn..]
-                        .iter()
-                        .filter(|message| {
-                            matches!(message.role, lash_sansio::llm::types::LlmRole::Assistant)
-                        })
-                        .count();
-                    Ok(responses[answered.min(responses.len() - 1)].clone())
-                }
+                        .find(|(text, _)| opening.contains(text.as_str()))
+                        .map(|(_, responses)| Arc::clone(responses))
+                });
+                let response = match (script, opened) {
+                    (Some(responses), Some(opened)) => {
+                        let answered = request.messages[opened + 1..]
+                            .iter()
+                            .filter(|message| {
+                                matches!(message.role, lash_sansio::llm::types::LlmRole::Assistant)
+                            })
+                            .count();
+                        responses[answered.min(responses.len() - 1)].clone()
+                    }
+                    _ => text(SUMMARY),
+                };
+                async move { Ok(response) }
             })
             .build()
     }
@@ -447,51 +647,7 @@ impl World {
         scope: crate::ScopedEffectController<'_>,
         phase_probe: Option<Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>>,
     ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
-        let law_backend = crate::LawBackend::over_stores(
-            Arc::clone(&self.tier.stores),
-            Arc::clone(&self.tier.effect_host),
-        );
-        let mut config = law_backend.host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
-        config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
-            self.model(turn).into_handle(),
-        ));
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(self.session_id.clone());
-        let probes: Arc<dyn crate::ToolProvider> = Arc::new(IdentityProbes {
-            witness: Arc::clone(&self.witness),
-            effect_host: Arc::clone(&self.tier.effect_host),
-        });
-        let factories = crate::testing::test_standard_protocol_factories()
-            .into_iter()
-            .chain([Arc::new(crate::plugin::StaticPluginFactory::new(
-                "conformance-tool-call-identity",
-                crate::facade_support::PluginSpec::new().with_tool_provider(probes),
-            ))
-                as Arc<dyn crate::facade_support::PluginFactory>])
-            .collect::<Vec<_>>();
-        let mut runtime = Box::pin(
-            crate::LashRuntime::builder(config, crate::testing::runtime_lease_owner())
-                .with_session_id(&self.session_id)
-                .with_policy(policy)
-                .with_plugin_host(crate::facade_support::PluginHost::new(factories))
-                .with_store(
-                    crate::conformance::law_session_store(
-                        self.tier.stores.as_ref(),
-                        &self.session_id,
-                    )
-                    .await,
-                )
-                .with_queued_work(Arc::new(crate::NoSessionWork::new()))
-                .build(),
-        )
-        .await
-        .expect("build the tool-call identity runtime");
-        if let Some(probe) = phase_probe {
-            runtime.set_turn_phase_probe(probe);
-        }
+        let mut runtime = self.runtime(phase_probe).await;
         let mut input = crate::TurnInput::text(turn.input.clone());
         input.trace_turn_id = Some(turn.turn_id.clone());
         tokio::time::timeout(
@@ -503,6 +659,98 @@ impl World {
         )
         .await
         .expect("the tool-call identity turn settles within its budget")
+    }
+
+    /// The session's store on the tier.
+    pub(crate) async fn store(&self) -> Arc<dyn crate::RuntimePersistence> {
+        crate::conformance::law_session_store(self.tier.stores.as_ref(), &self.session_id).await
+    }
+
+    /// A fresh runtime over the tier's host and stores, loading the session
+    /// the earlier executions committed.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
+    pub(crate) async fn runtime(
+        &self,
+        phase_probe: Option<Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>>,
+    ) -> crate::LashRuntime {
+        let (config, factories) = self.host_and_factories();
+        let mut policy = crate::testing::mock_session_policy();
+        policy.session_id = Some(self.session_id.clone());
+        let mut builder =
+            crate::LashRuntime::builder(config, crate::testing::runtime_lease_owner())
+                .with_session_id(&self.session_id)
+                .with_policy(policy)
+                .with_plugin_host(crate::facade_support::PluginHost::new(factories))
+                .with_store(self.store().await)
+                .with_queued_work(Arc::new(crate::NoSessionWork::new()));
+        if let Some(processes) = &self.processes {
+            builder = builder
+                .with_process_registry(Arc::clone(&processes.registry))
+                .with_process_work(processes.wiring.clone());
+        }
+        let mut runtime = Box::pin(builder.build())
+            .await
+            .expect("build the tool-call identity runtime");
+        if let Some(probe) = phase_probe {
+            runtime.set_turn_phase_probe(probe);
+        }
+        runtime
+    }
+
+    /// The runtime host config over the tier, answering with the law's
+    /// model, and the plugins the session runs: its protocol and the probes.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: the tier's plugins declare installable engines"
+    )]
+    fn host_and_factories(
+        &self,
+    ) -> (
+        crate::RuntimeHostConfig,
+        Vec<Arc<dyn crate::facade_support::PluginFactory>>,
+    ) {
+        let mut law_backend = crate::LawBackend::over_stores(
+            Arc::clone(&self.tier.stores),
+            Arc::clone(&self.tier.effect_host),
+        );
+        if let Some(registry) = &self.process_registry {
+            law_backend = law_backend.with_process_registry(Arc::clone(registry));
+        }
+        let mut config = law_backend.host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
+        config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
+            self.model().into_handle(),
+        ));
+        let probes: Arc<dyn crate::ToolProvider> = Arc::new(IdentityProbes {
+            witness: Arc::clone(&self.witness),
+            effect_host: Arc::clone(&self.tier.effect_host),
+        });
+        let protocol = match self.protocol {
+            Protocol::Standard => crate::testing::test_standard_protocol_factories(),
+            Protocol::Code => self.tier.rlm.clone(),
+            Protocol::CodeWithProcesses => self.tier.process_rlm.clone(),
+        };
+        let factories = protocol
+            .into_iter()
+            .chain([Arc::new(crate::plugin::StaticPluginFactory::new(
+                "conformance-tool-call-identity",
+                crate::facade_support::PluginSpec::new()
+                    .with_tool_provider(probes)
+                    .with_context_compactor(100, Arc::new(FixedCompactor)),
+            ))
+                as Arc<dyn crate::facade_support::PluginFactory>])
+            .collect::<Vec<_>>();
+        if self.process_registry.is_some() {
+            config = crate::facade_support::PluginHost::new(factories.clone())
+                .install_process_engine_contributions(config, true)
+                .expect("install the protocol's process-engine contributions");
+        }
+        (config, factories)
     }
 
     /// An attempt that drives `turn` and hands its result to `report`.
@@ -552,6 +800,19 @@ impl World {
             .expect("the tier's runner ran the turn")
             .unwrap_or_else(|error| panic!("the law's turn `{}` runs: {error}", turn.turn_id))
     }
+}
+
+/// The text blocks of `message`, joined.
+fn message_text(message: &lash_sansio::llm::types::LlmMessage) -> String {
+    message
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            lash_sansio::llm::types::LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// A turn's settled tool calls: each call's recorded output, by provider call
