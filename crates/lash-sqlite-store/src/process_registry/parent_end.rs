@@ -122,10 +122,10 @@ pub(super) async fn record(
 ) -> Result<(), PluginError> {
     let parent = parent.clone();
     let ended_at_ms = registry.clock.timestamp_ms();
-    let fleet_format = registry.fleet_format;
     registry
         .conn
         .write_flow(move |tx| {
+            let fleet_format = tx.fleet();
             Ok(tx_outcome(record_conn(
                 tx,
                 &parent,
@@ -217,7 +217,7 @@ async fn get_by_columns(
                 settled,
                 obligation_id,
                 obligation_state,
-                registry.fleet_format,
+                registry.conn.fleet(),
             )
         },
     )

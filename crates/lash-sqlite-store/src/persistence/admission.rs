@@ -53,10 +53,10 @@ pub(crate) async fn admit_root_sqlite(
 ) -> Result<Option<RootAdmission>, StoreError> {
     let request = request.clone();
     let now = store.clock.timestamp_ms();
-    let fleet = store.fleet_format;
     store
         .conn
         .write_flow(move |tx| {
+            let fleet = tx.fleet();
             flow((|| {
                 let session_id = request.session_id();
                 super::drive_epoch::require_fence_conn(tx, session_id, &request.fence)?;

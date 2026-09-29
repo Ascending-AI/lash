@@ -55,9 +55,9 @@ impl SqliteStore {
     /// no work survived* — never because the failure was absorbed into a clean
     /// zero report.
     pub async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {
-        let fleet = self.fleet_format;
         self.conn
             .write(move |tx| {
+                let fleet = tx.fleet();
                 Self::gc_unreachable_in_tx(tx, fleet).map_err(|err| {
                     rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
                         err.to_string(),

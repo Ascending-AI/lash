@@ -99,7 +99,7 @@ impl BackendFaultPoint {
 
     const fn from_sqlite(point: SqliteFaultPoint) -> Self {
         match point {
-            SqliteFaultPoint::AfterBegin => Self::AfterBegin,
+            SqliteFaultPoint::AfterBegin | SqliteFaultPoint::AfterFence => Self::AfterBegin,
             SqliteFaultPoint::BeforeCommit => Self::BeforeCommit,
             SqliteFaultPoint::CommitIo => Self::CommitIo,
         }

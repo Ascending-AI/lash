@@ -89,6 +89,143 @@ pub(crate) fn admit(
     Ok((admission, fleet))
 }
 
+/// The writer fence's one statement (ADR 0115 §2.2).
+const FENCE: &str =
+    "SELECT component, version, min_reader, fleet_format FROM lash_compat WHERE singleton = 1";
+
+/// The writer fence, the first statement of every write transaction after
+/// `BEGIN IMMEDIATE` (ADR 0115 §2.2). The reserved lock that `BEGIN
+/// IMMEDIATE` holds keeps any other writer, and any migration or finalize,
+/// from changing the row until the transaction ends.
+///
+/// It answers the epoch `F` the transaction runs under. It also re-admits the
+/// component stamp, because another process can migrate a shared database
+/// while this one holds a connection: a raised floor refuses typed here, not
+/// at the next open. A missing or malformed row fails closed. `F` outside
+/// `writable` is the terminal [`StoreError::WriterFenced`]; the caller's
+/// rollback leaves the transaction having written nothing.
+pub(crate) fn fence(
+    conn: &Connection,
+    database: SqliteDatabase,
+    writable: VersionRange,
+) -> rusqlite::Result<FleetFormat> {
+    let row: Option<(String, i64, i64, i64)> = conn
+        .prepare_cached(FENCE)
+        .and_then(|mut statement| {
+            statement
+                .query_row([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })
+                .optional()
+        })
+        .map_err(|error| malformed(database, error.to_string()))?;
+    let Some((component, version, min_reader, fleet)) = row else {
+        return Err(incompatible(CompatRefusal::Unstamped {
+            component: database.component().as_str().to_owned(),
+        }));
+    };
+    let descriptor = compat::descriptor(database.component())
+        .ok_or_else(|| malformed(database, "the build has no descriptor for this database"))?;
+    if component != database.component().as_str() {
+        return Err(malformed(database, format!("component is {component}")));
+    }
+    let stamp = CompatStamp {
+        version: u32::try_from(version).map_err(|error| malformed(database, error.to_string()))?,
+        min_reader: u32::try_from(min_reader)
+            .map_err(|error| malformed(database, error.to_string()))?,
+    };
+    compat::admit(descriptor, StampRead::Present(stamp)).map_err(incompatible)?;
+    let fleet = u32::try_from(fleet).map_err(|error| malformed(database, error.to_string()))?;
+    FleetFormat::fence(fleet, writable).map_err(crate::sqlite_conversion_error)
+}
+
+/// One step of [`advance_set`], as its observer sees it.
+#[cfg(any(test, feature = "testing"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AdvanceStep {
+    /// `BEGIN EXCLUSIVE` holds this database.
+    Locked(SqliteDatabase),
+    /// This database's rewrite committed.
+    Committed(SqliteDatabase),
+}
+
+/// Advance the whole store: a migration or a finalize (ADR 0115 §2.2).
+///
+/// It takes `BEGIN EXCLUSIVE` on every database in [`SqliteDatabase::ALL`]
+/// order, and only once it holds all three does `rewrite` change each one
+/// (its DDL and its `lash_compat` row). It then commits in the same order.
+/// While it holds a database no writer there passes its fence, and a writer
+/// that was already past its fence finishes first under the old row. A crash
+/// between two commits leaves the databases disagreeing, and the next set
+/// open refuses that as `PartiallyAdvanced` ([`check_set`]).
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn advance_set(
+    location: &SqliteLocation,
+    busy_timeout: std::time::Duration,
+    rewrite: impl FnMut(SqliteDatabase, &Transaction<'_>) -> rusqlite::Result<()>,
+) -> rusqlite::Result<()> {
+    advance_set_observed(location, busy_timeout, rewrite, |_| {})
+}
+
+/// [`advance_set`], reporting each lock and commit to `observe` as it happens.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn advance_set_observed(
+    location: &SqliteLocation,
+    busy_timeout: std::time::Duration,
+    mut rewrite: impl FnMut(SqliteDatabase, &Transaction<'_>) -> rusqlite::Result<()>,
+    mut observe: impl FnMut(AdvanceStep),
+) -> rusqlite::Result<()> {
+    let mut connections = Vec::with_capacity(SqliteDatabase::ALL.len());
+    for database in SqliteDatabase::ALL {
+        let connection = Connection::open_with_flags(
+            location.target(database).uri(),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )?;
+        connection.busy_timeout(busy_timeout)?;
+        connections.push((database, connection));
+    }
+    let mut held = Vec::with_capacity(connections.len());
+    for (database, connection) in &mut connections {
+        held.push((
+            *database,
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)?,
+        ));
+        observe(AdvanceStep::Locked(*database));
+    }
+    for (database, tx) in &held {
+        rewrite(*database, tx)?;
+    }
+    for (database, tx) in held {
+        tx.commit()?;
+        observe(AdvanceStep::Committed(database));
+    }
+    Ok(())
+}
+
+/// Finalize: move `F` to `fleet` in every database of the store, as one
+/// [`advance_set`]. Every writer whose writable range excludes `fleet` is
+/// fenced from its next transaction on.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn finalize(
+    location: &SqliteLocation,
+    busy_timeout: std::time::Duration,
+    fleet: u32,
+) -> rusqlite::Result<()> {
+    advance_set(location, busy_timeout, |database, tx| {
+        if tx.execute(
+            "UPDATE lash_compat SET fleet_format = ?1 WHERE singleton = 1",
+            [i64::from(fleet)],
+        )? == 1
+        {
+            Ok(())
+        } else {
+            Err(incompatible(CompatRefusal::Unstamped {
+                component: database.component().as_str().to_owned(),
+            }))
+        }
+    })
+}
+
 /// Only the installer writes the row. An existing row is never changed by an
 /// ordinary open, including an open by an older build after expand.
 pub(crate) fn provision(tx: &Transaction<'_>, database: SqliteDatabase) -> rusqlite::Result<()> {
@@ -159,9 +296,11 @@ pub(crate) fn check_set(location: &SqliteLocation) -> rusqlite::Result<()> {
     }
 }
 
+/// The handle answers the last `F` its writer fence observed, not the
+/// open-time value (ADR 0115 §2.3).
 impl lash_core_execution::FleetFormatStore for crate::SqliteStore {
     fn fleet_format(&self) -> FleetFormat {
-        self.fleet_format
+        self.conn.fleet()
     }
 }
 

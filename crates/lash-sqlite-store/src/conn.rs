@@ -31,23 +31,38 @@
 //!   caller cannot keep it. `busy_timeout` still stands for writers in other
 //!   processes.
 //!
+//! * **The writer fence (ADR 0115 §2.2).** The first statement of every
+//!   write transaction after `BEGIN IMMEDIATE` reads the database's
+//!   `lash_compat` row: it re-admits the component stamp and answers the
+//!   epoch `F` the transaction runs under, which the closure reads from
+//!   [`FencedTx::fleet`]. `F` outside the writable range is the terminal
+//!   `WriterFenced`, and the transaction writes nothing. The installer
+//!   ([`SqliteConnection::install`]) is the one write that runs before the
+//!   row exists, and it arms the fence. [`SqliteConnection::call`] and
+//!   [`SqliteConnection::read`] never mutate; the guarded-transaction lint
+//!   (`scripts/check-guarded-transactions.py`) keeps every other mutation
+//!   inside [`SqliteConnection::write`] or [`SqliteConnection::write_flow`].
+//!
 //! * **Error mapping.** `conn.call(...)` returns [`tokio_rusqlite::Error`],
 //!   which wraps [`rusqlite::Error`]. The helpers flatten that so closures only
 //!   ever deal in `rusqlite::Result<T>` and callers receive the inner
 //!   `rusqlite::Error` to feed through `sqlite_error` / `process_sqlite_error`.
 
+use lash_core_execution::FleetFormat;
+use lash_core_execution::compat::VersionRange;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use std::collections::HashMap;
 use std::path::PathBuf;
 #[cfg(feature = "perf-witness")]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, RwLock, Weak};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock, Weak};
 use std::time::Duration;
 #[cfg(feature = "perf-witness")]
 use std::time::Instant;
 use tokio_rusqlite::Connection as AsyncConnection;
 
+use crate::SqliteDatabase;
 use crate::location::DatabaseTarget;
 
 // Fault points are syntax declarations in the transaction code. With the
@@ -381,6 +396,93 @@ fn is_busy(err: &rusqlite::Error) -> bool {
     )
 }
 
+/// A connection's writer fence (ADR 0115 §2.2), shared by its clones.
+///
+/// The installer arms it with the database the connection writes and the
+/// build's writable range for `F`. Until then no write passes it.
+#[derive(Debug)]
+struct WriterFence {
+    armed: OnceLock<ArmedFence>,
+    /// The epoch the most recent fence read: what the handle's
+    /// `fleet_format()` answers and what payloads encoded before `BEGIN`
+    /// are encoded under (ADR 0115 §2.3).
+    observed: Mutex<FleetFormat>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ArmedFence {
+    database: SqliteDatabase,
+    writable: VersionRange,
+}
+
+impl WriterFence {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            armed: OnceLock::new(),
+            observed: Mutex::new(FleetFormat::current()),
+        })
+    }
+
+    fn observed(&self) -> FleetFormat {
+        *self
+            .observed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Record the epoch a fence read. A moved `F` replaces the observed
+    /// value; an unmoved one keeps it, pin table included.
+    fn observe(&self, fleet: FleetFormat) -> FleetFormat {
+        let mut observed = self
+            .observed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if observed.version() != fleet.version() {
+            *observed = fleet;
+        }
+        *observed
+    }
+
+    /// Run the fence inside `tx`, the transaction's first statement.
+    fn check(&self, tx: &Transaction<'_>) -> rusqlite::Result<FleetFormat> {
+        let Some(armed) = self.armed.get() else {
+            return Err(crate::sqlite_conversion_error(
+                lash_core_execution::StoreError::StorageFailure {
+                    backend: crate::SQLITE_BACKEND,
+                    message: "write on a SQLite connection whose database no installer admitted"
+                        .to_owned(),
+                },
+            ));
+        };
+        let fleet = crate::compat::fence(tx, armed.database, armed.writable)?;
+        Ok(self.observe(fleet))
+    }
+}
+
+/// A write transaction past its fence: the transaction, and the epoch `F`
+/// the fence read. Everything the transaction encodes for durable storage is
+/// encoded under [`fleet`](Self::fleet), so nothing it writes straddles a
+/// finalize.
+pub(crate) struct FencedTx<'c> {
+    tx: Transaction<'c>,
+    fleet: FleetFormat,
+}
+
+impl FencedTx<'_> {
+    /// The epoch this transaction runs under.
+    pub(crate) fn fleet(&self) -> FleetFormat {
+        self.fleet
+    }
+}
+
+impl<'c> std::ops::Deref for FencedTx<'c> {
+    type Target = Transaction<'c>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.tx
+    }
+}
+
 /// Cheaply-clonable async handle to one SQLite database. Cloning shares the
 /// same underlying connection thread (tokio-rusqlite reference-counts it), so
 /// the `SqliteStore` can keep a single `SqliteConnection` and hand `&self` borrows of
@@ -393,6 +495,7 @@ pub(crate) struct SqliteConnection {
     write_gate: Arc<Mutex<()>>,
     read_gate: Arc<RwLock<()>>,
     checkpoint: Option<Arc<CheckpointState>>,
+    fence: Arc<WriterFence>,
     #[cfg(feature = "testing")]
     fault_injector: Option<crate::testing::SqliteFaultInjector>,
 }
@@ -472,6 +575,7 @@ impl SqliteConnection {
             checkpoint: checkpoint_state(target, &gate, &reads, policy.wal_autocheckpoint_pages),
             write_gate: gate,
             read_gate: reads,
+            fence: WriterFence::new(),
             #[cfg(feature = "testing")]
             fault_injector,
         })
@@ -500,6 +604,7 @@ impl SqliteConnection {
             write_gate: write_gate(target),
             read_gate: read_gate(target),
             checkpoint: None,
+            fence: WriterFence::new(),
             #[cfg(feature = "testing")]
             fault_injector: None,
         })
@@ -557,9 +662,71 @@ impl SqliteConnection {
         )
     }
 
-    /// Run `f` inside a `BEGIN IMMEDIATE` transaction on the connection thread,
-    /// committing on `Ok` and rolling back (via drop) on `Err`. The write lock
-    /// is acquired up front. Use this for every read-then-write path.
+    /// The epoch `F` the most recent fence on this connection read (ADR 0115
+    /// §2.3), or the installer's admitted `F` before any write.
+    pub(crate) fn fleet(&self) -> FleetFormat {
+        self.fence.observed()
+    }
+
+    /// Stand this connection's writers up on `fleet`, pin table included,
+    /// until a fence reads another epoch.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn observe_fleet_for_testing(&self, fleet: FleetFormat) {
+        *self
+            .fence
+            .observed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = fleet;
+    }
+
+    /// The installer: the one write transaction that runs before the
+    /// database's `lash_compat` row exists, so it is not fenced. `f` admits
+    /// or provisions the database's stamp and answers the admitted `F`,
+    /// inside the same `BEGIN IMMEDIATE`; on success the fence is armed with
+    /// `database` and `writable`, and every later write on this connection or
+    /// its clones passes it.
+    pub(crate) async fn install<F>(
+        &self,
+        database: SqliteDatabase,
+        writable: VersionRange,
+        f: F,
+    ) -> rusqlite::Result<()>
+    where
+        F: FnOnce(&Transaction<'_>) -> rusqlite::Result<FleetFormat> + Send + 'static,
+    {
+        let write_gate = Arc::clone(&self.write_gate);
+        let read_gate = Arc::clone(&self.read_gate);
+        let fleet = flatten(
+            self.inner
+                .call(move |c| {
+                    let _read_gate = read_gate
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let _write_gate = write_gate
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                    let fleet = f(&tx)?;
+                    tx.commit()?;
+                    Ok(Ok(fleet))
+                })
+                .await,
+        )?;
+        let armed = ArmedFence { database, writable };
+        if *self.fence.armed.get_or_init(|| armed) != armed {
+            return Err(crate::compat::malformed(
+                database,
+                "the connection is already armed for another database or range",
+            ));
+        }
+        self.fence.observe(fleet);
+        Ok(())
+    }
+
+    /// Run `f` inside a fenced `BEGIN IMMEDIATE` transaction on the connection
+    /// thread, committing on `Ok` and rolling back (via drop) on `Err`. The
+    /// write lock is acquired up front, and the writer fence is the
+    /// transaction's first statement. Use this for every read-then-write path.
     ///
     /// The database's in-process write gate is taken on the connection thread
     /// and held until the transaction ends (FIG-3975): writers in this process
@@ -571,55 +738,10 @@ impl SqliteConnection {
     pub(crate) async fn write<T, F>(&self, f: F) -> rusqlite::Result<T>
     where
         T: Send + 'static,
-        F: FnOnce(&Transaction<'_>) -> rusqlite::Result<T> + Send + 'static,
+        F: FnOnce(&FencedTx<'_>) -> rusqlite::Result<T> + Send + 'static,
     {
-        let write_gate = Arc::clone(&self.write_gate);
-        let read_gate = Arc::clone(&self.read_gate);
-        let checkpoint = self.checkpoint.clone();
-        #[cfg(feature = "testing")]
-        let fault_injector = self.fault_injector.clone();
-        flatten(
-            self.inner
-                .call(move |c| {
-                    let _read_gate = read_gate
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    #[cfg(feature = "perf-witness")]
-                    let waiting_since = Instant::now();
-                    let _write_gate = write_gate
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    #[cfg(feature = "perf-witness")]
-                    let wait = waiting_since.elapsed();
-                    #[cfg(feature = "perf-witness")]
-                    let holding_since = Instant::now();
-                    let result = (|| {
-                        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                        #[cfg(feature = "testing")]
-                        let write_transaction_ordinal = fault_injector
-                            .as_ref()
-                            .map_or(0, crate::testing::SqliteFaultInjector::begin_write);
-                        sim_fault!(fault_injector, AfterBegin, write_transaction_ordinal);
-                        let value = f(&tx)?;
-                        sim_fault!(fault_injector, BeforeCommit, write_transaction_ordinal);
-                        sim_fault!(fault_injector, CommitIo, write_transaction_ordinal);
-                        tx.commit()?;
-                        Ok(Ok(value))
-                    })();
-                    #[cfg(feature = "perf-witness")]
-                    let hold = holding_since.elapsed();
-                    drop(_write_gate);
-                    #[cfg(feature = "perf-witness")]
-                    record_gate_timing(wait, hold);
-                    if result.is_ok()
-                        && let Some(checkpoint) = &checkpoint
-                    {
-                        checkpoint.commits.fetch_add(1, Ordering::Release);
-                    }
-                    result
-                })
-                .await,
-        )
+        self.write_flow(move |tx| f(tx).map(TxOutcome::Commit))
+            .await
     }
 
     /// Like [`write`](Self::write) but the closure decides commit vs rollback
@@ -629,11 +751,12 @@ impl SqliteConnection {
     pub(crate) async fn write_flow<T, F>(&self, f: F) -> rusqlite::Result<T>
     where
         T: Send + 'static,
-        F: FnOnce(&Transaction<'_>) -> rusqlite::Result<TxOutcome<T>> + Send + 'static,
+        F: FnOnce(&FencedTx<'_>) -> rusqlite::Result<TxOutcome<T>> + Send + 'static,
     {
         let write_gate = Arc::clone(&self.write_gate);
         let read_gate = Arc::clone(&self.read_gate);
         let checkpoint = self.checkpoint.clone();
+        let fence = Arc::clone(&self.fence);
         #[cfg(feature = "testing")]
         let fault_injector = self.fault_injector.clone();
         flatten(
@@ -658,16 +781,19 @@ impl SqliteConnection {
                             .as_ref()
                             .map_or(0, crate::testing::SqliteFaultInjector::begin_write);
                         sim_fault!(fault_injector, AfterBegin, write_transaction_ordinal);
+                        let fleet = fence.check(&tx)?;
+                        sim_fault!(fault_injector, AfterFence, write_transaction_ordinal);
+                        let tx = FencedTx { tx, fleet };
                         let outcome = f(&tx)?;
                         let value = match outcome {
                             TxOutcome::Commit(value) => {
                                 sim_fault!(fault_injector, BeforeCommit, write_transaction_ordinal);
                                 sim_fault!(fault_injector, CommitIo, write_transaction_ordinal);
-                                tx.commit()?;
+                                tx.tx.commit()?;
                                 value
                             }
                             TxOutcome::Rollback(value) => {
-                                tx.rollback()?;
+                                tx.tx.rollback()?;
                                 value
                             }
                         };
@@ -720,6 +846,36 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+    /// A connection to a bare scratch database whose installer laid down only
+    /// the durable core's `lash_compat` row, so its writes pass the fence.
+    async fn installed(
+        target: &DatabaseTarget,
+        policy: SqliteConnectionPolicy,
+    ) -> SqliteConnection {
+        let connection = SqliteConnection::open_with_policy(target, policy)
+            .await
+            .expect("open scratch connection");
+        connection
+            .install(SqliteDatabase::DurableCore, FleetFormat::writable(), |tx| {
+                tx.execute_batch(
+                    "CREATE TABLE IF NOT EXISTS lash_compat (
+                             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                             component TEXT NOT NULL,
+                             version INTEGER NOT NULL,
+                             min_reader INTEGER NOT NULL,
+                             fleet_format INTEGER NOT NULL
+                         )",
+                )?;
+                if crate::compat::read(tx, SqliteDatabase::DurableCore)?.is_none() {
+                    crate::compat::provision(tx, SqliteDatabase::DurableCore)?;
+                }
+                Ok(FleetFormat::current())
+            })
+            .await
+            .expect("install the scratch stamp");
+        connection
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[expect(
         clippy::disallowed_methods,
@@ -729,15 +885,14 @@ mod tests {
         let dir = tempfile::tempdir().expect("checkpoint test tempdir");
         let path = dir.path().join("core.db");
         let target = DatabaseTarget::File(path.clone());
-        let writer = SqliteConnection::open_with_policy(
+        let writer = installed(
             &target,
             SqliteConnectionPolicy {
                 wal_autocheckpoint_pages: 16,
                 ..SqliteConnectionPolicy::default()
             },
         )
-        .await
-        .expect("open WAL writer");
+        .await;
         writer
             .write(|tx| {
                 tx.execute_batch("CREATE TABLE payloads (body BLOB NOT NULL)")?;
@@ -852,11 +1007,7 @@ mod tests {
         let target = DatabaseTarget::File(dir.path().join("core.db"));
         let mut connections = Vec::with_capacity(16);
         for _ in 0..16 {
-            connections.push(
-                SqliteConnection::open(&target)
-                    .await
-                    .expect("open gated connection"),
-            );
+            connections.push(installed(&target, SqliteConnectionPolicy::default()).await);
         }
         connections[0]
             .write(|tx| {

@@ -24,9 +24,9 @@ impl StoreTestSupport for SqliteStore {
         corruption: GraphRowCorruption,
     ) -> Result<(), StoreError> {
         let node_id = node_id.clone();
-        let fleet = self.fleet_format;
         self.conn
             .write(move |tx| {
+                let fleet = tx.fleet();
                 let sql = &crate::session_sql::session_sql().graph_sqlite;
                 let changed = match corruption {
                     GraphRowCorruption::DeleteRow => crate::conn::cached_execute(

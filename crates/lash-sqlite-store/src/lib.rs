@@ -189,13 +189,12 @@ pub use triggers::SqliteTriggerStore;
 /// This is the first-party local implementation of the runtime store traits.
 /// Internally it holds one writer connection and a fixed pool of readers.
 pub struct SqliteStore {
-    conn: SqliteConnection,
-    /// The durable-format generation this store's writers emit — the
-    /// fleet-format row (ADR 0106 §1 `F`) as the open transaction recorded it.
-    /// Writers consult it through
+    /// The writer connection. Its fence holds the durable-format generation
+    /// this store's writers emit: `F` as the most recent fence read it
+    /// (ADR 0115 §2.3), which writers consult through
     /// [`lash_core_execution::FleetFormat::writer_version`] instead of binding
     /// the build's constants directly.
-    pub(crate) fleet_format: lash_core_execution::FleetFormat,
+    conn: SqliteConnection,
     /// The durable-core database this store is open on. Held so a store
     /// opened on a memory backend keeps its database alive.
     location: DatabaseLocation,
@@ -231,10 +230,10 @@ impl SqliteStore {
     /// build constant they would stamp anyway (FIG-3796).
     #[cfg(any(test, feature = "testing"))]
     pub fn with_fleet_format_for_testing(
-        mut self,
+        self,
         fleet_format: lash_core_execution::FleetFormat,
     ) -> Self {
-        self.fleet_format = fleet_format;
+        self.conn.observe_fleet_for_testing(fleet_format);
         self
     }
 }
@@ -259,10 +258,6 @@ pub struct SqliteProcessRegistry {
     location: DatabaseLocation,
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_execution::ProcessIdMint,
-    /// `F` from the fleet's durable-core catalog: wake-delivery, lease and
-    /// parent-end payloads the registry stamps go through `writer_version`,
-    /// never a bare build constant (FIG-3796).
-    fleet_format: lash_core_execution::FleetFormat,
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {
@@ -616,6 +611,8 @@ pub struct StoredSessionCheckpoint {
     pub manifest: SessionCheckpoint,
 }
 
+#[cfg(all(test, feature = "testing"))]
+mod fence_tests;
 #[cfg(test)]
 mod graph_error_tests;
 #[cfg(test)]

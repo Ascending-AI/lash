@@ -516,9 +516,9 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         let drafts = batch.drafts().len() as u64;
         let first_nonce = self.commit_count.fetch_add(drafts, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
-        let fleet = self.fleet_format();
         self.conn
             .write_flow(move |tx| {
+                let fleet = tx.fleet();
                 let outcome = admit_pending_turn_inputs_conn(
                     tx,
                     &batch,

@@ -17,9 +17,9 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
             pending_observer_intents: request.pending_observer_intents.clone(),
         };
         let created_at_ms = self.clock.timestamp_ms();
-        let fleet_format = self.fleet_format();
         self.conn
             .write_flow(move |tx| {
+                let fleet_format = tx.fleet();
                 let outcome = (|| {
                     crate::persistence::ensure_session_not_deleted_conn(tx, &meta.session_id)?;
                     let inserted = session_meta::write_session_meta(

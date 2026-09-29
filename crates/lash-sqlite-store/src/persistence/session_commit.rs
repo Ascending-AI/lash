@@ -159,9 +159,9 @@ impl SessionCommitStore for SqliteStore {
         fence: &lash_core_execution::store::DriveFence,
     ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
         let fence = fence.clone();
-        let fleet = self.fleet_format();
         self.conn
             .write_flow(move |tx| {
+                let fleet = tx.fleet();
                 let outcome = (|| {
                     require_drive_fence_conn(tx, &fence)?;
                     let version = read_session_state_version_conn(tx, fence.session(), fleet)?;
@@ -267,14 +267,105 @@ impl SessionCommitStore for SqliteStore {
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
         lash_core_execution::store::validate_session_id(&commit.session_id)?;
-        let planner =
-            lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, self.fleet_format())?;
+        // The commit is planned before `BEGIN` under the handle's last
+        // observed `F`. When the fence reads another writable epoch the
+        // transaction writes nothing and the commit is planned again under
+        // the new one, once (ADR 0115 §2.3); `F` moves at most once per
+        // release, so a second move inside one commit is contention.
+        let mut planned_under = self.fleet_format();
+        let mut planner =
+            lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, planned_under)?;
+        let mut replanned = false;
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
-        let fleet = self.fleet_format();
-        let result = self
-            .conn
+        loop {
+            match self
+                .commit_attempt(planner, planned_under, blob_profile, now)
+                .await?
+            {
+                CommitAttempt::Done(result) => return *result,
+                CommitAttempt::FleetMoved(returned) if !replanned => {
+                    replanned = true;
+                    planned_under = self.fleet_format();
+                    planner = lash_core_execution::store::RuntimeCommitPlanner::prepare(
+                        returned.commit().clone(),
+                        planned_under,
+                    )?;
+                }
+                CommitAttempt::FleetMoved(_) => return Err(StoreError::Contended),
+            }
+        }
+    }
+
+    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
+        SqliteStore::save_session_meta(self, meta).await
+    }
+
+    async fn load_session_meta(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionMeta>, StoreError> {
+        SqliteStore::load_session_meta(self, session_id).await
+    }
+
+    async fn load_session_meta_for_commit(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionMeta>, StoreError> {
+        let session_id = session_id.clone();
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    ensure_session_not_deleted_conn(conn, &session_id)?;
+                    crate::session_meta::load_session_meta(conn, Some(&session_id))
+                })())
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+}
+
+#[cfg(test)]
+mod artifact_frame_transition_tests;
+
+/// One attempt of a planned runtime commit.
+enum CommitAttempt {
+    /// The transaction ran: committed, or rolled back with a typed refusal.
+    Done(Box<Result<RuntimeCommitReceipt, StoreError>>),
+    /// The fence read an epoch other than the one the plan was made under;
+    /// nothing was written, and the planner comes back to be planned again.
+    FleetMoved(Box<lash_core_execution::store::RuntimeCommitPlanner>),
+}
+
+/// A turn commit's stored receipt row, as the idempotent replay reads it.
+type PriorReceiptRow = (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+);
+
+impl SqliteStore {
+    /// One transaction of a planned runtime commit, fenced: it answers
+    /// `FleetMoved` with the planner, having written nothing, when the fence
+    /// reads an epoch other than `planned_under`.
+    async fn commit_attempt(
+        &self,
+        planner: lash_core_execution::store::RuntimeCommitPlanner,
+        planned_under: lash_core_execution::FleetFormat,
+        blob_profile: crate::BuiltinBlobProfile,
+        now: u64,
+    ) -> Result<CommitAttempt, StoreError> {
+        self.conn
             .write_flow(move |tx| {
+                if tx.fleet().version() != planned_under.version() {
+                    return Ok(TxOutcome::Rollback(CommitAttempt::FleetMoved(Box::new(
+                        planner,
+                    ))));
+                }
+                let fleet = tx.fleet();
                 let outcome: Result<RuntimeCommitReceipt, StoreError> = (|| {
                     let commit = planner.commit();
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
@@ -326,14 +417,7 @@ impl SessionCommitStore for SqliteStore {
                         }
                     }
                     {
-                        let prior: Option<(
-                            String,
-                            String,
-                            Option<String>,
-                            Option<String>,
-                            Option<i64>,
-                            Option<i64>,
-                        )> = tx
+                        let prior: Option<PriorReceiptRow> = tx
                             .query_row(
                                 session_sql().turn_commits.select_receipt.sql(),
                                 params![commit.session_id.as_str(), planner.operation_key()],
@@ -799,42 +883,11 @@ impl SessionCommitStore for SqliteStore {
                 // backend write error) does not leave the partial transaction
                 // committed, while still carrying the typed error to the caller.
                 match outcome {
-                    Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
-                    Err(err) => Ok(TxOutcome::Rollback(Err(err))),
+                    Ok(value) => Ok(TxOutcome::Commit(CommitAttempt::Done(Box::new(Ok(value))))),
+                    Err(err) => Ok(TxOutcome::Rollback(CommitAttempt::Done(Box::new(Err(err))))),
                 }
             })
             .await
-            .map_err(sqlite_error)??;
-        Ok(result)
-    }
-
-    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        SqliteStore::save_session_meta(self, meta).await
-    }
-
-    async fn load_session_meta(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<SessionMeta>, StoreError> {
-        SqliteStore::load_session_meta(self, session_id).await
-    }
-
-    async fn load_session_meta_for_commit(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<SessionMeta>, StoreError> {
-        let session_id = session_id.clone();
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    ensure_session_not_deleted_conn(conn, &session_id)?;
-                    crate::session_meta::load_session_meta(conn, Some(&session_id))
-                })())
-            })
-            .await
-            .map_err(sqlite_error)?
+            .map_err(sqlite_error)
     }
 }
-
-#[cfg(test)]
-mod artifact_frame_transition_tests;

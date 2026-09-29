@@ -216,9 +216,9 @@ impl SqliteProcessRegistry {
         let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
         let config = self.wake_delivery_config;
-        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
+                let fleet_format = tx.fleet();
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
                     let changed = if add {
@@ -270,9 +270,9 @@ impl SqliteProcessRegistry {
         let target = target.map(ToOwned::to_owned);
         let now = self.clock.timestamp_ms();
         let config = self.wake_delivery_config;
-        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
+                let fleet_format = tx.fleet();
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
                     let previous: Option<String> = tx
@@ -345,7 +345,6 @@ impl SqliteProcessRegistry {
             DatabaseLocation::standalone_file(
                 &session_store_root.into().join(crate::DURABLE_CORE_DB_FILE),
             ),
-            lash_core_execution::FleetFormat::current(),
             #[cfg(feature = "testing")]
             None,
         )
@@ -365,7 +364,6 @@ impl SqliteProcessRegistry {
             DatabaseLocation::standalone_file(
                 &session_store_root.into().join(crate::DURABLE_CORE_DB_FILE),
             ),
-            lash_core_execution::FleetFormat::current(),
             Some(fault_injector),
         )
         .await
@@ -377,7 +375,6 @@ impl SqliteProcessRegistry {
         location: &DatabaseLocation,
         clock: Arc<dyn lash_core_execution::Clock>,
         process_session_catalog: DatabaseLocation,
-        fleet_format: lash_core_execution::FleetFormat,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
@@ -399,7 +396,6 @@ impl SqliteProcessRegistry {
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             location: location.clone(),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
-            fleet_format,
         })
     }
 

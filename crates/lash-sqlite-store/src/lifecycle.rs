@@ -231,9 +231,6 @@ impl SqliteStore {
             writable,
         )
         .await?;
-        let fleet_format = conn
-            .call(move |conn| crate::compat::read_recorded(conn, writable))
-            .await?;
         let process_registry_attached = if let Some(process_registry) = process_registry {
             attach_process_registry(&conn, process_registry, options.connection_policy).await?;
             true
@@ -246,7 +243,6 @@ impl SqliteStore {
         }
         Ok(Self {
             conn,
-            fleet_format,
             location: core.clone(),
             turn_cancel_closure_owner: Mutex::new(turn_cancel_closure_owner),
             process_registry: process_registry.cloned(),
@@ -275,10 +271,10 @@ impl SqliteStore {
         let fleet_format = conn
             .call(|conn| crate::compat::recorded_or_current(conn))
             .await?;
+        conn.observe_fleet_for_testing(fleet_format);
         let readers = vec![conn.clone()];
         Ok(Self {
             conn,
-            fleet_format,
             location: core.clone(),
             turn_cancel_closure_owner: Mutex::new(None),
             process_registry: None,
@@ -327,9 +323,9 @@ impl SqliteStore {
 
     pub async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
         let created_at_ms = self.clock.timestamp_ms();
-        let fleet_format = self.fleet_format();
         self.conn
             .write_flow(move |tx| {
+                let fleet_format = tx.fleet();
                 let outcome: Result<(), StoreError> = (|| {
                     crate::persistence::ensure_session_not_deleted_conn(tx, &meta.session_id)?;
                     // FIG-3045: the recorded lineage is write-once, so a

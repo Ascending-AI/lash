@@ -25,10 +25,10 @@ pub(super) async fn complete_process(
     let process_id = process_id.clone();
     let now = registry.clock.timestamp_ms();
     let wake_delivery_config = registry.wake_delivery_config;
-    let fleet_format = registry.fleet_format;
     registry
         .conn
         .write_flow(move |tx| {
+            let fleet_format = tx.fleet();
             Ok(tx_outcome((|| {
                 let mut record = SqliteProcessRegistry::require_process_conn(tx, &process_id)?;
                 let await_output = await_output.with_cancel_origin(

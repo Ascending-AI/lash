@@ -1758,7 +1758,8 @@ pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<(
 
 /// Admit the compatibility row, provision an empty database and its stamp, or
 /// refuse a populated database that cannot be read by this build. Runs on the
-/// connection thread so admission and DDL share one transaction.
+/// connection thread so admission and DDL share one transaction: the
+/// connection's installer, which arms its writer fence (ADR 0115 §2.2).
 pub(crate) async fn ensure_versioned_schema(
     conn: &SqliteConnection,
     database: SqliteDatabase,
@@ -1776,8 +1777,10 @@ pub(crate) async fn ensure_versioned_schema_with_writable(
     database: SqliteDatabase,
     writable: lash_core_execution::compat::VersionRange,
 ) -> rusqlite::Result<()> {
-    conn.write(move |tx| apply_versioned_schema_tx_with_writable(tx, database, writable))
-        .await
+    conn.install(database, writable, move |tx| {
+        apply_versioned_schema_tx_with_writable(tx, database, writable)
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -1800,13 +1803,15 @@ fn apply_versioned_schema_tx(
         database,
         lash_core_execution::FleetFormat::writable(),
     )
+    .map(drop)
 }
 
+/// The installer's transaction body; answers the admitted `F`.
 fn apply_versioned_schema_tx_with_writable(
     tx: &Transaction<'_>,
     database: SqliteDatabase,
     writable: lash_core_execution::compat::VersionRange,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<lash_core_execution::FleetFormat> {
     let apply_schema = |conn: &Transaction<'_>| -> rusqlite::Result<()> {
         conn.execute_batch(database.schema())?;
         for fragment in database.fragments() {
@@ -1814,7 +1819,7 @@ fn apply_versioned_schema_tx_with_writable(
         }
         Ok(())
     };
-    let (admission, _) = crate::compat::admit(tx, database, writable)?;
+    let (admission, fleet) = crate::compat::admit(tx, database, writable)?;
     match admission {
         lash_core_execution::compat::CompatAdmission::Provision => {
             apply_schema(tx)?;
@@ -1842,7 +1847,8 @@ fn apply_versioned_schema_tx_with_writable(
             crate::compat::verify_tolerant(tx, database)?;
         }
     }
-    stamp_deployment_metadata(tx, database)
+    stamp_deployment_metadata(tx, database)?;
+    Ok(fleet)
 }
 
 /// Whether this database is the one that carries the deployment's release stamp.

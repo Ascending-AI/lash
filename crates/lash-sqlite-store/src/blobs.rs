@@ -199,7 +199,7 @@ impl SqliteStore {
         let content = content.to_vec();
         let profile = self.options.blob_profile;
         self.conn
-            .call(move |conn| Self::insert_artifact_blob_conn(conn, descriptor, &content, profile))
+            .write(move |tx| Self::insert_artifact_blob_conn(tx, descriptor, &content, profile))
             .await
             .map_err(sqlite_error)
     }
@@ -445,9 +445,9 @@ impl SqliteStore {
     ) -> Result<StoredSessionCheckpoint, StoreError> {
         let checkpoint = checkpoint.clone();
         let profile = self.options.blob_profile;
-        let self_fleet = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
+                let self_fleet = tx.fleet();
                 Ok(
                     match Self::put_checkpoint_conn(tx, &checkpoint, profile, self_fleet) {
                         Ok(stored) => TxOutcome::Commit(Ok(stored)),
@@ -464,7 +464,7 @@ impl SqliteStore {
         blob_ref: &BlobRef,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
         let blob_ref = blob_ref.clone();
-        let fleet = self.fleet_format;
+        let fleet = self.conn.fleet();
         self.conn
             .call(move |conn| {
                 Self::get_checkpoint_conn(conn, &blob_ref, fleet).map_err(sqlite_conversion_error)

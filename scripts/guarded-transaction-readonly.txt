@@ -1,0 +1,19 @@
+# Sites the guarded-transaction lint (scripts/check-guarded-transactions.py)
+# admits because they only read, one per enclosing function:
+#   <backend> <path>::<fn>  # why it writes no store row
+
+# --- SQLite (lane L3) ---
+sqlite crates/lash-sqlite-store/src/conn.rs::read  # BEGIN DEFERRED for one read snapshot, always ended by ROLLBACK
+sqlite crates/lash-sqlite-store/src/conn.rs::open_configured  # connection PRAGMAs only (busy timeout, WAL, cache); no row changes
+sqlite crates/lash-sqlite-store/src/conn.rs::open_readonly  # PRAGMAs on a SQLITE_OPEN_READ_ONLY connection
+sqlite crates/lash-sqlite-store/src/conn.rs::checkpoint_if_needed  # WAL checkpoint on its own connection; copies committed pages, changes no row
+sqlite crates/lash-sqlite-store/src/schema.rs::apply_pragmas  # connection PRAGMAs only (synchronous, foreign_keys, cache_size)
+sqlite crates/lash-sqlite-store/src/lifecycle.rs::attach_process_registry  # ATTACH names a schema on this connection and reads the registry's stamp; no row changes
+sqlite crates/lash-sqlite-store/src/location.rs::pin  # anchor connections that keep memdb databases alive; they run no statement
+sqlite crates/lash-sqlite-store/src/compat.rs::check_set  # SQLITE_OPEN_READ_ONLY connections that read each database's lash_compat row
+sqlite crates/lash-sqlite-store/src/compat.rs::verify_tolerant  # writes only its private in-memory baseline catalog, never the store
+sqlite crates/lash-sqlite-store/src/preflight.rs::read_compat_verdict  # runs verify_tolerant, whose writes go to its private in-memory baseline
+sqlite crates/lash-sqlite-store/src/forks.rs::fork_points_in_catalog  # a read transaction over the fork points, committed with nothing written
+sqlite crates/lash-sqlite-store/src/session_meta.rs::load_session_meta  # one snapshot for the metadata read; the transaction writes nothing
+sqlite crates/lash-sqlite-store/src/process_registry_change.rs::processes_changed_since_conn  # one snapshot for the change page and its horizon; writes nothing
+sqlite crates/lash-sqlite-store/src/blobs.rs::raw_checkpoint_from_path_for_testing  # testing-only raw connection that decodes one checkpoint

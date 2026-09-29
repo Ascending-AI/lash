@@ -17,9 +17,9 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
         let process_id_mint = self.process_id_mint.clone();
-        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
+                let fleet_format = tx.fleet();
                 Ok(tx_outcome((|| {
                     // While the process minted for a key is retained, a
                     // start under the same key returns that process untouched
@@ -170,10 +170,10 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
         let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
-        let fleet_format = self.fleet_format;
         let record = self
             .conn
             .write_flow(move |tx| {
+                let fleet_format = tx.fleet();
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
                     match lash_core_execution::runtime::prepare_process_transition(

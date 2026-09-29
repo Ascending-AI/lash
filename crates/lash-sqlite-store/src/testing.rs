@@ -133,12 +133,37 @@ pub fn read_rows_for_testing(
     Ok(read)
 }
 
+/// Finalize the store at `location`: move the fleet epoch `F` to `fleet` in
+/// every database, under `BEGIN EXCLUSIVE` taken in [`SqliteDatabase::ALL`]
+/// order and committed in the same order (ADR 0115 §2.2). A writer that
+/// passed its fence first commits under the old `F`; every later writer
+/// whose writable range excludes `fleet` is refused `WriterFenced`.
+///
+/// Phase A's synthetic finalize; the operator verb is FIG-3800 B's.
+///
+/// [`SqliteDatabase::ALL`]: crate::SqliteDatabase
+pub fn finalize_fleet_format(
+    location: &crate::SqliteLocation,
+    fleet: u32,
+) -> Result<(), lash_core_execution::StoreError> {
+    crate::compat::finalize(
+        location,
+        std::time::Duration::from_millis(u64::from(crate::conn::BUSY_TIMEOUT_MS)),
+        fleet,
+    )
+    .map_err(crate::sqlite_error)
+}
+
 /// Transaction boundary at which one armed fault is injected.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SqliteFaultPoint {
     /// Abort immediately after `BEGIN IMMEDIATE`, before the transaction body.
     AfterBegin,
+    /// Abort, or pause, right after the writer fence (ADR 0115 §2.2), before
+    /// the transaction body: a paused writer holds the database's write lock
+    /// under the epoch its fence read.
+    AfterFence,
     /// Abort after the transaction body, before SQLite is asked to commit.
     BeforeCommit,
     /// Surface `SQLITE_IOERR` at the commit boundary and roll the transaction back.
@@ -149,8 +174,9 @@ impl SqliteFaultPoint {
     const fn index(self) -> usize {
         match self {
             Self::AfterBegin => 0,
-            Self::BeforeCommit => 1,
-            Self::CommitIo => 2,
+            Self::AfterFence => 1,
+            Self::BeforeCommit => 2,
+            Self::CommitIo => 3,
         }
     }
 }
@@ -301,7 +327,7 @@ impl SqliteReadPause {
 #[derive(Debug, Default)]
 struct InjectorState {
     armed: Vec<ArmedFault>,
-    point_occurrences: [u64; 3],
+    point_occurrences: [u64; 4],
     pause: Option<ArmedPause>,
     read_pause: Option<Arc<PauseState>>,
     process_event_page_read_pause: Option<Arc<PauseState>>,
@@ -337,7 +363,7 @@ impl SqliteFaultInjector {
             .enumerate()
             .map(|(arm_index, arm)| ArmedFault { arm_index, arm })
             .collect();
-        state.point_occurrences = [0; 3];
+        state.point_occurrences = [0; 4];
     }
 
     pub fn remaining_arms(&self) -> Vec<SqliteFaultArm> {
@@ -467,9 +493,9 @@ impl SqliteFaultInjector {
             write_transaction_ordinal,
         });
         let code = match point {
-            SqliteFaultPoint::AfterBegin | SqliteFaultPoint::BeforeCommit => {
-                rusqlite::ffi::SQLITE_ABORT
-            }
+            SqliteFaultPoint::AfterBegin
+            | SqliteFaultPoint::AfterFence
+            | SqliteFaultPoint::BeforeCommit => rusqlite::ffi::SQLITE_ABORT,
             SqliteFaultPoint::CommitIo => rusqlite::ffi::SQLITE_IOERR,
         };
         Err(rusqlite::Error::SqliteFailure(

@@ -209,15 +209,14 @@ impl SqliteStoreSet {
             options.fault_injector.clone(),
         )
         .await?;
-        // The durable-core store opens first so its admitted `F` stamps the
-        // process registry's durable payloads too (FIG-3796): one fleet row
-        // governs both databases.
+        // Each database carries its own copy of `F`, which its writer fence
+        // reads (ADR 0115 §1.2); `check_set` above refused a set whose copies
+        // disagree.
         let process_registry = Arc::new(
             SqliteProcessRegistry::open_at(
                 &registry,
                 Arc::clone(&clock),
                 core.clone(),
-                lash_core_execution::FleetFormatStore::fleet_format(&process_env_store),
                 #[cfg(feature = "testing")]
                 None,
             )

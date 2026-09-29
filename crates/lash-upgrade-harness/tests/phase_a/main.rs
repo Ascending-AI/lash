@@ -38,10 +38,12 @@ fn waits_for(lane: &str) -> Result<()> {
 /// straddles finalize is encoded again under N+1's `F`. Runs on PostgreSQL
 /// and on SQLite (each database).
 ///
-/// Waits for lanes L2 and L3 (FIG-3800 part A): the PostgreSQL and SQLite
-/// writer fences.
+/// Waits for lane L2 (FIG-4083): the PostgreSQL writer fence. Lane L3's
+/// SQLite half is built: the fence in `SqliteConnection::write`, the
+/// `AfterFence` seam of `lash_sqlite_store::testing::SqliteFaultPoint`, and
+/// `lash_sqlite_store::testing::finalize_fleet_format` as N+1's finalize.
 #[test]
-#[ignore = "waits for lanes L2 and L3 (FIG-3800 A): the PostgreSQL and SQLite writer fences"]
+#[ignore = "waits for lane L2 (FIG-4083): the PostgreSQL writer fence"]
 fn finalize_races_every_writer() -> Result<()> {
-    waits_for("lanes L2 and L3 (FIG-3800 A)")
+    waits_for("lane L2 (FIG-4083)")
 }

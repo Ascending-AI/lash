@@ -286,7 +286,7 @@ impl SessionHistoryStore for SqliteStore {
         selector: WindowSelector,
     ) -> Result<Option<SessionWindowRead>, StoreError> {
         let session = session_id.clone();
-        let fleet = self.fleet_format;
+        let fleet = self.conn.fleet();
         let decoded = Arc::clone(&self.decoded_graph_node_bodies);
         let holes = Arc::clone(&self.decoded_usage_holes);
         self.read_connection()
@@ -304,7 +304,7 @@ impl SessionHistoryStore for SqliteStore {
             cursor.check_session(session_id)?;
         }
         let session = session_id.clone();
-        let fleet = self.fleet_format;
+        let fleet = self.conn.fleet();
         let decoded = Arc::clone(&self.decoded_graph_node_bodies);
         self.read_connection()
             .read(move |conn| Ok(ancestors(conn, &session, anchor, budget, fleet, &decoded)))
@@ -380,7 +380,7 @@ impl SessionHistoryStore for SqliteStore {
         }
         let session = session_id.clone();
         let after = after.cloned();
-        let fleet = self.fleet_format;
+        let fleet = self.conn.fleet();
         let decoded = Arc::clone(&self.decoded_turn_receipt_bodies);
         self.read_connection()
             .read(move |conn| Ok(failure_page(conn, &session, after, limit, fleet, &decoded)))
