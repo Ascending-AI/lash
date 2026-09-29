@@ -35,9 +35,7 @@ workspace = true
 [dependencies]
 lash = { workspace = true, features = ["restate", "sqlite"] }
 lash-core = { workspace = true, features = ["testing"] }
-lash-core-store = { workspace = true }
 lash-postgres-store = { workspace = true }
-lash-remote-protocol = { workspace = true }
 lash-restate = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
