@@ -456,13 +456,11 @@ fn otel_sink_accepts_turn_and_llm_lifecycle() {
         turn_context.clone(),
         TraceEvent::LlmCallFailed {
             error: crate::TraceError {
-                message: "boom".to_string(),
                 retryable: false,
                 terminal_reason: None,
                 failure_kind: None,
                 code: Some("test".to_string()),
                 code_namespace: None,
-                raw: None,
             },
             stream_summary: None,
             attempts: None,
@@ -501,13 +499,11 @@ fn llm_call_failed_exports_failure_kind_and_spelling_only_code() {
         context.clone(),
         TraceEvent::LlmCallFailed {
             error: crate::TraceError {
-                message: "timed out".to_string(),
                 retryable: true,
                 terminal_reason: Some("provider_error".to_string()),
                 failure_kind: Some("timeout".to_string()),
                 code: Some("insufficient_quota".to_string()),
                 code_namespace: Some("provider".to_string()),
-                raw: None,
             },
             stream_summary: None,
             attempts: None,
@@ -518,13 +514,11 @@ fn llm_call_failed_exports_failure_kind_and_spelling_only_code() {
         context,
         TraceEvent::LlmCallFailed {
             error: crate::TraceError {
-                message: "no kind".to_string(),
                 retryable: false,
                 terminal_reason: Some("provider_error".to_string()),
                 failure_kind: None,
                 code: None,
                 code_namespace: None,
-                raw: None,
             },
             stream_summary: None,
             attempts: None,

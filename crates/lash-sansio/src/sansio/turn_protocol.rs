@@ -194,9 +194,7 @@ pub enum LogEvent {
         session_id: SessionId,
         protocol_iteration: usize,
         request_body: Option<String>,
-        message: String,
         retryable: bool,
-        raw: Option<String>,
         code: Option<crate::session_model::FailureCode>,
         /// The transport's failure classification. `ProviderFailureKind::Unknown`
         /// means the failure carried no provider kind; the trace projection
@@ -339,11 +337,13 @@ impl<M: TurnProtocol> Clone for Effect<M> {
 /// Error details from a failed LLM call.
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct LlmCallError {
+    #[serde(serialize_with = "serialize_provider_failure_message")]
     pub message: String,
     pub retryable: bool,
     /// Required transport classification. Non-provider failures explicitly
     /// carry `ProviderFailureKind::Unknown`; missing or future kinds are refused.
     pub kind: crate::llm::types::ProviderFailureKind,
+    #[serde(default, skip_serializing, skip_deserializing)]
     pub raw: Option<String>,
     /// Namespaced failure code: `provider` spellings are provider-owned,
     /// `lash` spellings are Lash-authored (pre-cutover `adapter`/`refusal`
@@ -356,6 +356,13 @@ pub struct LlmCallError {
     /// calls in this response are retained for diagnosis but never executed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub partial_response: Option<Box<LlmResponse>>,
+}
+
+fn serialize_provider_failure_message<S>(_: &String, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str("provider call failed")
 }
 
 /// A response to a previously emitted effect.
@@ -858,6 +865,30 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
 mod llm_call_error_tests {
     use super::LlmCallError;
     use crate::llm::types::ProviderFailureKind;
+
+    #[test]
+    fn journaled_provider_error_omits_free_text() {
+        const SECRET: &str = "api_key= secret Authorization: Basic abc";
+        let error = LlmCallError {
+            message: SECRET.to_string(),
+            retryable: false,
+            kind: ProviderFailureKind::Http,
+            raw: Some(SECRET.to_string()),
+            code: Some(crate::session_model::FailureCode::provider(
+                "rate_limit_exceeded",
+            )),
+            terminal_reason: crate::llm::types::LlmTerminalReason::ProviderError,
+            request_body: None,
+            partial_response: None,
+        };
+        let journaled = serde_json::to_string(&error).expect("serialize effect result");
+        assert!(!journaled.contains(SECRET));
+        assert!(!journaled.contains("Basic abc"));
+        assert!(journaled.contains("provider:rate_limit_exceeded"));
+        let replayed: LlmCallError = serde_json::from_str(&journaled).expect("replay error");
+        assert_eq!(replayed.message, "provider call failed");
+        assert_eq!(replayed.raw, None);
+    }
 
     #[test]
     fn llm_call_error_requires_a_recognized_journal_kind() {

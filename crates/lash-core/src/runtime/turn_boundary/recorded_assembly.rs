@@ -118,13 +118,23 @@ impl RecordedTurnAssembly {
             }
             SessionStreamEvent::Error { message, envelope } => {
                 let issue = if let Some(envelope) = envelope {
+                    let provider_error = envelope.kind == crate::TurnFailureKind::LlmProvider
+                        && envelope.terminal_reason.is_some();
                     TurnIssue {
                         severity: crate::runtime::TurnIssueSeverity::Blocking,
                         kind: envelope.kind.clone(),
                         code: envelope.code.clone(),
                         terminal_reason: envelope.terminal_reason,
-                        message: message.clone(),
-                        raw: envelope.raw.clone(),
+                        message: if provider_error {
+                            "provider call failed".to_string()
+                        } else {
+                            envelope.user_message.clone()
+                        },
+                        raw: if provider_error {
+                            None
+                        } else {
+                            envelope.raw.clone()
+                        },
                         retryable: envelope.retryable,
                         provider_failure_kind: envelope.provider_failure_kind,
                     }
@@ -298,6 +308,50 @@ impl RecordedTurnAssembly {
 
     pub(in crate::runtime) fn last_llm_usage(&self) -> Option<&TokenUsage> {
         self.last_llm_usage.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod provider_failure_tests {
+    use super::*;
+
+    #[test]
+    fn committed_provider_issue_uses_the_structured_envelope() {
+        const SECRET: &str = "api_key= secret Authorization: Basic abc";
+        let failure = crate::llm::transport::LlmTransportError::new(SECRET)
+            .with_kind(crate::ProviderFailureKind::Http)
+            .with_code(crate::FailureCode::provider("rate_limit_exceeded"))
+            .with_http_status(429);
+        let call_record = crate::provider::synthetic_terminal_call_record(
+            crate::LlmCallId("secret-attempt".to_string()),
+            crate::AttemptOutcome::Failed,
+            &failure,
+            true,
+            crate::ProtocolPosition::ResponseObserved,
+            Vec::new(),
+        );
+        let journaled = serde_json::to_string(&call_record).expect("serialize journaled attempt");
+        assert!(!journaled.contains(SECRET));
+        assert!(!journaled.contains("Basic abc"));
+        assert!(journaled.contains("provider:rate_limit_exceeded"));
+
+        let mut assembly = RecordedTurnAssembly::new();
+        let envelope = crate::session_model::make_error_envelope(
+            crate::TurnFailureKind::LlmProvider,
+            Some(crate::FailureCode::provider("rate_limit_exceeded")),
+            Some(crate::LlmTerminalReason::ProviderError),
+            SECRET,
+            Some(SECRET.to_string()),
+        );
+        assembly.record(&SessionStreamEvent::Error {
+            message: SECRET.to_string(),
+            envelope: Some(envelope),
+        });
+        let committed =
+            serde_json::to_string(&assembly.issues).expect("serialize committed issues");
+        assert!(!committed.contains(SECRET));
+        assert!(!committed.contains("Basic abc"));
+        assert!(committed.contains("provider:rate_limit_exceeded"));
     }
 }
 

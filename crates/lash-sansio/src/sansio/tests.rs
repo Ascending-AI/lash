@@ -1378,6 +1378,40 @@ fn context_overflow_llm_error_stops_as_its_own_outcome() {
     );
 }
 
+#[test]
+fn provider_error_is_live_but_absent_from_the_turn_checkpoint() {
+    const SECRET: &str = "api_key= secret Authorization: Basic abc";
+    let config = test_config(Arc::new(ProseDriver));
+    let mut machine =
+        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call").0;
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Err(LlmCallError {
+            message: SECRET.to_string(),
+            retryable: false,
+            kind: crate::llm::types::ProviderFailureKind::Http,
+            raw: Some(SECRET.to_string()),
+            code: Some(crate::session_model::FailureCode::provider(
+                "rate_limit_exceeded",
+            )),
+            terminal_reason: LlmTerminalReason::ProviderError,
+            request_body: None,
+            partial_response: None,
+        }),
+    });
+    let checkpoint = serde_json::to_string(&machine.checkpoint()).expect("serialize checkpoint");
+    assert!(!checkpoint.contains(SECRET));
+    assert!(!checkpoint.contains("Basic abc"));
+    let live = drain_effects(&mut machine);
+    assert!(live.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::Error { message, .. }) if message.contains(SECRET)
+    )));
+}
+
 /// The neighbouring failure reasons on the same error path did not move: only
 /// `ContextOverflow` is singled out, everything else still stops as
 /// `ProviderError`.

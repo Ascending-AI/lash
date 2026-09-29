@@ -237,7 +237,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
     assert!(
         turn.errors
             .iter()
-            .any(|issue| issue.message.contains("provider unavailable"))
+            .any(|issue| issue.message == "provider call failed")
     );
     // The transport's typed retryable signal survives into the host-facing
     // issue instead of living only in trace records.

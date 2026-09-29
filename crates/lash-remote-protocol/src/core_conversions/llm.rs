@@ -775,7 +775,6 @@ impl From<core_llm::NormalizedError> for RemoteNormalizedError {
             http_status,
             provider_request_id,
             retry_after,
-            diagnostic: _,
         } = value;
         Self {
             class,

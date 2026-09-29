@@ -163,13 +163,11 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             "llm call failed",
             TraceEvent::LlmCallFailed {
                 error: TraceError {
-                    message: "failed".to_string(),
                     retryable: false,
                     terminal_reason: None,
                     failure_kind: None,
                     code: None,
                     code_namespace: None,
-                    raw: None,
                 },
                 stream_summary: None,
                 attempts: None,

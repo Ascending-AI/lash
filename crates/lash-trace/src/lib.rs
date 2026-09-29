@@ -1747,7 +1747,6 @@ pub struct TraceLanguageExecutionMapEdge {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceError {
-    pub message: String,
     pub retryable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_reason: Option<String>,
@@ -1763,8 +1762,6 @@ pub struct TraceError {
     /// The namespace owning `code`'s spelling, when a code is present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_namespace: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]

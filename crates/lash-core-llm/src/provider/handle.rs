@@ -421,7 +421,7 @@ impl ProviderHandle {
                 Err(failure) => {
                     // The outer error is Lash's typed conflict classification;
                     // the sealed attempt remains the provider's original
-                    // failure evidence (kind, code, status, and diagnostic).
+                    // failure evidence (kind, code, and status).
                     let recorded_failure = original_failure.as_ref().unwrap_or(&failure);
                     let protocol_position = failure_protocol_position(&failure);
                     let retry_guarantee = self
@@ -1143,7 +1143,6 @@ fn failure_attempt_record(
             http_status: failure.http_status,
             provider_request_id,
             retry_after: failure.retry_after(),
-            diagnostic: bounded_redacted_diagnostic(&failure.message),
         }),
         evidence,
         generation_disposition: partial.and_then(|response| response.generation_disposition),
@@ -1157,35 +1156,6 @@ fn header_value(headers: &[(String, String)], name: &str) -> Option<String> {
         .iter()
         .find(|(header, _)| header.eq_ignore_ascii_case(name))
         .map(|(_, value)| value.clone())
-}
-
-pub(super) const MAX_ATTEMPT_DIAGNOSTIC_CHARS: usize = 1_024;
-
-pub(super) fn bounded_redacted_diagnostic(message: &str) -> Option<String> {
-    let mut redacted = Vec::new();
-    let mut redact_next = false;
-    for word in message.split_whitespace() {
-        let lower = word.to_ascii_lowercase();
-        if redact_next
-            || lower.starts_with("sk-")
-            || lower.contains("api_key=")
-            || lower.contains("api-key=")
-            || lower.contains("authorization:")
-        {
-            redacted.push("[REDACTED]");
-            redact_next = false;
-        } else {
-            redacted.push(word);
-            redact_next =
-                lower == "bearer" || lower.ends_with("api_key=") || lower.ends_with("api-key=");
-        }
-    }
-    let diagnostic: String = redacted
-        .join(" ")
-        .chars()
-        .take(MAX_ATTEMPT_DIAGNOSTIC_CHARS)
-        .collect();
-    (!diagnostic.is_empty()).then_some(diagnostic)
 }
 
 impl std::fmt::Debug for ProviderHandle {

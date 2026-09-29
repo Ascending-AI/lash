@@ -555,10 +555,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
         Some(lash_core::TurnFailureCode::UnsafeRetryAfterOutputStarted.into())
     );
     assert_eq!(issue.retryable, Some(false));
-    assert!(
-        issue.message.contains("already paid for")
-            && issue.message.contains("cannot be safely regenerated")
-    );
+    assert_eq!(issue.message, "provider call failed");
     assert_eq!(assembled.failure_evidence.len(), 1);
     assert!(
         assembled.failure_evidence.len()
