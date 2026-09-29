@@ -41,6 +41,16 @@ orchestrating and internal capability classes are deleted, and a pending
 attempt may declare exactly one start through `PendingResolver::DeclaredStart`.
 See [the amendment at the end](#amendment-fig-3562-2026-09-29-one-execution-seam-no-orchestrating-lane).
 
+Amended 2026-09-29 (FIG-4073, [ADR 0117](0117-lash-names-every-tool-call.md)):
+"lash's stable call id", in the FIG-3588 amendment above and wherever this ADR
+names a tool call's id, is the `ToolCallId`: one mandatory id per admitted
+logical call, derived by lash from the deployment namespace, the durable
+admission root and the call's position, and recorded before execution. It is
+never the provider's call id, which is correlation only. Crash replay and
+reported-failure retries keep it, so the implementor's idempotency key is
+the same on every attempt; `attempt_number` is separate. The at-least-once
+rule stands, with no replay opt-in, tool-body memo or action ledger.
+
 Tool implementations are opaque host code. Lash cannot reliably discover,
 name, order, or replay every network call, database write, timer, or other side
 effect performed while a tool runs. Pretending that those operations compose

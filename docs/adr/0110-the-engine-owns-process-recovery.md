@@ -15,6 +15,15 @@ authority matrix), [ADR 0045](0045-services-are-stateless-substrates-own-continu
 (the process-execution obligation). [ADR 0042](0042-tool-attempts-are-atomic.md)
 stands.
 
+Amended 2026-09-29 (FIG-4073, [ADR 0117](0117-lash-names-every-tool-call.md)):
+in §3, "lash's stable call id" is the `ToolCallId`, the mandatory id lash
+derives for every admitted logical tool call from the deployment namespace,
+its durable admission root and its position, and records before execution.
+The provider's call id is correlation only and keys nothing. A crash replay
+and a reported-failure retry present the same `ToolCallId`, so the
+implementor's idempotency covers the unjournaled window on every attempt.
+§3 is otherwise unchanged: at-least-once, no at-most-once marker.
+
 ## Context
 
 ADR 0019 made every registration declare a **Recovery Disposition**:

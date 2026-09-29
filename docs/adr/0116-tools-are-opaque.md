@@ -193,6 +193,13 @@ consumes:
 - identity reads: `session_id`, `execution_scope_id`, `agent_frame_id`,
   `tool_call_id`, `attempt_number`, `max_attempts`, `replay_key`,
   `logical_root`, `enclosing_process`;
+
+  Amended 2026-09-29 (FIG-4073, [ADR 0117](0117-lash-names-every-tool-call.md)):
+  the call's identity read is `call_id() -> &ToolCallId`, mandatory, beside
+  `attempt_number` and `max_attempts`. The optional `tool_call_id` and
+  `replay_key` reads are deleted, and there is no provider-id read.
+  `intent_identity` and `completion_key` below derive from the `ToolCallId`,
+  and `completion_key` errs only when the host lacks the capability.
 - the sealed payload: `prepared_payload`, `decode_prepared_payload`,
   `tool_execution_binding`;
 - controller-free reads: `sessions()` (`AttemptSessionReads`,
@@ -351,6 +358,16 @@ replay metadata (`crates/lash-protocol-standard/src/lib.rs:513-529`).
   keyed by slot, and intent identity carries the minting final-attempt
   emission (`tool_intent.rs:361-374`). A model that repeats call ids,
   repeats identical arguments or reuses a frame aliases nothing.
+
+Amended 2026-09-29 (FIG-4073, [ADR 0117](0117-lash-names-every-tool-call.md)):
+a member's call id is `ToolCallId::child(member index)` of the wrapper's
+`ToolCallId`, over the original member index counted before refusals. It
+replaces the `{wrapper call id}/batch/{member index}` string. The wrapper's
+own id is lash's, derived from its admission root and position, never the
+provider's. Every identity above (attempt, completion, intent, child and
+observation) is derived from the member's `ToolCallId`, so "no identity is
+derived from a call id alone" now means no identity is derived from a
+provider call id.
 
 #### 2.3 Member admission
 
