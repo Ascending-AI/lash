@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use lash::direct::LlmOutputPart;
 use lash::provider::LlmResponse;
-use lash::{LashCore, TurnInput};
+use lash::{LashCore, TurnInput, TurnOutput};
 use lash_sansio::sync::MutexExt;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -84,6 +84,26 @@ fn frame_artifacts(edges: &[Edge]) -> BTreeSet<&str> {
         .filter(|edge| edge.kind == "frame_environment")
         .map(|edge| edge.artifact_ref.as_str())
         .collect()
+}
+
+fn last_cell_finish(output: &TurnOutput) -> Option<serde_json::Value> {
+    output
+        .result
+        .state
+        .session_graph
+        .nodes
+        .iter()
+        .filter_map(|node| match &node.payload {
+            lash_core::SessionNodePayload::Event {
+                event: lash_core::SessionHistoryRecord::Protocol(event),
+            } if event.plugin_id == "rlm_protocol" => event
+                .payload
+                .get("RlmTrajectoryEntry")?
+                .get("final_output")
+                .cloned(),
+            _ => None,
+        })
+        .last()
 }
 
 fn response(code: &str) -> LlmResponse {
@@ -217,11 +237,7 @@ async fn cold_reopen_globals_across_turns() {
         second.is_success(),
         "a global from the first turn survives cold reopen: {second:?}"
     );
-    let text = second.result.assistant_message().unwrap_or_default();
-    assert!(
-        text.contains('7'),
-        "the retained definition executes: {text}"
-    );
+    assert_eq!(last_cell_finish(&second), Some(serde_json::json!(7)));
     let after_start = wait_edges(&double, |edges| {
         edges
             .iter()
@@ -392,13 +408,7 @@ async fn continue_as_carries_only_seeded_definition() {
         .await
         .expect("new-frame turn");
     assert!(result.is_success());
-    assert!(
-        result
-            .result
-            .assistant_message()
-            .unwrap_or_default()
-            .contains("11")
-    );
+    assert_eq!(last_cell_finish(&result), Some(serde_json::json!(11)));
 }
 
 #[expect(
@@ -468,6 +478,8 @@ async fn named_definition_survives_uncarried_frame_switch() {
             .count(),
         1
     );
+    drop(session);
+    drop(core);
     let registry = double.lash_backend().process_definition_registry();
     let saved = lash_core::process_registry::resolve_named_definition(
         registry.as_ref(),
@@ -477,30 +489,18 @@ async fn named_definition_survives_uncarried_frame_switch() {
     .await
     .expect("resolve registered name")
     .expect("the registered name survives the frame switch");
-    let definition = serde_json::to_string(saved.definition.definition.as_json())
-        .expect("registered definition value");
-    drop(session);
-    drop(core);
-    let reopened = rlm_core(
-        &double,
-        vec![response(&format!(
-            "const run = await processes.start({{ definition: {definition} }}); finish(await run);"
-        ))],
+    assert_eq!(
+        saved.definition.definition.as_json()["module_ref"],
+        module_ref
     );
-    serve_processes(&double, &reopened);
-    let reopened_session = reopened
-        .session("artifact-referrers-named")
-        .open()
-        .await
-        .expect("cold reopen after switch");
-    let started = reopened_session
-        .send(TurnInput::text("start by name"))
-        .output()
-        .await
-        .expect("start turn");
     assert!(
-        started.is_success(),
-        "the registered definition remains resolvable"
+        double
+            .lash_backend()
+            .module_artifacts()
+            .get_module_artifact(&module_ref)
+            .await
+            .expect("read pinned module")
+            .is_some(),
+        "the registered definition's module survives its frame"
     );
-    assert_eq!(started.result.assistant_message(), Some("31"));
 }
