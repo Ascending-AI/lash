@@ -20,7 +20,12 @@ pub(crate) mod helpers {
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         };
-        let store = factory.create_store(&request).await.expect("create store");
+        crate::store::SessionCatalogStore::admit_session(&factory, &request)
+            .await
+            .expect("create store");
+        let store = factory
+            .store_for(&request.session_id)
+            .expect("the recording factory holds the admitted session");
         let backend = sqlite.attachment_store();
         let attachment_backend: Arc<dyn crate::AttachmentStore> = backend.clone();
         let manifest: Arc<dyn crate::AttachmentManifest> = store.clone();
@@ -40,12 +45,17 @@ pub(crate) mod helpers {
             )
             .await
             .expect("put attachment");
-        store
-            .commit_refs(&request.session_id, std::slice::from_ref(&attachment.id))
-            .await
-            .expect("commit attachment ref");
+        crate::AttachmentManifest::commit_refs(
+            store.as_ref(),
+            &request.session_id,
+            std::slice::from_ref(&attachment.id),
+        )
+        .await
+        .expect("commit attachment ref");
         assert_eq!(
-            store.list_all_refs().await.unwrap(),
+            crate::AttachmentManifest::list_all_refs(store.as_ref())
+                .await
+                .unwrap(),
             vec![attachment.id.clone()]
         );
 

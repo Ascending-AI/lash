@@ -220,7 +220,6 @@ mod tests {
     fn message_ids(state: &RuntimeSessionState) -> Vec<String> {
         state
             .read_model()
-            .expect("test runtime frame scope resolves")
             .messages
             .iter()
             .map(|message| message.id.clone())
@@ -311,11 +310,7 @@ mod tests {
             &ProtocolTerminalOutput::default(),
         );
 
-        let messages = state
-            .read_model()
-            .expect("test runtime frame scope resolves")
-            .messages
-            .clone();
+        let messages = state.read_model().messages.clone();
         assert_eq!(
             messages
                 .iter()

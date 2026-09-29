@@ -260,11 +260,12 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
         failure.message
     );
     assert!(
-        factory
-            .open_existing_store_by_id(&child_session_id)
-            .await
-            .expect("inspect refused child")
-            .is_none(),
+        matches!(
+            crate::store::SessionCatalogStore::lookup_session(&factory, &child_session_id)
+                .await
+                .expect("inspect refused child"),
+            crate::store::SessionLookup::Absent
+        ),
         "a refused request creates no session row"
     );
 }

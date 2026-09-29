@@ -888,7 +888,6 @@ impl LashRuntime {
 #[cfg(test)]
 mod plugin_state_boundary_tests {
     use super::*;
-    use crate::SessionStoreFactory;
     use crate::plugin::{PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin};
     use crate::testing::checkpoint_observer::{
         CheckpointComponentWriteKind, CheckpointWriteCollector, ObservedSessionStoreFactory,
@@ -921,8 +920,10 @@ mod plugin_state_boundary_tests {
     async fn plugin_event_boundary_itself_contains_the_accepted_state_write() {
         let collector = CheckpointWriteCollector::default();
         let backend = crate::testing::memory_store_backend().await;
-        let factory =
-            ObservedSessionStoreFactory::new(backend.session_store_factory(), collector.clone());
+        let factory: Arc<dyn crate::DeploymentStore> = Arc::new(ObservedSessionStoreFactory::new(
+            backend.session_store_factory(),
+            collector.clone(),
+        ));
         let policy = crate::SessionPolicy {
             model: crate::ModelSpec::builder("plugin-state-model")
                 .context_window_tokens(4096)
@@ -930,16 +931,18 @@ mod plugin_state_boundary_tests {
                 .unwrap(),
             ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
         };
-        let store = factory
-            .create_store(&crate::SessionStoreCreateRequest {
+        let store = crate::runtime::admit_session_view(
+            &factory,
+            &crate::SessionStoreCreateRequest {
                 owning_process_id: None,
                 session_id: "event-state".into(),
                 relation: crate::SessionRelation::Root,
                 policy: policy.clone(),
                 pending_observer_intents: vec![],
-            })
-            .await
-            .unwrap();
+            },
+        )
+        .await
+        .unwrap();
         let fixture = MockPlugin::default();
         let mut factories = crate::testing::test_standard_protocol_factories();
         factories.push(Arc::new(fixture.clone()));

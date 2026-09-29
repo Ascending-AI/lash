@@ -1169,7 +1169,7 @@ mod tests {
         // force a copy-on-write on every graph mutation until the next
         // publish.
         let pinned_with_observation = runtime.state.session_graph.data_strong_count();
-        let read_view = runtime.read_view().expect("read view");
+        let read_view = runtime.read_view();
         let read_view_pins =
             runtime.state.session_graph.data_strong_count() - pinned_with_observation;
         drop(read_view);

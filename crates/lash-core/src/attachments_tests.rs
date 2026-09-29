@@ -241,13 +241,13 @@ async fn committed_factory_attachment() -> (
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
-    let store = crate::SessionStoreFactory::create_store(factory.as_ref(), &request)
+    let store = crate::runtime::admit_session_view(&factory, &request)
         .await
         .expect("create attachment-aware store");
     let backend = substrate.attachment_store();
     let session = SessionAttachmentStore::new(
         backend.clone(),
-        Arc::new(PersistenceManifestAdapter(Arc::clone(&store))),
+        Arc::new(PersistenceManifestAdapter(Arc::clone(store.store()))),
         request.session_id.clone(),
     );
     let reference = session
@@ -255,7 +255,7 @@ async fn committed_factory_attachment() -> (
         .await
         .expect("put factory attachment");
     store
-        .commit_refs(&request.session_id, std::slice::from_ref(&reference.id))
+        .commit_refs(std::slice::from_ref(&reference.id))
         .await
         .expect("commit factory attachment ref");
     (factory, backend, reference.id)
@@ -1208,7 +1208,7 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
-    let store = crate::SessionStoreFactory::create_store(factory.as_ref(), &request)
+    let store = crate::runtime::admit_session_view(&factory, &request)
         .await
         .expect("create attachment-aware store");
     let backend = substrate.attachment_store();
@@ -1216,7 +1216,7 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
     let session = Arc::new(SessionAttachmentStore::new(
         Arc::clone(&backend) as Arc<dyn AttachmentStore>,
         Arc::new(SignalingManifest {
-            inner: Arc::new(PersistenceManifestAdapter(Arc::clone(&store))),
+            inner: Arc::new(PersistenceManifestAdapter(Arc::clone(store.store()))),
             attempts,
         }),
         session_id.to_string(),
@@ -1392,7 +1392,7 @@ async fn same_content_put_inside_the_delete_window_survives() {
         bytes
     );
     assert!(
-        crate::AttachmentManifest::list_all_refs(&*fixture.store)
+        crate::AttachmentManifest::list_all_refs(fixture.store.store().as_ref())
             .await
             .map(|refs| refs.contains(&id))
             .expect("manifest probe"),
@@ -1653,7 +1653,7 @@ async fn ephemeral_facade_passes_reads_through_without_a_guard() {
 
 #[tokio::test]
 async fn persistence_manifest_adapter_forwards_root_tracking() {
-    let runtime: crate::store::SessionStore =
+    let runtime: Arc<dyn crate::store::RuntimeStore> =
         Arc::new(crate::testing::unbound_recording_store().await);
     let adapter = PersistenceManifestAdapter(runtime);
     let attachment_id = AttachmentId::parse("adapter-forwarding").expect("valid attachment id");

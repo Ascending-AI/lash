@@ -806,7 +806,6 @@ mod tests {
     use super::{bind_state_to_store, initial_park_operation, initial_park_preview};
     use crate::SessionError;
     use crate::SessionId;
-    use crate::SessionStoreFactory;
 
     fn user_message(id: &str, content: &str) -> crate::Message {
         crate::Message {
@@ -978,14 +977,13 @@ mod tests {
         };
         let backend = crate::testing::memory_store_backend().await;
         let factory = backend.session_store_factory();
-        let store = factory
-            .create_store(&request)
+        let store = crate::runtime::admit_session_view(&factory, &request)
             .await
             .expect("create session store before parking");
         let runtime_host = test_host_config(&backend);
         let runtime_services = crate::PersistentRuntimeServices::new(
             plugin_session_with_tools(&SessionId::from(session_id), Arc::new(EmptyTools)),
-            Arc::clone(&store),
+            store,
             std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
             std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
         );
@@ -1043,23 +1041,28 @@ mod tests {
         let session_id = "transient-park-commit-failure";
         let policy = standard_test_policy();
         let backend = crate::testing::memory_store_backend().await;
+        let factory = backend.session_store_factory();
+        factory
+            .admit_session(&crate::SessionStoreCreateRequest {
+                owning_process_id: None,
+                pending_observer_intents: Vec::new(),
+                session_id: SessionId::from(session_id.to_string()),
+                relation: crate::SessionRelation::Root,
+                policy: policy.clone(),
+            })
+            .await
+            .expect("create session store before parking");
         let store = Arc::new(crate::testing::runtime_helpers::RecordingStore::over(
-            backend
-                .session_store_factory()
-                .create_store(&crate::SessionStoreCreateRequest {
-                    owning_process_id: None,
-                    pending_observer_intents: Vec::new(),
-                    session_id: SessionId::from(session_id.to_string()),
-                    relation: crate::SessionRelation::Root,
-                    policy: policy.clone(),
-                })
-                .await
-                .expect("create session store before parking"),
+            factory,
         ));
         let runtime_host = test_host_config(&backend);
         let runtime_services = crate::PersistentRuntimeServices::new(
             plugin_session_with_tools(&SessionId::from(session_id), Arc::new(EmptyTools)),
-            Arc::clone(&store) as crate::store::SessionStore,
+            crate::store::SessionStore::new(
+                Arc::clone(&store) as Arc<dyn crate::store::RuntimeStore>,
+                SessionId::from(session_id),
+            )
+            .expect("valid test session id"),
             std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
             std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
         );

@@ -893,7 +893,7 @@ mod tests {
             .filter(|node| matches!(node.payload, SessionNodePayload::FrameOpen { .. }))
             .count();
         assert_eq!(frames, 2, "the frame opened exactly once");
-        let read = state.read_model().expect("the new frame resolves");
+        let read = state.read_model();
         assert_eq!(
             read.messages
                 .iter()
@@ -990,9 +990,7 @@ mod tests {
                 .map(crate::NodeId::as_str),
             Some(opened.frame_node_id.as_str())
         );
-        let read = state
-            .read_model()
-            .expect("test runtime frame scope resolves");
+        let read = state.read_model();
         assert_eq!(
             read.messages
                 .iter()
