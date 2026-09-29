@@ -744,6 +744,7 @@ async fn the_handler_chain_holds_across_control_flow_shapes() {
     for action in [Expr::Break, Expr::Continue] {
         let body = cleanup(cleanup(action.clone()));
         let loop_expr = Expr::For {
+            authored_binding: None,
             binding: "i".into(),
             iterable: Box::new(Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])),
             bind: None,
@@ -754,6 +755,7 @@ async fn the_handler_chain_holds_across_control_flow_shapes() {
 
         let leaving = exception_try(cleanup(Expr::Number(1.0)), None, Some(cleanup(action)));
         let loop_expr = Expr::For {
+            authored_binding: None,
             binding: "i".into(),
             iterable: Box::new(Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])),
             bind: None,

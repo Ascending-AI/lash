@@ -236,6 +236,12 @@ changes what the loop visits next; a `Map` or a `Set` visits entries added
 during the loop and skips ones deleted before their turn. A string iterates its
 code points.
 
+Workflow source projection restores a shadowed loop's authored binding name.
+Lowered and stored IR carry a renamed binding's spelling as `authored_binding`
+display metadata. Linking and module/source identity keep the unique internal
+name. If an edit would make the authored spelling capture another binding, the
+printer chooses the first unused `name_1`, `name_2`, and so on in that scope.
+
 ## Conformance
 
 Test262 runs every upstream test the census accepts at a pinned commit through

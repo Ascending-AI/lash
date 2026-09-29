@@ -452,6 +452,7 @@ pub fn if_else(condition: Expr, then_block: Expr, else_block: Expr) -> Expr {
 
 pub fn for_in(binding: &str, iterable: Expr, body: Expr) -> Expr {
     Expr::For {
+        authored_binding: None,
         binding: binding.into(),
         iterable: Box::new(iterable),
         bind: None,
@@ -462,6 +463,7 @@ pub fn for_in(binding: &str, iterable: Expr, body: Expr) -> Expr {
 /// An iteration whose `bind` runs before each body.
 pub fn for_bind(binding: &str, iterable: Expr, bind: Expr, body: Expr) -> Expr {
     Expr::For {
+        authored_binding: None,
         binding: binding.into(),
         iterable: Box::new(iterable),
         bind: Some(Box::new(bind)),

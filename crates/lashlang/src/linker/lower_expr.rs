@@ -133,7 +133,17 @@ impl<'module> Linker<'module> {
                 iterable,
                 bind,
                 body,
-            } => self.lower_for(expr, path, binding, iterable, bind.as_deref(), body, scope),
+                authored_binding,
+            } => self.lower_for(
+                expr,
+                path,
+                binding,
+                authored_binding,
+                iterable,
+                bind.as_deref(),
+                body,
+                scope,
+            ),
             Expr::While { condition, body } => self.lower_while(expr, path, condition, body, scope),
             Expr::ProcessRef { process } => self.lower_process_ref(process, scope),
             Expr::HostDescriptorConstructor { type_name, input } => {
@@ -563,6 +573,7 @@ impl<'module> Linker<'module> {
         original: &Expr,
         path: &AstPath,
         binding: &AstString,
+        authored_binding: &Option<AstString>,
         iterable: &Expr,
         bind: Option<&Expr>,
         body: &Expr,
@@ -620,6 +631,7 @@ impl<'module> Linker<'module> {
         }
         Ok((
             Expr::For {
+                authored_binding: authored_binding.clone(),
                 binding: binding.clone(),
                 iterable: Box::new(iterable),
                 bind,

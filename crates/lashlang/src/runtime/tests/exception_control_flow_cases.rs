@@ -34,6 +34,7 @@ fn control_flow_strings(items: &[&str]) -> Value {
 
 fn control_flow_for(binding: &str, count: usize, body: Expr) -> Expr {
     Expr::For {
+        authored_binding: None,
         binding: binding.into(),
         iterable: Box::new(Expr::List(
             (0..count).map(|index| Expr::Number(index as f64)).collect(),

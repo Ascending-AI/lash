@@ -356,11 +356,20 @@ impl Lowerer {
             lowerer.continue_epilogues.pop();
             parts
         })?;
+        let authored_binding = match (pattern, kind) {
+            (Pattern::Ident(name, _), Some(VarKind::Let | VarKind::Const))
+                if self.resolve(name)? != *name =>
+            {
+                Some(name.as_str().into())
+            }
+            _ => None,
+        };
         self.scopes.pop();
         // The element binds into the authored pattern before each iteration's
         // body: that binding is the loop's own work, and only the body holds
         // authored statements (the iteration role's `bind`).
         Ok(vec![LashExpr::For {
+            authored_binding,
             binding: iteration.into(),
             iterable: Box::new(iterable),
             bind: Some(Box::new(LashExpr::Block(bind))),
@@ -565,6 +574,7 @@ impl Lowerer {
                         condition: Box::new(Self::nullish(Self::variable(&source))),
                         then_block: Box::new(LashExpr::Undefined),
                         else_block: Box::new(LashExpr::For {
+                            authored_binding: None,
                             binding: entry.as_str().into(),
                             iterable: Box::new(Self::stdlib_call(
                                 "Object.entries",

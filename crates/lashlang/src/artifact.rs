@@ -1245,6 +1245,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
             iterable,
             bind,
             body,
+            authored_binding: _,
         } => {
             writer.atom("for");
             write_name(writer, binding.as_str());

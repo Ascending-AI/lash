@@ -11,10 +11,9 @@ use std::collections::BTreeSet;
 
 use lash_typescript::parse;
 use lash_typescript::workflow_graph::{
-    GraphRenderError, TypeScriptSourceError, WorkflowGraphBuildError,
-    parse_typescript_assign_target, parse_typescript_expression, typescript_expression_source,
-    typescript_program_source, validate, workflow_graph_from_source,
-    workflow_graph_from_source_with_facets, workflow_graph_to_source,
+    GraphRenderError, TypeScriptSourceError, parse_typescript_assign_target,
+    parse_typescript_expression, typescript_expression_source, typescript_program_source, validate,
+    workflow_graph_from_source, workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 use lashlang::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, TypeExpr, TypeField,
@@ -940,6 +939,7 @@ fn missing_and_null_container_children_fail_at_decode() {
         ),
         (
             WorkflowContainer::For {
+                authored_binding: None,
                 binding: "item".to_string(),
                 iterable: ir("[]"),
                 bind: None,
@@ -1328,31 +1328,6 @@ finish(item);
             )
     }));
     assert_lens_laws(source);
-}
-
-/// A loop binding that shadows an outer name has no canonical TypeScript.
-///
-/// The lowerer resolves the shadow by renaming the inner binding into its own
-/// generated namespace, and a generated name is indistinguishable from one of
-/// its own temporaries, so the lens cannot spell the loop back. It refuses the
-/// program rather than emitting a name nobody wrote. Recovering the authored
-/// spelling means the lowerer recording it, which is the same "the lowerer is
-/// the one source of truth for what it generated" shape as FIG-3033.b.
-#[test]
-fn a_shadowed_loop_binding_is_refused_rather_than_spelled_as_generated() {
-    let source = r#"const item = 99;
-const items = [1, 2];
-for (const item of items) {
-  console.log(item);
-}
-finish(item);
-"#;
-    assert!(matches!(
-        workflow_graph_from_source(source),
-        Err(WorkflowGraphBuildError::CanonicalSource(
-            TypeScriptSourceError::GeneratedBinding { .. }
-        ))
-    ));
 }
 
 #[test]

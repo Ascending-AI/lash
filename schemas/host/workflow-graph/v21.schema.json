@@ -326,6 +326,13 @@
           "properties": {
             "For": {
               "properties": {
+                "authored_binding": {
+                  "description": "The authored name of a renamed lexical element binding. Display metadata only; `binding` and `bind` retain their linker identities.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "bind": {
                   "anyOf": [
                     {
@@ -2314,6 +2321,13 @@
           "additionalProperties": false,
           "description": "An iteration: the IR's element binding, iterable and bind, exactly as the loop runs them. A dialect's printer reads its authored loop header back off these fields.",
           "properties": {
+            "authored_binding": {
+              "description": "The element binding's authored name, outside execution identity.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "bind": {
               "anyOf": [
                 {

@@ -251,6 +251,7 @@ impl Compiler {
                 iterable,
                 bind,
                 body,
+                ..
             } => self.compile_for_expr(binding, iterable, bind.as_deref(), body, true, path),
             Expr::While { condition, body } => self.compile_while_expr(condition, body, true, path),
             Expr::Break => {

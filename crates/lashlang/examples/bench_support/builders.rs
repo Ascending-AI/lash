@@ -353,6 +353,7 @@ pub fn if_else(condition: Expr, then_block: Expr, else_block: Expr) -> Expr {
 
 pub fn for_in(binding: &str, iterable: Expr, body: Expr) -> Expr {
     Expr::For {
+        authored_binding: None,
         binding: binding.into(),
         iterable: Box::new(iterable),
         bind: None,

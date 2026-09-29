@@ -313,12 +313,29 @@ impl Session<'_, '_> {
             None => (derived_name, None, WorkflowNodeNameSource::Derived),
         };
         let execution_sites = execution_sites(expression, owner, &facts_path, ownership, label);
-        let type_facets = projected_node_type_facets(
+        let mut type_facets = projected_node_type_facets(
             self.projector.analysis,
             &facts_path,
             &available_variables,
             &id,
         );
+        if let Some(facets) = &mut type_facets {
+            facets
+                .available_variables
+                .retain(|variable| !versions.hidden_display_bindings.contains(&variable.name));
+            for (authored, identity) in &versions.display_bindings {
+                facets
+                    .available_variables
+                    .retain(|variable| variable.name != *authored);
+                if let Some(variable) = facets
+                    .available_variables
+                    .iter_mut()
+                    .find(|variable| variable.name == *identity)
+                {
+                    variable.name.clone_from(authored);
+                }
+            }
+        }
         WorkflowNode {
             id,
             name,
@@ -456,6 +473,8 @@ impl Session<'_, '_> {
                 iterable,
                 bind,
                 body: _,
+
+                authored_binding,
             } => {
                 // The names the body reads: the bind's, when the loop binds
                 // its element into authored names, else the element itself.
@@ -472,6 +491,13 @@ impl Session<'_, '_> {
                 }
                 let mut scoped = visible;
                 scoped.insert(loop_binding.to_string());
+                if let Some(authored) = authored_binding {
+                    if let Some(identity) = copied_binding(loop_binding, bind.as_deref()) {
+                        body_versions.display_binding(authored.as_str(), identity);
+                    } else if bind.is_none() {
+                        body_versions.display_binding(authored.as_str(), loop_binding.as_str());
+                    }
+                }
                 let loop_body = body_in(WorkflowBodySlot::LoopBody);
                 let body_graph = self.project_body(loop_body, owner, ownership, &mut body_versions);
                 let outputs = loop_outputs(loop_body, &scoped, versions);
@@ -485,6 +511,7 @@ impl Session<'_, '_> {
                 let name = format!("for {binding}");
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::For {
+                        authored_binding: authored_binding.as_ref().map(ToString::to_string),
                         binding,
                         iterable: iterable.as_ref().clone(),
                         bind,
@@ -707,9 +734,21 @@ struct VersionState {
     next: BTreeMap<String, u32>,
     current: BTreeMap<String, (u32, WorkflowNodeId)>,
     known: BTreeSet<String>,
+    /// The innermost lexical binding for each authored display name.
+    display_bindings: BTreeMap<String, String>,
+    hidden_display_bindings: BTreeSet<String>,
 }
 
 impl VersionState {
+    fn display_binding(&mut self, authored: &str, identity: &str) {
+        if let Some(outer) = self
+            .display_bindings
+            .insert(authored.to_string(), identity.to_string())
+        {
+            self.hidden_display_bindings.insert(outer);
+        }
+    }
+
     fn seed(&mut self, variable: &str) {
         self.known.insert(variable.to_string());
         self.next.entry(variable.to_string()).or_insert(1);
@@ -811,6 +850,7 @@ fn collect_free_variables(
             iterable,
             bind,
             body,
+            ..
         } => {
             collect_free_variables(iterable, bound, variables);
             let mut body_bound = bound.clone();

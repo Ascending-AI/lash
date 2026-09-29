@@ -180,6 +180,7 @@ fn probe_program(body: Expr, iterations: usize) -> Program {
         assign("items", Expr::List(Vec::new())),
         assign("total", Expr::Number(0.0)),
         Expr::For {
+            authored_binding: None,
             binding: "i".into(),
             iterable: Box::new(builtin(
                 "range",
@@ -281,6 +282,7 @@ fn an_append_charges_what_the_object_measures() {
     let program = Program::block(vec![
         assign("items", Expr::List(Vec::new())),
         Expr::For {
+            authored_binding: None,
             binding: "i".into(),
             iterable: Box::new(builtin(
                 "range",

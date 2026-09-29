@@ -107,6 +107,7 @@ pub fn record(fields: Vec<(&str, Expr)>) -> Expr {
 /// `for <binding> in range(0, <end>) { <body> }`
 pub fn for_range(binding: &str, end: f64, body: Vec<Expr>) -> Expr {
     Expr::For {
+        authored_binding: None,
         binding: binding.into(),
         iterable: Box::new(call("range", vec![number(0.0), number(end)])),
         bind: None,

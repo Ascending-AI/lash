@@ -162,7 +162,6 @@ fn editable_ir_fields_survive_every_lens_direction() {
 }
 
 #[test]
-#[ignore = "FIG-4151: shadowed loop names need authored-binding provenance in the printer"]
 fn workflow_projection_preserves_shadow_loop_label_spans() {
     let source = "const scoped = async () => {\n  const item = 'outer';\n  /** @label Loop read */\n  for (const item of [1,2]) {\n    /** @label Inner read */\n    console.log(item);\n  }\n  /** @label Outer read */\n  console.log(item);\n  return item;\n};\n";
     let environment = lashlang::testing::harness::labeled_test_environment();
@@ -278,4 +277,75 @@ fn facet_echo_changes_no_execution_or_canonical_diff() {
             lashlang::Value::Number(2.0)
         );
     }
+}
+
+#[test]
+fn workflow_nested_loop_shadowing_round_trips() {
+    let source = "for (const item of [1, 2]) { for (const item of [3, 4]) { console.log(item); } console.log(item); }";
+    assert_lens_laws(source);
+    assert_eq!(canonical(source).matches("for (const item of").count(), 2);
+}
+
+#[test]
+fn workflow_loop_shadowing_module_const_round_trips() {
+    let source = "const item = 'outer'; for (const item of [1, 2]) { console.log(item); } console.log(item);";
+    assert_lens_laws(source);
+    assert!(canonical(source).contains("for (const item of"));
+    let admitted = lash_typescript::link(source, &lashlang::testing::harness::test_environment())
+        .expect("shadowed binding links")
+        .artifact;
+    let mut program = admitted.ir().clone();
+    fn rename_display(expression: &mut lashlang::Expr) -> bool {
+        if let lashlang::Expr::For {
+            authored_binding: Some(authored),
+            ..
+        } = expression
+        {
+            assert_eq!(authored.as_str(), "item");
+            *authored = "entry".into();
+            return true;
+        }
+        expression.children_mut().any(rename_display)
+    }
+    assert!(
+        rename_display(&mut program.main),
+        "lowered binding retains provenance"
+    );
+    let renamed =
+        lashlang::ModuleArtifact::from_program(program).expect("display metadata is admitted");
+    assert_eq!(renamed.module_ref(), admitted.module_ref());
+    assert_eq!(renamed.source_identity(), admitted.source_identity());
+    let stored = lashlang::ModuleArtifact::from_store_bytes(
+        &renamed.to_store_bytes().expect("encode artifact"),
+    )
+    .expect("decode artifact");
+    assert_eq!(stored.ir(), renamed.ir());
+    assert!(
+        typescript_program_source(stored.ir())
+            .expect("stored provenance prints")
+            .contains("for (const entry of")
+    );
+}
+
+#[test]
+fn workflow_loop_authored_name_avoids_capture() {
+    let mut program = parse("const item = 'outer'; const outside = 'other'; for (const item of [1]) { console.log(item, outside); }").expect("fixture parses");
+    fn reference_outer(expression: &mut lashlang::Expr) -> bool {
+        if let lashlang::Expr::Variable(name) = expression
+            && name.as_str() == "outside"
+        {
+            *name = "item".into();
+            return true;
+        }
+        expression.children_mut().any(reference_outer)
+    }
+    assert!(reference_outer(&mut program.main));
+    let rendered = typescript_program_source(&program).expect("edited binding provenance prints");
+    assert!(rendered.contains("for (const item_1 of [1])"), "{rendered}");
+    assert!(rendered.contains("console.log(item_1, item)"), "{rendered}");
+    assert_eq!(
+        typescript_program_source(&program).expect("repeat print"),
+        rendered
+    );
+    assert_lens_laws(&rendered);
 }

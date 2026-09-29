@@ -858,6 +858,7 @@ fn node_from_flow_data(
                 body: Box::new(WorkflowSubgraph::default()),
             },
             Some("for") => WorkflowContainer::For {
+                authored_binding: None,
                 binding: required_text(id, data.binding.as_ref(), "binding")?,
                 iterable: required_expression(
                     id,

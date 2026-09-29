@@ -527,6 +527,7 @@ async fn exception_unwind_crosses_frames_finally_chains_and_iterators() {
         },
         Expr::Finish(Box::new(exception_try(
             Expr::For {
+                authored_binding: None,
                 binding: "item".into(),
                 iterable: Box::new(Expr::List(vec![Expr::Number(1.0)])),
                 bind: None,

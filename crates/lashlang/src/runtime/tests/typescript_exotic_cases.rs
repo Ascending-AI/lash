@@ -721,6 +721,7 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
             ts_assign("set", iterable),
             ts_assign("total", Expr::Number(0.0)),
             Expr::For {
+                authored_binding: None,
                 binding: "value".into(),
                 iterable: Box::new(Expr::Variable("set".into())),
                 bind: None,
@@ -753,6 +754,7 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
             ),
             ts_assign("total", Expr::Number(0.0)),
             Expr::For {
+                authored_binding: None,
                 binding: "entry".into(),
                 iterable: Box::new(Expr::Variable("map".into())),
                 bind: None,
@@ -813,6 +815,7 @@ async fn set_normalizes_negative_zero_before_iteration() {
         heap_method("add", "set", vec![Expr::Number(-0.0)]),
         ts_assign("reciprocal", Expr::Undefined),
         Expr::For {
+            authored_binding: None,
             binding: "value".into(),
             iterable: Box::new(Expr::Variable("set".into())),
             bind: None,
@@ -1287,6 +1290,7 @@ async fn stored_per_iteration_closures_stay_inside_the_vm_across_calls_and_parks
     let program = Program::block(vec![
         ts_assign("callbacks", Expr::List(Vec::new())),
         Expr::For {
+            authored_binding: None,
             binding: "i".into(),
             iterable: Box::new(private_builtin(
                 "range",

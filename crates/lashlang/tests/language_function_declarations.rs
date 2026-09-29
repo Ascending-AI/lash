@@ -137,6 +137,7 @@ async fn one_function_serves_many_call_sites() {
         vec![
             assign("parts", Expr::List(Vec::new())),
             Expr::For {
+                authored_binding: None,
                 binding: "name".into(),
                 iterable: Box::new(Expr::List(vec![string("a"), string("b")])),
                 bind: None,
@@ -663,6 +664,7 @@ async fn an_effect_nested_deep_in_a_function_is_still_rejected() {
         Expr::Block(vec![
             assign("total", number(0.0)),
             Expr::For {
+                authored_binding: None,
                 binding: "path".into(),
                 iterable: Box::new(Expr::List(vec![string("a.txt")])),
                 bind: None,

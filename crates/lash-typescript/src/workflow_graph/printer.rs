@@ -43,6 +43,7 @@ use thiserror::Error;
 
 mod collection_transform;
 mod for_loop;
+mod loop_bindings;
 mod templates;
 
 use for_loop::{classic_for, is_statement_body, var_initialization};
@@ -133,6 +134,7 @@ struct Printer<'p> {
     /// the source's `this`: the function that owns it prints first, and an
     /// arrow inside it reads the same slot as a capture.
     receivers: RefCell<BTreeSet<String>>,
+    binding_names: RefCell<Vec<BTreeMap<String, String>>>,
 }
 
 impl Printer<'static> {
@@ -141,6 +143,7 @@ impl Printer<'static> {
             lifted: BTreeMap::new(),
             continue_epilogues: RefCell::new(Vec::new()),
             receivers: RefCell::new(BTreeSet::new()),
+            binding_names: RefCell::new(Vec::new()),
         }
     }
 }
@@ -160,6 +163,7 @@ impl<'p> Printer<'p> {
                 .collect(),
             continue_epilogues: RefCell::new(Vec::new()),
             receivers: RefCell::new(BTreeSet::new()),
+            binding_names: RefCell::new(Vec::new()),
         }
     }
 
@@ -231,11 +235,11 @@ impl<'p> Printer<'p> {
         let params = function
             .params
             .iter()
-            .map(|param| self.identifier("function parameter", param.name.as_str()))
+            .map(|param| self.binding_identifier("function parameter", param.name.as_str()))
             .collect::<Result<Vec<_>, _>>()?;
         let mut out = format!(
             "function {}(",
-            self.identifier("function", function.name.as_str())?
+            self.binding_identifier("function", function.name.as_str())?
         );
         out.push_str(&params.join(", "));
         out.push_str(") ");
@@ -274,7 +278,7 @@ impl<'p> Printer<'p> {
         }
         out.push_str(&format!(
             "const {} = async ({}) => ",
-            self.identifier("process binding", binding)?,
+            self.binding_identifier("process binding", binding)?,
             params.join(", "),
         ));
         let mut run_bound = authored_params(process)
@@ -360,7 +364,7 @@ impl<'p> Printer<'p> {
             out.push_str(&format!(
                 "{}var {};\n",
                 indent(level),
-                self.identifier("var binding", target.root.as_str())?
+                self.binding_identifier("var binding", target.root.as_str())?
             ));
             bound.push(target.root.to_string());
             vars.insert(target.root.to_string());
@@ -394,7 +398,7 @@ impl<'p> Printer<'p> {
                 {
                     return Ok(format!(
                         "{prefix}var {} = {};\n",
-                        self.identifier("var binding", target.root.as_str())?,
+                        self.binding_identifier("var binding", target.root.as_str())?,
                         self.expression(init)?
                     ));
                 }
@@ -472,7 +476,7 @@ impl<'p> Printer<'p> {
             }
             Expr::Block(items) => {
                 if let Some((name, operator, operand)) = compound_assign_block(items) {
-                    let name = self.identifier("binding", name)?;
+                    let name = self.binding_identifier("binding", name)?;
                     let operand = self.expression(operand)?;
                     return Ok(format!("{prefix}{name} {operator}= {operand};\n"));
                 }
@@ -505,7 +509,7 @@ impl<'p> Printer<'p> {
                 {
                     return Ok(format!(
                         "{prefix}var {} = {};\n",
-                        self.identifier("var binding", target.root.as_str())?,
+                        self.binding_identifier("var binding", target.root.as_str())?,
                         self.expression(expr)?
                     ));
                 }
@@ -586,14 +590,12 @@ impl<'p> Printer<'p> {
             }
             Expr::For {
                 binding,
+                authored_binding,
                 iterable,
                 bind,
                 body,
             } => {
                 let header = loop_header(binding.as_str(), iterable, bind.as_deref())?;
-                // An element binding already in scope is assigned by the
-                // loop, not declared — but a `var` head keeps its `var`: the
-                // binding is not one a bare `for (x of ..)` may assign.
                 let declaration = if vars.contains(header.binding) {
                     "var"
                 } else if bound.iter().any(|name| name == header.binding) {
@@ -601,16 +603,30 @@ impl<'p> Printer<'p> {
                 } else {
                     element_binding_kind(&statement_block_contents(body), header.binding)
                 };
+                // The iterable resolves outside the loop's lexical binding.
+                let source = self.expression(header.source)?;
+                let printed_binding = self.loop_binding_name(
+                    header.binding,
+                    authored_binding.as_deref(),
+                    body,
+                    bound,
+                )?;
                 let mut body_bound = bound.clone();
                 body_bound.push(header.binding.to_string());
+                self.binding_names.borrow_mut().push(BTreeMap::from([(
+                    header.binding.to_string(),
+                    printed_binding.clone(),
+                )]));
+                let printed_body = self.block(body, level, &mut body_bound, vars);
+                self.binding_names.borrow_mut().pop();
                 Ok(format!(
                     "{prefix}for ({}{}{} {} {}) {}\n",
                     declaration,
                     if declaration.is_empty() { "" } else { " " },
-                    self.identifier("loop binding", header.binding)?,
+                    printed_binding,
                     if header.keys { "in" } else { "of" },
-                    self.expression(header.source)?,
-                    self.block(body, level, &mut body_bound, vars)?
+                    source,
+                    printed_body?,
                 ))
             }
             Expr::While { condition, body } => {
@@ -630,7 +646,7 @@ impl<'p> Printer<'p> {
                     catch_bound.push(catch.binding.to_string());
                     out.push_str(&format!(
                         " catch ({}) {}",
-                        self.identifier("catch binding", catch.binding.as_str())?,
+                        self.binding_identifier("catch binding", catch.binding.as_str())?,
                         self.block(&catch.body, level, &mut catch_bound, vars)?
                     ));
                 }
@@ -678,7 +694,7 @@ impl<'p> Printer<'p> {
                 .map(|(target, value)| {
                     Ok(format!(
                         "{} = {}",
-                        self.identifier("var binding", target.root.as_str())?,
+                        self.binding_identifier("var binding", target.root.as_str())?,
                         self.expression(value)?
                     ))
                 })
@@ -713,7 +729,7 @@ impl<'p> Printer<'p> {
             };
             let mut declarators = Vec::with_capacity(declarations.len());
             for (target, value) in declarations {
-                let name = self.identifier("loop binding", target.root.as_str())?;
+                let name = self.binding_identifier("loop binding", target.root.as_str())?;
                 declarators.push(format!("{name} = {}", self.expression(value)?));
                 bound.push(target.root.to_string());
             }
@@ -745,7 +761,7 @@ impl<'p> Printer<'p> {
         {
             return Ok(format!(
                 "{}{}",
-                self.identifier("loop binding", target.root.as_str())?,
+                self.binding_identifier("loop binding", target.root.as_str())?,
                 if *step == -1.0 { "++" } else { "--" }
             ));
         }
@@ -797,7 +813,7 @@ impl<'p> Printer<'p> {
             Expr::Variable(name) if self.receivers.borrow().contains(name.as_str()) => {
                 Ok("this".to_string())
             }
-            Expr::Variable(name) => self.identifier("variable", name.as_str()),
+            Expr::Variable(name) => self.binding_identifier("variable", name.as_str()),
             Expr::List(items) => {
                 let items = items
                     .iter()
@@ -883,7 +899,7 @@ impl<'p> Printer<'p> {
                 let args = self.arguments(args)?;
                 Ok(format!(
                     "{}({})",
-                    self.identifier("function", function.as_str())?,
+                    self.binding_identifier("function", function.as_str())?,
                     args
                 ))
             }
@@ -1140,7 +1156,7 @@ impl<'p> Printer<'p> {
             let params = function
                 .params
                 .iter()
-                .map(|param| self.identifier("function parameter", param.as_str()))
+                .map(|param| self.binding_identifier("function parameter", param.as_str()))
                 .collect::<Result<Vec<_>, _>>()?;
             let mut bound = function.params.iter().map(ToString::to_string).collect();
             return Ok(format!(
@@ -1157,7 +1173,7 @@ impl<'p> Printer<'p> {
         let params = function
             .params
             .iter()
-            .map(|param| self.identifier("arrow parameter", param.as_str()))
+            .map(|param| self.binding_identifier("arrow parameter", param.as_str()))
             .collect::<Result<Vec<_>, _>>()?;
         let mut bound = function.params.iter().map(ToString::to_string).collect();
         // An expression-bodied arrow lowers to a body that is one `return`;
@@ -1190,7 +1206,7 @@ impl<'p> Printer<'p> {
         let params = function
             .params
             .iter()
-            .map(|param| self.identifier("function parameter", param.as_str()))
+            .map(|param| self.binding_identifier("function parameter", param.as_str()))
             .collect::<Result<Vec<_>, _>>()?;
         let mut bound = function.params.iter().map(ToString::to_string).collect();
         Ok(format!(
@@ -1200,7 +1216,7 @@ impl<'p> Printer<'p> {
             } else {
                 ""
             },
-            self.identifier("function", name)?,
+            self.binding_identifier("function", name)?,
             params.join(", "),
             self.rooted_block(&function.body, 0, &mut bound)?
         ))
@@ -1276,7 +1292,7 @@ impl<'p> Printer<'p> {
     }
 
     fn assign_target(&self, target: &AssignTarget) -> Printed {
-        let mut out = self.identifier("assignment target", target.root.as_str())?;
+        let mut out = self.binding_identifier("assignment target", target.root.as_str())?;
         for step in &target.steps {
             match step {
                 AssignPathStep::Field(field) => {

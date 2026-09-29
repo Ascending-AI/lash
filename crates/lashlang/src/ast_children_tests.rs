@@ -74,6 +74,7 @@ fn every_expr_variant() -> Vec<Expr> {
             else_block: Box::new(var("else")),
         },
         Expr::For {
+            authored_binding: None,
             binding: "item".into(),
             iterable: Box::new(var("for_iterable")),
             bind: None,

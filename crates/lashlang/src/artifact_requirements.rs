@@ -235,6 +235,7 @@ impl<'program> RequirementsCollector<'program> {
                 iterable,
                 bind,
                 body,
+                ..
             } => {
                 self.collect_expr(iterable, scope);
                 let previous = scope.insert(binding.to_string(), RequirementBinding::Value);

@@ -54,7 +54,10 @@ where
             iterable,
             bind,
             body,
+
+            authored_binding,
         } => Expr::For {
+            authored_binding,
             binding,
             iterable: Box::new(folder.fold_expr(*iterable)),
             bind: bind.map(|bind| Box::new(folder.fold_expr(*bind))),

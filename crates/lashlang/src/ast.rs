@@ -536,6 +536,10 @@ pub enum Expr {
     /// the loop itself; only `body` holds the authored statements.
     For {
         binding: AstString,
+        /// The authored name of a renamed lexical element binding. Display
+        /// metadata only; `binding` and `bind` retain their linker identities.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        authored_binding: Option<AstString>,
         iterable: Box<Expr>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bind: Option<Box<Expr>>,

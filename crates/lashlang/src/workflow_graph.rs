@@ -897,6 +897,9 @@ pub enum WorkflowContainer {
     /// back off these fields.
     For {
         binding: String,
+        /// The element binding's authored name, outside execution identity.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        authored_binding: Option<String>,
         #[serde(deserialize_with = "deserialize_strict")]
         iterable: Expr,
         #[serde(default, skip_serializing_if = "Option::is_none")]

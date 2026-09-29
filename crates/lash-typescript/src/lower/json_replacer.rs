@@ -119,6 +119,7 @@ impl Lowerer {
             assign(&output, LashExpr::Record(Vec::new())),
             assign(&keys, stdlib("Object.keys", vec![current_value()])),
             LashExpr::For {
+                authored_binding: None,
                 binding: property.as_str().into(),
                 iterable: Box::new(variable(&keys)),
                 bind: None,
@@ -429,6 +430,7 @@ impl Lowerer {
             assign(&out, LashExpr::Record(Vec::new())),
             assign(&keys, stdlib("Object.keys", vec![val_value()])),
             LashExpr::For {
+                authored_binding: None,
                 binding: property.as_str().into(),
                 iterable: Box::new(variable(&keys)),
                 bind: None,

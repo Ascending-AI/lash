@@ -1094,7 +1094,10 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
                     iterable,
                     bind,
                     body,
+
+                    authored_binding,
                 } => Expr::For {
+                    authored_binding: authored_binding.clone().map(Into::into),
                     binding: binding.clone().into(),
                     iterable: Box::new(iterable.clone()),
                     bind: bind.clone().map(Box::new),
