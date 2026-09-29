@@ -1438,6 +1438,9 @@ mod artifact_frame_transition_tests {
             None, &graph, &first
         ));
         assert!(!transition_source_matches_head_or_append(
+            None, &graph, &successor
+        ));
+        assert!(!transition_source_matches_head_or_append(
             Some(&successor),
             &graph,
             &first
