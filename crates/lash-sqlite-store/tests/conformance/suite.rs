@@ -16,43 +16,20 @@ use std::sync::{Arc, Mutex};
 
 use lash_conformance::{
     FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
-    LineageConformanceHandles, LineageConformanceInjector, ReopenableProcessRegistry,
-    ReopenableRuntimePersistence, ReopenableTriggerStore,
+    GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
+    ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
-use lash_core_execution::store::{ConformanceSessionStoreFactory, RuntimePersistenceDecorator};
+use lash_core_execution::store::{ConformanceDeployment, RuntimeStore};
 use lash_core_execution::{
-    ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity, ProcessInput,
-    ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
+    DeploymentStore, ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity,
+    ProcessInput, ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
     ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter,
-    RuntimePersistence, SessionCommitStore, SessionStoreFactory, StoreError, TriggerStore,
+    SessionCatalogStore, SessionCommitStore, TriggerStore,
 };
 use lash_sqlite_store::{SqliteDatabase, SqliteStoreSetOptions};
 
 use super::SUBSTRATE;
 use crate::backend_fixture::{Substrate, TestBackend, sync_await};
-
-struct MultiSessionAdmissionStore {
-    inner: Arc<dyn RuntimePersistence>,
-    backend: TestBackend,
-}
-
-#[async_trait::async_trait]
-impl RuntimePersistenceDecorator for MultiSessionAdmissionStore {
-    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
-        self.inner.as_ref()
-    }
-
-    async fn admit_and_bind_session(
-        &self,
-        binding: &lash_core_execution::SessionBinding,
-    ) -> Result<lash_core_execution::SessionAdmission, StoreError> {
-        self.backend
-            .store()
-            .await
-            .admit_and_bind_session(binding)
-            .await
-    }
-}
 
 /// Engine promise authority for storage laws that cross a turn-control boundary.
 async fn promise_authority() -> (
@@ -146,8 +123,8 @@ impl ScenarioBackends {
         }
     }
 
-    fn store(&self, scenario: &str) -> Arc<dyn RuntimePersistence> {
-        self.concrete_store(scenario) as Arc<dyn RuntimePersistence>
+    fn store(&self, scenario: &str) -> Arc<dyn RuntimeStore> {
+        self.concrete_store(scenario) as Arc<dyn RuntimeStore>
     }
 
     /// The scenario's store as its concrete type, for laws that also reach
@@ -180,7 +157,7 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
 
 lash_conformance::attachment_adoption_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    let factory = backend.session_store_factory();
+    let factory = backend.store().await;
     let bytes_root = tempfile::tempdir().expect("attachment bytes root");
     let make_bytes = crate::backend_fixture::attachment_bytes(&bytes_root);
     ((backend, bytes_root), factory, make_bytes)
@@ -188,7 +165,7 @@ lash_conformance::attachment_adoption_tests!({
 
 lash_conformance::attachment_condemnation_recovery_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    let factory = backend.session_store_factory();
+    let factory = backend.store().await;
     let reopen = backend.clone();
     let bytes_root = tempfile::tempdir().expect("attachment bytes root");
     let make_bytes = crate::backend_fixture::attachment_bytes(&bytes_root);
@@ -196,19 +173,17 @@ lash_conformance::attachment_condemnation_recovery_tests!({
         (backend, bytes_root),
         factory,
         make_bytes,
-        move || async move {
-            reopen.reopen().await.session_store_factory() as Arc<dyn SessionStoreFactory>
-        },
+        move || async move { reopen.reopen().await.store().await as Arc<dyn DeploymentStore> },
     )
 });
 
 #[tokio::test]
 async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    let factory = backend.session_store_factory();
+    let factory = backend.store().await;
     let session_id = SessionId::from("condemnation-corruption");
     factory
-        .create_store(
+        .admit_session(
             &lash_core_execution::testing::store_fixtures::session_store_request(
                 &session_id,
                 "condemnation-corruption",
@@ -254,9 +229,9 @@ lash_conformance::abandoned_attachment_recovery_tests!({
         async move {
             let backend = TestBackend::open(SUBSTRATE).await;
             retained.keep(&backend);
-            let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+            let factory = backend.store().await as Arc<dyn DeploymentStore>;
             (factory, make_bytes, move || async move {
-                backend.reopen().await.session_store_factory() as Arc<dyn SessionStoreFactory>
+                backend.reopen().await.store().await as Arc<dyn DeploymentStore>
             })
         }
     })
@@ -534,7 +509,7 @@ lash_conformance::store_contract_state_machine_tests!({
             retained.keep(&backend);
             lash_conformance::StoreContractHandles {
                 registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
-                runtime: backend.store().await as Arc<dyn RuntimePersistence>,
+                runtime: backend.store().await as Arc<dyn RuntimeStore>,
             }
         }
     })
@@ -548,7 +523,7 @@ lash_conformance::runtime_persistence_state_machine_tests!({
             let backend = TestBackend::open(SUBSTRATE).await;
             retained.keep(&backend);
             lash_conformance::RuntimePersistenceStateMachineHandles::create(
-                backend.session_store_factory(),
+                backend.store().await,
                 backend.attachment_store(),
                 true,
             )
@@ -565,7 +540,7 @@ lash_conformance::session_graph_state_machine_tests!({
         async move {
             let backend = TestBackend::open(SUBSTRATE).await;
             retained.keep(&backend);
-            backend.session_store_factory() as Arc<dyn SessionStoreFactory>
+            backend.store().await as Arc<dyn DeploymentStore>
         }
     })
 });
@@ -580,32 +555,19 @@ lash_conformance::process_continuation_store_tests!({
 
 lash_conformance::session_store_factory_tests!({
     let retained: Retained<TestBackend> = Retained::default();
-    let unbound_backend = TestBackend::open(SUBSTRATE).await;
-    retained.keep(&unbound_backend);
-    let unbound =
-        Some(unbound_backend.store().await as Arc<dyn lash_core_execution::StoreMaintenance>);
     let make_retained = retained.clone();
-    let make = move || {
-        make_retained.open_blocking().session_store_factory()
-            as Arc<dyn ConformanceSessionStoreFactory>
-    };
+    let make =
+        move || make_retained.open_blocking().blocking_store() as Arc<dyn ConformanceDeployment>;
     let attached_retained = retained.clone();
     let make_attached = move || {
         let backend = attached_retained.open_blocking();
         (
-            backend.session_store_factory() as Arc<dyn ConformanceSessionStoreFactory>,
+            backend.blocking_store() as Arc<dyn ConformanceDeployment>,
             backend.attachment_store() as Arc<dyn lash_core_execution::AttachmentStore>,
         )
     };
     let (engine, effect_host) = promise_authority().await;
-    (
-        (retained, engine),
-        "sqlite",
-        unbound,
-        make,
-        make_attached,
-        effect_host,
-    )
+    ((retained, engine), make, make_attached, effect_host)
 });
 
 // The settlement laws run a facade runtime over a fresh backend per law: an
@@ -626,7 +588,7 @@ lash_conformance::session_config_settlement_tests!({
 lash_conformance::fresh_session_admission_tests!({
     let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move |_session_id: &str| {
-        retained.open_blocking().blocking_store() as Arc<dyn RuntimePersistence>
+        retained.open_blocking().blocking_store() as Arc<dyn RuntimeStore>
     })
 });
 
@@ -638,14 +600,14 @@ lash_conformance::observer_intent_tests!({
 
 lash_conformance::session_graph_append_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    let factory = backend.store().await as Arc<dyn DeploymentStore>;
     (backend, factory)
 });
 
 lash_conformance::process_prune_session_store_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
-    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    let factory = backend.store().await as Arc<dyn DeploymentStore>;
     let (engine, effect_host) = promise_authority().await;
     ((backend, engine), factory, registry, effect_host)
 });
@@ -756,29 +718,18 @@ lash_conformance::runtime_persistence_reopenable_tests!({
             let clock = store_clock.clone() as Arc<dyn lash_core_execution::Clock>;
             let (backend, open, reopen) = sync_await(async move {
                 let backend = TestBackend::open_with_clock(SUBSTRATE, clock).await;
-                let factory = backend.session_store_factory();
-                let open = factory
-                    .create_store(&request)
+                let open = backend.store().await;
+                open.admit_session(&request)
                     .await
-                    .expect("create explicitly bound SQLite conformance store");
-                let reopen = factory
-                    .open_existing_store(&request)
-                    .await
-                    .expect("open explicit SQLite conformance store")
-                    .expect("created SQLite conformance store exists");
+                    .expect("admit SQLite conformance session");
+                let reopen = backend.reopen().await.store().await;
                 (backend, open, reopen)
             });
             let effect_host = Arc::clone(&effect_host);
             retained.keep(&backend);
             ReopenableRuntimePersistence {
-                open: Arc::new(MultiSessionAdmissionStore {
-                    inner: open,
-                    backend: backend.clone(),
-                }),
-                reopen: Arc::new(MultiSessionAdmissionStore {
-                    inner: reopen,
-                    backend,
-                }),
+                open: open as Arc<dyn RuntimeStore>,
+                reopen: reopen as Arc<dyn RuntimeStore>,
                 effect_host,
             }
         },
@@ -806,7 +757,7 @@ lash_conformance::checkpoint_component_reopen_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let reopen = backend.clone();
     (backend, move || {
-        reopen.blocking_store() as Arc<dyn RuntimePersistence>
+        reopen.blocking_store() as Arc<dyn RuntimeStore>
     })
 });
 
@@ -816,7 +767,7 @@ lash_conformance::append_head_switch_tests!({
     let mutation = backend.clone();
     (
         backend,
-        store as Arc<dyn RuntimePersistence>,
+        store as Arc<dyn RuntimeStore>,
         move |leaf_node_id: lash_core_execution::NodeId| async move {
             let conn = mutation.raw(SqliteDatabase::DurableCore);
             conn.execute(
@@ -836,7 +787,7 @@ lash_conformance::append_tombstone_tests!({
     let mutation = backend.clone();
     (
         backend,
-        store as Arc<dyn RuntimePersistence>,
+        store as Arc<dyn RuntimeStore>,
         move |node_id: lash_core_execution::NodeId| async move {
             let conn = mutation.raw(SqliteDatabase::DurableCore);
             conn.execute(
@@ -851,7 +802,11 @@ lash_conformance::append_tombstone_tests!({
 lash_conformance::append_receipt_envelope_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let store = backend.store().await;
-    (backend, store as Arc<dyn RuntimePersistence>)
+    store
+        .admit_session(&root_session_request("root"))
+        .await
+        .expect("admit receipt envelope session");
+    (backend, store as Arc<dyn RuntimeStore>)
 });
 
 // The commit-seam pause needs the fault injector, which only the `testing`
@@ -875,11 +830,11 @@ mod cancelled_queued_append {
             crate::backend_fixture::system_clock(),
         )
         .await;
-        let store = backend
-            .session_store_factory()
-            .create_store(&root_session_request("root"))
+        let store = backend.store().await;
+        store
+            .admit_session(&root_session_request("root"))
             .await
-            .expect("create cancellation store");
+            .expect("admit cancellation session");
         (backend, store, move || {
             // The append commit is the first write after the pause is armed.
             let pause = injector.pause(SqliteFaultPoint::BeforeCommit);
@@ -897,7 +852,7 @@ lash_conformance::append_receipt_rewrite_tests!({
     let mutation = backend.clone();
     (
         backend,
-        store as Arc<dyn RuntimePersistence>,
+        store as Arc<dyn RuntimeStore>,
         move || async move {
             let conn = mutation.raw(SqliteDatabase::DurableCore);
             let result_json: String = conn
@@ -998,6 +953,6 @@ async fn sqlite_runtime_turn_receipt_rejects_half_populated_append_identity() {
 
 lash_conformance::retention_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    let factory = backend.store().await as Arc<dyn DeploymentStore>;
     (backend, factory)
 });

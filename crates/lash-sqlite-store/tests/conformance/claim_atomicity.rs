@@ -1,4 +1,4 @@
-use lash_core_execution::{RuntimePersistence, SessionStoreFactory};
+use lash_core_execution::{RuntimeStore, SessionCatalogStore};
 use lash_sqlite_store::SqliteDatabase;
 use std::sync::Arc;
 
@@ -11,9 +11,9 @@ mod law;
 async fn sqlite_a_partial_admission_rolls_back_through_both_entry_points() {
     for entry in law::ENTRIES {
         let backend = TestBackend::open(SUBSTRATE).await;
-        let store = backend
-            .session_store_factory()
-            .create_store(&lash_core_execution::SessionStoreCreateRequest {
+        let store = backend.store().await;
+        store
+            .admit_session(&lash_core_execution::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: "root".into(),
@@ -24,7 +24,7 @@ async fn sqlite_a_partial_admission_rolls_back_through_both_entry_points() {
             })
             .await
             .unwrap();
-        let case = law::prepare(store as Arc<dyn RuntimePersistence>, entry).await;
+        let case = law::prepare(store as Arc<dyn RuntimeStore>, entry).await;
         let conn = backend.raw(SqliteDatabase::DurableCore);
         let second = case.ids[1].replace('\'', "''");
         conn.execute_batch(&format!("CREATE TRIGGER lose_second_bind BEFORE UPDATE OF admitted_root ON queued_work_batches WHEN OLD.batch_id = '{second}' BEGIN SELECT RAISE(IGNORE); END;")).unwrap();
@@ -52,9 +52,9 @@ async fn sqlite_a_partial_admission_rolls_back_through_both_entry_points() {
 #[tokio::test]
 async fn sqlite_an_admission_holds_its_rows_across_a_displaced_fence() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    let store = backend
-        .session_store_factory()
-        .create_store(&lash_core_execution::SessionStoreCreateRequest {
+    let store = backend.store().await;
+    store
+        .admit_session(&lash_core_execution::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: "root".into(),
@@ -66,7 +66,7 @@ async fn sqlite_an_admission_holds_its_rows_across_a_displaced_fence() {
         .await
         .unwrap();
     law::an_admission_holds_its_rows_across_a_displaced_fence(
-        store as Arc<dyn RuntimePersistence>,
+        store as Arc<dyn RuntimeStore>,
         "sqlite",
     )
     .await;

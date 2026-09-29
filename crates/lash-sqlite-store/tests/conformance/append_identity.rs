@@ -4,7 +4,7 @@ lash_conformance::append_receipt_identity_corruption_tests!({
     let mutation = backend.clone();
     (
         backend,
-        store as Arc<dyn RuntimePersistence>,
+        store as Arc<dyn RuntimeStore>,
         move || async move {
             let conn = mutation.raw(SqliteDatabase::DurableCore);
             conn.execute(

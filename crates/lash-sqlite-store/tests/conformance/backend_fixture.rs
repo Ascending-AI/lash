@@ -53,7 +53,7 @@ pub(crate) fn attachment_bytes(
     Arc::new(move || {
         let ordinal = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Arc::new(
-            lash_core_execution::facade_support::FileAttachmentSqliteStore::new(
+            lash_core_execution::facade_support::FileAttachmentStore::new(
                 root.join(format!("bytes-{ordinal}")),
             ),
         ) as Arc<dyn lash_core_execution::AttachmentStore>

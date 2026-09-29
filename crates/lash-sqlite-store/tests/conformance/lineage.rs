@@ -125,7 +125,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
 fn sqlite_lineage_handles() -> LineageConformanceHandles {
     let backend = TestBackend::blocking(SUBSTRATE);
     LineageConformanceHandles {
-        factory: backend.session_store_factory(),
+        factory: backend.blocking_store(),
         injector: Arc::new(SqliteLineageConformanceInjector { backend }),
     }
 }

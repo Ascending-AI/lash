@@ -3,7 +3,7 @@
 use lash_sansio::SessionId;
 use std::sync::{Arc, Mutex};
 
-use lash_core_execution::SessionStoreFactory;
+use lash_core_execution::DeploymentStore;
 use lash_sansio::sync::MutexExt;
 use lash_sqlite_store::SqliteDatabase;
 
@@ -48,9 +48,7 @@ lash_conformance::store_maintenance_tests!({
     (
         retained,
         "sqlite",
-        move || {
-            make_retained.open_blocking().session_store_factory() as Arc<dyn SessionStoreFactory>
-        },
+        move || make_retained.open_blocking().blocking_store() as Arc<dyn DeploymentStore>,
         move || {
             bytes_retained.open_blocking().attachment_store()
                 as Arc<dyn lash_core_execution::AttachmentStore>
@@ -68,7 +66,7 @@ lash_conformance::store_maintenance_fault_tests!({
         move || {
             let opened = retained.open_blocking();
             *make_backend.lock_recover() = Some(opened.clone());
-            opened.session_store_factory() as Arc<dyn SessionStoreFactory>
+            opened.blocking_store() as Arc<dyn DeploymentStore>
         },
         Arc::new(SqliteCorruptRootedManifest { backend }),
     )

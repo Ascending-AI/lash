@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::{ProcessExecutionEnvStore, ProcessRegistry, SessionStoreFactory};
+use lash_core_execution::{DeploymentStore, ProcessExecutionEnvStore, ProcessRegistry};
 use lash_sqlite_store::SqliteDatabase;
 
 use super::SUBSTRATE;
@@ -14,7 +14,7 @@ use crate::backend_fixture::TestBackend;
 // the backend's own catalog, which the factory owns.
 lash_conformance::process_prune_reclaim_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    let factory = backend.store().await as Arc<dyn DeploymentStore>;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(crate::blob_probe::SqliteBlobProbe::new(
         backend.database_uri(SqliteDatabase::DurableCore),

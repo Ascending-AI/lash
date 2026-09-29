@@ -55,8 +55,7 @@ lash_conformance::process_trigger_retention_tests!({
             lash_conformance::ProcessTriggerRetentionHandles {
                 registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
                 triggers: backend.trigger_store() as Arc<dyn TriggerStore>,
-                sessions: backend.session_store_factory()
-                    as Arc<dyn lash_core_execution::SessionStoreFactory>,
+                sessions: backend.store().await as Arc<dyn lash_core_execution::DeploymentStore>,
             }
         }
     })

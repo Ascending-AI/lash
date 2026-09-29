@@ -3,7 +3,7 @@ use super::*;
 lash_conformance::session_delete_blob_reclaim_tests!({
     ((), "sqlite", || {
         let backend = TestBackend::blocking(SUBSTRATE);
-        let factory = backend.session_store_factory();
+        let factory = backend.blocking_store();
         let attachments = backend.attachment_store();
         let probe = Arc::new(crate::blob_probe::SqliteBlobProbe::new(
             backend.database_uri(SqliteDatabase::DurableCore),
@@ -11,7 +11,7 @@ lash_conformance::session_delete_blob_reclaim_tests!({
             Some(Arc::new(backend)),
         ));
         lash_conformance::SessionDeleteBlobHandles {
-            factory: factory as Arc<dyn SessionStoreFactory>,
+            factory: factory as Arc<dyn DeploymentStore>,
             probe,
             attachments,
         }
