@@ -7,20 +7,21 @@ use std::num::NonZeroUsize;
 
 use lash_core::StoreError;
 use lash_core::store::{
-    ClaimToken, ClaimedObligation, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
-    ObligationSettlement, ObligationStanding, SettleOutcome, StalledObligation,
+    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, ObligationId, ObligationKey,
+    ObligationKind, ObligationLedger, ObligationSettlement, ObligationStanding, SettleOutcome,
+    StalledObligation,
 };
 
 type Passes = Arc<std::sync::Mutex<BTreeSet<ObligationKind>>>;
 
 /// A ledger that records each due pass a relay runs over it.
-struct DuePasses {
-    inner: Arc<dyn ObligationLedger>,
+struct DuePasses<L: ?Sized + ObligationLedger> {
+    inner: Arc<L>,
     passes: Passes,
 }
 
 #[async_trait]
-impl ObligationLedger for DuePasses {
+impl<L: ?Sized + ObligationLedger> ObligationLedger for DuePasses<L> {
     fn kind(&self) -> ObligationKind {
         self.inner.kind()
     }
@@ -86,17 +87,50 @@ impl ObligationLedger for DuePasses {
     }
 }
 
+#[async_trait]
+impl ArtifactCleanupLedger for DuePasses<dyn ArtifactCleanupLedger> {
+    async fn arm_cleanup(
+        &self,
+        cleanup: &lash_core::ArtifactCleanup,
+        now_ms: u64,
+    ) -> std::result::Result<ObligationId, StoreError> {
+        self.inner.arm_cleanup(cleanup, now_ms).await
+    }
+
+    async fn nudge(
+        &self,
+        referrer: &lash_core::ArtifactReferrer,
+        now_ms: u64,
+    ) -> std::result::Result<bool, StoreError> {
+        self.inner.nudge(referrer, now_ms).await
+    }
+
+    async fn load_cleanup(
+        &self,
+        id: &ObligationId,
+    ) -> std::result::Result<Option<lash_core::ArtifactCleanup>, StoreError> {
+        self.inner.load_cleanup(id).await
+    }
+}
+
 /// A fresh Restate double backend whose obligation ledgers record the due
 /// passes run over them.
 async fn recorded_backend() -> (lash_core::Backend, Passes) {
     let passes = Passes::default();
     let recorded = Arc::clone(&passes);
+    let cleanup_passes = Arc::clone(&passes);
     let backend = crate::testing::LayeredBackend::over(double_backend().await)
         .map_obligation_ledgers(move |_kind, inner| {
             Arc::new(DuePasses {
                 inner,
                 passes: Arc::clone(&recorded),
             }) as Arc<dyn ObligationLedger>
+        })
+        .map_artifact_cleanup(move |inner| {
+            Arc::new(DuePasses {
+                inner,
+                passes: cleanup_passes,
+            }) as Arc<dyn ArtifactCleanupLedger>
         })
         .into_backend();
     (backend, passes)

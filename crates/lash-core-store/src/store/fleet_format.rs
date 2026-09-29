@@ -423,6 +423,21 @@ const WRITER_PINS: &[WriterPin] = &[
         generation: 1,
         version: 1,
     },
+    WriterPin {
+        constant: "RESTATE_WIRE_VERSION",
+        generation: 1,
+        version: 1,
+    },
+    WriterPin {
+        constant: "SQLITE_BLOB_ENVELOPE_VERSION",
+        generation: 1,
+        version: 1,
+    },
+    WriterPin {
+        constant: "PROCESS_CURSOR_VERSION",
+        generation: 1,
+        version: lash_sansio::PROCESS_CURSOR_VERSION - 1,
+    },
 ];
 
 /// The [`SurfaceFormat`] a call site hands [`FleetFormat::writer_version`]

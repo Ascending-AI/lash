@@ -12,7 +12,8 @@ use std::sync::LazyLock;
 use lash_core_execution::WakeDeliveryState;
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
-    definitions::DefinitionStatements, events::EventStatements, observers::ObserverStatements,
+    abandoned_consumer_holds::AbandonedConsumerHoldStatements, definitions::DefinitionStatements,
+    events::EventStatements, observers::ObserverStatements,
     parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
     processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
     tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
@@ -143,9 +144,9 @@ lash_store_sql::statements! {
                             change_seq, status,
                             lifetime_scope_kind, lifetime_scope_id, lifetime, cancel_requested_at_ms,
                             record_json, consumer_hold_key, consumer_hold_scope_kind,
-                            consumer_hold_scope_id
+                            consumer_hold_scope_id, consumer_hold_cancels
                          )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)";
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)";
 
         /// SQLite spells a bound id list `json_each`; PostgreSQL deletes these
         /// rows inside its one-statement prune instead.
@@ -944,6 +945,8 @@ pub(crate) struct ProcessSql {
     pub(crate) park_clock_sqlite: ProcessParkClockSqliteStatements,
     /// `parent_end_plans` statements both backends issue verbatim.
     pub(crate) plan: ParentEndPlanStatements,
+    /// `abandoned_consumer_holds` statements, all of them shared.
+    pub(crate) abandoned_hold: AbandonedConsumerHoldStatements,
     /// `parent_end_plans` statements only SQLite issues.
     pub(crate) plan_sqlite: ParentEndPlanSqliteStatements,
     /// `wake_allocation_floors` statements both backends issue verbatim.
@@ -978,6 +981,7 @@ impl ProcessSql {
             park_event: ProcessParkEventStatements::render(dialect),
             park_clock_sqlite: ProcessParkClockSqliteStatements::render(dialect),
             plan: ParentEndPlanStatements::render(dialect),
+            abandoned_hold: AbandonedConsumerHoldStatements::render(dialect),
             plan_sqlite: ParentEndPlanSqliteStatements::render(dialect),
             floor: WakeAllocationFloorStatements::render(dialect),
             floor_sqlite: WakeAllocationFloorSqliteStatements::render(dialect),

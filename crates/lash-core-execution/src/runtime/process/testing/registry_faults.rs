@@ -9,8 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use super::super::model::{ProcessId, SessionId};
 use super::super::registry::ProcessRegistry;
 use super::super::registry_delegate::{
-    delegate_process_observer_registry, delegate_process_registrar, delegate_process_retention,
-    delegate_process_tool_intents,
+    delegate_process_observer_registry, delegate_process_registrar, delegate_process_tool_intents,
 };
 
 /// Wraps a registry so a test can make its point reads of one process fail,
@@ -54,6 +53,8 @@ struct ReadFaultPlan {
     non_terminal_page_errors: Option<(usize, std::collections::VecDeque<crate::PluginError>)>,
     non_terminal_page_pause: Option<NonTerminalPagePause>,
     registration_hold: Option<RegistrationHold>,
+    registration_pause: Option<NonTerminalPagePause>,
+    consumer_release_pause: Option<NonTerminalPagePause>,
 }
 
 /// Where a held registration stops: before it reaches the wrapped registry,
@@ -224,6 +225,23 @@ impl ProcessRegistryFaults {
         reached: Arc<dyn Fn() + Send + Sync>,
     ) {
         self.faults.lock_recover().registration_hold = Some(RegistrationHold { point, reached });
+    }
+
+    /// Hold the next registration before it reaches the wrapped registry
+    /// until the returned handle resumes it; it then registers as usual.
+    pub fn pause_next_registration(&self) -> NonTerminalPagePause {
+        let pause = NonTerminalPagePause::new();
+        self.faults.lock_recover().registration_pause = Some(pause.clone());
+        pause
+    }
+
+    /// Hold the next consumer-hold release until the returned handle resumes
+    /// it: the instant a parked call has consumed its child's terminal and
+    /// not yet released the child's row for pruning (ADR 0116 §3.6).
+    pub fn pause_next_consumer_release(&self) -> NonTerminalPagePause {
+        let pause = NonTerminalPagePause::new();
+        self.faults.lock_recover().consumer_release_pause = Some(pause.clone());
+        pause
     }
 
     /// Hold the next non-terminal-page read until the returned handle resumes it.
@@ -414,6 +432,10 @@ delegate_process_registrar!(
     inner,
     registration | faults,
     forwarded | {
+        let pause = faults.faults.lock_recover().registration_pause.take();
+        if let Some(pause) = pause {
+            pause.hold().await;
+        }
         let hold = faults.faults.lock_recover().registration_hold.take();
         match hold {
             None => forwarded.await,
@@ -781,7 +803,68 @@ impl super::super::registry_concerns::ProcessWakeOutbox for ProcessRegistryFault
     }
 }
 
-delegate_process_retention!(ProcessRegistryFaults, inner);
+#[async_trait::async_trait]
+impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults {
+    async fn compact_process_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+        watermark: crate::ProjectionWatermark,
+        trigger_store: Option<&dyn crate::TriggerStore>,
+    ) -> Result<usize, crate::PluginError> {
+        self.inner
+            .compact_process_tombstones(cutoff_epoch_ms, watermark, trigger_store)
+            .await
+    }
+
+    async fn compact_process_park_feed(
+        &self,
+        through: crate::store::ParkFeedCursor,
+    ) -> Result<(), crate::PluginError> {
+        self.inner.compact_process_park_feed(through).await
+    }
+
+    async fn prune_terminal_processes(
+        &self,
+        cutoff_epoch_ms: u64,
+        filter: Option<crate::ProcessListFilter>,
+        watermark: crate::ProjectionWatermark,
+    ) -> Result<crate::ProcessPruneReport, crate::PluginError> {
+        self.inner
+            .prune_terminal_processes(cutoff_epoch_ms, filter, watermark)
+            .await
+    }
+
+    async fn prunable_terminal_processes(
+        &self,
+        cutoff_epoch_ms: u64,
+        filter: Option<crate::ProcessListFilter>,
+        watermark: crate::ProjectionWatermark,
+    ) -> Result<Vec<ProcessId>, crate::PluginError> {
+        self.inner
+            .prunable_terminal_processes(cutoff_epoch_ms, filter, watermark)
+            .await
+    }
+
+    async fn release_consumer_hold(
+        &self,
+        process_id: &ProcessId,
+        key: &str,
+    ) -> Result<(), crate::PluginError> {
+        let pause = self.faults.lock_recover().consumer_release_pause.take();
+        if let Some(pause) = pause {
+            pause.hold().await;
+        }
+        self.inner.release_consumer_hold(process_id, key).await
+    }
+
+    async fn abandon_consumer_hold(
+        &self,
+        key: &str,
+        owner: &crate::ScopeId,
+    ) -> Result<Vec<ProcessId>, crate::PluginError> {
+        self.inner.abandon_consumer_hold(key, owner).await
+    }
+}
 
 impl super::super::registry_concerns::ProcessClockRebind for ProcessRegistryFaults {
     fn with_runtime_clock(&self, clock: Arc<dyn crate::Clock>) -> Option<Arc<dyn ProcessRegistry>> {

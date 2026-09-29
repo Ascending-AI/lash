@@ -908,6 +908,15 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
+    /// Install the turn capture this execution's tool attempts write, on
+    /// the dispatch, so the group children the turn opens borrow it too.
+    pub fn with_turn_capture(mut self, capture: Option<Arc<dyn crate::TurnToolCapture>>) -> Self {
+        let mut dispatch = (*self.dispatch).clone();
+        dispatch.turn_capture = capture;
+        self.dispatch = Arc::new(dispatch);
+        self
+    }
+
     pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
         crate::runtime::RuntimeNamedPhase::begin(self.turn_phase_probe.clone(), phase)
     }
@@ -1000,6 +1009,13 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// point.
     pub fn note_turn_cancelled(&self) {
         self.turn_cancel.note();
+    }
+
+    /// Whether a recorded outcome this execution received cancelled its
+    /// turn, or the turn had honoured its cancellation before it: recorded
+    /// facts only, never a live read of the execution's token.
+    pub fn turn_cancel_observed(&self) -> bool {
+        self.turn_cancel.is_observed()
     }
 
     /// Execution-side only: run one recorded step body that this execution

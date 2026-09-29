@@ -537,6 +537,12 @@ pub enum SessionStreamEvent {
     /// lifecycle marker emitted after this event.
     #[serde(rename = "turn_outcome")]
     TurnOutcome { outcome: TurnOutcome },
+    /// Published after the commit that made the partial durable. It holds
+    /// identity and facts, never payload.
+    #[serde(rename = "stopped_partial_available")]
+    StoppedPartialAvailable {
+        summary: crate::StoppedPartialSummary,
+    },
     #[serde(rename = "done")]
     Done,
     #[serde(rename = "error")]

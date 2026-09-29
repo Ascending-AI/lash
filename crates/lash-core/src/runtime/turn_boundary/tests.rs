@@ -1695,8 +1695,8 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
     .expect("open frame b");
     let successor = state.current_frame_node_id.clone().expect("frame b");
     let carried = crate::ArtifactName {
-        store: crate::ArtifactStoreId::LashlangModule,
-        artifact_ref: "lashlang:v2:blake3:carried".to_string(),
+        store: crate::ArtifactStoreId::module(),
+        artifact_ref: "module:v2:blake3:carried".to_string(),
     };
     let ended = crate::FrameEnvironmentId::new(state.session_id.clone(), committed.clone());
     let opened = crate::FrameEnvironmentId::new(state.session_id.clone(), successor);
@@ -1788,8 +1788,8 @@ fn a_first_commit_that_switches_ends_the_first_frame_it_opens() {
     let successor = state.current_frame_node_id.clone().expect("the successor");
     let committing = crate::ExecutionScope::turn(&state.session_id, "first-turn");
     let carried = crate::ArtifactName {
-        store: crate::ArtifactStoreId::LashlangModule,
-        artifact_ref: "lashlang:v2:blake3:carried".to_string(),
+        store: crate::ArtifactStoreId::module(),
+        artifact_ref: "module:v2:blake3:carried".to_string(),
     };
     // The commit appends both frames' opens: the head holds no frame yet, so
     // the first frame, whose edges the turn's cells acquired, ends here.
@@ -1852,8 +1852,8 @@ fn a_registration_turn_then_a_switch_ends_the_committed_frame_with_its_carries()
     let successor = state.current_frame_node_id.clone().expect("the successor");
     let switching = crate::ExecutionScope::turn(&state.session_id, "switching-turn");
     let carried = crate::ArtifactName {
-        store: crate::ArtifactStoreId::LashlangModule,
-        artifact_ref: "lashlang:v2:blake3:carried".to_string(),
+        store: crate::ArtifactStoreId::module(),
+        artifact_ref: "module:v2:blake3:carried".to_string(),
     };
     assert_eq!(
         committed_frame_transition(

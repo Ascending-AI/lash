@@ -477,6 +477,12 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 checkpoint: checkpoint.into(),
             }),
             lash_core::TurnEvent::Error { message } => Ok(Self::Error { message }),
+            lash_core::TurnEvent::ToolOutputProgress { call_id, chunk } => {
+                Ok(Self::ToolOutputProgress { call_id, chunk })
+            }
+            lash_core::TurnEvent::StoppedPartialAvailable { summary } => {
+                Ok(Self::StoppedPartialAvailable { summary })
+            }
         }
     }
 }

@@ -171,12 +171,24 @@ pub struct AttemptContext<'run> {
     completion_support: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     tool_execution_route: ToolExecutionRoute,
+    /// Where this attempt's progress chunks are persisted (ADR 0114 §2.2);
+    /// `None` outside a turn's capture.
+    progress_reporter: Option<Arc<dyn ToolProgressReporter>>,
     /// The catalog the attempt was dispatched against. `None` outside a
     /// runtime dispatch.
     tool_catalog: Option<Arc<crate::ToolCatalog>>,
 }
 
 impl<'run> AttemptContext<'run> {
+    /// This call's progress sink. A tool that never calls `report` is
+    /// captured as `ToolOutputCapture::Unavailable`.
+    pub fn progress(&self) -> ToolProgressSink {
+        ToolProgressSink {
+            reporter: self.progress_reporter.clone(),
+            call_id: self.tool_call_id.clone(),
+        }
+    }
+
     /// The logical root this attempt runs under, read from the admitted
     /// scope it was recorded in (FIG-3607 item 6): never a live read. `None`
     /// outside a session turn (a process body, a runtime operation).
@@ -245,6 +257,7 @@ impl<'run> AttemptContext<'run> {
             completion_support,
             phase_probe,
             tool_execution_route: context.tool_execution_route.clone(),
+            progress_reporter: context.progress_reporter.clone(),
             tool_catalog: context
                 .runtime_dispatch
                 .as_ref()
@@ -469,6 +482,95 @@ pub struct ToolContext<'run> {
     /// from the scope alone is always observing, which would wire a child
     /// admitted with no cooperative authority to a gate it must never see.
     pub(crate) turn_cancel_wait: Option<crate::runtime::TurnCancelWait>,
+    /// Where this call's progress chunks are persisted (ADR 0114 §2.2).
+    /// `None` outside a turn's capture: the call's progress is then accepted
+    /// and kept nowhere.
+    pub(crate) progress_reporter: Option<Arc<dyn ToolProgressReporter>>,
+}
+
+/// The runtime side of a [`ToolProgressSink`]: the turn's capture writer,
+/// which persists each chunk before it is published (ADR 0114 §4.1).
+#[async_trait::async_trait]
+pub trait ToolProgressReporter: Send + Sync {
+    /// Persist and then publish one chunk of call `call_id`'s output.
+    async fn report(
+        &self,
+        call_id: &str,
+        chunk: lash_sansio::ToolOutputChunk,
+    ) -> Result<(), ProgressRefused>;
+}
+
+/// One tool call's progress sink (ADR 0114 §2.2). A tool that never calls
+/// [`report`](Self::report) is captured as
+/// [`ToolOutputCapture::Unavailable`](lash_sansio::ToolOutputCapture::Unavailable).
+#[derive(Clone)]
+pub struct ToolProgressSink {
+    reporter: Option<Arc<dyn ToolProgressReporter>>,
+    call_id: Option<String>,
+}
+
+impl ToolProgressSink {
+    /// Persist one chunk before it is published. The first call flips the
+    /// capture from `Unavailable` to `Captured`. It waits under
+    /// backpressure. After the fence it returns [`ProgressRefused::Fenced`],
+    /// and the tool should stop.
+    pub async fn report(&self, chunk: lash_sansio::ToolOutputChunk) -> Result<(), ProgressRefused> {
+        match (&self.reporter, &self.call_id) {
+            (Some(reporter), Some(call_id)) => reporter.report(call_id, chunk).await,
+            _ => Ok(()),
+        }
+    }
+}
+
+impl std::fmt::Debug for ToolProgressSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolProgressSink")
+            .field("call_id", &self.call_id)
+            .field("captured", &self.reporter.is_some())
+            .finish()
+    }
+}
+
+/// The turn capture a tool attempt's step body writes (ADR 0114 §2.2,
+/// §4.1): the attempt's start, the chunks it reports, and its settlement,
+/// each persisted before it is published.
+#[async_trait::async_trait]
+pub trait ToolAttemptCaptureWriter: ToolProgressReporter {
+    /// Persist the attempt's settled output for call `call_id`.
+    async fn settled(
+        &self,
+        call_id: &str,
+        output: &crate::ToolCallOutput,
+    ) -> Result<(), ProgressRefused>;
+
+    /// Where the attempt's writer stood: the reference its recorded outcome
+    /// carries.
+    fn watermark(&self) -> Option<crate::runtime::CaptureWatermark>;
+}
+
+/// A turn's capture, as the tool step bodies of that turn open it. The
+/// runtime installs one on a turn's execution context; a process has none.
+#[async_trait::async_trait]
+pub trait TurnToolCapture: Send + Sync {
+    /// Open the writer of one tool attempt, keyed by its invocation's
+    /// replay key, and persist that the attempt started for `call_id`. Each
+    /// persisted progress chunk publishes on `observer`: the stream of the
+    /// dispatch the attempt runs under.
+    async fn open_attempt(
+        &self,
+        invocation: &str,
+        call_id: &str,
+        observer: Arc<dyn crate::engine::ObservationSink>,
+    ) -> Result<Arc<dyn ToolAttemptCaptureWriter>, crate::RuntimeEffectControllerError>;
+}
+
+/// Why a [`ToolProgressSink::report`] was not persisted.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ProgressRefused {
+    #[error("the turn's capture is fenced")]
+    Fenced,
+    #[error("capture persistence failed: {0}")]
+    Store(String),
 }
 
 #[derive(Clone)]
@@ -541,6 +643,7 @@ pub struct ToolContextBuilder<'run> {
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
     orchestrating_sinks: Option<crate::tool_dispatch::OrchestratingChildSinks>,
     turn_cancel_wait: Option<crate::runtime::TurnCancelWait>,
+    progress_reporter: Option<Arc<dyn ToolProgressReporter>>,
 }
 
 impl<'run> ToolContextBuilder<'run> {
@@ -572,6 +675,7 @@ impl<'run> ToolContextBuilder<'run> {
             child_execution_trace_hook: None,
             orchestrating_sinks: None,
             turn_cancel_wait: None,
+            progress_reporter: None,
         }
     }
 
@@ -686,6 +790,13 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
+    /// Installs the turn capture writer that persists this call's progress
+    /// (ADR 0114 §2.2). Only the runtime's tool step body sets one.
+    pub fn progress_reporter(mut self, reporter: Option<Arc<dyn ToolProgressReporter>>) -> Self {
+        self.progress_reporter = reporter;
+        self
+    }
+
     pub fn build(self) -> ToolContext<'run> {
         ToolContext {
             session_id: self.session_id,
@@ -714,6 +825,7 @@ impl<'run> ToolContextBuilder<'run> {
             child_execution_trace_hook: self.child_execution_trace_hook,
             orchestrating_sinks: self.orchestrating_sinks,
             turn_cancel_wait: self.turn_cancel_wait,
+            progress_reporter: self.progress_reporter,
         }
     }
 }
@@ -788,6 +900,7 @@ impl<'run> ToolContext<'run> {
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
             orchestrating_sinks: self.orchestrating_sinks.clone(),
             turn_cancel_wait: self.turn_cancel_wait.clone(),
+            progress_reporter: self.progress_reporter.clone(),
         })
     }
 
@@ -839,6 +952,7 @@ impl<'run> ToolContext<'run> {
             child_execution_trace_hook: None,
             orchestrating_sinks: None,
             turn_cancel_wait: None,
+            progress_reporter: None,
         }
     }
 

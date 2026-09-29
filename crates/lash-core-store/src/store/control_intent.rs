@@ -159,6 +159,7 @@ impl ControlIntent {
             cause: super::RootTerminalCause::SessionDeleted { intent: self.id },
             head_revision: None,
             at_ms: self.created_at_ms,
+            stopped_partial: None,
         })
     }
 

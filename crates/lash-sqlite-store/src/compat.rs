@@ -13,7 +13,7 @@ fn incompatible(refusal: CompatRefusal) -> rusqlite::Error {
     crate::sqlite_conversion_error(StoreError::Incompatible { refusal })
 }
 
-fn malformed(database: SqliteDatabase, detail: impl Into<String>) -> rusqlite::Error {
+pub(crate) fn malformed(database: SqliteDatabase, detail: impl Into<String>) -> rusqlite::Error {
     incompatible(CompatRefusal::MalformedStamp {
         component: database.component().as_str().to_owned(),
         detail: detail.into(),

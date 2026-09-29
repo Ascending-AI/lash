@@ -427,20 +427,27 @@ struct TerminalDiagnostic<'a> {
     activity: TerminalActivityTarget<'a>,
 }
 
-/// Emit the canonical terminal sequence for a stopped turn.
+/// Record the canonical terminal sequence for a stopped turn and hold its
+/// publication for the commit.
 ///
 /// The order is fixed and load-bearing for host transcripts: the optional
-/// diagnostic's session `Error` event (with its turn activity emitted in
-/// between), then `TurnOutcome::Stopped(stop)`, then `Done`. Every session
-/// event is recorded on `recorded_assembly` as it is written, so the committed
-/// turn carries the same terminal facts the host streamed.
-fn emit_terminal_sequence(
+/// diagnostic's session `Error` event (with its turn activity in between),
+/// then `TurnOutcome::Stopped(stop)`, then `Done`. Every session event is
+/// recorded on `recorded_assembly` here, so the committed turn carries the
+/// same terminal facts the host is sent.
+///
+/// Nothing publishes before the commit that seals the turn's partial
+/// (ADR 0114 §4.3): the sequence is held on the observer and released after
+/// the commit, with `StoppedPartialAvailable` before `Done`, or abandoned
+/// when the commit fails.
+fn hold_terminal_sequence(
     recorded_assembly: &mut RecordedTurnAssembly,
     observer: &TurnObserver,
     cursor: &mut crate::engine::ObservationCursor,
     diagnostic: Option<TerminalDiagnostic<'_>>,
     stop: TurnStop,
 ) {
+    observer.hold_terminal();
     if let Some(diagnostic) = diagnostic {
         let error_event = SessionStreamEvent::Error {
             message: diagnostic.message.clone(),

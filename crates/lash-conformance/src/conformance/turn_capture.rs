@@ -1,0 +1,736 @@
+//! Durable capture laws shared by SQLite and PostgreSQL.
+
+use super::*;
+use crate::store::{
+    CaptureAttemptReset, CaptureBaseAdvance, CaptureBatch, CaptureFrame, CaptureInvocationKey,
+    OpenCaptureWriter, SealTurnCapture, SealedCapture, StoppedPartialCommit, StoppedPartialRead,
+    StoppedPartialReadRequest,
+};
+use lash_core::DeploymentStore;
+use lash_core::facade_support::TurnAddress;
+use lash_sansio::llm::types::StreamBlockIdentity;
+use lash_sansio::{CaptureBase, PartialItem, SessionId, StopReason};
+
+#[expect(clippy::expect_used, reason = "conformance fixture setup")]
+async fn fixture(
+    factory: Arc<dyn DeploymentStore>,
+    label: &str,
+) -> (Arc<dyn RuntimeStore>, TurnAddress) {
+    let session = SessionId::from(format!("capture-{label}"));
+    let request = lash_core::testing::store_fixtures::session_store_request(
+        &session,
+        "capture-model",
+        SessionRelation::Root,
+    );
+    factory
+        .admit_session(&request)
+        .await
+        .expect("admit capture session");
+    let store: Arc<dyn RuntimeStore> = factory;
+    (store, TurnAddress::new(session, format!("turn-{label}")))
+}
+
+#[expect(clippy::expect_used, reason = "conformance fixture setup")]
+async fn writer(store: &dyn RuntimeStore, turn: &TurnAddress) -> crate::store::CaptureWriterLease {
+    store
+        .open_capture_writer(&OpenCaptureWriter {
+            turn: turn.clone(),
+            root: turn.turn_id.clone(),
+            invocation: CaptureInvocationKey("llm".into()),
+        })
+        .await
+        .expect("open writer")
+}
+
+fn text_frames() -> Vec<CaptureFrame> {
+    let block = StreamBlockIdentity::new("message", 0);
+    vec![
+        CaptureFrame::TextStart {
+            block: block.clone(),
+        },
+        CaptureFrame::TextDelta {
+            block: block.clone(),
+            text: "partial".into(),
+        },
+        CaptureFrame::TextEnd {
+            block,
+            text: "partial".into(),
+        },
+    ]
+}
+
+#[expect(clippy::expect_used, reason = "conformance fixture setup")]
+async fn append(
+    store: &dyn RuntimeStore,
+    writer: &crate::store::CaptureWriterLease,
+    ordinal: u64,
+    frames: Vec<CaptureFrame>,
+) -> crate::store::CaptureAck {
+    store
+        .append_capture_batch(&CaptureBatch {
+            lease: writer.lease_ref(),
+            batch_ordinal: ordinal,
+            frames,
+        })
+        .await
+        .expect("append capture")
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_batch_replay_and_conflict(factory: Arc<dyn DeploymentStore>, label: &str) {
+    let (store, turn) = fixture(factory, label).await;
+    let lease = writer(store.as_ref(), &turn).await;
+    let batch = CaptureBatch {
+        lease: lease.lease_ref(),
+        batch_ordinal: 0,
+        frames: text_frames(),
+    };
+    let first = store
+        .append_capture_batch(&batch)
+        .await
+        .expect("first append");
+    assert_eq!((first.first_sequence, first.last_sequence), (1, 3));
+    assert_eq!(
+        store.append_capture_batch(&batch).await.expect("retry"),
+        first
+    );
+    let conflict = CaptureBatch {
+        frames: vec![CaptureFrame::TextStart {
+            block: StreamBlockIdentity::new("different", 0),
+        }],
+        ..batch
+    };
+    assert!(matches!(
+        store.append_capture_batch(&conflict).await,
+        Err(StoreError::CaptureBatchConflict { .. })
+    ));
+}
+
+/// A capture batch is never empty: the store refuses one before it writes
+/// anything, so the ordinal stays free for the writer's next real batch.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_empty_batch_is_refused(factory: Arc<dyn DeploymentStore>, label: &str) {
+    let (store, turn) = fixture(factory, label).await;
+    let lease = writer(store.as_ref(), &turn).await;
+    let empty = CaptureBatch {
+        lease: lease.lease_ref(),
+        batch_ordinal: 0,
+        frames: Vec::new(),
+    };
+    assert!(matches!(
+        store.append_capture_batch(&empty).await,
+        Err(StoreError::CaptureBatchEmpty { batch_ordinal: 0 })
+    ));
+    assert!(
+        matches!(
+            store.append_capture_batch(&empty).await,
+            Err(StoreError::CaptureBatchEmpty { batch_ordinal: 0 })
+        ),
+        "a retried empty batch is refused the same way"
+    );
+    let first = store
+        .append_capture_batch(&CaptureBatch {
+            frames: text_frames(),
+            ..empty
+        })
+        .await
+        .expect("the ordinal is still free");
+    assert_eq!(
+        (first.first_sequence, first.last_sequence),
+        (1, 3),
+        "the refusal stored nothing"
+    );
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_reset_fences_old_epoch(factory: Arc<dyn DeploymentStore>, label: &str) {
+    let (store, turn) = fixture(factory, label).await;
+    let first = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &first, 0, text_frames()).await;
+    let next = store
+        .persist_attempt_reset(&CaptureAttemptReset {
+            lease: first.lease_ref(),
+        })
+        .await
+        .expect("reset");
+    assert_eq!(next.attempt_epoch, first.attempt_epoch + 1);
+    assert!(next.inherited.is_empty());
+    assert_eq!(
+        store
+            .persist_attempt_reset(&CaptureAttemptReset {
+                lease: first.lease_ref()
+            })
+            .await
+            .expect("reset replay")
+            .attempt_epoch,
+        next.attempt_epoch
+    );
+    assert!(matches!(
+        store
+            .append_capture_batch(&CaptureBatch {
+                lease: first.lease_ref(),
+                batch_ordinal: 1,
+                frames: text_frames()
+            })
+            .await,
+        Err(StoreError::CaptureWriterFenced { .. })
+    ));
+    append(store.as_ref(), &next, 0, text_frames()).await;
+    let sealed = store
+        .seal_turn_capture(&SealTurnCapture {
+            turn,
+            root: first.turn.turn_id,
+            reason: StopReason::UserCancel,
+            recorded_watermark: None,
+            drive_fence: None,
+        })
+        .await
+        .expect("seal");
+    let partial = sealed.partial();
+    assert_eq!(partial.items.len(), 1);
+    assert!(matches!(&partial.items[0], PartialItem::Text { text, .. } if text == "partial"));
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_successor_resets_inherited_epoch(
+    factory: Arc<dyn DeploymentStore>,
+    label: &str,
+) {
+    let (store, turn) = fixture(factory, label).await;
+    let first = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &first, 0, text_frames()).await;
+    let successor = writer(store.as_ref(), &turn).await;
+    assert_eq!(successor.attempt_epoch, first.attempt_epoch + 1);
+    assert_eq!(successor.inherited.len(), 3);
+    let reset = CaptureAttemptReset {
+        lease: first.lease_ref(),
+    };
+    let resumed = store
+        .persist_attempt_reset(&reset)
+        .await
+        .expect("reset inherited epoch");
+    assert_eq!(resumed.attempt_epoch, successor.attempt_epoch);
+    assert!(resumed.inherited.is_empty());
+    assert_eq!(
+        store
+            .persist_attempt_reset(&reset)
+            .await
+            .expect("reset replay"),
+        resumed
+    );
+    let mut stale = first.lease_ref();
+    stale.attempt_epoch = successor.attempt_epoch + 1;
+    assert!(matches!(
+        store
+            .persist_attempt_reset(&CaptureAttemptReset { lease: stale })
+            .await,
+        Err(StoreError::CaptureWriterFenced { .. })
+    ));
+    append(store.as_ref(), &resumed, 0, text_frames()).await;
+    let partial = store
+        .seal_turn_capture(&SealTurnCapture {
+            turn: turn.clone(),
+            root: turn.turn_id,
+            reason: StopReason::UserCancel,
+            recorded_watermark: None,
+            drive_fence: None,
+        })
+        .await
+        .expect("seal")
+        .into_partial();
+    assert_eq!(partial.items.len(), 1);
+    assert!(matches!(&partial.items[0], PartialItem::Text { text, .. } if text == "partial"));
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_base_advance_removes_old_tail(factory: Arc<dyn DeploymentStore>, label: &str) {
+    let (store, turn) = fixture(factory, label).await;
+    let first = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &first, 0, text_frames()).await;
+    let advance = CaptureBaseAdvance {
+        turn: turn.clone(),
+        to: CaptureBase(1),
+    };
+    store.advance_capture_base(&advance).await.expect("advance");
+    store
+        .advance_capture_base(&advance)
+        .await
+        .expect("advance replay");
+    let stale = CaptureBaseAdvance {
+        turn: turn.clone(),
+        to: CaptureBase(3),
+    };
+    assert!(matches!(
+        store.advance_capture_base(&stale).await,
+        Err(StoreError::CaptureBaseStale { .. })
+    ));
+    let next = writer(store.as_ref(), &turn).await;
+    assert_eq!(next.base, CaptureBase(1));
+    assert!(next.inherited.is_empty());
+    append(store.as_ref(), &next, 0, text_frames()).await;
+    let partial = store
+        .seal_turn_capture(&SealTurnCapture {
+            turn: turn.clone(),
+            root: turn.turn_id.clone(),
+            reason: StopReason::UserCancel,
+            recorded_watermark: None,
+            drive_fence: None,
+        })
+        .await
+        .expect("seal")
+        .into_partial();
+    assert_eq!(partial.id.base, CaptureBase(1));
+    assert_eq!(partial.items.len(), 1);
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_seal_is_first_writer_wins(factory: Arc<dyn DeploymentStore>, label: &str) {
+    let (store, turn) = fixture(factory, label).await;
+    let lease = writer(store.as_ref(), &turn).await;
+    let ack = append(store.as_ref(), &lease, 0, text_frames()).await;
+    let request = SealTurnCapture {
+        turn: turn.clone(),
+        root: turn.turn_id.clone(),
+        reason: StopReason::UserCancel,
+        recorded_watermark: Some(ack.last_sequence),
+        drive_fence: None,
+    };
+    let sealed = store
+        .seal_turn_capture(&request)
+        .await
+        .expect("seal")
+        .into_partial();
+    assert_eq!(sealed.id.sealed_through, ack.last_sequence);
+    assert_eq!(
+        store
+            .seal_turn_capture(&SealTurnCapture {
+                recorded_watermark: Some(u64::MAX),
+                drive_fence: None,
+                ..request
+            })
+            .await
+            .expect("reseal")
+            .into_partial(),
+        sealed
+    );
+    assert!(matches!(
+        store
+            .append_capture_batch(&CaptureBatch {
+                lease: lease.lease_ref(),
+                batch_ordinal: 1,
+                frames: text_frames()
+            })
+            .await,
+        Err(StoreError::CaptureSealed { .. })
+    ));
+    assert_eq!(
+        store
+            .read_stopped_partial(&StoppedPartialReadRequest {
+                session_id: turn.session_id,
+                turn: turn.turn_id
+            })
+            .await
+            .expect("read"),
+        StoppedPartialRead::Pending
+    );
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_commit_publishes_exact_partial(
+    factory: Arc<dyn DeploymentStore>,
+    label: &str,
+) {
+    let (store, turn) = fixture(factory, label).await;
+    let lease = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &lease, 0, text_frames()).await;
+    let partial = store
+        .seal_turn_capture(&SealTurnCapture {
+            turn: turn.clone(),
+            root: turn.turn_id.clone(),
+            reason: StopReason::UserCancel,
+            recorded_watermark: None,
+            drive_fence: None,
+        })
+        .await
+        .expect("seal")
+        .into_partial();
+    let request = lash_core::testing::store_fixtures::session_store_request(
+        &turn.session_id,
+        "capture-model",
+        SessionRelation::Root,
+    );
+    let mut state = RuntimeSessionState {
+        session_id: turn.session_id.clone(),
+        ..RuntimeSessionState::new(request.policy)
+    };
+    state.ensure_agent_frame_initialized();
+    let operation = crate::store::OperationId::new(
+        lash_core::ExecutionScope::turn(turn.session_id.clone(), turn.turn_id.clone()),
+        "commit",
+    );
+    let mut commit =
+        crate::RuntimeCommit::persisted_state_with_operation_for_testing(&state, &[], operation);
+    commit.stopped_partial = Some(StoppedPartialCommit::of(&partial));
+    store
+        .commit_runtime_state(commit.clone())
+        .await
+        .expect("commit");
+    let read = store
+        .read_stopped_partial(&StoppedPartialReadRequest {
+            session_id: turn.session_id.clone(),
+            turn: turn.turn_id.clone(),
+        })
+        .await
+        .expect("read");
+    assert_eq!(read, StoppedPartialRead::Available(partial.clone()));
+    assert_eq!(
+        store
+            .seal_turn_capture(&SealTurnCapture {
+                turn,
+                root: partial.id.root.clone(),
+                reason: StopReason::ProcessLoss,
+                recorded_watermark: None,
+                drive_fence: None,
+            })
+            .await
+            .expect("seal replay"),
+        SealedCapture::Committed(partial)
+    );
+    assert!(
+        store
+            .commit_runtime_state(commit)
+            .await
+            .expect("commit replay")
+            .receipt_replayed
+    );
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_retention_waits_for_deletion(factory: Arc<dyn DeploymentStore>, label: &str) {
+    let (store, turn) = fixture(Arc::clone(&factory), label).await;
+    let lease = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &lease, 0, text_frames()).await;
+    let partial = store
+        .seal_turn_capture(&SealTurnCapture {
+            turn: turn.clone(),
+            root: turn.turn_id.clone(),
+            reason: StopReason::UserCancel,
+            recorded_watermark: None,
+            drive_fence: None,
+        })
+        .await
+        .expect("seal")
+        .into_partial();
+    let request = lash_core::testing::store_fixtures::session_store_request(
+        &turn.session_id,
+        "capture-model",
+        SessionRelation::Root,
+    );
+    let mut state = RuntimeSessionState {
+        session_id: turn.session_id.clone(),
+        ..RuntimeSessionState::new(request.policy)
+    };
+    state.ensure_agent_frame_initialized();
+    let operation = crate::store::OperationId::new(
+        lash_core::ExecutionScope::turn(turn.session_id.clone(), turn.turn_id.clone()),
+        "commit",
+    );
+    let mut commit =
+        crate::RuntimeCommit::persisted_state_with_operation_for_testing(&state, &[], operation);
+    commit.stopped_partial = Some(StoppedPartialCommit::of(&partial));
+    store.commit_runtime_state(commit).await.expect("commit");
+
+    let all = crate::RetentionBound {
+        committed_before_epoch_ms: u64::MAX,
+    };
+    assert_eq!(
+        factory
+            .reclaim_retained_evidence(all)
+            .await
+            .expect("live sweep")
+            .removed_stopped_partial_count,
+        0
+    );
+    factory
+        .delete_session(&turn.session_id)
+        .await
+        .expect("delete session");
+    assert!(matches!(
+        store
+            .read_stopped_partial(&StoppedPartialReadRequest {
+                session_id: turn.session_id.clone(),
+                turn: turn.turn_id,
+            })
+            .await,
+        Err(StoreError::SessionDeleted { .. })
+    ));
+    let report = factory
+        .reclaim_retained_evidence(all)
+        .await
+        .expect("deleted sweep");
+    assert_eq!(report.removed_stopped_partial_count, 1);
+    assert_eq!(
+        factory
+            .reclaim_retained_evidence(all)
+            .await
+            .expect("sweep replay")
+            .removed_stopped_partial_count,
+        0
+    );
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_deletion_reclaims_staging_frames(
+    factory: Arc<dyn DeploymentStore>,
+    label: &str,
+) {
+    let (store, turn) = fixture(Arc::clone(&factory), label).await;
+    let lease = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &lease, 0, text_frames()).await;
+    let report = factory
+        .delete_session(&turn.session_id)
+        .await
+        .expect("delete session");
+    assert_eq!(report.removed_capture_frame_count, 3);
+    assert!(matches!(
+        store
+            .read_stopped_partial(&StoppedPartialReadRequest {
+                session_id: turn.session_id,
+                turn: turn.turn_id,
+            })
+            .await,
+        Err(StoreError::SessionDeleted { .. })
+    ));
+}
+
+/// A root the engine lost ends through `end_lost_root`, whose write seals the
+/// root's capture in its own transaction (ADR 0114 §4.4): the worker that
+/// wrote it is gone, so the partial is `ProcessLoss`, carries recovery
+/// evidence and promises only the acknowledged prefix (§1.3), and the read
+/// by the root returns it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_lost_root_seals_the_acknowledged_prefix(
+    factory: Arc<dyn DeploymentStore>,
+    label: &str,
+) {
+    let (store, turn) = fixture(Arc::clone(&factory), label).await;
+    store
+        .bind_root_inputs(&turn.session_id, &turn.turn_id, &[])
+        .await
+        .expect("open the root");
+    let lease = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &lease, 0, text_frames()).await;
+    let terminal = factory
+        .end_lost_root(
+            &lash_core::engine::RootRef {
+                session: turn.session_id.clone(),
+                root: turn.turn_id.clone(),
+            },
+            1,
+        )
+        .await
+        .expect("end the lost root")
+        .expect("the open root ends");
+    let summary = terminal
+        .stopped_partial
+        .expect("the terminal write sealed the root's partial");
+    assert_eq!(summary.reason, StopReason::ProcessLoss);
+    assert!(summary.recovered_after_process_loss);
+    assert_eq!(
+        summary.coverage,
+        lash_sansio::CaptureCoverage::AcknowledgedPrefix
+    );
+    let StoppedPartialRead::Available(partial) = store
+        .read_stopped_partial(&StoppedPartialReadRequest {
+            session_id: turn.session_id.clone(),
+            turn: turn.turn_id.clone(),
+        })
+        .await
+        .expect("read the root's partial")
+    else {
+        panic!("the lost root's partial is committed");
+    };
+    assert_eq!(partial.summary(), summary);
+    let [PartialItem::Text { text, .. }] = partial.items.as_slice() else {
+        panic!("expected the acknowledged text, got {:?}", partial.items);
+    };
+    assert_eq!(text, "partial");
+}
+
+/// A later root adopts a physical turn an earlier root staged (an owed
+/// follow-on's recovery runs as a root of its own, on a fresh journal): the
+/// earlier root's staging and writers go, the base restarts, the turn reads
+/// recovered, and the seal names the adopting root.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_a_later_root_adopts_the_turn(factory: Arc<dyn DeploymentStore>, label: &str) {
+    let (store, turn) = fixture(factory, label).await;
+    writer(store.as_ref(), &turn).await;
+    store
+        .advance_capture_base(&CaptureBaseAdvance {
+            turn: turn.clone(),
+            to: CaptureBase(1),
+        })
+        .await
+        .expect("advance the earlier root's base");
+    let earlier = writer(store.as_ref(), &turn).await;
+    assert_eq!(earlier.base, CaptureBase(1));
+    let stale = StreamBlockIdentity::new("stale", 0);
+    append(
+        store.as_ref(),
+        &earlier,
+        0,
+        vec![
+            CaptureFrame::TextStart {
+                block: stale.clone(),
+            },
+            CaptureFrame::TextDelta {
+                block: stale,
+                text: "from the lost execution".into(),
+            },
+        ],
+    )
+    .await;
+
+    let adopting = lash_core::TurnId::from(format!("follow-on:{}#0", turn.turn_id));
+    let lease = store
+        .open_capture_writer(&OpenCaptureWriter {
+            turn: turn.clone(),
+            root: adopting.clone(),
+            invocation: CaptureInvocationKey("llm".into()),
+        })
+        .await
+        .expect("the adopting root opens its writer");
+    assert_eq!(lease.base, CaptureBase(0), "the base restarts");
+    assert!(lease.inherited.is_empty(), "nothing is inherited");
+    assert!(matches!(
+        store
+            .append_capture_batch(&CaptureBatch {
+                lease: earlier.lease_ref(),
+                batch_ordinal: 1,
+                frames: text_frames(),
+            })
+            .await,
+        Err(StoreError::CaptureWriterFenced { .. } | StoreError::CaptureBaseStale { .. })
+    ));
+    let ack = append(store.as_ref(), &lease, 0, text_frames()).await;
+    let partial = store
+        .seal_turn_capture(&SealTurnCapture {
+            turn: turn.clone(),
+            root: adopting.clone(),
+            reason: StopReason::UserCancel,
+            recorded_watermark: Some(ack.last_sequence),
+            drive_fence: None,
+        })
+        .await
+        .expect("seal under the adopting root")
+        .into_partial();
+    assert_eq!(partial.id.root, adopting);
+    assert_eq!(partial.id.base, CaptureBase(0));
+    assert!(partial.recovered_after_process_loss);
+    assert_eq!(
+        partial.coverage,
+        lash_sansio::CaptureCoverage::AcknowledgedPrefix
+    );
+    assert!(
+        matches!(
+            partial.items.as_slice(),
+            [PartialItem::Text { text, .. }] if text == "partial"
+        ),
+        "only the adopting root's text: {:?}",
+        partial.items
+    );
+}
+
+/// A stop's seal is fenced like its commit (ADR 0105 §9): once a successor
+/// raised the session's drive epoch, the superseded execution seals nothing,
+/// so a later drive of the same root still captures its turn. The current
+/// fence seals.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_a_superseded_execution_seals_nothing(
+    factory: Arc<dyn DeploymentStore>,
+    label: &str,
+) {
+    use crate::store::{AdmissionId, DriveEpochSeal, RootStartNonce};
+
+    let (store, turn) = fixture(factory, label).await;
+    let seal = |admission: &'static str, observed: u64| {
+        let store = Arc::clone(&store);
+        let session = turn.session_id.clone();
+        async move {
+            match store
+                .seal_drive_epoch(
+                    &session,
+                    &AdmissionId::new(admission),
+                    observed,
+                    &RootStartNonce::new(admission),
+                )
+                .await
+                .expect("seal the drive epoch")
+            {
+                DriveEpochSeal::Sealed(fence) => fence,
+                other => panic!("the admission seals: {other:?}"),
+            }
+        }
+    };
+    let stale = seal("first#0", 0).await;
+    let current = seal("successor#0", stale.epoch()).await;
+    let lease = writer(store.as_ref(), &turn).await;
+    let ack = append(store.as_ref(), &lease, 0, text_frames()).await;
+    let request = SealTurnCapture {
+        turn: turn.clone(),
+        root: turn.turn_id.clone(),
+        reason: StopReason::UserCancel,
+        recorded_watermark: Some(ack.last_sequence),
+        drive_fence: Some(stale),
+    };
+    assert!(matches!(
+        store.seal_turn_capture(&request).await,
+        Err(StoreError::StaleDriveFence { .. })
+    ));
+    let next = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &next, 0, text_frames()).await;
+    store
+        .seal_turn_capture(&SealTurnCapture {
+            drive_fence: Some(current),
+            recorded_watermark: None,
+            ..request
+        })
+        .await
+        .expect("the current fence seals");
+}

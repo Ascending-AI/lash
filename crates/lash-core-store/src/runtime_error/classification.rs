@@ -387,6 +387,8 @@ impl RuntimeErrorCode {
             Self::ToolDeferralNotDeclared => Terminal,
             // the cancel watch failed transiently.
             Self::TransientCancelWatch => Retryable,
+            // a capture batch failed to persist transiently.
+            Self::TransientCaptureWrite => Retryable,
             // terminal publication failed transiently.
             Self::TransientTerminalPublication => Retryable,
             // the cancel gate does not decode.

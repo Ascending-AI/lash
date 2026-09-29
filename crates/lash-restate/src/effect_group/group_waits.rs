@@ -59,32 +59,27 @@ pub(super) async fn seal_cancel_decisions(
     ctx: &ObjectContext<'_>,
     namespace: &crate::RestateNamespace,
     group_key: &str,
-    shape: &EffectGroupShape,
     positions: &[usize],
 ) -> Result<(), TerminalError> {
-    fence_cancel_decided_completions(ctx, namespace, group_key, shape, positions).await?;
-    release_cancel_decided_waits(ctx, namespace, group_key, shape, positions).await
+    // The membership is read only when there is a decision to seal: a close
+    // that decides nothing leaves the group's envelopes unread (FIG-4068).
+    if positions.is_empty() {
+        return Ok(());
+    }
+    let membership = load_membership(ctx).await?;
+    fence_cancel_decided_completions(ctx, namespace, group_key, &membership, positions).await?;
+    release_cancel_decided_waits(ctx, namespace, group_key, &membership, positions).await
 }
 
 async fn fence_cancel_decided_completions(
     ctx: &ObjectContext<'_>,
     namespace: &crate::RestateNamespace,
     group_key: &str,
-    shape: &EffectGroupShape,
+    membership: &EffectGroupMembership,
     positions: &[usize],
 ) -> Result<(), TerminalError> {
     for &position in positions {
-        let member = shape.membership.get(position).ok_or_else(|| {
-            TerminalError::new(format!(
-                "effect group {group_key} retains no membership for child {position}"
-            ))
-        })?;
-        let envelope = serde_json::from_str::<RuntimeEffectEnvelope>(member).map_err(|error| {
-            TerminalError::new(format!(
-                "retained membership of effect group {group_key} child {position} does not \
-                 decode: {error}"
-            ))
-        })?;
+        let envelope = membership.envelope(group_key, position)?;
         let Some((scope, wait)) = envelope.command.group_child_completion_wait() else {
             continue;
         };
@@ -111,21 +106,11 @@ async fn release_cancel_decided_waits(
     ctx: &ObjectContext<'_>,
     namespace: &crate::RestateNamespace,
     group_key: &str,
-    shape: &EffectGroupShape,
+    membership: &EffectGroupMembership,
     positions: &[usize],
 ) -> Result<(), TerminalError> {
     for &position in positions {
-        let member = shape.membership.get(position).ok_or_else(|| {
-            TerminalError::new(format!(
-                "effect group {group_key} retains no membership for child {position}"
-            ))
-        })?;
-        let envelope = serde_json::from_str::<RuntimeEffectEnvelope>(member).map_err(|error| {
-            TerminalError::new(format!(
-                "retained membership of effect group {group_key} child {position} does not \
-                 decode: {error}"
-            ))
-        })?;
+        let envelope = membership.envelope(group_key, position)?;
         let lash_core::RuntimeEffectCommand::AwaitEvent { key } = envelope.command else {
             continue;
         };

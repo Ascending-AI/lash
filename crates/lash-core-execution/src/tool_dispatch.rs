@@ -13,7 +13,8 @@ pub use context::{
 };
 pub use pending_resolver::{
     ArmedResolver, LaunchReceipt, ParkSite, ResolverArming, arm_pending_resolver,
-    finish_parked_wait, model_visible_intent_outcomes,
+    consumer_hold_owner, discharge_abandoned_call, finish_parked_wait,
+    model_visible_intent_outcomes,
 };
 
 pub use attempt_coordinator::{
@@ -29,7 +30,7 @@ pub use context::{PendingToolDispatchOutcome, ToolDispatchOutcome, ToolPreparati
 #[cfg(any(test, feature = "testing"))]
 pub use execution::coordinate_prepared_tool_call_launch_with_execution_context;
 pub use execution::{
-    execute_internal_process_tool, execute_orchestrating_tool,
+    ToolAttemptTurnCapture, execute_internal_process_tool, execute_orchestrating_tool,
     execute_prepared_tool_attempt_effect, finalize_tool_result_with_execution_context,
 };
 #[cfg(feature = "testing")]

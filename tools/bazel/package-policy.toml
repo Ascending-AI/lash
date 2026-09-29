@@ -266,6 +266,20 @@ kinds = ["bin", "test", "example", "bench"]
 targets = ["dialect_cost"]
 compile_data = ["//:perf_guard_budgets"]
 
+# The tool-batch scaling guard holds each double to its checked-in budget by
+# reading the budget file with `include_str!`, the way lash-perf does
+# (FIG-4068).
+[[rule]]
+packages = ["lash-internal-protocol-rlm"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["tool_batch_parallelism"]
+compile_data = ["//:perf_guard_budgets"]
+
+[[rule]]
+packages = ["lash-internal-restate"]
+kinds = ["unit-test"]
+compile_data = ["//:perf_guard_budgets"]
+
 [[rule]]
 packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
 kinds = ["bin", "test", "example", "bench"]

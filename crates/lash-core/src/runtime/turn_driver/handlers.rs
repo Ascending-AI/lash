@@ -142,6 +142,7 @@ impl RuntimeTurnDriver<'_> {
                     reasoning_published,
                     stream_hook_states,
                 },
+            capture,
         } = match self
             .invoke_turn_llm_effect(machine, id, request, event_tx)
             .await
@@ -152,6 +153,8 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
+        self.recorded_assembly
+            .note_capture_watermark(capture.as_ref());
         if let (Err(error), Some(record)) = (&result, call_record.as_ref()) {
             let sealed_attempt_count = self
                 .llm_calls

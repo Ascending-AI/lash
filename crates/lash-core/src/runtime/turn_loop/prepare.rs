@@ -111,7 +111,7 @@ impl LashRuntime {
                     .trace_turn_id
                     .clone()
                     .expect("turn id is bound from the execution scope before validation");
-                emit_terminal_sequence(
+                hold_terminal_sequence(
                     &mut recorded_assembly,
                     observer,
                     &mut turn_observation_cursor(

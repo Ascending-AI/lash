@@ -151,6 +151,25 @@ impl ToolChildContextSource for CoreToolChildContextSource {
             ))
         })?;
         let mut dispatch = runtime.tool_child_dispatch(lent_controller)?;
+        // A turn's child writes that turn's capture, as it does beside its
+        // live opener: its writer fences what an earlier worker left and
+        // inherits the acknowledged prefix (ADR 0114 §3.2, Lane G amendment).
+        // The storeless runtime has no store to write it to, so the capture
+        // gets the session's own.
+        if let lash_core::EffectOpener::Turn { session_id, .. } = &request.scope.opener
+            && let Some(turn_id) = request
+                .attempt_identity
+                .parent_invocation()
+                .and_then(|parent| parent.attribution.turn_id.clone())
+            && let Some(root) = request.scope.admitted_scope.scope().logical_root()
+        {
+            let store: Arc<dyn lash_core::RuntimeStore> = env.core.session_store_factory();
+            dispatch.turn_capture = Some(lash_core::facade_support::deployment_turn_tool_capture(
+                store,
+                lash_core::facade_support::TurnAddress::new(session_id.clone(), turn_id),
+                root,
+            ));
+        }
         // A child a process body opened runs inside that process: its starts
         // record the process's lineage, read back from the process's own row
         // since no live body lends it here (FIG-3607 R2).

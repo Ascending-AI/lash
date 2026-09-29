@@ -610,6 +610,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             turn_context: self.turn_context.clone(),
             clock: self.clock,
             process_lineage,
+            turn_capture: None,
             process_originator: None,
         });
 

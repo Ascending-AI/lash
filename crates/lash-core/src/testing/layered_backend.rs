@@ -42,6 +42,7 @@ pub struct LayeredBackend {
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
+    artifact_cleanup: Arc<dyn crate::store::ArtifactCleanupLedger>,
     process_work: ProcessWorkWiring,
     session_work: Arc<dyn crate::SessionWorkEngine>,
 }
@@ -60,6 +61,7 @@ impl LayeredBackend {
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
             obligation_ledgers: None,
+            artifact_cleanup: inner.artifact_cleanup(),
             process_work: inner.process_work(),
             session_work: inner.session_work(),
             inner,
@@ -208,6 +210,18 @@ impl LayeredBackend {
         self
     }
 
+    /// Replace the artifact-cleanup ledger with `layer` over it. This port
+    /// has cleanup verbs beyond the ordinary obligation ledger.
+    pub fn map_artifact_cleanup(
+        mut self,
+        layer: impl FnOnce(
+            Arc<dyn crate::store::ArtifactCleanupLedger>,
+        ) -> Arc<dyn crate::store::ArtifactCleanupLedger>,
+    ) -> Self {
+        self.artifact_cleanup = layer(self.artifact_cleanup);
+        self
+    }
+
     /// The decorated backend, as the handle a host config takes.
     pub fn into_backend(self) -> Backend {
         let inner_stores = self.inner.stores();
@@ -223,6 +237,7 @@ impl LayeredBackend {
             attachment_store: self.attachment_store,
             module_artifacts: self.module_artifacts,
             obligation_ledgers: self.obligation_ledgers,
+            artifact_cleanup: self.artifact_cleanup,
         });
         Backend::new(Arc::new(LayeredEngine {
             stores,
@@ -255,6 +270,7 @@ impl LayeredStores {
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
             obligation_ledgers: None,
+            artifact_cleanup: inner.artifact_cleanup(),
             inner,
         })
     }
@@ -379,6 +395,7 @@ struct LayeredStoreSet {
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
+    artifact_cleanup: Arc<dyn crate::store::ArtifactCleanupLedger>,
 }
 
 impl StoreSet for LayeredStoreSet {
@@ -446,7 +463,7 @@ impl StoreSet for LayeredStoreSet {
     }
 
     fn artifact_cleanup(&self) -> Arc<dyn crate::store::ArtifactCleanupLedger> {
-        self.inner.artifact_cleanup()
+        Arc::clone(&self.artifact_cleanup)
     }
 }
 

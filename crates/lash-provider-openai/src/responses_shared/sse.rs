@@ -153,6 +153,11 @@ pub fn process_sse_event(
                             event.get("item_id").and_then(|v| v.as_str()),
                             arguments,
                         );
+                    } else {
+                        state.close_tool_call_arguments(
+                            output_index,
+                            event.get("item_id").and_then(Value::as_str),
+                        );
                     }
                     state.streamed_item_content_received |= event
                         .get("name")
@@ -213,4 +218,83 @@ pub fn parse_sse_payload(
     state: &mut ResponsesStreamState,
 ) -> Result<(), LlmTransportError> {
     frame_sse_payload(payload, |raw| process_sse_event(provider, raw, state, None))
+}
+
+#[cfg(test)]
+mod tool_input_tests {
+    use super::*;
+
+    #[test]
+    fn interleaved_deltas_keep_ordinals_and_cut_call_open() {
+        let mut state = ResponsesStreamState::default();
+        let wire = [
+            serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_a","call_id":"a","name":"lookup","arguments":""}}),
+            serde_json::json!({"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_b","call_id":"b","name":"lookup","arguments":""}}),
+            serde_json::json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_a","delta":"{\"path\":\"READ"}),
+            serde_json::json!({"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_b","delta":"{\"q\":\"x\"}"}),
+            serde_json::json!({"type":"response.function_call_arguments.done","output_index":1,"item_id":"fc_b","arguments":"{\"q\":\"x\"}"}),
+            serde_json::json!({"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_b","call_id":"b","name":"lookup","arguments":"{\"q\":\"x\"}"}}),
+        ];
+        let mut events = Vec::new();
+        for event in wire {
+            let mut parts = Vec::new();
+            process_sse_event("OpenAI", &event.to_string(), &mut state, Some(&mut parts))
+                .expect("recorded Responses event parses");
+            events.extend(state.take_block_events());
+            events.extend(parts.into_iter().map(LlmStreamEvent::Part));
+        }
+        let kinds = events
+            .iter()
+            .filter_map(|event| match event {
+                LlmStreamEvent::ToolInputStart { call } => Some(("start", call.ordinal)),
+                LlmStreamEvent::ToolInputDelta { call, .. } => Some(("delta", call.ordinal)),
+                LlmStreamEvent::ToolInputEnd { call, .. } => Some(("end", call.ordinal)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            [
+                ("start", 0),
+                ("start", 1),
+                ("delta", 0),
+                ("delta", 1),
+                ("end", 1)
+            ]
+        );
+        assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputDelta { call, text } if call.ordinal == 0 && text == "{\"path\":\"READ")));
+        assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputEnd { call, raw_arguments } if call.ordinal == 1 && raw_arguments == "{\"q\":\"x\"}")));
+    }
+
+    #[test]
+    fn arguments_arriving_whole_at_item_start_are_captured() {
+        let mut state = ResponsesStreamState::default();
+        let start = serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_whole","call_id":"whole","name":"lookup","arguments":"{\"q\":\"x\"}"}});
+        process_sse_event("OpenAI", &start.to_string(), &mut state, None)
+            .expect("recorded whole call start parses");
+        let events = state.take_block_events();
+        assert!(
+            matches!(&events[..], [LlmStreamEvent::ToolInputStart { .. }, LlmStreamEvent::ToolInputDelta { text, .. }] if text == "{\"q\":\"x\"}")
+        );
+        let done = serde_json::json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_whole","call_id":"whole","name":"lookup","arguments":"{\"q\":\"x\"}"}});
+        let mut parts = Vec::new();
+        process_sse_event("OpenAI", &done.to_string(), &mut state, Some(&mut parts))
+            .expect("recorded whole call end parses");
+        assert!(
+            matches!(&state.take_block_events()[..], [LlmStreamEvent::ToolInputEnd { raw_arguments, .. }] if raw_arguments == "{\"q\":\"x\"}")
+        );
+        assert_eq!(parts.len(), 1);
+    }
+
+    #[test]
+    fn closed_arguments_without_a_name_do_not_disappear() {
+        let mut state = ResponsesStreamState::default();
+        let mut parts = Vec::new();
+        let done = serde_json::json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_unnamed","call_id":"unnamed","arguments":"{\"q\":\"x\"}"}});
+        process_sse_event("OpenAI", &done.to_string(), &mut state, Some(&mut parts))
+            .expect("recorded unnamed call parses");
+        let events = state.take_block_events();
+        assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputEnd { call, raw_arguments } if call.tool_name.is_none() && raw_arguments == "{\"q\":\"x\"}")));
+        assert!(parts.is_empty());
+    }
 }

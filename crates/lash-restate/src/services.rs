@@ -76,7 +76,7 @@ use restate_sdk::service::macro_support::{ServiceBoxFuture, service_definition};
 use restate_sdk::service::{Discoverable, Service};
 
 use crate::RestateEffectHost;
-use crate::compat::{Call, Reply};
+use crate::compat::{Call, DeploymentWire, RESTATE_WIRE, Reply, VersionRange};
 use crate::durable_wait::{
     LashDurableWaitRegistry as _, LashDurableWaitRegistryImpl, LashDurableWaitWorkflow as _,
     LashDurableWaitWorkflowImpl,
@@ -475,7 +475,7 @@ macro_rules! lash_clients {
         where
             C: ContextClient<'ctx>,
         {
-            self.ctx.request(self.target(stringify!($handler)), Call::new(body))
+            self.ctx.request(self.target(stringify!($handler)), Call::journaled(body))
         }
     };
     (@method $handler:ident() -> $res:ty) => {
@@ -483,7 +483,7 @@ macro_rules! lash_clients {
         where
             C: ContextClient<'ctx>,
         {
-            self.ctx.request(self.target(stringify!($handler)), Call::new(()))
+            self.ctx.request(self.target(stringify!($handler)), Call::journaled(()))
         }
     };
     (@pin $handler:ident($arg:ty) -> $res:ty) => {
@@ -604,7 +604,7 @@ where
 {
     ctx.request(
         RequestTarget::workflow(route.name().into_owned(), key, handler),
-        Call::new(request),
+        Call::journaled(request),
     )
 }
 
@@ -622,7 +622,7 @@ where
 {
     ctx.request(
         RequestTarget::object(route.name().into_owned(), key, handler),
-        Call::new(request),
+        Call::journaled(request),
     )
 }
 
@@ -642,7 +642,17 @@ where
 /// admits (`tests::bindings` pins it). A name it refused would leave that
 /// lane unbound — reported, never a panic in the endpoint's construction —
 /// and the discovery test fails on the missing lane.
-fn bind_as<S>(builder: Builder, dispatcher: S, name: &str, options: ServiceOptions) -> Builder
+///
+/// Every handler of the binding runs under the deployment's wire
+/// ([`DeploymentWire`]), read from `wire` as each invocation starts: the
+/// calls it journals state the wire its fleet epoch selects.
+fn bind_as<S>(
+    builder: Builder,
+    dispatcher: S,
+    name: &str,
+    options: ServiceOptions,
+    wire: &WireSource,
+) -> Builder
 where
     S: Service<Future = ServiceBoxFuture> + Discoverable + Send + Sync + 'static,
 {
@@ -650,6 +660,10 @@ where
     match restate_sdk::discovery::ServiceName::try_from(name.to_owned()) {
         Ok(renamed) => {
             discovery.name = renamed;
+            let dispatcher = Wired {
+                dispatcher,
+                wire: wire.clone(),
+            };
             builder.bind(service_definition(dispatcher, discovery).options(options))
         }
         Err(error) => {
@@ -660,6 +674,33 @@ where
             );
             builder
         }
+    }
+}
+
+/// Where a deployment's handlers read their wire: the versions the build
+/// reads, and the fleet epoch that selects what it writes.
+#[derive(Clone, Debug)]
+struct WireSource {
+    reads: VersionRange,
+    fleet: FleetView,
+}
+
+/// A lash service's dispatcher, running each handler under its
+/// deployment's wire.
+struct Wired<S> {
+    dispatcher: S,
+    wire: WireSource,
+}
+
+impl<S> Service for Wired<S>
+where
+    S: Service<Future = ServiceBoxFuture>,
+{
+    type Future = ServiceBoxFuture;
+
+    fn handle(&self, ctx: restate_sdk::endpoint::ContextInternal) -> Self::Future {
+        let wire = DeploymentWire::speaking(self.wire.reads, self.wire.fleet.fleet_format());
+        Box::pin(wire.scope(self.dispatcher.handle(ctx)))
     }
 }
 
@@ -730,6 +771,17 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
     builder: Builder,
     parts: LashServiceParts<'_, R>,
 ) -> Builder {
+    bind_lash_services_reading(builder, parts, RESTATE_WIRE)
+}
+
+/// [`bind_lash_services`] for a deployment that reads the wire versions
+/// `reads`: this build's [`RESTATE_WIRE`] in every deployment, and another
+/// build's range in a law that serves two builds from one binary.
+pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
+    builder: Builder,
+    parts: LashServiceParts<'_, R>,
+    reads: VersionRange,
+) -> Builder {
     let LashServiceParts {
         effect_host,
         ingress,
@@ -780,6 +832,10 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
             build_generation.clone(),
         )
     };
+    let wire = WireSource {
+        reads,
+        fleet: fleet.clone(),
+    };
     LASH_SERVICES
         .iter()
         .flat_map(|&service| lanes(&namespace, service, &build_generation))
@@ -791,51 +847,66 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
                     LashDurableWaitWorkflowImpl::new(namespace.clone()).serve(),
                     &name,
                     claimed(),
+                    &wire,
                 ),
                 LashService::DurableWaitRegistry => bind_as(
                     builder,
                     LashDurableWaitRegistryImpl::new(namespace.clone(), fleet.clone()).serve(),
                     &name,
                     claimed().enable_lazy_state(true),
+                    &wire,
                 ),
                 LashService::ProcessAttach => bind_as(
                     builder,
                     LashProcessAttachImpl::new(namespace.clone()).serve(),
                     &name,
                     claimed(),
+                    &wire,
                 ),
+                // Lazy, so each index handler loads only the keys it reads:
+                // a width-n group runs O(n) handlers, and none of the
+                // per-child ones reads the retained membership (FIG-4068).
                 LashService::EffectGroupState => bind_as(
                     builder,
                     EffectGroupStateImpl::new(namespace.clone(), fleet.clone()).serve(),
                     &name,
-                    claimed(),
+                    claimed().enable_lazy_state(true),
+                    &wire,
                 ),
                 LashService::EffectGroupPayload => bind_as(
                     builder,
                     EffectGroupPayloadImpl::new(fleet.clone()).serve(),
                     &name,
                     claimed(),
+                    &wire,
                 ),
                 LashService::ProcessWorkflow => bind_as(
                     builder,
                     process_workflow.on_route(route.clone()).serve(),
                     &name,
                     claimed().handler("run", run_options.clone()),
+                    &wire,
                 ),
-                LashService::EffectGroupDispatch => {
-                    bind_as(builder, dispatch(route.clone()).serve(), &name, claimed())
-                }
+                LashService::EffectGroupDispatch => bind_as(
+                    builder,
+                    dispatch(route.clone()).serve(),
+                    &name,
+                    claimed(),
+                    &wire,
+                ),
                 LashService::SessionDriver => bind_as(
                     builder,
                     session.on_route(route.clone()).serve(),
                     &name,
                     claimed().handler("drive", crate::turn_handler_options()),
+                    &wire,
                 ),
                 LashService::TurnDriver => bind_as(
                     builder,
                     turn.on_route(route.clone()).serve(),
                     &name,
                     claimed().handler("run", crate::turn_handler_options()),
+                    &wire,
                 ),
             }
         })

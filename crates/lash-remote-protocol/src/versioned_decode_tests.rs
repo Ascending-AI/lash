@@ -101,6 +101,7 @@ fn streamed_turn_report() -> RemoteTurnReport {
         issues: Vec::new(),
         activities: vec![streamed_activity()],
         metadata: std::collections::HashMap::new(),
+        stopped_partial: None,
     }
 }
 

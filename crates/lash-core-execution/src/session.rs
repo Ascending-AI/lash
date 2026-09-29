@@ -12,6 +12,7 @@ mod process_handles;
 mod settlement_incorporation;
 #[cfg(test)]
 mod settlement_incorporation_tests;
+mod tool_attempt;
 pub(crate) mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
@@ -812,6 +813,7 @@ impl Session {
             turn_context: turn_context.clone(),
             clock: Arc::clone(&self.services.clock),
             process_lineage: process_lineage_of(&turn_context),
+            turn_capture: None,
             process_originator: None,
         });
         Ok(RuntimeExecutionContext::new(

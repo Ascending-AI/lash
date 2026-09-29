@@ -737,6 +737,14 @@ macro_rules! delegate_process_retention {
             ) -> Result<(), $crate::PluginError> {
                 self.$inner.release_consumer_hold(process_id, key).await
             }
+
+            async fn abandon_consumer_hold(
+                &self,
+                key: &str,
+                owner: &$crate::ScopeId,
+            ) -> Result<Vec<$crate::ProcessId>, $crate::PluginError> {
+                self.$inner.abandon_consumer_hold(key, owner).await
+            }
         }
     };
 }

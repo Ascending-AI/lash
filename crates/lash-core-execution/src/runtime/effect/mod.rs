@@ -4,6 +4,7 @@ mod envelope;
 #[doc(hidden)]
 pub mod executor;
 mod group;
+mod llm_outcome;
 pub(crate) use group::await_cancelled_error;
 mod group_executors;
 #[cfg(any(test, feature = "testing"))]
@@ -48,12 +49,11 @@ mod validation;
 
 pub use envelope::tool_cancel_work_replay_suffix;
 pub use envelope::{
-    AdmittedHeadVerdict, AssistantResponseHookEvents, AssistantStreamHookState,
-    CheckpointAdmittedSet, LlmRequestSpec, LlmStreamRecord, ProcessCommand, ProcessEffectOutcome,
-    RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
-    RuntimeLlmCallOutcome, ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome,
-    ToolAttemptLaunch, ToolInvocationEffectOutcome,
+    AdmittedHeadVerdict, AssistantResponseHookEvents, CheckpointAdmittedSet, LlmRequestSpec,
+    ProcessCommand, ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome,
+    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectOutcome, RuntimeInvocation, ServedExecutionEnvironmentSync, SleepSpec,
+    ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolInvocationEffectOutcome,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
@@ -83,6 +83,9 @@ pub use identity_types::{
 pub use lash_sansio::{CausalRef, EffectAddress};
 #[cfg(any(test, feature = "testing"))]
 pub use layered_host::{EffectLayer, LayeredEffectHost};
+pub use llm_outcome::{
+    AssistantStreamHookState, CaptureWatermark, LlmStreamRecord, RuntimeLlmCallOutcome,
+};
 pub use validation::{
     CanonicalRuntimeEffectEnvelope, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
     validate_replayed_effect_envelope,

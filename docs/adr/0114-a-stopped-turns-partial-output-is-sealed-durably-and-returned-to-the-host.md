@@ -1438,3 +1438,153 @@ state. `AttemptContext::progress(&self) -> ToolProgressSink` is the accessor,
 with §2.2's semantics unchanged. `ToolContext` keeps the runtime's
 `progress_reporter` so the attempt context can hand it on. §8's lane R owns
 this region of `tool_provider.rs`, and [ADR 0116](0116-tools-are-opaque.md) §10.4 names the seam.
+
+## Lane G amendment
+
+Added 2026-09-29, after lanes R, P, S and H settled. It closes six gaps
+lane R left open. Where it changes a section above, this text rules.
+
+**A checkpoint that closes an interrupted call keeps the base (§3.1).** An
+`Immediate` stop inside a tool batch does not backtrack the batch: the
+batch fills every unsettled call with a cancelled result, and the
+iteration's checkpoint commits those calls, as it did before this record.
+That checkpoint no longer advances the capture base. The driver decides
+where it issues the checkpoint, from recorded facts only: the turn
+honoured its stop, a group wait of the batch lost to the stop, or a call
+of the batch settled `Cancelled` (a tool child that answered its stop
+before its turn resumed). The driver's base counter follows the same
+decision, so a replay counts the same, and the hold ends with that
+checkpoint. The stop's seal then covers the whole iteration: each
+interrupted call is `Running` with every chunk the host received and
+`OutcomeUnknown`, beside the model output that asked for it. A
+`Cancelled` settlement is never captured as a result, because it is the
+stop's own consequence, not a result before the cutoff. A settlement the
+seal already fenced is not a fault. Two consequences follow. The partial
+may quote content the transcript also holds: the call, with the
+synthesized result the transcript keeps, and prose streamed before it in
+that iteration. And if a turn continues after such a checkpoint, because a
+tool cancelled itself, its next checkpoint advances the base and drops the
+held frames. Until that checkpoint, a stop in the continued iteration seals
+the held iteration with it, so its partial also quotes the iteration
+before. An `AfterStep` stop still seals an empty partial.
+
+**Unstreamed response blocks are captured (§3.1).** When a response
+streamed no text, the driver publishes its text and reasoning blocks from
+the completed response. The model call's writer now captures those blocks
+before its step returns, under the identities the driver publishes them
+with, as blocks with no start frame (the capture opens them). Calls the
+adapter never streamed were already captured this way. If an assistant
+response hook rewrites such a response, the capture holds the text before
+the rewrite; FIG-4063 tracks that.
+
+**A rebuilt tool child writes its turn's capture (§3.2).** A group tool
+child with no live opener runs on a context the deployment builds. That
+context now carries its turn's capture
+(`facade_support::deployment_turn_tool_capture`) over the session's own
+store. It is addressed by the physical turn that the child's recorded
+parent invocation names and by its admitted scope's root. Its writer opens
+like any other: it fences the dead attempt's epoch, retracts what that
+attempt wrote, and marks the turn recovered. A tool attempt publishes its
+progress on the stream of the dispatch it runs under, so a rebuilt child's
+chunks ride its settlement with its other events.
+
+**The machine's error is held too (§4.3).** A turn machine writes its
+`Error` right before a stopped outcome. The driver holds the observer from
+that `Error` once the machine has finished, so the whole terminal
+publishes after the commit and a failed commit publishes none of it.
+
+**The lost-root announcement (§4.4, §5.2).** lash-restate publishes
+nothing. The lost-root pass reports the partials its terminal writes
+sealed on `ParkReconcileReport::sealed_partials`, and the core that runs
+the reconcile tick announces each through its Live Replay publisher. The
+session's open runtime records it as a turn activity, which is how the
+in-process tier publishes turn activities. The activity is the new
+`TurnEvent::StoppedPartialAvailable { summary }`. A stopped turn's own
+terminal publishes the same activity beside the session event, and both
+use one id derived from the partial's turn. The announcement stays best
+effort: a session that is open nowhere in the process is not told, and its
+hosts read the partial by the root. The activity has no remote form yet.
+A remote host gets the partial on `RemoteTurnReport` or through the read.
+`RestateConfig` gains nothing: the core already holds the publisher, and
+the engine only reports.
+
+**A lost root is always recovered (§1.3).** The lost-root write seals with
+`recovered_after_process_loss = true` and `AcknowledgedPrefix` coverage on
+both backends, whatever the turn's own capture row recorded. Before, it
+took both from that row, so a lost root read as complete and unrecovered.
+
+## Integration amendment
+
+Added 2026-09-29, when the branch merged onto `main` (FIG-433). Where it
+changes a section or amendment above, this text rules.
+
+**Both activities have remote forms (§2.2, §5.2).** A remote host follows a
+session through its observation stream, which projects each turn activity
+to a `RemoteTurnEvent`. That projection refused the two activities this
+record adds, so a remote stream failed on every stopped turn.
+`RemoteTurnEvent` now carries `ToolOutputProgress { call_id, chunk }` and
+`StoppedPartialAvailable { summary }`, reusing the `lash-sansio` types.
+Under ADR 0115 §4 a new event kind is additive within the negotiated
+version. The Lane G amendment's "no remote form yet" is withdrawn.
+
+**A refused root seals too (§1.3, §4.4).** `main` added
+`RootTerminalCause::Refused` (FIG-4018): the root's run ended with a typed
+refusal and no turn commit. Its terminal write seals like the other
+uncommitted terminals, with `Other { RuntimeFailure }` and
+`recovered_after_process_loss = false`. A partial the stopped turn already
+sealed is reused and commits with the terminal.
+
+**A later root can adopt a physical turn (§3.2).** An owed follow-on's
+recovery runs as a root of its own, `follow-on:<turn>#<n>`, on a fresh
+journal, and drives the physical turn a lost root staged (FIG-3946). The
+turn's capture row is keyed by session and turn, so the adopting root's
+first open or seal rebinds it. The earlier root's frames and writers are
+deleted, the base restarts at zero, and the turn reads recovered. The lost
+execution's staging never enters the adopting root's partial.
+
+**The seal is drive-fenced (§4.3).** `SealTurnCapture` carries the drive
+fence of the execution that seals, and the store checks it as it checks
+the commit's (ADR 0105 §9). A successor may raise the drive epoch mid-turn,
+which makes the stale execution's commit fail `StaleDriveFence`. That
+execution's seal fails the same way, so it cannot leave a seal that blocks
+the later drive of the same root. Root-terminal writes seal with no fence,
+inside their own transaction.
+
+**Capture-write retries (§4.1).** The runtime retries every refused capture
+write, not only transient faults, so a deterministic refusal hangs the
+turn. FIG-4069 limits the retry to transient faults.
+
+**A tool attempt writes its capture outside its cancel watch (§2.2, §4.1).**
+A tool attempt's recorded body races a live watch on its stop: the turn's
+gate, or a group child's cancel fact over the ingress. The attempt now opens
+its writer and persists its start before that race, and persists its
+settlement after it, still inside the recorded step. What persists, and
+before what it publishes, is unchanged. Only the tool's own run, with its
+progress chunks, races the watch. An engine that sequences its steps
+therefore sees the store writes as the step's own work, never as work left
+running while the step waits on the watch's request: the Restate server
+double's serial scheduler keeps one grant order per seed (FIG-4071).
+
+**Frozen versions (§3.5).** The four capture tables change the stored
+shapes in place: SQLite stays at schema version 99 and PostgreSQL at DDL
+revision 141, as the version freeze requires. A catalog without the tables
+is refused and recreated.
+
+**The PostgreSQL head commit pays one round trip for capture.** Clearing
+the committing turn's frames, writers and counters and reading its sealed
+partial run as one data-modifying `WITH`. The pinned head commit gains that
+one round trip, and only a stopped turn's commit adds a second, to mark its
+partial committed. The capture tables name their `CHECK` constraints, so
+the open-time check of an expanded catalog reads them as declared.
+
+**Adapter law (§2.1).** Where an adapter decodes a closed call strictly,
+`Part(ToolCall).input_json` may be its normalized encoding, provided it
+parses to the same value as `ToolInputEnd::raw_arguments`. The capture
+keeps the raw text the provider streamed.
+
+**The PostgreSQL leg of §6.7** is FIG-4065. `stopped_partial_recovery__test`
+runs on the Restate double's SQLite store only.
+
+**The terminal's record-and-hold half** is `hold_terminal_sequence`
+(§4.3). It records the sequence on the recorded assembly and holds it on the
+observer; the commit releases it, and a failed commit abandons it.

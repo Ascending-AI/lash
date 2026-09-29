@@ -195,7 +195,7 @@ impl RuntimeTurnDriver<'_> {
         invocation: crate::RuntimeInvocation,
         event_tx: &TurnObserver,
         cancel: &CancellationToken,
-    ) -> RuntimeLlmCallOutcome {
+    ) -> Result<RuntimeLlmCallOutcome, RuntimeEffectControllerError> {
         let mut request = (*request).clone();
         let protocol_suppressed_stop_sequences =
             request.generation.stop_sequences_suppressed_by_protocol();
@@ -211,7 +211,7 @@ impl RuntimeTurnDriver<'_> {
         {
             Ok(request) => request,
             Err(err) => {
-                return RuntimeLlmCallOutcome {
+                return Ok(RuntimeLlmCallOutcome {
                     result: Err(LlmCallError {
                         message: err.to_string(),
                         retryable: false,
@@ -227,7 +227,8 @@ impl RuntimeTurnDriver<'_> {
                     text_streamed: false,
                     call_record: None,
                     stream: crate::runtime::LlmStreamRecord::default(),
-                };
+                    capture: None,
+                });
             }
         };
         let request_model = request.model.clone();
@@ -326,11 +327,16 @@ impl RuntimeTurnDriver<'_> {
                         .unwrap_or_else(|_| format!("scope:{}", scope.id()))
                 )
             });
+        let capture = self
+            .open_capture_writer(&stream_base)
+            .await
+            .map_err(super::capture_writer::capture_write_fault)?;
         let mut host_forwarder = ProviderHostForwarder::new(
             event_tx,
             crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
                 "{stream_base}:stream"
             ))),
+            capture,
         );
         let mut call_record = None;
         let mut stream_closed = false;
@@ -376,6 +382,23 @@ impl RuntimeTurnDriver<'_> {
                         .await
                     {
                         break Err(err);
+                    }
+                    // Events that queued while the last batch persisted form
+                    // the next one (ADR 0114 §4.1).
+                    if let Err(err) = self
+                        .forward_ready_stream_events(
+                            &mut host_forwarder,
+                            &mut llm_stream_rx,
+                            &mut stream_closed,
+                            &mut stream_state,
+                        )
+                        .await
+                    {
+                        break Err(err);
+                    }
+                    if !host_forwarder.flush().await {
+                        llm_task.abort();
+                        break Err(capture_stopped_error());
                     }
                     if *stream_state.abort_requested {
                         // A plugin stream hook asked us to end the LLM
@@ -593,6 +616,29 @@ impl RuntimeTurnDriver<'_> {
             }
         };
 
+        // Everything the stream loop still holds persists before the step
+        // returns, so the partial covers everything published.
+        if let Ok(response) = &result {
+            // What the driver publishes for a response that never streamed
+            // its text is captured here, where the call's writer is open.
+            if !text_streamed {
+                let prose_projector = self.session.plugins().assistant_prose_projector();
+                for super::events::SemanticResponseBlock { kind, block, text } in
+                    super::events::semantic_response_blocks(
+                        response,
+                        prose_projector.as_deref(),
+                        &reasoning_publication,
+                    )
+                {
+                    host_forwarder.capture_unstreamed_block(kind, block, text);
+                }
+            }
+            host_forwarder.capture_response_tool_calls(&response.parts);
+        }
+        host_forwarder.flush().await;
+        let capture = host_forwarder
+            .finish()
+            .map_err(super::capture_writer::capture_write_fault)?;
         let mut result = result;
         if let Some(conflict) = completion_sideband.origin_conflict() {
             match &mut result {
@@ -690,7 +736,7 @@ impl RuntimeTurnDriver<'_> {
                 }
             }
         }
-        RuntimeLlmCallOutcome {
+        Ok(RuntimeLlmCallOutcome {
             result,
             text_streamed,
             call_record,
@@ -698,7 +744,62 @@ impl RuntimeTurnDriver<'_> {
                 reasoning_published: reasoning_publication.into_published_blocks(),
                 stream_hook_states,
             },
+            capture,
+        })
+    }
+
+    /// The turn capture's writer for this model call, keyed by the call's
+    /// replay key. `None` for a session with no durable store.
+    async fn open_capture_writer(
+        &self,
+        invocation: &str,
+    ) -> Result<Option<super::capture_writer::CaptureWriter>, crate::store::StoreError> {
+        let Some(store) = self.session.history_store() else {
+            return Ok(None);
+        };
+        let root = self
+            .scoped_effect_controller
+            .execution_scope()
+            .logical_root()
+            .unwrap_or_else(|| self.turn_id.clone());
+        super::capture_writer::CaptureWriter::open(
+            Arc::clone(store.store()),
+            crate::TurnAddress::new(self.session_id.clone(), self.turn_id.clone()),
+            root,
+            crate::store::CaptureInvocationKey(invocation.to_string()),
+        )
+        .await
+        .map(Some)
+    }
+
+    /// Forwards the events already queued behind the one just forwarded,
+    /// without waiting for more, up to one batch's worth. A retry boundary
+    /// ends the run: its reset persists on its own.
+    async fn forward_ready_stream_events(
+        &mut self,
+        forwarder: &mut ProviderHostForwarder<'_>,
+        llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,
+        stream_closed: &mut bool,
+        state: &mut LlmStreamState<'_>,
+    ) -> Result<(), LlmCallError> {
+        for _ in 0..crate::store::CAPTURE_BATCH_MAX_FRAMES {
+            if *state.abort_requested || forwarder.faulted() {
+                break;
+            }
+            let Ok(event) = llm_stream_rx.try_recv() else {
+                // Nothing queued: either more is coming, or the provider
+                // dropped its sender and the stream is over.
+                *stream_closed |= llm_stream_rx.is_closed();
+                break;
+            };
+            let reset = matches!(event, LlmStreamEvent::AttemptReset);
+            self.forward_provider_stream_event(forwarder, event, state)
+                .await?;
+            if reset {
+                break;
+            }
         }
+        Ok(())
     }
 
     /// Ends the stream for every stream-finished hook and returns the end
@@ -1069,6 +1170,11 @@ impl RuntimeTurnDriver<'_> {
                     crate::plugin::AssistantStreamFinishReason::AttemptReset,
                 )
                 .await;
+                // The retraction persists before its announcement publishes
+                // (ADR 0114 §4.2); a failed reset stops publication.
+                if !forwarder.reset_attempt().await {
+                    return Ok(());
+                }
                 let assistant_prose_correlation_ids =
                     std::mem::take(state.assistant_prose_attempt_correlations);
                 let reasoning_correlation_ids =
@@ -1314,6 +1420,7 @@ impl RuntimeTurnDriver<'_> {
                         }),
                     },
                 );
+                forwarder.capture_tool_call(&call_id, &tool_name, &input_json);
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,
@@ -1429,6 +1536,16 @@ impl RuntimeTurnDriver<'_> {
                     envelope: None,
                 });
             }
+            // Argument streaming is captured and publishes nothing
+            // (ADR 0114 §2.1).
+            LlmStreamEvent::ToolInputStart { call } => forwarder.capture_tool_input_start(call),
+            LlmStreamEvent::ToolInputDelta { call, text } => {
+                forwarder.capture_tool_input_delta(call, text);
+            }
+            LlmStreamEvent::ToolInputEnd {
+                call,
+                raw_arguments,
+            } => forwarder.capture_tool_input_end(call, raw_arguments),
         }
         Ok(())
     }
@@ -1486,168 +1603,25 @@ impl RuntimeTurnDriver<'_> {
 mod provider_host_forwarding_tests;
 
 #[cfg(test)]
-mod clamp_report_tests {
-    use super::*;
-
-    fn applied() -> Option<crate::GenerationReceipt> {
-        Some(crate::GenerationReceipt {
-            output_token_cap: crate::GenerationOptionOutcome::Applied,
-            temperature: crate::GenerationOptionOutcome::Applied,
-            seed: crate::GenerationOptionOutcome::NotRequested,
-            stop_sequences: crate::GenerationOptionOutcome::NotRequested,
-            cache: crate::GenerationOptionOutcome::NotRequested,
-        })
-    }
-
-    fn attempt(generation_disposition: Option<crate::GenerationReceipt>) -> crate::AttemptRecord {
-        crate::AttemptRecord {
-            ordinal: 1,
-            outcome: crate::AttemptOutcome::Completed,
-            protocol_position: crate::ProtocolPosition::OutputStarted,
-            retry_budget_consumed: false,
-            retry_decision: None,
-            error: None,
-            evidence: None,
-            generation_disposition,
-            usage: None,
-            usage_disposition: Default::default(),
-        }
-    }
-    fn call_record(attempts: Vec<crate::AttemptRecord>) -> crate::LlmCallRecord {
-        crate::LlmCallRecord {
-            call_id: crate::LlmCallId("call".to_string()),
-            label: None,
-            replay_drops: Vec::new(),
-            attempts,
-        }
-    }
-    fn cap_of(disposition: Option<crate::GenerationReceipt>) -> crate::GenerationOptionOutcome {
-        disposition
-            .expect("a reported disposition")
-            .output_token_cap
-    }
-
-    /// A failed call still leaves accounts of itself behind: the ledger
-    /// attempt, and the partial response an adapter salvaged onto the error.
-    /// Narrowing one and not the other is how the same attempt comes to say
-    /// two different things.
-    #[test]
-    fn a_failed_calls_partial_response_agrees_with_its_ledger_attempt() {
-        let mut result: Result<LlmResponse, LlmCallError> = Err(LlmCallError {
-            message: "stream ended early".to_string(),
-            retryable: false,
-            kind: crate::ProviderFailureKind::Unknown,
-            raw: None,
-            code: None,
-            terminal_reason: crate::LlmTerminalReason::ProviderError,
-            request_body: None,
-            partial_response: Some(Box::new(LlmResponse {
-                generation_disposition: applied(),
-                ..LlmResponse::default()
-            })),
-        });
-        let mut call_record = call_record(vec![crate::AttemptRecord {
-            ordinal: 1,
-            outcome: crate::AttemptOutcome::Failed,
-            protocol_position: crate::ProtocolPosition::OutputStarted,
-            retry_budget_consumed: true,
-            retry_decision: None,
-            error: None,
-            evidence: None,
-            generation_disposition: applied(),
-            usage: None,
-            usage_disposition: Default::default(),
-        }]);
-
-        record_clamped_output_token_cap(&mut result, Some(&mut call_record));
-
-        let partial = result
-            .expect_err("the call failed")
-            .partial_response
-            .expect("the adapter salvaged a partial");
-        assert_eq!(
-            cap_of(partial.generation_disposition),
-            crate::GenerationOptionOutcome::ClampedToCapacity
-        );
-        assert_eq!(
-            cap_of(call_record.attempts[0].generation_disposition),
-            crate::GenerationOptionOutcome::ClampedToCapacity
-        );
-    }
-
-    /// An adapter that reports nothing keeps reporting nothing, and an option
-    /// the adapter dropped is not overwritten with a clamp it never applied.
-    #[test]
-    fn narrowing_only_touches_a_cap_the_adapter_reported_as_applied() {
-        let mut unreported: Result<LlmResponse, LlmCallError> = Ok(LlmResponse::default());
-        record_clamped_output_token_cap(&mut unreported, None);
-        assert!(
-            unreported.expect("ok").generation_disposition.is_none(),
-            "None means unreported, not an invitation to invent a report"
-        );
-
-        let mut dropped: Result<LlmResponse, LlmCallError> = Ok(LlmResponse {
-            generation_disposition: Some(crate::GenerationReceipt {
-                output_token_cap: crate::GenerationOptionOutcome::OmittedUnsupported,
-                ..Default::default()
-            }),
-            ..LlmResponse::default()
-        });
-        record_clamped_output_token_cap(&mut dropped, None);
-        assert_eq!(
-            cap_of(dropped.expect("ok").generation_disposition),
-            crate::GenerationOptionOutcome::OmittedUnsupported
-        );
-    }
-
-    #[test]
-    fn protocol_stop_suppression_updates_response_and_attempt_ledger() {
-        let mut result: Result<LlmResponse, LlmCallError> = Ok(LlmResponse {
-            generation_disposition: applied(),
-            ..LlmResponse::default()
-        });
-        let mut call_record = call_record(vec![attempt(applied())]);
-
-        record_protocol_owned_stop_suppression(&mut result, Some(&mut call_record));
-
-        let response = result.expect("response");
-        assert_eq!(
-            response
-                .generation_disposition
-                .expect("response disposition")
-                .stop_sequences,
-            crate::GenerationOptionOutcome::SuppressedProtocolOwned
-        );
-        assert_eq!(
-            call_record.attempts[0]
-                .generation_disposition
-                .expect("attempt disposition")
-                .stop_sequences,
-            crate::GenerationOptionOutcome::SuppressedProtocolOwned
-        );
-    }
-
-    #[test]
-    fn protocol_stop_suppression_leaves_unreported_attempts_absent() {
-        let mut result: Result<LlmResponse, LlmCallError> = Ok(LlmResponse {
-            generation_disposition: applied(),
-            ..LlmResponse::default()
-        });
-        let mut call_record = call_record(vec![attempt(None), attempt(applied())]);
-
-        record_protocol_owned_stop_suppression(&mut result, Some(&mut call_record));
-
-        assert!(call_record.attempts[0].generation_disposition.is_none());
-        assert_eq!(
-            call_record.attempts[1]
-                .generation_disposition
-                .expect("reported attempt disposition")
-                .stop_sequences,
-            crate::GenerationOptionOutcome::SuppressedProtocolOwned
-        );
-    }
-}
+#[path = "streaming/clamp_report_tests.rs"]
+mod clamp_report_tests;
 
 #[cfg(test)]
 #[path = "streaming_protocol_abort_tests.rs"]
 mod protocol_abort_evidence_tests;
+
+/// The call error a stream loop breaks with when its capture stopped
+/// publication. It is never recorded: the step ends with the capture's own
+/// live fault instead.
+fn capture_stopped_error() -> LlmCallError {
+    LlmCallError {
+        message: "turn capture stopped publication".to_string(),
+        retryable: true,
+        kind: crate::ProviderFailureKind::Unknown,
+        raw: None,
+        code: None,
+        terminal_reason: crate::LlmTerminalReason::ProviderError,
+        request_body: None,
+        partial_response: None,
+    }
+}

@@ -54,6 +54,7 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
             "committed_attachment_ids",
             !commit.committed_attachment_ids.is_empty(),
         ),
+        ("stopped_partial", commit.stopped_partial.is_some()),
     ];
     if let Some((field, _)) = carried.iter().find(|(_, present)| *present) {
         return Err(StoreError::Backend(format!(
@@ -116,6 +117,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         turn_cancel_closure_settlement: _, // transient fenced obligation
         adopted_intent_rows: _, // refused non-zero by validation
         committed_attachment_ids: _, // refused non-empty by validation
+        stopped_partial: _,   // refused present by validation
     } = commit;
     let operation_key = turn_commit.operation.storage_key()?;
     let projection = SemanticBoundaryRequestIntent {

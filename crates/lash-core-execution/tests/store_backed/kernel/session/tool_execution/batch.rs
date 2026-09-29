@@ -114,6 +114,7 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
             process_lineage: None,
+            turn_capture: None,
             process_originator: None,
         };
         let process_env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
@@ -618,6 +619,7 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
             process_lineage: None,
+            turn_capture: None,
             process_originator: None,
         };
         crate::RuntimeExecutionContext::new(

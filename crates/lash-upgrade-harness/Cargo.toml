@@ -14,6 +14,7 @@ synthetic-next = [
     "lash-restate/synthetic-next",
     "lash/synthetic-next",
     "lash-postgres-store/synthetic-next",
+    "lashlang/synthetic-next",
 ]
 
 [lib]
@@ -37,14 +38,17 @@ path = "tests/rolling/main.rs"
 workspace = true
 
 [dependencies]
-lash = { workspace = true, features = ["restate", "sqlite"] }
+lash = { workspace = true, features = ["restate", "sqlite", "typescript"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true }
+lash-lashlang-runtime = { workspace = true }
+lashlang = { workspace = true }
 lash-postgres-store = { workspace = true }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-restate = { workspace = true }
 anyhow = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
+restate-sdk = { workspace = true }
 sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 clap = { workspace = true, features = ["derive", "env"] }
 serde = { workspace = true, features = ["derive"] }

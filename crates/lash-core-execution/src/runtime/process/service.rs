@@ -169,6 +169,20 @@ pub trait ProcessService: Send + Sync {
         ))
     }
 
+    /// Marks a call's consumer hold `key`, owned by `owner`, abandoned and
+    /// returns the processes it holds that the call owes a cancel,
+    /// controller-free: what an opener that cancelled the call drains (ADR
+    /// 0116 §3.4). A registration under the key is refused from then on. The
+    /// default holds nothing.
+    async fn abandon_consumer_hold(
+        &self,
+        key: &str,
+        owner: &crate::ScopeId,
+    ) -> Result<Vec<ProcessId>, PluginError> {
+        let _ = (key, owner);
+        Ok(Vec::new())
+    }
+
     async fn list_visible(
         &self,
         session_id: &SessionId,

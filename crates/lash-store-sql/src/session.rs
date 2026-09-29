@@ -9,6 +9,9 @@
 //! each named only by the backend that has it, and every head statement is
 //! backend-only by construction rather than by choice.
 
+pub mod capture_frames;
+pub mod capture_turns;
+pub mod capture_writers;
 pub mod checkpoint_blob_refs;
 pub mod deleted_sessions;
 pub mod fleet_format;
@@ -20,6 +23,7 @@ pub mod meta_pending_observer_intents;
 pub mod node_anchors;
 pub mod release_stamp;
 pub mod sessions;
+pub mod stopped_partials;
 pub mod turn_commits;
 pub mod usage_delta_holes;
 pub mod usage_deltas;

@@ -135,7 +135,6 @@ fn tool_child() -> EffectGroupChildRequest {
             loser_disposition: LoserPolicy::RunToCompletion,
             replay_keys: vec![envelope.invocation.replay_key().to_string()],
             wait_scope: scope,
-            membership: vec![serde_json::to_string(&envelope).expect("encode the member")],
             opener: lash_core::AdmittedScope::turn("session", "turn"),
         },
         position: 0,

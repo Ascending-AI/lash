@@ -30,6 +30,7 @@ impl RemoteTurnReport {
             // duplicate remote execution-result payload.
             failure_evidence: _,
             errors,
+            stopped_partial,
         } = turn;
         let activities = activities.into_iter().collect::<Vec<_>>();
         let outcome = RemoteTurnOutcome::from(outcome);
@@ -50,6 +51,7 @@ impl RemoteTurnReport {
             issues: errors.into_iter().map(Into::into).collect(),
             activities,
             metadata: HashMap::new(),
+            stopped_partial,
         }
     }
 }

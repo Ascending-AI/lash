@@ -760,7 +760,7 @@ where
         group.validate_execution_scope(opener.scope())?;
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);
-        let shape = EffectGroupShape::from_group(&group, opener)?;
+        let (shape, membership) = EffectGroupShape::from_group(&group, opener)?;
         // The route the dispatch is sent under is data (FIG-3795 S10): the
         // opener declares its own build's lane to the index, which retains
         // it, and the submit below goes to the recorded route the open
@@ -777,6 +777,7 @@ where
             .into_owned();
         let open_request = EffectGroupOpenRequest {
             shape,
+            membership,
             dispatch_route: dispatch_route.clone(),
             content_checked: group.reopen() == lash_core::GroupReopen::RetainedContent,
         };
@@ -1248,7 +1249,7 @@ where
             RestateEffectExecution::DirectProcess {
                 invocation,
                 command,
-            } => execute_restate_process_command(
+            } => match execute_restate_process_command(
                 &self.context,
                 &self.namespace,
                 &self.authority_id,
@@ -1274,7 +1275,10 @@ where
                 },
             )
             .await
-            .map(|result| RuntimeEffectOutcome::Process { result }),
+            {
+                Ok(result) => Ok(RuntimeEffectOutcome::Process { result }),
+                Err(error) => Err(self.group_child_process_failure(error).await),
+            },
             RestateEffectExecution::DurableProcessCommand {
                 invocation,
                 command,
@@ -1285,26 +1289,31 @@ where
                         command: command.clone(),
                     },
                 );
-                self.record_eager_effect(
-                    &envelope,
-                    Box::pin(async move {
-                        execute_restate_process_command(
-                            &self.context,
-                            &self.namespace,
-                            &self.authority_id,
-                            self.build_generation.as_ref(),
-                            self.options.process_cancel,
-                            &invocation,
-                            *command,
-                            local_executor,
-                            |_| {},
-                            |_, _| {},
-                        )
-                        .await
-                        .map(|result| RuntimeEffectOutcome::Process { result })
-                    }),
-                )
-                .await
+                let recorded = self
+                    .record_eager_effect(
+                        &envelope,
+                        Box::pin(async move {
+                            execute_restate_process_command(
+                                &self.context,
+                                &self.namespace,
+                                &self.authority_id,
+                                self.build_generation.as_ref(),
+                                self.options.process_cancel,
+                                &invocation,
+                                *command,
+                                local_executor,
+                                |_| {},
+                                |_, _| {},
+                            )
+                            .await
+                            .map(|result| RuntimeEffectOutcome::Process { result })
+                        }),
+                    )
+                    .await;
+                match recorded {
+                    Err(error) => Err(self.group_child_process_failure(error).await),
+                    recorded => recorded,
+                }
             }
             RestateEffectExecution::DirectLocal { envelope } => {
                 local_executor.execute(envelope).await

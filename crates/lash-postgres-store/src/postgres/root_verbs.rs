@@ -181,6 +181,7 @@ pub(crate) async fn open_root_intent_tx(
             cause,
             head_revision: revision.map(|revision| revision as u64),
             at_ms,
+            stopped_partial: None,
         },
     )
     .await?;

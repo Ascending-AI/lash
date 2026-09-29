@@ -100,6 +100,7 @@ pub use lash_core_execution::runtime::turn_control;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_execution::runtime::turn_control;
 mod turn_driver;
+pub use turn_driver::deployment_turn_tool_capture;
 mod turn_observer;
 use lash_core_store::turn_failure_evidence;
 use turn_observer::{Observation, TurnObserver};

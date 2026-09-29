@@ -104,7 +104,7 @@ pub(crate) fn root_terminal_conn(
     let (Some(kind), Some(cause_json), Some(at_ms)) = (kind, cause_json, at_ms) else {
         return Ok(None);
     };
-    RootTerminal::from_stored(
+    let mut terminal = RootTerminal::from_stored(
         session_id.clone(),
         root.clone(),
         &kind,
@@ -113,8 +113,9 @@ pub(crate) fn root_terminal_conn(
             .map(|revision| stored_u64("RootTerminal", revision))
             .transpose()?,
         stored_u64("RootTerminal", at_ms)?,
-    )
-    .map(Some)
+    )?;
+    terminal.stopped_partial = crate::capture::committed_root_summary_conn(conn, session_id, root)?;
+    Ok(Some(terminal))
 }
 
 /// Write `terminal` in the caller's transaction, deciding it against the
@@ -134,6 +135,36 @@ pub(crate) fn write_root_terminal_conn(
         == RootTerminalWriteDecision::AlreadyWritten
     {
         return release_root_rows_conn(tx, &terminal.session_id, &terminal.root);
+    }
+    let reason = match &terminal.cause {
+        RootTerminalCause::Committed { .. } | RootTerminalCause::SessionDeleted { .. } => None,
+        RootTerminalCause::SubstrateLost {
+            cancelled_by: Some(_),
+        } => Some(lash_sansio::StopReason::UserCancel),
+        RootTerminalCause::SubstrateLost { cancelled_by: None } => {
+            Some(lash_sansio::StopReason::ProcessLoss)
+        }
+        RootTerminalCause::OperatorCancelled { .. } | RootTerminalCause::Forked { .. } => {
+            Some(lash_sansio::StopReason::Other {
+                cause: lash_sansio::OtherStopCause::OperatorCancellation,
+            })
+        }
+        // The run's own typed refusal ended the root without a turn commit
+        // (FIG-4018): a partial the stopped turn already sealed commits with
+        // the terminal, and otherwise the refusal seals what the turn staged.
+        RootTerminalCause::Refused { .. } => Some(lash_sansio::StopReason::Other {
+            cause: lash_sansio::OtherStopCause::RuntimeFailure,
+        }),
+    };
+    if let Some(reason) = reason {
+        crate::capture::seal_root_terminal_capture_conn(
+            tx,
+            &terminal.session_id,
+            &terminal.root,
+            reason,
+            terminal.at_ms,
+            matches!(terminal.cause, RootTerminalCause::SubstrateLost { .. }),
+        )?;
     }
     let sql = session_roots_sql();
     crate::conn::cached_execute(
@@ -378,6 +409,7 @@ fn end_unanswered_root_conn(
         cause,
         head_revision: None,
         at_ms,
+        stopped_partial: None,
     };
     crate::conn::cached_execute(
         tx,
@@ -422,9 +454,10 @@ fn end_unanswered_root_conn(
     }
     // The terminal write applies the root's cancel request's `undelivered`
     // disposition to open input addressed to a turn the root ends
-    // (FIG-3927 §2.4, FIG-3946).
+    // (FIG-3927 §2.4, FIG-3946), and seals the root's stopped partial
+    // (ADR 0114 §4.4); the reread carries the partial's summary.
     write_root_terminal_conn(tx, &terminal)?;
-    Ok(Some(terminal))
+    root_terminal_conn(tx, session, root)
 }
 
 /// Decode a root's recorded admission (`session_roots.admission_json`).
@@ -917,6 +950,7 @@ pub(crate) fn begin_session_close_conn(
                     cause: RootTerminalCause::SessionDeleted { intent: intent.id },
                     head_revision: None,
                     at_ms,
+                    stopped_partial: None,
                 },
             )?;
         }

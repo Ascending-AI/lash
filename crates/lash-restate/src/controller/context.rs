@@ -1438,7 +1438,7 @@ macro_rules! impl_restate_controller_context {
                             restate_sdk::context::RequestTarget::workflow(
                                 route, group_key, "preflight",
                             ),
-                            crate::Call::new(children),
+                            crate::Call::journaled(children),
                         )
                         .call();
                     Box::pin(async move { call.await.map(Reply::into_body) })
@@ -1477,7 +1477,7 @@ macro_rules! impl_restate_controller_context {
                                 request.group_key.clone(),
                                 "run",
                             ),
-                            crate::Call::new(request),
+                            crate::Call::journaled(request),
                         )
                         .send();
                     Box::pin(async move {

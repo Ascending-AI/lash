@@ -19,7 +19,7 @@
 crates/lash-core/src/runtime/turn_driver/streaming.rs  |  futures_util::select_biased! {  |  1  # RECORDED winner of a race inside the recorded LlmCall step body is the journaled step outcome
 crates/lash-core/src/runtime/turn_driver/streaming.rs  |  let (llm_stream_tx, mut llm_stream_rx) = crate::session_model::llm_stream_channel();  |  1  # RECORDED provider stream channel of the recorded LlmCall step body
 crates/lash-core/src/runtime/turn_driver/streaming.rs  |  let mut llm_task = crate::task::spawn(async move {  |  1  # RECORDED provider task spawned inside the recorded LlmCall step body
-crates/lash-core/src/runtime/turn_driver/streaming.rs  |  llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,  |  2  # RECORDED stream receiver of the recorded LlmCall step body
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,  |  3  # RECORDED stream receiver of the recorded LlmCall step body
 crates/lash-core/src/runtime/turn_driver/streaming.rs  |  llm_task: &mut crate::task::JoinHandle<T>,  |  1  # RECORDED provider task handle of the recorded LlmCall step body
 crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  ) -> DrivePollOutcome<Result<T, crate::task::JoinError>> {  |  1  # RECORDED source poll of the recorded LlmCall step body
 crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  futures_util::select_biased! {  |  1  # RECORDED winner of a race inside the recorded LlmCall step body is the journaled step outcome

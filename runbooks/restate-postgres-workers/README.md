@@ -93,7 +93,11 @@ The faults cover the commit/ack window:
 - **Loss after commit.** In `e2e-tool-batch-failover`, the `slow` call exits its
   worker once, after the receiver commits and before the reply is recorded or
   the tool returns. Restate must re-enter the closure, and the retry must find
-  the first commit.
+  the first commit. The exit waits until Restate's journal shows the batch's
+  other member, `fast`, completed its attempt: the two children may share the
+  worker, and an attempt cut between its side effect and its journaled
+  outcome runs again by design, so without the wait `fast` recorded two side
+  effects whenever the loss landed in that window.
 - **Replay over completed effects.** The same workflow's `crash_once` now runs
   after `Promise.all` settles, so the replay runs over effects that already
   completed. The existing one-side-effect-per-key and one-provider-call counts

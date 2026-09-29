@@ -337,6 +337,54 @@ CREATE INDEX IF NOT EXISTS idx_runtime_turn_commits_failure_evidence
     ON runtime_turn_commits(session_id, committed_at_ms, turn_id)
     WHERE failure_evidence;
 
+CREATE TABLE IF NOT EXISTS turn_capture_turns (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    base INTEGER NOT NULL DEFAULT 0 CHECK (base >= 0),
+    next_sequence INTEGER NOT NULL DEFAULT 1 CHECK (next_sequence >= 1),
+    recovered INTEGER NOT NULL DEFAULT 0 CHECK (recovered IN (0, 1)),
+    PRIMARY KEY (session_id, turn_id)
+);
+CREATE TABLE IF NOT EXISTS turn_capture_writers (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    invocation TEXT NOT NULL,
+    attempt_epoch INTEGER NOT NULL CHECK (attempt_epoch >= 0),
+    state TEXT NOT NULL CHECK (state IN ('live', 'retracted', 'fenced')),
+    PRIMARY KEY (session_id, turn_id, invocation, attempt_epoch)
+);
+CREATE TABLE IF NOT EXISTS turn_capture_frames (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence >= 1),
+    base INTEGER NOT NULL CHECK (base >= 0),
+    invocation TEXT NOT NULL,
+    attempt_epoch INTEGER NOT NULL CHECK (attempt_epoch >= 0),
+    batch_ordinal INTEGER NOT NULL CHECK (batch_ordinal >= 0),
+    frame_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, turn_id, sequence),
+    UNIQUE (session_id, turn_id, invocation, attempt_epoch, batch_ordinal, sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_turn_capture_frames_batch ON turn_capture_frames
+    (session_id, turn_id, invocation, attempt_epoch, batch_ordinal);
+CREATE TABLE IF NOT EXISTS stopped_partials (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    base INTEGER NOT NULL CHECK (base >= 0),
+    sealed_through INTEGER NOT NULL CHECK (sealed_through >= 0),
+    reason TEXT NOT NULL,
+    recovered INTEGER NOT NULL CHECK (recovered IN (0, 1)),
+    digest TEXT NOT NULL,
+    partial_json TEXT NOT NULL,
+    body_bytes INTEGER NOT NULL CHECK (body_bytes >= 0),
+    sealed_at_ms INTEGER NOT NULL,
+    committed_at_ms INTEGER,
+    PRIMARY KEY (session_id, turn_id),
+    UNIQUE (session_id, root)
+);
+
 CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     session_id TEXT NOT NULL,
     turn_id    TEXT NOT NULL,
@@ -1074,7 +1122,9 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// Version 99 also lets tool-intent submissions record process-definition
 /// and trigger registration (FIG-4057, changed in place under the version
 /// freeze): a catalog whose kind CHECK predates them rejects both kinds, so
-/// recreate it.
+/// recreate it. It also holds the turn capture tables and sealed stopped
+/// partials (ADR 0114, FIG-433, changed in place): a catalog without them
+/// fails its first capture query, so recreate it.
 const BASE_SCHEMA_VERSION: i32 = 99;
 #[cfg(not(feature = "synthetic-next"))]
 pub(crate) const SCHEMA_VERSION: i32 = BASE_SCHEMA_VERSION;
@@ -1132,6 +1182,7 @@ CREATE TABLE IF NOT EXISTS processes (
     consumer_hold_key     TEXT,
     consumer_hold_scope_kind TEXT,
     consumer_hold_scope_id TEXT,
+    consumer_hold_cancels INTEGER,
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
     CONSTRAINT ck_processes_start_obligation CHECK ((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_processes_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
@@ -1399,6 +1450,18 @@ CREATE INDEX IF NOT EXISTS idx_parent_end_plans_obligation_stalled
     ON parent_end_plans(obligation_id)
     WHERE obligation_state = 'stalled';
 
+-- The consumer holds whose call was abandoned before it consumed its child
+-- (ADR 0116 §3.4): a registration under a marked key is refused, and the
+-- owning scope's close forgets the marks.
+CREATE TABLE IF NOT EXISTS abandoned_consumer_holds (
+    hold_key         TEXT PRIMARY KEY,
+    owner_scope_kind TEXT NOT NULL,
+    owner_scope_id   TEXT NOT NULL,
+    abandoned_at_ms  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_abandoned_consumer_holds_owner
+    ON abandoned_consumer_holds(owner_scope_kind, owner_scope_id);
+
 CREATE TABLE IF NOT EXISTS tool_intent_submissions (
     replay_key          TEXT PRIMARY KEY,
     session_id          TEXT NOT NULL,
@@ -1543,9 +1606,13 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 /// Version 44 also carries consumer holds (ADR 0116 §3.6, changed in place
 /// under the same freeze): `processes` gains `consumer_hold_key` and the
 /// owning scope's `consumer_hold_scope_kind` and `consumer_hold_scope_id`,
-/// set together or not at all, and indexed by owner. A held row is never
+/// set together or not at all, and indexed by owner, with
+/// `consumer_hold_cancels` saying whether the holding call owes the process a
+/// cancel when it is abandoned. A held row is never
 /// pruned. A registry written before the change lacks the columns; recreate
-/// it.
+/// it. `abandoned_consumer_holds` marks the holds whose call was abandoned,
+/// so a registration under one is refused; a registry written before it
+/// lacks the table until it is next opened, which creates it empty.
 const BASE_PROCESS_SCHEMA_VERSION: i32 = 44;
 #[cfg(not(feature = "synthetic-next"))]
 pub(crate) const PROCESS_SCHEMA_VERSION: i32 = BASE_PROCESS_SCHEMA_VERSION;
@@ -1746,7 +1813,12 @@ fn apply_versioned_schema_tx_with_writable(
             #[cfg(feature = "synthetic-next")]
             {
                 let written_version = lash_core_execution::compat::descriptor(database.component())
-                    .expect("SQLite component has a descriptor")
+                    .ok_or_else(|| {
+                        crate::compat::malformed(
+                            database,
+                            "the build has no descriptor for this database",
+                        )
+                    })?
                     .writes
                     .max();
                 tx.execute(

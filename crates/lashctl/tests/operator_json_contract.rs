@@ -209,9 +209,11 @@ async fn operator_json_contract_postgres() {
             "live_processes",
             "parked_processes",
             "parked_turns",
+            "stalled",
             "stalled_obligations",
         ],
     );
+    assert_eq!(before["result"]["stalled"], json!([]));
 
     let (code, marked) = run(&["drain", generation, "--json"], Some(&scratch_url));
     assert_eq!(code, 0);

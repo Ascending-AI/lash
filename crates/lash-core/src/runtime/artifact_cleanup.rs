@@ -325,7 +325,7 @@ impl ArtifactCleanupRelay {
             .end_module_referrer(&ResolvedArtifactCleanup::for_store(
                 referrer,
                 carries,
-                &ArtifactStoreId::LashlangModule,
+                &ArtifactStoreId::module(),
             ))
             .await
             .map_err(store_failure("module store"))?;
@@ -359,6 +359,9 @@ fn store_failure(context: &'static str) -> impl Fn(ArtifactStoreError) -> Delive
     move |error| match error {
         ArtifactStoreError::CarryArtifactMissing { .. } => {
             DeliveryFailure::Refused(format!("{context}: {error}"))
+        }
+        ArtifactStoreError::Incompatible { .. } | ArtifactStoreError::StoredDataCorrupt { .. } => {
+            DeliveryFailure::Undecodable(format!("{context}: {error}"))
         }
         other => DeliveryFailure::Retryable(format!("{context}: {other}")),
     }

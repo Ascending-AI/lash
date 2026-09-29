@@ -388,6 +388,7 @@ pub enum RuntimeErrorCode {
     ToolCompletionKeyMissingCallId,
     ToolDeferralNotDeclared,
     TransientCancelWatch,
+    TransientCaptureWrite,
     TransientTerminalPublication,
     TurnCancelGateDecode,
     TurnCancelGateEncode,
@@ -727,6 +728,7 @@ impl RuntimeErrorCode {
             Self::ToolCompletionKeyMissingCallId => "tool_completion_key_missing_call_id",
             Self::ToolDeferralNotDeclared => "tool_deferral_not_declared",
             Self::TransientCancelWatch => "transient_cancel_watch",
+            Self::TransientCaptureWrite => "transient_capture_write",
             Self::TransientTerminalPublication => "transient_terminal_publication",
             Self::TurnCancelGateDecode => "turn_cancel_gate_decode",
             Self::TurnCancelGateEncode => "turn_cancel_gate_encode",
@@ -941,6 +943,7 @@ impl RuntimeErrorCode {
         Self::ToolCompletionKeyMissingCallId,
         Self::ToolDeferralNotDeclared,
         Self::TransientCancelWatch,
+        Self::TransientCaptureWrite,
         Self::TransientTerminalPublication,
         Self::TurnCancelGateDecode,
         Self::TurnCancelGateEncode,
@@ -1157,6 +1160,7 @@ impl RuntimeErrorCode {
             "tool_completion_key_missing_call_id" => Self::ToolCompletionKeyMissingCallId,
             "tool_deferral_not_declared" => Self::ToolDeferralNotDeclared,
             "transient_cancel_watch" => Self::TransientCancelWatch,
+            "transient_capture_write" => Self::TransientCaptureWrite,
             "transient_terminal_publication" => Self::TransientTerminalPublication,
             "turn_cancel_gate_decode" => Self::TurnCancelGateDecode,
             "turn_cancel_gate_encode" => Self::TurnCancelGateEncode,
@@ -1643,6 +1647,15 @@ impl RuntimeEffectControllerError {
             .retryable_uncommitted_derivation()
     }
 
+    /// A step whose turn capture could not persist a batch (ADR 0114 §4.1):
+    /// publication stopped, and the attempt ends with this live fault instead
+    /// of a recorded outcome, never a stop or an empty partial. It is never
+    /// journaled — the engine runs the step again.
+    pub fn turn_capture_write_failed(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::TransientCaptureWrite, message)
+            .retryable_uncommitted_derivation()
+    }
+
     /// Only the host derivations — the before-LLM-call and assistant-response hooks,
     /// execution-environment sync, execution-environment load, and presentation
     /// whose recorded renderer is unavailable — and a
@@ -1670,8 +1683,10 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::CloseRootScope
                 | RuntimeEffectKind::BeginSessionClose
                 | RuntimeEffectKind::Process
-        ) || self.code == RuntimeErrorCode::TransientCancelWatch
-        {
+        ) || matches!(
+            self.code,
+            RuntimeErrorCode::TransientCancelWatch | RuntimeErrorCode::TransientCaptureWrite
+        ) {
             self.journal_disposition
         } else {
             EffectErrorJournalDisposition::Terminal

@@ -648,14 +648,11 @@ impl RestateTestBackend {
         let call = ingress.call_workflow_json::<_, bool>(&handler_host, &key, "run", &key);
         // A job whose handler exhausted its retries is paused, not failed:
         // report it at once instead of waiting out the attach ceiling.
-        let target = format!("{handler_host}/{key}/run");
         let paused = async {
             loop {
-                if let Some(view) = self
-                    .server
-                    .invocations()
-                    .into_iter()
-                    .find(|view| view.target == target && view.status == "paused")
+                if let Some(view) =
+                    self.server
+                        .find_invocation(&handler_host, &key, "run", "paused")
                 {
                     return view;
                 }

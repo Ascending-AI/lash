@@ -14,7 +14,7 @@ mod hash_writer;
 use hash_writer::HashWriter;
 #[path = "artifact_identity.rs"]
 mod identity;
-use identity::{IR_ATOM, module_ref};
+use identity::{IR_ATOM, module_ref, module_ref_for_family};
 #[path = "artifact_requirements.rs"]
 mod requirements;
 #[path = "artifact_write_helpers.rs"]
@@ -35,6 +35,35 @@ use crate::linker::{
 
 pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The JSON module envelope written by the 1.0 binary.
+#[cfg(not(feature = "synthetic-next"))]
+pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 1;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the envelope encoding to 2.
+/// Its shape is 1's. The module encoder never sees the fleet epoch, so N+1
+/// writes N's encoding, as `F` pinned at N's epoch would have it write, and
+/// every module it publishes before finalize is one N verifies after a
+/// rollback.
+#[cfg(feature = "synthetic-next")]
+pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 2;
+
+/// The envelope encoding this build writes: its own, and for the synthetic
+/// N+1 N's, one back.
+pub(crate) const fn written_envelope_encoding() -> u32 {
+    if cfg!(feature = "synthetic-next") {
+        MODULE_ARTIFACT_ENVELOPE_VERSION - 1
+    } else {
+        MODULE_ARTIFACT_ENVELOPE_VERSION
+    }
+}
+
+/// Whether this build reads envelope `encoding`: its own, and for the
+/// synthetic N+1 also N's, one back.
+const fn envelope_encoding_admitted(encoding: u64) -> bool {
+    encoding == MODULE_ARTIFACT_ENVELOPE_VERSION as u64
+        || (cfg!(feature = "synthetic-next")
+            && encoding + 1 == MODULE_ARTIFACT_ENVELOPE_VERSION as u64)
+}
 /// v11: `ResourceOperationBatch` carries the aggregate's consumer mode, timer
 /// leaves and the immediate-prefix boundary, and its result is the response
 /// algebra of ADR 0099 §10 L2 instead of a settlement order.
@@ -167,12 +196,28 @@ pub struct ModuleArtifact {
 
 /// The stored shape of a [`ModuleArtifact`], decoded only to be verified.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StoredModuleArtifact {
     module_ref: ModuleRef,
     host_requirements_ref: HostRequirementsRef,
     host_requirements: HostRequirements,
     exports: ModuleExports,
     ir: Program,
+}
+
+#[derive(Serialize)]
+struct ModuleArtifactEnvelope<'a> {
+    family: &'static str,
+    encoding: u32,
+    artifact: &'a ModuleArtifact,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredModuleArtifactEnvelope {
+    family: String,
+    encoding: u32,
+    artifact: StoredModuleArtifact,
 }
 
 impl ModuleArtifact {
@@ -313,12 +358,16 @@ impl ModuleArtifact {
     /// artifact, so a decode never deep-copies the program only to hash it
     /// (FIG-3088). Only the store decoder needs it: every other artifact was
     /// built by a validating builder.
-    fn verify(&self) -> Result<(), ModuleArtifactError> {
+    fn verify(&self, family: &str) -> Result<(), ModuleArtifactError> {
         Self::check_ir(&self.ir)?;
         let derived_host_requirements_ref = hash_host_requirements(&self.host_requirements);
         let derived_exports = module_exports(&self.ir);
-        let derived_module_ref =
-            module_ref(&self.ir, &derived_host_requirements_ref, &derived_exports);
+        let derived_module_ref = module_ref_for_family(
+            family,
+            &self.ir,
+            &derived_host_requirements_ref,
+            &derived_exports,
+        );
         if derived_module_ref != self.module_ref {
             return Err(ModuleArtifactError::HashMismatch {
                 field: "module_ref",
@@ -344,24 +393,57 @@ impl ModuleArtifact {
     }
 
     pub fn to_store_bytes(&self) -> Result<Vec<u8>, ModuleArtifactError> {
-        serde_json::to_vec(self).map_err(|err| ModuleArtifactError::Codec(err.to_string()))
+        serde_json::to_vec(&ModuleArtifactEnvelope {
+            family: LASHLANG_SEMANTIC_HASH_VERSION,
+            encoding: written_envelope_encoding(),
+            artifact: self,
+        })
+        .map_err(|err| ModuleArtifactError::Codec(err.to_string()))
     }
 
     pub fn from_store_bytes(bytes: &[u8]) -> Result<Self, ModuleArtifactError> {
         let raw: serde_json::Value = serde_json::from_slice(bytes)
             .map_err(|err| ModuleArtifactError::Codec(err.to_string()))?;
-        reject_future_shape(&raw)?;
-        let stored: StoredModuleArtifact = serde_json::from_slice(bytes).map_err(|err| {
-            let message = err.to_string();
-            if message.contains("unknown variant") {
-                ModuleArtifactError::FutureShape {
-                    field: "artifact shape",
-                    value: "nested enum variant".to_string(),
+        if let (Some(family), Some(encoding)) = (raw.get("family"), raw.get("encoding"))
+            && (family.as_str() != Some(LASHLANG_SEMANTIC_HASH_VERSION)
+                || !encoding.as_u64().is_some_and(envelope_encoding_admitted))
+        {
+            return Err(ModuleArtifactError::UnsupportedFamily {
+                family: family
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| family.to_string()),
+                encoding: encoding.to_string(),
+            });
+        }
+        let artifact_raw = raw.get("artifact").unwrap_or(&raw);
+        reject_future_shape(artifact_raw)?;
+        let envelope: StoredModuleArtifactEnvelope =
+            serde_json::from_slice(bytes).map_err(|err| {
+                let message = err.to_string();
+                if message.contains("unknown variant") {
+                    ModuleArtifactError::FutureShape {
+                        field: "artifact shape",
+                        value: "nested enum variant".to_string(),
+                    }
+                } else if message.contains("unknown field") {
+                    ModuleArtifactError::FutureShape {
+                        field: "artifact shape",
+                        value: "unknown field".to_string(),
+                    }
+                } else {
+                    ModuleArtifactError::Codec(message)
                 }
-            } else {
-                ModuleArtifactError::Codec(message)
-            }
-        })?;
+            })?;
+        if envelope.family != LASHLANG_SEMANTIC_HASH_VERSION
+            || !envelope_encoding_admitted(u64::from(envelope.encoding))
+        {
+            return Err(ModuleArtifactError::UnsupportedFamily {
+                family: envelope.family,
+                encoding: envelope.encoding.to_string(),
+            });
+        }
+        let stored = envelope.artifact;
         let artifact = Self {
             module_ref: stored.module_ref,
             host_requirements_ref: stored.host_requirements_ref,
@@ -369,7 +451,7 @@ impl ModuleArtifact {
             exports: stored.exports,
             ir: stored.ir,
         };
-        artifact.verify()?;
+        artifact.verify(&envelope.family)?;
         Ok(artifact)
     }
 }
@@ -500,6 +582,10 @@ pub enum ModuleArtifactError {
          recompile and republish the module"
     )]
     FutureShape { field: &'static str, value: String },
+    #[error(
+        "module artifact family `{family}` or encoding {encoding} is unsupported; use a build that supports it"
+    )]
+    UnsupportedFamily { family: String, encoding: String },
     #[error("module artifact {field} mismatch: expected {expected}, got {actual}")]
     HashMismatch {
         field: &'static str,
@@ -522,6 +608,7 @@ impl From<ModuleArtifactError> for ArtifactStoreError {
             }
             ModuleArtifactError::Codec(message) => Self::Decode(message),
             ModuleArtifactError::FutureShape { .. } => Self::Decode(value.to_string()),
+            ModuleArtifactError::UnsupportedFamily { .. } => Self::Decode(value.to_string()),
             ModuleArtifactError::RetiredCompilationDialect => Self::Decode(value.to_string()),
             ModuleArtifactError::HashMismatch { .. } => Self::Decode(value.to_string()),
         }

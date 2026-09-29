@@ -1,11 +1,42 @@
 //! Named backend test registration. Every generated test owns a fresh fixture.
 
+mod declared_start;
 mod generation_drain;
 mod obligation_relay;
 mod session_ingress;
 mod tool_child;
 mod turn_crash;
 mod turn_ingress;
+
+/// Register the same capture laws on every durable store backend.
+#[macro_export]
+macro_rules! turn_capture_tests {
+    ($fixture:block) => {
+        $crate::turn_capture_tests!(@catalogue $fixture; [
+            (capture_batch_replay_and_conflict, "batch"),
+            (capture_empty_batch_is_refused, "empty-batch"),
+            (capture_reset_fences_old_epoch, "reset"),
+            (capture_successor_resets_inherited_epoch, "inherited-reset"),
+            (capture_base_advance_removes_old_tail, "base"),
+            (capture_seal_is_first_writer_wins, "seal"),
+            (capture_commit_publishes_exact_partial, "commit"),
+            (capture_retention_waits_for_deletion, "retention"),
+            (capture_deletion_reclaims_staging_frames, "deletion"),
+            (capture_lost_root_seals_the_acknowledged_prefix, "lost-root"),
+            (capture_a_later_root_adopts_the_turn, "adopted-turn"),
+            (capture_a_superseded_execution_seals_nothing, "superseded-seal"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, factory) = $fixture;
+                $crate::$law(factory, $label).await;
+            }
+        )*
+    };
+}
 
 /// Expansion machinery for the runtime-persistence registration macros.
 #[macro_export]
@@ -359,6 +390,7 @@ macro_rules! process_registry_tests {
                 (a_terminal_write_arms_its_publication_once, "process-terminal-publication"),
                 (a_session_scope_closes_only_through_its_close_row, "session-scope-close"),
                 (a_turn_scope_ends_through_its_recorded_ledger_row, "turn-parent-end"),
+                (an_abandoned_consumer_hold_fences_registration, "abandoned-consumer-hold"),
                 (scopes_that_collide_in_rendering_share_no_ledger_key, "colliding-scope-keys"),
                 (an_unrecorded_turn_parent_is_reported_until_its_row_is_written, "unrecorded-turn-parents"),
                 (a_session_close_reaps_the_turn_scopes_that_never_became_roots, "never-root-turn-scopes"),

@@ -732,6 +732,7 @@ impl SessionCommitStore for SqliteStore {
                         .map_err(sqlite_error)?;
                     }
                     crate::session_roots::write_commit_root_terminal_conn(tx, commit, plan.next_head_revision(), now)?;
+                    crate::capture::commit_capture_conn(tx, commit, now)?;
                     let mut result = plan.result(
                         stored_checkpoint.checkpoint_ref,
                         stored_checkpoint.manifest,

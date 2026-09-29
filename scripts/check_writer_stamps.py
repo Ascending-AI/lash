@@ -106,6 +106,12 @@ EXEMPTIONS: list[tuple[str, str, str]] = [
 # `#[cfg(...test...)]` decorating any item body: mod, fn, impl.
 TEST_ATTRIBUTE = re.compile(r"#\[cfg\([^]]*\btest\b[^]]*\)\]")
 
+# These tables describe the fleet's compatibility policy. Their version
+# fields are inputs to writer_version, never stamps on stored records.
+FLEET_POLICY_TABLE = re.compile(
+    r"\b(?:pub\s+)?const\s+(?:RECORD_UPCASTERS|WRITER_PINS)\s*:[^\n]*=\s*&\["
+)
+
 # A constant used in initialiser position: `version: CONST`,
 # `schema_version: CONST`, `"version": CONST`, `version: path::to::CONST`.
 def stamp_pattern(constant: str) -> re.Pattern[str]:
@@ -145,6 +151,13 @@ def test_item_ranges(text: str) -> list[tuple[int, int]]:
     return ranges
 
 
+def fleet_policy_ranges(text: str) -> list[tuple[int, int]]:
+    return [
+        (match.start(), text.find("];", match.end()) + 2)
+        for match in FLEET_POLICY_TABLE.finditer(text)
+    ]
+
+
 def exempt(path: str, constant: str) -> str | None:
     for suffix, exempt_constant, reason in EXEMPTIONS:
         if exempt_constant not in ("*", constant):
@@ -170,6 +183,8 @@ def check(repo: Path, constants: list[str]) -> list[str]:
                 continue
             text = path.read_text(encoding="utf-8", errors="surrogateescape")
             skipped = test_item_ranges(text)
+            if relative == "crates/lash-core-store/src/store/fleet_format.rs":
+                skipped.extend(fleet_policy_ranges(text))
             for constant, pattern in patterns.items():
                 for match in pattern.finditer(text):
                     if any(start <= match.start() < end for start, end in skipped):

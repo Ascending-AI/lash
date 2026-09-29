@@ -116,12 +116,21 @@ async fn is_fenced_tx(
 fn decode_edge_referrer(row: &PgRow) -> Result<ArtifactReferrer, ArtifactStoreError> {
     let kind: String = row.try_get("referrer_kind").map_err(backend)?;
     let id: String = row.try_get("referrer_id").map_err(backend)?;
-    ArtifactReferrer::decode(&kind, &id).map_err(|error| {
-        StoreError::StoredDataCorrupt {
-            record_kind: "artifact_referrer_edge",
-            message: error.to_string(),
+    ArtifactReferrer::decode(&kind, &id).map_err(|error| match error {
+        lash_core_execution::ArtifactReferrerError::UnknownKind(label) => {
+            StoreError::Incompatible {
+                refusal: lash_core_execution::compat::CompatRefusal::UnknownVocabulary {
+                    surface: "artifact referrer edge kind".to_owned(),
+                    label,
+                },
+            }
+            .into()
         }
-        .into()
+        other => StoreError::StoredDataCorrupt {
+            record_kind: "artifact_referrer_edge",
+            message: other.to_string(),
+        }
+        .into(),
     })
 }
 

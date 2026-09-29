@@ -2273,6 +2273,9 @@ mod conformance {
                             json!({ "q": "x" }),
                         )
                     }
+                    Scenario::StreamingToolInputEvents => {
+                        return self.wire_for(Scenario::StreamingToolArgumentMerge);
+                    }
                     Scenario::StreamingToolCallAbortEquivalence => {
                         ProviderWire::body(json!({})).with_aborted_tool_call_stream(
                             vec![
@@ -2366,10 +2369,16 @@ mod conformance {
             let route = provider.route_identity("gpt-5.4");
             for raw in sse_events {
                 let mut emitted_parts = Vec::new();
-                let capture_parts = matches!(scenario, Scenario::StreamingToolCallAbortEquivalence)
-                    .then_some(&mut emitted_parts);
+                let capture_parts = matches!(
+                    scenario,
+                    Scenario::StreamingToolCallAbortEquivalence
+                        | Scenario::StreamingToolArgumentMerge
+                        | Scenario::StreamingToolInputEvents
+                )
+                .then_some(&mut emitted_parts);
                 shared::process_sse_event(PROVIDER, raw, &mut state, capture_parts)
                     .expect("responses sse event parses");
+                stream_events.extend(state.take_block_events());
                 for part in &mut emitted_parts {
                     part.stamp_replay_origin(&route)
                         .expect("conformance stream output accepts its minting route");

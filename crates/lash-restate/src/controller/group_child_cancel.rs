@@ -85,6 +85,27 @@ where
         }
     }
 
+    /// A process command's failure, as the bound group child meets it. The
+    /// engine's cancellation of the child's invocation fails the command's
+    /// journaled step with a 409 the command reports as a controller fault;
+    /// the child's journaled cancel fact, peeked as its step boundaries peek
+    /// it, tells that decided cancel apart from any other fault, which is
+    /// returned unchanged. A replay meets the same failure and the same peek.
+    pub(super) async fn group_child_process_failure(
+        &self,
+        error: RuntimeEffectControllerError,
+    ) -> RuntimeEffectControllerError {
+        if self.options.group_child_cancel.is_none()
+            || error.code != RuntimeErrorCode::EngineEffectController
+        {
+            return error;
+        }
+        match self.peek_group_child_cancel().await {
+            Ok(true) => group_child_cancelled(),
+            Ok(false) | Err(_) => error,
+        }
+    }
+
     /// A timer of this controller. One that observes no turn races the bound
     /// child's cancel fact; any other races as the turn-cancel race answers
     /// it. The outer `Err` is the child's typed cancel, whichever way it

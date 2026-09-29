@@ -38,6 +38,9 @@ pub(crate) struct RestateSessionControl {
 #[derive(Default)]
 pub(crate) struct LostRootPass {
     pub(crate) ended: Vec<RootRef>,
+    /// The partials the pass's terminal writes sealed (ADR 0114 §4.4), in
+    /// the order their roots ended.
+    pub(crate) sealed: Vec<(RootRef, lash_sansio::StoppedPartialSummary)>,
     pub(crate) unchanged: usize,
     pub(crate) failed: Vec<(String, String)>,
 }
@@ -128,7 +131,13 @@ pub(crate) async fn end_lost_root_runs(
                 .unwrap_or_default()
                 .as_millis() as u64;
             match sessions.end_lost_root(&target, at_ms).await {
-                Ok(Some(_)) => pass.ended.push(target),
+                Ok(Some(terminal)) => {
+                    if let Some(summary) = terminal.stopped_partial {
+                        announce_stopped_partial(&target, &summary);
+                        pass.sealed.push((target.clone(), summary));
+                    }
+                    pass.ended.push(target);
+                }
                 Ok(None) => pass.unchanged += 1,
                 Err(error) => pass.failed.push((run.id.clone(), error.to_string())),
             }
@@ -138,6 +147,25 @@ pub(crate) async fn end_lost_root_runs(
             return Ok(pass);
         }
     }
+}
+
+/// The lost-root write sealed a partial. The pass reports it, and the core
+/// that runs the pass announces it to the session's hosts through its Live
+/// Replay publisher (ADR 0114 §4.4); a host that misses the announcement
+/// reads the partial by its root (§5.2).
+fn announce_stopped_partial(target: &RootRef, summary: &lash_sansio::StoppedPartialSummary) {
+    tracing::info!(
+        event = "root.stopped_partial_available",
+        session_id = %target.session,
+        root = %target.root,
+        turn = %summary.id.turn_id,
+        sealed_through = summary.id.sealed_through,
+        digest = %summary.digest.to_hex(),
+        reason = ?summary.reason,
+        eligibility = ?summary.eligibility,
+        items = summary.item_count,
+        "a lost root's stopped partial was sealed"
+    );
 }
 
 fn refusal(error: impl std::fmt::Display) -> EngineRefusal {
@@ -554,6 +582,9 @@ impl SessionControlEngine for RestateSessionControl {
         {
             Ok(pass) => {
                 report.ended_roots.extend(pass.ended);
+                report
+                    .sealed_partials
+                    .extend(pass.sealed.into_iter().map(|(_, summary)| summary));
                 report.unchanged += pass.unchanged;
                 report.failed.extend(
                     pass.failed

@@ -19,6 +19,12 @@
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
 version 141
+table lash_abandoned_consumer_holds
+  column abandoned_at_ms bigint not-null
+  column hold_key text not-null
+  column owner_scope_id text not-null
+  column owner_scope_kind text not-null
+  primary-key (hold_key)
 table lash_artifact_cleanup_obligations
   column cleanup_json text not-null
   column obligation_attempts integer not-null default
@@ -272,6 +278,7 @@ table lash_process_wake_deliveries
 table lash_processes
   column cancel_requested_at_ms bigint nullable
   column change_seq bigint not-null
+  column consumer_hold_cancels boolean nullable
   column consumer_hold_key text nullable
   column consumer_hold_scope_id text nullable
   column consumer_hold_scope_kind text nullable
@@ -462,6 +469,21 @@ table lash_sessions
   column pending_follow_on_json text nullable
   column session_id text not-null
   primary-key (session_id)
+table lash_stopped_partials
+  column base bigint not-null
+  column body_bytes bigint not-null
+  column committed_at_ms bigint nullable
+  column digest text not-null
+  column partial_json text not-null
+  column reason text not-null
+  column recovered bigint not-null
+  column root text not-null
+  column sealed_at_ms bigint not-null
+  column sealed_through bigint not-null
+  column session_id text not-null
+  column turn_id text not-null
+  unique (session_id, root)
+  primary-key (session_id, turn_id)
 table lash_tool_intent_submissions
   column execution_scope_id text not-null
   column intent_index bigint not-null
@@ -551,6 +573,32 @@ table lash_turn_cancellation_bindings
   column binding_id text not-null
   column session_id text not-null
   primary-key (session_id)
+table lash_turn_capture_frames
+  column attempt_epoch bigint not-null
+  column base bigint not-null
+  column batch_ordinal bigint not-null
+  column frame_json text not-null
+  column invocation text not-null
+  column sequence bigint not-null
+  column session_id text not-null
+  column turn_id text not-null
+  unique (session_id, turn_id, invocation, attempt_epoch, batch_ordinal, sequence)
+  primary-key (session_id, turn_id, sequence)
+table lash_turn_capture_turns
+  column base bigint not-null default
+  column next_sequence bigint not-null default
+  column recovered bigint not-null default
+  column root text not-null
+  column session_id text not-null
+  column turn_id text not-null
+  primary-key (session_id, turn_id)
+table lash_turn_capture_writers
+  column attempt_epoch bigint not-null
+  column invocation text not-null
+  column session_id text not-null
+  column state text not-null
+  column turn_id text not-null
+  primary-key (session_id, turn_id, invocation, attempt_epoch)
 table lash_turn_park_clock
   column compaction_horizon bigint not-null default
   column current_seq bigint not-null default

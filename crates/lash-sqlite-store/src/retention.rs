@@ -23,6 +23,11 @@ pub(crate) async fn reclaim(
                 session_sql().turn_commits_sqlite.delete_retained.sql(),
                 params![cutoff],
             )?;
+            let removed_stopped_partial_count = crate::conn::cached_execute(
+                tx,
+                crate::capture::retention_delete_sql(),
+                params![cutoff],
+            )?;
             let removed_usage_delta_count =
                 crate::conn::cached_execute(tx, session_sql().usage.delete_reclaimable.sql(), [])?;
             let removed_attachment_root_count = crate::conn::cached_execute(
@@ -35,6 +40,7 @@ pub(crate) async fn reclaim(
             )?;
             Ok(lash_core_execution::store::RetentionReport {
                 removed_receipt_count,
+                removed_stopped_partial_count,
                 removed_usage_delta_count,
                 removed_attachment_root_count,
                 retired_effect_scope_count: 0,

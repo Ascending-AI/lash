@@ -59,7 +59,7 @@ async fn read_drive_epoch(
 /// caller's transaction and row-locked until it ends: a seal in flight is
 /// waited for and its epoch read, and a later seal waits for the write this
 /// check fences (FIG-4044).
-pub(super) async fn require_fence_tx(
+pub(crate) async fn require_fence_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
     fence: &DriveFence,

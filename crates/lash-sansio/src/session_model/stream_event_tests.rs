@@ -52,6 +52,7 @@ stream_event_tags! {
     InjectedMessagesCommitted => "injected_messages_committed",
     PluginEvent => "plugin_event",
     TurnOutcome => "turn_outcome",
+    StoppedPartialAvailable => "stopped_partial_available",
     Done => "done",
     Error => "error",
 }
@@ -343,6 +344,48 @@ fn sample_events() -> Vec<(&'static str, SessionStreamEvent, serde_json::Value)>
             json!({
                 "type": "turn_outcome",
                 "outcome": { "finished": { "assistant_message": { "text": "hi" } } },
+            }),
+        ),
+        (
+            "stopped_partial_available",
+            SessionStreamEvent::StoppedPartialAvailable {
+                summary: crate::StoppedPartialSummary {
+                    id: crate::StoppedPartialId {
+                        session_id: crate::SessionId::from("session-1"),
+                        root: crate::TurnId::from("root-1"),
+                        turn_id: crate::TurnId::from("turn-1"),
+                        base: crate::CaptureBase(1),
+                        sealed_through: 7,
+                    },
+                    digest: crate::StoppedPartialDigest([0; 32]),
+                    reason: crate::StopReason::UserCancel,
+                    recovered_after_process_loss: false,
+                    coverage: crate::CaptureCoverage::Complete,
+                    eligibility: crate::ResubmissionEligibility::Empty,
+                    cut_mid_tool_call: false,
+                    tool_outcome_unknown: false,
+                    item_count: 0,
+                },
+            },
+            json!({
+                "type": "stopped_partial_available",
+                "summary": {
+                    "id": {
+                        "session_id": "session-1",
+                        "root": "root-1",
+                        "turn_id": "turn-1",
+                        "base": 1,
+                        "sealed_through": 7,
+                    },
+                    "digest": vec![0u8; 32],
+                    "reason": { "kind": "user_cancel" },
+                    "recovered_after_process_loss": false,
+                    "coverage": "complete",
+                    "eligibility": { "eligibility": "empty" },
+                    "cut_mid_tool_call": false,
+                    "tool_outcome_unknown": false,
+                    "item_count": 0,
+                },
             }),
         ),
         ("done", SessionStreamEvent::Done, json!({ "type": "done" })),

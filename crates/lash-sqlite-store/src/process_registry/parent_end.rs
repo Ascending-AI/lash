@@ -91,6 +91,14 @@ pub(super) fn record_conn(
         params![kind, id],
     )
     .map_err(process_sqlite_error)?;
+    // Its abandoned holds' marks go with it: the ledger row now refuses a
+    // start under the scope.
+    crate::conn::cached_execute(
+        conn,
+        process_sql().abandoned_hold.forget_owned_by.sql(),
+        params![kind, id],
+    )
+    .map_err(process_sqlite_error)?;
     Ok(())
 }
 

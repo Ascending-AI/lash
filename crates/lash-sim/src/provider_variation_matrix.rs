@@ -287,12 +287,13 @@ async fn run_matrix_row(
                 ("content_filter", LlmTerminalReason::ContentFilter),
             ] {
                 let recording = named_recording(&recordings, case);
+                let events = Arc::new(Mutex::new(Vec::new()));
                 let completion = complete_matrix(
                     transport,
                     dialect,
                     row,
                     std::slice::from_ref(recording),
-                    &Arc::new(Mutex::new(Vec::new())),
+                    &events,
                     CompletionMode::Streaming,
                 )
                 .await;
@@ -307,6 +308,7 @@ async fn run_matrix_row(
                 );
                 if case == "tool" {
                     assert_lookup_tool(&completion.parts, dialect, &row.variation);
+                    assert_tool_input_stream(&events.lock_recover(), dialect);
                     assert_declared_replay(
                         &completion.parts,
                         &route,
@@ -1316,6 +1318,9 @@ fn assert_retry_stream_reduction(
             | LlmStreamEvent::ReasoningBlockStart { .. }
             | LlmStreamEvent::ReasoningBlockEnd { .. }
             | LlmStreamEvent::ReasoningDelta { .. }
+            | LlmStreamEvent::ToolInputStart { .. }
+            | LlmStreamEvent::ToolInputDelta { .. }
+            | LlmStreamEvent::ToolInputEnd { .. }
             | LlmStreamEvent::Part(_)
             | LlmStreamEvent::Usage(_)
             | LlmStreamEvent::RetryStatus { .. } => {}
@@ -1329,6 +1334,40 @@ fn assert_retry_stream_reduction(
     assert_eq!(
         accumulated_evidence.provider_usage, completion.provider_usage,
         "{dialect} reset reduction retained stale provider usage"
+    );
+}
+
+fn assert_tool_input_stream(events: &[LlmStreamEvent], dialect: &str) {
+    let mut started = false;
+    let mut ended = false;
+    let mut part_seen = false;
+    for event in events {
+        match event {
+            LlmStreamEvent::ToolInputStart { call } => {
+                assert!(!started, "{dialect} repeated tool input start");
+                assert_eq!(call.ordinal, 0, "{dialect} first tool ordinal");
+                started = true;
+            }
+            LlmStreamEvent::ToolInputDelta { call, text } => {
+                assert!(started && !ended, "{dialect} tool delta outside input");
+                assert_eq!(call.ordinal, 0);
+                assert!(!text.is_empty());
+            }
+            LlmStreamEvent::ToolInputEnd { call, .. } => {
+                assert!(started && !ended, "{dialect} tool end outside input");
+                assert_eq!(call.ordinal, 0);
+                ended = true;
+            }
+            LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. }) => {
+                assert!(ended, "{dialect} tool part preceded its input end");
+                part_seen = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        started && ended && part_seen,
+        "{dialect} omitted tool input events"
     );
 }
 

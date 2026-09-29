@@ -1525,6 +1525,13 @@ fn postgres_statement_name(query: &str) -> &'static str {
         {
             "turn-commit-load"
         }
+        // The commit clears its turn's staged capture as a data-modifying
+        // `WITH` over the sealed-partial read (ADR 0114): one round trip.
+        q if q.starts_with("WITH cleared_frames AS ( DELETE FROM lash_turn_capture_frames")
+            && q.contains("FROM lash_stopped_partials") =>
+        {
+            "capture-clear-partial-read"
+        }
         q if q.starts_with("INSERT INTO lash_blobs") => "blob-insert",
         q if q.starts_with("INSERT INTO lash_checkpoint_blob_refs") => {
             "checkpoint-blob-refs-insert"
@@ -1708,8 +1715,10 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
     let commit_statements = postgres_statement_calls_by_name(storage.pool()).await;
     // The pending follow-on read (ADR 0101 §3, FIG-3542) adds one read to the
     // previous 16-round-trip head commit: the head-write invariant decides
-    // against the locked fact. The commit refuses a session the catalog never
-    // admitted (ADR 0112) with one probe, where it used to insert the meta row.
+    // against the locked fact. Clearing the turn's staged capture and reading
+    // its sealed partial (ADR 0114, FIG-433) adds one more. The commit refuses
+    // a session the catalog never admitted (ADR 0112) with one probe, where it
+    // used to insert the meta row.
     // This fixture does not pass through the testing lease-epoch probe.
     let expected_commit: std::collections::BTreeMap<&'static str, i64> =
         std::collections::BTreeMap::from([
@@ -1730,6 +1739,7 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
             ("head-upsert", 1),
             ("attachment-manifest-commit", 1),
             ("session-meta-touch", 1),
+            ("capture-clear-partial-read", 1),
         ]);
     assert_eq!(
         commit_statements, expected_commit,

@@ -16,6 +16,8 @@ pub struct RetentionBound {
 pub struct RetentionReport {
     /// Terminal-session receipts removed before the host's horizon.
     pub removed_receipt_count: usize,
+    /// Stopped partials of deleted sessions whose receipts passed the horizon.
+    pub removed_stopped_partial_count: usize,
     /// Terminal-session usage rows whose owning receipt no longer exists.
     pub removed_usage_delta_count: usize,
     /// Deleted-owner manifest rows no surviving graph prefix needs.
@@ -30,6 +32,7 @@ pub struct RetentionReport {
 impl super::MaintenanceReport for RetentionReport {
     fn reclaimed_count(&self) -> usize {
         self.removed_receipt_count
+            + self.removed_stopped_partial_count
             + self.removed_usage_delta_count
             + self.removed_attachment_root_count
             + self.retired_effect_scope_count

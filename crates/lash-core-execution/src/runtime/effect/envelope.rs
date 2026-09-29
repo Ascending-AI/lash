@@ -20,6 +20,9 @@ use crate::{
 
 use super::executor::RuntimeEffectControllerError;
 use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
+use super::llm_outcome::{
+    AssistantStreamHookState, CaptureWatermark, LlmStreamRecord, RuntimeLlmCallOutcome,
+};
 use super::tool_settlement::{ToolAttemptCapture, ToolSettlement};
 
 /// Effect-specific header whose address is present by construction.
@@ -1045,6 +1048,9 @@ pub struct ToolAttemptEffectOutcome {
     /// just executed or served by replay (ADR 0099 §6, §13).
     #[serde(default)]
     pub capture: ToolAttemptCapture,
+    /// The attempt's capture watermark (ADR 0114 §4.2); `None` outside a turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_watermark: Option<CaptureWatermark>,
 }
 
 /// What one tool child of a durable effect group settled on, unpacked.
@@ -1075,42 +1081,6 @@ pub enum ToolAttemptLaunch {
         key: Box<crate::AwaitEventKey>,
         pending: crate::PendingCompletion,
     },
-}
-
-/// What phase 1 of a turn's LLM call recorded, decoded for the driver.
-#[derive(Debug)]
-pub struct RuntimeLlmCallOutcome {
-    pub result: Result<LlmResponse, LlmCallError>,
-    pub text_streamed: bool,
-    pub call_record: Option<crate::LlmCallRecord>,
-    pub stream: LlmStreamRecord,
-}
-
-/// What a turn's provider stream left behind that later steps read: recorded
-/// with phase 1's outcome so a replay reads it from the journal, never from
-/// the memory of the worker that streamed.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LlmStreamRecord {
-    /// The reasoning blocks the live stream already published, so the driver
-    /// publishes the completed response's remaining reasoning the same way on
-    /// every replay.
-    pub reasoning_published: Vec<crate::llm::types::StreamBlockIdentity>,
-    /// Each plugin's stream-hook end state, which phase 2's
-    /// [`RuntimeEffectCommand::AssistantResponseHooks`] carries.
-    pub stream_hook_states: Vec<AssistantStreamHookState>,
-}
-
-/// The state one plugin's stream hooks reached when the provider stream
-/// finished (see [`crate::plugin::AssistantStreamFinishedHook`]).
-///
-/// Recorded with phase 1's outcome and handed to the same plugin's
-/// assistant-response hook in phase 2, so the derivation never depends on
-/// which worker streamed the completion.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct AssistantStreamHookState {
-    pub plugin_id: String,
-    pub state: serde_json::Value,
 }
 
 /// Plugin-attributed runtime events emitted by one assistant-response hook.
@@ -1162,6 +1132,8 @@ pub enum RuntimeEffectOutcome {
         call_record: Option<crate::LlmCallRecord>,
         /// What the provider stream left that later steps read.
         stream: Box<LlmStreamRecord>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capture: Option<Box<CaptureWatermark>>,
     },
     /// Phase 2 of the staged LLM-call boundary.
     ///
@@ -1194,6 +1166,8 @@ pub enum RuntimeEffectOutcome {
         /// exactly as they did before this field existed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         capture: Option<Box<ToolAttemptCapture>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capture_watermark: Option<Box<CaptureWatermark>>,
     },
     /// What one tool child of a durable effect group settled on
     /// (ADR 0099 §2, §6, §13).
@@ -1480,11 +1454,13 @@ impl RuntimeEffectOutcome {
                 text_streamed,
                 call_record,
                 stream,
+                capture,
             } => Ok(RuntimeLlmCallOutcome {
                 result: *result,
                 text_streamed,
                 call_record,
                 stream: *stream,
+                capture: capture.map(|capture| *capture),
             }),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::LlmCall,
@@ -1528,6 +1504,7 @@ impl RuntimeEffectOutcome {
                 launch,
                 triggers,
                 capture,
+                capture_watermark,
             } => {
                 let capture = capture.map(|capture| *capture).unwrap_or_default();
                 capture.validate()?;
@@ -1535,6 +1512,7 @@ impl RuntimeEffectOutcome {
                     launch: *launch,
                     triggers,
                     capture,
+                    capture_watermark: capture_watermark.map(|watermark| *watermark),
                 })
             }
             other => Err(RuntimeEffectControllerError::wrong_outcome(

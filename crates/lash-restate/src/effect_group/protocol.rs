@@ -111,10 +111,9 @@ pub(super) async fn upgrade(
     if compat == ObjectCompat::fresh(newest) {
         return Ok(EffectGroupUpgradeResponse::Current { format: newest });
     }
-    if let Some(unknown) = keys
-        .iter()
-        .find(|key| object_state::is_value_key(key) && *key != INDEX_STATE_KEY)
-    {
+    if let Some(unknown) = keys.iter().find(|key| {
+        object_state::is_value_key(key) && *key != INDEX_STATE_KEY && *key != MEMBERSHIP_STATE_KEY
+    }) {
         return Err(TerminalError::new(format!(
             "effect group {} holds `{unknown}`, which the upgrade does not convert",
             ctx.key()
@@ -122,6 +121,15 @@ pub(super) async fn upgrade(
     }
     if let Some(record) = load_index(ctx).await? {
         super::store_index(ctx, object.writer, record);
+    }
+    if let Some(membership) = object_state::get_stamped::<EffectGroupMembership>(
+        ctx,
+        MEMBERSHIP_STATE_KEY,
+        &EFFECT_GROUP_STATE_FORMATS,
+    )
+    .await?
+    {
+        super::store_membership(ctx, object.writer, membership);
     }
     ctx.set(COMPAT_KEY, Json(ObjectCompat::fresh(newest)));
     Ok(EffectGroupUpgradeResponse::Upgraded {
@@ -143,6 +151,22 @@ pub(super) async fn load_index(
     ctx: &ObjectContext<'_>,
 ) -> Result<Option<EffectGroupStateRecord>, TerminalError> {
     object_state::get_stamped(ctx, INDEX_STATE_KEY, &EFFECT_GROUP_STATE_FORMATS).await
+}
+
+/// The group's accepted membership, read only where children are rebuilt
+/// (FIG-4068). A group whose index exists has one: open writes both in the
+/// same exclusive invocation, and only a completed retirement clears it.
+pub(super) async fn load_membership(
+    ctx: &ObjectContext<'_>,
+) -> Result<EffectGroupMembership, TerminalError> {
+    object_state::get_stamped(ctx, MEMBERSHIP_STATE_KEY, &EFFECT_GROUP_STATE_FORMATS)
+        .await?
+        .ok_or_else(|| {
+            TerminalError::new(format!(
+                "effect group {} retains no membership record",
+                ctx.key()
+            ))
+        })
 }
 
 pub(super) async fn load_index_shared(
@@ -178,7 +202,6 @@ mod tests {
                         loser_disposition: LoserPolicy::RunToCompletion,
                         replay_keys: vec!["child-0".to_owned()],
                         wait_scope: ExecutionScope::runtime_operation("group"),
-                        membership: vec!["{}".to_owned()],
                         opener: lash_core::AdmittedScope::turn("session", "turn"),
                     },
                     next_rank: 0,

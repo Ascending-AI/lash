@@ -50,6 +50,8 @@ pub enum Scenario {
     /// a plugin-aborted turn entirely from the events emitted for this prefix;
     /// its tool-call parts must equal the adapter's parsed partial state.
     StreamingToolCallAbortEquivalence,
+    /// Tool arguments emit start, suffix deltas, end and then the tool part.
+    StreamingToolInputEvents,
     /// A turn stopped by the provider's content filter. Terminal reason:
     /// `ContentFilter`.
     ContentFilter,
@@ -92,6 +94,7 @@ impl Scenario {
         Scenario::StreamingTextAssembly,
         Scenario::StreamingToolArgumentMerge,
         Scenario::StreamingToolCallAbortEquivalence,
+        Scenario::StreamingToolInputEvents,
         Scenario::ContentFilter,
         Scenario::UsageCacheHit,
         Scenario::UsageReasoning,
@@ -637,6 +640,7 @@ fn check_scenario(n: &dyn ProviderNormalizer, scenario: Scenario, wire: Provider
                 sse.len()
             );
             let assembled = n.assemble_stream(scenario, sse);
+            assert_tool_input_law(&assembled.stream_events, who);
             let tool = assembled
                 .parts
                 .iter()
@@ -680,6 +684,7 @@ fn check_scenario(n: &dyn ProviderNormalizer, scenario: Scenario, wire: Provider
                 "[{who}] {scenario:?}: abort prefix must contain provider-native events"
             );
             let assembled = n.assemble_stream(scenario, sse);
+            assert_tool_input_law(&assembled.stream_events, who);
             let parsed_tool_calls = assembled
                 .parts
                 .iter()
@@ -720,6 +725,15 @@ fn check_scenario(n: &dyn ProviderNormalizer, scenario: Scenario, wire: Provider
                 wire.expected_tool_input_json.as_ref(),
                 "[{who}] {scenario:?}: abort-path tool input changed"
             );
+        }
+        Scenario::StreamingToolInputEvents => {
+            let sse = wire
+                .tool_call_sse
+                .as_ref()
+                .or(wire.abort_tool_call_sse.as_ref())
+                .unwrap_or_else(|| panic!("[{who}] {scenario:?}: must supply a tool stream"));
+            let assembled = n.assemble_stream(scenario, sse);
+            assert_tool_input_law(&assembled.stream_events, who);
         }
         Scenario::UsageCacheHit => {
             assert_usage(
@@ -1051,6 +1065,69 @@ fn assert_terminal(
 
 fn is_tool_call(part: &LlmOutputPart) -> bool {
     matches!(part, LlmOutputPart::ToolCall { .. })
+}
+
+/// Checks the adapter's tool-input event law on a completed fixture.
+pub fn assert_tool_input_law(events: &[LlmStreamEvent], who: &str) {
+    use std::collections::HashMap;
+
+    let mut calls: HashMap<u64, bool> = HashMap::new();
+    let mut next_ordinal = 0;
+    let mut completed = 0;
+    let mut parts = 0;
+    let mut end_payloads = Vec::new();
+    let mut part_payloads = Vec::new();
+    for event in events {
+        match event {
+            LlmStreamEvent::ToolInputStart { call } => {
+                assert_eq!(
+                    call.ordinal, next_ordinal,
+                    "[{who}] tool ordinals must be dense"
+                );
+                next_ordinal += 1;
+                assert!(
+                    calls.insert(call.ordinal, false).is_none(),
+                    "[{who}] duplicate tool start"
+                );
+            }
+            LlmStreamEvent::ToolInputDelta { call, text } => {
+                let ended = calls
+                    .get_mut(&call.ordinal)
+                    .unwrap_or_else(|| panic!("[{who}] tool delta before start"));
+                assert!(!*ended, "[{who}] tool delta after end");
+                assert!(!text.is_empty(), "[{who}] empty tool delta");
+            }
+            LlmStreamEvent::ToolInputEnd {
+                call,
+                raw_arguments,
+            } => {
+                let ended = calls
+                    .get_mut(&call.ordinal)
+                    .unwrap_or_else(|| panic!("[{who}] tool end before start"));
+                assert!(!*ended, "[{who}] duplicate tool end");
+                *ended = true;
+                completed += 1;
+                end_payloads.push(raw_arguments);
+            }
+            LlmStreamEvent::Part(LlmOutputPart::ToolCall { input_json, .. }) => {
+                parts += 1;
+                assert!(completed >= parts, "[{who}] tool part before input end");
+                part_payloads.push(input_json);
+            }
+            _ => {}
+        }
+    }
+    assert!(next_ordinal > 0, "[{who}] fixture exercised no tool input");
+    assert_eq!(
+        completed, parts,
+        "[{who}] completed inputs and tool parts differ"
+    );
+    if end_payloads.len() == 1 {
+        assert_eq!(
+            end_payloads, part_payloads,
+            "[{who}] tool part changed its closed arguments"
+        );
+    }
 }
 
 fn as_tool_call(part: &LlmOutputPart) -> Option<(String, String)> {

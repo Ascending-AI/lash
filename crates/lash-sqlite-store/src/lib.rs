@@ -94,6 +94,7 @@ mod artifact_store;
 mod attachment_store;
 mod attachments;
 mod blobs;
+mod capture;
 mod codec;
 mod conn;
 mod connection_sql;

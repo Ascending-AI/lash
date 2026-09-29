@@ -32,6 +32,15 @@ pub struct Invocation {
     pub retry_count: Option<u64>,
 }
 
+/// One segment `run` of a process.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct ProcessSegment {
+    pub lane: String,
+    pub key: String,
+    #[serde(flatten)]
+    pub invocation: Invocation,
+}
+
 /// The server a roll runs against, seen through one ADR 0111 namespace.
 pub struct RestateView {
     admin: RestateAdminClient,
@@ -173,6 +182,19 @@ impl RestateView {
         .await
     }
 
+    /// Every invocation of any of `service`'s handlers on `key` that has not
+    /// completed, oldest first: work a node still owes the object.
+    pub async fn live_invocations(&self, service: &str, key: &str) -> Result<Vec<Invocation>> {
+        self.query(&format!(
+            "SELECT id, status, pinned_deployment_id, invoked_by_id, last_failure, retry_count \
+             FROM sys_invocation WHERE target_service_name = {} AND target_service_key = {} \
+             AND status <> 'completed' ORDER BY created_at",
+            sql_literal(&self.service_name(service)),
+            sql_literal(key)
+        ))
+        .await
+    }
+
     /// Every deployment the server holds.
     pub async fn deployments(&self) -> Result<Vec<Deployment>> {
         #[derive(Deserialize)]
@@ -264,5 +286,22 @@ impl RestateView {
             .into_iter()
             .map(|row| (row.target_service_key, row.invocation))
             .collect())
+    }
+
+    /// Every segment `run` of `process_id`, on any lane of lash's process
+    /// workflow, oldest first: the lane it was sent on, its workflow key
+    /// (`<pid>` for segment 0, `<pid>#<n>` after a hand-over) and its
+    /// invocation.
+    pub async fn process_segments(&self, process_id: &str) -> Result<Vec<ProcessSegment>> {
+        self.query(&format!(
+            "SELECT target_service_name AS lane, target_service_key AS key, id, status, \
+             pinned_deployment_id, invoked_by_id, last_failure, retry_count FROM sys_invocation \
+             WHERE target_service_name LIKE {} AND (target_service_key = {} OR \
+             target_service_key LIKE {}) AND target_handler_name = 'run' ORDER BY created_at",
+            sql_literal(&format!("{}%", self.service_name("LashProcessWorkflow"))),
+            sql_literal(process_id),
+            sql_literal(&format!("{process_id}#%"))
+        ))
+        .await
     }
 }

@@ -24,7 +24,7 @@ otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel
 perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness"]
 # Test-only observation hooks shared with lash-core's unit suites.
 testing = ["lash-core-ids/testing", "lash-core-llm/testing"]
-synthetic-next = []
+synthetic-next = ["lash-sansio/synthetic-next"]
 
 [lints]
 workspace = true

@@ -70,17 +70,19 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     text_streamed,
                     call_record,
                     stream,
+                    capture,
                 } = Box::pin(control.run_step_body(&host, honoured, |stop| async move {
                     driver
                         .run_llm_call(request, protocol_iteration, invocation, &event_tx, &stop)
                         .await
                 }))
-                .await?;
+                .await??;
                 Ok(RuntimeEffectOutcome::LlmCall {
                     result: Box::new(result),
                     text_streamed,
                     call_record,
                     stream: Box::new(stream),
+                    capture: capture.map(Box::new),
                 })
             }
             RuntimeEffectCommand::AssistantResponseHooks {
@@ -116,16 +118,32 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     result: Box::new(result),
                 })
             }
-            RuntimeEffectCommand::Checkpoint { checkpoint } => Ok(runner
-                .driver
-                .execute_checkpoint_locally(
-                    runner.messages.clone(),
-                    runner.protocol_iteration,
-                    checkpoint,
-                    envelope.invocation.replay_key(),
-                    &runner.event_tx,
-                )
-                .await),
+            RuntimeEffectCommand::Checkpoint { checkpoint } => {
+                let outcome = runner
+                    .driver
+                    .execute_checkpoint_locally(
+                        runner.messages.clone(),
+                        runner.protocol_iteration,
+                        checkpoint,
+                        envelope.invocation.replay_key(),
+                        &runner.event_tx,
+                    )
+                    .await;
+                // What the turn produced before this checkpoint commits with
+                // it, so the capture tail restarts here; a recorded outcome
+                // implies the advance (ADR 0114 §3.1). An iteration that
+                // interrupted a call keeps the tail: the checkpoint commits
+                // the cancelled calls, and a stop's partial holds what the
+                // host saw of them (Lane G amendment).
+                if matches!(
+                    &outcome,
+                    RuntimeEffectOutcome::Checkpoint { result: Ok(_), .. }
+                ) && !runner.driver.holds_capture_tail()
+                {
+                    runner.driver.advance_capture_base().await?;
+                }
+                Ok(outcome)
+            }
             RuntimeEffectCommand::SyncExecutionEnvironment => {
                 // A live fault rebuilding the environment (a store fault) is
                 // not the sync's outcome: the step stays unrecorded and the
@@ -230,6 +248,8 @@ pub(super) fn turn_effect_executor(
         // turn cursor is the main driver's alone, and cloning it would put
         // body and driver emissions on colliding {key}#{ordinal} ids.
         turn_observations: body_observation_cursor(body_replay_key),
+        capture_base: driver.capture_base,
+        interrupted_calls: driver.interrupted_calls,
     };
     crate::RuntimeEffectLocalExecutor::owned_runner(
         Box::new(LocalTurnEffectRunner {

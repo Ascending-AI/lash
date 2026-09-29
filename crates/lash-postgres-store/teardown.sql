@@ -46,6 +46,14 @@ DROP TABLE IF EXISTS lash_session_meta_pending_observer_intents CASCADE;
 
 DROP TABLE IF EXISTS lash_runtime_turn_commits CASCADE;
 
+DROP TABLE IF EXISTS lash_turn_capture_turns CASCADE;
+
+DROP TABLE IF EXISTS lash_turn_capture_writers CASCADE;
+
+DROP TABLE IF EXISTS lash_turn_capture_frames CASCADE;
+
+DROP TABLE IF EXISTS lash_stopped_partials CASCADE;
+
 DROP TABLE IF EXISTS lash_turn_cancel_requests CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_cancel_affected_inputs CASCADE;
@@ -87,6 +95,8 @@ DROP TABLE IF EXISTS lash_attachment_condemnations CASCADE;
 DROP TABLE IF EXISTS lash_process_change_clock CASCADE;
 
 DROP TABLE IF EXISTS lash_processes CASCADE;
+
+DROP TABLE IF EXISTS lash_abandoned_consumer_holds CASCADE;
 
 DROP TABLE IF EXISTS lash_process_park_clock CASCADE;
 

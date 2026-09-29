@@ -172,6 +172,7 @@ fn echo_dispatch_context<'h>(
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
         process_lineage: None,
+        turn_capture: None,
         process_originator: None,
     }
 }

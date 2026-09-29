@@ -292,6 +292,23 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "stopped_partial_recovery__test",
+    crate_features = [],
+    crate_name = "stopped_partial_recovery",
+    crate_root = "tests/stopped_partial_recovery.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "stopped_partial_recovery", "//crates/lash-restate-test:stopped_partial_recovery__test"),
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "substrate_lost_zombie__test",
     crate_features = [],
     crate_name = "substrate_lost_zombie",
@@ -381,6 +398,7 @@ lash_batch_test(
         ":session_driver__test",
         ":session_send__test",
         ":start_gate_peek__test",
+        ":stopped_partial_recovery__test",
         ":substrate_lost_zombie__test",
         ":suspended_turn__test",
         ":tool_child_drift__test",

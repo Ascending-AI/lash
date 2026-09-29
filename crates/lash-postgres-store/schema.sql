@@ -275,6 +275,54 @@ CREATE INDEX IF NOT EXISTS idx_lash_runtime_turn_commits_failure_evidence
     ON lash_runtime_turn_commits(session_id, committed_at_ms, turn_id)
     WHERE failure_evidence;
 
+CREATE TABLE IF NOT EXISTS lash_turn_capture_turns (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    base BIGINT NOT NULL DEFAULT 0 CONSTRAINT ck_turn_capture_turns_base CHECK (base >= 0),
+    next_sequence BIGINT NOT NULL DEFAULT 1 CONSTRAINT ck_turn_capture_turns_next_sequence CHECK (next_sequence >= 1),
+    recovered BIGINT NOT NULL DEFAULT 0 CONSTRAINT ck_turn_capture_turns_recovered CHECK (recovered IN (0, 1)),
+    PRIMARY KEY (session_id, turn_id)
+);
+CREATE TABLE IF NOT EXISTS lash_turn_capture_writers (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    invocation TEXT NOT NULL,
+    attempt_epoch BIGINT NOT NULL CONSTRAINT ck_turn_capture_writers_attempt_epoch CHECK (attempt_epoch >= 0),
+    state TEXT NOT NULL CONSTRAINT ck_turn_capture_writers_state CHECK (state IN ('live', 'retracted', 'fenced')),
+    PRIMARY KEY (session_id, turn_id, invocation, attempt_epoch)
+);
+CREATE TABLE IF NOT EXISTS lash_turn_capture_frames (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    sequence BIGINT NOT NULL CONSTRAINT ck_turn_capture_frames_sequence CHECK (sequence >= 1),
+    base BIGINT NOT NULL CONSTRAINT ck_turn_capture_frames_base CHECK (base >= 0),
+    invocation TEXT NOT NULL,
+    attempt_epoch BIGINT NOT NULL CONSTRAINT ck_turn_capture_frames_attempt_epoch CHECK (attempt_epoch >= 0),
+    batch_ordinal BIGINT NOT NULL CONSTRAINT ck_turn_capture_frames_batch_ordinal CHECK (batch_ordinal >= 0),
+    frame_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, turn_id, sequence),
+    UNIQUE (session_id, turn_id, invocation, attempt_epoch, batch_ordinal, sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_lash_turn_capture_frames_batch ON lash_turn_capture_frames
+    (session_id, turn_id, invocation, attempt_epoch, batch_ordinal);
+CREATE TABLE IF NOT EXISTS lash_stopped_partials (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    base BIGINT NOT NULL CONSTRAINT ck_stopped_partials_base CHECK (base >= 0),
+    sealed_through BIGINT NOT NULL CONSTRAINT ck_stopped_partials_sealed_through CHECK (sealed_through >= 0),
+    reason TEXT NOT NULL,
+    recovered BIGINT NOT NULL CONSTRAINT ck_stopped_partials_recovered CHECK (recovered IN (0, 1)),
+    digest TEXT NOT NULL,
+    partial_json TEXT NOT NULL,
+    body_bytes BIGINT NOT NULL CONSTRAINT ck_stopped_partials_body_bytes CHECK (body_bytes >= 0),
+    sealed_at_ms BIGINT NOT NULL,
+    committed_at_ms BIGINT,
+    PRIMARY KEY (session_id, turn_id),
+    UNIQUE (session_id, root)
+);
+
 CREATE TABLE IF NOT EXISTS lash_turn_cancel_requests (
     session_id TEXT NOT NULL,
     turn_id TEXT NOT NULL,
@@ -671,6 +719,7 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     consumer_hold_key TEXT,
     consumer_hold_scope_kind TEXT,
     consumer_hold_scope_id TEXT COLLATE "C",
+    consumer_hold_cancels BOOLEAN,
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
     CONSTRAINT ck_processes_start_obligation CHECK ((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_processes_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
@@ -684,6 +733,18 @@ CREATE TABLE IF NOT EXISTS lash_processes (
 CREATE INDEX IF NOT EXISTS idx_lash_processes_consumer_hold_owner
     ON lash_processes(consumer_hold_scope_kind, consumer_hold_scope_id)
     WHERE consumer_hold_key IS NOT NULL;
+
+-- The consumer holds whose call was abandoned before it consumed its child
+-- (ADR 0116 §3.4): a registration under a marked key is refused, and the
+-- owning scope's close forgets the marks.
+CREATE TABLE IF NOT EXISTS lash_abandoned_consumer_holds (
+    hold_key TEXT COLLATE "C" PRIMARY KEY,
+    owner_scope_kind TEXT NOT NULL,
+    owner_scope_id TEXT COLLATE "C" NOT NULL,
+    abandoned_at_ms BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lash_abandoned_consumer_holds_owner
+    ON lash_abandoned_consumer_holds(owner_scope_kind, owner_scope_id);
 
 -- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
 -- and the stalled listing.

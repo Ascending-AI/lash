@@ -624,6 +624,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // tool-intent submission ledger's kind constraint (FIG-4057, changed in place
 // under the version freeze). A catalog provisioned before the change rejects
 // both kinds; recreate it.
+//
+// Version 141 also holds staged turn capture, writer epochs, frame rows and
+// sealed stopped partials (ADR 0114, FIG-433, changed in place under the
+// version freeze). A catalog provisioned before them fails the open-time
+// shape check; recreate it.
 const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
@@ -1405,6 +1410,8 @@ mod attachments;
 mod backend;
 #[path = "postgres/blobs.rs"]
 mod blobs;
+#[path = "postgres/capture.rs"]
+mod capture;
 #[path = "postgres/connection_sql.rs"]
 mod connection_sql;
 #[path = "postgres/evidence_retention.rs"]

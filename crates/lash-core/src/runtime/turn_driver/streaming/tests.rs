@@ -99,6 +99,7 @@ fn provider_drain_never_waits_on_the_host() {
         let mut forwarder = ProviderHostForwarder::new(
             &host_tx,
             crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new("test:stream")),
+            None,
         );
         while let Some(LlmStreamEvent::Delta { text, .. }) = provider_rx.recv().await {
             drained.fetch_add(1, Ordering::Relaxed);
@@ -139,6 +140,7 @@ fn every_delta_is_published_on_both_lanes_in_order() {
     let mut forwarder = ProviderHostForwarder::new(
         &host_tx,
         crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new("test:stream")),
+        None,
     );
 
     for chunk in ["alpha", "beta", "gamma"] {
@@ -184,6 +186,7 @@ fn interleaved_correlations_and_classes_remain_distinct() {
     let mut forwarder = ProviderHostForwarder::new(
         &host_tx,
         crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new("test:stream")),
+        None,
     );
     for (class, correlation, content) in [
         (ProviderDeltaClass::AssistantProse, "A", "a1"),

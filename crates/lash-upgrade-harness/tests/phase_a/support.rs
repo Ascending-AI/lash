@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail, ensure};
-use lash_upgrade_harness::harness::{NodeBuilds, Services};
+use lash_upgrade_harness::harness::{Case, NodeBuilds, Services, block_on, wait_for};
 use lash_upgrade_harness::identity::BuildLabel;
 use lash_upgrade_harness::node::objects::{CallOutcome, CallReport, HandlerRefusal};
 use lash_upgrade_harness::restate_view::RestateView;
@@ -63,9 +63,9 @@ pub fn open_group_body(view: &RestateView, key: &str) -> Result<serde_json::Valu
             loser_disposition: lash_core::LoserPolicy::RunToCompletion,
             replay_keys: vec![format!("{key}-child-0")],
             wait_scope: lash_core::ExecutionScope::runtime_operation(key),
-            membership: vec!["{}".to_owned()],
             opener: lash_core::AdmittedScope::turn(format!("{key}-session"), "turn"),
         },
+        membership: lash_restate::EffectGroupMembership(vec!["{}".to_owned()]),
         dispatch_route: view.service_name("EffectGroupDispatch"),
         content_checked: false,
     };
@@ -93,4 +93,15 @@ pub fn record(leg: &Leg, name: &str, report: &impl serde::Serialize) -> Result<(
     let path = leg.scratch.join(name);
     std::fs::write(&path, serde_json::to_vec_pretty(report)?)
         .with_context(|| format!("write {}", path.display()))
+}
+
+/// Wait until no invocation on `session` is still owed: a turn answers
+/// before its drive completes, and a drive left on a node that stops stays
+/// pinned to the node's dead deployment, ahead of every later turn.
+pub fn quiesce(case: &Case, session: &str) -> Result<()> {
+    let view = case.view()?;
+    wait_for(&format!("{session}'s drive to complete"), || {
+        let live = block_on(view.live_invocations("LashSession", session))?;
+        Ok(live.is_empty().then_some(()))
+    })
 }

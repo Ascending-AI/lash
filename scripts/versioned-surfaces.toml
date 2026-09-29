@@ -78,6 +78,27 @@ description = "versioned SQLite artifact blob envelope and compression codec"
 outside_manifest = "backend-local blob encoding: SQLite admits it when reading the blob"
 
 [[surface]]
+constant = "MODULE_ARTIFACT_ENVELOPE_VERSION"
+constant_path = "crates/lashlang/src/artifact.rs"
+upgrade = "coexist"
+description = "module artifact JSON envelope encoding and stored semantic identity family"
+outside_manifest = "the ModuleArtifact manifest row is claimed by LASHLANG_SEMANTIC_HASH_VERSION; the envelope is checked by the artifact decoder"
+
+[[surface]]
+constant = "ARTIFACT_REFERRER_KINDS_VERSION"
+constant_path = "crates/lash-core-store/src/artifact_referrer.rs"
+upgrade = "coexist"
+description = "seven stored artifact referrer kinds and canonical id encodings"
+outside_manifest = "referrer vocabulary is checked when edge and fence rows are decoded"
+
+[[surface]]
+constant = "OBLIGATION_LEDGER_VOCABULARY_VERSION"
+constant_path = "crates/lash-core-store/src/store/obligation.rs"
+upgrade = "migrate"
+description = "obligation states, kinds, key columns, and stall reasons in stored ledger rows"
+outside_manifest = "obligation vocabulary is checked by each ledger's typed row decoder"
+
+[[surface]]
 constant = "PROCESS_CURSOR_VERSION"
 constant_path = "crates/lash-sansio/src/process_cursor.rs"
 upgrade = "coexist"

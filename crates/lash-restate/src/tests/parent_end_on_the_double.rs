@@ -301,6 +301,7 @@ impl World {
             },
             head_revision: None,
             at_ms: 1,
+            stopped_partial: None,
         };
         self.law_sink()
             .close_root_scope(&terminal)
@@ -663,6 +664,7 @@ async fn a_lost_parent_end_delivery_is_retried_and_delivered_once() {
         },
         head_revision: None,
         at_ms: 1,
+        stopped_partial: None,
     };
     let sink = world.law_sink();
     assert!(

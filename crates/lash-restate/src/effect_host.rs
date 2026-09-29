@@ -919,7 +919,7 @@ impl RestateEffectHostController {
         let ingress = &self.await_event_ingress.ingress;
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);
-        let shape = EffectGroupShape::from_group(&group, opener)?;
+        let (shape, membership) = EffectGroupShape::from_group(&group, opener)?;
         // A replay-leg handler can suspend at the very next await. Pin its
         // local tool contexts before probing the index so a child dispatched
         // during that suspension can still resolve its executor.
@@ -990,6 +990,7 @@ impl RestateEffectHostController {
                 "open",
                 &EffectGroupOpenRequest {
                     shape: shape.clone(),
+                    membership,
                     dispatch_route,
                     content_checked,
                 },

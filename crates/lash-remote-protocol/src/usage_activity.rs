@@ -98,6 +98,15 @@ impl RemoteTurnActivity {
                 }
             }
             RemoteTurnEvent::ModelCallRecorded { record } => validate_llm_call_record(record)?,
+            RemoteTurnEvent::ToolOutputProgress { call_id, .. } => {
+                require_non_empty("RemoteTurnEvent::ToolOutputProgress", "call_id", call_id)?;
+            }
+            RemoteTurnEvent::StoppedPartialAvailable { summary } => {
+                let context = "RemoteTurnEvent::StoppedPartialAvailable";
+                require_non_empty(context, "session_id", &summary.id.session_id)?;
+                require_non_empty(context, "root", &summary.id.root)?;
+                require_non_empty(context, "turn_id", &summary.id.turn_id)?;
+            }
             RemoteTurnEvent::CodeBlockCompleted {
                 error: Some(error), ..
             } => {
@@ -235,6 +244,18 @@ pub enum RemoteTurnEvent {
     },
     Error {
         message: String,
+    },
+    /// One progress chunk a running tool reported, published once it was
+    /// persisted to its turn's capture (ADR 0114 §2.2).
+    ToolOutputProgress {
+        call_id: String,
+        chunk: lash_sansio::ToolOutputChunk,
+    },
+    /// A stopped turn's partial is durable (ADR 0114 §5.2). It holds identity
+    /// and facts, never payload: the host reads the partial from the turn's
+    /// report or by the root.
+    StoppedPartialAvailable {
+        summary: lash_sansio::StoppedPartialSummary,
     },
 }
 

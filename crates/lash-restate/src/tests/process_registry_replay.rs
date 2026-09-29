@@ -1859,6 +1859,7 @@ pub(super) fn restate_segment_tool_attempt_outcome(ordinal: u64) -> RuntimeEffec
         }),
         triggers: Vec::new(),
         capture: None,
+        capture_watermark: None,
     }
 }
 

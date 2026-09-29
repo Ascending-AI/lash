@@ -24,9 +24,9 @@
 //!
 //! # Acquisition never creates
 //!
-//! A Durable Session resolves an *existing* store: the catalog seam is
-//! [`DeploymentStore::open_existing_store_by_id`](lash_core::DeploymentStore::open_existing_store_by_id),
-//! never `create_store`. Resolution happens at most once per handle (shared by
+//! A Durable Session resolves an *existing* session: the catalog seam is
+//! [`SessionCatalogStore::lookup_session`](lash_core::store::SessionCatalogStore::lookup_session),
+//! never `admit_session`. Resolution happens at most once per handle (shared by
 //! its clones) and is reused afterwards. Every queue operation therefore
 //! requires a session id the store already knows: sending to an id that was
 //! never created fails with [`EmbedError::UnknownSession`], and to a deleted
@@ -374,6 +374,25 @@ impl DurableSession {
     ) -> Result<Option<QueuedWorkBatch>> {
         let store = self.store().await?;
         Ok(self.ops.cancel_queued_work_batch(store, batch_id).await?)
+    }
+
+    /// The stopped partial output of one of this session's turns (ADR 0114
+    /// §5.2): the read after a reconnect or a `Trimmed` gap, and the only
+    /// read for a root that ended without a turn report.
+    ///
+    /// `turn` is the physical turn id or the root id. Authorization is this
+    /// handle's session: the store answers only for turns the session itself
+    /// owns, so a fork's ancestor turns are
+    /// [`Unknown`](crate::StoppedPartialRead::Unknown).
+    pub async fn stopped_partial(
+        &self,
+        turn: &lash_core::TurnId,
+    ) -> Result<crate::StoppedPartialRead> {
+        let request = lash_core::store::StoppedPartialReadRequest {
+            session_id: self.session_id.clone(),
+            turn: turn.clone(),
+        };
+        Ok(self.store().await?.read_stopped_partial(&request).await?)
     }
 
     /// Read the canonical settled view of this durable session's current
