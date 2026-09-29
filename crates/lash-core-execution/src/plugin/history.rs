@@ -120,9 +120,8 @@ pub struct ContextPressureContext<'run> {
 
 /// What a [`ContextPressureHook`] decided for the turn being prepared.
 ///
-/// Core applies it as the folded outcome of the turn's prepare step (ADR
-/// 0105 §6). Nothing is written until the turn commits, and the turn's
-/// commit carries every node and the frame.
+/// Core writes it (ADR 0105 §6): `Record` nodes commit with the turn, and an
+/// `OpenFrame` commits on its own before the turn's model call.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ContextPressureDecision {
     /// Leave the session as it is.
@@ -135,11 +134,12 @@ pub enum ContextPressureDecision {
     /// Open a compaction frame the turn runs in.
     ///
     /// `records` are appended to the frame being left, then core opens a
-    /// frame seeded with `seed` before the turn runs, so the turn's own
-    /// messages follow the seed. Core derives the frame key from the turn's
-    /// scope and the current frame. `task` names the compaction. A turn
-    /// opens at most one frame: a turn that opened one and then ends in a
-    /// `continue_as` is refused typed.
+    /// frame seeded with `seed` and commits all of it together, with the
+    /// execution-state reset, before the turn's model call; the turn's own
+    /// messages follow the seed. Core derives the frame key from the
+    /// session, the current frame, the turn and the hook. `task` names the
+    /// compaction. A turn that ends in `continue_as` commits its own frame
+    /// after this one.
     OpenFrame {
         records: Vec<crate::SessionAppendNode>,
         task: String,

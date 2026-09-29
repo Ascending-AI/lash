@@ -53,10 +53,7 @@ fn reasoning_capability() -> ModelCapability {
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
-            default_effort: Some("medium".to_string()),
-            disable: Some(lash_core::provider::ReasoningDisableEncoding::Effort(
-                "none".to_string(),
-            )),
+            disable: true,
             ..ReasoningCapability::default()
         }),
         cache_control: None,
@@ -314,14 +311,17 @@ fn codex_request_body_emits_none_effort_for_disabled_selection() {
 }
 
 #[test]
-fn codex_request_body_omits_reasoning_without_capability() {
+fn codex_request_body_refuses_an_effort_without_capability() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model = "custom-codex-model".to_string();
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    let body = CodexProvider::new("access", "refresh", 0)
+    let error = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
-        .unwrap();
-    assert!(body.get("reasoning").is_none());
+        .expect_err("an effort without capability is refused");
+    assert_eq!(
+        error.code.as_ref().map(ToString::to_string).as_deref(),
+        Some("lash:effort_not_configurable")
+    );
 }
 
 #[path = "cache_emission_tests.rs"]
@@ -478,22 +478,26 @@ fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
 }
 
 #[test]
-fn codex_request_omits_output_token_cap() {
+fn codex_request_refuses_an_output_token_cap_from_either_source() {
     let provider = CodexProvider::new("access", "refresh", 0).with_options(ProviderOptions {
         max_output_tokens: Some(9_999),
         ..ProviderOptions::default()
     });
-    let provider_limited = provider
+    provider
         .build_request_body(
             &request(vec![LlmMessage::text(LlmRole::User, "hello")]),
             false,
         )
-        .unwrap();
-    assert!(provider_limited.get("max_output_tokens").is_none());
+        .expect_err("a provider cap is refused on Codex");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.generation.output_token_cap = NonZeroUsize::new(2_048);
-    let request_limited = provider.build_request_body(&req, false).unwrap();
-    assert!(request_limited.get("max_output_tokens").is_none());
+    let error = CodexProvider::new("access", "refresh", 0)
+        .build_request_body(&req, false)
+        .expect_err("a request cap is refused on Codex");
+    assert_eq!(
+        error.code.as_ref().map(ToString::to_string).as_deref(),
+        Some("lash:unsupported_generation_option")
+    );
 }
 
 #[test]

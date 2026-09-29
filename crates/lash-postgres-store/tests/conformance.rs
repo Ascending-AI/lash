@@ -2038,3 +2038,25 @@ mod session_history {
         .await;
     }
 }
+
+mod frame_open {
+    use super::*;
+    // FIG-4110: every frame open (a context-pressure frame, a pressure frame
+    // followed by `continue_as`, `/compact`) killed at each crash point and
+    // redriven opens once, chained in order, with one summarizer call, over
+    // this test's PostgreSQL stores.
+    lash_conformance::frame_open_redrive_tests!({
+        let Some((lock, storage)) = storage().await else {
+            return;
+        };
+        reset(storage.pool()).await;
+        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
+        (
+            (lock, storage, attachments, double),
+            "pg-frame-open",
+            host,
+            stores,
+            runner,
+        )
+    });
+}

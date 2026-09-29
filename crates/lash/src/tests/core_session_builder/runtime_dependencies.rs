@@ -1350,6 +1350,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         temperature: Some(lash_core::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
         seed: Some(42),
         stop_sequences: Vec::new(),
+        parallel_tool_calls: None,
         projection_provenance: Default::default(),
     };
     let backend = double_backend().await;

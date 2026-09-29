@@ -202,6 +202,13 @@ pub(super) struct RecordingContext {
     pub(super) started: Mutex<Vec<ProcessRegistration>>,
     fail_process_workflow_starts: AtomicUsize,
     fail_process_workflow_starts_ambiguously: AtomicUsize,
+    cancel_process_workflow_starts: AtomicUsize,
+    /// Journal operations whose next run the engine's cancellation of the
+    /// invocation interrupts after its closure ran.
+    cancel_after_runs: Mutex<Vec<String>>,
+    /// A registry the next submission's run is started through before the
+    /// submission itself is refused: another delivery of the start won.
+    start_elsewhere_then_refuse: Mutex<Option<Arc<dyn ProcessRegistry>>>,
     started_execution_contexts: Mutex<Vec<ProcessExecutionContext>>,
     pub(super) process_command_log: Mutex<Vec<String>>,
     pub(super) cancelled: Mutex<Vec<RestateProcessCancelRequest>>,
@@ -254,6 +261,28 @@ impl RecordingContext {
     pub(super) fn fail_next_process_workflow_start_ambiguously(&self) {
         self.fail_process_workflow_starts_ambiguously
             .fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// The engine cancels the invocation while the next submission's await
+    /// is pending: the send was journaled, and its await answers `409`.
+    pub(super) fn cancel_next_process_workflow_start(&self) {
+        self.cancel_process_workflow_starts
+            .fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// The engine cancels the invocation while the next run of the journal
+    /// step `operation` awaits its answer: the closure ran, and the step
+    /// answers `409`.
+    pub(super) fn cancel_after_next_run(&self, operation: &str) {
+        self.cancel_after_runs
+            .lock_recover()
+            .push(format!(".{operation}:v1"));
+    }
+
+    /// The next submission is refused, after another delivery of the start
+    /// already had the run start the process through `registry`.
+    pub(super) fn start_elsewhere_then_refuse_next(&self, registry: Arc<dyn ProcessRegistry>) {
+        *self.start_elsewhere_then_refuse.lock_recover() = Some(registry);
     }
 
     pub(super) async fn wait_for_await_event_registration(
@@ -546,7 +575,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn run_json_send<'run, T, Fut>(
         &'run self,
-        _effect_name: String,
+        effect_name: String,
         _retry_policy: Option<RunRetryPolicy>,
         future: Fut,
     ) -> Pin<Box<dyn Future<Output = Result<Json<T>, TerminalError>> + Send + 'run>>
@@ -555,8 +584,22 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         T: Serialize + DeserializeOwned + Send + 'static,
         Fut: Future<Output = T> + Send + 'run,
     {
-        self.runs.lock_recover().push(_effect_name);
-        Box::pin(async move { Ok(Json(future.await)) })
+        let cancelled = {
+            let mut pending = self.cancel_after_runs.lock_recover();
+            pending
+                .iter()
+                .position(|operation| effect_name.ends_with(operation.as_str()))
+                .map(|index| pending.remove(index))
+                .is_some()
+        };
+        self.runs.lock_recover().push(effect_name);
+        Box::pin(async move {
+            let answer = future.await;
+            if cancelled {
+                return Err(TerminalError::new_with_code(409, "cancelled"));
+            }
+            Ok(Json(answer))
+        })
     }
 
     fn start_process_workflow<'run>(
@@ -599,6 +642,39 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             {
                 return Err(ProcessWorkflowStartFailure::Ambiguous(TerminalError::new(
                     "injected ambiguous process workflow start failure",
+                )));
+            }
+            if self
+                .cancel_process_workflow_starts
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(ProcessWorkflowStartFailure::of_send(
+                    TerminalError::new_with_code(409, "cancelled"),
+                ));
+            }
+            let started_elsewhere = self.start_elsewhere_then_refuse.lock_recover().take();
+            if let Some(registry) = started_elsewhere {
+                registry
+                    .set_external_ref(
+                        &process_id,
+                        lash_core::ProcessExternalRef {
+                            backend: "restate".to_string(),
+                            id: format!("elsewhere/{process_id}"),
+                            metadata: None,
+                            segment_ordinal: Some(0),
+                        },
+                    )
+                    .await
+                    .map_err(|error| {
+                        ProcessWorkflowStartFailure::Ambiguous(TerminalError::new(
+                            error.to_string(),
+                        ))
+                    })?;
+                return Err(ProcessWorkflowStartFailure::Rejected(TerminalError::new(
+                    "injected refusal of a start another delivery already started",
                 )));
             }
             if let Some(endpoint) = endpoint {
@@ -1893,7 +1969,8 @@ impl ReplayableRecordingContext {
 /// A journaled step that is not a recorded effect: a process command's
 /// journaled fact (a cancel admission, an await's or attach's existence
 /// guard, a process wait step, a start's registration, obligation claim and
-/// settle, compensation and external reference, ADR 0107, or a command's
+/// settle, compensation and external reference and their reruns past the
+/// engine's cancellation, ADR 0107, or a command's
 /// recorded store work, FIG-3827), or the frontier marker a process start or
 /// a sleep journals before it acts (FIG-3779).
 fn is_process_command_journal_fact(effect_name: &str) -> bool {
@@ -1907,10 +1984,14 @@ fn is_process_command_journal_fact(effect_name: &str) -> bool {
         ".process-delete-session:v1",
         ".process-emit-event:v1",
         ".process-start-register:v1",
+        ".process-start-register-after-cancel:v1",
         ".process-start-claim:v1",
+        ".process-start-claim-after-cancel:v1",
         ".process-start-settle:v1",
+        ".process-start-settle-after-cancel:v1",
         ".process-start-compensate:v1",
         ".process-start-external-ref:v1",
+        ".process-start-external-ref-after-cancel:v1",
     ]
     .iter()
     .any(|suffix| effect_name.ends_with(suffix))

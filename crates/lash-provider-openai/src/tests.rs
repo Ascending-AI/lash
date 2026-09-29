@@ -170,10 +170,7 @@ fn reasoning_capability() -> ModelCapability {
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
-            default_effort: Some("medium".to_string()),
-            disable: Some(lash_core::provider::ReasoningDisableEncoding::Effort(
-                "none".to_string(),
-            )),
+            disable: true,
             ..ReasoningCapability::default()
         }),
         cache_control: None,
@@ -191,30 +188,10 @@ fn budget_reasoning_capability() -> ModelCapability {
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
-            default_effort: Some("medium".to_string()),
             encoding: ReasoningEncoding::Budget(BTreeMap::from([
                 ("medium".to_string(), 4096),
                 ("high".to_string(), 16384),
             ])),
-            ..ReasoningCapability::default()
-        }),
-        cache_control: None,
-        stream_termination: None,
-        sampling: lash_core::SamplingCapability::Configurable,
-        reasoning_retention: Default::default(),
-    }
-}
-
-fn toggle_false_reasoning_capability() -> ModelCapability {
-    ModelCapability {
-        instruction_role: Default::default(),
-        native_mid_conversation_system: false,
-        attachment_acceptance: Default::default(),
-        google_dialect: Default::default(),
-        reasoning: Some(ReasoningCapability {
-            efforts: vec!["medium".to_string()],
-            default_effort: Some("medium".to_string()),
-            disable: Some(lash_core::provider::ReasoningDisableEncoding::ToggleFalse),
             ..ReasoningCapability::default()
         }),
         cache_control: None,
@@ -666,9 +643,7 @@ fn responses_body_rejects_numeric_reasoning_from_budget_encoding() {
         Some("lash:reasoning_encoding_unrepresentable".to_string())
     );
     assert!(!error.is_retryable());
-    assert!(error.message.contains("openai"));
-    assert!(error.message.contains("Responses"));
-    assert!(error.message.contains("Budget(16384)"));
+    assert!(error.message.contains("token-budget"));
 }
 
 #[test]
@@ -684,15 +659,20 @@ fn responses_body_emits_none_effort_for_disabled_selection() {
 }
 
 #[test]
-fn responses_body_omits_reasoning_without_capability() {
+fn responses_body_refuses_an_effort_without_capability() {
     let provider = OpenAiProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model = "custom-direct-model".to_string();
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
 
-    let body = provider.build_responses_request_body(&req, true).unwrap();
+    let error = provider
+        .build_responses_request_body(&req, true)
+        .expect_err("an effort without capability is refused");
 
-    assert!(body.get("reasoning").is_none());
+    assert_eq!(
+        error.code.as_ref().map(ToString::to_string).as_deref(),
+        Some("lash:effort_not_configurable")
+    );
 }
 
 #[test]
@@ -772,17 +752,33 @@ fn chat_body_emits_reasoning_from_capability_variant() {
 }
 
 #[test]
-fn chat_body_openai_format_emits_top_level_reasoning_effort_only() {
+fn chat_body_openai_dialect_emits_top_level_reasoning_effort_only() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     req.model_capability = reasoning_capability();
     let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_reasoning_format(ReasoningWireFormat::openai());
+        .with_reasoning_dialect(OpenAiReasoningDialect::OpenAi);
 
     let body = provider.build_chat_request_body(&req, true).unwrap();
 
     assert_eq!(body["reasoning_effort"], "high");
     assert!(body.get("reasoning").is_none());
+}
+
+#[test]
+fn openai_chat_preset_speaks_the_openai_dialect_on_chat_completions() {
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model_capability = reasoning_capability();
+    req.generation.output_token_cap = std::num::NonZeroUsize::new(1_024);
+    let provider = OpenAiCompatibleProvider::new("key", OPENAI_BASE_URL)
+        .with_compat(OpenAiCompat::openai_chat());
+
+    let body = provider.build_chat_request_body(&req, true).unwrap();
+
+    assert_eq!(body["reasoning_effort"], "high");
+    assert_eq!(body["max_completion_tokens"], 1_024);
+    assert!(body.get("max_tokens").is_none());
 }
 
 #[test]
@@ -801,89 +797,121 @@ fn chat_body_emits_numeric_reasoning_from_budget_encoding() {
 }
 
 #[test]
-fn chat_body_openai_format_rejects_budget() {
+fn openai_dialect_refuses_a_budget_on_both_endpoints() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     req.model_capability = budget_reasoning_capability();
     let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_reasoning_format(ReasoningWireFormat::openai());
+        .with_reasoning_dialect(OpenAiReasoningDialect::OpenAi);
 
-    let error = provider
-        .build_chat_request_body(&req, true)
-        .expect_err("OpenAI Chat Completions cannot encode a budget");
-
-    assert_eq!(
-        error.code.as_ref().map(|code| code.to_string()),
-        Some("lash:reasoning_encoding_unrepresentable".to_string())
-    );
-    assert!(!error.is_retryable());
-    assert!(error.message.contains("openai"));
-    assert!(error.message.contains("ChatCompletions"));
-    assert!(error.message.contains("Budget(16384)"));
+    for error in [
+        provider
+            .build_chat_request_body(&req, true)
+            .expect_err("OpenAI Chat Completions cannot encode a budget"),
+        provider
+            .build_responses_request_body(&req, true)
+            .expect_err("OpenAI Responses cannot encode a budget"),
+    ] {
+        assert_eq!(
+            error.code.as_ref().map(|code| code.to_string()),
+            Some("lash:reasoning_encoding_unrepresentable".to_string())
+        );
+        assert!(!error.is_retryable());
+        assert!(error.message.contains("token-budget"));
+    }
 }
 
 #[test]
-fn chat_body_emits_none_effort_for_disabled_selection() {
+fn disabled_selection_maps_per_dialect() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
     req.model_capability = reasoning_capability();
-
-    let body = openrouter_provider()
-        .build_chat_request_body(&req, true)
-        .unwrap();
-
-    assert_eq!(body["reasoning"], json!({ "effort": "none" }));
-}
-
-#[test]
-fn chat_body_reasoning_toggle_false_respects_dialect() {
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
-    req.model_capability = toggle_false_reasoning_capability();
-
-    let openai = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_reasoning_format(ReasoningWireFormat::openai());
-    let error = openai
-        .build_chat_request_body(&req, true)
-        .expect_err("OpenAI Chat Completions cannot encode enabled:false");
-    assert_eq!(
-        error.code.as_ref().map(|code| code.to_string()),
-        Some("lash:reasoning_encoding_unrepresentable".to_string())
-    );
-    assert!(!error.is_retryable());
-    assert!(error.message.contains("ToggleFalse"));
 
     let openrouter = openrouter_provider()
         .build_chat_request_body(&req, true)
         .unwrap();
     assert_eq!(openrouter["reasoning"], json!({ "enabled": false }));
     assert!(openrouter.get("reasoning_effort").is_none());
+
+    let openai = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
+        .with_reasoning_dialect(OpenAiReasoningDialect::OpenAi);
+    let chat = openai.build_chat_request_body(&req, true).unwrap();
+    assert_eq!(chat["reasoning_effort"], "none");
+    let responses = openai.build_responses_request_body(&req, true).unwrap();
+    assert_eq!(responses["reasoning"], json!({ "effort": "none" }));
 }
 
 #[test]
-fn chat_body_omits_reasoning_without_capability() {
+fn chat_body_refuses_an_effort_without_capability() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model = "openrouter/custom-model".to_string();
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
 
-    let body = openrouter_provider()
+    let error = openrouter_provider()
         .build_chat_request_body(&req, true)
-        .unwrap();
+        .expect_err("an effort on a model with no reasoning capability is refused");
 
-    assert!(body.get("reasoning").is_none());
+    assert_eq!(
+        error.code.as_ref().map(|code| code.to_string()),
+        Some("lash:effort_not_configurable".to_string())
+    );
 }
 
 #[test]
-fn chat_body_none_format_omits_resolved_reasoning_intent() {
+fn chat_body_without_a_reasoning_dialect_refuses_an_explicit_selection() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     req.model_capability = reasoning_capability();
     let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1");
 
-    let body = provider.build_chat_request_body(&req, true).unwrap();
+    let error = provider
+        .build_chat_request_body(&req, true)
+        .expect_err("a route with no reasoning dialect refuses an explicit selection");
 
-    assert!(body.get("reasoning").is_none());
-    assert!(body.get("reasoning_effort").is_none());
+    assert_eq!(
+        error.code.as_ref().map(|code| code.to_string()),
+        Some("lash:reasoning_encoding_unrepresentable".to_string())
+    );
+    assert!(!error.is_retryable());
+}
+
+#[test]
+fn a_route_without_a_reasoning_dialect_sends_nothing_for_provider_default() {
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.model_capability = reasoning_capability();
+    for provider in [
+        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1"),
+        OpenAiCompatibleProvider::new("key", "http://localhost:11434/v1")
+            .with_compat(OpenAiCompat::local()),
+    ] {
+        let chat = provider.build_chat_request_body(&req, true).unwrap();
+        assert!(chat.get("reasoning").is_none());
+        assert!(chat.get("reasoning_effort").is_none());
+        let responses = provider.build_responses_request_body(&req, true).unwrap();
+        assert!(responses.get("reasoning").is_none());
+    }
+}
+
+#[test]
+fn no_url_selects_a_reasoning_dialect() {
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model_capability = reasoning_capability();
+    for base_url in [OPENAI_BASE_URL, OPENROUTER_BASE_URL] {
+        let provider = OpenAiCompatibleProvider::new("key", base_url);
+        for error in [
+            provider.build_chat_request_body(&req, true).unwrap_err(),
+            provider
+                .build_responses_request_body(&req, true)
+                .unwrap_err(),
+        ] {
+            assert_eq!(
+                error.code.as_ref().map(|code| code.to_string()),
+                Some("lash:reasoning_encoding_unrepresentable".to_string()),
+                "{base_url}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -1368,53 +1396,28 @@ fn openai_compat_config_serializes_when_non_default() {
 }
 
 #[test]
-fn reasoning_wire_format_equality_uses_name_identity() {
-    assert_eq!(
-        ReasoningWireFormat::openrouter(),
-        ReasoningWireFormat::openrouter()
-    );
-    assert_ne!(
-        ReasoningWireFormat::openai(),
-        ReasoningWireFormat::openrouter()
-    );
-}
-
-#[test]
-fn built_in_reasoning_formats_serialize_under_their_name() {
-    for format in [
-        ReasoningWireFormat::openrouter(),
-        ReasoningWireFormat::openai(),
+fn reasoning_dialects_round_trip_through_config_and_unknown_names_are_refused() {
+    for (dialect, name) in [
+        (OpenAiReasoningDialect::OpenAi, "openai"),
+        (OpenAiReasoningDialect::OpenRouter, "openrouter"),
     ] {
-        let name = format.name().to_string();
         let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-            .with_reasoning_format(format);
-
+            .with_reasoning_dialect(dialect);
         let config = provider.serialize_config();
-
-        assert_eq!(config["compat"]["reasoning_format"], name);
+        assert_eq!(config["compat"]["reasoning"], name);
+        let compat = serde_json::from_value::<OpenAiCompat>(config["compat"].clone())
+            .expect("dialects deserialize under their name");
+        assert_eq!(compat.reasoning, Some(dialect));
     }
-}
 
-#[test]
-fn built_in_reasoning_formats_deserialize_by_name_and_unknown_names_are_rejected() {
-    for expected in [
-        ReasoningWireFormat::none(),
-        ReasoningWireFormat::openai(),
-        ReasoningWireFormat::openrouter(),
+    for refused in [
+        json!({ "reasoning": "none" }),
+        json!({ "reasoning": "qwen3" }),
+        json!({ "reasoning_format": "openai" }),
     ] {
-        let compat =
-            serde_json::from_value::<OpenAiCompat>(json!({ "reasoning_format": expected.name() }))
-                .expect("built-in reasoning formats deserialize under their name");
-
-        assert_eq!(compat.reasoning_format, Some(expected));
+        serde_json::from_value::<OpenAiCompat>(refused.clone())
+            .expect_err(&format!("{refused} must be refused"));
     }
-
-    let error = serde_json::from_value::<OpenAiCompat>(json!({ "reasoning_format": "qwen3" }))
-        .expect_err("custom reasoning formats are programmatic only");
-
-    let message = error.to_string();
-    assert!(message.contains("unknown reasoning format `qwen3`"));
-    assert!(message.contains("none/openai/openrouter"));
 }
 
 #[test]
@@ -1430,66 +1433,13 @@ fn provider_routing_config_rejects_unknown_sibling_keys() {
     assert!(error.to_string().contains("unknown_preference"));
 }
 
-#[derive(Debug)]
-struct DeepSeekTestReasoningEncoder;
-
-impl ReasoningWireEncoder for DeepSeekTestReasoningEncoder {
-    fn name(&self) -> &str {
-        "deepseek-test"
-    }
-
-    fn encode(
-        &self,
-        endpoint: CompletionEndpoint,
-        intent: &ReasoningWireIntent,
-        body: &mut Value,
-    ) -> Result<(), ReasoningEncodeError> {
-        match (endpoint, intent) {
-            (CompletionEndpoint::ChatCompletions, ReasoningWireIntent::Effort(_)) => {
-                body["thinking"] = json!({ "type": "enabled" });
-                Ok(())
-            }
-            _ => Err(ReasoningEncodeError {
-                dialect: self.name().to_string(),
-                detail: "test dialect only supports Chat Completions effort".to_string(),
-            }),
-        }
-    }
-}
-
-#[test]
-fn custom_reasoning_encoder_is_attached_programmatically() {
-    let format = ReasoningWireFormat::custom(Arc::new(DeepSeekTestReasoningEncoder));
-    let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_reasoning_format(format);
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-    req.model_capability = reasoning_capability();
-
-    let body = provider.build_chat_request_body(&req, false).unwrap();
-
-    assert_eq!(body["thinking"], json!({ "type": "enabled" }));
-}
-
-#[test]
-fn custom_reasoning_format_serializes_under_its_encoder_name() {
-    let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_reasoning_format(ReasoningWireFormat::custom(Arc::new(
-            DeepSeekTestReasoningEncoder,
-        )));
-
-    let config = provider.serialize_config();
-
-    assert_eq!(config["compat"]["reasoning_format"], json!("deepseek-test"));
-}
-
 #[test]
 fn openai_compat_resolver_covers_openrouter_and_session_affinity() {
     let openrouter = openrouter_provider();
     let openrouter_caps = openrouter.resolved_compat(CompletionEndpoint::ChatCompletions);
     assert_eq!(
-        openrouter_caps.reasoning_format,
-        ReasoningWireFormat::openrouter()
+        openrouter_caps.reasoning,
+        Some(OpenAiReasoningDialect::OpenRouter)
     );
     assert!(openrouter_caps.streaming_usage);
     assert!(openrouter_caps.cache_session_affinity);
@@ -1534,6 +1484,8 @@ fn chat_body_honors_compat_max_token_field_streaming_usage_and_strict_tools() {
         output_schema: json!({}).into(),
     }]);
 
+    req.generation.output_token_cap = std::num::NonZeroUsize::new(2_048);
+
     let body = openrouter_provider()
         .with_compat(OpenAiCompat {
             max_tokens_field: Some(OpenAiCompatMaxTokensField::MaxCompletionTokens),
@@ -1545,7 +1497,7 @@ fn chat_body_honors_compat_max_token_field_streaming_usage_and_strict_tools() {
         .unwrap();
 
     assert!(body.get("max_tokens").is_none());
-    assert_eq!(body["max_completion_tokens"], DEFAULT_MAX_OUTPUT_TOKENS);
+    assert_eq!(body["max_completion_tokens"], 2_048);
     assert!(body.get("stream_options").is_none());
     assert_eq!(body["tools"][0]["function"]["strict"], true);
     assert_eq!(
@@ -1557,7 +1509,6 @@ fn chat_body_honors_compat_max_token_field_streaming_usage_and_strict_tools() {
 #[test]
 fn local_preset_suppresses_optional_openai_fields() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
     req.model_capability = reasoning_capability();
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "lookup".to_string(),
@@ -2340,9 +2291,8 @@ mod provider_routing_tests;
 mod openrouter_native_finish_reason_tests;
 
 #[test]
-fn generation_disposition_reports_what_each_dialect_carried() {
-    use crate::common::generation_disposition;
-    use lash_core::llm::types::GenerationOptionOutcome::{Applied, OmittedUnsupported};
+fn receipt_reports_what_each_dialect_carried() {
+    use lash_core::llm::types::GenerationOptionOutcome::{Applied, NotRequested};
 
     let provider = openrouter_provider();
     let mut req = request(vec![LlmMessage::new(
@@ -2358,33 +2308,40 @@ fn generation_disposition_reports_what_each_dialect_carried() {
     req.generation.seed = Some(7);
 
     // Chat Completions carries both sampling controls.
-    let (chat, chat_diagnostics) = provider
+    let (chat, _) = provider
         .build_chat_request_body_with_diagnostics(&req, false)
         .unwrap();
-    let chat = generation_disposition(&req, &chat, chat_diagnostics.cache_control_emitted);
-    assert_eq!((chat.temperature, chat.seed), (Applied, Applied));
-    assert_eq!(chat.cache, Applied);
-    assert!(chat.nothing_omitted());
-
-    // Responses has no seed field, so a repeatability request is dropped —
-    // silently on the wire, but not in the report.
-    let (responses, responses_cache_emitted) = provider
-        .build_responses_request_body_with_cache_evidence(&req, false)
-        .unwrap();
-    let responses = generation_disposition(&req, &responses, responses_cache_emitted);
     assert_eq!(
-        (responses.temperature, responses.seed),
-        (Applied, OmittedUnsupported)
+        (chat.receipt.temperature, chat.receipt.seed),
+        (Applied, Applied)
     );
-    assert!(!responses.nothing_omitted());
+    assert_eq!(chat.receipt.cache, Applied);
+    assert_eq!(chat.receipt.output_token_cap, NotRequested);
+    assert!(chat.body.get("max_tokens").is_none(), "lash invents no cap");
+    assert!(chat.receipt.fully_honored());
+
+    // Responses has no seed field, so a repeatability request is refused
+    // before any I/O instead of being dropped.
+    let error = provider
+        .build_responses_request(&req, false)
+        .expect_err("Responses refuses a seed");
+    assert_eq!(
+        error.code.as_ref().map(|code| code.to_string()),
+        Some("lash:unsupported_generation_option".to_string())
+    );
+    req.generation.seed = None;
+    let responses = provider.build_responses_request(&req, false).unwrap();
+    assert_eq!(responses.receipt.temperature, Applied);
+    // The protocol's cache breakpoint has no directive on this endpoint.
+    assert_eq!(
+        responses.receipt.cache,
+        lash_core::llm::types::GenerationOptionOutcome::OmittedUnsupported
+    );
 
     let direct = OpenAiProvider::new("key");
-    let (direct_body, direct_cache_emitted) = direct
-        .build_responses_request_body_with_cache_evidence(&req, false)
-        .unwrap();
+    let direct = direct.build_responses_request(&req, false).unwrap();
     assert_eq!(
-        generation_disposition(&req, &direct_body, direct_cache_emitted).cache,
-        Applied,
+        direct.receipt.cache, Applied,
         "OpenAI Responses carries prompt-cache intent via prompt_cache_key"
     );
 }

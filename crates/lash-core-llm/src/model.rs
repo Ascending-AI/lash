@@ -401,9 +401,9 @@ mod tests {
         );
 
         assert_eq!(
-            ModelLimits::from_token_limits(32_768, None).expect("valid limits"),
+            ModelLimits::from_token_limits(32_000, None).expect("valid limits"),
             ModelLimits {
-                context_window_tokens: NonZeroUsize::new(32_768).expect("non-zero"),
+                context_window_tokens: NonZeroUsize::new(32_000).expect("non-zero"),
                 output_token_capacity: None,
             }
         );
@@ -412,7 +412,7 @@ mod tests {
             ModelLimitsError::ZeroContextWindowTokens
         );
         assert_eq!(
-            ModelLimits::from_token_limits(32_768, Some(0))
+            ModelLimits::from_token_limits(32_000, Some(0))
                 .expect_err("a present zero output capacity is refused"),
             ModelLimitsError::ZeroOutputTokenCapacity
         );

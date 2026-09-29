@@ -37,7 +37,7 @@
         "openai.responses": {
           "kind": "not_applicable",
           "reason": "Responses has no provider wire stop-sequence field",
-          "assertion": "omitted_unsupported_stop",
+          "assertion": "refused_unsupported_stop",
           "recordings": [
             {
               "case": "unsupported_stop",
@@ -165,7 +165,7 @@
         "codex.responses-sse": {
           "kind": "not_applicable",
           "reason": "Codex Responses has no provider wire stop-sequence field",
-          "assertion": "omitted_unsupported_stop",
+          "assertion": "refused_unsupported_stop",
           "recordings": [
             {
               "case": "unsupported_stop",
@@ -293,7 +293,7 @@
         "codex.responses-websocket": {
           "kind": "not_applicable",
           "reason": "Codex Responses WebSocket has no provider wire stop-sequence field",
-          "assertion": "omitted_unsupported_stop",
+          "assertion": "refused_unsupported_stop",
           "recordings": [
             {
               "case": "unsupported_stop",

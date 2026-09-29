@@ -324,11 +324,10 @@ impl DirectCompletionCapability {
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
         let resolved = context.current.resolve_policy()?;
         let provider = resolved.provider().clone();
-        let mut request = request;
         let model = request.model.clone();
-        // Validate against the capability carried by the request and write the
-        // resolved (alias-normalized) effort back before the provider sees it.
-        request.model_variant = request
+        // Validate against the capability carried by the request before the
+        // provider sees it; the selection travels unchanged.
+        request
             .model_capability
             .validate_selection(&model, provider.kind(), &request.model_variant)
             .map_err(|error| crate::PluginError::Session(error.message))?;
@@ -386,10 +385,9 @@ impl DirectCompletionCapability {
                 "direct LLM completion request_id must be non-empty for durable replay".to_string(),
             ));
         }
-        let mut request = request;
         // Same variant validation the text lane applies before the provider
         // sees the request.
-        request.model_variant = request
+        request
             .model_capability
             .validate_selection(
                 &request.model,

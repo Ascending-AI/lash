@@ -48,3 +48,26 @@ uses the stored model rather than refreshing capability facts from a host catalo
 Consequently changing the host catalogue cannot change historical attachment
 rendering. New sessions can adopt the new revision. The remote protocol mirrors
 all acceptance rule and source variants so workers use the same retained data.
+
+## Amendment (FIG-4120, 2026-09-29): one resolution, exact efforts, defaults are the `variant`
+
+[ADR 0121](0121-host-generation-settings-are-sent-or-refused.md) changes the
+capability shape to `ReasoningCapability { efforts, encoding, disable,
+mandatory }`:
+
+- `default_effort` is deleted. It was never read, and the host's default is
+  the model spec's `variant`.
+- `aliases` and case folding are deleted. Effort names match exactly, and an
+  unadvertised name is `unsupported_effort`.
+- `ReasoningDisableEncoding` becomes the flag `disable: bool`. The flag says
+  the route accepts an explicit off; the route's dialect owns its wire form.
+
+Validation no longer normalizes, so nothing is written back. The four
+per-provider resolvers are replaced by one,
+`ModelCapability::reasoning_intent`, which returns
+`Effort | Budget | Off`. Each provider maps that intent in one function per
+wire, and a combination a wire cannot carry is refused.
+
+The sentences above that list `default_effort`, `aliases` and
+`ReasoningDisableEncoding`, and those that describe the alias-normalized effort
+being written back, describe the state before this amendment.

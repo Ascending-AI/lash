@@ -427,14 +427,31 @@ impl OpenAiCompatibleProvider {
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
         self.build_chat_request_body_with_diagnostics(req, stream)
-            .map(|(body, _)| body)
+            .map(|(built, _)| built.body)
+    }
+
+    /// What Chat Completions, as this endpoint's compat configures it, can
+    /// carry for this request.
+    fn chat_generation_wire(compat: &OpenAiResolvedCompat, req: &LlmRequest) -> GenerationWire {
+        GenerationWire {
+            label: "OpenAI-compatible Chat Completions",
+            output_token_cap: output_cap_wire(compat.max_tokens_field),
+            temperature: true,
+            seed: true,
+            stop_sequences: true,
+            // Chat Completions rejects `parallel_tool_calls` without tools,
+            // and `request_fields: false` endpoints take none of these fields.
+            parallel_tool_calls: compat.request_fields && !req.tools.is_empty(),
+            thinking_summary: ThinkingSummaryWire::NoField,
+            active_thinking_pins_sampling: false,
+        }
     }
 
     pub(crate) fn build_chat_request_body_with_diagnostics(
         &self,
         req: &LlmRequest,
         stream: bool,
-    ) -> Result<(Value, CacheBreakpointDiagnostics), LlmTransportError> {
+    ) -> Result<(BuiltRequest, CacheBreakpointDiagnostics), LlmTransportError> {
         let serving_route = self.route_identity(&req.model);
         let safe_request = req
             .reasoning_retention_safe_for(
@@ -446,17 +463,29 @@ impl OpenAiCompatibleProvider {
         let req = safe_request.as_ref();
         Self::validate_chat_attachments(req)?;
         let compat = self.resolved_compat(CompletionEndpoint::ChatCompletions);
+        let policy = resolve_generation_policy(
+            req,
+            &self.options,
+            self.kind(),
+            &Self::chat_generation_wire(&compat, req),
+        )?;
+        let mut emission = GenerationEmission::default();
+        let mut reasoning_body = json!({});
+        if let Some(intent) = &policy.reasoning {
+            apply_reasoning(
+                CompletionEndpoint::ChatCompletions,
+                compat.reasoning,
+                intent,
+                &mut reasoning_body,
+            )?;
+            emission.reasoning = true;
+        }
         let mut messages = Self::build_chat_messages(req);
         let mut tools =
             Self::build_chat_tools(req, compat.strict_tools, &compat.schema_capabilities)?;
-        let policy = resolve_generation_policy(
-            &req.generation,
-            &self.options,
-            DEFAULT_MAX_OUTPUT_TOKENS,
-            (),
-        );
         let cache_diagnostics =
             Self::apply_chat_cache_control(req, policy.cache_retention, &mut messages, &mut tools);
+        emission.cache = cache_diagnostics.cache_control_emitted;
         let mut body = json!({
             "model": req.model,
             "messages": null,
@@ -466,39 +495,35 @@ impl OpenAiCompatibleProvider {
         if let Some(provider_routing) = compat.provider_routing {
             body["provider"] = json!(provider_routing);
         }
-        apply_max_tokens_field(&mut body, compat.max_tokens_field, policy.max_output_tokens);
-        // Chat Completions is the one dialect that carries both sampling
-        // controls; each is omitted entirely when the caller set nothing.
+        emission.output_token_cap =
+            apply_max_tokens_field(&mut body, compat.max_tokens_field, policy.max_output_tokens);
         if let Some(temperature) = &policy.temperature {
             body["temperature"] = Value::Number(temperature.clone().into());
+            emission.temperature = true;
         }
         if let Some(seed) = policy.seed {
             body["seed"] = json!(seed);
+            emission.seed = true;
         }
         if !policy.stop_sequences.is_empty() {
             body["stop"] = json!(policy.stop_sequences);
+            emission.stop_sequences = true;
         }
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools);
             body["tool_choice"] = json!(tool_choice_value(&req.tool_choice));
-            if compat.request_fields {
-                body["parallel_tool_calls"] = json!(true);
-            }
+        }
+        if let Some(parallel_tool_calls) = policy.parallel_tool_calls {
+            body["parallel_tool_calls"] = json!(parallel_tool_calls);
+            emission.parallel_tool_calls = true;
         }
         if stream && compat.streaming_usage {
             body["stream_options"] = json!({ "include_usage": true });
         }
-        if let Some(intent) = reasoning_intent(req) {
-            compat
-                .reasoning_format
-                .encode(CompletionEndpoint::ChatCompletions, &intent, &mut body)
-                .map_err(|error| {
-                    reasoning_encode_transport_error(
-                        CompletionEndpoint::ChatCompletions,
-                        &intent,
-                        error,
-                    )
-                })?;
+        if let Value::Object(fields) = reasoning_body {
+            for (key, value) in fields {
+                body[key] = value;
+            }
         }
         if let Some(output_spec) = &req.output_spec {
             body["response_format"] = match output_spec {
@@ -521,7 +546,8 @@ impl OpenAiCompatibleProvider {
                 }
             };
         }
-        Ok((body, cache_diagnostics))
+        let receipt = policy.receipt(req, &emission);
+        Ok((BuiltRequest { body, receipt }, cache_diagnostics))
     }
 
     fn chat_message_text(message: &Value) -> String {

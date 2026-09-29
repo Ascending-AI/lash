@@ -1060,8 +1060,7 @@ impl LiveConformanceHarness {
                 &group_key,
                 "record_dispatch",
                 &EffectGroupRecordDispatchRequest {
-                    position: 0,
-                    invocation_id: child_invocation.clone(),
+                    dispatched: [(0, child_invocation.clone())].into_iter().collect(),
                 },
             )
             .await
@@ -1215,8 +1214,9 @@ impl LiveConformanceHarness {
                 &group_key,
                 "record_dispatch",
                 &EffectGroupRecordDispatchRequest {
-                    position: 0,
-                    invocation_id: child_invocation.as_str().to_owned(),
+                    dispatched: [(0, child_invocation.as_str().to_owned())]
+                        .into_iter()
+                        .collect(),
                 },
             )
             .await
@@ -1277,6 +1277,11 @@ impl LiveConformanceHarness {
             .await
             .expect("the admitting group tombstones");
         println!("EFFECT_GROUP_WITNESS admitting-wait-child-release PASS");
+    }
+
+    /// An ingress client of the harness's server.
+    pub(super) fn ingress(&self) -> RestateIngressClient {
+        RestateIngressClient::new(self.connection.clone())
     }
 
     pub(super) async fn run_design_witnesses(&self) {
@@ -1721,6 +1726,7 @@ async fn run_design_witnesses(
             &EffectGroupReadRankRequest {
                 rank: 1,
                 for_caller: false,
+                run: false,
             },
         )
         .await
@@ -1885,8 +1891,9 @@ async fn run_design_witnesses(
             &admission_group,
             "record_dispatch",
             &EffectGroupRecordDispatchRequest {
-                position: 0,
-                invocation_id: child_invocation.as_str().to_owned(),
+                dispatched: [(0, child_invocation.as_str().to_owned())]
+                    .into_iter()
+                    .collect(),
             },
         )
         .await
@@ -2191,7 +2198,7 @@ async fn overwrite_index_state(admin: &HarnessAdmin, group_key: &str, state: &se
     );
 }
 
-fn witness_child(group_key: &str, position: usize) -> RuntimeEffectEnvelope {
+pub(super) fn witness_child(group_key: &str, position: usize) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
@@ -2208,7 +2215,7 @@ fn witness_child(group_key: &str, position: usize) -> RuntimeEffectEnvelope {
     )
 }
 
-fn witness_key(label: &str) -> String {
+pub(super) fn witness_key(label: &str) -> String {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     format!(
         "effect-group-witness-{label}-{}-{}",
@@ -2217,7 +2224,10 @@ fn witness_key(label: &str) -> String {
     )
 }
 
-fn witness_shape(group_key: &str, children: &[RuntimeEffectEnvelope]) -> EffectGroupShape {
+pub(super) fn witness_shape(
+    group_key: &str,
+    children: &[RuntimeEffectEnvelope],
+) -> EffectGroupShape {
     EffectGroupShape {
         wake: GroupWakePolicy::All,
         loser_disposition: LoserPolicy::RunToCompletion,
@@ -2238,7 +2248,7 @@ fn witness_shape(group_key: &str, children: &[RuntimeEffectEnvelope]) -> EffectG
     }
 }
 
-fn witness_membership(children: &[RuntimeEffectEnvelope]) -> EffectGroupMembership {
+pub(super) fn witness_membership(children: &[RuntimeEffectEnvelope]) -> EffectGroupMembership {
     EffectGroupMembership(
         children
             .iter()
@@ -2247,7 +2257,7 @@ fn witness_membership(children: &[RuntimeEffectEnvelope]) -> EffectGroupMembersh
     )
 }
 
-async fn await_group_wait(
+pub(super) async fn await_group_wait(
     ingress: &RestateIngressClient,
     request: RestateDurableWaitAwaitRequest,
 ) -> EffectGroupWaitResolution {

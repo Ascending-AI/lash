@@ -429,3 +429,84 @@ fn an_existing_start_answered_to_another_originator_is_caught() {
     );
     assert_eq!(report.violations[0].records, vec![at]);
 }
+
+/// FIG-4110 F8: a node placed in a frame that is not its nearest open, a
+/// frame opened twice, a frame opened from a frame that was not current, and
+/// a frame named with no open each break the frame chain.
+#[test]
+fn a_broken_frame_chain_breaks_frame_lineage() {
+    let clean = clean();
+    let store = &clean.stores[0];
+    let (session, leaf) = store
+        .heads
+        .first()
+        .cloned()
+        .expect("the fixture has a head");
+    let first = store
+        .graph_nodes
+        .iter()
+        .find(|node| node.session == session && node.frame_open)
+        .cloned()
+        .expect("the fixture's session opens a frame");
+    let node = |id: &str, parent: Option<&str>, frame: &str, frame_open: bool| GraphNodeRow {
+        session: session.clone(),
+        node_id: id.to_owned(),
+        parent: parent.map(str::to_owned),
+        frame: frame.to_owned(),
+        frame_open,
+    };
+    let extend = |nodes: Vec<GraphNodeRow>| {
+        let mut history = clean.clone();
+        let store = &mut history.stores[0];
+        let head = nodes.last().expect("a new leaf").node_id.clone();
+        store.graph_nodes.extend(nodes);
+        for (named, leaf) in &mut store.heads {
+            if *named == session {
+                *leaf = head.clone();
+            }
+        }
+        history
+    };
+
+    // A second frame opened in order from the first keeps the chain.
+    let kept = extend(vec![
+        node("f2", Some(&leaf), "f2", true),
+        node("n2", Some("f2"), "f2", false),
+    ]);
+    let report = check_with(&kept, &[checker("frames-form-one-chain")]);
+    assert!(report.passed(), "{}", report.failure());
+
+    // A node placed in the frame it left.
+    assert_caught(
+        &extend(vec![
+            node("f2", Some(&leaf), "f2", true),
+            node("n2", Some("f2"), &first.node_id, false),
+        ]),
+        "frames-form-one-chain",
+    );
+    // A frame opened twice on one path.
+    assert_caught(
+        &extend(vec![
+            node("f2", Some(&leaf), "f2", true),
+            node("n2", Some("f2"), "f2", false),
+            node("f2-again", Some("n2"), "f2", true),
+        ]),
+        "frames-form-one-chain",
+    );
+    // A frame opened from a frame that was not current: its parent sits in
+    // a frame the path already left.
+    assert_caught(
+        &extend(vec![
+            node("f2", Some(&leaf), "f2", true),
+            node("n2", Some("f2"), "f2", false),
+            node("stale", Some("n2"), &first.node_id, false),
+            node("f3", Some("stale"), "f3", true),
+        ]),
+        "frames-form-one-chain",
+    );
+    // A frame named with no open.
+    assert_caught(
+        &extend(vec![node("orphan", Some(&leaf), "no-such-frame", false)]),
+        "frames-form-one-chain",
+    );
+}

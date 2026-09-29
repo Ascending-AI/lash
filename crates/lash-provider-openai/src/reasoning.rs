@@ -1,221 +1,68 @@
+//! The OpenAI-compatible reasoning mapping: one resolved [`ReasoningIntent`]
+//! onto the route's closed [`OpenAiReasoningDialect`], per endpoint.
+
+use crate::config::OpenAiReasoningDialect;
 use crate::driver::CompletionEndpoint;
 use lash_core::llm::transport::{LlmTransportError, TransportRetryVerdict, TurnFailureCode};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use lash_core::provider::ReasoningIntent;
 use serde_json::{Value, json};
-use std::fmt;
-use std::sync::Arc;
 
-/// The dialect-independent, already-validated reasoning intent resolved from
-/// `ReasoningSelection` × `ReasoningCapability`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ReasoningWireIntent {
-    Effort(String),
-    Budget(u32),
-    ToggleFalse,
-}
-
-/// Error returned when a reasoning dialect cannot represent an intent.
-/// Callers must never silently omit an intent after receiving this error.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReasoningEncodeError {
-    pub dialect: String,
-    pub detail: String,
-}
-
-/// A reasoning wire dialect that maps an intent onto an outgoing request body.
-pub trait ReasoningWireEncoder: fmt::Debug + Send + Sync {
-    /// Stable serialized-config, equality, and error-message identity.
-    fn name(&self) -> &str;
-
-    fn encode(
-        &self,
-        endpoint: CompletionEndpoint,
-        intent: &ReasoningWireIntent,
-        body: &mut Value,
-    ) -> Result<(), ReasoningEncodeError>;
-}
-
-/// Config-facing reasoning wire dialect handle.
+/// Write `intent` onto `body` in the route's dialect, or refuse it.
 ///
-/// A format's name is its identity. Custom encoders must therefore use names
-/// that are unique among all dialects a host attaches.
-#[derive(Clone)]
-pub struct ReasoningWireFormat(Arc<dyn ReasoningWireEncoder>);
-
-impl ReasoningWireFormat {
-    pub fn none() -> Self {
-        Self(Arc::new(NoneReasoningWireEncoder))
-    }
-
-    pub fn openai() -> Self {
-        Self(Arc::new(OpenAiReasoningWireEncoder))
-    }
-
-    pub fn openrouter() -> Self {
-        Self(Arc::new(OpenRouterReasoningWireEncoder))
-    }
-
-    pub fn custom(encoder: Arc<dyn ReasoningWireEncoder>) -> Self {
-        Self(encoder)
-    }
-
-    pub fn name(&self) -> &str {
-        self.0.name()
-    }
-
-    pub fn encode(
-        &self,
-        endpoint: CompletionEndpoint,
-        intent: &ReasoningWireIntent,
-        body: &mut Value,
-    ) -> Result<(), ReasoningEncodeError> {
-        self.0.encode(endpoint, intent, body)
-    }
-}
-
-impl fmt::Debug for ReasoningWireFormat {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.name())
-    }
-}
-
-impl PartialEq for ReasoningWireFormat {
-    fn eq(&self, other: &Self) -> bool {
-        self.name() == other.name()
-    }
-}
-
-impl Eq for ReasoningWireFormat {}
-
-impl Serialize for ReasoningWireFormat {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.name())
-    }
-}
-
-impl<'de> Deserialize<'de> for ReasoningWireFormat {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let name = String::deserialize(deserializer)?;
-        match name.as_str() {
-            "none" => Ok(Self::none()),
-            "openai" => Ok(Self::openai()),
-            "openrouter" => Ok(Self::openrouter()),
-            _ => Err(serde::de::Error::custom(format!(
-                "unknown reasoning format `{name}`; built-ins are none/openai/openrouter; custom dialects must be attached programmatically"
-            ))),
-        }
-    }
-}
-
-/// Reasoning selections are not transmitted on endpoints using this dialect.
-/// Hosts must only declare reasoning vocabularies on endpoints with a verified
-/// dialect.
-#[derive(Debug)]
-struct NoneReasoningWireEncoder;
-
-impl ReasoningWireEncoder for NoneReasoningWireEncoder {
-    fn name(&self) -> &str {
-        "none"
-    }
-
-    fn encode(
-        &self,
-        _endpoint: CompletionEndpoint,
-        _intent: &ReasoningWireIntent,
-        _body: &mut Value,
-    ) -> Result<(), ReasoningEncodeError> {
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct OpenAiReasoningWireEncoder;
-
-impl ReasoningWireEncoder for OpenAiReasoningWireEncoder {
-    fn name(&self) -> &str {
-        "openai"
-    }
-
-    fn encode(
-        &self,
-        endpoint: CompletionEndpoint,
-        intent: &ReasoningWireIntent,
-        body: &mut Value,
-    ) -> Result<(), ReasoningEncodeError> {
-        match (endpoint, intent) {
-            (CompletionEndpoint::ChatCompletions, ReasoningWireIntent::Effort(effort)) => {
-                body["reasoning_effort"] = json!(effort);
-                Ok(())
-            }
-            (CompletionEndpoint::Responses, ReasoningWireIntent::Effort(effort)) => {
-                body["reasoning"] = json!({ "effort": effort });
-                Ok(())
-            }
-            (CompletionEndpoint::ChatCompletions, ReasoningWireIntent::Budget(_)) => {
-                Err(self.unrepresentable(
-                    "top-level reasoning_effort cannot express a token budget",
-                ))
-            }
-            (CompletionEndpoint::ChatCompletions, ReasoningWireIntent::ToggleFalse) => {
-                Err(self.unrepresentable(
-                    "top-level reasoning_effort cannot express enabled:false; disabling on OpenAI must use an effort name from the capability's disable encoding",
-                ))
-            }
-            (CompletionEndpoint::Responses, ReasoningWireIntent::Budget(_)) => Err(self
-                .unrepresentable("OpenAI Responses has no reasoning token-budget field")),
-            (CompletionEndpoint::Responses, ReasoningWireIntent::ToggleFalse) => Err(self
-                .unrepresentable("OpenAI Responses has no reasoning enabled:false field")),
-        }
-    }
-}
-
-impl OpenAiReasoningWireEncoder {
-    fn unrepresentable(&self, detail: impl Into<String>) -> ReasoningEncodeError {
-        ReasoningEncodeError {
-            dialect: self.name().to_string(),
-            detail: detail.into(),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct OpenRouterReasoningWireEncoder;
-
-impl ReasoningWireEncoder for OpenRouterReasoningWireEncoder {
-    fn name(&self) -> &str {
-        "openrouter"
-    }
-
-    fn encode(
-        &self,
-        _endpoint: CompletionEndpoint,
-        intent: &ReasoningWireIntent,
-        body: &mut Value,
-    ) -> Result<(), ReasoningEncodeError> {
-        body["reasoning"] = match intent {
-            ReasoningWireIntent::Effort(effort) => json!({ "effort": effort }),
-            ReasoningWireIntent::Budget(max_tokens) => json!({ "max_tokens": max_tokens }),
-            ReasoningWireIntent::ToggleFalse => json!({ "enabled": false }),
-        };
-        Ok(())
-    }
-}
-
-pub(crate) fn reasoning_encode_transport_error(
+/// A route with no dialect refuses every explicit intent: guessing a shape
+/// would move the silent drop to a gateway that ignores unknown fields. The
+/// `OpenAi` dialect has no token-budget field on either endpoint. Codex speaks
+/// Responses in the `OpenAi` dialect.
+pub(crate) fn apply_reasoning(
     endpoint: CompletionEndpoint,
-    intent: &ReasoningWireIntent,
-    error: ReasoningEncodeError,
-) -> LlmTransportError {
-    LlmTransportError::new(format!(
-        "reasoning dialect `{}` cannot encode {intent:?} for {endpoint:?}: {}",
-        error.dialect, error.detail
-    ))
-    .with_lash_code(TurnFailureCode::ReasoningEncodingUnrepresentable)
-    .with_retry_verdict(TransportRetryVerdict::Forbidden)
+    dialect: Option<OpenAiReasoningDialect>,
+    intent: &ReasoningIntent,
+    body: &mut Value,
+) -> Result<(), LlmTransportError> {
+    let Some(dialect) = dialect else {
+        return Err(unrepresentable(
+            "the route declares no reasoning dialect; set `OpenAiCompat.reasoning` or select `ProviderDefault`",
+        ));
+    };
+    match dialect {
+        OpenAiReasoningDialect::OpenAi => {
+            // The OpenAI effort field names "off" as the effort `none`.
+            let effort = match intent {
+                ReasoningIntent::Effort(effort) => effort.as_str(),
+                ReasoningIntent::Off => "none",
+                ReasoningIntent::Budget(_) => {
+                    return Err(unrepresentable(
+                        "the OpenAI reasoning dialect has no token-budget field",
+                    ));
+                }
+            };
+            match endpoint {
+                CompletionEndpoint::ChatCompletions => body["reasoning_effort"] = json!(effort),
+                CompletionEndpoint::Responses => reasoning_object(body)["effort"] = json!(effort),
+            }
+        }
+        OpenAiReasoningDialect::OpenRouter => {
+            let reasoning = reasoning_object(body);
+            match intent {
+                ReasoningIntent::Effort(effort) => reasoning["effort"] = json!(effort),
+                ReasoningIntent::Budget(max_tokens) => reasoning["max_tokens"] = json!(max_tokens),
+                ReasoningIntent::Off => reasoning["enabled"] = json!(false),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The body's `reasoning` object, created empty when absent.
+pub(crate) fn reasoning_object(body: &mut Value) -> &mut Value {
+    if !body["reasoning"].is_object() {
+        body["reasoning"] = json!({});
+    }
+    &mut body["reasoning"]
+}
+
+fn unrepresentable(detail: &str) -> LlmTransportError {
+    LlmTransportError::new(format!("reasoning selection cannot be sent: {detail}"))
+        .with_lash_code(TurnFailureCode::ReasoningEncodingUnrepresentable)
+        .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }

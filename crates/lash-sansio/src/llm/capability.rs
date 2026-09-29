@@ -2,8 +2,9 @@
 //!
 //! Capability is data the host attaches to a model spec and threads onto every
 //! [`LlmRequest`](crate::llm::types::LlmRequest). Lash validates a requested
-//! effort against it and normalizes (alias-clamps) the value before a provider
-//! sees it. Providers consume capability; they never produce it.
+//! effort against it and resolves it into one [`ReasoningIntent`] that each
+//! provider maps onto its wire. Providers consume capability; they never
+//! produce it.
 
 use std::collections::BTreeMap;
 
@@ -227,19 +228,22 @@ pub enum CacheControlDialect {
 }
 
 /// What reasoning/effort the model exposes and how effort maps onto the wire.
+///
+/// There is no default effort here: a host's default is the model spec's
+/// `variant`. Effort names match exactly; lash neither aliases, lowercases nor
+/// clamps them to a "nearest" level.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ReasoningCapability {
+    /// Exact effort names this route accepts, sent verbatim.
     #[serde(default)]
     pub efforts: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_effort: Option<String>,
-    /// requested-effort -> canonical-effort clamp map (e.g. "xhigh" -> "max", "minimal" -> "low")
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub aliases: BTreeMap<String, String>,
     #[serde(default)]
     pub encoding: ReasoningEncoding,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disable: Option<ReasoningDisableEncoding>,
+    /// Whether this route accepts an explicit reasoning-off selection. The
+    /// wire form of "off" belongs to the route's dialect, not to this data.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disable: bool,
     #[serde(default)]
     pub mandatory: bool,
 }
@@ -248,9 +252,10 @@ pub struct ReasoningCapability {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReasoningSelection {
+    /// Send no reasoning control; the endpoint's own default applies.
     #[default]
     ProviderDefault,
-    /// Explicitly disable reasoning using the model capability's disable encoding.
+    /// Explicitly turn reasoning off, where the capability declares `disable`.
     Disabled,
     /// Request a named, capability-validated effort.
     Effort(String),
@@ -265,15 +270,16 @@ impl ReasoningSelection {
     }
 }
 
-/// How an explicit [`ReasoningSelection::Disabled`] is encoded on the wire.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ReasoningDisableEncoding {
-    Native,
-    Omit,
+/// The one dialect-independent reasoning intent a provider maps onto its
+/// wire, resolved once from `ReasoningSelection` × `ReasoningCapability`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReasoningIntent {
+    /// A named effort, sent verbatim.
     Effort(String),
+    /// A reasoning token budget the host mapped from the selected effort.
     Budget(u32),
-    ToggleFalse,
+    /// Reasoning explicitly turned off.
+    Off,
 }
 
 /// How a resolved effort level is encoded on the wire.
@@ -419,29 +425,18 @@ impl ModelCapability {
         self.sampling == SamplingCapability::Configurable
     }
 
-    /// Resolve a requested effort to its canonical form: alias-map first (input
-    /// lowercased/trimmed), then direct membership in `efforts`.
-    pub fn resolve_effort(&self, requested: &str) -> Option<String> {
-        let reasoning = self.reasoning.as_ref()?;
-        let key = requested.trim().to_lowercase();
-        if let Some(canonical) = reasoning.aliases.get(&key) {
-            return Some(canonical.clone());
-        }
-        if reasoning.efforts.iter().any(|effort| effort == &key) {
-            return Some(key);
-        }
-        None
-    }
-
-    /// Validate a requested effort against this capability and return the
-    /// canonical (alias-normalized) effort to send on the wire. `Ok(None)`
-    /// means no effort is configured on the request.
-    pub fn validate_selection(
+    /// Resolve the requested selection against this capability into the
+    /// one reasoning intent providers map onto their wires. `Ok(None)` means
+    /// the selection is `ProviderDefault`: nothing is sent.
+    ///
+    /// A budget encoding missing an advertised effort is malformed data and an
+    /// error for every selection, never an omission.
+    pub fn reasoning_intent(
         &self,
         model: &str,
         provider_kind: &str,
         requested: &ReasoningSelection,
-    ) -> Result<ReasoningSelection, ModelEffortValidationError> {
+    ) -> Result<Option<ReasoningIntent>, ModelEffortValidationError> {
         if let Some(ReasoningCapability {
             efforts,
             encoding: ReasoningEncoding::Budget(budgets),
@@ -470,7 +465,7 @@ impl ModelCapability {
                     "Model `{model}` on {provider_kind} does not expose configurable effort (requested disabled)."
                 ),
             }),
-            (None, ReasoningSelection::ProviderDefault) => Ok(ReasoningSelection::ProviderDefault),
+            (None, ReasoningSelection::ProviderDefault) => Ok(None),
             (Some(reasoning), ReasoningSelection::ProviderDefault) => {
                 if reasoning.mandatory {
                     Err(ModelEffortValidationError {
@@ -481,12 +476,12 @@ impl ModelCapability {
                         ),
                     })
                 } else {
-                    Ok(ReasoningSelection::ProviderDefault)
+                    Ok(None)
                 }
             }
             (Some(reasoning), ReasoningSelection::Disabled) => {
-                if reasoning.disable.is_some() {
-                    Ok(ReasoningSelection::Disabled)
+                if reasoning.disable {
+                    Ok(Some(ReasoningIntent::Off))
                 } else {
                     Err(ModelEffortValidationError {
                         category: ModelEffortValidationCategory::UnsupportedEffort,
@@ -505,20 +500,43 @@ impl ModelCapability {
                         ),
                     });
                 }
-                match self.resolve_effort(effort) {
-                    Some(resolved) if reasoning.efforts.contains(&resolved) => {
-                        Ok(ReasoningSelection::Effort(resolved))
-                    }
-                    _ => Err(ModelEffortValidationError {
+                if !reasoning.efforts.contains(effort) {
+                    return Err(ModelEffortValidationError {
                         category: ModelEffortValidationCategory::UnsupportedEffort,
                         message: format!(
                             "Unsupported effort `{effort}` for `{model}` on {provider_kind}. Available: {}",
                             reasoning.efforts.join(", ")
                         ),
-                    }),
+                    });
+                }
+                match &reasoning.encoding {
+                    ReasoningEncoding::Effort => Ok(Some(ReasoningIntent::Effort(effort.clone()))),
+                    // Completeness was checked above, so every advertised
+                    // effort has a budget.
+                    ReasoningEncoding::Budget(budgets) => budgets
+                        .get(effort)
+                        .map(|budget| Some(ReasoningIntent::Budget(*budget)))
+                        .ok_or_else(|| ModelEffortValidationError {
+                            category: ModelEffortValidationCategory::MalformedCapability,
+                            message: format!(
+                                "Malformed capability for model `{model}` on {provider_kind}: budget encoding is missing advertised effort `{effort}`."
+                            ),
+                        }),
                 }
             }
         }
+    }
+
+    /// Validate a requested selection against this capability at a runtime
+    /// seam. The selection travels unchanged: validation never rewrites it.
+    pub fn validate_selection(
+        &self,
+        model: &str,
+        provider_kind: &str,
+        requested: &ReasoningSelection,
+    ) -> Result<(), ModelEffortValidationError> {
+        self.reasoning_intent(model, provider_kind, requested)
+            .map(|_| ())
     }
 }
 
@@ -536,10 +554,8 @@ mod tests {
     fn reasoning() -> ReasoningCapability {
         ReasoningCapability {
             efforts: efforts(),
-            default_effort: Some("medium".to_string()),
-            aliases: BTreeMap::new(),
             encoding: ReasoningEncoding::Effort,
-            disable: Some(ReasoningDisableEncoding::Effort("none".to_string())),
+            disable: true,
             mandatory: false,
         }
     }
@@ -591,72 +607,75 @@ mod tests {
     }
 
     #[test]
-    fn resolve_effort_prefers_alias_then_membership() {
-        let mut r = reasoning();
-        r.aliases.insert("xhigh".to_string(), "max".to_string());
-        r.aliases.insert("minimal".to_string(), "low".to_string());
-        let cap = capability(Some(r));
-
-        // alias, including case/whitespace normalization
-        assert_eq!(cap.resolve_effort("xhigh").as_deref(), Some("max"));
-        assert_eq!(cap.resolve_effort("  XHigh ").as_deref(), Some("max"));
-        assert_eq!(cap.resolve_effort("MINIMAL").as_deref(), Some("low"));
-        // direct membership
-        assert_eq!(cap.resolve_effort("high").as_deref(), Some("high"));
-        assert_eq!(cap.resolve_effort("turbo"), None);
+    fn effort_names_match_exactly_without_aliases_case_folding_or_clamping() {
+        let cap = capability(Some(reasoning()));
+        assert_eq!(
+            cap.reasoning_intent("m", "test", &ReasoningSelection::Effort("high".to_string())),
+            Ok(Some(ReasoningIntent::Effort("high".to_string())))
+        );
+        for near_miss in ["High", " high", "xhigh", "minimal"] {
+            let error = cap
+                .reasoning_intent(
+                    "m",
+                    "test",
+                    &ReasoningSelection::Effort(near_miss.to_string()),
+                )
+                .expect_err(near_miss);
+            assert_eq!(
+                error.category,
+                ModelEffortValidationCategory::UnsupportedEffort,
+                "{near_miss}"
+            );
+        }
     }
 
     #[test]
-    fn resolve_effort_none_when_no_reasoning() {
-        assert_eq!(capability(None).resolve_effort("low"), None);
-    }
-
-    #[test]
-    fn resolved_selection_classifier_covers_ratified_table() {
+    fn reasoning_intent_classifier_covers_ratified_table() {
         struct Case {
             name: &'static str,
             capability: ModelCapability,
             selection: ReasoningSelection,
-            expected: Result<ReasoningSelection, ModelEffortValidationCategory>,
+            expected: Result<Option<ReasoningIntent>, ModelEffortValidationCategory>,
         }
 
-        let mut aliased = reasoning();
-        aliased
-            .aliases
-            .insert("xhigh".to_string(), "max".to_string());
         let mut cannot_disable = reasoning();
-        cannot_disable.disable = None;
+        cannot_disable.disable = false;
         let mut mandatory = reasoning();
         mandatory.mandatory = true;
-        let mut malformed = reasoning();
-        malformed
-            .aliases
-            .insert("broken".to_string(), "missing".to_string());
+        let mut budget = reasoning();
+        budget.encoding = ReasoningEncoding::Budget(BTreeMap::from([
+            ("low".to_string(), 1024),
+            ("medium".to_string(), 4096),
+            ("high".to_string(), 8192),
+            ("max".to_string(), 16384),
+        ]));
+        let mut no_efforts = reasoning();
+        no_efforts.efforts.clear();
 
         let cases = [
             Case {
                 name: "default",
                 capability: capability(Some(reasoning())),
                 selection: ReasoningSelection::ProviderDefault,
-                expected: Ok(ReasoningSelection::ProviderDefault),
+                expected: Ok(None),
             },
             Case {
                 name: "effort",
                 capability: capability(Some(reasoning())),
-                selection: ReasoningSelection::Effort("High".to_string()),
-                expected: Ok(ReasoningSelection::Effort("high".to_string())),
+                selection: ReasoningSelection::Effort("high".to_string()),
+                expected: Ok(Some(ReasoningIntent::Effort("high".to_string()))),
             },
             Case {
-                name: "alias_to_effort",
-                capability: capability(Some(aliased)),
-                selection: ReasoningSelection::Effort("xhigh".to_string()),
-                expected: Ok(ReasoningSelection::Effort("max".to_string())),
+                name: "budget",
+                capability: capability(Some(budget)),
+                selection: ReasoningSelection::Effort("medium".to_string()),
+                expected: Ok(Some(ReasoningIntent::Budget(4096))),
             },
             Case {
                 name: "disabled",
                 capability: capability(Some(reasoning())),
                 selection: ReasoningSelection::Disabled,
-                expected: Ok(ReasoningSelection::Disabled),
+                expected: Ok(Some(ReasoningIntent::Off)),
             },
             Case {
                 name: "disabled_unsupported",
@@ -671,25 +690,39 @@ mod tests {
                 expected: Err(ModelEffortValidationCategory::EffortNotConfigurable),
             },
             Case {
+                name: "no_reasoning_default",
+                capability: capability(None),
+                selection: ReasoningSelection::ProviderDefault,
+                expected: Ok(None),
+            },
+            Case {
+                name: "no_efforts",
+                capability: capability(Some(no_efforts)),
+                selection: ReasoningSelection::Effort("low".to_string()),
+                expected: Err(ModelEffortValidationCategory::EffortNotConfigurable),
+            },
+            Case {
                 name: "mandatory_without_selection",
                 capability: capability(Some(mandatory)),
                 selection: ReasoningSelection::ProviderDefault,
                 expected: Err(ModelEffortValidationCategory::EffortRequired),
-            },
-            Case {
-                name: "malformed_capability",
-                capability: capability(Some(malformed)),
-                selection: ReasoningSelection::Effort("broken".to_string()),
-                expected: Err(ModelEffortValidationCategory::UnsupportedEffort),
             },
         ];
 
         for case in cases {
             let actual = case
                 .capability
-                .validate_selection("m", "test", &case.selection)
+                .reasoning_intent("m", "test", &case.selection)
                 .map_err(|error| error.category);
             assert_eq!(actual, case.expected, "{}", case.name);
+            assert_eq!(
+                case.capability
+                    .validate_selection("m", "test", &case.selection)
+                    .map_err(|error| error.category),
+                case.expected.map(|_| ()),
+                "{} validate_selection agrees with reasoning_intent",
+                case.name
+            );
         }
     }
 
@@ -750,7 +783,7 @@ mod tests {
                 ("high".to_string(), 8192),
             ]));
             let error = capability(Some(r))
-                .validate_selection("m", "test", &case.selection)
+                .reasoning_intent("m", "test", &case.selection)
                 .expect_err(case.name);
             assert_eq!(
                 error.category,
@@ -778,12 +811,12 @@ mod tests {
         ]));
 
         assert_eq!(
-            capability(Some(r)).validate_selection(
+            capability(Some(r)).reasoning_intent(
                 "m",
                 "test",
                 &ReasoningSelection::Effort("high".to_string())
             ),
-            Ok(ReasoningSelection::Effort("high".to_string()))
+            Ok(Some(ReasoningIntent::Budget(8192)))
         );
     }
 
@@ -806,7 +839,6 @@ mod tests {
         assert_eq!(back, cap);
 
         let mut r = reasoning();
-        r.aliases.insert("xhigh".to_string(), "max".to_string());
         r.encoding = ReasoningEncoding::Budget(BTreeMap::from([
             ("low".to_string(), 1024u32),
             ("medium".to_string(), 4096u32),
@@ -817,6 +849,25 @@ mod tests {
         let json = serde_json::to_value(&cap).expect("serialize");
         let back: ModelCapability = serde_json::from_value(json).expect("deserialize");
         assert_eq!(back, cap);
+    }
+
+    #[test]
+    fn recorded_reasoning_capabilities_of_the_removed_shape_are_refused() {
+        for removed in [
+            serde_json::json!({ "efforts": ["low"], "retired_default": "low" }),
+            serde_json::json!({ "efforts": ["low"], "aliases": { "minimal": "low" } }),
+            serde_json::json!({ "efforts": ["low"], "disable": "native" }),
+            serde_json::json!({ "efforts": ["low"], "disable": { "effort": "none" } }),
+        ] {
+            assert!(
+                serde_json::from_value::<ReasoningCapability>(removed.clone()).is_err(),
+                "{removed}"
+            );
+        }
+        let current: ReasoningCapability =
+            serde_json::from_value(serde_json::json!({ "efforts": ["low"], "disable": true }))
+                .expect("current shape");
+        assert!(current.disable);
     }
 }
 

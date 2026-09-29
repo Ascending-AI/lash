@@ -6,7 +6,7 @@ use std::time::Duration;
 use lash_core::Resolution;
 use restate_sdk::errors::TerminalError;
 
-use super::{GateRaceWinner, GateWait, first_of_gate_race};
+use super::{GateRaceWinner, GateWait, first_of_gate_race, is_engine_cancellation};
 use crate::durable_wait::RestateDurableWaitAwaitRequest;
 
 /// The two races of a group child's waits against its cancel fact, a part of
@@ -82,11 +82,6 @@ pub(super) async fn race_group_child_cancel<'run, T>(
         Err(error) => return Err(error),
     }
     guarded.await.map(Some)
-}
-
-/// Whether `error` is the engine's cancellation of this invocation.
-fn is_engine_cancellation(error: &TerminalError) -> bool {
-    error.code() == 409
 }
 
 /// The journaled arm on an effect-group child's cancel wait, erased for the

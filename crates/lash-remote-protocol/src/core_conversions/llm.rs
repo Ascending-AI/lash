@@ -321,18 +321,14 @@ impl From<core_llm::ReasoningCapability> for RemoteReasoningCapability {
     fn from(value: core_llm::ReasoningCapability) -> Self {
         let core_llm::ReasoningCapability {
             efforts,
-            default_effort,
-            aliases,
             encoding,
             disable,
             mandatory,
         } = value;
         Self {
             efforts,
-            default_effort,
-            aliases,
             encoding: encoding.into(),
-            disable: disable.map(Into::into),
+            disable,
             mandatory,
         }
     }
@@ -342,18 +338,14 @@ impl From<RemoteReasoningCapability> for core_llm::ReasoningCapability {
     fn from(value: RemoteReasoningCapability) -> Self {
         let RemoteReasoningCapability {
             efforts,
-            default_effort,
-            aliases,
             encoding,
             disable,
             mandatory,
         } = value;
         Self {
             efforts,
-            default_effort,
-            aliases,
             encoding: encoding.into(),
-            disable: disable.map(Into::into),
+            disable,
             mandatory,
         }
     }
@@ -375,30 +367,6 @@ impl From<RemoteReasoningSelection> for core_llm::ReasoningSelection {
             RemoteReasoningSelection::ProviderDefault => Self::ProviderDefault,
             RemoteReasoningSelection::Disabled => Self::Disabled,
             RemoteReasoningSelection::Effort(effort) => Self::Effort(effort),
-        }
-    }
-}
-
-impl From<core_llm::ReasoningDisableEncoding> for RemoteReasoningDisableEncoding {
-    fn from(value: core_llm::ReasoningDisableEncoding) -> Self {
-        match value {
-            core_llm::ReasoningDisableEncoding::Native => Self::Native,
-            core_llm::ReasoningDisableEncoding::Omit => Self::Omit,
-            core_llm::ReasoningDisableEncoding::Effort(effort) => Self::Effort(effort),
-            core_llm::ReasoningDisableEncoding::Budget(budget) => Self::Budget(budget),
-            core_llm::ReasoningDisableEncoding::ToggleFalse => Self::ToggleFalse,
-        }
-    }
-}
-
-impl From<RemoteReasoningDisableEncoding> for core_llm::ReasoningDisableEncoding {
-    fn from(value: RemoteReasoningDisableEncoding) -> Self {
-        match value {
-            RemoteReasoningDisableEncoding::Native => Self::Native,
-            RemoteReasoningDisableEncoding::Omit => Self::Omit,
-            RemoteReasoningDisableEncoding::Effort(effort) => Self::Effort(effort),
-            RemoteReasoningDisableEncoding::Budget(budget) => Self::Budget(budget),
-            RemoteReasoningDisableEncoding::ToggleFalse => Self::ToggleFalse,
         }
     }
 }
@@ -526,6 +494,10 @@ impl From<core_llm::GenerationReceipt> for RemoteGenerationReceipt {
             seed,
             stop_sequences,
             cache,
+            reasoning,
+            parallel_tool_calls,
+            thinking_summary,
+            thinking_visibility,
         } = value;
         Self {
             output_token_cap: output_token_cap.into(),
@@ -533,6 +505,10 @@ impl From<core_llm::GenerationReceipt> for RemoteGenerationReceipt {
             seed: seed.into(),
             stop_sequences: stop_sequences.into(),
             cache: cache.into(),
+            reasoning: reasoning.into(),
+            parallel_tool_calls: parallel_tool_calls.into(),
+            thinking_summary: thinking_summary.into(),
+            thinking_visibility: thinking_visibility.into(),
         }
     }
 }
@@ -545,6 +521,10 @@ impl From<RemoteGenerationReceipt> for core_llm::GenerationReceipt {
             seed,
             stop_sequences,
             cache,
+            reasoning,
+            parallel_tool_calls,
+            thinking_summary,
+            thinking_visibility,
         } = value;
         Self {
             output_token_cap: output_token_cap.into(),
@@ -552,6 +532,10 @@ impl From<RemoteGenerationReceipt> for core_llm::GenerationReceipt {
             seed: seed.into(),
             stop_sequences: stop_sequences.into(),
             cache: cache.into(),
+            reasoning: reasoning.into(),
+            parallel_tool_calls: parallel_tool_calls.into(),
+            thinking_summary: thinking_summary.into(),
+            thinking_visibility: thinking_visibility.into(),
         }
     }
 }
@@ -565,7 +549,6 @@ impl From<core_llm::GenerationOptionOutcome> for RemoteGenerationOptionOutcome {
                 Self::SuppressedProtocolOwned
             }
             core_llm::GenerationOptionOutcome::OmittedUnsupported => Self::OmittedUnsupported,
-            core_llm::GenerationOptionOutcome::OmittedSamplingPinned => Self::OmittedSamplingPinned,
             core_llm::GenerationOptionOutcome::ClampedToCapacity => Self::ClampedToCapacity,
         }
     }
@@ -578,7 +561,6 @@ impl From<RemoteGenerationOptionOutcome> for core_llm::GenerationOptionOutcome {
             RemoteGenerationOptionOutcome::Applied => Self::Applied,
             RemoteGenerationOptionOutcome::SuppressedProtocolOwned => Self::SuppressedProtocolOwned,
             RemoteGenerationOptionOutcome::OmittedUnsupported => Self::OmittedUnsupported,
-            RemoteGenerationOptionOutcome::OmittedSamplingPinned => Self::OmittedSamplingPinned,
             RemoteGenerationOptionOutcome::ClampedToCapacity => Self::ClampedToCapacity,
         }
     }
@@ -794,6 +776,7 @@ impl From<core_llm::GenerationOptions> for RemoteGenerationOptions {
             temperature,
             seed,
             stop_sequences,
+            parallel_tool_calls,
             projection_provenance: _,
         } = value;
         Self {
@@ -801,6 +784,7 @@ impl From<core_llm::GenerationOptions> for RemoteGenerationOptions {
             temperature: temperature.map(Into::into),
             seed,
             stop_sequences,
+            parallel_tool_calls,
         }
     }
 }
@@ -815,6 +799,7 @@ impl TryFrom<RemoteGenerationOptions> for core_llm::GenerationOptions {
             temperature,
             seed,
             stop_sequences,
+            parallel_tool_calls,
         } = value;
         let temperature = temperature
             .map(core_llm::NonNegativeFiniteF64::try_from)
@@ -830,6 +815,7 @@ impl TryFrom<RemoteGenerationOptions> for core_llm::GenerationOptions {
             temperature,
             seed,
             stop_sequences,
+            parallel_tool_calls,
             projection_provenance: Default::default(),
         })
     }

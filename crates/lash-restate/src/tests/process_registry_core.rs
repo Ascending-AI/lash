@@ -1216,7 +1216,7 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
     assert_eq!(stored.id, first.id);
 }
 
-fn start_recovery_effect(
+pub(super) fn start_recovery_effect(
     start_key: &str,
     spec: &lash_core::ProcessExecutionEnvSpec,
 ) -> RuntimeEffectEnvelope {
@@ -1248,7 +1248,7 @@ fn start_recovery_effect(
 
 /// The one row a start-failure law registered: its id was minted inside the
 /// failed start, so the law reads it back from the registry.
-async fn the_only_process(registry: &dyn ProcessRegistry) -> lash_core::ProcessRecord {
+pub(super) async fn the_only_process(registry: &dyn ProcessRegistry) -> lash_core::ProcessRecord {
     let mut records = registry
         .list_processes(&lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Any,

@@ -715,7 +715,15 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
         // READY and releases the opener, so awaiting any child before that
         // point would deadlock the open. Issue all, record all, register, then
         // hold.
-        let mut addresses = BTreeMap::new();
+        //
+        // Every call is issued before any invocation id is awaited, and the
+        // ids are recorded in one `record_dispatch` (FIG-4088). The engine
+        // mints a call's id when it appends the call, so by the time the first
+        // await suspends every id is journaled: the dispatch costs a fixed
+        // number of suspensions whatever the width. Awaiting each id and
+        // recording each dispatch in turn cost two per child, and on a
+        // resumption that replays the journal, child i started only after
+        // about 2i replays of a journal that grows with the width.
         let mut calls = Vec::with_capacity(children.len());
         for (position, envelope) in children.into_iter().enumerate() {
             let replay_key = shape.replay_key(position)?.to_string();
@@ -740,32 +748,34 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             .idempotency_key(replay_key.clone())
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call();
-            let invocation_id = call.invocation_handle().await?.invocation_id().to_owned();
-            let recorded = self
-                .route
-                .namespace()
-                .effect_group_state(&ctx, request.group_key.clone())
-                .record_dispatch(EffectGroupRecordDispatchRequest {
-                    position,
-                    invocation_id: invocation_id.clone(),
-                })
-                .call()
-                .await?
-                .into_body();
-            match recorded {
-                EffectGroupRecordDispatchResponse::Recorded
-                | EffectGroupRecordDispatchResponse::Duplicate => {}
-                EffectGroupRecordDispatchResponse::Retired => return Ok(Reply::at(wire, ())),
-                other => {
-                    return Err(TerminalError::new(format!(
-                        "record dispatch protocol defect for {} child {position}: {other:?}",
-                        request.group_key
-                    ))
-                    .into());
-                }
-            }
-            addresses.insert(position, invocation_id);
             calls.push((position, call));
+        }
+        let mut addresses = BTreeMap::new();
+        for (position, call) in &calls {
+            let invocation_id = call.invocation_handle().await?.invocation_id().to_owned();
+            addresses.insert(*position, invocation_id);
+        }
+        let recorded = self
+            .route
+            .namespace()
+            .effect_group_state(&ctx, request.group_key.clone())
+            .record_dispatch(EffectGroupRecordDispatchRequest {
+                dispatched: addresses.clone(),
+            })
+            .call()
+            .await?
+            .into_body();
+        match recorded {
+            EffectGroupRecordDispatchResponse::Recorded
+            | EffectGroupRecordDispatchResponse::Duplicate => {}
+            EffectGroupRecordDispatchResponse::Retired => return Ok(Reply::at(wire, ())),
+            other => {
+                return Err(TerminalError::new(format!(
+                    "record dispatch protocol defect for {}: {other:?}",
+                    request.group_key
+                ))
+                .into());
+            }
         }
         let registered = self
             .route

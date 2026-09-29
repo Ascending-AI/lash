@@ -1,8 +1,0 @@
-# On the replay leg every await suspends and every resumption replays the
-# journal. The effect-group dispatcher awaits each child's invocation id and
-# records its dispatch one child at a time, so child i starts only after about
-# 2i resumptions: a width-64 group starts its last member more than 60 s in,
-# and the barrier law's width-64 rows outrun the suite's bound. Every member
-# still starts and overlaps; the live leg gates the law.
-[suites.effect-group.replay.divergent]
-"tests::conformance_and_poison::tool_group_members_start_before_any_finishes" = "a width-64 group starts its members one replayed resumption at a time under replay (FIG-4088)"

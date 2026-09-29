@@ -147,6 +147,32 @@ pub struct TranscriptSession {
     pub results: Vec<TranscriptResult>,
 }
 
+/// One committed session graph node, as the frame-lineage checker reads it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct GraphNodeRow {
+    pub session: String,
+    pub node_id: String,
+    pub parent: Option<String>,
+    /// The frame the store placed the node in.
+    pub frame: String,
+    /// Whether the node is a `FrameOpen`.
+    pub frame_open: bool,
+}
+
+impl GraphNodeRow {
+    #[must_use]
+    pub fn render(&self) -> String {
+        format!(
+            "graph_nodes {}/{}: parent={} frame={} frame_open={}",
+            self.session,
+            self.node_id,
+            self.parent.as_deref().unwrap_or("NULL"),
+            self.frame,
+            self.frame_open
+        )
+    }
+}
+
 /// One store set's final durable rows.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct StoreSnapshot {
@@ -161,6 +187,10 @@ pub struct StoreSnapshot {
     pub fences: BTreeSet<(String, String)>,
     pub cleanups: Vec<CleanupRow>,
     pub transcripts: Vec<TranscriptSession>,
+    /// Every committed graph node, in commit order.
+    pub graph_nodes: Vec<GraphNodeRow>,
+    /// `(session, leaf)` of every session head that has a leaf.
+    pub heads: Vec<(String, String)>,
 }
 
 fn text(row: &RawRow, column: &str) -> Option<String> {
@@ -290,6 +320,41 @@ impl StoreSnapshot {
                     referrers: referrer.into_iter().collect(),
                 }),
             }
+        }
+        for row in read(
+            stores,
+            core,
+            "SELECT session_id, node_id, parent_node_id, frame_node_id, node_json \
+             FROM graph_nodes ORDER BY session_id, generation",
+        )? {
+            let node_id = required(&row, "node_id");
+            let parent = text(&row, "parent_node_id");
+            let record = lash_core::SessionNodeRecord::decode_storage_body(
+                node_id.clone(),
+                parent.clone(),
+                &required(&row, "node_json"),
+            )
+            .map_err(|error| format!("decode graph node {node_id}: {error}"))?;
+            snapshot.graph_nodes.push(GraphNodeRow {
+                session: required(&row, "session_id"),
+                node_id,
+                parent,
+                frame: required(&row, "frame_node_id"),
+                frame_open: matches!(
+                    record.payload,
+                    lash_core::SessionNodePayload::FrameOpen { .. }
+                ),
+            });
+        }
+        for row in read(
+            stores,
+            core,
+            "SELECT session_id, leaf_node_id FROM session_head \
+             WHERE leaf_node_id IS NOT NULL ORDER BY session_id",
+        )? {
+            snapshot
+                .heads
+                .push((required(&row, "session_id"), required(&row, "leaf_node_id")));
         }
         for row in read(
             stores,

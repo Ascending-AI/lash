@@ -194,6 +194,7 @@ async fn ensure_group_is_new(ingress: &RestateIngressClient, run_id: &str) -> Ap
             &Call::new(EffectGroupReadRankRequest {
                 rank: 1,
                 for_caller: false,
+                run: false,
             }),
         )
         .await
@@ -222,6 +223,7 @@ async fn read_effect_group_report(
                 &Call::new(EffectGroupReadRankRequest {
                     rank,
                     for_caller: false,
+                    run: false,
                 }),
             )
             .await
@@ -233,6 +235,11 @@ async fn read_effect_group_report(
             .body;
         let settlement = match response {
             EffectGroupReadRankResponse::Settled { settlement, .. } => settlement,
+            EffectGroupReadRankResponse::SettledRun { .. } => {
+                return Err(AppError::internal(format!(
+                    "effect group {group_key} answered a one-rank read of rank {rank} with a run"
+                )));
+            }
             EffectGroupReadRankResponse::NotSettled => {
                 return Err(AppError::internal(format!(
                     "effect group {group_key} is not terminal: rank {rank} has not settled"

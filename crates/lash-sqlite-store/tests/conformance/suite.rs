@@ -51,18 +51,59 @@ impl lash_conformance::ConformanceTurnRunner for ScopeLawTurnRunner {
                 }),
             )
             .await
-            .expect("the joined-scope law runs inside a handler");
+            .expect("the law's turn runs inside a handler");
     }
 
     async fn run_crashed_then_redriven_turn(
         &self,
-        _admitted: lash_core_execution::AdmittedScope,
-        _crashing: lash_conformance::ConformanceTurnAttempt,
-        _redrive: lash_conformance::ConformanceTurnAttempt,
+        admitted: lash_core_execution::AdmittedScope,
+        crashing: lash_conformance::ConformanceTurnAttempt,
+        redrive: lash_conformance::ConformanceTurnAttempt,
     ) {
-        unreachable!("the joined-scope law does not crash a turn")
+        let handler = |attempt: lash_conformance::ConformanceTurnAttempt| -> lash_restate_test::HandlerAttempt {
+            Arc::new(move |scoped| {
+                let attempt = Arc::clone(&attempt);
+                Box::pin(async move {
+                    attempt(scoped).await;
+                })
+            })
+        };
+        self.0
+            .run_crashed_then_redriven(admitted, handler(crashing), handler(redrive))
+            .await
+            .unwrap_or_else(|error| {
+                panic!("the law's crashed turn did not redrive in its handler: {error}")
+            });
     }
 }
+
+// FIG-4110: every frame open (a context-pressure frame, a pressure frame
+// followed by `continue_as`, `/compact`) killed at each crash point and
+// redriven opens once, chained in order, with one summarizer call. Each turn
+// runs inside a handler of the Restate double over this substrate's stores.
+lash_conformance::frame_open_redrive_tests!({
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let stores = backend.as_stores();
+    let double_stores = Arc::clone(&stores);
+    let double = lash_restate_test::backend_with(
+        4110 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+        lash_restate_test::ServerConfig::default(),
+        move |_| Arc::clone(&double_stores),
+    )
+    .await
+    .expect("boot the frame-open law's handler");
+    let effect_host = double.restate().restate_effect_host();
+    let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
+        as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+    (
+        (backend, double),
+        "sqlite-frame-open",
+        effect_host,
+        stores,
+        runner,
+    )
+});
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_joined_inputs_turn_scope_closes_with_its_admitting_root() {

@@ -31,8 +31,8 @@ pub(crate) use lash_core_ids::{operational_metrics, panic_containment};
 pub(crate) use lash_sansio::llm::types::{
     AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
-    GenerationOptions, GenerationReceipt, LlmCallRecord, LlmTerminalReason, NonNegativeFiniteF64,
-    ProviderFailureKind, ProviderReplayDrop,
+    GenerationReceipt, LlmCallRecord, LlmTerminalReason, NonNegativeFiniteF64, ProviderFailureKind,
+    ProviderReplayDrop,
 };
 pub(crate) use lash_sansio::session_model::{FailureCode, TurnFailureKind};
 pub(crate) use session_model::ChargeSafetyPolicy;
@@ -42,7 +42,8 @@ pub(crate) use session_model::ChargeSafetyPolicy;
 pub(crate) use lash_core_ids::clock::ClockWallTime;
 #[cfg(test)]
 pub(crate) use lash_sansio::llm::types::{
-    GenerationOptionOutcome, LlmCallId, LlmRequestScope, ProtocolPosition, ProviderReplayDropReason,
+    GenerationOptionOutcome, GenerationOptions, LlmCallId, LlmRequestScope, ProtocolPosition,
+    ProviderReplayDropReason,
 };
 #[cfg(test)]
 pub(crate) use provider::ModelCapability;

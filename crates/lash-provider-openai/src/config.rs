@@ -9,6 +9,20 @@ pub enum OpenAiCompatMaxTokensField {
     Omit,
 }
 
+/// The closed set of reasoning wire dialects an OpenAI-compatible route speaks.
+/// The host or a preset names one; no URL or model name selects it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum OpenAiReasoningDialect {
+    /// Chat Completions top-level `reasoning_effort`; Responses
+    /// `reasoning.effort`. Off is the effort `none`; there is no budget field.
+    #[serde(rename = "openai")]
+    OpenAi,
+    /// `reasoning.effort`, `reasoning.max_tokens` or `reasoning.enabled:false`
+    /// on both endpoints.
+    #[serde(rename = "openrouter")]
+    OpenRouter,
+}
+
 /// Endpoint-owned HTTP authentication and static request query parameters.
 ///
 /// The default preserves the conventional OpenAI wire shape:
@@ -65,8 +79,10 @@ pub struct OpenAiCompat {
     pub request_fields: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens_field: Option<OpenAiCompatMaxTokensField>,
+    /// Reasoning dialect of this route. `None` sends no reasoning control and
+    /// refuses an explicit reasoning selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_format: Option<ReasoningWireFormat>,
+    pub reasoning: Option<OpenAiReasoningDialect>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_session_affinity: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -89,7 +105,7 @@ pub struct OpenAiCompat {
     /// How this endpoint recovers the usage of a generation whose stream
     /// ended before usage was reported (FIG-2765). Absent means the endpoint
     /// has no such lookup and `Provider::reconcile_usage` answers `None`.
-    /// Explicit, never URL-derived (ADR 0072).
+    /// Explicit, never URL-derived.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_reconciliation: Option<UsageReconciliation>,
 }
@@ -105,7 +121,19 @@ pub enum UsageReconciliation {
 }
 
 impl OpenAiCompat {
+    /// Explicit endpoint capabilities for OpenAI's own Chat Completions API,
+    /// for an [`OpenAiCompatibleProvider`] pointed at it. [`OpenAiProvider`]
+    /// always speaks Responses and carries its own preset.
+    pub fn openai_chat() -> Self {
+        Self {
+            reasoning: Some(OpenAiReasoningDialect::OpenAi),
+            max_tokens_field: Some(OpenAiCompatMaxTokensField::MaxCompletionTokens),
+            ..Self::default()
+        }
+    }
+
     /// Explicit endpoint capabilities for local OpenAI-compatible servers.
+    /// No reasoning dialect: an explicit reasoning selection is refused.
     pub fn local() -> Self {
         Self {
             request_fields: Some(false),
@@ -123,7 +151,7 @@ impl OpenAiCompat {
     /// enforcement, and that trade belongs to the host.
     pub fn openrouter() -> Self {
         Self {
-            reasoning_format: Some(ReasoningWireFormat::openrouter()),
+            reasoning: Some(OpenAiReasoningDialect::OpenRouter),
             cache_session_affinity: Some(true),
             stream_termination: Some(StreamTermination::RequireTerminalEvidence),
             usage_reconciliation: Some(UsageReconciliation::OpenRouterGeneration),
@@ -137,7 +165,7 @@ pub(crate) struct OpenAiResolvedCompat {
     pub(crate) stream_termination: StreamTermination,
     pub(crate) request_fields: bool,
     pub(crate) max_tokens_field: OpenAiCompatMaxTokensField,
-    pub(crate) reasoning_format: ReasoningWireFormat,
+    pub(crate) reasoning: Option<OpenAiReasoningDialect>,
     pub(crate) cache_session_affinity: bool,
     pub(crate) prompt_cache_key: bool,
     pub(crate) prompt_cache_retention: bool,
@@ -168,23 +196,15 @@ pub struct OpenAiProvider {
 
 impl OpenAiCompatibleProvider {
     pub(crate) fn resolved_compat(&self, endpoint: CompletionEndpoint) -> OpenAiResolvedCompat {
-        // ADR 0072 ratifies this exact direct-OpenAI equality as the sole
-        // URL-derived compatibility choice.
-        let direct_openai = self.base_url.trim_end_matches('/') == OPENAI_BASE_URL;
-
         let max_tokens_field = match endpoint {
             CompletionEndpoint::Responses => OpenAiCompatMaxTokensField::MaxOutputTokens,
             CompletionEndpoint::ChatCompletions => OpenAiCompatMaxTokensField::MaxTokens,
-        };
-        let reasoning_format = match endpoint {
-            CompletionEndpoint::Responses if direct_openai => ReasoningWireFormat::openai(),
-            _ => ReasoningWireFormat::none(),
         };
         let defaults = OpenAiResolvedCompat {
             stream_termination: StreamTermination::RequireTerminalEvidence,
             request_fields: true,
             max_tokens_field,
-            reasoning_format,
+            reasoning: None,
             cache_session_affinity: false,
             prompt_cache_key: false,
             prompt_cache_retention: false,
@@ -208,11 +228,7 @@ impl OpenAiCompatibleProvider {
                 .compat
                 .max_tokens_field
                 .unwrap_or(defaults.max_tokens_field),
-            reasoning_format: self
-                .compat
-                .reasoning_format
-                .clone()
-                .unwrap_or(defaults.reasoning_format),
+            reasoning: self.compat.reasoning.or(defaults.reasoning),
             cache_session_affinity: self
                 .compat
                 .cache_session_affinity

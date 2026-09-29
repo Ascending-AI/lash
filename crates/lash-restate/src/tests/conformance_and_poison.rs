@@ -332,11 +332,10 @@ lash_conformance::migrated_tools_redrive_tests!(
     }
 );
 
-// FIG-4110's pressure-compaction redrive on a live endpoint: the compacting
-// turn runs in a probe handler, its summarizer completion is journaled by the
-// real server, and the crash after its commit is a failed handler attempt
-// Restate redelivers.
-lash_conformance::pressure_compaction_redrive_tests!(
+// FIG-4110's frame-open laws on a live endpoint: each turn runs in a probe
+// handler, its summarizer completion is journaled by the real server, and
+// each crash is a failed handler attempt Restate redelivers.
+lash_conformance::frame_open_redrive_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
         let harness =
@@ -345,9 +344,8 @@ lash_conformance::pressure_compaction_redrive_tests!(
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
         // Restate state outlives a run: each run names its own session.
-        let prefix: &'static str = Box::leak(
-            format!("restate-pressure-compaction-{}", harness.run_nonce()).into_boxed_str(),
-        );
+        let prefix: &'static str =
+            Box::leak(format!("restate-frame-open-{}", harness.run_nonce()).into_boxed_str());
         (harness, prefix, effect_host, stores, turn_runner)
     }
 );
@@ -680,6 +678,22 @@ async fn live_restate_effect_group_design_witnesses() {
     harness.finish().await;
 }
 
+/// The rounds each tier runs of the §5 barrier's transitivity law.
+const DRAIN_TRANSITIVITY_ROUNDS: usize = 12;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+async fn live_restate_drain_barrier_is_transitive() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+    super::effect_group_drain_transitivity::drain_barrier_is_transitive(
+        harness.ingress(),
+        super::effect_group_drain_transitivity::drain_law_seed(),
+        DRAIN_TRANSITIVITY_ROUNDS,
+    )
+    .await;
+    harness.finish().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
 async fn live_restate_close_releases_an_unstarted_wait_child() {
@@ -914,6 +928,39 @@ mod on_the_server_double {
         tokio::time::timeout(Duration::from_secs(240), harness.run_design_witnesses())
             .await
             .expect("design witnesses on the server double exceeded 240 seconds");
+        harness.finish().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn drain_barrier_is_transitive() {
+        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
+        crate::tests::effect_group_drain_transitivity::drain_barrier_is_transitive(
+            harness.ingress(),
+            crate::tests::effect_group_drain_transitivity::drain_law_seed(),
+            super::DRAIN_TRANSITIVITY_ROUNDS,
+        )
+        .await;
+        harness.finish().await;
+    }
+
+    /// The same law where every await suspends and every resumption replays
+    /// its journal, the e2e replay leg's mode.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn drain_barrier_is_transitive_under_replay() {
+        let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
+            unreachable!("in_process names the server double");
+        };
+        let harness = LiveConformanceHarness::start_on(HarnessServer::InProcess {
+            seed,
+            always_replay: true,
+        })
+        .await;
+        crate::tests::effect_group_drain_transitivity::drain_barrier_is_transitive(
+            harness.ingress(),
+            crate::tests::effect_group_drain_transitivity::drain_law_seed(),
+            super::DRAIN_TRANSITIVITY_ROUNDS,
+        )
+        .await;
         harness.finish().await;
     }
 

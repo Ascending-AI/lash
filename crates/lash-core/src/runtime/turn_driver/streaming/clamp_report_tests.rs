@@ -7,6 +7,7 @@ fn applied() -> Option<crate::GenerationReceipt> {
         seed: crate::GenerationOptionOutcome::NotRequested,
         stop_sequences: crate::GenerationOptionOutcome::NotRequested,
         cache: crate::GenerationOptionOutcome::NotRequested,
+        ..crate::GenerationReceipt::default()
     })
 }
 

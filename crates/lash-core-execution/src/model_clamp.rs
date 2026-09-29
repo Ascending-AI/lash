@@ -64,6 +64,7 @@ mod tests {
             temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
             seed: Some(42),
             stop_sequences: Vec::new(),
+            parallel_tool_calls: None,
             projection_provenance: Default::default(),
         };
 

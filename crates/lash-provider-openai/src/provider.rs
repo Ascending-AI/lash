@@ -28,8 +28,8 @@ impl OpenAiCompatibleProvider {
         self
     }
 
-    pub fn with_reasoning_format(mut self, format: ReasoningWireFormat) -> Self {
-        self.compat.reasoning_format = Some(format);
+    pub fn with_reasoning_dialect(mut self, dialect: OpenAiReasoningDialect) -> Self {
+        self.compat.reasoning = Some(dialect);
         self
     }
 
@@ -51,6 +51,7 @@ impl OpenAiCompatibleProvider {
 impl OpenAiProvider {
     pub fn new(api_key: impl Into<String>) -> Self {
         let compat = OpenAiCompat {
+            reasoning: Some(OpenAiReasoningDialect::OpenAi),
             prompt_cache_key: Some(true),
             prompt_cache_retention: Some(true),
             ..OpenAiCompat::default()
@@ -80,22 +81,18 @@ impl OpenAiProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
-        self.build_responses_request_body_with_cache_evidence(req, stream)
-            .map(|(body, _)| body)
+        self.build_responses_request(req, stream)
+            .map(|built| built.body)
     }
 
     #[cfg(test)]
-    pub(crate) fn build_responses_request_body_with_cache_evidence(
+    pub(crate) fn build_responses_request(
         &self,
         req: &LlmRequest,
         stream: bool,
-    ) -> Result<(Value, bool), LlmTransportError> {
+    ) -> Result<BuiltRequest, LlmTransportError> {
         self.inner
-            .build_responses_request_body_for_route_with_cache_evidence(
-                req,
-                stream,
-                &self.route_identity(&req.model),
-            )
+            .build_responses_request_for_route(req, stream, &self.route_identity(&req.model))
     }
 }
 

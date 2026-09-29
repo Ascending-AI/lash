@@ -659,8 +659,8 @@ pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
     AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
     InstructionRole, ModelCapability, OpenAiReasoningContext, ReasoningCapability,
-    ReasoningDisableEncoding, ReasoningEncoding, ReasoningRetentionCapability,
-    ReasoningRetentionPolicy, ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
+    ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
+    ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
     ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 pub(crate) use provider::{ProviderCompletion, ProviderCompletionError, RuntimeProviderResolver};

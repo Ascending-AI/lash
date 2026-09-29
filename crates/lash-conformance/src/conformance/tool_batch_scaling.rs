@@ -28,6 +28,18 @@
 //! [`assert_tool_batch_scales_linearly`], and an `#[ignore]`d child, which
 //! calls [`run_tool_batch_scaling_child`] on its tier. Only the parent's
 //! re-execution runs the child.
+//!
+//! A durable tier also counts resumptions (FIG-4088): the group dispatch's,
+//! which starts the children, and the opener's, which consumes their
+//! settlements. Each resumption replays the invocation's journal, which holds
+//! an entry or more per child, so the replay costs the width once per
+//! resumption: linear only while the resumptions stay bounded. A dispatch
+//! that suspended once per child, or an opener that suspended once per rank,
+//! replayed quadratically, and a width-64 group on an engine that replays at
+//! every await ran for minutes.
+//! [`measure_tool_batch_resumptions`] runs one gated scenario and reads the
+//! tier's counts; [`assert_tool_batch_resumptions_bounded`] holds the large
+//! width's counts to the small width's, unnormalized.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -60,6 +72,14 @@ pub struct ToolBatchScalingBudget {
     pub max_normalized_time_ratio: f64,
     /// The same bound on the child process's peak RSS.
     pub max_normalized_peak_rss_ratio: f64,
+    /// The most the large width's group dispatch may resume, over the small
+    /// width's, with no width normalization: a dispatch that resumes a fixed
+    /// number of times scores about one, and one that resumes per child
+    /// scores the width ratio.
+    pub max_dispatch_resumption_ratio: f64,
+    /// The same bound on the opener's resumptions, the turn that opened the
+    /// group and consumes its settlements.
+    pub max_opener_resumption_ratio: f64,
 }
 
 impl ToolBatchScalingBudget {
@@ -90,7 +110,11 @@ impl ToolBatchScalingBudget {
             budget.max_normalized_time_ratio.is_finite()
                 && budget.max_normalized_time_ratio >= 1.0
                 && budget.max_normalized_peak_rss_ratio.is_finite()
-                && budget.max_normalized_peak_rss_ratio >= 1.0,
+                && budget.max_normalized_peak_rss_ratio >= 1.0
+                && budget.max_dispatch_resumption_ratio.is_finite()
+                && budget.max_dispatch_resumption_ratio >= 1.0
+                && budget.max_opener_resumption_ratio.is_finite()
+                && budget.max_opener_resumption_ratio >= 1.0,
             "tool_batch_scaling ratios must be finite and at least one: {budget:?}"
         );
         budget
@@ -310,6 +334,133 @@ pub fn assert_tool_batch_scales_linearly(
     );
 }
 
+/// A tier's running resumption counts (FIG-4088).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ToolBatchResumptionCounts {
+    /// Every group dispatch's suspensions.
+    pub dispatch: u64,
+    /// Every opener's suspensions: the invocations that open groups and
+    /// consume their settlements.
+    pub opener: u64,
+}
+
+/// How often one width's group dispatch and opener resumed on a tier that
+/// replays at every await (FIG-4088). Each resumption replays the whole
+/// journal of the invocation it resumes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToolBatchResumptions {
+    pub width: usize,
+    pub counts: ToolBatchResumptionCounts,
+    /// The scenario turn's wall time, reported beside the counts.
+    pub turn: Duration,
+}
+
+impl ToolBatchResumptions {
+    /// `large`'s count over `small`'s, unnormalized, for the dispatch and the
+    /// opener. A count of none counts as one, so a side that never suspends
+    /// scores one.
+    pub fn ratios(small: &Self, large: &Self) -> (f64, f64) {
+        let ratio = |small: u64, large: u64| large.max(1) as f64 / small.max(1) as f64;
+        (
+            ratio(small.counts.dispatch, large.counts.dispatch),
+            ratio(small.counts.opener, large.counts.opener),
+        )
+    }
+
+    /// Whether both ratios are inside `budget`.
+    pub fn within(small: &Self, large: &Self, budget: &ToolBatchScalingBudget) -> bool {
+        let (dispatch, opener) = Self::ratios(small, large);
+        dispatch <= budget.max_dispatch_resumption_ratio
+            && opener <= budget.max_opener_resumption_ratio
+    }
+}
+
+/// Runs one gated width-`width` scenario of [`crate::measure_gated_tool_batch`]
+/// and reports how often its group dispatch and its opener resumed: `counts`
+/// reads the tier's running counts, before and after the scenario, and waits
+/// for the scenario's dispatch to finish before it answers.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the scenario's tier handles beside the tier's own resumption counts"
+)]
+pub async fn measure_tool_batch_resumptions<F, Fut>(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+    producer: &crate::ToolBatchProducer,
+    width: usize,
+    catalog: usize,
+    counts: F,
+) -> ToolBatchResumptions
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = ToolBatchResumptionCounts>,
+{
+    let before = counts().await;
+    let measured = crate::measure_gated_tool_batch(
+        prefix,
+        effect_host,
+        stores,
+        runner,
+        producer,
+        width,
+        catalog,
+    )
+    .await;
+    let after = counts().await;
+    ToolBatchResumptions {
+        width,
+        counts: ToolBatchResumptionCounts {
+            dispatch: after.dispatch.saturating_sub(before.dispatch),
+            opener: after.opener.saturating_sub(before.opener),
+        },
+        turn: measured.turn,
+    }
+}
+
+/// Fails when the large width's group dispatch or opener resumed more than
+/// `budget` allows over the small width's.
+///
+/// # Panics
+///
+/// When a ratio exceeds `max_dispatch_resumption_ratio` or
+/// `max_opener_resumption_ratio`.
+pub fn assert_tool_batch_resumptions_bounded(
+    label: &str,
+    small: ToolBatchResumptions,
+    large: ToolBatchResumptions,
+    budget: ToolBatchScalingBudget,
+) {
+    let (dispatch, opener) = ToolBatchResumptions::ratios(&small, &large);
+    println!(
+        "{label}: width {} resumed its dispatch {} and its opener {} times ({:?} turn); width \
+         {} resumed them {} and {} times ({:?} turn); ratios {dispatch:.2} (budget {}) and \
+         {opener:.2} (budget {})",
+        small.width,
+        small.counts.dispatch,
+        small.counts.opener,
+        small.turn,
+        large.width,
+        large.counts.dispatch,
+        large.counts.opener,
+        large.turn,
+        budget.max_dispatch_resumption_ratio,
+        budget.max_opener_resumption_ratio,
+    );
+    assert!(
+        ToolBatchResumptions::within(&small, &large, &budget),
+        "{label}: a width-{} group's dispatch and opener must resume at most {}x and {}x as \
+         often as a width-{} group's; they resumed {dispatch:.2}x and {opener:.2}x ({small:?}, \
+         {large:?}). Every resumption replays a journal that grows with the width, so \
+         resumptions that grow with it cost quadratic replay.",
+        large.width,
+        budget.max_dispatch_resumption_ratio,
+        budget.max_opener_resumption_ratio,
+        small.width,
+    );
+}
+
 /// Bounds one child: a wedged scenario fails the guard instead of hanging it.
 const CHILD_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -379,6 +530,8 @@ mod tests {
         large_width: 64,
         max_normalized_time_ratio: 2.5,
         max_normalized_peak_rss_ratio: 2.5,
+        max_dispatch_resumption_ratio: 2.0,
+        max_opener_resumption_ratio: 2.0,
     };
 
     fn sample(width: usize, cpu_ms: f64, peak_rss_kib: u64) -> ToolBatchScalingSample {
@@ -401,5 +554,28 @@ mod tests {
         assert!(!ToolBatchScalingRatios::of(&small, &quadratic_time).within(&BUDGET));
         let quadratic_memory = sample(64, 800.0, 6_400_000);
         assert!(!ToolBatchScalingRatios::of(&small, &quadratic_memory).within(&BUDGET));
+    }
+
+    #[test]
+    fn bounded_resumptions_pass_and_per_child_resumptions_trip_the_budget() {
+        let resumed = |width, dispatch, opener| ToolBatchResumptions {
+            width,
+            counts: ToolBatchResumptionCounts { dispatch, opener },
+            turn: Duration::ZERO,
+        };
+        let within = |small, large| ToolBatchResumptions::within(&small, &large, &BUDGET);
+        assert!(within(resumed(8, 7, 30), resumed(64, 9, 40)));
+        assert!(within(resumed(8, 0, 0), resumed(64, 0, 0)));
+        // FIG-4088's dispatch: an invocation-id await and a record call per
+        // child, two resumptions each.
+        assert!(!within(
+            resumed(8, 2 * 8 + 5, 30),
+            resumed(64, 2 * 64 + 5, 30)
+        ));
+        // Its opener: a read and a payload get per rank.
+        assert!(!within(
+            resumed(8, 7, 2 * 8 + 50),
+            resumed(64, 7, 2 * 64 + 50)
+        ));
     }
 }

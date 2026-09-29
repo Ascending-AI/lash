@@ -260,17 +260,17 @@
       "type": "string"
     },
     "GenerationOptionOutcome": {
-      "description": "What became of one caller-requested generation option on one request.\n\nAdapters emit what their wire can express and omit the rest \u2014 a model that pins sampling, extended thinking, or an endpoint with no seed field all take an option away without failing the call. This names which happened so a host can tell an honored request from a silently dropped one.",
+      "description": "What became of one host-set generation setting on one request.\n\nA setting a host sets is sent, or the call is refused before any I/O with a typed failure; nothing is silently dropped. The receipt therefore names only the two deliberate non-send dispositions besides `Applied`: a cap reduced to the model's capacity, and stop sequences a protocol owns. `Applied` means lash put the value on the wire, never that the provider complied.",
       "oneOf": [
         {
-          "description": "The caller expressed no preference, so there was nothing to apply.",
+          "description": "The host expressed no preference, so there was nothing to apply.",
           "enum": [
             "not_requested"
           ],
           "type": "string"
         },
         {
-          "description": "The caller asked for it and the request carries it.",
+          "description": "The host asked for it and the request carries it.",
           "enum": [
             "applied"
           ],
@@ -284,16 +284,9 @@
           "type": "string"
         },
         {
-          "description": "The caller asked for it and it is not expressible here: the endpoint has no field for it, or this adapter's use of the endpoint does not send one. Codex declines request controls by policy even when its underlying dialect has related fields.",
+          "description": "Explicit prompt-cache breakpoints the protocol placed that this adapter's wire has no cache directive for. Only the `cache` row, which reports protocol-placed breakpoints rather than a host setting, uses it.",
           "enum": [
             "omitted_unsupported"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "The caller asked for it and sampling is pinned for this request, by the model's declared capability or by the thinking configuration in use.",
-          "enum": [
-            "omitted_sampling_pinned"
           ],
           "type": "string"
         },
@@ -307,7 +300,7 @@
       ]
     },
     "GenerationReceipt": {
-      "description": "Adapter-reported fate of a request's generation and prompt-cache intent.\n\nThis is request-side, adapter-owned bookkeeping and deliberately separate from [`ExecutionEvidence`], which carries only facts the provider reported about the execution. A host that needs repeatability asserts [`nothing_omitted`](Self::nothing_omitted) rather than trusting that a session-wide temperature survived every model it ran against.",
+      "description": "Per-call account of every host generation setting: resolution supplies what was requested, the adapter supplies what it emitted.\n\nThis is request-side, adapter-owned bookkeeping and deliberately separate from [`ExecutionEvidence`], which carries only facts the provider reported about the execution.",
       "properties": {
         "cache": {
           "allOf": [
@@ -324,7 +317,25 @@
               "$ref": "#/definitions/GenerationOptionOutcome"
             }
           ],
+          "default": "not_requested",
+          "description": "The effective cap: the request's, else the provider options'."
+        },
+        "parallel_tool_calls": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GenerationOptionOutcome"
+            }
+          ],
           "default": "not_requested"
+        },
+        "reasoning": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested",
+          "description": "The model spec's reasoning selection; `ProviderDefault` is not a request."
         },
         "seed": {
           "allOf": [
@@ -349,6 +360,24 @@
             }
           ],
           "default": "not_requested"
+        },
+        "thinking_summary": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested",
+          "description": "`expose_thinking`'s wire half: a reasoning summary requested from the provider."
+        },
+        "thinking_visibility": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested",
+          "description": "`expose_thinking`'s local half: reasoning output published to the host."
         }
       },
       "type": "object"

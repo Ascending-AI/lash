@@ -82,8 +82,9 @@ fn request_bodies_carry_only_hashed_session_identity() {
         let provider = openrouter_provider();
         let route =
             ProviderRouteIdentity::for_endpoint(kind, &provider.base_url, req.model.clone());
-        let (body, _) = crate::driver::build_request_body(&provider, &req, endpoint, false, &route)
-            .expect("openrouter-compatible body");
+        let body = crate::driver::build_request_body(&provider, &req, endpoint, false, &route)
+            .expect("openrouter-compatible body")
+            .body;
         assert_eq!(body["session_id"], session_key);
         assert!(
             !body.to_string().contains(raw_session),

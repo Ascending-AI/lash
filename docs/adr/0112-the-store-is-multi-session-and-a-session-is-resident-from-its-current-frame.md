@@ -105,11 +105,11 @@ append fence already runs inside the commit transaction
 The only resident ancestor check left is on the storeless path
 (`crates/lash-core/src/runtime/session_ops.rs:139-149`). Three paths switch
 frames today: explicit compaction
-(`crates/lash-core/src/runtime/session_api.rs:827`), context-pressure
+(`crates/lash-core/src/runtime/session_api.rs:783`), context-pressure
 compaction and overflow recovery (a context-pressure hook's decision, which
-core opens in `LashRuntime::apply_context_pressure`,
-`crates/lash-core/src/runtime/turn_loop/prepare.rs`) and
-`continue_as` (`crates/lash-core/src/runtime/turn_boundary.rs:494-505`).
+core opens and commits in `LashRuntime::run_context_pressure`,
+`crates/lash-core/src/runtime/turn_loop/context_pressure.rs:102`) and
+`continue_as` (`crates/lash-core/src/runtime/turn_boundary.rs:515`).
 
 ## Decision
 
@@ -1095,27 +1095,23 @@ this cutover. The rewrite now costs O(frame).
 ### 10. Frames change on compaction and `continue_as`
 
 A frame is the context window. Explicit compaction
-(`crates/lash-core/src/runtime/session_api.rs:827`), context-pressure
+(`crates/lash-core/src/runtime/session_api.rs:783`), context-pressure
 compaction and overflow recovery (a context-pressure hook's decision, which
-core opens in `LashRuntime::apply_context_pressure`,
-`crates/lash-core/src/runtime/turn_loop/prepare.rs`) and
-`continue_as` (`crates/lash-core/src/runtime/turn_boundary.rs:494-505`) all
+core opens and commits in `LashRuntime::run_context_pressure`,
+`crates/lash-core/src/runtime/turn_loop/context_pressure.rs:102`) and
+`continue_as` (`crates/lash-core/src/runtime/turn_boundary.rs:515`) all
 append a `FrameOpen` through `open_agent_frame_in_state_with_clock`
 (`crates/lash-core-store/src/session_state.rs:1676`) and commit it. After the
 receipt, §9 trims. None of them reloads from the store. The three are
 equivalent, and §14 pins each one.
 
-**A defect is raised here, as Sam directed.** The automatic pressure path
-does not start a frame. When prompt usage crosses the compaction threshold,
-`StandardCompactionTurnTransform::transform` emits `CompactionNeeded` and
-then only cuts the prompt view to a tail (`prompt_tail_window`,
-`PromptViewPruned`,
-`crates/lash-plugin-standard-compaction/src/lib.rs:773-859`). The durable
-frame keeps growing past the context window. The frame stays the anchor.
-The fix belongs to the pressure path: at the threshold, it must compact
-into a new frame through the same switch that overflow recovery uses. That
-fix is outside the four lanes unless Sam folds it into the runtime lane. It
-carries its own acceptance test (§14, test 6d).
+**The defect raised here is fixed (FIG-4110).** The automatic pressure path
+used to cut only the prompt view to a tail when usage crossed the threshold,
+so the durable frame kept growing past the context window. Pressure
+compaction is now a context-pressure hook (ADR 0001, amended): at the
+threshold it summarizes and returns a frame-opening decision, and core opens
+the frame through the same primitive and commits it before the turn's model
+call, as explicit compaction does. §14's test 6d pins it.
 
 ### 11. Stored shapes change in place
 
@@ -1415,7 +1411,9 @@ The existing hooks that act on a handle gain `session_id`.
      calls.
 
    6d is the pressure-path fix of §10: crossing the compaction threshold
-   starts a frame. It lands with that fix.
+   starts a frame
+   (`pressure_compaction_opens_a_summary_frame_the_turn_continues_in`,
+   `crates/lash/src/tests/standard_compaction_persistence.rs`).
 7. **Shared projection identity**
    (`//crates/lash-core-store:lash-core-store__unit_test`,
    `//crates/lash-core:lash-core__unit_test`).

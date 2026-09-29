@@ -336,15 +336,14 @@ impl RuntimeTurnDriver<'_> {
     ) -> Result<String, Box<SessionStreamEvent>> {
         let model = policy.model.id.clone();
         let provider_kind = policy.provider().kind();
-        // Validate the requested effort against the host-supplied capability
-        // and normalize (alias-clamp) it back onto the spec so the outgoing
-        // request carries the canonical effort the provider expects.
+        // Validate the requested effort against the host-supplied capability.
+        // Effort names match exactly, so the selection travels unchanged.
         match policy.model.capability.validate_selection(
             &model,
             provider_kind,
             &policy.model.variant,
         ) {
-            Ok(resolved) => policy.model.variant = resolved,
+            Ok(()) => {}
             Err(error) => {
                 return Err(Box::new(make_error_event(
                     crate::TurnFailureKind::LlmProvider,

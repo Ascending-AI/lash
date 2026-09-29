@@ -269,6 +269,8 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-postgres-store:schema_drift__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-postgres-store:schema_drift__test__fv_e4daf51f": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-postgres-store:schema_drift__test__fv_ee02aefc": {"cpu_count": 2, "memory_kb": 1048576},
+    "//crates/lash-protocol-rlm:frame_open_redrive__test": {"cpu_count": 2, "memory_kb": 1048576},
+    "//crates/lash-protocol-rlm:frame_open_redrive__test__fv_75c6d3f0": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_75c6d3f0": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-protocol-rlm:protocol_drivers__test": {"cpu_count": 1, "memory_kb": 1048576},

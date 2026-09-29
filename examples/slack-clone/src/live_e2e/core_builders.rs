@@ -30,9 +30,9 @@ pub(super) fn provider(config: &Config, ledger: &SpendLedger) -> ProviderHandle 
         max_output_tokens: Some(config.output_token_cap as u64),
         ..ProviderOptions::default()
     };
+    // Sonnet 5 advertises tools but not parallel_tool_calls; lash sends that
+    // field only when the host sets it, and this host does not.
     let mut compat = OpenAiCompat::openrouter();
-    // Sonnet 5 advertises tools but not parallel_tool_calls; Lash gates that field behind request_fields.
-    compat.request_fields = Some(false);
     compat.provider_routing = Some(ProviderRoutingPrefs {
         require_parameters: true,
         ..ProviderRoutingPrefs::default()
@@ -75,7 +75,6 @@ pub(super) fn model_spec(model: &str, output_cap: usize) -> Result<ModelSpec> {
         .capability(ModelCapability {
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.into_iter().map(String::from).collect(),
-                default_effort: Some("low".to_string()),
                 encoding: ReasoningEncoding::Effort,
                 ..ReasoningCapability::default()
             }),

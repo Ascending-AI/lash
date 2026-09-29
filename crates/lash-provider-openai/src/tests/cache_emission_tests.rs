@@ -23,9 +23,10 @@ fn gemini_cache_dialect_reports_fallback_emission_when_marked_text_is_empty() {
     req.model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Gemini);
 
-    let (body, diagnostics) = openrouter_provider()
+    let (built, diagnostics) = openrouter_provider()
         .build_chat_request_body_with_diagnostics(&req, true)
         .unwrap();
+    let body = built.body;
 
     assert_eq!(count_object_key(&body, "cache_control"), 1);
     assert_eq!(
@@ -36,15 +37,13 @@ fn gemini_cache_dialect_reports_fallback_emission_when_marked_text_is_empty() {
     assert_eq!((diagnostics.requested, diagnostics.emitted), (1, 0));
     assert!(diagnostics.cache_control_emitted);
     assert_eq!(
-        crate::common::generation_disposition(&req, &body, diagnostics.cache_control_emitted).cache,
+        built.receipt.cache,
         lash_core::GenerationOptionOutcome::Applied
     );
 }
 
 #[test]
 fn tool_schema_cache_key_does_not_count_as_adapter_cache_emission() {
-    use crate::common::generation_disposition;
-
     let provider = OpenAiCompatibleProvider::new("key", "https://provider.example/v1");
     let mut req = request(vec![LlmMessage::new(
         LlmRole::User,
@@ -69,22 +68,22 @@ fn tool_schema_cache_key_does_not_count_as_adapter_cache_emission() {
         output_schema: json!({}).into(),
     }]);
 
-    let (body, diagnostics) = provider
+    let (chat, _) = provider
         .build_chat_request_body_with_diagnostics(&req, false)
         .unwrap();
 
-    assert!(body["tools"][0]["function"]["parameters"]["properties"]["cache_control"].is_object());
+    assert!(
+        chat.body["tools"][0]["function"]["parameters"]["properties"]["cache_control"].is_object()
+    );
     assert_eq!(
-        generation_disposition(&req, &body, diagnostics.cache_control_emitted).cache,
+        chat.receipt.cache,
         lash_core::GenerationOptionOutcome::OmittedUnsupported
     );
 
-    let (body, cache_control_emitted) = provider
-        .build_responses_request_body_with_cache_evidence(&req, false)
-        .unwrap();
-    assert!(body["tools"][0]["parameters"]["properties"]["prompt_cache_key"].is_object());
+    let responses = provider.build_responses_request(&req, false).unwrap();
+    assert!(responses.body["tools"][0]["parameters"]["properties"]["prompt_cache_key"].is_object());
     assert_eq!(
-        generation_disposition(&req, &body, cache_control_emitted).cache,
+        responses.receipt.cache,
         lash_core::GenerationOptionOutcome::OmittedUnsupported
     );
 }

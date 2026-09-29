@@ -382,6 +382,10 @@ impl PluginSession {
         Ok(current)
     }
 
+    pub fn has_context_pressure_hooks(&self) -> bool {
+        !self.contributions.context_pressure_hooks.is_empty()
+    }
+
     /// Ask each registered context-pressure hook, in priority order, what the
     /// turn being prepared needs. The first hook that opens a frame is the
     /// last one asked: a turn opens at most one frame. `Continue` decisions

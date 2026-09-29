@@ -159,3 +159,93 @@ async fn batch_scaling_child() {
     )
     .await;
 }
+
+/// The resumption half of the perf guard (FIG-4088): on an endpoint double
+/// that replays at every await, the `INACTIVITY_TIMEOUT=0s` mode of the e2e
+/// replay leg, a width-64 group's dispatch and opener resume about as often as
+/// a width-8 group's, held to `scripts/perf_guard_budgets.json`. A dispatch
+/// that suspended once per child, or an opener that suspended once per rank,
+/// replayed its whole journal each time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn tool_batch_resumptions_stay_bounded() {
+    let budget = lash_conformance::ToolBatchScalingBudget::from_perf_guard_budgets(include_str!(
+        "../../../../scripts/perf_guard_budgets.json"
+    ));
+    let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
+        unreachable!("in_process names the server double");
+    };
+    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
+        seed,
+        always_replay: true,
+    })
+    .await;
+    let server = harness
+        .server_double()
+        .expect("the guard runs on the server double");
+    let producer = lash_conformance::parallel_model_tool_calls_producer(standard_factories());
+    let mut measured = Vec::new();
+    for width in [budget.small_width, budget.large_width] {
+        measured.push(
+            lash_conformance::measure_tool_batch_resumptions(
+                "resumptions",
+                harness.endpoint_host(),
+                harness.law_stores(),
+                harness.turn_runner(),
+                &producer,
+                width,
+                budget.large_width,
+                || resumption_counts(&server),
+            )
+            .await,
+        );
+    }
+    lash_conformance::assert_tool_batch_resumptions_bounded(
+        "restate-endpoint-double/always-replay/parallel-model-tool-calls",
+        measured[0],
+        measured[1],
+        budget,
+    );
+}
+
+/// Every group dispatch's and every turn's suspensions on `server`, once no
+/// dispatch still runs: a dispatch holds its children's calls past the turn
+/// that opened the group. The scenario's turn is the group's opener.
+async fn resumption_counts(
+    server: &lash_restate_test::RestateTestServer,
+) -> lash_conformance::ToolBatchResumptionCounts {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        let invocations = server.invocations();
+        let dispatches = invocations
+            .iter()
+            .filter(|invocation| {
+                invocation.target.contains("EffectGroupDispatch")
+                    && invocation.target.ends_with("/run")
+            })
+            .collect::<Vec<_>>();
+        if dispatches
+            .iter()
+            .all(|invocation| invocation.status == "completed")
+        {
+            let suspensions =
+                |invocations: &mut dyn Iterator<Item = &lash_restate_test::InvocationView>| {
+                    invocations
+                        .map(|invocation| u64::from(invocation.suspensions))
+                        .sum()
+                };
+            return lash_conformance::ToolBatchResumptionCounts {
+                dispatch: suspensions(&mut dispatches.iter().copied()),
+                opener: suspensions(
+                    &mut invocations
+                        .iter()
+                        .filter(|invocation| invocation.target.contains("ConformanceTurnProbe")),
+                ),
+            };
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "a group dispatch did not finish: {dispatches:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}

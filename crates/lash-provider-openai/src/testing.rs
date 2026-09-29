@@ -50,9 +50,9 @@ pub fn serialize_chat_request(
             ..ProviderOptions::default()
         },
     );
-    let (body, diagnostics) = provider.build_chat_request_body_with_diagnostics(request, false)?;
+    let (built, diagnostics) = provider.build_chat_request_body_with_diagnostics(request, false)?;
     Ok((
-        body,
+        built.body,
         CacheBreakpointReport {
             requested: diagnostics.requested,
             emitted: diagnostics.emitted,

@@ -1065,12 +1065,12 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 generation_disposition: Some(lash::remote::llm::RemoteGenerationReceipt {
                     output_token_cap:
                         lash::remote::llm::RemoteGenerationOptionOutcome::ClampedToCapacity,
-                    temperature:
-                        lash::remote::llm::RemoteGenerationOptionOutcome::OmittedSamplingPinned,
-                    seed: lash::remote::llm::RemoteGenerationOptionOutcome::OmittedUnsupported,
+                    temperature: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
+                    seed: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
                     stop_sequences:
                         lash::remote::llm::RemoteGenerationOptionOutcome::SuppressedProtocolOwned,
-                    cache: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
+                    cache: lash::remote::llm::RemoteGenerationOptionOutcome::OmittedUnsupported,
+                    ..Default::default()
                 }),
                 usage: Some(lash::remote::usage::RemoteUsage {
                     input_tokens: 11,

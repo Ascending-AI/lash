@@ -29,16 +29,11 @@ fn process_execution_env_identity_golden_corpus() {
                 google_dialect: Default::default(),
                 reasoning: Some(crate::ReasoningCapability {
                     efforts: vec!["low".to_string(), "high".to_string()],
-                    default_effort: Some("low".to_string()),
-                    aliases: std::collections::BTreeMap::from([(
-                        "max".to_string(),
-                        "high".to_string(),
-                    )]),
                     encoding: crate::ReasoningEncoding::Budget(std::collections::BTreeMap::from([
                         ("low".to_string(), 256),
                         ("high".to_string(), 1024),
                     ])),
-                    disable: Some(crate::ReasoningDisableEncoding::ToggleFalse),
+                    disable: true,
                     mandatory: true,
                 }),
                 cache_control: Some(crate::CacheControlDialect::Anthropic),
@@ -57,6 +52,7 @@ fn process_execution_env_identity_golden_corpus() {
             temperature: Some(crate::NonNegativeFiniteF64::new(0.25).expect("finite temperature")),
             seed: Some(-7),
             stop_sequences: Vec::new(),
+            parallel_tool_calls: None,
             projection_provenance: Default::default(),
         },
     };
@@ -84,8 +80,8 @@ fn process_execution_env_identity_golden_corpus() {
                 "process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738".to_string(),
             ),
             (
-                r#"{"plugin_options":{"plugins":{"a:b":{"enabled":true}}},"policy":{"model":{"id":"model:rich","variant":{"effort":"high"},"limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"default_effort":"low","aliases":{"max":"high"},"encoding":{"budget":{"high":1024,"low":256}},"disable":"toggle_false","mandatory":true}}},"provider_id":"provider","session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"prompt":{"template":{"sections":[]}},"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
-                "process-env:v6:blake3:7c2a6b64d1b7e20fb517db8720f073d40bfa41dfe99d160268cd3571f5e5dbac".to_string(),
+                r#"{"plugin_options":{"plugins":{"a:b":{"enabled":true}}},"policy":{"model":{"id":"model:rich","variant":{"effort":"high"},"limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}},"provider_id":"provider","session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"prompt":{"template":{"sections":[]}},"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
+                "process-env:v6:blake3:291b0b6b8ae9f2571ce7629ee5287b6b352e8ef4105dbd2fe5c7ff563cbd771c".to_string(),
             ),
         ]
     );

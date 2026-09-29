@@ -445,19 +445,19 @@ def matrix() -> dict[str, object]:
                 "openai.responses": {
                     "kind": "not_applicable",
                     "reason": "Responses has no provider wire stop-sequence field",
-                    "assertion": "omitted_unsupported_stop",
+                    "assertion": "refused_unsupported_stop",
                     "recordings": [stream_for("openai.responses", "unsupported_stop", text='<typescript>\nfinish("settled");\n</typescript>\n')],
                 },
                 "codex.responses-sse": {
                     "kind": "not_applicable",
                     "reason": "Codex Responses has no provider wire stop-sequence field",
-                    "assertion": "omitted_unsupported_stop",
+                    "assertion": "refused_unsupported_stop",
                     "recordings": [stream_for("codex.responses-sse", "unsupported_stop", text='<typescript>\nfinish("settled");\n</typescript>\n')],
                 },
                 "codex.responses-websocket": {
                     "kind": "not_applicable",
                     "reason": "Codex Responses WebSocket has no provider wire stop-sequence field",
-                    "assertion": "omitted_unsupported_stop",
+                    "assertion": "refused_unsupported_stop",
                     "recordings": [stream_for("codex.responses-websocket", "unsupported_stop", text='<typescript>\nfinish("settled");\n</typescript>\n')],
                 },
             },

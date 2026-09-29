@@ -135,9 +135,10 @@ pub struct ProviderOptions {
     /// Surface provider reasoning/thinking output in responses.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expose_thinking: bool,
-    /// Per-request output-token cap. `None` lets each provider apply its
-    /// own default. Providers translate to their wire-specific field
-    /// (`max_tokens`, `max_output_tokens`, `maxOutputTokens`, …).
+    /// Output-token cap for calls whose request sets none. `None` sends no
+    /// cap; a wire that requires one (Anthropic Messages) then refuses the
+    /// call. Providers translate to their wire-specific field (`max_tokens`,
+    /// `max_output_tokens`, `maxOutputTokens`, …).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u64>,
     /// Prompt-cache lifetime hint; see [`CacheRetention`].
@@ -179,42 +180,258 @@ impl ProviderOptions {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ResolvedGenerationPolicy<TThinking> {
-    pub max_output_tokens: u64,
-    /// Requested sampling temperature, or `None` when the caller expressed no
-    /// preference. Adapters with an endpoint default of their own layer it
-    /// beneath this value.
-    pub temperature: Option<crate::NonNegativeFiniteF64>,
-    /// Requested sampling seed, or `None`. Only wires that accept a seed emit
-    /// it; the rest omit it.
-    pub seed: Option<i64>,
-    /// Caller-requested literal generation boundaries. Provider adapters that
-    /// expose a native field copy these to the wire unchanged.
-    pub stop_sequences: Vec<String>,
-    pub cache_retention: CacheRetention,
-    pub expose_thinking: bool,
-    pub thinking: TThinking,
+/// Whether and how a wire carries an output-token cap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputCapWire {
+    /// The wire has an optional cap field; no cap is sent when none is set.
+    Optional,
+    /// The wire requires a cap; a call with no effective cap is refused.
+    Required,
+    /// The wire has no cap field; a set cap is refused.
+    Unsupported,
 }
 
-pub fn resolve_generation_policy<TThinking>(
-    generation: &crate::GenerationOptions,
+/// Where a wire can carry `expose_thinking`'s request for a reasoning summary.
+///
+/// `expose_thinking` is chiefly local-publication intent: every adapter
+/// publishes the reasoning a provider streams when it is set. Only a wire that
+/// needs a flag to produce that reasoning gets one; a wire without such a flag
+/// sends nothing and the intent is still honored locally. It is never refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThinkingSummaryWire {
+    /// No summary field (Chat Completions): nothing is sent.
+    NoField,
+    /// A summary field that stands on its own.
+    Always,
+    /// A summary field that exists only inside an active (effort or budget)
+    /// thinking configuration.
+    WithActiveThinking,
+}
+
+/// What one provider wire, as this call uses it, can carry. Each adapter
+/// states it; [`resolve_generation_policy`] refuses every host setting the
+/// wire cannot carry before any I/O, so an adapter only ever emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GenerationWire {
+    /// Lash-authored wire name for refusal messages.
+    pub label: &'static str,
+    pub output_token_cap: OutputCapWire,
+    pub temperature: bool,
+    pub seed: bool,
+    pub stop_sequences: bool,
+    pub parallel_tool_calls: bool,
+    pub thinking_summary: ThinkingSummaryWire,
+    /// Whether an active effort or budget pins sampling on this wire, the way
+    /// Anthropic extended thinking does.
+    pub active_thinking_pins_sampling: bool,
+}
+
+/// Every host generation setting for one call, resolved once: request options
+/// over provider options, the reasoning selection over the host capability,
+/// and every refusal already applied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedGenerationPolicy {
+    /// The request's cap, else the provider options'. `None` sends no cap.
+    pub max_output_tokens: Option<u64>,
+    pub temperature: Option<crate::NonNegativeFiniteF64>,
+    pub seed: Option<i64>,
+    /// Caller-requested literal generation boundaries, copied to the wire
+    /// unchanged.
+    pub stop_sequences: Vec<String>,
+    pub parallel_tool_calls: Option<bool>,
+    /// The one reasoning intent the adapter maps onto its wire; `None` sends
+    /// no reasoning control.
+    pub reasoning: Option<ReasoningIntent>,
+    pub cache_retention: CacheRetention,
+    /// Local publication of provider reasoning.
+    pub expose_thinking: bool,
+    /// Whether the adapter must put its reasoning-summary flag on the wire:
+    /// `expose_thinking` on a wire that has one for this request.
+    pub request_thinking_summary: bool,
+}
+
+/// What an adapter put on the wire, reported by the branch that wrote it so
+/// the receipt never has to be read back off the body.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GenerationEmission {
+    pub output_token_cap: bool,
+    pub temperature: bool,
+    pub seed: bool,
+    pub stop_sequences: bool,
+    pub parallel_tool_calls: bool,
+    pub reasoning: bool,
+    pub thinking_summary: bool,
+    /// The adapter emitted its prompt-cache directive.
+    pub cache: bool,
+}
+
+fn refused(code: TurnFailureCode, message: String) -> LlmTransportError {
+    LlmTransportError::new(message)
+        .with_kind(ProviderFailureKind::Unsupported)
+        .with_lash_code(code)
+        .with_retry_verdict(TransportRetryVerdict::Forbidden)
+}
+
+fn unsupported(wire: &GenerationWire, setting: &str, reason: &str) -> LlmTransportError {
+    refused(
+        TurnFailureCode::UnsupportedGenerationOption,
+        format!(
+            "{} {reason} `{setting}`; clear it for this route instead of expecting lash to drop it.",
+            wire.label
+        ),
+    )
+}
+
+/// Resolve every host generation setting for one call against the wire that
+/// will carry it. Each setting is sent or refused here, with a typed,
+/// non-retryable failure, before the adapter does any I/O; nothing is dropped
+/// and nothing is remapped.
+///
+/// Lash invents no defaults: with no request cap and no provider
+/// `max_output_tokens` no cap is sent, and a wire that requires one refuses
+/// the call with `output_token_cap_required`. A pinned model
+/// ([`SamplingCapability::Pinned`](lash_sansio::llm::capability::SamplingCapability))
+/// or active thinking that pins sampling refuses a set temperature on every
+/// adapter.
+pub fn resolve_generation_policy(
+    request: &LlmRequest,
     options: &ProviderOptions,
-    provider_default_max_output_tokens: u64,
-    thinking: TThinking,
-) -> ResolvedGenerationPolicy<TThinking> {
+    provider_kind: &str,
+    wire: &GenerationWire,
+) -> Result<ResolvedGenerationPolicy, LlmTransportError> {
+    let reasoning = request
+        .model_capability
+        .reasoning_intent(&request.model, provider_kind, &request.model_variant)
+        .map_err(|error| {
+            refused(error.category.failure_code(), error.message)
+                .with_kind(ProviderFailureKind::Validation)
+        })?;
+    let generation = &request.generation;
     let max_output_tokens = generation
         .output_token_cap_u64()
-        .or(options.max_output_tokens)
-        .unwrap_or(provider_default_max_output_tokens);
-    ResolvedGenerationPolicy {
+        .or(options.max_output_tokens);
+    match (wire.output_token_cap, max_output_tokens) {
+        (OutputCapWire::Required, None) => {
+            return Err(refused(
+                TurnFailureCode::OutputTokenCapRequired,
+                format!(
+                    "{} requires an output-token cap; set the request's `output_token_cap` or the provider's `max_output_tokens`.",
+                    wire.label
+                ),
+            ));
+        }
+        (OutputCapWire::Unsupported, Some(_)) => {
+            return Err(unsupported(wire, "output_token_cap", "has no field for"));
+        }
+        _ => {}
+    }
+    if generation.temperature.is_some() {
+        if !wire.temperature {
+            return Err(unsupported(wire, "temperature", "has no field for"));
+        }
+        if !request.model_capability.allows_caller_temperature() {
+            return Err(unsupported(
+                wire,
+                "temperature",
+                "refuses, because the model's capability pins sampling,",
+            ));
+        }
+        if wire.active_thinking_pins_sampling
+            && matches!(
+                reasoning,
+                Some(ReasoningIntent::Effort(_) | ReasoningIntent::Budget(_))
+            )
+        {
+            return Err(unsupported(
+                wire,
+                "temperature",
+                "refuses, because active thinking pins sampling,",
+            ));
+        }
+    }
+    if generation.seed.is_some() && !wire.seed {
+        return Err(unsupported(wire, "seed", "has no field for"));
+    }
+    if !generation.stop_sequences.is_empty() && !wire.stop_sequences {
+        return Err(unsupported(wire, "stop_sequences", "has no field for"));
+    }
+    if generation.parallel_tool_calls.is_some() && !wire.parallel_tool_calls {
+        return Err(unsupported(
+            wire,
+            "parallel_tool_calls",
+            "has no field, for this request, for",
+        ));
+    }
+    let request_thinking_summary = options.expose_thinking
+        && match wire.thinking_summary {
+            ThinkingSummaryWire::NoField => false,
+            ThinkingSummaryWire::Always => true,
+            ThinkingSummaryWire::WithActiveThinking => matches!(
+                reasoning,
+                Some(ReasoningIntent::Effort(_) | ReasoningIntent::Budget(_))
+            ),
+        };
+    Ok(ResolvedGenerationPolicy {
         max_output_tokens,
         temperature: generation.temperature.clone(),
         seed: generation.seed,
         stop_sequences: generation.stop_sequences.clone(),
+        parallel_tool_calls: generation.parallel_tool_calls,
+        reasoning,
         cache_retention: options.cache_retention,
         expose_thinking: options.expose_thinking,
-        thinking,
+        request_thinking_summary,
+    })
+}
+
+impl ResolvedGenerationPolicy {
+    /// The per-call receipt: this resolution supplies what the host asked
+    /// for, the adapter's `emission` what it put on the wire. `Applied` means
+    /// sent, never provider compliance. Runtime layers narrow it afterwards
+    /// for the clamp and protocol stop suppression they alone saw.
+    pub fn receipt(
+        &self,
+        request: &LlmRequest,
+        emission: &GenerationEmission,
+    ) -> GenerationReceipt {
+        use GenerationOptionOutcome as Outcome;
+        let cache_requested = request.messages.iter().any(|message| {
+            message.blocks.iter().any(|block| {
+                matches!(
+                    block,
+                    LlmContentBlock::Text {
+                        cache_breakpoint: true,
+                        ..
+                    }
+                )
+            })
+        });
+        GenerationReceipt {
+            output_token_cap: Outcome::from_emission(
+                self.max_output_tokens.is_some(),
+                emission.output_token_cap,
+            ),
+            temperature: Outcome::from_emission(self.temperature.is_some(), emission.temperature),
+            seed: Outcome::from_emission(self.seed.is_some(), emission.seed),
+            stop_sequences: Outcome::from_emission(
+                !self.stop_sequences.is_empty(),
+                emission.stop_sequences,
+            ),
+            cache: Outcome::from_emission(cache_requested, emission.cache),
+            reasoning: Outcome::from_emission(self.reasoning.is_some(), emission.reasoning),
+            parallel_tool_calls: Outcome::from_emission(
+                self.parallel_tool_calls.is_some(),
+                emission.parallel_tool_calls,
+            ),
+            // A wire without a summary flag is not asked for one; the
+            // host's intent is then carried by local visibility alone.
+            thinking_summary: Outcome::from_emission(
+                self.request_thinking_summary,
+                emission.thinking_summary,
+            ),
+            // Every adapter gates local reasoning publication on this option.
+            thinking_visibility: Outcome::from_emission(self.expose_thinking, true),
+        }
     }
 }
 

@@ -22,6 +22,7 @@
 //! | [`tool_call_identity`] | tool-body runs ([`Fact::ToolExecuted`]) and the committed transcript's tool calls |
 //! | [`input_settlement`] | `pending_turn_inputs`, `queued_work_batches`, `session_roots` and `session_root_inputs` |
 //! | [`start_originator`] | the host's process starts, each with the originator it requested and the one the answered process carries ([`Fact::ProcessStartAnswered`]) |
+//! | [`frame_lineage`] | `graph_nodes` and `session_head` |
 //!
 //! Store rows are read raw, through the SQLite store's test-only
 //! `read_rows_for_testing` (`lash-sqlite-store`, `testing` feature), the
@@ -44,6 +45,7 @@
 mod artifact_reachability;
 mod completion_ownership;
 mod effect_window;
+mod frame_lineage;
 mod input_settlement;
 mod obligations_settled;
 pub mod quarantine;
@@ -61,8 +63,8 @@ use lash_core::sync::MutexExt as _;
 use serde::Serialize;
 
 pub use snapshot::{
-    ArtifactRow, CleanupRow, InputRow, ObligationRow, RootRow, StoreSnapshot, TranscriptCall,
-    TranscriptResult, TranscriptSession,
+    ArtifactRow, CleanupRow, GraphNodeRow, InputRow, ObligationRow, RootRow, StoreSnapshot,
+    TranscriptCall, TranscriptResult, TranscriptSession,
 };
 
 /// The oracle a generated run reports its global-invariant verdict under.
@@ -447,6 +449,7 @@ pub static CHECKERS: &[&dyn HistoryChecker] = &[
     &tool_call_identity::ToolCallIdentity,
     &input_settlement::InputSettlement,
     &start_originator::StartOriginator,
+    &frame_lineage::FrameLineage,
 ];
 
 /// Every checker's verdict on one history.

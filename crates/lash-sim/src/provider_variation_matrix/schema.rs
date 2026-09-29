@@ -108,7 +108,9 @@ pub(super) enum MatrixCell {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum NotApplicableAssertion {
-    OmittedUnsupportedStop,
+    /// The wire has no stop field, so a host stop list is refused before
+    /// any I/O rather than silently dropped.
+    RefusedUnsupportedStop,
 }
 
 impl MatrixCell {

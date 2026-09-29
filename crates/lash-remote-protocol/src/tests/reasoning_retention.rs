@@ -51,6 +51,7 @@ fn fig1123_remote_llm_request_json_round_trips() {
             temperature: Some(serde_json::Number::from_f64(0.25).expect("finite")),
             seed: Some(-9),
             stop_sequences: Vec::new(),
+            parallel_tool_calls: None,
         },
         metadata: HashMap::new(),
     };

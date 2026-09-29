@@ -158,3 +158,39 @@ call rather than guessing before it.
 sentence above that names it is historical. The clamping rule stands for the
 observational-memory workers and for direct requests a tool issues through
 `AttemptContext::direct_completions`.
+
+## Amendment (FIG-4120, 2026-09-29): refusal replaces silent omission
+
+[ADR 0121](0121-host-generation-settings-are-sent-or-refused.md) (audit G9, Q1)
+reverses "omission stays silent and becomes observable". A setting the call's
+model or wire cannot carry is now **refused before any I/O**, with a typed,
+non-retryable failure (`unsupported_generation_option`,
+`output_token_cap_required`, and the others ADR 0121 lists). That covers a
+seed on Messages or Responses, sampling or a cap on Codex, stop sequences on
+Responses, and a temperature on a pinned model. A receipt arrives too late to
+un-send a call. A mixed-model session clears incompatible intent with
+`GenerationOverlay::Replace`.
+
+- **Shared pinning.** `resolve_generation_policy` applies `Pinned` sampling
+  once, for every adapter, together with active Anthropic thinking (and Claude
+  on Vertex). It is no longer an Anthropic-only adapter fact.
+- **No invented cap.** The provider-options cap is still the fallback beneath
+  the request, but lash adds no default of its own. The 32,768 constant is
+  gone. Anthropic, which requires a cap, refuses an uncapped call.
+- **Google.** Google no longer sends `temperature: 0` when none is set. Its
+  receipt comes from what the adapter emitted, not from the request.
+- **The receipt.** Rows are joined from resolution provenance and the
+  adapter's emission evidence, not from the body. Four rows are new:
+  `reasoning`, `parallel_tool_calls`, `thinking_summary` (the wire half of
+  `expose_thinking`) and `thinking_visibility` (its local half). Chat
+  Completions has no summary flag, so there `expose_thinking` is honored by
+  local visibility alone. `OmittedSamplingPinned` is deleted.
+  `OmittedUnsupported` remains only for the `cache` row, which reports
+  protocol-placed breakpoints. The clamp (`ClampedToCapacity`) and protocol
+  stop suppression (`SuppressedProtocolOwned`) are the only remaining non-send
+  dispositions, and the runtime still narrows them as described above.
+- **`parallel_tool_calls`** is a typed `GenerationOptions` field, and the
+  hard-coded values are gone.
+
+The paragraphs above that call omission silent-but-reported, and the rejected
+typed pre-flight check, describe the state before this amendment.

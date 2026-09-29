@@ -372,10 +372,8 @@ fn capability_for_variant(variant: Option<&str>) -> lash_core::ModelCapability {
         google_dialect: Default::default(),
         reasoning: Some(lash_core::ReasoningCapability {
             efforts: vec![variant.to_string()],
-            default_effort: None,
-            aliases: Default::default(),
             encoding: lash_core::ReasoningEncoding::Effort,
-            disable: None,
+            disable: false,
             mandatory: false,
         }),
         cache_control: None,

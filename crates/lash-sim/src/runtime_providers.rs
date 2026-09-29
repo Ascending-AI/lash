@@ -630,6 +630,10 @@ where
         }
         ANTHROPIC => {
             let provider = AnthropicProvider::new("test-key")
+                .with_options(lash_core::provider::ProviderOptions {
+                    max_output_tokens: Some(4_096),
+                    ..lash_core::provider::ProviderOptions::default()
+                })
                 .with_base_url(Some("https://anthropic.test".to_string()))
                 .with_transport(transport);
             (

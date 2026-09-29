@@ -18,27 +18,6 @@ impl GoogleOAuthProvider {
             })
     }
 
-    /// Which of the caller's generation options a Cloud Code request carries.
-    ///
-    /// `generationConfig` expresses every supported generation control:
-    /// `maxOutputTokens` is always written, while sampling controls and stop
-    /// sequences are written whenever the caller sets them.
-    pub(crate) fn generation_disposition(req: &LlmRequest) -> GenerationReceipt {
-        GenerationReceipt {
-            output_token_cap: GenerationOptionOutcome::applied(
-                req.generation.output_token_cap.is_some(),
-            ),
-            temperature: GenerationOptionOutcome::applied(req.generation.temperature.is_some()),
-            seed: GenerationOptionOutcome::applied(req.generation.seed.is_some()),
-            stop_sequences: GenerationOptionOutcome::applied(
-                !req.generation.stop_sequences.is_empty(),
-            ),
-            // Cloud Code reports cached-token usage, but Lash emits no
-            // prompt-cache directive in this request dialect.
-            cache: lash_llm_transport::cache_intent_disposition(req, false),
-        }
-    }
-
     pub(crate) async fn execute_request(
         &self,
         access_token: &str,
@@ -470,8 +449,9 @@ impl GoogleOAuthProvider {
             self.build_contents_with_attachment_parts(&req, &attachment_parts)?
         };
 
-        let request = Self::build_request(self, &req, contents, project_id.as_deref())?;
-        let generation_disposition = Some(Self::generation_disposition(&req));
+        let (request, receipt) =
+            Self::build_request_with_receipt(self, &req, contents, project_id.as_deref())?;
+        let generation_disposition = Some(receipt);
 
         match self
             .execute_request(
@@ -496,8 +476,12 @@ impl GoogleOAuthProvider {
                         cache.remove(key);
                     }
                 }
-                let inline_request =
-                    Self::build_request(self, &req, inline_contents, project_id.as_deref())?;
+                let (inline_request, _) = Self::build_request_with_receipt(
+                    self,
+                    &req,
+                    inline_contents,
+                    project_id.as_deref(),
+                )?;
                 self.execute_request(
                     &access_token,
                     inline_request,
@@ -592,6 +576,9 @@ impl Provider for GoogleOAuthProvider {
             })?;
         let req = self.reasoning_retention_safe_request(&req)?.into_owned();
         Self::validate_attachments(&req)?;
+        // Every generation refusal lands before the credential refresh, the
+        // project lookup and any attachment upload.
+        Self::resolve_generation(self, &req)?;
         let manager = Arc::clone(&self.credentials);
         let mut context = GoogleCredentialCallContext {
             provider: self,
@@ -785,6 +772,60 @@ mod error_detail_tests {
             json!("resolved-project")
         );
         assert_eq!(transport.calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// Every refusal lands before the project lookup, any upload and the
+    /// generate call: the transport never sees a request.
+    #[tokio::test]
+    async fn refused_settings_never_reach_the_project_lookup_or_the_transport() {
+        let mut pinned = completion_request();
+        pinned.generation.temperature =
+            Some(lash_core::NonNegativeFiniteF64::new(0.5).expect("finite"));
+        pinned.model_capability.sampling = lash_core::SamplingCapability::Pinned;
+        let mut parallel = completion_request();
+        parallel.generation.parallel_tool_calls = Some(true);
+        let mut effort = completion_request();
+        effort.model_variant = lash_core::provider::ReasoningSelection::Effort("high".into());
+        let mut gemini3_off = completion_request();
+        gemini3_off.model_capability.google_dialect = lash_core::GoogleDialect::Gemini3;
+        gemini3_off.model_capability.reasoning = Some(lash_core::provider::ReasoningCapability {
+            efforts: vec!["high".to_string()],
+            disable: true,
+            ..lash_core::provider::ReasoningCapability::default()
+        });
+        gemini3_off.model_variant = lash_core::provider::ReasoningSelection::Disabled;
+        for (label, req, code) in [
+            ("pinned", pinned, "lash:unsupported_generation_option"),
+            ("parallel", parallel, "lash:unsupported_generation_option"),
+            ("effort", effort, "lash:effort_not_configurable"),
+            (
+                "gemini3 off",
+                gemini3_off,
+                "lash:reasoning_encoding_unrepresentable",
+            ),
+        ] {
+            let transport = Arc::new(ProjectResolutionTransport {
+                calls: AtomicUsize::new(0),
+            });
+            let mut provider = GoogleOAuthProvider::new(
+                "access",
+                "refresh",
+                u64::MAX,
+                crate::GoogleOAuthClient {
+                    id: "oauth-client-id".into(),
+                    secret: "oauth-client-secret".into(),
+                },
+            )
+            .with_transport(transport.clone());
+            let error = provider.complete(req).await.expect_err(label);
+            assert_eq!(
+                error.code.as_ref().map(ToString::to_string).as_deref(),
+                Some(code),
+                "{label}"
+            );
+            assert_eq!(transport.calls.load(Ordering::SeqCst), 0, "{label}");
+            assert!(provider.project_id.is_none(), "{label} resolved a project");
+        }
     }
 
     /// Lash runs every model call on a fresh copy of the turn's provider.

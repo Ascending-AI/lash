@@ -1050,35 +1050,9 @@ impl LashRuntime {
         self.state.apply_persisted_commit_result(commit_result);
         self.state.mark_node_ids_persisted(persisted_node_ids);
         if switched {
-            self.restore_code_executor_after_frame_switch().await?;
-        }
-        Ok(())
-    }
-
-    /// Restore the live protocol session from the committed state after a
-    /// frame switch, so the live globals match the durable ones: the switch
-    /// cleared execution state, and the executor must not keep the ended
-    /// frame's values (ADR 0113 §3.1).
-    async fn restore_code_executor_after_frame_switch(
-        &mut self,
-    ) -> Result<(), PluginOperationInvokeError> {
-        let Some(session) = self.session.as_mut() else {
-            return Ok(());
-        };
-        let protocol_session = Arc::clone(session.plugins().protocol_session());
-        let session_id = self.state.session_id.clone();
-        let view = crate::plugin::ProtocolSessionRestoreView::new(&self.state);
-        let restored = protocol_session
-            .restore_session(
-                crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                view,
-            )
-            .await;
-        if let Err(err) = restored {
-            self.invalidate_resident_session_state();
-            return Err(PluginOperationInvokeError::Unknown(format!(
-                "failed to restore the protocol session after a compaction frame switch: {err}"
-            )));
+            self.restore_protocol_session_after_frame_open()
+                .await
+                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         }
         Ok(())
     }

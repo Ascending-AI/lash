@@ -24,12 +24,9 @@ pub use codex::CodexProvider;
 pub use common::{OPENAI_BASE_URL, OPENROUTER_BASE_URL};
 pub use config::{
     OpenAiCompat, OpenAiCompatMaxTokensField, OpenAiCompatibleProvider, OpenAiProvider,
-    OpenAiWireConfig, ProviderRoutingPrefs, UsageReconciliation,
+    OpenAiReasoningDialect, OpenAiWireConfig, ProviderRoutingPrefs, UsageReconciliation,
 };
 pub use driver::CompletionEndpoint;
-pub use reasoning::{
-    ReasoningEncodeError, ReasoningWireEncoder, ReasoningWireFormat, ReasoningWireIntent,
-};
 
 #[cfg(test)]
 mod attachment_capability_fixture;
