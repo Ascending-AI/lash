@@ -16,6 +16,59 @@ use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 
 impl SqliteStore {
+    /// Open a named database file for fixtures that inspect or corrupt raw rows.
+    #[cfg(any(test, feature = "testing"))]
+    pub async fn open_file_for_testing(path: &Path) -> tokio_rusqlite::Result<Self> {
+        Self::open_file_with_options_and_clock_for_testing(
+            path,
+            StoreOptions::default(),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
+        )
+        .await
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub async fn open_file_with_clock_for_testing(
+        path: &Path,
+        clock: Arc<dyn lash_core_execution::Clock>,
+    ) -> tokio_rusqlite::Result<Self> {
+        Self::open_file_with_options_and_clock_for_testing(path, StoreOptions::default(), clock)
+            .await
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub async fn open_file_with_options_for_testing(
+        path: &Path,
+        options: StoreOptions,
+    ) -> tokio_rusqlite::Result<Self> {
+        Self::open_file_with_options_and_clock_for_testing(
+            path,
+            options,
+            Arc::new(lash_core_execution::facade_support::SystemClock),
+        )
+        .await
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub async fn open_file_with_options_and_clock_for_testing(
+        path: &Path,
+        options: StoreOptions,
+        clock: Arc<dyn lash_core_execution::Clock>,
+    ) -> tokio_rusqlite::Result<Self> {
+        validate_file_database_path(path, "SqliteStore test fixture")?;
+        Self::open_at(
+            &DatabaseLocation::standalone_file(path),
+            options,
+            clock,
+            None,
+            None,
+            lash_core_execution::FleetFormat::writable_range(),
+            #[cfg(feature = "testing")]
+            None,
+        )
+        .await
+    }
+
     pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
         Self::open_direct(
             path,

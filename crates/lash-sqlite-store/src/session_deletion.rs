@@ -6,7 +6,7 @@ pub(super) fn warn_process_registry_not_wired(path: &'static str) {
         store = "sqlite",
         path,
         consequence = "process-owned uncommitted intents are never reclaimed",
-        "SQLite attachment GC process-owner liveness is not wired; process-owned intents will be retained indefinitely. Call SqliteSessionStoreFactory::new_with_process_registry(...)."
+        "SQLite attachment GC process-owner liveness is not wired; process-owned intents will be retained indefinitely. Open a SqliteStoreSet for process registry integration."
     );
 }
 

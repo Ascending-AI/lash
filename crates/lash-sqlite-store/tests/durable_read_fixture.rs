@@ -185,7 +185,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     // Prime the durable core so its release stamp can be pinned before
     // anything is written.
     let core_path = root.join("durable-core.db");
-    let priming_runtime = SqliteStore::open_with_clock(
+    let priming_runtime = SqliteStore::open_file_with_clock_for_testing(
         &core_path,
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
@@ -194,7 +194,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     drop(priming_runtime);
     pin_release_stamp_instant(&core_path, timestamp_ms);
     let runtime = Arc::new(
-        SqliteStore::open_with_clock(
+        SqliteStore::open_file_with_clock_for_testing(
             &core_path,
             Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
         )

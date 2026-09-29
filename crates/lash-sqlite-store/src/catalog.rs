@@ -1,7 +1,7 @@
 use super::*;
 
-#[path = "factory_reads.rs"]
-mod factory_reads;
+#[path = "catalog_reads.rs"]
+mod catalog_reads;
 
 impl SqliteStore {
     pub(crate) async fn resume_artifact_owner_retirements(

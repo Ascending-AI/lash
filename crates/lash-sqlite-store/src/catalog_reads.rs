@@ -1,6 +1,4 @@
-//! The catalog-wide reads a SQLite session-store factory answers without a
-//! bound session: the turn park feed (FIG-3659), a logical root's terminal
-//! evidence and the open control intents (FIG-3600 S7).
+//! Catalog-wide turn park feed reads (FIG-3659).
 
 use super::*;
 
@@ -20,7 +18,7 @@ type ParkFeedRow = (
 );
 
 impl SqliteStore {
-    /// [`SessionStoreFactory::turn_park_feed`] over the durable core.
+    /// The durable-core turn park feed.
     pub(crate) async fn read_turn_park_feed(
         &self,
         after: lash_core_execution::store::ParkFeedCursor,
@@ -127,36 +125,5 @@ impl SqliteStore {
             );
         }
         Ok(page)
-    }
-
-    /// [`SessionStoreFactory::root_terminal`] over the durable core: the
-    /// root's own evidence, else the session's `close_session` tombstone,
-    /// which answers every root of a deleted session.
-    pub(crate) async fn read_root_terminal(
-        &self,
-        session_id: &SessionId,
-        root: &lash_sansio::TurnId,
-    ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
-        if !self.location.target().exists() {
-            return Ok(None);
-        }
-        let conn = self.read_connection();
-        let session_id = session_id.clone();
-        let root = root.clone();
-        conn.read(move |conn| {
-            Ok((|| {
-                if let Some(terminal) =
-                    crate::session_roots::root_terminal_conn(conn, &session_id, &root)?
-                {
-                    return Ok(Some(terminal));
-                }
-                Ok(
-                    crate::session_roots::close_session_intent_conn(conn, &session_id)?
-                        .and_then(|intent| intent.session_deleted_terminal(&root)),
-                )
-            })())
-        })
-        .await
-        .map_err(sqlite_error)?
     }
 }

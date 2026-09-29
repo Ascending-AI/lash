@@ -1,10 +1,8 @@
-//! The [`RuntimePersistence`] capability-segment implementations for
-//! [`Store`]: [`SessionCommitStore`], [`IngressStore`], and
-//! [`StoreMaintenance`].
+//! Capability-segment implementations for [`SqliteStore`]:
+//! [`SessionCommitStore`], [`lash_core_execution::TurnInputStore`],
+//! [`lash_core_execution::QueuedWorkStore`], and [`StoreMaintenance`].
 //!
-//! This is the tokio-rusqlite port of the prior store's `persistence.rs`. The
-//! public surface is byte-for-byte the prior store async trait: identical method
-//! names and signatures, so consumers swap backends with a path rename only.
+//! Every operation scopes its session explicitly or through its request.
 //!
 //! The translation rules (see `conn.rs`, `lifecycle.rs`, `blobs.rs`):
 //!
@@ -16,8 +14,7 @@
 //!   through `self.conn.write_flow`, deciding commit vs rollback via
 //!   [`TxOutcome`].
 //! * The shared `*_conn` helpers (`try_load_session_head_meta_from_conn`,
-//!   `Self::put_checkpoint_conn`, `Self::load_usage_deltas_conn`,
-//!   `Self::load_session_graph_from_conn`, the queued-work helpers, …) are
+//!   `Self::put_checkpoint_conn`, and the queued-work helpers) are
 //!   synchronous and take a `&rusqlite::Connection`, so they are reused from
 //!   inside these closures (a `&Transaction` derefs to `&Connection`).
 //! * Closures must be `'static` + `Send`: every borrow of `self`/caller data is

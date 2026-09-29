@@ -10,7 +10,7 @@ use lash_core_execution::{
     FLEET_FORMAT_VERSION, FleetFormat, FleetFormatStore, StoreError, StorePreflight,
     StoreSchemaStatus, WriterPin,
 };
-use lash_sqlite_store::{SqliteStorePreflight, Store};
+use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
 
 struct SqliteBackend {
     _root: tempfile::TempDir,
@@ -20,7 +20,7 @@ struct SqliteBackend {
 #[async_trait]
 impl FleetFormatDeployment for SqliteBackend {
     async fn open(&self) -> Result<FleetFormat, StoreError> {
-        SqliteStore::open(&self.durable_core)
+        SqliteStore::open_file_for_testing(&self.durable_core)
             .await
             .map(|store| store.fleet_format())
             .map_err(|err| StoreError::Backend(err.to_string()))
@@ -76,7 +76,7 @@ async fn sqlite_session_meta_stamps_the_version_the_fleet_format_selects() {
         generation: FLEET_FORMAT_VERSION,
         version: 7,
     }]);
-    let store = SqliteStore::open(&durable_core)
+    let store = SqliteStore::open_file_for_testing(&durable_core)
         .await
         .expect("open")
         .with_fleet_format_for_testing(fleet);

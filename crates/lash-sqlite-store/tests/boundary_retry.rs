@@ -7,7 +7,7 @@ use lash_core_execution::{
     ExecutionScope, OperationId, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
     SessionPolicy, StoreError, TurnBudget,
 };
-use lash_sqlite_store::Store;
+use lash_sqlite_store::SqliteStore;
 
 fn commit(boundary: &str, key: &str, revision: u64) -> RuntimeCommit {
     let state = RuntimeSessionState {
@@ -39,7 +39,9 @@ fn semantic_commit_state(boundary: &str, key: &str, state: &RuntimeSessionState)
 async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
     let directory = tempfile::tempdir().expect("database directory");
     let path = directory.path().join("session.db");
-    let store = SqliteStore::open(&path).await.expect("SQLite store");
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("SQLite store");
     let state = RuntimeSessionState {
         session_id: "root".into(),
         ..RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))
@@ -59,7 +61,7 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
         .await
         .expect("advance head");
     drop(store);
-    let store = SqliteStore::open(&path)
+    let store = SqliteStore::open_file_for_testing(&path)
         .await
         .expect("reopen durable receipts");
     let replay = store
@@ -129,7 +131,9 @@ async fn usage_ledger_retry_after_head_advance() {
 async fn usage_ledger_retry_with_staged_usage_after_head_advance() {
     let directory = tempfile::tempdir().expect("database directory");
     let path = directory.path().join("session.db");
-    let store = SqliteStore::open(&path).await.expect("SQLite store");
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("SQLite store");
     let entry = |source: &str| lash_core_execution::TokenLedgerEntry {
         source: source.into(),
         model: "ledger-model".into(),
@@ -210,7 +214,7 @@ async fn usage_ledger_retry_with_staged_usage_after_head_advance() {
 #[tokio::test]
 async fn initial_park_exact_commit_retry_after_head_advance() {
     let directory = tempfile::tempdir().expect("database directory");
-    let store = SqliteStore::open(&directory.path().join("session.db"))
+    let store = SqliteStore::open_file_for_testing(&directory.path().join("session.db"))
         .await
         .expect("SQLite store");
     let mut state = RuntimeSessionState {
@@ -273,7 +277,7 @@ async fn initial_park_exact_commit_retry_after_head_advance() {
 #[tokio::test]
 async fn append_identity_replays_after_head_advance() {
     let directory = tempfile::tempdir().expect("database directory");
-    let store = SqliteStore::open(&directory.path().join("session.db"))
+    let store = SqliteStore::open_file_for_testing(&directory.path().join("session.db"))
         .await
         .expect("SQLite store");
     let mut state = RuntimeSessionState {
@@ -338,7 +342,7 @@ async fn append_identity_replays_after_head_advance() {
 #[tokio::test]
 async fn non_append_operations_refuse_append_identity_metadata() {
     let directory = tempfile::tempdir().expect("database directory");
-    let store = SqliteStore::open(&directory.path().join("session.db"))
+    let store = SqliteStore::open_file_for_testing(&directory.path().join("session.db"))
         .await
         .expect("SQLite store");
     for key in [

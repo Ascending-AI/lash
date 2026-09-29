@@ -10,7 +10,7 @@ use lash_core_execution::{
     StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState, facade_support::shared_parts,
 };
 use lash_sansio::SessionId;
-use lash_sqlite_store::{BlobArtifactDescriptor, SqliteSessionStoreFactory, Store};
+use lash_sqlite_store::{BlobArtifactDescriptor, SqliteSessionStoreFactory, SqliteStore};
 
 fn model_spec(id: &str) -> ModelSpec {
     ModelSpec::builder(id)
@@ -714,10 +714,11 @@ async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
         .expect("delete");
     factory.unpin(&leaf).await.expect("unpin");
 
-    let unbound =
-        SqliteStore::open(&root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()))
-            .await
-            .expect("open unbound store");
+    let unbound = SqliteStore::open_file_for_testing(
+        &root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+    )
+    .await
+    .expect("open unbound store");
     let err = unbound
         .vacuum()
         .await

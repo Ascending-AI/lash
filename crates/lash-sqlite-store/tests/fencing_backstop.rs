@@ -29,7 +29,7 @@ use lash_core_execution::store_backend_support::{
 use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt;
 use lash_core_execution::{IngressStore, LeaseOwnerIdentity, StoreError, TurnId};
 use lash_sansio::SessionId;
-use lash_sqlite_store::Store;
+use lash_sqlite_store::SqliteStore;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::{Layer, Registry};
 
@@ -248,7 +248,7 @@ async fn a_lost_admission_bind_fails_closed_and_records_the_disagreement() {
     let capture = capture();
     let dir = tempfile::tempdir().expect("admission backstop tempdir");
     let path = dir.path().join("admission-backstop.db");
-    let store = SqliteStore::open(&path)
+    let store = SqliteStore::open_file_for_testing(&path)
         .await
         .expect("open admission backstop store");
     let session_id = SessionId::from("admission-backstop-lost-write");
@@ -299,7 +299,7 @@ async fn an_admission_the_unfinished_root_refuses_never_reaches_the_write() {
     let capture = capture();
     let dir = tempfile::tempdir().expect("admission refusal tempdir");
     let path = dir.path().join("admission-refused-first.db");
-    let store = SqliteStore::open(&path)
+    let store = SqliteStore::open_file_for_testing(&path)
         .await
         .expect("open admission refusal store");
     let session_id = SessionId::from("admission-backstop-refused-first");

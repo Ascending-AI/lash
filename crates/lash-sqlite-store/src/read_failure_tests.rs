@@ -44,7 +44,9 @@ async fn sqlite_persisted_record_decode_classification() {
     let path = dir.path().join("persisted-record-decode.db");
 
     let head_session_id = SessionId::from("persisted-record-decode-head");
-    let head_store = SqliteStore::open(&path).await.expect("open head store");
+    let head_store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("open head store");
     head_store
         .bind_session(&head_session_id)
         .expect("bind head store");
@@ -68,7 +70,7 @@ async fn sqlite_persisted_record_decode_classification() {
         .expect("seed head session");
 
     let checkpoint_session_id = SessionId::from("persisted-record-decode-checkpoint");
-    let checkpoint_store = SqliteStore::open(&path)
+    let checkpoint_store = SqliteStore::open_file_for_testing(&path)
         .await
         .expect("open checkpoint store");
     checkpoint_store
@@ -365,7 +367,9 @@ async fn corrupt_non_msgpack_blob_surfaces_stored_data_corrupt_from_get_blob() {
 async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("unknown-attachment-owner.db");
-    let store = SqliteStore::open(&path).await.expect("open store");
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("open store");
     store
         .bind_session(&SessionId::from("unknown-attachment-owner"))
         .expect("bind store");
@@ -401,7 +405,9 @@ async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
 async fn unminted_process_attachment_owner_refuses_with_canonical_typed_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("unminted-process-attachment-owner.db");
-    let store = SqliteStore::open(&path).await.expect("open store");
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("open store");
     store
         .bind_session(&SessionId::from("unminted-process-attachment-owner"))
         .expect("bind store");
@@ -438,7 +444,9 @@ async fn unminted_process_attachment_owner_refuses_with_canonical_typed_error() 
 async fn malformed_durable_rows_surface_typed_corruption() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("corrupt.db");
-    let store = SqliteStore::open(&path).await.expect("open store");
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("open store");
     store
         .bind_session(&SessionId::from("corrupt"))
         .expect("bind store");
@@ -627,7 +635,9 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
 async fn readonly_store_for_blob_write_failure() -> (tempfile::TempDir, SqliteStore) {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("readonly.db");
-    SqliteStore::open(&path).await.expect("provision store");
+    SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("provision store");
     let store =
         SqliteStore::open_readonly(&crate::location::DatabaseLocation::standalone_file(&path))
             .await
@@ -718,7 +728,9 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
 async fn queued_work_hydration_rejects_kind_payload_contradiction() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("family-corrupt.db");
-    let store = SqliteStore::open(&path).await.expect("open store");
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("open store");
     let batch = store
         .enqueue_queued_work(lash_core_execution::runtime::QueuedWorkBatchDraft::new(
             "family-corrupt",

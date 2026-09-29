@@ -219,7 +219,7 @@ fn queued_work_batches_reject_a_duplicate_source_key_insert() {
 async fn store_options_apply_connection_policy_on_connection_thread() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("policy.db");
-    let store = SqliteStore::open_with_options(
+    let store = SqliteStore::open_file_with_options_for_testing(
         &path,
         StoreOptions {
             blob_profile: BuiltinBlobProfile::Balanced,
@@ -533,7 +533,9 @@ fn registration() -> ProcessRegistration {
 async fn real_locked_catalog_surfaces_typed_contention() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("contended.db");
-    let store = SqliteStore::open(&path).await.expect("open store");
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("open store");
     store
         .bind_session(&SessionId::from("contended"))
         .expect("bind store");
@@ -572,7 +574,9 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
     let attachment_id =
         lash_core_execution::AttachmentId::parse("a".repeat(64)).expect("valid attachment id");
     {
-        let store = SqliteStore::open(&catalog).await.expect("open catalog");
+        let store = SqliteStore::open_file_for_testing(&catalog)
+            .await
+            .expect("open catalog");
         let intent = lash_core_execution::AttachmentIntent {
             attachment_id: attachment_id.clone(),
             session_id: SessionId::from("sess-1"),
@@ -961,12 +965,14 @@ async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_ha
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("artifacts.db");
     let releasing = lashlang::LashlangArtifacts::new(Arc::new(
-        SqliteStore::open(&path)
+        SqliteStore::open_file_for_testing(&path)
             .await
             .expect("open releasing store"),
     ));
     let cached = lashlang::LashlangArtifacts::new(Arc::new(
-        SqliteStore::open(&path).await.expect("open caching store"),
+        SqliteStore::open_file_for_testing(&path)
+            .await
+            .expect("open caching store"),
     ));
     // process cache_probe(root: str) -> str { finish root }
     let module = lashlang::ModuleArtifact::from_program(one_process_module("cache_probe", "root"))
@@ -1085,7 +1091,11 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
 async fn concurrent_admission_loser_leaves_no_metadata() {
     let dir = tempfile::tempdir().expect("admission race tempdir");
     let path = dir.path().join("admission-race.db");
-    let store = Arc::new(SqliteStore::open(&path).await.expect("open unbound store"));
+    let store = Arc::new(
+        SqliteStore::open_file_for_testing(&path)
+            .await
+            .expect("open unbound store"),
+    );
 
     let first_id = SessionId::from("admission-race-a");
     let second_id = SessionId::from("admission-race-b");

@@ -58,20 +58,26 @@ async fn attachment_constructors_warn_exactly_once_with_fields() {
             let clock = Arc::new(lash_core_execution::facade_support::SystemClock);
             match path {
                 "SqliteStore::open" => {
-                    SqliteStore::open(&db).await.unwrap();
+                    SqliteStore::open_file_for_testing(&db).await.unwrap();
                 }
                 "SqliteStore::open_with_clock" => {
-                    SqliteStore::open_with_clock(&db, clock).await.unwrap();
+                    SqliteStore::open_file_with_clock_for_testing(&db, clock)
+                        .await
+                        .unwrap();
                 }
                 "SqliteStore::open_with_options" => {
-                    SqliteStore::open_with_options(&db, StoreOptions::default())
+                    SqliteStore::open_file_with_options_for_testing(&db, StoreOptions::default())
                         .await
                         .unwrap();
                 }
                 "SqliteStore::open_with_options_and_clock" => {
-                    SqliteStore::open_with_options_and_clock(&db, StoreOptions::default(), clock)
-                        .await
-                        .unwrap();
+                    SqliteStore::open_file_with_options_and_clock_for_testing(
+                        &db,
+                        StoreOptions::default(),
+                        clock,
+                    )
+                    .await
+                    .unwrap();
                 }
                 _ => {
                     let factory = if path == "SqliteSessionStoreFactory::new" {

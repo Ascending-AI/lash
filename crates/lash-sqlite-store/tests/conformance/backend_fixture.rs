@@ -11,7 +11,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use lash_sqlite_store::{SqliteDatabase, SqliteStoreSet, SqliteStoreSetOptions, Store};
+use lash_sqlite_store::{SqliteDatabase, SqliteStore, SqliteStoreSet, SqliteStoreSetOptions};
 
 /// Which kind of SQLite substrate a suite instance runs on.
 #[expect(
@@ -171,14 +171,12 @@ impl TestBackend {
         }
     }
 
-    /// A new unbound durable-core store on a connection of its own.
+    /// The durable-core catalog store shared by this store set.
     pub(crate) async fn store(&self) -> Arc<SqliteStore> {
-        Arc::new(
-            self.stores
-                .open_store()
-                .await
-                .expect("open a durable-core store"),
-        )
+        self.stores
+            .open_store()
+            .await
+            .expect("open durable-core store")
     }
 
     /// [`Self::store`] from synchronous fixture code.

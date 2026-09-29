@@ -28,7 +28,7 @@ async fn open_creates_a_missing_database_and_preflight_does_not() {
     // Red side: today's only way to ask "will this open?" is to open, and the
     // open path carries `SQLITE_OPEN_CREATE`.
     assert!(!path.exists());
-    let store = SqliteStore::open(&path)
+    let store = SqliteStore::open_file_for_testing(&path)
         .await
         .expect("open creates the database");
     drop(store);
@@ -59,7 +59,7 @@ async fn open_creates_a_missing_database_and_preflight_does_not() {
 async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     let root = temp_root();
     let path = root.path().join("durable-core.db");
-    SqliteStore::open(&path)
+    SqliteStore::open_file_for_testing(&path)
         .await
         .expect("provision the database");
     let expected = SqliteDatabase::DurableCore.expected_version();
@@ -103,7 +103,7 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
 async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     let root = temp_root();
     let path = root.path().join("durable-core.db");
-    SqliteStore::open(&path)
+    SqliteStore::open_file_for_testing(&path)
         .await
         .expect("provision the database");
     let expected = SqliteDatabase::DurableCore.expected_version();
@@ -118,7 +118,7 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     // `user_version`, so with the write lock held it cannot even reach the
     // question. It blocks on the busy handler instead of reporting the version.
     let blocked = tokio::time::timeout(Duration::from_secs(2), async {
-        SqliteStore::open(&path)
+        SqliteStore::open_file_for_testing(&path)
             .await
             .map(|_| ())
             .map_err(|err| err.to_string())
@@ -152,7 +152,7 @@ async fn every_declared_database_is_reported_and_undeclared_ones_are_not() {
     let root = temp_root();
     let core = root.path().join("durable-core.db");
     let registry = root.path().join("processes.db");
-    SqliteStore::open(&core)
+    SqliteStore::open_file_for_testing(&core)
         .await
         .expect("provision durable core");
 
@@ -201,7 +201,7 @@ async fn reading_a_hot_wal_database_leaves_its_bytes_untouched() {
     // rather than described.
     let root = temp_root();
     let path = root.path().join("durable-core.db");
-    let store = SqliteStore::open(&path)
+    let store = SqliteStore::open_file_for_testing(&path)
         .await
         .expect("provision the database");
     // Leave the WAL hot: a live writer that has not checkpointed is precisely
@@ -241,7 +241,7 @@ async fn a_preflight_connection_refuses_to_write_even_if_asked() {
     // depend on which statements this module happens to send.
     let root = temp_root();
     let path = root.path().join("durable-core.db");
-    SqliteStore::open(&path)
+    SqliteStore::open_file_for_testing(&path)
         .await
         .expect("provision the database");
 
@@ -403,7 +403,7 @@ mod walk {
     async fn module_artifact_surface_reads_the_persisted_json() {
         let root = super::temp_root();
         let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
-        let store = SqliteStore::open(&core)
+        let store = SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
         let artifact = lashlang::ModuleArtifact::from_program(lashlang::Program::block(vec![
@@ -629,7 +629,7 @@ mod walk {
         // instead of vanishing or taking the page down with it.
         let root = super::temp_root();
         let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
-        SqliteStore::open(&core)
+        SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
@@ -663,7 +663,7 @@ mod walk {
     async fn a_bare_checkpoint_blob_is_reported_missing_with_a_decode_reason() {
         let root = super::temp_root();
         let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
-        SqliteStore::open(&core)
+        SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
@@ -704,7 +704,7 @@ mod walk {
         // hand back what the format manifest describes.
         let root = super::temp_root();
         let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
-        let store = SqliteStore::open(&core)
+        let store = SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
         let body = rmp_serde::to_vec_named(&serde_json::json!({"execution": "state"}))
@@ -791,7 +791,7 @@ mod walk {
         // list is for things that should be there and are not.
         let root = super::temp_root();
         let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
-        let store = SqliteStore::open(&core)
+        let store = SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
         let mut components = std::collections::BTreeMap::new();

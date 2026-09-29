@@ -1,9 +1,9 @@
 //! # lash-sqlite-store
 //!
-//! The high-performance local **durable** persistence backend for the lash
-//! agent runtime. One factory-wide SQLite durable-core database, opened in WAL journal mode
-//! with a 15-second busy timeout, satisfying the full [`RuntimePersistence`] +
-//! [`AttachmentManifest`] contract from `lash-core-store`.
+//! The local durable persistence backend for the lash agent runtime. One
+//! [`SqliteStore`] owns the durable-core catalog for all sessions, with a
+//! writer connection and a fixed pool of WAL readers. It implements
+//! [`DeploymentStore`] and [`AttachmentManifest`].
 //!
 //! It provides a `SqliteStoreSet` and storage ports for an effect engine such
 //! as Restate. SQLite uses WAL (`-wal`/`-shm` sidecars) for concurrent
@@ -27,15 +27,15 @@
 //!
 //! ## Catalog contention
 //!
-//! Every store handle from one [`SqliteSessionStoreFactory`] writes the same
-//! durable-core database. SQLite WAL permits concurrent readers but has one
+//! Every session in one [`SqliteStore`] writes the same durable-core database.
+//! SQLite WAL permits concurrent readers but has one
 //! writer, so commits for different sessions serialize. This is an accepted
 //! embedded/single-host trade-off: catalog granularity can be tuned later
 //! without weakening crash atomicity. Runtime commits are preflighted against a
 //! measured node-and-byte budget for graph, checkpoint, and attachment-adoption
 //! payloads before entering the catalog write transaction.
 //!
-//! [`RuntimePersistence`]: lash_core_execution::RuntimePersistence
+//! [`DeploymentStore`]: lash_core_execution::DeploymentStore
 //! [`AttachmentManifest`]: lash_core_execution::AttachmentManifest
 
 use lash_core_execution::FleetFormatStore;
@@ -185,8 +185,7 @@ pub use triggers::SqliteTriggerStore;
 /// Lashlang artifacts.
 ///
 /// This is the first-party local implementation of the runtime store traits.
-/// Internally it holds a single cloneable [`SqliteConnection`] (a
-/// tokio-rusqlite handle to one database thread).
+/// Internally it holds one writer connection and a fixed pool of readers.
 pub struct SqliteStore {
     conn: SqliteConnection,
     /// The durable-format generation this store's writers emit — the

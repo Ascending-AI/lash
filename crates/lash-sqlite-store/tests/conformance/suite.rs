@@ -156,7 +156,7 @@ impl ScenarioBackends {
 
     /// The scenario's store as its concrete type, for laws that also reach
     /// its test-support seams.
-    fn concrete_store(&self, scenario: &str) -> Arc<lash_sqlite_store::Store> {
+    fn concrete_store(&self, scenario: &str) -> Arc<lash_sqlite_store::SqliteStore> {
         let existing = self.by_scenario.lock_recover().get(scenario).cloned();
         let backend = existing.unwrap_or_else(|| {
             let clock = Arc::clone(&self.clock);
@@ -402,7 +402,7 @@ lash_conformance::fence_integrity_tests!({
 
 struct SqliteGraphIntegrityInjector {
     backend: TestBackend,
-    runtime: Arc<lash_sqlite_store::Store>,
+    runtime: Arc<lash_sqlite_store::SqliteStore>,
 }
 
 #[async_trait::async_trait]

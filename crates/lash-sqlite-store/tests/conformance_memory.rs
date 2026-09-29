@@ -15,6 +15,8 @@
 mod backend_fixture;
 #[path = "blob_probe.rs"]
 mod blob_probe;
+#[path = "conformance/session_history.rs"]
+mod session_history;
 #[path = "conformance/suite.rs"]
 mod suite;
 
