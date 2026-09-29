@@ -74,11 +74,7 @@ impl CurrentSnapshot {
                 graph_appends,
             } => {
                 let mut snapshot = meta.clone();
-                snapshot
-                    .replace_active_read_state(messages.as_slice())
-                    .expect(
-                        "turn-scoped read-model frame must resolve in its source session graph",
-                    );
+                snapshot.replace_active_read_state(messages.as_slice());
                 graph_appends.overlay_on_read_state(&mut snapshot);
                 snapshot
             }
@@ -93,7 +89,7 @@ pub(in crate::runtime) struct CurrentSessionCapability {
     policy: SessionPolicy,
     pub(in crate::runtime) host: RuntimeHost,
     plugins: Arc<crate::PluginSession>,
-    store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+    store: Option<crate::store::SessionStore>,
     runtime_lease_owner: crate::LeaseOwnerIdentity,
     runtime_lease_executor_id: String,
     /// Explicit lane context for services scoped to a running parent turn.
@@ -112,7 +108,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime) fn fleet_format(&self) -> crate::FleetFormat {
         self.store
             .as_ref()
-            .map(|store| crate::FleetFormatStore::fleet_format(store.as_ref()))
+            .map(|store| store.fleet_format())
             .unwrap_or_else(crate::FleetFormat::current)
     }
 }
@@ -221,7 +217,7 @@ impl CurrentSessionCapability {
             protocol_turn_options: state.effective_protocol_turn_options().clone(),
             authority: state.authority.clone(),
             checkpoint_components: state.checkpoint_components.clone(),
-            token_ledger: state.token_ledger.clone(),
+            usage: state.usage.clone(),
             checkpoint_ref: state.checkpoint_ref.clone(),
             head_revision: state.head_revision,
             config_revision: state.config_revision,
@@ -245,10 +241,7 @@ impl CurrentSessionCapability {
             snapshot: match turn_graph_appends {
                 None => CurrentSnapshot::Owned(runtime.export_persistence_state()),
                 Some(graph_appends) => {
-                    let read_model = runtime
-                        .state
-                        .read_model()
-                        .expect("turn-scoped runtime state is normalized before service creation");
+                    let read_model = runtime.state.read_model();
                     CurrentSnapshot::ReadModel {
                         meta: Self::snapshot_meta_with_frame_root(&runtime.state),
                         messages: read_model.messages,
@@ -467,7 +460,7 @@ impl RuntimeSessionServices {
 )]
 pub async fn append_receipt_mixed_usage_envelope_conformance(
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: crate::store::SessionStore,
 ) {
     let policy = crate::SessionPolicy {
         provider_id: "mixed-envelope-provider".to_string(),
@@ -487,7 +480,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
     ));
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
-        Arc::clone(&store),
+        store.clone(),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -647,15 +640,14 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
         .await
         .expect("next natural commit persists restored usage");
 
-    let read = store
-        .load_session()
+    let totals = store
+        .load_usage_totals()
         .await
-        .expect("load mixed-envelope session")
-        .expect("mixed-envelope session exists");
-    assert_eq!(read.token_ledger.len(), 1);
-    assert_eq!(read.token_ledger[0].source, "mixed-envelope-source");
-    assert_eq!(read.token_ledger[0].model, "mixed-envelope-model");
-    assert_eq!(read.token_ledger[0].usage, interleaved_usage);
+        .expect("load mixed-envelope usage totals");
+    assert_eq!(totals.rows.len(), 1);
+    assert_eq!(totals.rows[0].source, "mixed-envelope-source");
+    assert_eq!(totals.rows[0].model, "mixed-envelope-model");
+    assert_eq!(totals.rows[0].usage, interleaved_usage);
 
     // Pin ordinal reuse after successful confirmation. U1 is committed and
     // removed from the pending ledger under operation A at ordinal zero. U2
@@ -766,13 +758,12 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
         "U2 must clear only after natural commit B confirms its full identity"
     );
 
-    let read = store
-        .load_session()
+    let totals = store
+        .load_usage_totals()
         .await
-        .expect("load ordinal-reuse session")
-        .expect("ordinal-reuse session exists");
-    let durable = read
-        .token_ledger
+        .expect("load ordinal-reuse usage totals");
+    let durable = totals
+        .rows
         .iter()
         .find(|entry| {
             entry.source == "ordinal-reuse-source" && entry.model == "ordinal-reuse-model"
@@ -788,7 +779,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
 )]
 pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: crate::store::SessionStore,
     arm_and_wait: A,
 ) where
     A: FnOnce() -> W,
@@ -813,7 +804,7 @@ pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
     ));
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
-        Arc::clone(&store),
+        store.clone(),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -871,7 +862,7 @@ pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
     release_worker();
 
     store
-        .load_session()
+        .load_session_window(crate::store::WindowSelector::Current)
         .await
         .expect("flush queued SQLite commit")
         .expect("cancelled append committed on worker");
@@ -901,13 +892,12 @@ pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
         .await
         .expect("next natural commit re-submits cancelled usage identity");
 
-    let read = store
-        .load_session()
+    let totals = store
+        .load_usage_totals()
         .await
-        .expect("load cancelled usage session")
-        .expect("cancelled usage session exists");
-    let matching = read
-        .token_ledger
+        .expect("load cancelled usage totals");
+    let matching = totals
+        .rows
         .iter()
         .filter(|entry| {
             entry.source == "cancelled-usage-source" && entry.model == "cancelled-usage-model"

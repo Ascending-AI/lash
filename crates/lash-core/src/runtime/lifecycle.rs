@@ -35,22 +35,35 @@ pub(in crate::runtime) fn initial_park_operation(
 }
 
 async fn bind_state_to_store(
-    store: &(dyn crate::store::RuntimePersistence + '_),
+    store: &crate::store::SessionStore,
     state: &mut RuntimeSessionState,
     relation: crate::SessionRelation,
 ) -> Result<(), SessionError> {
-    let binding = crate::SessionBinding {
+    if store.session_id() != &state.session_id {
+        return Err(SessionError::Store {
+            context: format!("failed to bind session `{}` to its store", state.session_id),
+            source: crate::StoreError::ForeignSessionRequest {
+                view_session_id: store.session_id().clone(),
+                request_session_id: state.session_id.clone(),
+            },
+        });
+    }
+    let request = crate::SessionStoreCreateRequest {
         session_id: state.session_id.clone(),
         relation,
+        pending_observer_intents: Vec::new(),
+        policy: state.policy.clone(),
+        owning_process_id: None,
     };
     store
-        .admit_and_bind_session(&binding)
+        .store()
+        .admit_session(&request)
         .await
         .map_err(|source| SessionError::Store {
             context: format!("failed to bind session `{}` to its store", state.session_id),
             source,
         })?;
-    let meta = store
+    store
         .load_session_meta()
         .await
         .map_err(|source| SessionError::Store {
@@ -69,24 +82,12 @@ async fn bind_state_to_store(
                 session_id: state.session_id.clone(),
             },
         })?;
-    if meta.session_id != state.session_id {
-        return Err(SessionError::Store {
-            context: format!(
-                "failed to verify session `{}` store binding",
-                state.session_id
-            ),
-            source: crate::StoreError::SessionBindingMismatch {
-                bound_session_id: meta.session_id,
-                attempted_session_id: state.session_id.clone(),
-            },
-        });
-    }
     Ok(())
 }
 
 async fn bind_state_to_store_with_trace(
     host: &crate::RuntimeHostConfig,
-    store: &(dyn crate::store::RuntimePersistence + '_),
+    store: &crate::store::SessionStore,
     state: &mut RuntimeSessionState,
     relation: crate::SessionRelation,
 ) -> Result<(), SessionError> {
@@ -105,8 +106,8 @@ async fn bind_state_to_store_with_trace(
 }
 
 pub(in crate::runtime) struct RuntimePersistenceBindings {
-    runtime_store: Option<Arc<dyn crate::store::RuntimePersistence>>,
-    attachment_manifest_store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+    runtime_store: Option<crate::store::SessionStore>,
+    attachment_manifest_store: Option<Arc<dyn crate::store::RuntimeStore>>,
 }
 
 pub(in crate::runtime) struct RuntimeSessionAssembly {
@@ -145,18 +146,18 @@ impl RuntimeSessionAssembly {
 }
 
 impl RuntimePersistenceBindings {
-    pub(in crate::runtime) fn new(
-        runtime_store: Option<Arc<dyn crate::store::RuntimePersistence>>,
-    ) -> Self {
+    pub(in crate::runtime) fn new(runtime_store: Option<crate::store::SessionStore>) -> Self {
         Self {
-            attachment_manifest_store: runtime_store.clone(),
+            attachment_manifest_store: runtime_store
+                .as_ref()
+                .map(|store| Arc::clone(store.store())),
             runtime_store,
         }
     }
 
     pub(in crate::runtime) fn with_attachment_manifest_store(
         mut self,
-        store: Arc<dyn crate::store::RuntimePersistence>,
+        store: Arc<dyn crate::store::RuntimeStore>,
     ) -> Self {
         self.attachment_manifest_store = Some(store);
         self
@@ -299,8 +300,7 @@ impl LashRuntime {
         protocol_session
             .restore_session(
                 crate::plugin::ProtocolSessionContext::new(&mut session, &session_id),
-                crate::plugin::ProtocolSessionRestoreView::new(&state)
-                    .map_err(|error| SessionError::Protocol(error.to_string()))?,
+                crate::plugin::ProtocolSessionRestoreView::new(&state),
             )
             .await?;
         if session.history_store().is_some() {
@@ -311,15 +311,13 @@ impl LashRuntime {
         session
             .plugins()
             .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
-                crate::SessionReadView::from_persisted_state(&state)
-                    .map_err(|error| SessionError::Protocol(error.to_string()))?,
+                crate::SessionReadView::from_persisted_state(&state),
             ))
             .await
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
         // FIG-2765: a reopened runtime learns the attempts it still owes usage
         // for from the durable ledger, never from process memory.
-        let outstanding_unreported_attempts =
-            crate::runtime::outstanding_unreported_attempts(&state.token_ledger);
+        let outstanding_unreported_attempts = state.usage.outstanding.clone();
         Ok(Self {
             session: Some(session),
             host,
@@ -385,7 +383,7 @@ impl LashRuntime {
     ) -> Result<Self, SessionError> {
         bind_state_to_store_with_trace(
             &host.core,
-            services.store().as_ref(),
+            &services.store(),
             &mut state,
             crate::SessionRelation::Root,
         )
@@ -410,7 +408,7 @@ impl LashRuntime {
     ) -> Result<Self, SessionError> {
         bind_state_to_store_with_trace(
             &host.embedded().core,
-            services.store().as_ref(),
+            &services.store(),
             &mut state,
             crate::SessionRelation::Root,
         )
@@ -452,7 +450,7 @@ impl LashRuntime {
             runtime_store: store,
             attachment_manifest_store,
         } = persistence;
-        if let Some(store) = store.as_deref()
+        if let Some(store) = store.as_ref()
             && let Err(error) =
                 bind_state_to_store_with_trace(&embedded_host.core, store, &mut state, relation)
                     .await
@@ -529,7 +527,7 @@ impl LashRuntime {
         env: &RuntimeEnvironment,
         policy: SessionPolicy,
         state: RuntimeSessionState,
-        store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+        store: Option<crate::store::SessionStore>,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, SessionError> {
         Self::from_environment_with_plugin_options(
@@ -547,7 +545,7 @@ impl LashRuntime {
         env: &RuntimeEnvironment,
         policy: SessionPolicy,
         state: RuntimeSessionState,
-        store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+        store: Option<crate::store::SessionStore>,
         plugin_options: crate::PluginOptions,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, SessionError> {
@@ -567,7 +565,7 @@ impl LashRuntime {
         env: &RuntimeEnvironment,
         policy: SessionPolicy,
         state: RuntimeSessionState,
-        store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+        store: Option<crate::store::SessionStore>,
         plugin_options: crate::PluginOptions,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
         runtime_lease_executor_id: String,
@@ -655,7 +653,8 @@ impl LashRuntime {
         commit
             .stamp_semantic_boundary()
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
+        let result = store
+            .commit_runtime_state_verified(commit)
             .await
             .map_err(|source| {
                 session_commit_error("failed to record protocol configuration", source)
@@ -718,11 +717,10 @@ impl LashRuntime {
                 session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
                     .map_err(|err| SessionError::Protocol(err.to_string()))?;
             for delta in staged.deltas() {
-                crate::store::merge_token_ledger_entry_checked(
-                    &mut self.state.token_ledger,
-                    delta.entry.clone(),
-                )
-                .map_err(|err| SessionError::Protocol(err.to_string()))?;
+                self.state
+                    .usage
+                    .fold_checked(&delta.entry)
+                    .map_err(|err| SessionError::Protocol(err.to_string()))?;
             }
             let fleet_format = self.fleet_format();
             let (commit, persisted_node_ids) =
@@ -736,7 +734,8 @@ impl LashRuntime {
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             // Lane-less host lifecycle boundary: `park` runs between turns and
             // owns no retained session-execution guard.
-            let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
+            let result = store
+                .commit_runtime_state_verified(commit)
                 .await
                 .map_err(|source| {
                     session_commit_error("failed to persist runtime state", source)
@@ -777,12 +776,9 @@ impl LashRuntime {
                 "parked runtime owner does not match the resuming host owner".to_string(),
             ));
         }
-        let loaded = crate::store::load_persisted_session_admitted(
-            parked.store.as_ref(),
-            &parked.session_id,
-            &runtime_lease_owner,
-            &parked.runtime_lease_executor_id,
-            env.core.control.lease_timings.ttl_ms(),
+        let loaded = crate::store::load_session_window_state(
+            &parked.store,
+            crate::store::WindowSelector::Current,
         )
         .await
         .map_err(|err| session_commit_error("failed to load runtime state", err))?
@@ -1063,7 +1059,7 @@ mod tests {
         let runtime_host = test_host_config(&backend);
         let runtime_services = crate::PersistentRuntimeServices::new(
             plugin_session_with_tools(&SessionId::from(session_id), Arc::new(EmptyTools)),
-            Arc::clone(&store) as Arc<dyn crate::RuntimePersistence>,
+            Arc::clone(&store) as crate::store::SessionStore,
             std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
             std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
         );

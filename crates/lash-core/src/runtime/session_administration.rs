@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use super::{
-    AdmittedScope, EffectHost, ProcessWorkWiring, RuntimeError, ScopedEffectController,
-    SessionStoreFactory,
+    AdmittedScope, DeploymentStore, EffectHost, ProcessWorkWiring, RuntimeError,
+    ScopedEffectController,
 };
 use crate::SessionId;
 
@@ -13,7 +13,7 @@ use crate::SessionId;
 /// operation contexts from the effect executor paired with that deployment.
 #[derive(Clone)]
 pub struct SessionAdministration {
-    store_factory: Arc<dyn SessionStoreFactory>,
+    store_factory: Arc<dyn DeploymentStore>,
     effect_host: Arc<dyn EffectHost>,
     process: Option<ProcessWorkWiring>,
     trigger_store: Option<Arc<dyn crate::TriggerStore>>,
@@ -28,7 +28,7 @@ impl SessionAdministration {
     /// This is a trusted host integration boundary. The host must compose all
     /// supplied services from the same physical persistence deployment.
     pub fn new(
-        store_factory: Arc<dyn SessionStoreFactory>,
+        store_factory: Arc<dyn DeploymentStore>,
         effect_host: Arc<dyn EffectHost>,
         process: Option<ProcessWorkWiring>,
         trigger_store: Option<Arc<dyn crate::TriggerStore>>,
@@ -55,7 +55,7 @@ impl SessionAdministration {
         self
     }
 
-    pub fn store_factory(&self) -> &Arc<dyn SessionStoreFactory> {
+    pub fn store_factory(&self) -> &Arc<dyn DeploymentStore> {
         &self.store_factory
     }
 

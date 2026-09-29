@@ -437,9 +437,7 @@ impl TurnCommitDraft {
     ) -> Self {
         state.ensure_agent_frame_initialized_with_clock(clock.as_ref());
         let base_graph = Arc::new(std::mem::take(&mut state.session_graph));
-        let base_read_model = base_graph
-            .read_model(state.current_frame_node_id.as_ref())
-            .expect("runtime current frame must resolve in its validated session graph");
+        let base_read_model = base_graph.read_model();
         let persisted_node_ids = std::mem::take(&mut state.persisted_node_ids);
         let graph = TurnGraphEditor::new(
             base_graph,
@@ -515,7 +513,7 @@ impl TurnCommitDraft {
         turn_index: usize,
         protocol_turn_options: crate::ProtocolTurnOptions,
         messages: MessageSequence,
-    ) -> Result<SessionReadView, crate::SessionGraphScopeError> {
+    ) -> SessionReadView {
         SessionReadView::derived_from_persisted_state(
             &self.state,
             policy,

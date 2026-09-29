@@ -40,8 +40,7 @@ use crate::engine::{
 };
 use crate::runtime::recovery_lease::RecoveryDuties;
 use crate::{
-    Clock, ProcessRegistry, ProcessWorkSubstrate, SessionStoreFactory, SessionWorkEngine,
-    StoreError,
+    Clock, DeploymentStore, ProcessRegistry, ProcessWorkSubstrate, SessionWorkEngine, StoreError,
 };
 
 /// What one tick reaches: the catalog, the engine, the scope owner, and the
@@ -49,7 +48,7 @@ use crate::{
 #[derive(Clone, Copy)]
 pub struct ReconcileParts<'a> {
     /// The deployment's session catalog.
-    pub sessions: &'a dyn SessionStoreFactory,
+    pub sessions: &'a dyn DeploymentStore,
     /// The engine that drives sessions; its [`control`](SessionWorkEngine::control)
     /// half reconciles parks.
     pub work: &'a dyn SessionWorkEngine,

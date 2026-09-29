@@ -21,10 +21,10 @@ use crate::engine::{ScopeCloseSink, begin_session_close_replay_key};
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::store::{ControlIntent, ControlIntentState, StoreError};
 use crate::{
-    Clock, EffectAddress, ExecutionScope, RuntimeAttribution, RuntimeEffectCommand,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
-    SessionDeleteContext, SessionId, SessionStoreFactory, SessionWorkEngine,
+    Clock, DeploymentStore, EffectAddress, ExecutionScope, RuntimeAttribution,
+    RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    RuntimeErrorCode, SessionDeleteContext, SessionId, SessionWorkEngine,
 };
 
 /// What a session's close runs against besides its catalog: the engine whose
@@ -51,12 +51,14 @@ pub struct SessionCloseServices {
 /// Whether session `session_id` is already closing: its close committed,
 /// under the `CloseSession` intent its stored drive epoch names.
 async fn session_is_closing(
-    stores: &dyn SessionStoreFactory,
+    stores: &dyn DeploymentStore,
     session_id: &SessionId,
 ) -> Result<bool, StoreError> {
-    match stores.open_existing_store_by_id(session_id).await? {
-        Some(store) => Ok(store.drive_epoch(session_id).await?.closing.is_some()),
-        None => Ok(false),
+    match stores.lookup_session(session_id).await? {
+        crate::store::SessionLookup::Live(_) => {
+            Ok(stores.drive_epoch(session_id).await?.closing.is_some())
+        }
+        crate::store::SessionLookup::Deleted | crate::store::SessionLookup::Absent => Ok(false),
     }
 }
 
@@ -205,7 +207,7 @@ pub async fn close_session(
 /// The first execution of one `BeginSessionClose` step. A replay decodes the
 /// recorded intent and never runs it.
 struct BeginSessionCloseRunner {
-    stores: Arc<dyn SessionStoreFactory>,
+    stores: Arc<dyn DeploymentStore>,
     session_id: SessionId,
     clock: Arc<dyn Clock>,
 }

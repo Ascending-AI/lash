@@ -83,7 +83,7 @@ impl LashRuntime {
         );
         let reason_code = write.reason.code().as_str();
         let effect_kind = write.reason.effect_kind();
-        match lash_core_execution::runtime::record_root_park(store.as_ref(), &write).await {
+        match lash_core_execution::runtime::record_root_park(store.store().as_ref(), &write).await {
             Ok(park) => {
                 crate::operational_metrics::record_work_parked("turn", reason_code);
                 tracing::warn!(

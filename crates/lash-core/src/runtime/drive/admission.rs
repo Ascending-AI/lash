@@ -60,10 +60,10 @@ pub(in crate::runtime) struct AdmitDriveRunner {
     /// The session's history store, or `None` when the engine could not open
     /// it at all — the session's tombstone already committed — in which case
     /// the step's recorded body is the retirement itself.
-    pub(in crate::runtime) store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+    pub(in crate::runtime) store: Option<crate::store::SessionStore>,
     /// The deployment's control-intent ledger: a park names its redrive by
     /// intent id, and whether that redrive is settled lives here (D15).
-    pub(in crate::runtime) stores: Arc<dyn crate::SessionStoreFactory>,
+    pub(in crate::runtime) stores: Arc<dyn crate::DeploymentStore>,
     pub(in crate::runtime) request: AdmitRequest,
     pub(in crate::runtime) ordinal: u32,
 }
@@ -118,7 +118,7 @@ impl AdmitDriveRunner {
         // A closing session admits nothing (FIG-3600 S7): its close ended
         // every root and raised the epoch past every admission. A store with
         // no drive epoch holds no close; the admission below still needs one.
-        let stored_epoch = match store.drive_epoch(session_id).await {
+        let stored_epoch = match store.drive_epoch().await {
             Ok(epoch) if epoch.closing.is_some() || epoch.control_pending => {
                 return Ok(AdmitVerdict::Idle);
             }
@@ -132,7 +132,7 @@ impl AdmitDriveRunner {
 
         // A parked root blocks the session until it is resolved (FIG-3659).
         // A store with no park ledger holds no park.
-        let park = match store.load_turn_park(session_id).await {
+        let park = match store.load_turn_park().await {
             Ok(park) => park,
             Err(StoreError::UnsupportedStoreOperation { .. }) => None,
             Err(error) => return Err(store_fault("parked-root check", error)),
@@ -186,7 +186,7 @@ impl AdmitDriveRunner {
         // keeps such an input out, so this is the defensive answer.
         if matches!(work, AdmittedWork::Input { .. })
             && let Some(terminal) = store
-                .root_terminal(session_id, &root)
+                .root_terminal(&root)
                 .await
                 .map_err(|error| store_fault("root terminal read", error))?
         {
@@ -228,10 +228,9 @@ impl AdmitDriveRunner {
     /// command lane drains ahead of that root, which waits for its redrive.
     async fn next_root(
         &self,
-        store: &Arc<dyn crate::store::RuntimePersistence>,
+        store: &crate::store::SessionStore,
         redrive_unsettled: bool,
     ) -> Result<Option<(TurnId, AdmittedWork)>, RuntimeEffectControllerError> {
-        let session_id = &self.request.session;
         if let Some(owed) = store
             .load_pending_follow_on()
             .await
@@ -246,7 +245,7 @@ impl AdmitDriveRunner {
             )));
         }
         let unfinished = store
-            .unfinished_root(session_id)
+            .unfinished_root()
             .await
             .map_err(|error| store_fault("unfinished root read", error))?
             .map(|unfinished| {
@@ -261,7 +260,7 @@ impl AdmitDriveRunner {
         }
         let admission = admission_id(&self.request.request, self.ordinal);
         let ordering = store
-            .pending_session_work_ordering(session_id)
+            .pending_session_work_ordering()
             .await
             .map_err(|error| store_fault("pending work ordering read", error))?;
         if let Some(command) = ordering.session_command {
@@ -276,11 +275,11 @@ impl AdmitDriveRunner {
             return Ok(unfinished);
         }
         let queued = store
-            .list_queued_work(session_id)
+            .list_queued_work()
             .await
             .map_err(|error| store_fault("open queued work read", error))?;
         let open = store
-            .list_pending_turn_inputs(session_id)
+            .list_pending_turn_inputs()
             .await
             .map_err(|error| store_fault("pending turn input read", error))?;
         match lash_core_execution::runtime::turn_lane_head(&open, &queued) {
@@ -296,7 +295,7 @@ impl AdmitDriveRunner {
                 // admission took it, or the new root a fork bound it to
                 // (FIG-3600 S7). Then its host id.
                 let bound = store
-                    .root_binding(session_id, &head.input.input_id)
+                    .root_binding(&head.input.input_id)
                     .await
                     .map_err(|error| store_fault("input root binding read", error))?;
                 Ok(Some((
@@ -331,7 +330,7 @@ pub(in crate::runtime) struct SealDriveRunner {
     /// it at all — the session's close or tombstone already committed — in
     /// which case the step's recorded body is the retirement itself
     /// (FIG-3881).
-    pub(in crate::runtime) store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+    pub(in crate::runtime) store: Option<crate::store::SessionStore>,
     pub(in crate::runtime) admitted: Admitted,
     pub(in crate::runtime) root_start: crate::engine::RootStartNonce,
 }
@@ -361,7 +360,6 @@ impl RuntimeEffectLocalRunner for SealDriveRunner {
         };
         let seal = store
             .seal_drive_epoch(
-                self.admitted.session(),
                 self.admitted.admission(),
                 self.admitted.observed_epoch(),
                 &self.root_start,

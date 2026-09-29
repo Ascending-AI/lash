@@ -118,7 +118,11 @@ impl RuntimeSessionServices {
     ) -> Result<crate::ProcessEngineRunContext<'run>, crate::PluginError> {
         let session_id = self.current.session_id.clone();
         let plugins = Arc::clone(&self.current.plugins);
-        let store = self.current.store.clone();
+        let store = self
+            .current
+            .store
+            .as_ref()
+            .map(|store| Arc::clone(store.store()));
         let session_store_factory = Some(self.current.host.core.session_store_factory());
         let queued_work = Arc::clone(self.current.host.queued_work());
         let process_registry_available = self.current.host.process_registry().is_some();
@@ -159,7 +163,11 @@ impl RuntimeSessionServices {
             let event_context = crate::RuntimeExecutionProcessEventContext {
                 execution_write_authority: execution_write_authority.clone(),
                 process_work: process_work_for_runtime.clone(),
-                store: services.current.store.clone(),
+                store: services
+                    .current
+                    .store
+                    .as_ref()
+                    .map(|store| Arc::clone(store.store())),
                 session_store_factory: Some(services.current.host.core.session_store_factory()),
                 queued_work: Arc::clone(services.current.host.queued_work()),
                 process_wake_delivery_policy: services

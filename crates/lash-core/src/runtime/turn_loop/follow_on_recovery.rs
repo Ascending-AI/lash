@@ -31,7 +31,7 @@ impl LashRuntime {
     /// [`FollowOnRecovery::Exhausted`]: crate::store::FollowOnRecovery::Exhausted
     async fn recover_pending_follow_on(
         &mut self,
-        store: &dyn crate::store::RuntimePersistence,
+        store: &crate::store::SessionStore,
         fence: &DriveFence,
         recorded: Option<u32>,
     ) -> Result<crate::store::FollowOnRecovery, RuntimeError> {
@@ -117,7 +117,7 @@ impl LashRuntime {
             {
                 return Ok(None);
             }
-            self.recover_pending_follow_on(store.as_ref(), &fence, Some(recorded))
+            self.recover_pending_follow_on(&store, &fence, Some(recorded))
                 .await
                 .map(Some)
         }

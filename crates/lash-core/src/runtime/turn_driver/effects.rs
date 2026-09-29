@@ -521,11 +521,7 @@ impl RuntimeTurnDriver<'_> {
             .apply_checkpoint(CheckpointHookContext {
                 session_id: self.session_id.clone(),
                 checkpoint,
-                state: self
-                    .checkpoint_state_view(messages, protocol_iteration)
-                    .map_err(|error| {
-                        RuntimeError::new(RuntimeErrorCode::PluginCheckpoint, error.to_string())
-                    })?,
+                state: self.checkpoint_state_view(messages, protocol_iteration),
                 sessions: self.session_services.state_service(),
                 session_lifecycle: self.session_services.lifecycle_service(),
                 session_graph: self.session_services.graph_service(),

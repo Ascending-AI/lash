@@ -1,6 +1,5 @@
 use crate::TurnId;
 use crate::runtime::turn_settlement::TurnIngressSettlement;
-use crate::store::RuntimePersistence;
 use crate::{OmittedToolCalls, PluginSession, ToolCallRecord, TurnOutcome};
 
 use super::ExecutionStateUpdate;
@@ -12,7 +11,7 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) plugins: Option<&'a PluginSession>,
     pub(super) execution_state_update: ExecutionStateUpdate,
     pub(super) agent_frame_switch_materializes: bool,
-    pub(super) store: Option<&'a (dyn RuntimePersistence + 'a)>,
+    pub(super) store: Option<&'a crate::store::SessionStore>,
     pub(super) usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     pub(super) failure_evidence: &'a [crate::TurnFailureEvidence],
     pub(super) outcome: &'a TurnOutcome,

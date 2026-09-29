@@ -169,22 +169,7 @@ impl RecordedTurnAssembly {
         {
             output
         } else {
-            let recovered = match recovered_assistant_output_from_state(&state) {
-                Ok(recovered) => recovered,
-                Err(error) => {
-                    issues.push(TurnIssue {
-                        severity: crate::runtime::TurnIssueSeverity::Blocking,
-                        kind: crate::TurnFailureKind::Runtime,
-                        code: Some(crate::TurnFailureCode::SessionGraphScope.into()),
-                        terminal_reason: None,
-                        message: error.to_string(),
-                        raw: None,
-                        retryable: Some(false),
-                        provider_failure_kind: None,
-                    });
-                    String::new()
-                }
-            };
+            let recovered = recovered_assistant_output_from_state(&state);
             if !recovered.is_empty() {
                 issues.push(TurnIssue {
                     severity: crate::runtime::TurnIssueSeverity::Advisory,
@@ -314,10 +299,8 @@ fn render_outcome_for_output(outcome: &TurnOutcome) -> Option<String> {
     }
 }
 
-fn recovered_assistant_output_from_state(
-    state: &crate::SessionSnapshot,
-) -> Result<String, crate::SessionGraphScopeError> {
-    let read_model = state.read_model()?;
+fn recovered_assistant_output_from_state(state: &crate::SessionSnapshot) -> String {
+    let read_model = state.read_model();
     let messages = read_model.messages.as_slice();
     let latest_user_message_idx = messages
         .iter()
@@ -325,7 +308,7 @@ fn recovered_assistant_output_from_state(
     let search_messages = latest_user_message_idx
         .map(|idx| &messages[idx.saturating_add(1)..])
         .unwrap_or(messages);
-    Ok(search_messages
+    search_messages
         .iter()
         .rev()
         .find(|message| message.role == MessageRole::Assistant)
@@ -342,7 +325,7 @@ fn recovered_assistant_output_from_state(
                 .map(|part| part.content())
                 .collect::<String>()
         })
-        .unwrap_or_default())
+        .unwrap_or_default()
 }
 
 fn sanitize_assistant_output(text: String) -> String {

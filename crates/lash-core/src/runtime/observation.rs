@@ -53,7 +53,7 @@ pub struct RuntimeObservation {
     /// could supply all of them.
     pub plugin_services: Option<ObservationPluginServices>,
     pub process_registry: Option<Arc<dyn ProcessRegistry>>,
-    pub queue_store: Option<Arc<dyn crate::RuntimePersistence>>,
+    pub queue_store: Option<crate::store::SessionStore>,
     /// The ingress relay an acceptance through this observation delivers
     /// with (ADR 0109 §3).
     pub ingress: super::drive::IngressRelay,
@@ -243,31 +243,25 @@ impl RuntimeObservation {
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "resident state is normalized before publication"
-)]
 fn export_observation_state(
     runtime: &LashRuntime,
 ) -> (crate::SessionReadView, super::SessionUsageReport, Vec<u8>) {
     // Observation publication is synchronous. When resident state has been
     // invalidated, project only the already-adopted durable snapshot; never
     // recapture live plugin/tool state before the async reload gate runs.
-    let read_view = runtime
-        .read_view()
-        .expect("resident runtime state is normalized before observation publication");
+    let read_view = runtime.read_view();
     let shared_ledger = runtime.shared_token_ledger.lock_recover();
-    let mut token_ledger = runtime.state.token_ledger.clone();
+    let mut usage = runtime.state.usage.clone();
     let mut saturated = false;
-    for entry in shared_ledger.iter().cloned() {
-        saturated |= super::merge_ledger_entry_saturating(&mut token_ledger, entry.entry);
+    for entry in shared_ledger.iter() {
+        saturated |= usage.fold_saturating(&entry.entry);
     }
-    let usage_report =
-        super::SessionUsageReport::from_entries_with_saturation(&token_ledger, saturated);
+    let mut usage_report = usage.report();
+    usage_report.saturated |= saturated;
     (
         read_view,
         usage_report,
-        authority_fingerprint(&runtime.state, &token_ledger),
+        authority_fingerprint(&runtime.state, &usage),
     )
 }
 
@@ -691,8 +685,7 @@ impl RuntimeHandle {
     /// store call or a publication.
     fn durable_queue(
         &self,
-    ) -> Result<(super::DurableSessionOps, Arc<dyn crate::RuntimePersistence>), crate::RuntimeError>
-    {
+    ) -> Result<(super::DurableSessionOps, crate::store::SessionStore), crate::RuntimeError> {
         let observation = self.observe();
         let store = observation
             .queue_store
@@ -762,7 +755,7 @@ impl RuntimeHandle {
 )]
 fn authority_fingerprint(
     state: &super::RuntimeSessionState,
-    token_ledger: &[crate::TokenLedgerEntry],
+    usage: &crate::SessionUsageTotals,
 ) -> Vec<u8> {
     // The resident graph contributes its shape, not its serialized nodes:
     // graph bodies are immutable durable history, and every production
@@ -787,7 +780,7 @@ fn authority_fingerprint(
         &state.protocol_turn_options,
         &state.authority,
         &state.checkpoint_components,
-        token_ledger,
+        usage,
         &state.checkpoint_ref,
         state.head_revision,
         persisted_nodes_digest,

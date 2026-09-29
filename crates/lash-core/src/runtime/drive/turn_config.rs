@@ -255,7 +255,7 @@ struct ResolveTurnConfigRunner {
 struct RootSpec {
     hash: crate::RunSpecHash,
     session_id: crate::SessionId,
-    store: std::sync::Arc<dyn crate::store::RuntimePersistence>,
+    store: crate::store::SessionStore,
     definitions: crate::RunDefinitions,
 }
 
@@ -271,7 +271,7 @@ impl RootSpec {
         };
         let spec = self
             .store
-            .load_run_spec(&self.session_id, &self.hash)
+            .load_run_spec(&self.hash)
             .await
             .map_err(|error| {
                 repairable(

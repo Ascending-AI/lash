@@ -54,7 +54,7 @@ impl LashRuntime {
         self.session
             .as_ref()
             .and_then(|session| session.history_store())
-            .map(|store| crate::FleetFormatStore::fleet_format(store.as_ref()))
+            .map(|store| store.fleet_format())
             .unwrap_or_else(crate::FleetFormat::current)
     }
 
@@ -262,7 +262,7 @@ impl LashRuntime {
     /// store is touched, and post-commit steps fail after the commit landed.
     async fn commit_appended_nodes(
         &mut self,
-        store: Arc<dyn crate::store::RuntimePersistence>,
+        store: crate::store::SessionStore,
         state_before_append: &RuntimeSessionState,
         node_ids: Vec<crate::NodeId>,
         operation: crate::OperationId,
@@ -315,8 +315,7 @@ impl LashRuntime {
         // interleaves in-memory protocol session rollback
         // (`restore_protocol_session_from_state`) on commit failure or
         // `AppendAncestorNotActive` stale-branch response.
-        let result = match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await
-        {
+        let result = match store.commit_runtime_state_verified(commit).await {
             Ok(result) => result,
             Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
                 return Err(AppendFailure::StaleBranch { required_node_id });
@@ -347,8 +346,7 @@ impl LashRuntime {
         if receipt_replayed {
             let mut durable_state = state_before_append.clone();
             if let Err(source) =
-                crate::store::refresh_persisted_session_state(store.as_ref(), &mut durable_state)
-                    .await
+                crate::store::refresh_session_window(&store, &mut durable_state).await
             {
                 return Err(AppendFailure::RolledBack(SessionError::Store {
                     context: "failed to refresh resident state after append receipt replay"
@@ -406,8 +404,7 @@ impl LashRuntime {
         if let Some(session) = self.session.as_mut() {
             let protocol_session = Arc::clone(session.plugins().protocol_session());
             let session_id = state_for_restore.session_id.clone();
-            let mut view = crate::plugin::ProtocolSessionRestoreView::new(&state_for_restore)
-                .map_err(|error| SessionError::Protocol(error.to_string()))?;
+            let mut view = crate::plugin::ProtocolSessionRestoreView::new(&state_for_restore);
             if let Some(snapshot) = execution_before_append {
                 restored_capture = Some(snapshot.clone());
                 view.execution_state = Ok(Some(snapshot));
@@ -819,24 +816,23 @@ impl LashRuntime {
             // Lane-less host plugin-operation boundary. In-turn lifecycle
             // graph appends use `session_manager::graph` and carry an explicit
             // borrowed guard instead of reaching this runtime-owned path.
-            let result =
-                match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
-                    Ok(result) => result,
-                    Err(err) => {
-                        let persistence_error =
-                            format!("failed to persist plugin runtime events: {err}");
-                        if let Err(rollback_err) = self
-                            .rollback_plugin_runtime_event_append(state_before_append)
-                            .await
-                        {
-                            return Err(PluginOperationInvokeError::Failed(format!(
-                                "{persistence_error}; failed to restore protocol session: \
+            let result = match store.commit_runtime_state_verified(commit).await {
+                Ok(result) => result,
+                Err(err) => {
+                    let persistence_error =
+                        format!("failed to persist plugin runtime events: {err}");
+                    if let Err(rollback_err) = self
+                        .rollback_plugin_runtime_event_append(state_before_append)
+                        .await
+                    {
+                        return Err(PluginOperationInvokeError::Failed(format!(
+                            "{persistence_error}; failed to restore protocol session: \
                              {rollback_err}"
-                            )));
-                        }
-                        return Err(PluginOperationInvokeError::Failed(persistence_error));
+                        )));
                     }
-                };
+                    return Err(PluginOperationInvokeError::Failed(persistence_error));
+                }
+            };
             self.state.apply_persisted_commit_result(result);
             self.state.mark_node_ids_persisted(persisted_node_ids);
         }
@@ -875,7 +871,8 @@ impl LashRuntime {
             })?;
         // Lane-less host plugin-operation snapshot. Turn-scoped service calls
         // are classified at the session-manager call sites instead.
-        let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
+        let result = store
+            .commit_runtime_state_verified(commit)
             .await
             .map_err(|err| {
                 PluginOperationInvokeError::Failed(format!(

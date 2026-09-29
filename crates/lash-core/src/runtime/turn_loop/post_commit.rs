@@ -46,13 +46,7 @@ impl LashRuntime {
                 crate::PluginLifecycleEvent::TurnPersisted(Box::new(
                     crate::SessionStateChangedContext {
                         session_id: self.state.session_id.clone(),
-                        state: crate::SessionReadView::from_snapshot(&returned_turn.state)
-                            .map_err(|error| {
-                                RuntimeError::new(
-                                    RuntimeErrorCode::ContextPrepareTurn,
-                                    error.to_string(),
-                                )
-                            })?,
+                        state: crate::SessionReadView::from_snapshot(&returned_turn.state),
                         sessions: manager.state_service(),
                         session_graph: manager.graph_service(),
                         direct_completions,

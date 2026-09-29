@@ -407,7 +407,6 @@ pub mod facade_support {
     pub use crate::session_model::context::PreparedContext;
     pub use crate::store::LeaseTimings;
     pub use crate::store::LeaseTimingsError;
-    pub use crate::store::SessionHead;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_intent::legacy_tool_intent_v1_lookup_key;
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
@@ -498,7 +497,7 @@ pub mod facade_support {
 
     pub fn wake_delivery_driver_with_work_cadence(
         registry: std::sync::Arc<dyn crate::runtime::ProcessRegistry>,
-        session_store_factory: std::sync::Arc<dyn crate::runtime::SessionStoreFactory>,
+        session_store_factory: std::sync::Arc<dyn crate::runtime::DeploymentStore>,
         queued_work: std::sync::Arc<dyn crate::runtime::SessionWorkEngine>,
         clock: std::sync::Arc<dyn crate::runtime::Clock>,
         delivery_policy: crate::runtime::DeliveryPolicy,
@@ -685,28 +684,29 @@ pub use runtime::{
     AssistantStreamHookState, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BindingId,
     BoundaryReason, CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet,
     Clock, ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation,
-    ContractRef, DeclaredProcessIdentity, DefinitionRef, DeliveryPolicy, DrainMode,
-    DrainModePolicy, EffectAddress, EffectGroupDrainBudget, EffectGroupHandle,
-    EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener, EffectOpenerError,
-    EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
-    ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupChildCancelWatch,
-    GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId, IndependentEffectWork,
-    InputItem, InvalidStartKey, LedgerUsageDisposition, Lifetime, LifetimeDecision, LifetimePolicy,
-    LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
-    LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
-    LlmStreamRecord, LocalTurnStop, LoserPolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork,
-    NoSessionWork, NonTerminalProcessPage, PROCESS_EFFECT_OCCURRENCE_CAP,
-    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-    PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
-    ParentEndPlan, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
-    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
-    PersistedSegmentHandover, PreparedLiveReplayPublication, ProcessArtifactCleanup,
-    ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeCursor, ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessContinuationStore, ProcessDefinitionRef,
-    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionValue,
-    ProcessDriveStep, ProcessEffectNodeSummary, ProcessEffectOmissions, ProcessEffectOmittedCounts,
+    ContractRef, DeclaredProcessIdentity, DefinitionRef, DeliveryPolicy, DeploymentStore,
+    DeploymentStoreDecorator, DrainMode, DrainModePolicy, EffectAddress, EffectGroupDrainBudget,
+    EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener,
+    EffectOpenerError, EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal,
+    ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding,
+    GroupChildCancelWatch, GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
+    IndependentEffectWork, InputItem, InvalidStartKey, LedgerUsageDisposition, Lifetime,
+    LifetimeDecision, LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome,
+    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
+    LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
+    MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoSessionWork, NonTerminalProcessPage,
+    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, PendingTurnInput,
+    PendingTurnInputBatch, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
+    PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputRead,
+    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover,
+    PreparedLiveReplayPublication, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
+    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
+    ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessDriveStep,
+    ProcessEffectNodeSummary, ProcessEffectOmissions, ProcessEffectOmittedCounts,
     ProcessEffectOutcome, ProcessEffectOutcomeClass, ProcessEffectSummary,
     ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
     ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
@@ -746,8 +746,8 @@ pub use runtime::{
     SessionCursorError, SessionDeleteContext, SessionDeleteExecution, SessionDriver, SessionId,
     SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
     SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
-    SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionStoreFactory,
-    SessionSummary, SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey,
+    SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionSummary,
+    SessionUsageTotals, SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey,
     StartKeyOwner, StoreRealization, TokenLedgerEntry, ToolAttemptLaunch, ToolIntentOutcomeSink,
     ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity, TurnActivityId,
     TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
@@ -794,7 +794,7 @@ pub use session::{
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
-    SessionGraphScopeError, SessionNodePayload, SessionNodeRecord,
+    SessionNodePayload, SessionNodeRecord,
 };
 
 pub use session_model::{ChargeSafetyPolicy, NoProgressBudget, SessionPolicy, TurnBudget};
@@ -807,21 +807,22 @@ pub use store::{
     BlobRef, CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor, CommitBudget,
     CommitBudgetLimit, DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,
     FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
-    HydratedCheckpointComponent, HydratedSessionCheckpoint, IngressStore, LeaseOwnerIdentity,
-    MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop,
-    MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, RetentionBound,
-    RetentionReport, RuntimeCommit, RuntimePersistence, RuntimeTurnCommitStamp, RuntimeUsageDelta,
-    RuntimeUsageDeltaIdentity, ScanCoverage, SemanticBoundaryOperation, SessionAdmission,
-    SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionMeta,
-    SessionStateAdmission, StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance,
+    HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseOwnerIdentity, MaintenanceFailure,
+    MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
+    OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, QueuedWorkStore, RetentionBound,
+    RetentionReport, RuntimeCommit, RuntimeStore, RuntimeStoreDecorator, RuntimeTurnCommitStamp,
+    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, ScanCoverage, SemanticBoundaryOperation,
+    SessionAdmission, SessionBinding, SessionBlobReclaimReport, SessionCatalogStore,
+    SessionCommitStore, SessionHistoryStore, SessionLookup, SessionMeta, SessionStateAdmission,
+    SessionStore, StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance,
     StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
-    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, VacuumReport,
-    WriterPin, compare_releases, release_stamp_advances,
+    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputStore,
+    VacuumReport, WriterPin, compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{
-    GraphAppend, PersistedSessionRead, RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta,
-    SessionHeadPayload, ensure_supported_schema_version, load_persisted_session_state,
+    GraphAppend, RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
+    ensure_supported_schema_version,
 };
 pub use tool_intent::{
     CancelProcessIntent, EmitProcessEventIntent, EmitTriggerIntent,

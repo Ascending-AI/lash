@@ -234,7 +234,8 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
+        let result = store
+            .commit_runtime_state_verified(commit)
             .await
             .map_err(|source| {
                 super::session_commit_error(

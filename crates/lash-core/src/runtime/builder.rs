@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::plugin::{PluginFactory, PluginHost, PluginSession};
 use crate::{
     EmbeddedRuntimeHost, LashRuntime, PluginStack, ProcessRegistry, RuntimeHostConfig,
-    RuntimePersistence, RuntimeSessionState, SessionError, SessionPolicy,
+    RuntimeSessionState, SessionError, SessionPolicy,
 };
 
 enum PluginSource {
@@ -20,8 +20,8 @@ pub struct EmbeddedRuntimeBuilder {
     initial_state: Option<RuntimeSessionState>,
     plugin_source: PluginSource,
     core: RuntimeHostConfig,
-    store: Option<Arc<dyn RuntimePersistence>>,
-    attachment_manifest_store: Option<Arc<dyn RuntimePersistence>>,
+    store: Option<crate::store::SessionStore>,
+    attachment_manifest_store: Option<Arc<dyn crate::store::RuntimeStore>>,
     drivers: Box<EmbeddedRuntimeDriverBindings>,
 }
 
@@ -166,12 +166,15 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    pub fn with_store(mut self, store: Arc<dyn RuntimePersistence>) -> Self {
+    pub fn with_store(mut self, store: crate::store::SessionStore) -> Self {
         self.store = Some(store);
         self
     }
 
-    pub fn with_attachment_manifest_store(mut self, store: Arc<dyn RuntimePersistence>) -> Self {
+    pub fn with_attachment_manifest_store(
+        mut self,
+        store: Arc<dyn crate::store::RuntimeStore>,
+    ) -> Self {
         // Runtime state still uses `self.store`; only attachment intent
         // persistence is redirected to this store.
         self.attachment_manifest_store = Some(store);
@@ -247,32 +250,18 @@ impl EmbeddedRuntimeBuilder {
             });
         }
         if let Some(store) = &self.store {
-            let recovery_session_id = match self.session_id.clone() {
-                Some(session_id) => Some(session_id),
-                None => store
-                    .load_session_meta()
-                    .await
-                    .map_err(|err| {
-                        SessionError::Protocol(format!(
-                            "failed to resolve store binding for admission: {err}"
-                        ))
-                    })?
-                    .map(|meta| meta.session_id),
-            };
-            if let Some(recovery_session_id) = recovery_session_id
-                && let Some(mut state) = crate::store::load_persisted_session_admitted(
-                    store.as_ref(),
-                    &recovery_session_id,
-                    &self.runtime_lease_owner,
-                    &uuid::Uuid::new_v4().to_string(),
-                    self.core.control.lease_timings.ttl_ms(),
-                )
-                .await
-                .map_err(|source| SessionError::Store {
-                    context: "failed to admit and load store".to_string(),
-                    source,
-                })?
-                .map(|loaded| loaded.state)
+            // The view names its session; a builder session id that
+            // disagrees is refused below, before anything is adopted.
+            if let Some(mut state) = crate::store::load_session_window_state(
+                store,
+                crate::store::WindowSelector::Current,
+            )
+            .await
+            .map_err(|source| SessionError::Store {
+                context: "failed to admit and load store".to_string(),
+                source,
+            })?
+            .map(|loaded| loaded.state)
             {
                 if let Some(session_id) = &self.session_id
                     && state.session_id != session_id

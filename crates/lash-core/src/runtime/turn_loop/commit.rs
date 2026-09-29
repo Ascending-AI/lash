@@ -224,7 +224,7 @@ impl PreparedTurn {
                 // reloads. Discard them only on a confirmed landing — on a
                 // clean failure, or when the probe cannot answer, they stay
                 // pending for the next boundary.
-                if let Some(store) = history_store.as_deref() {
+                if let Some(store) = history_store.as_ref() {
                     let operation = self.turn_pipeline.final_operation();
                     if let (Some(session_id), Some(turn_id)) =
                         (operation.scope.session_id(), operation.scope.turn_id())
@@ -777,17 +777,12 @@ impl LashRuntime {
         {
             let protocol_session = Arc::clone(session.plugins().protocol_session());
             let session_id = self.state.session_id.clone();
-            let restore_result = match crate::plugin::ProtocolSessionRestoreView::new(&self.state) {
-                Ok(view) => {
-                    protocol_session
-                        .restore_session(
-                            crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                            view,
-                        )
-                        .await
-                }
-                Err(error) => Err(crate::SessionError::Protocol(error.to_string())),
-            };
+            let restore_result = protocol_session
+                .restore_session(
+                    crate::plugin::ProtocolSessionContext::new(session, &session_id),
+                    crate::plugin::ProtocolSessionRestoreView::new(&self.state),
+                )
+                .await;
             if let Err(err) = restore_result {
                 delivery.turn.errors.push(post_commit_delivery_issue(
                     crate::TurnFailureCode::ProtocolRestoreSession.into(),
@@ -1006,12 +1001,7 @@ impl LashRuntime {
             .into_iter()
             .collect();
         let messages = crate::MessageSequence::from_base_and_delta(
-            self.state
-                .read_model()
-                .map_err(|error| {
-                    RuntimeError::new(RuntimeErrorCode::ContextPrepareTurn, error.to_string())
-                })?
-                .messages,
+            self.state.read_model().messages,
             delivered,
         );
         // The terminal commits under its own turn's scope, so a follow-on's

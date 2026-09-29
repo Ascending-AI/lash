@@ -196,7 +196,7 @@ impl LashRuntime {
             return Ok(crate::AdmissionRefusal::Empty);
         };
         let pending = store
-            .list_open_queued_work(&self.state.session_id)
+            .list_open_queued_work()
             .await
             .map_err(super::runtime_error_from_store_commit)?;
         Ok(if pending.is_empty() {

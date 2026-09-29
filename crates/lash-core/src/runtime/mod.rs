@@ -360,13 +360,13 @@ pub use turn_queue::{
     process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
     process_wake_source_key,
 };
+use usage::nonzero_usage;
 pub use usage::{
-    LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, TokenLedgerEntry,
-    UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageDispositionError,
-    UsageReconciliationReport, UsageReportRow, UsageTotals, diff_token_ledger, diff_usage_reports,
-    outstanding_unreported_attempts,
+    LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, SessionUsageTotals,
+    TokenLedgerEntry, UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageDispositionError,
+    UsageReconciliationReport, UsageReportRow, UsageTotalRow, UsageTotals, diff_token_ledger,
+    diff_usage_reports, outstanding_unreported_attempts,
 };
-use usage::{merge_ledger_entry_saturating, nonzero_usage};
 
 // Turn-execution vocabulary. These types and the phase-probe trait carry no
 // runtime machinery, so they live one layer down in `lash-core-llm` where the
@@ -378,11 +378,12 @@ pub use lash_core_llm::turn_vocabulary::{
 };
 
 pub use lash_core_execution::runtime::{
-    AgentFrameRun, AssembledTurn, CodeOutputRecord, EventSink, NOOP_EVENT_SINK,
-    NOOP_TURN_ACTIVITY_SINK, NoopEventSink, NoopTurnActivitySink, ProtocolSessionExtension,
-    ProtocolSessionExtensionHandle, RuntimeTurnPhaseProbeSlot, SessionStoreFactory,
+    AgentFrameRun, AssembledTurn, CodeOutputRecord, DeploymentStore, DeploymentStoreDecorator,
+    EventSink, NOOP_EVENT_SINK, NOOP_TURN_ACTIVITY_SINK, NoopEventSink, NoopTurnActivitySink,
+    ProtocolSessionExtension, ProtocolSessionExtensionHandle, RuntimeTurnPhaseProbeSlot,
     TerminationPolicy, TurnActivity, TurnActivitySink, TurnEvent, admit_session_state_generation,
-    park_turn_of_refused_group_child, park_turn_refused_by_generation,
+    admit_session_view, live_session_view, park_turn_of_refused_group_child,
+    park_turn_refused_by_generation,
 };
 
 mod normalized_item {

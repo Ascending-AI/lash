@@ -96,7 +96,7 @@ impl CurrentSessionCapability {
         commit.debug_assert_append_envelope_scope();
         let commit_result = super::super::state::commit_in_lane_context(
             self.held_drive_fence.as_ref(),
-            Arc::clone(store),
+            store.clone(),
             commit,
             &self.resident_graph_head_stale,
         )
@@ -171,11 +171,28 @@ impl CurrentSessionCapability {
                 graph_appends,
                 meta,
                 ..
-            } => graph_appends.record_frame_switch(
-                session_id,
-                meta.current_frame_node_id.as_deref(),
-                request,
-            ),
+            } => {
+                if let Some(store) = &self.store {
+                    let frame_node_id =
+                        crate::session_graph::frame_node_id(session_id, request.frame_key.as_str());
+                    if meta.current_frame_node_id.as_deref() != Some(frame_node_id.as_str())
+                        && store
+                            .contains_active_ancestor(&crate::NodeId::from(frame_node_id.as_str()))
+                            .await
+                            .map_err(|error| crate::PluginError::Session(error.to_string()))?
+                    {
+                        return Err(crate::PluginError::Runtime(crate::RuntimeError::new(
+                            crate::RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported,
+                            "switching to a persisted historical frame requires a commanded config patch, which is not supported",
+                        )));
+                    }
+                }
+                graph_appends.record_frame_switch(
+                    session_id,
+                    meta.current_frame_node_id.as_deref(),
+                    request,
+                )
+            }
             _ => Err(crate::PluginError::Session(format!(
                 "agent-frame switch requires the running session's turn scope; session `{session_id}` has no live turn draft"
             ))),

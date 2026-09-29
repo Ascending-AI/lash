@@ -440,15 +440,7 @@ impl LashRuntime {
         protocol_session
             .restore_session(
                 crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                crate::plugin::ProtocolSessionRestoreView::new(durable_state).map_err(|error| {
-                    (
-                        ResidentReloadStage::ProtocolSessionRestore,
-                        RuntimeError::new(
-                            RuntimeErrorCode::ResidentSessionReloadFailed,
-                            error.to_string(),
-                        ),
-                    )
-                })?,
+                crate::plugin::ProtocolSessionRestoreView::new(durable_state),
             )
             .await
             .map_err(|err| {
@@ -469,15 +461,7 @@ impl LashRuntime {
         session
             .plugins()
             .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
-                crate::SessionReadView::from_persisted_state(durable_state).map_err(|error| {
-                    (
-                        ResidentReloadStage::SessionRestoredHook,
-                        RuntimeError::new(
-                            RuntimeErrorCode::ResidentSessionReloadFailed,
-                            error.to_string(),
-                        ),
-                    )
-                })?,
+                crate::SessionReadView::from_persisted_state(durable_state),
             ))
             .await
             .map_err(|err| {
@@ -532,7 +516,7 @@ impl LashRuntime {
         let mut reloaded_tool_restore = None;
         let reload_result: Result<(), (ResidentReloadStage, RuntimeError)> = async {
             if let Some(store) = store.as_ref() {
-                crate::store::refresh_persisted_session_state(store.as_ref(), &mut durable_state)
+                crate::store::refresh_session_window(&store, &mut durable_state)
                     .await
                     .map_err(|err| {
                         (

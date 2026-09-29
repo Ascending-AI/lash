@@ -184,7 +184,10 @@ impl<'scope> ProcessCommandRunner<'scope> {
             } => {
                 crate::tool_provider::process_events::enqueue_wake_delivery(
                     Arc::clone(&self.registry),
-                    self.current.store.clone(),
+                    self.current
+                        .store
+                        .as_ref()
+                        .map(|store| Arc::clone(store.store())),
                     Some(&self.current.host.core.session_store_factory()),
                     wake_delivery.map(|delivery| *delivery),
                     None,
@@ -1157,19 +1160,18 @@ async fn owning_process_lineage(
     session_id: &SessionId,
 ) -> Result<Option<crate::ProcessLineage>, crate::PluginError> {
     let store = match current.store.as_ref() {
-        Some(store) if current.session_id == *session_id => Some(Arc::clone(store)),
-        _ => current
-            .host
-            .core
-            .session_store_factory()
-            .open_existing_store_by_id(session_id)
-            .await
-            .map_err(|error| {
-                crate::PluginError::Session(format!(
-                    "process start refused: the owner of session `{session_id}` cannot be \
+        Some(store) if current.session_id == *session_id => Some(store.clone()),
+        _ => crate::runtime::live_session_view(
+            &current.host.core.session_store_factory(),
+            session_id,
+        )
+        .await
+        .map_err(|error| {
+            crate::PluginError::Session(format!(
+                "process start refused: the owner of session `{session_id}` cannot be \
                      read: {error}"
-                ))
-            })?,
+            ))
+        })?,
     };
     let Some(store) = store else {
         return Ok(None);

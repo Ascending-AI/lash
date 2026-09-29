@@ -24,7 +24,7 @@ use crate::{
 
 /// The first execution of one `CloseRootScope` step.
 pub(super) struct CloseRootScopeRunner {
-    pub(super) store: Arc<dyn crate::store::RuntimePersistence>,
+    pub(super) store: crate::store::SessionStore,
     pub(super) session: SessionId,
     pub(super) root: TurnId,
     pub(super) sink: Arc<dyn ScopeCloseSink>,
@@ -67,7 +67,7 @@ impl RuntimeEffectLocalRunner for CloseRootScopeRunner {
         }
         let terminal = self
             .store
-            .root_terminal(&self.session, &self.root)
+            .root_terminal(&self.root)
             .await
             .map_err(|error| attempt_fault("root terminal read", error))?
             .ok_or_else(|| {

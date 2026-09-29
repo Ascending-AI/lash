@@ -63,11 +63,11 @@ impl UsageCapability {
         operation: &crate::OperationId,
     ) -> Result<StagedTokenLedger, crate::StoreError> {
         let staged = stage_token_ledger_shared(&self.token_ledger, operation)?;
-        let mut projected = state.token_ledger.clone();
+        let mut projected = state.usage.clone();
         for delta in staged.deltas() {
-            crate::store::merge_token_ledger_entry_checked(&mut projected, delta.entry.clone())?;
+            projected.fold_checked(&delta.entry)?;
         }
-        state.token_ledger = projected;
+        state.usage = projected;
         Ok(staged)
     }
 
@@ -108,7 +108,7 @@ impl UsageCapability {
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         let result = super::super::state::commit_in_lane_context(
             current.held_drive_fence.as_ref(),
-            Arc::clone(store),
+            store.clone(),
             commit,
             &current.resident_graph_head_stale,
         )

@@ -68,12 +68,7 @@ pub(super) fn committed_attachment_ids(
             attachment_ids.insert(attachment_ref.id.clone());
         }
     }
-    for message in state
-        .read_model()
-        .expect("finalized runtime state has a resolvable frame scope")
-        .messages
-        .iter()
-    {
+    for message in state.read_model().messages.iter() {
         for part in message.parts.iter() {
             for attachment_ref in part
                 .attachment_sources()
@@ -106,7 +101,6 @@ pub(super) fn materialize_terminal_output(
     };
     if state
         .read_model()
-        .expect("finalized runtime state has a resolvable frame scope")
         .messages
         .iter()
         .any(|message| message.id == message_id || protocol_output.names(&message.id))

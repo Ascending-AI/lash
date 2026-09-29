@@ -239,7 +239,7 @@ impl LashRuntime {
         self.state.to_snapshot()
     }
 
-    pub fn read_view(&self) -> Result<crate::SessionReadView, crate::SessionGraphScopeError> {
+    pub fn read_view(&self) -> crate::SessionReadView {
         crate::SessionReadView::from_runtime_state(
             &self.state,
             self.state.effective_policy().clone(),
@@ -279,13 +279,15 @@ impl LashRuntime {
     }
 
     pub fn usage_report(&self) -> SessionUsageReport {
-        let mut entries = self.state.token_ledger.clone();
+        let mut totals = self.state.usage.clone();
         let drained = self.shared_token_ledger.lock_recover();
         let mut saturated = false;
-        for entry in drained.iter().cloned() {
-            saturated |= merge_ledger_entry_saturating(&mut entries, entry.entry);
+        for entry in drained.iter() {
+            saturated |= totals.fold_saturating(&entry.entry);
         }
-        SessionUsageReport::from_entries_with_saturation(&entries, saturated)
+        let mut report = totals.report();
+        report.saturated |= saturated;
+        report
     }
 
     /// Attempts of finished turns whose usage never arrived after an abort or
@@ -435,9 +437,12 @@ impl LashRuntime {
             self.resident_session.mark_graph_head_current();
             return Ok(());
         }
-        let read = store.load_session().await.map_err(|err| {
-            SessionError::Protocol(format!("failed to refresh session graph from store: {err}"))
-        })?;
+        let read = store
+            .load_session_window(crate::store::WindowSelector::Current)
+            .await
+            .map_err(|err| {
+                SessionError::Protocol(format!("failed to refresh session graph from store: {err}"))
+            })?;
         self.resident_session.mark_graph_loaded();
         let Some(read) = read else {
             self.resident_session.mark_graph_head_current();
@@ -454,9 +459,10 @@ impl LashRuntime {
     /// moved the live head since the turn was admitted, and a turn replayed on
     /// that head would issue other effects than its journal holds. A base the
     /// resident session already is needs no read. Revision zero is the session
-    /// before any head existed. Any other base comes from
-    /// [`load_session_at`](crate::store::SessionCommitStore::load_session_at),
-    /// which refuses a head the store no longer retains.
+    /// before any head existed. Any other base is the window
+    /// [`WindowSelector::Admitted`](crate::store::WindowSelector::Admitted)
+    /// reads at the admitted leaf (ADR 0112 §5), which refuses a head the
+    /// store no longer retains.
     pub(in crate::runtime) async fn adopt_admission_base(
         &mut self,
         base: &crate::store::SessionHeadRef,
@@ -498,8 +504,13 @@ impl LashRuntime {
             return Ok(());
         }
         let read = store
-            .load_session_at(base)
+            .load_session_window(crate::store::WindowSelector::Admitted(base.clone()))
             .await
+            .and_then(|read| {
+                read.ok_or(crate::StoreError::TurnBaseNotRetained {
+                    revision: base.revision,
+                })
+            })
             .map_err(|source| SessionError::Store {
                 context: "failed to read the head the turn was admitted on".to_string(),
                 source,
@@ -507,28 +518,13 @@ impl LashRuntime {
         self.adopt_session_read(read).await
     }
 
-    /// Adopt a durable session read as the resident session, head-authoritatively.
+    /// Adopt a durable window read as the resident session,
+    /// head-authoritatively. The resident graph becomes the window (ADR 0112
+    /// §9).
     async fn adopt_session_read(
         &mut self,
-        read: crate::store::PersistedSessionRead,
+        read: crate::store::SessionWindowRead,
     ) -> Result<(), SessionError> {
-        // Defend refreshes against third-party stores that return an unvalidated resident graph.
-        read.graph
-            .validate_resident_integrity()
-            .map_err(|source| SessionError::Store {
-                context: "failed to refresh session graph from store".to_string(),
-                source,
-            })?;
-        let head = crate::store::SessionHead {
-            session_id: read.session_id.clone(),
-            head_revision: read.head_revision,
-            current_frame_node_id: read.current_frame_node_id.clone(),
-            pending_follow_on: read.pending_follow_on.clone(),
-            graph: read.graph,
-            config: read.config.clone(),
-            checkpoint_ref: read.checkpoint_ref.clone(),
-            token_ledger: read.token_ledger,
-        };
         // Head-authoritative adoption (FIG-1875): the durable head wins for
         // every fact it carries. Session config is durable (read + guarded
         // write, FIG-1555/FIG-1895), so the head already holds any committed
@@ -539,19 +535,18 @@ impl LashRuntime {
         let mut adopted = self.state.clone();
         crate::runtime::state::adopt_durable_head(
             &mut adopted,
-            &head,
-            read.checkpoint,
+            read,
             live_owned,
             self.fleet_format(),
         )
         .map_err(|source| SessionError::Store {
-            context: "failed to restore session checkpoint".to_string(),
+            context: "failed to adopt the session window".to_string(),
             source,
         })?;
         Box::pin(self.adopt_resident_state(adopted)).await?;
         self.resident_session.mark_graph_head_current();
         // The adopted head is authoritative for usage too: rebuild the attempts
-        // this session still owes usage for from the durable rows plus the
+        // this session still owes usage for from the durable totals plus the
         // resident rows that have not been confirmed into them yet.
         self.rehydrate_unreported_usage_attempts();
         Ok(())
@@ -593,16 +588,16 @@ impl LashRuntime {
         Ok(())
     }
 
-    /// Rebuild the pending-attempt registry from durable ledger rows and the
-    /// unconfirmed resident rows layered on top. Confirmed resident rows are
-    /// already in `state.token_ledger`, and rebuilding by identity rather than
-    /// by count means seeing a hole twice cannot double-count it.
+    /// Rebuild the pending-attempt registry from the durable usage totals and
+    /// the unconfirmed resident rows layered on top. Confirmed resident rows
+    /// are already folded into `state.usage`, and folding holes by identity
+    /// rather than by count means seeing a hole twice cannot double-count it.
     pub(in crate::runtime) fn rehydrate_unreported_usage_attempts(&mut self) {
-        let mut entries = self.state.token_ledger.clone();
+        let mut totals = self.state.usage.clone();
         for pending in self.shared_token_ledger.lock_recover().iter() {
-            entries.push(pending.entry.clone());
+            totals.fold_saturating(&pending.entry);
         }
-        self.unreported_usage_attempts = crate::runtime::outstanding_unreported_attempts(&entries);
+        self.unreported_usage_attempts = totals.outstanding;
     }
 
     pub fn runtime_session_services(
@@ -736,8 +731,18 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.history_store())
             .ok_or_else(queued_turn_input_store_required)?;
+        if store.session_id() != session_id {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                crate::StoreError::ForeignSessionRequest {
+                    view_session_id: store.session_id().clone(),
+                    request_session_id: session_id.clone(),
+                }
+                .to_string(),
+            ));
+        }
         store
-            .cancel_queued_work_batch(session_id, batch_id)
+            .cancel_queued_work_batch(batch_id)
             .await
             .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))
     }
@@ -772,6 +777,18 @@ impl LashRuntime {
                 pending.pending_error(&self.state.session_id),
             ));
         }
+        let store = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store());
+        super::state::refuse_historical_frame_switch(
+            store.as_ref(),
+            &self.state.session_id,
+            self.state.current_frame_node_id.as_deref(),
+            &self.state.session_graph,
+            &request.frame_key,
+        )
+        .await?;
         open_agent_frame_in_state_with_clock(
             &mut self.state,
             request,
@@ -795,9 +812,7 @@ impl LashRuntime {
             ));
         };
         let plugin_session = Arc::clone(session.plugins());
-        let state = self
-            .read_view()
-            .map_err(|error| PluginOperationInvokeError::Unknown(error.to_string()))?;
+        let state = self.read_view();
         let system_prompt = Self::compaction_system_prompt(
             session.context_prompt_contributions().to_vec(),
             Arc::clone(&plugin_session),
@@ -968,11 +983,10 @@ impl LashRuntime {
             session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
                 .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         for delta in staged.deltas() {
-            crate::store::merge_token_ledger_entry_checked(
-                &mut self.state.token_ledger,
-                delta.entry.clone(),
-            )
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+            self.state
+                .usage
+                .fold_checked(&delta.entry)
+                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         }
         let fleet_format = self.fleet_format();
         let (commit, persisted_node_ids) =
@@ -984,8 +998,7 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        let commit_result =
-            crate::store::commit_runtime_state_verified(store.as_ref(), commit).await;
+        let commit_result = store.commit_runtime_state_verified(commit).await;
         let commit_result = match commit_result {
             Ok(result) => result,
             Err(err) => {
@@ -1200,14 +1213,14 @@ impl LashRuntime {
                 )
             })?;
         let still_pending = store
-            .list_queued_work(&handle.receipt.session_id)
+            .list_queued_work()
             .await
             .map_err(super::runtime_error_from_store_commit)?
             .iter()
             .any(|batch| batch.batch_id == handle.receipt.batch_id);
         if !still_pending {
             let completed = store
-                .queued_work_batch_completed(&handle.receipt.session_id, &handle.receipt.batch_id)
+                .queued_work_batch_completed(&handle.receipt.batch_id)
                 .await
                 .map_err(super::runtime_error_from_store_commit)?;
             if !completed {
@@ -1571,22 +1584,21 @@ impl LashRuntime {
             .map_err(super::runtime_error_from_store_commit)?;
         commit.drive_fence = Some(Box::new(drive_fence.clone()));
         commit.applied_commands = Some(completion);
-        let result =
-            match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
-                // A host withdrew a command since the lane was read: the commit
-                // applied nothing, and the lane is read again (FIG-3927 §2.7).
-                Err(crate::StoreError::SessionCommandWithdrawn { .. }) => return Ok(false),
-                result => result,
+        let result = match store.commit_runtime_state_verified(commit).await {
+            // A host withdrew a command since the lane was read: the commit
+            // applied nothing, and the lane is read again (FIG-3927 §2.7).
+            Err(crate::StoreError::SessionCommandWithdrawn { .. }) => return Ok(false),
+            result => result,
+        }
+        .map_err(|error| match error {
+            // A later admission sealed after the drain presented its
+            // fence: nothing was written, and the drive applies the
+            // command (ADR 0109 §7).
+            error @ crate::StoreError::StaleDriveFence { .. } => {
+                RuntimeError::new(RuntimeErrorCode::StoreCommitSuperseded, error.to_string())
             }
-            .map_err(|error| match error {
-                // A later admission sealed after the drain presented its
-                // fence: nothing was written, and the drive applies the
-                // command (ADR 0109 §7).
-                error @ crate::StoreError::StaleDriveFence { .. } => {
-                    RuntimeError::new(RuntimeErrorCode::StoreCommitSuperseded, error.to_string())
-                }
-                error => super::runtime_error_from_store_commit(error),
-            })?;
+            error => super::runtime_error_from_store_commit(error),
+        })?;
         commit_state.apply_persisted_commit_result(result);
         commit_state.mark_node_ids_persisted(persisted_node_ids);
         if let Some(next_state) = next_config_state {

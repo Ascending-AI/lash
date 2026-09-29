@@ -7,7 +7,7 @@
 //! (ADR 0089): initialisation builds a *new* session from a request that
 //! carries policy, relation, tool access, subagent context, initial nodes,
 //! observer intents, and the spawn-time `SessionPluginInit` capture. Catalog
-//! `SessionStoreFactory::fork_at` materializes durable fork lineage and
+//! `SessionCatalogStore::fork_session` materializes durable fork lineage and
 //! retained-frame content with different failure semantics and no live
 //! parent's plugin-init payload; neither API covers the other.
 //!
@@ -46,7 +46,7 @@ pub(in crate::runtime::session_manager) struct SessionInitPlan {
 /// The resolved request with its runtime assembled but not yet committed.
 struct MaterializedSession {
     runtime: LashRuntime,
-    store_binding: Arc<dyn crate::store::RuntimePersistence>,
+    store_binding: crate::store::SessionStore,
 }
 
 /// The child a `ProcessInput::SessionTurn` run owns: an ordinary session
@@ -302,26 +302,25 @@ fn build_session_plugins<'a>(
 async fn bind_session_store(
     current: &CurrentSessionCapability,
     plan: &SessionInitPlan,
-) -> Result<Arc<dyn crate::store::RuntimePersistence>, crate::PluginError> {
-    let store = current
-        .host
-        .core
-        .session_store_factory()
-        .create_store(&SessionStoreCreateRequest {
+) -> Result<crate::store::SessionStore, crate::PluginError> {
+    let store = crate::runtime::admit_session_view(
+        &current.host.core.session_store_factory(),
+        &SessionStoreCreateRequest {
             session_id: plan.session_id.clone(),
             relation: plan.relation.clone(),
             pending_observer_intents: plan.pending_observer_intents.clone(),
             policy: plan.policy.clone(),
             owning_process_id: plan.owning_process_id.clone(),
-        })
-        .await
-        .map_err(|message| {
-            crate::PluginError::Session(session_creation_store_factory_error(
-                &plan.session_id,
-                message.to_string(),
-            ))
-        })?;
-    validate_created_session_store_binding(store.as_ref(), &plan.session_id).await?;
+        },
+    )
+    .await
+    .map_err(|message| {
+        crate::PluginError::Session(session_creation_store_factory_error(
+            &plan.session_id,
+            message.to_string(),
+        ))
+    })?;
+    validate_created_session_store_binding(&store, &plan.session_id).await?;
     Ok(store)
 }
 
@@ -343,7 +342,7 @@ fn session_creation_store_factory_error(session_id: &SessionId, message: String)
 }
 
 async fn validate_created_session_store_binding(
-    store: &dyn crate::RuntimePersistence,
+    store: &crate::store::SessionStore,
     session_id: &SessionId,
 ) -> Result<(), crate::PluginError> {
     let meta = store.load_session_meta().await.map_err(|err| {
@@ -400,20 +399,18 @@ async fn commit_initialized_session(
     // Lane-less by construction: the session is being created before it
     // owns an execution lane. A guard for another session cannot authorize
     // this commit.
-    let result =
-        crate::store::commit_runtime_state_verified(materialized.store_binding.as_ref(), commit)
-            .await
-            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+    let result = materialized
+        .store_binding
+        .commit_runtime_state_verified(commit)
+        .await
+        .map_err(|err| crate::PluginError::Session(err.to_string()))?;
     persisted_state.apply_persisted_commit_result(result);
     persisted_state.mark_node_ids_persisted(persisted_node_ids);
     materialized.runtime.install_resident_state(persisted_state);
     materialized.runtime.materialized_protocol_config_dirty = false;
-    let observed_processes = settle_session_observer_intents(
-        current,
-        &plan.session_id,
-        materialized.store_binding.as_ref(),
-    )
-    .await?;
+    let observed_processes =
+        settle_session_observer_intents(current, &plan.session_id, &materialized.store_binding)
+            .await?;
     let handle = SessionHandle {
         session_id: plan.session_id,
         parent_session_id: plan.parent_session_id,
@@ -429,9 +426,10 @@ async fn commit_initialized_session(
 async fn settle_session_observer_intents(
     current: &CurrentSessionCapability,
     session_id: &SessionId,
-    store: &dyn crate::store::RuntimePersistence,
+    store: &crate::store::SessionStore,
 ) -> Result<Vec<crate::plugin::SessionObservedProcessReceipt>, crate::PluginError> {
-    let observer_intent_source = crate::runtime::SessionObserverIntentSource::Persisted(store);
+    let observer_intent_source =
+        crate::runtime::SessionObserverIntentSource::Persisted(store.store().as_ref());
     crate::runtime::reconcile_session_process_observer_intents(
         current.host.process_registry().map(Arc::as_ref),
         session_id,
@@ -460,12 +458,8 @@ fn session_catalog_lookup_unsupported(error: &crate::PluginError) -> bool {
 async fn durable_session_store(
     current: &CurrentSessionCapability,
     session_id: &SessionId,
-) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, crate::PluginError> {
-    current
-        .host
-        .core
-        .session_store_factory()
-        .open_existing_store_by_id(session_id)
+) -> Result<Option<crate::store::SessionStore>, crate::PluginError> {
+    crate::runtime::live_session_view(&current.host.core.session_store_factory(), session_id)
         .await
         .map_err(|error| match error {
             // A catalog that cannot resolve a session by id can never serve
@@ -562,7 +556,7 @@ async fn commit_fresh_session_init(
 /// the caller finishes as a create rather than reopening.
 async fn recorded_session_state(
     plan: &SessionInitPlan,
-    store: &Arc<dyn crate::store::RuntimePersistence>,
+    store: &crate::store::SessionStore,
 ) -> Result<Option<crate::RuntimeSessionState>, crate::PluginError> {
     // The durable row decides lineage. A redelivery replays the same recorded
     // request, so a recorded relation that disagrees is a conflict, never a
@@ -581,8 +575,9 @@ async fn recorded_session_state(
             plan.session_id, meta.relation, plan.relation
         )));
     }
-    crate::store::load_persisted_session_state(store.as_ref())
+    crate::store::load_session_window_state(store, crate::store::WindowSelector::Current)
         .await
+        .map(|loaded| loaded.map(|loaded| loaded.state))
         .map_err(|error| {
             crate::PluginError::Session(format!(
                 "failed to load session `{}` for reopen: {error}",
@@ -597,7 +592,7 @@ async fn recorded_session_state(
 async fn reopen_committed_session(
     current: &CurrentSessionCapability,
     plan: &SessionInitPlan,
-    store: Arc<dyn crate::store::RuntimePersistence>,
+    store: crate::store::SessionStore,
     state: crate::RuntimeSessionState,
 ) -> Result<InitializedSession, crate::PluginError> {
     let authority = crate::plugin::SessionAuthorityContext {
@@ -649,7 +644,7 @@ async fn reopen_committed_session(
     // Finish any observer intents a crashed create attempt left pending; the
     // settle is durable and idempotent, so completing it here is the same
     // work the create path performs.
-    settle_session_observer_intents(current, &plan.session_id, store.as_ref()).await?;
+    settle_session_observer_intents(current, &plan.session_id, &store).await?;
     Ok(InitializedSession {
         handle: RuntimeHandle::new(runtime),
         session_id: plan.session_id.clone(),
@@ -904,25 +899,20 @@ impl RuntimeSessionServices {
             }
         }
         for session_id in candidates {
-            self.settle_open_process_child_turn_input(
-                factory.as_ref(),
-                &session_id,
-                process_id,
-                turn_id,
-            )
-            .await?;
+            self.settle_open_process_child_turn_input(&factory, &session_id, process_id, turn_id)
+                .await?;
         }
         Ok(())
     }
 
     async fn settle_open_process_child_turn_input(
         &self,
-        factory: &dyn crate::SessionStoreFactory,
+        factory: &Arc<dyn crate::DeploymentStore>,
         session_id: &SessionId,
         process_id: &crate::ProcessId,
         turn_id: &TurnId,
     ) -> Result<(), crate::PluginError> {
-        let store = match factory.open_existing_store_by_id(session_id).await {
+        let store = match crate::runtime::live_session_view(factory, session_id).await {
             Ok(store) => store,
             // A catalog without the by-id seam can hold no claimable input
             // this reconcile could reach — the same toleration
@@ -961,7 +951,7 @@ impl RuntimeSessionServices {
                 )
             });
         let pending = store
-            .list_pending_turn_inputs(session_id)
+            .list_pending_turn_inputs()
             .await
             .map_err(|error| {
                 crate::PluginError::Session(format!(
@@ -982,7 +972,7 @@ impl RuntimeSessionServices {
             return Ok(());
         }
         let receipts = store
-            .cancel_pending_turn_inputs(session_id, &targets)
+            .cancel_pending_turn_inputs(&targets)
             .await
             .map_err(|error| {
                 crate::PluginError::Session(format!(

@@ -228,7 +228,7 @@ fn meta() -> AttachmentCreateMeta {
 }
 
 async fn committed_factory_attachment() -> (
-    Arc<dyn crate::SessionStoreFactory>,
+    Arc<dyn crate::DeploymentStore>,
     Arc<dyn AttachmentStore>,
     AttachmentId,
 ) {
@@ -288,7 +288,7 @@ async fn explicit_factory_root_set_keeps_committed_blob() {
 /// is therefore blind; only the factory's condemn CAS — the authority the
 /// writer's intent lives in — can still see the root.
 struct EmptySnapshotFactoryRoots<'a> {
-    factory: &'a dyn crate::SessionStoreFactory,
+    factory: &'a dyn crate::DeploymentStore,
 }
 
 #[async_trait::async_trait]
@@ -1189,8 +1189,8 @@ impl AttachmentStore for WindowHookedStore {
 }
 
 struct FencedFixture {
-    factory: Arc<dyn crate::SessionStoreFactory>,
-    store: Arc<dyn crate::RuntimePersistence>,
+    factory: Arc<dyn crate::DeploymentStore>,
+    store: crate::store::SessionStore,
     backend: Arc<dyn AttachmentStore>,
     session: Arc<SessionAttachmentStore>,
     /// Every fence outcome the facade observed, in order.
@@ -1653,7 +1653,7 @@ async fn ephemeral_facade_passes_reads_through_without_a_guard() {
 
 #[tokio::test]
 async fn persistence_manifest_adapter_forwards_root_tracking() {
-    let runtime: Arc<dyn crate::RuntimePersistence> =
+    let runtime: crate::store::SessionStore =
         Arc::new(crate::testing::unbound_recording_store().await);
     let adapter = PersistenceManifestAdapter(runtime);
     let attachment_id = AttachmentId::parse("adapter-forwarding").expect("valid attachment id");

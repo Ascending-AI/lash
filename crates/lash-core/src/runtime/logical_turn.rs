@@ -373,7 +373,7 @@ impl LashRuntime {
         }
         commit.drive_fence = Some(Box::new(drive_commit.fence.clone()));
         commit.root_terminal = drive_commit.terminal.clone().map(Box::new);
-        match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
+        match store.commit_runtime_state_verified(commit).await {
             Ok(receipt) => {
                 if receipt.receipt_replayed {
                     self.invalidate_resident_session_state();

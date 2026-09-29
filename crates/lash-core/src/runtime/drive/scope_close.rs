@@ -23,7 +23,7 @@ use crate::store::{
     ObligationId, ObligationKey, ObligationKind, ObligationLedger, RootTerminal, StoreError,
     scope_close_obligation_id,
 };
-use crate::{Clock, SessionStoreFactory};
+use crate::{Clock, DeploymentStore};
 
 use super::relay::{DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now};
 
@@ -33,7 +33,7 @@ use super::relay::{DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, 
 #[derive(Clone)]
 pub struct ScopeCloseRelay {
     ledger: Arc<dyn ObligationLedger>,
-    sessions: Arc<dyn SessionStoreFactory>,
+    sessions: Arc<dyn DeploymentStore>,
     sink: Arc<dyn ScopeCloseSink>,
     policy: RelayPolicy,
 }
@@ -44,7 +44,7 @@ impl ScopeCloseRelay {
     #[must_use]
     pub fn new(
         ledger: Arc<dyn ObligationLedger>,
-        sessions: Arc<dyn SessionStoreFactory>,
+        sessions: Arc<dyn DeploymentStore>,
         sink: Arc<dyn ScopeCloseSink>,
     ) -> Self {
         Self {
@@ -60,7 +60,7 @@ impl ScopeCloseRelay {
     #[must_use]
     pub fn over_backend(
         backend: &crate::Backend,
-        sessions: Arc<dyn SessionStoreFactory>,
+        sessions: Arc<dyn DeploymentStore>,
         sink: Arc<dyn ScopeCloseSink>,
     ) -> Self {
         Self::new(

@@ -105,10 +105,7 @@ impl DurableSessionOps {
     /// publication; it degrades to [`EMPTY_HEAD_REVISION`], which mints a
     /// cursor a reconnect resolves through gap recovery rather than losing the
     /// event silently.
-    async fn publication_revision(
-        &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
-    ) -> SessionRevision {
+    async fn publication_revision(&self, store: &crate::store::SessionStore) -> SessionRevision {
         match store.load_session_head_meta().await {
             Ok(meta) => revision_of_head(meta),
             Err(err) => {
@@ -127,7 +124,7 @@ impl DurableSessionOps {
     /// directly instead of costing the head read again.
     async fn publish_queue_changed(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &crate::store::SessionStore,
         kind: SessionQueueEventKind,
         batch_ids: Vec<String>,
         revision: Option<SessionRevision>,
@@ -164,7 +161,7 @@ impl DurableSessionOps {
     /// retried by the ingress relay from the row's obligation.
     pub async fn enqueue_turn_input(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &crate::store::SessionStore,
         input: crate::TurnInput,
         ingress: crate::TurnInputIngress,
         source_key: Option<String>,
@@ -186,7 +183,7 @@ impl DurableSessionOps {
     /// whole request and accepts nothing.
     pub async fn enqueue_turn_inputs(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &crate::store::SessionStore,
         inputs: Vec<(crate::TurnInput, Option<String>)>,
         ingress: crate::TurnInputIngress,
         run_spec: crate::RunSpec,
@@ -194,7 +191,7 @@ impl DurableSessionOps {
         let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
         let (enqueued, revision) = enqueue_turn_inputs_to_store(
             self.session_id.clone(),
-            Arc::clone(store),
+            store.clone(),
             &self.ingress,
             inputs,
             ingress,
@@ -222,21 +219,18 @@ impl DurableSessionOps {
     /// input is still reported, held.
     pub async fn pending_turn_inputs(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &crate::store::SessionStore,
     ) -> Result<Vec<crate::PendingTurnInputRead>, crate::RuntimeError> {
-        store
-            .list_pending_turn_inputs(&self.session_id)
-            .await
-            .map_err(store_error)
+        store.list_pending_turn_inputs().await.map_err(store_error)
     }
 
     /// Settled canonical input applications from durable turn commits.
     pub async fn turn_input_applications(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &crate::store::SessionStore,
     ) -> Result<Vec<crate::TurnInputApplication>, crate::RuntimeError> {
         store
-            .list_turn_input_applications(&self.session_id)
+            .list_turn_input_applications()
             .await
             .map_err(store_error)
     }
@@ -244,22 +238,19 @@ impl DurableSessionOps {
     /// Pending durable queued-work batches for this session.
     pub async fn queued_work(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &crate::store::SessionStore,
     ) -> Result<Vec<crate::QueuedWorkBatch>, crate::RuntimeError> {
-        store
-            .list_open_queued_work(&self.session_id)
-            .await
-            .map_err(store_error)
+        store.list_open_queued_work().await.map_err(store_error)
     }
 
     /// Cancel one pending turn input by runtime input id.
     pub async fn cancel_pending_turn_input(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &crate::store::SessionStore,
         input_id: &str,
     ) -> Result<crate::PendingTurnInputCancelOutcome, crate::RuntimeError> {
         let outcome = store
-            .cancel_pending_turn_input(&self.session_id, input_id)
+            .cancel_pending_turn_input(input_id)
             .await
             .map_err(store_error)?;
         if outcome.is_cancelled() {
@@ -277,11 +268,11 @@ impl DurableSessionOps {
     /// Atomically cancel a selected set of pending inputs.
     pub async fn cancel_pending_turn_inputs(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &crate::store::SessionStore,
         targets: &[crate::PendingTurnInputCancelTarget],
     ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, crate::RuntimeError> {
         let receipts = store
-            .cancel_pending_turn_inputs(&self.session_id, targets)
+            .cancel_pending_turn_inputs(targets)
             .await
             .map_err(store_error)?;
         let cancelled_ids = receipts
@@ -308,11 +299,11 @@ impl DurableSessionOps {
     /// Atomically cancel the same-session pending-input suffix from `anchor`.
     pub async fn cancel_pending_turn_input_suffix(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &crate::store::SessionStore,
         anchor: &crate::PendingTurnInputCancelTarget,
     ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, crate::RuntimeError> {
         let outcome = store
-            .cancel_pending_turn_input_suffix(&self.session_id, anchor)
+            .cancel_pending_turn_input_suffix(anchor)
             .await
             .map_err(store_error)?;
         if let crate::PendingTurnInputSuffixCancelOutcome::Outcomes { outcomes, .. } = &outcome {
@@ -341,11 +332,11 @@ impl DurableSessionOps {
     /// Cancel one pending queued-work batch.
     pub async fn cancel_queued_work_batch(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &crate::store::SessionStore,
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, crate::RuntimeError> {
         let batch = store
-            .cancel_queued_work_batch(&self.session_id, batch_id)
+            .cancel_queued_work_batch(batch_id)
             .await
             .map_err(store_error)?;
         if batch.is_some() {
@@ -363,7 +354,7 @@ impl DurableSessionOps {
     /// Does this session still have durable live session metadata?
     pub async fn session_exists(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &crate::store::SessionStore,
     ) -> Result<bool, crate::StoreError> {
         Ok(store.load_session_meta().await?.is_some())
     }
@@ -371,7 +362,7 @@ impl DurableSessionOps {
 
 pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     session_id: SessionId,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: crate::store::SessionStore,
     ingress_relay: &super::drive::IngressRelay,
     input: crate::TurnInput,
     ingress: crate::TurnInputIngress,
@@ -410,7 +401,7 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
 /// back so the caller's queue event does not read the head again.
 pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
     session_id: SessionId,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: crate::store::SessionStore,
     ingress_relay: &super::drive::IngressRelay,
     inputs: Vec<(crate::TurnInput, Option<String>)>,
     ingress: crate::TurnInputIngress,

@@ -142,17 +142,7 @@ impl LashRuntime {
                     TurnAddress::new(&self.state.session_id, &trace_turn_id),
                 )
                 .await?;
-                let messages = crate::MessageSequence::from_base(
-                    self.state
-                        .read_model()
-                        .map_err(|error| {
-                            RuntimeError::new(
-                                RuntimeErrorCode::ContextPrepareTurn,
-                                error.to_string(),
-                            )
-                        })?
-                        .messages,
-                );
+                let messages = crate::MessageSequence::from_base(self.state.read_model().messages);
                 let mut turn_pipeline = TurnBoundary::from_state_with_clock(
                     self.state.clone(),
                     Arc::clone(&self.host.core.clock),
@@ -219,9 +209,7 @@ impl LashRuntime {
             );
         }
 
-        let base_read_model = self.state.read_model().map_err(|error| {
-            RuntimeError::new(RuntimeErrorCode::ContextPrepareTurn, error.to_string())
-        })?;
+        let base_read_model = self.state.read_model();
         let base_messages = base_read_model.messages;
         let base_render_cache = base_read_model.prompt_render_cache;
         let mut turn_delta = Vec::new();
@@ -325,9 +313,7 @@ impl LashRuntime {
         let plugin_session = Arc::clone(session.plugins());
         let prepare_phase_turn_id = turn_phase_id(&trace_turn_id, "prepare-turn");
         let prepare_phase_controller = scoped_effect_controller.clone();
-        let prepare_read_view = self.read_view().map_err(|error| {
-            RuntimeError::new(RuntimeErrorCode::ContextPrepareTurn, error.to_string())
-        })?;
+        let prepare_read_view = self.read_view();
         // Lazy: resolved only if overflow recovery actually runs — an eager
         // build would fire plugin prompt hooks on every turn for a prompt
         // that is almost never sent.

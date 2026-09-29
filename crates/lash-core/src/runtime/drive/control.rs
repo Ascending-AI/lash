@@ -60,7 +60,7 @@ use crate::store::{
     ObligationKind, ObligationLedger, ObligationSettlement, ObligationStanding, SettleOutcome,
     StalledObligation, StoreError, scope_close_obligation_id,
 };
-use crate::{Clock, SessionStoreFactory, SessionWorkEngine};
+use crate::{Clock, DeploymentStore, SessionWorkEngine};
 
 /// The drive request a cancel's or fork's delivery asks for once its intent
 /// settled, and a redrive's when the engine held no execution: one per
@@ -74,7 +74,7 @@ pub fn intent_drive_request(intent: ControlIntentId) -> DriveRequestId {
 /// and its follow-on drive under the claim its ledger took.
 pub struct ControlIntentRelay {
     ledger: ClaimRecordingLedger,
-    stores: Arc<dyn SessionStoreFactory>,
+    stores: Arc<dyn DeploymentStore>,
     work: Arc<dyn SessionWorkEngine>,
     scopes: Arc<dyn ScopeCloseSink>,
     scope_close: Arc<dyn ObligationRelay>,
@@ -92,7 +92,7 @@ impl ControlIntentRelay {
     #[must_use]
     pub fn new(
         ledger: Arc<dyn ObligationLedger>,
-        stores: Arc<dyn SessionStoreFactory>,
+        stores: Arc<dyn DeploymentStore>,
         work: Arc<dyn SessionWorkEngine>,
         scopes: Arc<dyn ScopeCloseSink>,
         scope_close: Arc<dyn ObligationRelay>,
@@ -403,7 +403,7 @@ async fn close_session_engine_half(
 /// cancel inside the close must not wedge the session behind its cancel or
 /// fork.
 async fn release_root_engine_half(
-    stores: &dyn SessionStoreFactory,
+    stores: &dyn DeploymentStore,
     engine: &dyn SessionControlEngine,
     scopes: &dyn ScopeCloseSink,
     scope_close: &dyn ObligationRelay,

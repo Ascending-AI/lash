@@ -17,8 +17,7 @@ use crate::runtime::process_terminal::ProcessTerminalRelay;
 use crate::runtime::session_delete::SessionDeleteRelay;
 use crate::store::ObligationKind;
 use crate::{
-    Backend, Clock, ProcessWorkWiring, SessionAdministration, SessionStoreFactory,
-    SessionWorkEngine,
+    Backend, Clock, DeploymentStore, ProcessWorkWiring, SessionAdministration, SessionWorkEngine,
 };
 
 /// What a kind's delivery needs beyond the store set, the session engine and
@@ -106,7 +105,7 @@ impl RelaySupply {
 pub struct RelayParts {
     /// The backend whose store set holds every kind's ledger.
     pub backend: Backend,
-    pub sessions: Arc<dyn SessionStoreFactory>,
+    pub sessions: Arc<dyn DeploymentStore>,
     /// The session engine drives and control verbs are asked of.
     pub work: Arc<dyn SessionWorkEngine>,
     /// The owner of lifetime scopes a root's close reaches.

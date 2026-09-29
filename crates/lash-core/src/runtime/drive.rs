@@ -339,8 +339,8 @@ async fn emit_admission_step(
     controller: &ScopedEffectController<'_>,
     request: &DriveRequest,
     ordinal: u32,
-    store: Option<Arc<dyn crate::store::RuntimePersistence>>,
-    stores: Arc<dyn crate::SessionStoreFactory>,
+    store: Option<crate::store::SessionStore>,
+    stores: Arc<dyn crate::DeploymentStore>,
 ) -> Result<AdmitVerdict, DriveAbort> {
     let scope = drive_admission_scope(&request.session, &request.request);
     let invocation = RuntimeEffectInvocation::new(
@@ -393,7 +393,7 @@ pub async fn admit_drive_retired(
     controller: &ScopedEffectController<'_>,
     request: &DriveRequest,
     ordinal: u32,
-    stores: Arc<dyn crate::SessionStoreFactory>,
+    stores: Arc<dyn crate::DeploymentStore>,
 ) -> Result<AdmitVerdict, DriveAbort> {
     emit_admission_step(controller, request, ordinal, None, stores).await
 }
@@ -987,7 +987,7 @@ impl LashRuntime {
             .map_err(|error| controller_abort(Some(root), error))
     }
 
-    fn drive_store(&self) -> Result<Arc<dyn crate::store::RuntimePersistence>, DriveAbort> {
+    fn drive_store(&self) -> Result<crate::store::SessionStore, DriveAbort> {
         self.session
             .as_ref()
             .and_then(|session| session.history_store())
@@ -1009,7 +1009,7 @@ async fn mark_and_seal_root(
     root_controller: &ScopedEffectController<'_>,
     scope: &crate::AdmittedScope,
     admitted: &Admitted,
-    store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+    store: Option<crate::store::SessionStore>,
 ) -> Result<crate::engine::SealVerdict, DriveAbort> {
     let root = admitted.root().clone();
     // The execution's start marker, drawn in the root's own journal before

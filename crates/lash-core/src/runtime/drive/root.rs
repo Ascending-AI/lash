@@ -68,7 +68,7 @@ impl LashRuntime {
                 ),
                 crate::RuntimeEffectLocalExecutor::owned_runner(
                     Box::new(AdmitRootRunner {
-                        store: Arc::clone(&store),
+                        store: store.clone(),
                         effect_host: Arc::clone(&self.host.core.control.effect_host),
                         scope: root_controller.admitted_scope().clone(),
                         fence: fence.clone(),
@@ -139,7 +139,7 @@ impl LashRuntime {
                         ),
                         crate::RuntimeEffectLocalExecutor::owned_runner(
                             Box::new(InspectAdmittedHeadRunner {
-                                store: Arc::clone(&store),
+                                store: store.clone(),
                                 root: root.clone(),
                                 head: head.clone(),
                                 head_moved,
@@ -337,7 +337,7 @@ impl LashRuntime {
     /// A base the store no longer retains parks the root too.
     async fn adopt_admitted_turn(
         &mut self,
-        store: &Arc<dyn crate::store::RuntimePersistence>,
+        store: &crate::store::SessionStore,
         admitted: AdmittedTurn<'_>,
         verdict: AdmittedHeadVerdict,
     ) -> Result<(), RuntimeError> {
@@ -412,7 +412,7 @@ struct AdmittedTurn<'a> {
 }
 
 struct InspectAdmittedHeadRunner {
-    store: Arc<dyn crate::store::RuntimePersistence>,
+    store: crate::store::SessionStore,
     root: TurnId,
     head: AdmittedHead,
     head_moved: bool,
@@ -510,7 +510,7 @@ enum RootAdmissionProbe {
 /// envelope, which names only the head: the fence changes with every drive
 /// epoch, and the envelope must not.
 struct AdmitRootRunner {
-    store: Arc<dyn crate::store::RuntimePersistence>,
+    store: crate::store::SessionStore,
     effect_host: Arc<dyn crate::EffectHost>,
     scope: crate::AdmittedScope,
     fence: crate::store::DriveFence,
@@ -603,7 +603,6 @@ impl AdmitRootRunner {
         let session_id = self.fence.session();
         self.store
             .validate_turn_cancellation_binding(
-                session_id,
                 &self.fence,
                 binding_id,
                 &crate::runtime::effect::executor::admitted_turn_cancel_scope(
@@ -681,17 +680,16 @@ impl AdmitRootRunner {
                 admission: Box::new(admission),
             }));
         }
-        let session_id = self.fence.session();
         let present = match &self.head {
             AdmittedHead::Input(head) => self
                 .store
-                .list_pending_turn_inputs(session_id)
+                .list_pending_turn_inputs()
                 .await?
                 .iter()
                 .any(|read| read.input.input_id == *head),
             AdmittedHead::Batch(head) => self
                 .store
-                .list_queued_work(session_id)
+                .list_queued_work()
                 .await?
                 .iter()
                 .any(|batch| batch.batch_id == *head),

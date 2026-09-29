@@ -183,7 +183,7 @@ impl LashRuntime {
                     },
                 ),
                 crate::RuntimeEffectLocalExecutor::turn_acceptance(
-                    Arc::clone(&store) as Arc<dyn crate::IngressStore>
+                    Arc::clone(store.store()) as Arc<dyn crate::TurnInputStore>
                 ),
             )
             .await
@@ -309,7 +309,7 @@ impl LashRuntime {
     /// refreshed head still owes one.
     async fn queued_behind_pending_follow_on(
         &self,
-        store: &Arc<dyn crate::store::RuntimePersistence>,
+        store: &crate::store::SessionStore,
         accepted_id: &crate::InputId,
         declined: bool,
     ) -> Result<Option<u64>, RuntimeError> {
@@ -317,7 +317,7 @@ impl LashRuntime {
             return Ok(None);
         }
         let open = store
-            .list_pending_turn_inputs(&self.state.session_id)
+            .list_pending_turn_inputs()
             .await
             .map_err(super::runtime_error_from_store_commit)?;
         let Some(own) = open.iter().find(|read| read.input.input_id == *accepted_id) else {

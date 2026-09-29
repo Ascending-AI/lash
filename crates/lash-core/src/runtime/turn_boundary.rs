@@ -9,7 +9,7 @@ use crate::facade_support::SessionGraphFacadeOps;
 use crate::facade_support::SessionNodeProjection;
 use crate::runtime::turn_settlement::TurnIngressSettlement;
 use crate::session_model::SessionHistoryRecord;
-use crate::store::{GraphAppend, RuntimeCommit, RuntimePersistence, StoreError};
+use crate::store::{GraphAppend, RuntimeCommit, StoreError};
 use crate::{
     AssembledTurn, MessageSequence, PluginSession, Session, SessionPolicy, SessionReadView,
     TurnOutcome,
@@ -213,7 +213,7 @@ impl TurnBoundary {
         turn_index: usize,
         protocol_turn_options: crate::ProtocolTurnOptions,
         messages: MessageSequence,
-    ) -> Result<SessionReadView, crate::SessionGraphScopeError> {
+    ) -> SessionReadView {
         self.draft_ref()
             .read_view(policy, turn_index, protocol_turn_options, messages)
     }
@@ -402,7 +402,7 @@ impl TurnBoundary {
                 plugins: plugins.as_deref(),
                 execution_state_update,
                 agent_frame_switch_materializes,
-                store: store.as_ref().map(|store| store.as_ref()),
+                store: store.as_ref(),
                 usage_deltas,
                 failure_evidence: &returned_turn.failure_evidence,
                 outcome: &returned_turn.outcome,
@@ -569,10 +569,7 @@ impl TurnBoundary {
         // §3). A store-less session keeps the same fact resident.
         state.pending_follow_on = pending_follow_on.map(Box::new);
         for delta in usage_deltas {
-            crate::store::merge_token_ledger_entry_checked(
-                &mut state.token_ledger,
-                delta.entry.clone(),
-            )?;
+            state.usage.fold_checked(&delta.entry)?;
         }
         if let Some(plugins) = plugins {
             state.capture_plugin_states(plugins);
@@ -638,6 +635,7 @@ impl TurnBoundary {
                 graph,
                 usage_deltas,
                 failure_evidence,
+                crate::store::TurnCommitOutcome::from_terminal(outcome),
                 operation,
                 ingress_settlement,
                 interrupted_turn_input_turn_id,
@@ -673,10 +671,11 @@ impl TurnBoundary {
     async fn apply_commit(
         state: &mut RuntimeSessionState,
         commit_budget: crate::CommitBudget,
-        store: &(dyn RuntimePersistence + '_),
+        store: &crate::store::SessionStore,
         mut graph: GraphAppend,
         usage_deltas: &[crate::store::RuntimeUsageDelta],
         failure_evidence: &[crate::TurnFailureEvidence],
+        outcome: crate::store::TurnCommitOutcome,
         operation: crate::OperationId,
         ingress_settlement: TurnIngressSettlement,
         interrupted_turn_input_turn_id: Option<TurnId>,
@@ -715,10 +714,11 @@ impl TurnBoundary {
                 usage_deltas,
                 operation,
                 commit_budget,
-                crate::FleetFormatStore::fleet_format(store),
+                store.fleet_format(),
             )?
             .with_committed_attachments(committed_attachment_ids);
         commit.failure_evidence = failure_evidence.to_vec();
+        commit.outcome = Some(outcome);
         commit.adopted_intent_rows = adopted_intent_rows;
         // A cancelled turn's undelivered input follows the cancellation's
         // disposition; every other handed-back row is deferred.
@@ -756,7 +756,7 @@ impl TurnBoundary {
         // iteration that honoured an AfterStep request) which a raw promise
         // peek cannot reconstruct.
         let result = loop {
-            match crate::store::commit_runtime_state_verified(store, commit.clone()).await {
+            match store.commit_runtime_state_verified(commit.clone()).await {
                 Ok(result) => break result,
                 Err(crate::StoreError::TurnCancelIntentChanged { .. }) => {
                     let turn_id =
