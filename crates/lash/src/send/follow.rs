@@ -946,7 +946,7 @@ async fn finish_settled(
             }
             report
         }
-        None => durable_report(ctx, &root, outcome, acceptance).await?,
+        None => durable_report(ctx, outcome, acceptance).await?,
     };
     Ok(SendOutcome {
         status,
@@ -957,30 +957,13 @@ async fn finish_settled(
 }
 
 /// The report of a root that ran elsewhere, rebuilt from the store: honest
-/// and thin (D1 §1.5 3b). A stopped root's partial is read back by the root
-/// id (ADR 0114 §5.2), so the durable report carries it as the live one does.
+/// and thin (D1 §1.5 3b).
 pub(super) async fn durable_report(
     ctx: &SendContext,
-    root: &TurnId,
     outcome: TurnOutcome,
     acceptance: Option<TurnInputAcceptanceReceipt>,
 ) -> Result<TurnReport> {
     let state = ctx.session_snapshot().await?;
-    let stopped_partial = match &outcome {
-        TurnOutcome::Stopped(_) => {
-            let request = lash_core::store::StoppedPartialReadRequest {
-                session_id: ctx.parts.session_id.clone(),
-                turn: root.clone(),
-            };
-            match ctx.parts.store.read_stopped_partial(&request).await? {
-                lash_core::store::StoppedPartialRead::Available(partial) => Some(partial),
-                lash_core::store::StoppedPartialRead::Pending
-                | lash_core::store::StoppedPartialRead::NotStopped
-                | lash_core::store::StoppedPartialRead::Unknown => None,
-            }
-        }
-        TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. } => None,
-    };
     let assistant_output = match &outcome {
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { text }) => {
             lash_core::facade_support::AssistantOutput {
@@ -999,7 +982,6 @@ pub(super) async fn durable_report(
         state,
         outcome,
         assistant_output,
-        stopped_partial,
         usage: Default::default(),
         llm_calls: Vec::new(),
         failure_evidence: Vec::new(),

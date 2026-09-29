@@ -61,7 +61,6 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
             },
         }],
         metadata: HashMap::new(),
-        stopped_partial: None,
     };
     result.validate().expect("valid model-call result");
     result.llm_calls[0].attempts.clear();
@@ -147,7 +146,6 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
             },
         }],
         metadata: HashMap::new(),
-        stopped_partial: None,
     };
 
     assert!(matches!(
@@ -198,7 +196,6 @@ fn turn_result_requires_one_summary_and_one_activity_per_model_call() {
                 event: RemoteTurnEvent::ModelCallRecorded { record },
             }],
             metadata: HashMap::new(),
-            stopped_partial: None,
         }
     }
 
@@ -285,7 +282,6 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
             issues: Vec::new(),
             activities: Vec::new(),
             metadata: HashMap::new(),
-            stopped_partial: None,
         };
         assert!(result.validate().is_err(), "result accepted {record:?}");
     }
@@ -370,7 +366,6 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
                 event: RemoteTurnEvent::ModelCallRecorded { record },
             }],
             metadata: HashMap::new(),
-            stopped_partial: None,
         }
         .validate()
         .expect("valid ledger in result envelope");

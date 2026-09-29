@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 49,
-  "cargo_target_count": 190,
+  "cargo_target_count": 188,
   "feature_lane_units": [
     {
       "features": [
@@ -18277,122 +18277,6 @@
         "sqlite"
       ],
       "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_23a92e04",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "postgres"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_2784f4d2",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "s3"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_31e8af69",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "mcp"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_34ba0b0e",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_398bfd9d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_398bfd9d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "typescript"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_456e8402",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "openai"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_5ee28370",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_6720306b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_758fabe4",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_84c1cf5c",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "http-transport"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_a1ef38c9",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_aa88ec4d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "rlm"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_b39b3946",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "subagents"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:stopped_partial_evidence__test__fv_d0108f2d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "sqlite"
-      ],
-      "kind": "test",
       "label": "//crates/lash:triggers_evidence__test__fv_23a92e04",
       "package": "lash-runtime"
     },
@@ -19213,7 +19097,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 251,
+  "generated_label_count": 249,
   "packages": [
     {
       "declared_features": [
@@ -20954,12 +20838,6 @@
           "tags": []
         },
         {
-          "cargo": "stopped_partial_recovery",
-          "kind": "test",
-          "label": "//crates/lash-restate-test:stopped_partial_recovery__test",
-          "tags": []
-        },
-        {
           "cargo": "substrate_lost_zombie",
           "kind": "test",
           "label": "//crates/lash-restate-test:substrate_lost_zombie__test",
@@ -21003,7 +20881,6 @@
           "//crates/lash-restate-test:session_driver__test",
           "//crates/lash-restate-test:session_send__test",
           "//crates/lash-restate-test:start_gate_peek__test",
-          "//crates/lash-restate-test:stopped_partial_recovery__test",
           "//crates/lash-restate-test:substrate_lost_zombie__test",
           "//crates/lash-restate-test:suspended_turn__test",
           "//crates/lash-restate-test:tool_child_drift__test",
@@ -21945,12 +21822,6 @@
           "tags": []
         },
         {
-          "cargo": "stopped_partial_evidence",
-          "kind": "test",
-          "label": "//crates/lash:stopped_partial_evidence__test",
-          "tags": []
-        },
-        {
           "cargo": "triggers_evidence",
           "kind": "test",
           "label": "//crates/lash:triggers_evidence__test",
@@ -21979,7 +21850,6 @@
           "//crates/lash:processes_evidence_b__test",
           "//crates/lash:protocol_evidence__test",
           "//crates/lash:sessions_evidence__test",
-          "//crates/lash:stopped_partial_evidence__test",
           "//crates/lash:triggers_evidence__test"
         ]
       }

@@ -376,25 +376,6 @@ impl DurableSession {
         Ok(self.ops.cancel_queued_work_batch(store, batch_id).await?)
     }
 
-    /// The stopped partial output of one of this session's turns (ADR 0114
-    /// §5.2): the read after a reconnect or a `Trimmed` gap, and the only
-    /// read for a root that ended without a turn report.
-    ///
-    /// `turn` is the physical turn id or the root id. Authorization is this
-    /// handle's session: the store answers only for turns the session itself
-    /// owns, so a fork's ancestor turns are
-    /// [`Unknown`](crate::StoppedPartialRead::Unknown).
-    pub async fn stopped_partial(
-        &self,
-        turn: &lash_core::TurnId,
-    ) -> Result<crate::StoppedPartialRead> {
-        let request = lash_core::store::StoppedPartialReadRequest {
-            session_id: self.session_id.clone(),
-            turn: turn.clone(),
-        };
-        Ok(self.store().await?.read_stopped_partial(&request).await?)
-    }
-
     /// Read the canonical settled view of this durable session's current
     /// frame without opening a live runtime or exposing mutations.
     ///

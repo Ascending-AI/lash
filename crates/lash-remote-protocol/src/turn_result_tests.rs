@@ -92,7 +92,6 @@ fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode(
         issues: Vec::new(),
         activities: Vec::new(),
         metadata: HashMap::new(),
-        stopped_partial: None,
     })
     .expect("serialize version 43 report");
     payload["protocol_version"] = serde_json::json!(43);
@@ -296,81 +295,6 @@ fn turn_issue_failure_vocabulary_is_typed_and_wire_stable() {
     );
 }
 
-fn stopped_report(partial: lash_sansio::StoppedPartial) -> RemoteTurnReport {
-    RemoteTurnReport {
-        outcome: RemoteTurnOutcome::Stopped {
-            stop: RemoteTurnStop::Incomplete,
-        },
-        stopped_partial: Some(partial),
-        ..answered_report()
-    }
-}
-
-fn sealed_partial(session: &str) -> lash_sansio::StoppedPartial {
-    lash_sansio::StoppedPartial::seal(
-        lash_sansio::StoppedPartialId {
-            session_id: SessionId::from(session),
-            root: TurnId::from("root"),
-            turn_id: TurnId::from("root"),
-            base: lash_sansio::CaptureBase(1),
-            sealed_through: 3,
-        },
-        lash_sansio::StopReason::Other {
-            cause: lash_sansio::OtherStopCause::ProtocolStop,
-        },
-        false,
-        lash_sansio::CaptureCoverage::Complete,
-        vec![lash_sansio::PartialItem::Text {
-            id: lash_sansio::PartialItemId::new("llm", 1, lash_sansio::PartialItemKey::Text("b0")),
-            state: lash_sansio::CutState::Interrupted,
-            text: "half an answ".to_string(),
-        }],
-    )
-    .expect("seal partial")
-}
-
-#[test]
-fn a_stopped_report_carries_its_partial_through_the_envelope() {
-    let report = stopped_report(sealed_partial("session"));
-    report.validate().expect("stopped report with its partial");
-    let bytes = report
-        .encode_json(&crate::negotiation::test_negotiated())
-        .expect("encode report");
-    let decoded = RemoteTurnReport::decode_json(&bytes).expect("decode report");
-    assert_eq!(decoded.stopped_partial, report.stopped_partial);
-
-    let bare = answered_report()
-        .encode_json(&crate::negotiation::test_negotiated())
-        .expect("encode bare report");
-    let bare: serde_json::Value = serde_json::from_slice(&bare).expect("bare json");
-    assert!(
-        !bare.to_string().contains("stopped_partial"),
-        "a report without a partial leaves the field out"
-    );
-}
-
-#[test]
-fn a_report_refuses_a_tampered_foreign_or_misplaced_partial() {
-    let mut tampered = sealed_partial("session");
-    tampered.recovered_after_process_loss = true;
-    assert!(matches!(
-        stopped_report(tampered).validate(),
-        Err(RemoteProtocolError::StoppedPartialDigestMismatch { turn_id }) if turn_id == "root"
-    ));
-    assert!(matches!(
-        stopped_report(sealed_partial("elsewhere")).validate(),
-        Err(RemoteProtocolError::InvalidEnvelope { .. })
-    ));
-    let finished = RemoteTurnReport {
-        stopped_partial: Some(sealed_partial("session")),
-        ..answered_report()
-    };
-    assert!(matches!(
-        finished.validate(),
-        Err(RemoteProtocolError::InvalidEnvelope { .. })
-    ));
-}
-
 fn answered_report() -> RemoteTurnReport {
     RemoteTurnReport {
         session_id: SessionId::from("session"),
@@ -388,7 +312,6 @@ fn answered_report() -> RemoteTurnReport {
         issues: Vec::new(),
         activities: Vec::new(),
         metadata: HashMap::new(),
-        stopped_partial: None,
     }
 }
 

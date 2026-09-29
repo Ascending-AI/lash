@@ -295,23 +295,6 @@ impl OpenFailure {
     }
 }
 
-impl CoreSessionDriver {
-    /// Announce a lost root's sealed partial to its session's hosts, through
-    /// the Live Replay publisher its open runtime publishes turn activities
-    /// with (ADR 0114 §4.4). Best effort: a session open nowhere in this
-    /// process has no subscriber here, and its hosts read the partial by the
-    /// root (§5.2).
-    fn announce_stopped_partial(&self, summary: &lash_sansio::StoppedPartialSummary) {
-        let Some(resident) = self.config.residents.borrow(&summary.id.session_id) else {
-            return;
-        };
-        resident.runtime().record_turn_activity(
-            Some(&summary.id.turn_id),
-            lash_core::TurnActivity::stopped_partial_available(summary.clone()),
-        );
-    }
-}
-
 #[async_trait]
 impl lash_core::SessionDriver for CoreSessionDriver {
     fn owns_reconciliation(&self) -> bool {
@@ -376,13 +359,6 @@ impl lash_core::SessionDriver for CoreSessionDriver {
         .await;
         for failure in &report.failures {
             tracing::warn!(arm = ?failure.arm, error = %failure.error, "reconcile arm failed; a later pass retries it");
-        }
-        for summary in report
-            .parks
-            .iter()
-            .flat_map(|parks| parks.sealed_partials.iter())
-        {
-            self.announce_stopped_partial(summary);
         }
         Ok(report.next)
     }

@@ -435,7 +435,6 @@ fn remote_turn_result_json_round_trips() {
             },
         }],
         metadata: HashMap::new(),
-        stopped_partial: None,
     };
 
     result.validate().expect("valid result");
@@ -573,7 +572,6 @@ fn remote_turn_result_derives_status_from_its_outcome() {
         issues: Vec::new(),
         activities: Vec::new(),
         metadata: HashMap::new(),
-        stopped_partial: None,
     };
     result.validate().expect("cancelled result with evidence");
 

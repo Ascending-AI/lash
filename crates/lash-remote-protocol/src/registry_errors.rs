@@ -77,8 +77,6 @@ pub enum RemoteProtocolError {
     },
     #[error("duplicate LLM call summary `{call_id}` in RemoteTurnReport.llm_calls")]
     DuplicateLlmCallSummary { call_id: String },
-    #[error("stopped partial of turn `{turn_id}` does not match its digest")]
-    StoppedPartialDigestMismatch { turn_id: String },
     #[error("duplicate ModelCallRecorded activity for LLM call `{call_id}`")]
     DuplicateLlmCallActivity { call_id: String },
     #[error("LLM call summary `{call_id}` has no matching ModelCallRecorded activity")]
