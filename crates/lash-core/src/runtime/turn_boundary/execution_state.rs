@@ -42,10 +42,11 @@ impl ExecutionStateUpdate {
 /// frame it opens (ADR 0113 §3.1): exactly what the code executor finds in
 /// the new frame's seed. Every frame author derives them the same way,
 /// through [`derive_seed_carries`], whatever wrote the seed: a
-/// context-pressure hook, overflow recovery, `/compact` or `continue_as`
-/// (FIG-4134). A protocol-specific seed (an RLM seed holding a module-backed
-/// value) therefore keeps its artifacts alive in the successor frame, and
-/// no author can hand a frame transition carries its seed did not name.
+/// context-pressure hook, overflow recovery, an administrative compaction or
+/// `continue_as` (FIG-4134). A protocol-specific seed (one holding a
+/// module-backed value) therefore keeps its artifacts alive in the successor
+/// frame, and no author can hand a frame transition carries its seed did not
+/// name.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::runtime) struct SeedCarries(Vec<crate::ArtifactName>);
 

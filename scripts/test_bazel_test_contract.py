@@ -1129,6 +1129,7 @@ class BazelTestContractTests(unittest.TestCase):
         self.assertEqual(
             [
                 "pg-store",
+                "pg-artifact-referrers",
                 "pg-pool-wait",
                 "pg-sim-backend-faults",
                 "pg-cross-backend",
