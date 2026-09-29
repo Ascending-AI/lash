@@ -21,6 +21,7 @@ members = [
     "crates/lash-provider-auth",
     "crates/lash-sqlite-store",
     "crates/lash-postgres-store",
+    "crates/lashctl",
     "crates/lash-s3-store",
     "crates/lash-restate",
     "crates/lash-restate-test",

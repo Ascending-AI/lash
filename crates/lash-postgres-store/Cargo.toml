@@ -39,14 +39,6 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync", "macr
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
-# The migrate binary wraps the library's runner; anyhow is the CLI-facing
-# error type, matching the runbook binaries' convention.
-anyhow = { workspace = true }
-
-[[bin]]
-name = "lash-migrate"
-path = "src/bin/lash_migrate.rs"
-
 [dev-dependencies]
 lash-conformance = { workspace = true, features = ["lashlang"] }
 fastrand = { workspace = true }

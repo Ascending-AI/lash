@@ -2388,7 +2388,6 @@ dependencies = [
 name = "lash-internal-postgres-store"
 version = "0.0.0-dev"
 dependencies = [
- "anyhow",
  "async-trait",
  "fastrand",
  "lash-internal-conformance",
@@ -2951,6 +2950,23 @@ dependencies = [
  "sqlx",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "lashctl"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-internal-core-execution",
+ "lash-internal-core-store",
+ "lash-internal-postgres-store",
+ "lash-internal-remote-protocol",
+ "lash-internal-restate",
+ "lash-runtime",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
-  "cargo_package_count": 47,
-  "cargo_target_count": 176,
+  "cargo_package_count": 48,
+  "cargo_target_count": 177,
   "feature_lane_units": [
     {
       "features": [
@@ -7884,22 +7884,6 @@
       ],
       "kind": "test",
       "label": "//crates/lash-postgres-store:integration__test__fv_e4daf51f",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "bin",
-      "label": "//crates/lash-postgres-store:lash-migrate__bin__fv_e4daf51f",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "bin-unit-test",
-      "label": "//crates/lash-postgres-store:lash-migrate__bin__unit_test__fv_e4daf51f",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -16282,7 +16266,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 235,
+  "generated_label_count": 236,
   "packages": [
     {
       "declared_features": [
@@ -17181,7 +17165,6 @@
         "testing"
       ],
       "dependencies": [
-        "anyhow",
         "async-trait",
         "fastrand",
         "lash-internal-conformance",
@@ -17222,26 +17205,6 @@
           "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "unit-test",
           "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test",
-          "tags": [
-            "cargo-service-gate",
-            "manual"
-          ]
-        },
-        {
-          "cargo": "lash-migrate",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
-          "kind": "bin",
-          "label": "//crates/lash-postgres-store:lash-migrate__bin",
-          "tags": [
-            "cargo-service-gate",
-            "manual"
-          ]
-        },
-        {
-          "cargo": "lash-migrate",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
-          "kind": "bin-unit-test",
-          "label": "//crates/lash-postgres-store:lash-migrate__bin__unit_test",
           "tags": [
             "cargo-service-gate",
             "manual"
@@ -18921,6 +18884,50 @@
           "//crates/lash:sessions_evidence__test",
           "//crates/lash:triggers_evidence__test"
         ]
+      }
+    },
+    {
+      "declared_features": [],
+      "dependencies": [
+        "lash-internal-core-execution",
+        "lash-internal-core-store",
+        "lash-internal-postgres-store",
+        "lash-internal-remote-protocol",
+        "lash-internal-restate",
+        "lash-runtime",
+        "serde",
+        "serde_json",
+        "sqlx",
+        "tokio",
+        "uuid"
+      ],
+      "doc": null,
+      "manifest": "crates/lashctl/Cargo.toml",
+      "package": "lashctl",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lashctl",
+          "kind": "bin",
+          "label": "//crates/lashctl:lashctl",
+          "tags": []
+        },
+        {
+          "cargo": "lashctl",
+          "kind": "bin-unit-test",
+          "label": "//crates/lashctl:lashctl__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "operator_json_contract",
+          "kind": "test",
+          "label": "//crates/lashctl:operator_json_contract__test",
+          "tags": []
+        }
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
       }
     },
     {

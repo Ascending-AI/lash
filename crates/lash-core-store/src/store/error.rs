@@ -145,7 +145,7 @@ pub enum StoreError {
     /// range does not admit (ADR 0106 §1): a worker that opened anyway would
     /// emit a format the fleet has retired.
     #[error(
-        "store records fleet format {recorded}, outside this build's writable range ending at {current}; run `lash admin finalize-upgrade` from a build whose range contains {recorded}, or upgrade this build"
+        "store records fleet format {recorded}, outside this build's writable range ending at {current}; run `lashctl version` with a build whose range contains {recorded}, or upgrade this build"
     )]
     FleetFormatOutsideWritableRange { recorded: u32, current: u32 },
     /// A store, an epoch or a stored label this build cannot admit
