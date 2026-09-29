@@ -10,11 +10,16 @@ use std::num::NonZeroUsize;
 use std::sync::LazyLock;
 
 use lash_core_execution::store::{
-    ClaimToken, ClaimedObligation, KeyColumn, KeyColumnType, ObligationId, ObligationKey,
-    ObligationKind, ObligationLedger, ObligationSettlement, ObligationStanding, ObligationState,
-    SettleOutcome, StallReason, StalledObligation, UndecodableObligation,
+    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, KeyColumn, KeyColumnType,
+    ObligationId, ObligationKey, ObligationKind, ObligationLedger, ObligationSettlement,
+    ObligationStanding, ObligationState, SettleOutcome, StallReason, StalledObligation,
+    UndecodableObligation,
 };
+use lash_core_execution::{ArtifactCleanup, ArtifactReferrer};
 use lash_store_sql::Dialect;
+use lash_store_sql::artifact::cleanup_obligations::{
+    CleanupObligationLedgerStatements, CleanupObligationStatements,
+};
 use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
 use lash_store_sql::process::parent_end_plans::ParentEndPlanObligationStatements;
 use lash_store_sql::process::processes::{
@@ -79,6 +84,11 @@ static PROCESS_STARTS: LazyLock<
     shared: ProcessStartObligationStatements::render(Dialect::postgres()),
     locking: ProcessStartObligationPostgresStatements::render(Dialect::postgres()),
 });
+static CLEANUP: LazyLock<CleanupObligationStatements> =
+    LazyLock::new(|| CleanupObligationStatements::render(Dialect::postgres()));
+static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
+    LazyLock::new(|| CleanupObligationLedgerStatements::render(Dialect::postgres()));
+const CLEANUP_DUE_LOCKING: &str = "SELECT obligation_id FROM lash_artifact_cleanup_obligations WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= $1 ORDER BY obligation_due_at_ms, obligation_id LIMIT $2 FOR UPDATE SKIP LOCKED";
 
 /// `kind`'s shared statements and its locking due read. Ingress names its
 /// turn-input table here; its ledger composes that table with the
@@ -113,6 +123,7 @@ fn obligation_sql(kind: ObligationKind) -> (ObligationSql<'static>, &'static str
             PROCESSES.shared.obligation_sql(),
             PROCESSES.locking.obligation_select_due_locking.sql(),
         ),
+        ObligationKind::ArtifactCleanup => (CLEANUP_LEDGER.obligation_sql(), CLEANUP_DUE_LOCKING),
     }
 }
 
@@ -126,6 +137,89 @@ fn corrupt(message: &'static str) -> StoreError {
         record_kind: "obligation",
         message: message.to_owned(),
     }
+}
+
+fn corrupt_cleanup(message: impl ToString) -> StoreError {
+    StoreError::StoredDataCorrupt {
+        record_kind: "artifact_cleanup_obligation",
+        message: message.to_string(),
+    }
+}
+
+fn cleanup_row(row: &PgRow) -> Result<(ObligationId, ArtifactCleanup), StoreError> {
+    let id = ObligationId::new(row.try_get::<String, _>(0).map_err(store_sqlx_error)?);
+    let kind: String = row.try_get(2).map_err(store_sqlx_error)?;
+    let referrer_id: String = row.try_get(3).map_err(store_sqlx_error)?;
+    let referrer = ArtifactReferrer::decode(&kind, &referrer_id).map_err(corrupt_cleanup)?;
+    let json: String = row.try_get(4).map_err(store_sqlx_error)?;
+    let cleanup = ArtifactCleanup::from_json(&json, &referrer).map_err(corrupt_cleanup)?;
+    Ok((id, cleanup))
+}
+
+pub(crate) async fn arm_cleanup_tx(
+    conn: &mut sqlx::PgConnection,
+    cleanup: &ArtifactCleanup,
+    now_ms: u64,
+) -> Result<ObligationId, StoreError> {
+    crate::artifact_store::lock_referrer_tx(conn, &cleanup.referrer)
+        .await
+        .map_err(store_sqlx_error)?;
+    let kind = cleanup.referrer.kind().as_str();
+    let referrer_id = cleanup.referrer.canonical_id();
+    let existing = sqlx::query(CLEANUP.select_by_referrer.sql())
+        .bind(kind)
+        .bind(&referrer_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(store_sqlx_error)?;
+    let decoded = existing.as_ref().map(cleanup_row).transpose()?;
+    let decision = CleanupUpsert::decide(decoded.as_ref().map(|(_, body)| body), cleanup);
+    let id = decoded.map_or_else(
+        || ObligationId::mint(ObligationKind::ArtifactCleanup),
+        |(id, _)| id,
+    );
+    let json = cleanup
+        .to_json()
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    match decision {
+        CleanupUpsert::Insert => {
+            sqlx::query(CLEANUP.insert_if_absent.sql())
+                .bind(kind)
+                .bind(&referrer_id)
+                .bind(json)
+                .bind(id.as_str())
+                .bind(sql_i64("cleanup due instant", now_ms)?)
+                .execute(&mut *conn)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
+        CleanupUpsert::ReplaceGuard => {
+            sqlx::query(CLEANUP.replace_guard_with_ended.sql())
+                .bind(kind)
+                .bind(&referrer_id)
+                .bind(json)
+                .bind(sql_i64("cleanup due instant", now_ms)?)
+                .execute(&mut *conn)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
+        CleanupUpsert::Keep => {}
+    }
+    if cleanup.plan.is_ended() {
+        sqlx::query(
+            crate::artifact_store::artifact_sql()
+                .fences
+                .insert_fence
+                .sql(),
+        )
+        .bind(kind)
+        .bind(&referrer_id)
+        .bind(sql_i64("referrer end instant", now_ms)?)
+        .execute(&mut *conn)
+        .await
+        .map_err(store_sqlx_error)?;
+    }
+    Ok(id)
 }
 
 /// The key columns of `kind` read from `row` starting at column `first`.
@@ -385,6 +479,17 @@ impl ObligationLedger for PostgresObligationLedger {
                 .bind(reason.as_str())
                 .bind(error)
                 .bind(now),
+            ObligationSettlement::Defer { due_at_ms } => {
+                if self.kind != ObligationKind::ArtifactCleanup {
+                    return Err(StoreError::Backend(
+                        "defer requires an artifact cleanup obligation".into(),
+                    ));
+                }
+                sqlx::query(CLEANUP_LEDGER.obligation_settle_defer.sql())
+                    .bind(id.as_str())
+                    .bind(token.as_str())
+                    .bind(sql_i64("obligation due instant", due_at_ms)?)
+            }
         };
         let changed = query
             .execute(&self.pool)
@@ -466,5 +571,43 @@ impl ObligationLedger for PostgresObligationLedger {
             attempts: u32::try_from(attempts)
                 .map_err(|_| corrupt("a negative obligation attempt count"))?,
         }))
+    }
+}
+
+#[async_trait::async_trait]
+impl ArtifactCleanupLedger for PostgresObligationLedger {
+    async fn arm_cleanup(
+        &self,
+        cleanup: &ArtifactCleanup,
+        now_ms: u64,
+    ) -> Result<ObligationId, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let id = arm_cleanup_tx(&mut tx, cleanup, now_ms).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(id)
+    }
+
+    async fn nudge(&self, referrer: &ArtifactReferrer, now_ms: u64) -> Result<bool, StoreError> {
+        let changed = sqlx::query(CLEANUP.nudge.sql())
+            .bind(referrer.kind().as_str())
+            .bind(referrer.canonical_id())
+            .bind(sql_i64("cleanup due instant", now_ms)?)
+            .execute(&self.pool)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected();
+        Ok(changed == 1)
+    }
+
+    async fn load_cleanup(&self, id: &ObligationId) -> Result<Option<ArtifactCleanup>, StoreError> {
+        sqlx::query(CLEANUP.select_by_id.sql())
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(store_sqlx_error)?
+            .as_ref()
+            .map(cleanup_row)
+            .transpose()
+            .map(|entry| entry.map(|(_, cleanup)| cleanup))
     }
 }

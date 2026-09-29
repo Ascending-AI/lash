@@ -353,7 +353,7 @@ impl ToolChildScope {
 /// | [`scope`](Self::scope) | group formation, as the opener, claim scope, session and frame | recovery (FIG-3396 §1) validates the opener; the driver reconstructs the admitted controller and its session-scoped services |
 /// | [`enclosing_process`](Self::enclosing_process) | group formation, when the opener is a process, as a `ProcessId` | the driver, to set the call's enclosing process incarnation |
 /// | [`cancellation_authority`](Self::cancellation_authority) | group formation, from the opener's turn-control binding | the cooperative cancel path (FIG-2266) and the cancel disposition (FIG-3409) |
-/// | [`execution_env`](Self::execution_env) | group formation, from `captured_process_execution_env_ref` (required) | the driver, to resolve the captured environment; retained under `ArtifactOwner::Execution` until the last dependency |
+/// | [`execution_env`](Self::execution_env) | group formation, from `captured_process_execution_env_ref` (required) | the driver, to resolve the captured environment; held by its `ArtifactReferrer::Execution` edge until the journal settles |
 /// | [`completion_routing`](Self::completion_routing) | group formation, from the admitted deferral and routing facts | the driver and recovery, to refuse a key nothing can resolve |
 ///
 /// # What is deliberately absent
@@ -411,7 +411,7 @@ pub struct ToolChildRequest {
     /// journals through a durable authority, so every child has one.
     pub cancellation_authority: TurnControlBindingId,
     /// The captured process-execution environment this child resolves, retained
-    /// under `ArtifactOwner::Execution` through its last dependency.
+    /// under its `ArtifactReferrer::Execution` edge until the journal settles.
     ///
     /// **Required, not optional.** ADR 0099 §3 makes the environment reference
     /// part of the retained authority, and the capture it comes from is total:

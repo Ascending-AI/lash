@@ -846,25 +846,6 @@ pub trait ProcessWakeOutbox: Send + Sync {
 /// Physical reclamation of terminal processes and their tombstones.
 #[async_trait::async_trait]
 pub trait ProcessRetention: Send + Sync {
-    /// Durable exact release inputs left by Process Prune.
-    async fn pending_process_artifact_cleanup(
-        &self,
-    ) -> Result<Vec<super::model::ProcessArtifactCleanup>, PluginError> {
-        Ok(Vec::new())
-    }
-
-    /// Acknowledge that all configured artifact stores applied one cleanup.
-    ///
-    /// Implementations remove the exact cleanup record.
-    async fn complete_process_artifact_cleanup(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<super::model::ProcessArtifactCleanupAck, PluginError> {
-        Ok(super::model::ProcessArtifactCleanupAck::Unknown {
-            process_id: process_id.clone(),
-        })
-    }
-
     /// Delete payload-free tombstones older than `cutoff_epoch_ms` without
     /// outrunning a trusted projection or orphaning outstanding trigger
     /// deliveries. `NoProjector` permits free compaction; `UpTo(cursor)` retains

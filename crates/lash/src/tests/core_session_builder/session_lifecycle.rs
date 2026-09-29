@@ -1132,9 +1132,9 @@ finish(value);
             ),
         )
         .expect("compile module through the RLM factory");
-    factory
-        .publish_lashlang_module(
-            &lash_core::ArtifactOwner::host("compile-module-test"),
+    artifact_store
+        .publish_module_artifact(
+            &lash_core::testing::host_pin_claim_for_testing(),
             &compiled.artifact,
         )
         .await
@@ -1872,6 +1872,13 @@ impl lash_core::AwaitEventResolver for RetirementRecordingHost {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for RetirementRecordingHost {
+    async fn journal_replay(
+        &self,
+        journal: &lash_sansio::EffectJournalIdentity,
+    ) -> std::result::Result<lash_core::JournalReplay, lash_core::RuntimeError> {
+        self.inner.journal_replay(journal).await
+    }
+
     fn turn_control_binding_id(&self) -> String {
         self.inner.turn_control_binding_id()
     }

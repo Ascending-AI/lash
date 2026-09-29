@@ -439,17 +439,11 @@ impl EffectHost for LayeredEffectHost {
         self.inner.retire_effect_journal(retirement).await
     }
 
-    async fn pending_artifact_owner_retirements(
+    async fn journal_replay(
         &self,
-    ) -> Result<Vec<ExecutionScope>, RuntimeError> {
-        self.inner.pending_artifact_owner_retirements().await
-    }
-
-    async fn complete_artifact_owner_retirement(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<(), RuntimeError> {
-        self.inner.complete_artifact_owner_retirement(scope).await
+        journal: &lash_sansio::EffectJournalIdentity,
+    ) -> Result<crate::JournalReplay, RuntimeError> {
+        self.inner.journal_replay(journal).await
     }
 
     async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {

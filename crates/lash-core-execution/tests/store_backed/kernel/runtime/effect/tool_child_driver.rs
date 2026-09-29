@@ -353,7 +353,10 @@ mod tests {
             .expect("a process opener enclosing its own incarnation is a legal request");
         request.execution_env = crate::publish_process_execution_env(
             env_store.as_ref(),
-            &crate::ArtifactOwner::host("tool-child-driver-tests"),
+            &crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
+                crate::HostArtifactPin::mint(),
+            ))
+            .expect("host pin claim"),
             &spec(3),
         )
         .await
@@ -601,7 +604,10 @@ mod tests {
         let mut request = durably_admitted_request(&host, ToolChildCompletionRouting::Inline);
         request.execution_env = crate::publish_process_execution_env(
             env_store.as_ref(),
-            &crate::ArtifactOwner::host("tool-child-driver-tests"),
+            &crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
+                crate::HostArtifactPin::mint(),
+            ))
+            .expect("host pin claim"),
             &spec(3),
         )
         .await

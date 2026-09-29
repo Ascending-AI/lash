@@ -170,6 +170,13 @@ impl lash::runtime::AwaitEventResolver for RestateParticipantCrashHost {
 
 #[async_trait::async_trait]
 impl lash::durability::EffectHost for RestateParticipantCrashHost {
+    async fn journal_replay(
+        &self,
+        journal: &lash::durability::EffectJournalIdentity,
+    ) -> Result<lash_core_execution::JournalReplay, lash::runtime::RuntimeError> {
+        self.inner.journal_replay(journal).await
+    }
+
     fn turn_control_binding_id(&self) -> String {
         self.inner.turn_control_binding_id()
     }

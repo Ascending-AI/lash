@@ -122,6 +122,23 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "journal_verdict__test",
+    crate_features = [],
+    crate_name = "journal_verdict",
+    crate_root = "tests/journal_verdict.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "journal_verdict", "//crates/lash-restate-test:journal_verdict__test"),
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "namespaces__test",
     crate_features = [],
     crate_name = "namespaces",
@@ -353,6 +370,7 @@ lash_batch_test(
         ":drop__test",
         ":follow_on_crash_replay__test",
         ":host_send_wait__test",
+        ":journal_verdict__test",
         ":lash-restate-test__unit_test",
         ":namespaces__test",
         ":one_driver__test",

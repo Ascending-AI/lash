@@ -417,7 +417,12 @@ async fn module_artifact_store_bytes_reject_corruption() {
 
     store
         .publish_module_artifact(
-            &lash_core_execution::ArtifactOwner::host("corruption-test"),
+            &lash_core_execution::ReferrerClaim::unguarded(
+                lash_core_execution::ArtifactReferrer::HostPin(
+                    lash_core_execution::HostArtifactPin::mint(),
+                ),
+            )
+            .expect("a host pin is unguarded"),
             &linked.artifact,
         )
         .await
@@ -451,7 +456,12 @@ async fn a_module_stored_under_another_reference_is_refused() {
     let (stored, named) = (module(1.0), module(2.0));
     let port = std::sync::Arc::new(crate::InMemoryLashlangArtifactStore::new());
     port.publish_module_artifact(
-        &lash_core_execution::ArtifactOwner::host("misfiled-module"),
+        &lash_core_execution::ReferrerClaim::unguarded(
+            lash_core_execution::ArtifactReferrer::HostPin(
+                lash_core_execution::HostArtifactPin::mint(),
+            ),
+        )
+        .expect("a host pin is unguarded"),
         named.module_ref().as_str(),
         &stored.to_store_bytes().expect("encode module"),
     )

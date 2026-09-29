@@ -707,6 +707,51 @@ lash_conformance::artifact_store_reopenable_tests!({
     })
 });
 
+lash_conformance::artifact_referrer_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres artifact-referrer conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let storage = Arc::new(storage);
+    let database_url = database_url().expect("configured Postgres database URL");
+    (database_lock, move || {
+        let storage = Arc::clone(&storage);
+        let database_url = database_url.clone();
+        sync_await(async move {
+            reset(storage.pool()).await;
+            let open_storage = PostgresStorage::connect(&database_url)
+                .await
+                .expect("open first Postgres artifact pool");
+            let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
+                artifacts: Arc::new(open_storage.lashlang_artifact_store())
+                    as Arc<dyn lash_core::ModuleArtifactStore>,
+                process_env: Arc::new(open_storage.process_env_store())
+                    as Arc<dyn ProcessExecutionEnvStore>,
+            };
+            let reopen_url = database_url.clone();
+            lash_conformance::fused_artifact_store::ReopenableArtifactStore {
+                open,
+                reopen: Arc::new(move || {
+                    let reopen_url = reopen_url.clone();
+                    let reopened = sync_await(async move {
+                        PostgresStorage::connect(&reopen_url)
+                            .await
+                            .expect("construct post-write Postgres artifact pool")
+                    });
+                    lash_conformance::fused_artifact_store::ArtifactStoreHandles {
+                        artifacts: Arc::new(reopened.lashlang_artifact_store())
+                            as Arc<dyn lash_core::ModuleArtifactStore>,
+                        process_env: Arc::new(reopened.process_env_store())
+                            as Arc<dyn ProcessExecutionEnvStore>,
+                    }
+                }),
+            }
+        })
+    })
+});
+
 /// Corrupt the live checkpoint manifest so the mark phase cannot decode the
 /// root it must follow, giving the sweep a real failure to report.
 struct PostgresCorruptRootedManifest {

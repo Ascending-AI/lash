@@ -100,6 +100,15 @@ pub(crate) async fn register_harness_process(
 
 /// The session policy the harness's execution env declares: the worker
 /// builds its runtime over it, so it must carry model metadata.
+/// A fresh host pin's claim: what a test publishes fixtures under
+/// (ADR 0113 §2.6).
+pub(crate) fn host_claim() -> lash_core::ReferrerClaim {
+    lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+        lash_core::HostArtifactPin::mint(),
+    ))
+    .expect("a host pin is unguarded")
+}
+
 fn harness_session_policy() -> lash_core::SessionPolicy {
     lash_core::SessionPolicy {
         model: lash_core::ModelSpec::builder("mock-model")
@@ -235,7 +244,7 @@ pub(crate) async fn double_process_harness() -> DoubleProcessHarness {
     let backend = double.lash_backend();
     let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         backend.process_env_store().as_ref(),
-        &lash_core::ArtifactOwner::host("lashlang-harness-env"),
+        &crate::lib_tests::host_claim(),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
             harness_session_policy(),
@@ -332,10 +341,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
     })
     .expect("signal process compiles");
     store
-        .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("signal-fixture"),
-            &output.artifact,
-        )
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &output.artifact)
         .await
         .expect("signal process artifact publishes");
     let input = LashlangProcessInput {
@@ -483,10 +489,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     })
     .expect("batch process compiles");
     store
-        .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("batch-fixture"),
-            &output.artifact,
-        )
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &output.artifact)
         .await
         .expect("batch process artifact publishes");
     let input = LashlangProcessInput {
@@ -935,10 +938,7 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
     .expect("process module compiles");
     let store = crate::lib_tests::memory_artifact_store().await;
     store
-        .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("trace-map-test"),
-            &output.artifact,
-        )
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &output.artifact)
         .await
         .expect("artifact publishes");
     let input = LashlangProcessInput {
@@ -1442,7 +1442,7 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
     })
     .expect("module compiles");
     store
-        .publish_module_artifact(&lash_core::ArtifactOwner::host("fixture"), &output.artifact)
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &output.artifact)
         .await
         .expect("module publishes");
     let artifact_store: LashlangArtifacts = store;
@@ -1506,7 +1506,7 @@ process scan(root: str) -> str {
     })
     .expect("module compiles");
     store
-        .publish_module_artifact(&lash_core::ArtifactOwner::host("fixture"), &output.artifact)
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &output.artifact)
         .await
         .expect("module publishes");
     let start = test_process_start(&output, test_start_site("child_process:scan", 1), ".");
@@ -1737,7 +1737,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         environment: &environment,
     })
     .expect("receiver compiles");
-    let owner = lash_core::ArtifactOwner::host("fixture");
+    let owner = crate::lib_tests::host_claim();
     for artifact in [
         &matching.artifact,
         &mismatching.artifact,
@@ -1910,10 +1910,7 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
     })
     .expect("union receiver compiles");
     store
-        .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("fixture"),
-            &receiver.artifact,
-        )
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &receiver.artifact)
         .await
         .expect("module publishes");
     let mut args = lashlang::Record::new();

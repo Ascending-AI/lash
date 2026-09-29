@@ -94,19 +94,21 @@ fn calendar_trigger_grant(route: &str) -> lash_lashlang_runtime::TriggerGrant {
 /// is a declaring leaf tool (FIG-3116), so a cell reaches the trigger store
 /// only through the tool's realized intent: the tool resolves the target
 /// against `artifact_store`, and realization publishes the cell's execution
-/// env through the router's env store.
+/// env through the router's env store, the one the referrer ports hold.
 pub(super) async fn trigger_tool_context<'run>(
     ports: impl Into<lash_core::testing::TestExecutionPorts<'run>>,
     trigger_store: Arc<dyn lash_core::TriggerStore>,
     artifact_store: &lashlang::LashlangArtifacts,
     invocation: Option<lash_core::RuntimeInvocation>,
 ) -> lash_core::RuntimeExecutionContext<'run> {
+    let ports: lash_core::testing::TestExecutionPorts<'run> = ports.into();
+    // Realization publishes into the store the referrer ports acquire from.
     let router = lash_core::testing::test_trigger_router(
         trigger_store,
         crate::testing::memory_process_registry().await,
     )
     .with_process_artifacts(
-        crate::testing::memory_backend().await.process_env_store(),
+        Arc::clone(&ports.process_env_store),
         lash_core::ProcessEngineRegistry::new().with_registration(
             lash_lashlang_runtime::lashlang_process_engine_registration(
                 lash_lashlang_runtime::LashlangProcessEngine::new(
@@ -120,7 +122,7 @@ pub(super) async fn trigger_tool_context<'run>(
             ),
         ),
     );
-    let builder = lash_core::testing::TestExecutionContextBuilder::new(ports.into())
+    let builder = lash_core::testing::TestExecutionContextBuilder::new(ports)
         .provider(Arc::new(
             lash_lashlang_runtime::register_trigger_tool_provider(artifact_store.clone()),
         ))

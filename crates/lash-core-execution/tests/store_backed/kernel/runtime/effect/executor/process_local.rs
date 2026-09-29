@@ -67,10 +67,40 @@ mod tests {
         *record
     }
 
-    fn staging_owner(key: &str) -> crate::ArtifactOwner {
-        crate::ArtifactOwner::process_start(&crate::ProcessCommand::start_effect_id(Some(
-            &crate::StartKey::for_host(crate::StartKeyOwner::HOST, key),
-        )))
+    fn start_claim(key: &crate::StartKey) -> crate::ReferrerClaim {
+        crate::ReferrerClaim::guarded(
+            crate::ArtifactReferrer::Start(key.clone()),
+            crate::ArtifactCleanupPlan::AwaitStart {
+                starter: crate::ExecutionScope::runtime_operation("runtime")
+                    .journal_identity()
+                    .expect("runtime journal"),
+            },
+        )
+        .expect("start claim")
+    }
+
+    fn end(referrer: crate::ArtifactReferrer) -> crate::ResolvedArtifactCleanup {
+        crate::ResolvedArtifactCleanup {
+            referrer,
+            carries: Vec::new(),
+        }
+    }
+
+    fn carry_env(
+        from: crate::ArtifactReferrer,
+        to: crate::ArtifactReferrer,
+        env_ref: &crate::ProcessExecutionEnvRef,
+    ) -> crate::ResolvedArtifactCleanup {
+        crate::ResolvedArtifactCleanup {
+            referrer: from,
+            carries: vec![crate::ArtifactCarry {
+                artifact: crate::ArtifactName {
+                    store: crate::ArtifactStoreId::ProcessEnv,
+                    artifact_ref: env_ref.as_str().to_owned(),
+                },
+                to,
+            }],
+        }
     }
 
     fn start_envelope(
@@ -98,7 +128,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn process_start_transfers_environment_and_replays_after_staging_retirement() {
+    async fn process_start_replays_and_carries_environment_to_process() {
         let key = "owned-env-start";
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -135,7 +165,7 @@ mod tests {
         let rerun = started_record(
             execute_in_handler(&double, command, executor())
                 .await
-                .expect("re-run process start after staging retirement"),
+                .expect("re-run process start before guard cleanup"),
         );
         assert_eq!(
             rerun.id, first.id,
@@ -147,105 +177,89 @@ mod tests {
             .expect("read registered process")
             .expect("registered process remains live");
 
+        let start = crate::ArtifactReferrer::Start(crate::StartKey::for_host(
+            crate::StartKeyOwner::HOST,
+            key,
+        ));
+        let process = crate::ArtifactReferrer::ProcessRecord(record.id.clone());
         env_store
-            .release_process_execution_env(
-                &crate::ArtifactOwner::process(record.id.clone()),
-                &env_ref,
-            )
+            .end_process_env_referrer(&carry_env(start, process.clone(), &env_ref))
             .await
-            .expect("release process environment owner");
+            .expect("carry start environment to process");
+        env_store
+            .end_process_env_referrer(&end(process))
+            .await
+            .expect("end process environment referrer");
         assert_eq!(
             env_store
                 .get_process_execution_env(&env_ref)
                 .await
                 .expect("read reclaimed environment"),
             None,
-            "the process owner must be the only surviving edge after transfer"
+            "the process record was the only surviving referrer after the carry"
         );
     }
 
-    /// A `ProcessExecutionEnvStore` that retires one staging owner at the exact
-    /// moment a start settles its staged environment.
-    ///
-    /// The injected call is the one a concurrent attempt at the same start makes
-    /// on its own: `process-start:<id>` is stable per process id, so a second
-    /// attempt — a trigger delivery reconciled by the worker while the emitting
-    /// turn is still starting it, or an attempt whose registration failed —
-    /// retires the shared staging owner. The interleaving point is the reachable
-    /// one: after this attempt's publication landed, before its transfer.
-    struct RetireStagingOwnerBeforeFirstTransfer {
+    /// A store that fences the start just before its first acquire, as a
+    /// concurrent attempt can settle the same key before this one stages.
+    struct FenceStartBeforeFirstAcquire {
         inner: Arc<dyn crate::ProcessExecutionEnvStore>,
-        staging_owner: crate::ArtifactOwner,
+        start: crate::ArtifactReferrer,
         interleavings: AtomicUsize,
     }
 
     #[async_trait::async_trait]
-    impl crate::ProcessExecutionEnvStore for RetireStagingOwnerBeforeFirstTransfer {
+    impl crate::ProcessExecutionEnvStore for FenceStartBeforeFirstAcquire {
         async fn publish_process_execution_env(
             &self,
-            owner: &crate::ArtifactOwner,
+            claim: &crate::ReferrerClaim,
             env_ref: &crate::ProcessExecutionEnvRef,
             bytes: &[u8],
-        ) -> Result<(), crate::PluginError> {
+        ) -> Result<(), crate::ArtifactStoreError> {
             self.inner
-                .publish_process_execution_env(owner, env_ref, bytes)
+                .publish_process_execution_env(claim, env_ref, bytes)
                 .await
         }
 
-        async fn transfer_process_execution_env(
+        async fn acquire_process_execution_env(
             &self,
-            from: &crate::ArtifactOwner,
-            to: &crate::ArtifactOwner,
+            claim: &crate::ReferrerClaim,
             env_ref: &crate::ProcessExecutionEnvRef,
-        ) -> Result<(), crate::PluginError> {
+        ) -> Result<(), crate::ArtifactStoreError> {
             if self.interleavings.fetch_add(1, Ordering::SeqCst) == 0 {
                 self.inner
-                    .retire_process_execution_env_owner(&self.staging_owner)
+                    .end_process_env_referrer(&end(self.start.clone()))
                     .await?;
             }
             self.inner
-                .transfer_process_execution_env(from, to, env_ref)
+                .acquire_process_execution_env(claim, env_ref)
                 .await
         }
 
-        async fn release_process_execution_env(
+        async fn end_process_env_referrer(
             &self,
-            owner: &crate::ArtifactOwner,
-            env_ref: &crate::ProcessExecutionEnvRef,
-        ) -> Result<(), crate::PluginError> {
-            self.inner
-                .release_process_execution_env(owner, env_ref)
-                .await
-        }
-
-        async fn retire_process_execution_env_owner(
-            &self,
-            owner: &crate::ArtifactOwner,
-        ) -> Result<(), crate::PluginError> {
-            self.inner.retire_process_execution_env_owner(owner).await
+            cleanup: &crate::ResolvedArtifactCleanup,
+        ) -> Result<(), crate::ArtifactStoreError> {
+            self.inner.end_process_env_referrer(cleanup).await
         }
 
         async fn get_process_execution_env(
             &self,
             env_ref: &crate::ProcessExecutionEnvRef,
-        ) -> Result<Option<Vec<u8>>, crate::PluginError> {
+        ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
             self.inner.get_process_execution_env(env_ref).await
         }
     }
 
-    /// FIG-3090: a start whose staging edge is severed mid-flight still leaves
-    /// the registered process owning its environment.
+    /// FIG-3090: a start whose referrer is fenced before acquisition still
+    /// leaves the registered process holding its environment.
     ///
     /// This is the trigger-delivery shape: the registration names an environment
-    /// a subscription already published, the start re-publishes it under the
-    /// stable staging owner, and a concurrent attempt at the same start retires
-    /// that owner before this attempt transfers. The store is right to refuse a
-    /// transfer whose source edge is gone; this attempt still holds the exact
-    /// content-addressed bytes, so it settles the destination edge itself
-    /// instead of failing the delivery.
+    /// a subscription already published. A concurrent attempt fences the
+    /// shared start referrer before this attempt acquires; the runtime then
+    /// acquires the same bytes directly for the registered process.
     #[tokio::test]
-    async fn a_start_settles_its_environment_after_a_concurrent_attempt_retires_the_staging_owner()
-    {
+    async fn a_start_acquires_its_environment_after_a_concurrent_attempt_fences_its_referrer() {
         let key = "raced-staging-owner-start";
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -259,14 +273,19 @@ mod tests {
         let inner: Arc<dyn crate::ProcessExecutionEnvStore> =
             double.lash_backend().process_env_store();
         // The subscription's own edge, exactly as a registered trigger holds it.
-        let subscription_owner = crate::ArtifactOwner::host("trigger-subscription");
+        let subscription = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
+        let subscription_claim =
+            crate::ReferrerClaim::unguarded(subscription.clone()).expect("subscription pin claim");
         inner
-            .publish_process_execution_env(&subscription_owner, &env_ref, &bytes)
+            .publish_process_execution_env(&subscription_claim, &env_ref, &bytes)
             .await
             .expect("publish the subscription environment");
-        let env_store = Arc::new(RetireStagingOwnerBeforeFirstTransfer {
+        let env_store = Arc::new(FenceStartBeforeFirstAcquire {
             inner: Arc::clone(&inner),
-            staging_owner: staging_owner(key),
+            start: crate::ArtifactReferrer::Start(crate::StartKey::for_host(
+                crate::StartKeyOwner::HOST,
+                key,
+            )),
             interleavings: AtomicUsize::new(0),
         });
         let envelope = crate::RuntimeEffectEnvelope::new(
@@ -301,19 +320,19 @@ mod tests {
 
         assert_eq!(
             env_store.interleavings.load(Ordering::SeqCst),
-            1,
-            "the start must still attempt the transfer first"
+            2,
+            "the start first tries its fenced claim, then acquires for the process"
         );
         let record = registry
             .get_process(&started.id)
             .await
             .expect("read registered process")
             .expect("registered process remains live");
-        let process_owner = crate::ArtifactOwner::process(record.id.clone());
+        let process = crate::ArtifactReferrer::ProcessRecord(record.id.clone());
         inner
-            .release_process_execution_env(&subscription_owner, &env_ref)
+            .end_process_env_referrer(&end(subscription))
             .await
-            .expect("release the subscription edge");
+            .expect("end the subscription pin");
         assert_eq!(
             inner
                 .get_process_execution_env(&env_ref)
@@ -323,9 +342,9 @@ mod tests {
             "the registered process must own its environment after the race"
         );
         inner
-            .release_process_execution_env(&process_owner, &env_ref)
+            .end_process_env_referrer(&end(process))
             .await
-            .expect("release the process edge");
+            .expect("end the process referrer");
         assert_eq!(
             inner
                 .get_process_execution_env(&env_ref)
@@ -339,12 +358,10 @@ mod tests {
     /// ADR 0107: a changed-content retry under a trusted key keeps the
     /// retained process's environment.
     ///
-    /// The first attempt staged E1 under the key's staging owner, registered
-    /// the process naming E1, and crashed before settling it: E1 is held by
-    /// the staging owner alone. The retry submits E2, is returned the retained
-    /// process, and must release only its own staging. Retiring the shared
-    /// staging owner outright severed E1's only edge, and the retained process
-    /// later failed with a missing environment.
+    /// The first attempt acquired E1 under the start referrer, registered
+    /// the process naming E1, and crashed before its cleanup. The retry
+    /// publishes E2 under the same start referrer, then returns the retained
+    /// process. The cleanup carries E1 to that process and reclaims E2.
     #[tokio::test]
     async fn a_changed_content_retry_after_a_crash_keeps_the_retained_environment() {
         let double =
@@ -375,9 +392,7 @@ mod tests {
             registration.start_key = Some(key.clone());
             registration
         };
-        let staging = crate::ArtifactOwner::process_start(&crate::ProcessCommand::start_effect_id(
-            Some(&key),
-        ));
+        let staging = start_claim(&key);
 
         // The first attempt: staged, registered, crashed before settling.
         crate::publish_process_execution_env(env_store.as_ref(), &staging, &first_env)
@@ -420,6 +435,16 @@ mod tests {
         assert_eq!(returned.id, retained.id);
         assert_eq!(returned.env_ref.as_ref(), Some(&first_ref));
 
+        let process = crate::ArtifactReferrer::ProcessRecord(retained.id.clone());
+        env_store
+            .end_process_env_referrer(&carry_env(
+                crate::ArtifactReferrer::Start(key.clone()),
+                process.clone(),
+                &first_ref,
+            ))
+            .await
+            .expect("carry the retained environment and reclaim the retry's bytes");
+
         assert!(
             env_store
                 .get_process_execution_env(&first_ref)
@@ -434,22 +459,19 @@ mod tests {
                 .await
                 .expect("read the retry's environment"),
             None,
-            "the retry's own unadopted staging is released"
+            "the retry's unadopted bytes are reclaimed by start cleanup"
         );
         env_store
-            .release_process_execution_env(
-                &crate::ArtifactOwner::process(retained.id.clone()),
-                &first_ref,
-            )
+            .end_process_env_referrer(&end(process))
             .await
-            .expect("release the process edge");
+            .expect("end the process edge");
         assert_eq!(
             env_store
                 .get_process_execution_env(&first_ref)
                 .await
                 .expect("read the reclaimed environment"),
             None,
-            "the process owner holds the environment, and the staging owner is retired"
+            "the process record held the environment after start cleanup"
         );
     }
 
@@ -581,11 +603,11 @@ mod tests {
 
     /// ADR 0107: a lash-derived start key is trusted. A retry under a
     /// retained key whose content changed returns the retained process
-    /// untouched, and the environment it staged is released rather than
-    /// attached to a process that never submitted it. (A host key fences its
+    /// untouched, and start cleanup reclaims the environment it staged rather
+    /// than attaching it to a process that never submitted it. (A host key fences its
     /// content instead; the registry conformance laws cover that.)
     #[tokio::test]
-    async fn a_changed_content_retry_returns_the_retained_process_and_releases_its_staging() {
+    async fn a_changed_content_retry_reclaims_its_unadopted_start_artifact() {
         let key = "changed-content-start";
         let start_key =
             crate::StartKey::for_trigger_delivery(key, "subscription", "incarnation", 1);
@@ -638,6 +660,10 @@ mod tests {
             "the retry's content is not adopted"
         );
         assert_eq!(returned.env_ref, Some(retained_env_ref));
+        env_store
+            .end_process_env_referrer(&end(crate::ArtifactReferrer::Start(start_key.clone())))
+            .await
+            .expect("reclaim the retry's unadopted staging");
         assert_eq!(
             env_store
                 .get_process_execution_env(&env_ref)
@@ -648,16 +674,10 @@ mod tests {
         );
         assert!(
             env_store
-                .publish_process_execution_env(
-                    &crate::ArtifactOwner::process_start(&crate::ProcessCommand::start_effect_id(
-                        Some(&start_key),
-                    )),
-                    &env_ref,
-                    &bytes,
-                )
+                .publish_process_execution_env(&start_claim(&start_key), &env_ref, &bytes,)
                 .await
                 .is_err(),
-            "the released staging owner must fence a late staging publication"
+            "the ended start referrer must fence a late publication"
         );
     }
 }

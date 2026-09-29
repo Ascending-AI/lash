@@ -479,8 +479,13 @@ impl TriggerStore for PostgresTriggerStore {
                     incarnation.clone(),
                 )?
             } else {
-                lash_core_execution::facade_support::evaluate_trigger_mutation(
-                    current, command, now,
+                let incarnation =
+                    lash_core_execution::trigger_incarnation(command.owner_scope(), operation_id);
+                lash_core_execution::facade_support::evaluate_trigger_mutation_with_incarnation(
+                    current,
+                    command,
+                    now,
+                    incarnation,
                 )?
             }
         };

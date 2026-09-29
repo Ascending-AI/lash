@@ -628,6 +628,17 @@ lash_conformance::artifact_store_reopenable_tests!({
     })
 });
 
+lash_conformance::artifact_referrer_tests!({
+    let retained: Retained<TestBackend> = Retained::default();
+    (retained.clone(), move || {
+        let backend = retained.open_blocking();
+        lash_conformance::fused_artifact_store::ReopenableArtifactStore {
+            open: artifact_store_handles(&backend),
+            reopen: Arc::new(move || artifact_store_handles(&backend)),
+        }
+    })
+});
+
 lash_conformance::process_registry_reopenable_tests!({
     let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move |_label: &str| {

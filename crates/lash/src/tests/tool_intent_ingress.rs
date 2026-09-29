@@ -140,7 +140,7 @@ async fn register_ingress_trigger_subscription(
 ) -> Result<lash_core::TriggerSubscriptionRecord> {
     let process_env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         env_store,
-        &lash_core::ArtifactOwner::host("process-execution-env-fixture"),
+        &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -219,7 +219,7 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
     let store = backend.trigger_store();
     let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         backend.process_env_store().as_ref(),
-        &lash_core::ArtifactOwner::host("ingress-registration-fixture"),
+        &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -451,7 +451,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
     let store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         backend.process_env_store().as_ref(),
-        &lash_core::ArtifactOwner::host("process-execution-env-fixture"),
+        &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -697,53 +697,42 @@ impl ProbeProcessEnvStore {
 impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
     async fn publish_process_execution_env(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        claim: &lash_core::ReferrerClaim,
         env_ref: &lash_core::ProcessExecutionEnvRef,
         bytes: &[u8],
-    ) -> std::result::Result<(), lash_core::PluginError> {
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
         self.puts.fetch_add(1, Ordering::SeqCst);
         if self.fail_put.load(Ordering::SeqCst) {
-            return Err(lash_core::PluginError::Session(
+            return Err(lash_core::ArtifactStoreError::Backend(
                 "injected process env persist failure".to_string(),
             ));
         }
         self.inner
-            .publish_process_execution_env(owner, env_ref, bytes)
+            .publish_process_execution_env(claim, env_ref, bytes)
             .await
     }
 
-    async fn transfer_process_execution_env(
+    async fn acquire_process_execution_env(
         &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
+        claim: &lash_core::ReferrerClaim,
         env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
         self.inner
-            .transfer_process_execution_env(from, to, env_ref)
+            .acquire_process_execution_env(claim, env_ref)
             .await
     }
 
-    async fn release_process_execution_env(
+    async fn end_process_env_referrer(
         &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner
-            .release_process_execution_env(owner, env_ref)
-            .await
-    }
-
-    async fn retire_process_execution_env_owner(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner.retire_process_execution_env_owner(owner).await
+        cleanup: &lash_core::ResolvedArtifactCleanup,
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        self.inner.end_process_env_referrer(cleanup).await
     }
 
     async fn get_process_execution_env(
         &self,
         env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<Option<Vec<u8>>, lash_core::PluginError> {
+    ) -> std::result::Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
         self.inner.get_process_execution_env(env_ref).await
     }
 }
@@ -798,6 +787,13 @@ impl lash_core::AwaitEventResolver for KeyJournalController {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for KeyJournalController {
+    async fn journal_replay(
+        &self,
+        _journal: &lash_sansio::EffectJournalIdentity,
+    ) -> std::result::Result<lash_core::JournalReplay, lash_core::RuntimeError> {
+        Ok(lash_core::JournalReplay::MayReplay)
+    }
+
     fn turn_control_binding_id(&self) -> String {
         "key-journal-controller".to_string()
     }
@@ -924,6 +920,13 @@ impl lash_core::AwaitEventResolver for AdmissionCrashController {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for AdmissionCrashController {
+    async fn journal_replay(
+        &self,
+        _journal: &lash_sansio::EffectJournalIdentity,
+    ) -> std::result::Result<lash_core::JournalReplay, lash_core::RuntimeError> {
+        Ok(lash_core::JournalReplay::MayReplay)
+    }
+
     fn turn_control_binding_id(&self) -> String {
         "admission-crash-controller".to_string()
     }
@@ -1713,7 +1716,8 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
     assert!(
         env_store
             .get_process_execution_env(&env_ref)
-            .await?
+            .await
+            .map_err(lash_core::PluginError::from)?
             .is_some(),
         "the redriven process environment is usable"
     );
@@ -1818,6 +1822,28 @@ struct IngressAdmissionEngine;
 impl lash_core::ProcessEngine for IngressAdmissionEngine {
     fn kind(&self) -> &'static str {
         INGRESS_ENGINE_KIND
+    }
+
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &lash_core::ResolvedArtifactCleanup,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &lash_core::ReferrerClaim,
+        _artifact_ref: &str,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        unreachable!("the ingress engine stores no artifacts")
     }
 
     async fn run(

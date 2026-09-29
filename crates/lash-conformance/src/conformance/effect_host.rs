@@ -165,6 +165,13 @@ impl crate::AwaitEventResolver for RecordingEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for RecordingEffectHost {
+    async fn journal_replay(
+        &self,
+        _journal: &crate::EffectJournalIdentity,
+    ) -> Result<crate::JournalReplay, crate::RuntimeError> {
+        Ok(crate::JournalReplay::MayReplay)
+    }
+
     fn turn_control_binding_id(&self) -> String {
         "conformance-recording-effect-host".to_string()
     }

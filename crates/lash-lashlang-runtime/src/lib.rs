@@ -1271,57 +1271,61 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         ))
     }
 
-    async fn protect_start_artifacts(
+    /// A lashlang start names one artifact: its module, in the store set's
+    /// module port. The payload is a start input or a definition value, so a
+    /// definition revision holds the same module its starts will
+    /// (ADR 0113 §3.6).
+    fn start_artifacts(
         &self,
-        owner: &lash_core::ArtifactOwner,
         payload: &serde_json::Value,
-    ) -> Result<(), lash_core::PluginError> {
-        let input = LashlangProcessInput::from_payload(payload.clone()).map_err(|error| {
-            lash_core::PluginError::Session(format!("invalid lashlang process payload: {error}"))
-        })?;
-        self.artifact_store
-            .retain_module_artifact(owner, &input.module_ref)
-            .await
-            .map_err(lash_core::PluginError::from)
+    ) -> Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
+        let definition_value = payload
+            .get(lashlang::LASH_PROCESS_VALUE_KEY)
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
+        let module_ref = if definition_value {
+            lashlang::ProcessDefinitionIdentity::from_process_value(payload)
+                .map_err(|error| {
+                    lash_core::PluginError::Session(format!(
+                        "invalid lashlang process definition: {error}"
+                    ))
+                })?
+                .module_ref
+        } else {
+            LashlangProcessInput::from_payload(payload.clone())
+                .map_err(|error| {
+                    lash_core::PluginError::Session(format!(
+                        "invalid lashlang process payload: {error}"
+                    ))
+                })?
+                .module_ref
+        };
+        Ok(vec![lash_core::ArtifactName {
+            store: lash_core::ArtifactStoreId::LashlangModule,
+            artifact_ref: module_ref.as_str().to_owned(),
+        }])
     }
 
-    async fn transfer_start_artifacts(
+    /// Lashlang keeps no engine store: its modules live in the module port,
+    /// which ends its own referrers.
+    async fn end_artifact_referrer(
         &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
-        payload: &serde_json::Value,
+        _cleanup: &lash_core::ResolvedArtifactCleanup,
     ) -> Result<(), lash_core::PluginError> {
-        let input = LashlangProcessInput::from_payload(payload.clone()).map_err(|error| {
-            lash_core::PluginError::Session(format!("invalid lashlang process payload: {error}"))
-        })?;
-        self.artifact_store
-            .transfer_module_artifact(from, to, &input.module_ref)
-            .await
-            .map_err(lash_core::PluginError::from)
+        Ok(())
     }
 
-    async fn release_artifacts(
+    /// Never called: [`Self::start_artifacts`] names nothing under this
+    /// engine's own store.
+    async fn acquire_engine_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
-        payload: &serde_json::Value,
+        _claim: &lash_core::ReferrerClaim,
+        artifact_ref: &str,
     ) -> Result<(), lash_core::PluginError> {
-        let input = LashlangProcessInput::from_payload(payload.clone()).map_err(|error| {
-            lash_core::PluginError::Session(format!("invalid lashlang process payload: {error}"))
-        })?;
-        self.artifact_store
-            .release_module_artifact(owner, &input.module_ref)
-            .await
-            .map_err(lash_core::PluginError::from)
-    }
-
-    async fn retire_artifact_owner(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lash_core::PluginError> {
-        self.artifact_store
-            .retire_module_artifact_owner(owner)
-            .await
-            .map_err(lash_core::PluginError::from)
+        Err(lash_core::PluginError::Invoke(format!(
+            "the lashlang engine keeps no engine artifact store; `{artifact_ref}` belongs to the \
+             module port"
+        )))
     }
 }
 

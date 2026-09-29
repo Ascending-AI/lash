@@ -9,6 +9,7 @@
 
 use std::num::NonZeroUsize;
 
+use crate::artifact_referrer::ArtifactReferrer;
 use crate::{ProcessId, SessionId, TurnId};
 
 use super::StoreError;
@@ -35,11 +36,13 @@ pub enum ObligationKind {
     ProcessStart,
     /// A terminal process owes its terminal publication.
     ProcessTerminal,
+    /// An ended or guarded artifact referrer owes its cleanup (ADR 0113 §2.5).
+    ArtifactCleanup,
 }
 
 impl ObligationKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Ingress,
         Self::ControlIntent,
         Self::ScopeClose,
@@ -47,6 +50,7 @@ impl ObligationKind {
         Self::SessionDelete,
         Self::ProcessStart,
         Self::ProcessTerminal,
+        Self::ArtifactCleanup,
     ];
 
     /// The stable label metrics and drain status report.
@@ -60,6 +64,7 @@ impl ObligationKind {
             Self::SessionDelete => "session_delete",
             Self::ProcessStart => "process_start",
             Self::ProcessTerminal => "process_terminal",
+            Self::ArtifactCleanup => "artifact_cleanup",
         }
     }
 
@@ -68,7 +73,7 @@ impl ObligationKind {
     #[must_use]
     pub const fn key_column_types(self) -> &'static [KeyColumnType] {
         match self {
-            Self::Ingress | Self::ScopeClose | Self::ParentEnd => {
+            Self::Ingress | Self::ScopeClose | Self::ParentEnd | Self::ArtifactCleanup => {
                 &[KeyColumnType::Text, KeyColumnType::Text]
             }
             Self::ControlIntent => &[KeyColumnType::Integer],
@@ -124,6 +129,8 @@ pub enum ObligationKey {
     ProcessStart { process_id: ProcessId },
     /// A `processes` row.
     ProcessTerminal { process_id: ProcessId },
+    /// An `artifact_cleanup_obligations` row: the referrer's stored pair.
+    ArtifactCleanup { referrer: ArtifactReferrer },
 }
 
 impl ObligationKey {
@@ -138,6 +145,7 @@ impl ObligationKey {
             Self::SessionDelete { .. } => ObligationKind::SessionDelete,
             Self::ProcessStart { .. } => ObligationKind::ProcessStart,
             Self::ProcessTerminal { .. } => ObligationKind::ProcessTerminal,
+            Self::ArtifactCleanup { .. } => ObligationKind::ArtifactCleanup,
         }
     }
 }
@@ -174,6 +182,10 @@ impl ObligationKey {
             Self::ProcessStart { process_id } | Self::ProcessTerminal { process_id } => {
                 vec![KeyColumn::Text(process_id.as_str().to_owned())]
             }
+            Self::ArtifactCleanup { referrer } => vec![
+                KeyColumn::Text(referrer.kind().as_str().to_owned()),
+                KeyColumn::Text(referrer.canonical_id()),
+            ],
         }
     }
 
@@ -205,6 +217,17 @@ impl ObligationKey {
             ObligationKind::SessionDelete => Self::SessionDelete {
                 session_id: SessionId::from(next_text(&mut columns, kind, "session_id")?),
             },
+            ObligationKind::ArtifactCleanup => {
+                let referrer_kind = next_text(&mut columns, kind, "referrer_kind")?;
+                let referrer_id = next_text(&mut columns, kind, "referrer_id")?;
+                Self::ArtifactCleanup {
+                    referrer: ArtifactReferrer::decode(&referrer_kind, &referrer_id).map_err(
+                        |error| UndecodableObligation {
+                            detail: error.to_string(),
+                        },
+                    )?,
+                }
+            }
             kind @ (ObligationKind::ProcessStart | ObligationKind::ProcessTerminal) => {
                 let process_id = ProcessId::parse(&next_text(&mut columns, kind, "process_id")?)
                     .map_err(|error| UndecodableObligation {
@@ -458,6 +481,8 @@ pub enum ObligationSettlement {
     Retry { due_at_ms: u64, error: String },
     /// Stop until re-armed.
     Stall { reason: StallReason, error: String },
+    /// Not owed yet: back to `due` at `due_at_ms` with attempts reset to 0.
+    Defer { due_at_ms: u64 },
 }
 
 /// Whether a settling write applied.
@@ -570,6 +595,11 @@ mod tests {
             ObligationKey::SessionDelete {
                 session_id: SessionId::from("s"),
             },
+            ObligationKey::ArtifactCleanup {
+                referrer: ArtifactReferrer::HostPin(
+                    crate::artifact_referrer::HostArtifactPin::mint(),
+                ),
+            },
         ];
         for key in keys {
             assert_eq!(
@@ -595,6 +625,20 @@ mod tests {
             (
                 ObligationKind::ProcessTerminal,
                 vec![KeyColumn::Text("not a process id".to_owned())],
+            ),
+            (
+                ObligationKind::ArtifactCleanup,
+                vec![
+                    KeyColumn::Text("owner".to_owned()),
+                    KeyColumn::Text("x".to_owned()),
+                ],
+            ),
+            (
+                ObligationKind::ArtifactCleanup,
+                vec![
+                    KeyColumn::Text("host_pin".to_owned()),
+                    KeyColumn::Text(String::new()),
+                ],
             ),
         ] {
             assert!(

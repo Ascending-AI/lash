@@ -255,7 +255,7 @@ impl HeapObject {
         refs
     }
 
-    pub(super) fn values(&self) -> Box<dyn Iterator<Item = &Value> + '_> {
+    pub(crate) fn values(&self) -> Box<dyn Iterator<Item = &Value> + '_> {
         match self {
             Self::Tuple(values) | Self::List(values) => Box::new(values.iter()),
             Self::Record(record) => Box::new(record.values()),

@@ -3,12 +3,6 @@ use super::*;
 #[path = "factory_reads.rs"]
 mod factory_reads;
 
-type BoundArtifactStores = (
-    Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
-    lash_core_execution::ProcessEngineRegistry,
-);
-type SharedArtifactStores = Arc<std::sync::Mutex<Option<BoundArtifactStores>>>;
-
 /// Explicit first-party factory for one SQLite durable-core catalog.
 ///
 /// A [`SqliteStoreSet`] opens the one a host's core
@@ -26,51 +20,9 @@ pub struct SqliteSessionStoreFactory {
     pub(crate) fault_injector: Option<testing::SqliteFaultInjector>,
     pub(crate) turn_cancel_closure_owner:
         Arc<std::sync::Mutex<Option<lash_core_execution::TurnCancelClosureOwnerBinding>>>,
-    pub(crate) effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
-    artifact_stores: SharedArtifactStores,
 }
 
 impl SqliteSessionStoreFactory {
-    pub(crate) async fn resume_artifact_owner_retirements(
-        &self,
-    ) -> Result<(), lash_core_execution::StoreError> {
-        let effect_host = self
-            .effect_host
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        let artifact_stores = self
-            .artifact_stores
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        let (Some(effect_host), Some((process_env_store, process_engines))) =
-            (effect_host, artifact_stores)
-        else {
-            return Ok(());
-        };
-        let scopes = effect_host
-            .pending_artifact_owner_retirements()
-            .await
-            .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
-        for scope in scopes {
-            let owner = lash_core_execution::ArtifactOwner::execution(scope.clone());
-            process_env_store
-                .retire_process_execution_env_owner(&owner)
-                .await
-                .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
-            process_engines
-                .retire_artifact_owner(&owner)
-                .await
-                .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
-            effect_host
-                .complete_artifact_owner_retirement(&scope)
-                .await
-                .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
-        }
-        Ok(())
-    }
-
     pub fn new(root: impl Into<PathBuf>) -> Self {
         warn_process_registry_not_wired("SqliteSessionStoreFactory::new");
         Self::for_root(root.into(), StoreOptions::default(), None)
@@ -126,8 +78,6 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
-            effect_host: Arc::new(std::sync::Mutex::new(None)),
-            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -298,22 +248,6 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 format!("sqlite-catalog:{catalog}"),
                 Arc::clone(effect_host),
             ));
-        *self
-            .effect_host
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
-    }
-
-    fn bind_artifact_stores(
-        &self,
-        process_env_store: Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
-        process_engines: lash_core_execution::ProcessEngineRegistry,
-    ) {
-        *self
-            .artifact_stores
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-            Some((process_env_store, process_engines));
     }
 
     async fn reclaim_retained_evidence(
@@ -323,11 +257,6 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         let report = crate::retention::reclaim(self, bound)
             .await
             .map_err(|failure| *failure)?;
-        if let Err(error) = self.resume_artifact_owner_retirements().await {
-            return Err(lash_core_execution::MaintenanceFailure::failed(
-                error, report,
-            ));
-        }
         Ok(report)
     }
 
@@ -940,6 +869,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             request,
             self.clock.timestamp_ms(),
             self.options.connection_policy,
+            self.options.blob_profile,
         )
         .await
     }

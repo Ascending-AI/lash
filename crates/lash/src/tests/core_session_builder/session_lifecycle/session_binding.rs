@@ -32,6 +32,13 @@ impl lash_core::AwaitEventResolver for FailOnceRetirementHost {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for FailOnceRetirementHost {
+    async fn journal_replay(
+        &self,
+        journal: &lash_sansio::EffectJournalIdentity,
+    ) -> std::result::Result<lash_core::JournalReplay, lash_core::RuntimeError> {
+        self.inner.journal_replay(journal).await
+    }
+
     fn turn_control_binding_id(&self) -> String {
         self.inner.turn_control_binding_id()
     }

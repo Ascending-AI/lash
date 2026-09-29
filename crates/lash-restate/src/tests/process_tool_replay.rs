@@ -186,7 +186,10 @@ async fn signal_waiting_process_registration() -> ProcessRegistration {
     .expect("link the signal-waiting TypeScript process");
     lashlang::LashlangArtifacts::publish_module_artifact(
         &recovery_artifact_store(),
-        &lash_core::ArtifactOwner::host("restate-recovery-test"),
+        &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .expect("host pin claim"),
         &linked.artifact,
     )
     .await

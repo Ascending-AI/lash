@@ -150,7 +150,6 @@ pub(crate) fn prune_terminal_processes_conn(
             pruned_processes: 0,
             pruned_events: 0,
             pruned_trigger_deliveries: 0,
-            artifact_cleanup_acknowledgements: Vec::new(),
         });
     }
 
@@ -195,23 +194,18 @@ fn prune_process_rows_conn(
     }
 
     for process_id in prunable {
-        let record_json: String = conn
-            .query_row(
-                process_sql().process.select_record_json_by_id.sql(),
-                params![process_id.as_str()],
-                |row| row.get(0),
-            )
-            .map_err(process_sqlite_error)?;
-        let record: lash_core_execution::ProcessRecord =
-            serde_json::from_str(&record_json).map_err(process_decode_error)?;
-        let cleanup = lash_core_execution::ProcessArtifactCleanup::from_record(&record);
-        let cleanup_json = serde_json::to_string(&cleanup).map_err(process_decode_error)?;
-        crate::conn::cached_execute(
+        let cleanup = lash_core_execution::ArtifactCleanup::ended(
+            lash_core_execution::ArtifactReferrer::ProcessRecord(process_id.clone()),
+            Vec::new(),
+            None,
+        );
+        crate::obligation_ledger::arm_cleanup_tx(
             conn,
-            process_sql().cleanup_sqlite.insert.sql(),
-            params![process_id.as_str(), cleanup_json],
+            &cleanup,
+            u64::try_from(pruned_at_ms).unwrap_or(0),
+            "registry",
         )
-        .map_err(process_sqlite_error)?;
+        .map_err(|error| lash_core_execution::PluginError::Session(error.to_string()))?;
     }
 
     let sql = process_sql();
@@ -246,7 +240,6 @@ fn prune_process_rows_conn(
         pruned_processes,
         pruned_events,
         pruned_trigger_deliveries: 0,
-        artifact_cleanup_acknowledgements: Vec::new(),
     })
 }
 

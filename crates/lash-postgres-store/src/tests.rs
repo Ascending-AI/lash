@@ -486,11 +486,24 @@ async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidat
         ];
 
         for session_id in [&ancestor_session, &child_session] {
+            // Deletion reads the head's current frame to fence it (ADR 0113
+            // §3.1), so the witness head is a well-formed frameless one.
+            let head_json =
+                serde_json::to_string(&lash_core_execution::store::SessionHeadPayload {
+                    schema_version: lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                    session_id: SessionId::from(session_id.as_str()),
+                    config: lash_core_execution::PersistedSessionConfig::new(
+                        lash_core_execution::TurnBudget::Unbounded,
+                    ),
+                    current_frame_node_id: None,
+                })
+                .expect("encode witness head");
             sqlx::query(
                 "INSERT INTO lash_sessions (session_id, head_json, leaf_node_id)
-                 VALUES ($1, '{}', NULL)",
+                 VALUES ($1, $2, NULL)",
             )
             .bind(session_id)
+            .bind(head_json)
             .execute(storage.pool())
             .await
             .unwrap_or_else(|error| panic!("seed witness session `{session_id}`: {error}"));
@@ -593,9 +606,13 @@ async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidat
             .begin()
             .await
             .expect("begin witness bulk delete");
-        crate::session_factory::delete_process_sessions_tx(&mut tx, &session_ids)
-            .await
-            .expect("bulk delete witness sessions");
+        crate::session_factory::delete_process_sessions_tx(
+            &mut tx,
+            &session_ids,
+            lash_core_execution::FleetFormat::current(),
+        )
+        .await
+        .expect("bulk delete witness sessions");
         tx.commit().await.expect("commit witness bulk delete");
         let after: std::collections::BTreeSet<String> = sqlx::query_scalar(
             "SELECT node_id FROM lash_graph_nodes WHERE node_id LIKE $1 ORDER BY node_id",
@@ -1806,9 +1823,13 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
         .begin()
         .await
         .expect("begin the batch delete");
-    crate::session_factory::delete_process_sessions_tx(&mut tx, &session_ids)
-        .await
-        .expect("batch delete the parked sessions");
+    crate::session_factory::delete_process_sessions_tx(
+        &mut tx,
+        &session_ids,
+        lash_core_execution::FleetFormat::current(),
+    )
+    .await
+    .expect("batch delete the parked sessions");
     tx.commit().await.expect("commit the batch delete");
 
     let after = factory

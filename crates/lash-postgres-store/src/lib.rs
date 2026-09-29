@@ -648,12 +648,6 @@ pub struct PostgresStorage {
     fleet_format: lash_core_execution::FleetFormat,
 }
 
-type BoundArtifactStores = (
-    Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
-    lash_core_execution::ProcessEngineRegistry,
-);
-type SharedArtifactStores = Arc<std::sync::Mutex<Option<BoundArtifactStores>>>;
-
 #[derive(Clone)]
 pub struct PostgresSessionStoreFactory {
     #[cfg(any(test, feature = "testing"))]
@@ -667,8 +661,6 @@ pub struct PostgresSessionStoreFactory {
     clock: Arc<dyn lash_core_execution::Clock>,
     turn_cancel_closure_owner:
         Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
-    effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
-    artifact_stores: SharedArtifactStores,
 }
 
 #[derive(Clone)]
@@ -1187,8 +1179,6 @@ impl PostgresStorage {
             fault_injector: None,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
-            effect_host: Arc::new(std::sync::Mutex::new(None)),
-            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -1208,8 +1198,6 @@ impl PostgresStorage {
             fault_injector: None,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
-            effect_host: Arc::new(std::sync::Mutex::new(None)),
-            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -1310,6 +1298,13 @@ impl PostgresStorage {
         }
         Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
             kind,
+            self.pool.clone(),
+        ))
+    }
+
+    pub fn artifact_cleanup(&self) -> Arc<dyn lash_core_execution::store::ArtifactCleanupLedger> {
+        Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
+            lash_core_execution::store::ObligationKind::ArtifactCleanup,
             self.pool.clone(),
         ))
     }

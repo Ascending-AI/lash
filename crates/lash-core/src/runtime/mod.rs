@@ -35,6 +35,7 @@ use lash_core_execution::runtime::host;
 pub use lash_core_store::input_normalization as io;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_store::input_normalization as io;
+pub mod artifact_cleanup;
 pub mod drive;
 mod durable_queue;
 mod lifecycle;
@@ -198,7 +199,7 @@ pub use effect::{
     EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
     ExecutionScope, ExternalCompletionError, GroupChildBinding, GroupChildCancelWatch,
     GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, IndependentEffectWork,
-    LlmRequestSpec, LlmStreamRecord, LoserPolicy, ProcessCommand, ProcessDriveStep,
+    JournalReplay, LlmRequestSpec, LlmStreamRecord, LoserPolicy, ProcessCommand, ProcessDriveStep,
     ProcessEffectOutcome, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
     RankedGroupSettlement, RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
     RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome,
@@ -249,7 +250,7 @@ pub use observation_publisher::{ObservationSource, drive_with_observations};
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
 pub use process::{
-    AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArtifactOwner,
+    AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry,
     DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime,
     LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage,
     ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
@@ -257,13 +258,12 @@ pub use process::{
     PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
     PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ParentEndPlan, PersistedSegmentHandover,
-    ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt,
-    ProcessChange, ProcessChangeCursor, ProcessChangeHub, ProcessClockRebind,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionValue, ProcessEffectNodeSummary, ProcessEffectOmissions,
-    ProcessEffectOmittedCounts, ProcessEffectOutcomeClass, ProcessEffectSummary,
-    ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
+    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessChangeHub,
+    ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEffectNodeSummary,
+    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
+    ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
     ProcessEngineAdmission, ProcessEngineKind, ProcessEngineProcessContext,
     ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEvent, ProcessEventAppendPlan,
@@ -295,20 +295,16 @@ pub use process::{
     WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
     WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
     WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry, allocate_process_event_sequence,
-    apply_process_event_projection, apply_process_status_projection,
-    artifact_destination_owner_retired_error, artifact_owner_is_permanently_retired,
-    artifact_owner_retired_error, artifact_staging_edge_missing_error,
-    artifact_staging_owner_edge_is_missing, artifact_store_plugin_error, check_retained_start,
-    current_epoch_ms, fold_process_record, lifetime, load_process_execution_env,
-    materialize_process_event_semantics, mint_process_id, prepare_process_event_append,
-    prepare_process_registration, prepare_process_start, prepare_process_transition,
-    process_child_session_id, process_park_transitions, process_runtime_session_ids,
-    process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
-    process_wake_delivery, process_wake_input_from_event_payload, process_wake_turn_cause,
-    process_wake_turn_text, publish_process_execution_env, reconcile_pruned_trigger_deliveries,
-    reconcile_session_process_observer_intents, require_event_replay,
-    settle_started_process_engine_artifacts, settle_started_process_execution_env,
-    terminal_append_request, terminal_event_type_name, tool_failure_code,
+    apply_process_event_projection, apply_process_status_projection, artifact_store_plugin_error,
+    check_retained_start, current_epoch_ms, fold_process_record, lifetime,
+    load_process_execution_env, materialize_process_event_semantics, mint_process_id,
+    prepare_process_event_append, prepare_process_registration, prepare_process_start,
+    prepare_process_transition, process_child_session_id, process_park_transitions,
+    process_runtime_session_ids, process_signal_event_type, process_signal_name_from_event_type,
+    process_signal_wait_key, process_wake_delivery, process_wake_input_from_event_payload,
+    process_wake_turn_cause, process_wake_turn_text, publish_process_execution_env,
+    reconcile_pruned_trigger_deliveries, reconcile_session_process_observer_intents,
+    require_event_replay, terminal_append_request, terminal_event_type_name, tool_failure_code,
     validate_generic_process_event_append, validate_process_signal_name, watch_process_registry,
     watch_process_registry_with_sink,
 };

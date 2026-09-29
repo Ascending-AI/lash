@@ -57,24 +57,6 @@ pub(super) async fn prunable_terminal_processes(
     .collect())
 }
 
-pub(super) async fn complete_process_artifact_cleanup(
-    registry: &PostgresProcessRegistry,
-    process_id: &ProcessId,
-) -> Result<lash_core_execution::ProcessArtifactCleanupAck, PluginError> {
-    let removed = sqlx::query(process_sql().cleanup.delete_for_process.sql())
-        .bind(process_id.as_str())
-        .execute(&registry.pool)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected();
-    let process_id = process_id.clone();
-    Ok(if removed == 1 {
-        lash_core_execution::ProcessArtifactCleanupAck::Acknowledged { process_id }
-    } else {
-        lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_id }
-    })
-}
-
 /// Settled ledger rows the retention horizon has passed and no live child
 /// still names.
 ///
@@ -111,7 +93,7 @@ pub(super) async fn prune_terminal_processes(
     watermark: lash_core_execution::ProjectionWatermark,
 ) -> Result<ProcessPruneReport, PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-    let pruned_at_ms = registry.clock.timestamp_ms() as i64;
+    let pruned_at_ms = crate::support::clamp_epoch_ms(registry.clock.timestamp_ms());
     let max_change_seq = watermark_change_seq(watermark);
     let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
     let prunable = select_prunable(
@@ -140,21 +122,20 @@ pub(super) async fn prune_terminal_processes(
             pruned_processes: 0,
             pruned_events: 0,
             pruned_trigger_deliveries: 0,
-            artifact_cleanup_acknowledgements: Vec::new(),
         });
     }
 
-    // The candidates stay locked from selection through the prune, so the
-    // cleanup built from each row read here is the cleanup of the row pruned.
-    let cleanups = prunable
+    // The candidates stay locked from selection through the prune. The same
+    // transaction fences each pruned process record and writes its cleanup.
+    let process_ids = prunable
         .iter()
-        .map(lash_core_execution::ProcessArtifactCleanup::from_record)
+        .map(|record| record.id.clone())
         .collect::<Vec<_>>();
-    let session_ids = cleanups
+    let session_ids = process_ids
         .iter()
-        .flat_map(|cleanup| facade_support::process_runtime_session_ids(&cleanup.process_id))
+        .flat_map(facade_support::process_runtime_session_ids)
         .collect::<Vec<_>>();
-    let blob_reclaim = delete_process_sessions_tx(&mut tx, &session_ids)
+    let blob_reclaim = delete_process_sessions_tx(&mut tx, &session_ids, registry.fleet_format)
         .await
         .map_err(|failure| {
             PluginError::Session(format!(
@@ -163,7 +144,7 @@ pub(super) async fn prune_terminal_processes(
             ))
         })?;
 
-    let report = prune_process_rows_tx(&mut tx, &cleanups, pruned_at_ms).await?;
+    let report = prune_process_rows_tx(&mut tx, &process_ids, pruned_at_ms).await?;
     tx.commit().await.map_err(plugin_sqlx_error)?;
     tracing::debug!(
         enumerated_blob_count = blob_reclaim.enumerated_blob_count,

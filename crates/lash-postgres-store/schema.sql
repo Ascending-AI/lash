@@ -834,12 +834,6 @@ CREATE TABLE IF NOT EXISTS lash_process_tombstones (
 CREATE INDEX IF NOT EXISTS idx_lash_process_tombstones_change
     ON lash_process_tombstones(pruned_change_seq);
 
-CREATE TABLE IF NOT EXISTS lash_process_artifact_cleanup (
-    process_id TEXT COLLATE "C" PRIMARY KEY,
-    cleanup_json TEXT NOT NULL,
-    FOREIGN KEY (process_id) REFERENCES lash_process_tombstones(process_id) ON DELETE RESTRICT
-);
-
 CREATE TABLE IF NOT EXISTS lash_process_segment_handovers (
     process_id TEXT COLLATE "C" NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
     segment_ordinal BIGINT NOT NULL,
@@ -998,21 +992,45 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
     artifact_bytes BYTEA NOT NULL,
     PRIMARY KEY (namespace, artifact_ref)
 );
-CREATE TABLE IF NOT EXISTS lash_artifact_owners (
+CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    owner_kind TEXT NOT NULL CONSTRAINT ck_artifact_owners_owner_kind CHECK (owner_kind IN ('host', 'process', 'execution')),
-    owner_id TEXT NOT NULL,
-    PRIMARY KEY (namespace, artifact_ref, owner_kind, owner_id),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_id CHECK (char_length(referrer_id) > 0),
+    PRIMARY KEY (namespace, artifact_ref, referrer_kind, referrer_id),
     FOREIGN KEY (namespace, artifact_ref) REFERENCES lash_lashlang_artifacts(namespace, artifact_ref) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_lash_artifact_owners_owner
-    ON lash_artifact_owners(owner_kind, owner_id);
-CREATE TABLE IF NOT EXISTS lash_artifact_owner_retirements (
-    owner_kind TEXT NOT NULL CONSTRAINT ck_artifact_owner_retirements_owner_kind CHECK (owner_kind = 'execution'),
-    owner_id TEXT NOT NULL,
-    PRIMARY KEY (owner_kind, owner_id)
+CREATE INDEX IF NOT EXISTS idx_lash_artifact_referrer_edges_referrer
+    ON lash_artifact_referrer_edges(referrer_kind, referrer_id);
+CREATE TABLE IF NOT EXISTS lash_artifact_referrer_fences (
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_id CHECK (char_length(referrer_id) > 0),
+    ended_at_ms BIGINT NOT NULL,
+    PRIMARY KEY (referrer_kind, referrer_id)
 );
+CREATE TABLE IF NOT EXISTS lash_artifact_cleanup_obligations (
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_id CHECK (char_length(referrer_id) > 0),
+    cleanup_json TEXT NOT NULL,
+    obligation_id TEXT NOT NULL,
+    obligation_state TEXT NOT NULL DEFAULT 'due',
+    obligation_attempts INTEGER NOT NULL DEFAULT 0,
+    obligation_due_at_ms BIGINT,
+    obligation_claim_token TEXT,
+    obligation_stall_reason TEXT,
+    obligation_last_error TEXT,
+    obligation_settled_at_ms BIGINT,
+    CONSTRAINT ck_artifact_cleanup_obligations_obligation CHECK ((obligation_state = 'due' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'stalled' AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
+    PRIMARY KEY (referrer_kind, referrer_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_artifact_cleanup_obligations_id
+    ON lash_artifact_cleanup_obligations(obligation_id);
+CREATE INDEX IF NOT EXISTS idx_lash_artifact_cleanup_obligations_due
+    ON lash_artifact_cleanup_obligations(obligation_due_at_ms, obligation_id)
+    WHERE obligation_state IN ('due', 'claimed');
+CREATE INDEX IF NOT EXISTS idx_lash_artifact_cleanup_obligations_stalled
+    ON lash_artifact_cleanup_obligations(obligation_id)
+    WHERE obligation_state = 'stalled';
 
 -- Which lash release wrote this database, recorded so a host running store
 -- preflight can answer "which release reopens this store" before wiring a

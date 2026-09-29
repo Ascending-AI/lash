@@ -31,8 +31,8 @@ pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildCancelWatch,
-    IndependentEffectWork, ProcessDriveStep, RecordedJournal, RecordedKeyFence, RefusedWriteRange,
-    Resolution, ResolveOutcome, RuntimeEffectController, ScopeBoundController,
+    IndependentEffectWork, JournalReplay, ProcessDriveStep, RecordedJournal, RecordedKeyFence,
+    RefusedWriteRange, Resolution, ResolveOutcome, RuntimeEffectController, ScopeBoundController,
     ScopedEffectController, SegmentProgress, ServedOnlyRange, ToolIntentOutcomeSink,
     ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
 };
@@ -1621,6 +1621,9 @@ pub async fn sleep_with_cancellation(
 
 #[cfg(test)]
 mod served_only_tests;
+
+#[cfg(test)]
+mod unresolved_execution_env_tests;
 
 #[cfg(test)]
 mod task_boundary_tests {

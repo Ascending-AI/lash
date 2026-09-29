@@ -192,6 +192,11 @@ impl Backend {
         self.stores().obligation_ledger(kind)
     }
 
+    /// The store set's artifact-cleanup ledger (ADR 0113 §2.5).
+    pub fn artifact_cleanup(&self) -> Arc<dyn crate::store::ArtifactCleanupLedger> {
+        self.stores().artifact_cleanup()
+    }
+
     /// The store set's session-delete reads (ADR 0109 §4).
     pub fn session_delete_ledger(
         &self,
@@ -284,4 +289,10 @@ pub trait StoreSet: Send + Sync {
 
     /// The reads of a session's two-phase delete (ADR 0109 §4).
     fn session_delete_ledger(&self) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger>;
+
+    /// The artifact-cleanup ledger (ADR 0113 §2.5): the ledger
+    /// [`Self::obligation_ledger`] answers for
+    /// [`ObligationKind::ArtifactCleanup`](crate::store::ObligationKind::ArtifactCleanup),
+    /// with the verbs beyond ADR 0109's.
+    fn artifact_cleanup(&self) -> Arc<dyn crate::store::ArtifactCleanupLedger>;
 }

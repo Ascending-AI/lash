@@ -514,40 +514,51 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
     );
 }
 
-/// Artifact-owner retirement is a typed refusal, not a prose sentinel: the
-/// classifiers answer from the runtime error code, so a session error that
-/// merely quotes the message is not a retirement.
+/// An ended referrer is a typed refusal, not a prose sentinel (ADR 0113
+/// §2.7): the classifier answers the fenced referrer from the error's typed
+/// cause, across the controller-error conversion and the journal's serde, so
+/// a session error that merely quotes the message is not a fence.
 #[test]
-fn artifact_owner_retirement_classifies_by_code_not_message() {
-    let retired = artifact_owner_retired_error();
-    assert!(artifact_owner_is_permanently_retired(&retired));
-    assert!(!retired.is_retryable());
-    // A permanent retirement fence is terminal: a redrive meets it again.
-    assert!(retired.is_terminal());
+fn an_ended_referrer_classifies_by_its_typed_cause_not_its_message() {
+    let referrer = crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("ended"));
+    let ended: crate::PluginError = crate::ArtifactStoreError::ReferrerEnded {
+        referrer: referrer.clone(),
+    }
+    .into();
+    assert_eq!(artifact_referrer_ended(&ended), Some(&referrer));
+    assert!(!ended.is_retryable());
+    // A permanent fence is terminal: a redrive meets it again.
+    assert!(ended.is_terminal());
 
-    // The destination form of the same fence is the same classification.
-    let destination = artifact_destination_owner_retired_error();
-    assert!(artifact_owner_is_permanently_retired(&destination));
+    let controller: crate::RuntimeEffectControllerError =
+        crate::StoreError::ArtifactReferrerEnded {
+            referrer: referrer.clone(),
+        }
+        .into();
+    assert_eq!(
+        controller.code,
+        crate::RuntimeErrorCode::ArtifactReferrerEnded
+    );
+    let journaled: crate::RuntimeEffectControllerError =
+        serde_json::from_value(serde_json::to_value(&controller).expect("encode")).expect("decode");
+    assert_eq!(
+        artifact_referrer_ended(&crate::PluginError::RuntimeEffectController(journaled)),
+        Some(&referrer)
+    );
 
-    let quoted = crate::PluginError::Session(
-        "backend refused: artifact owner has been permanently retired".to_string(),
+    let quoted = crate::PluginError::Session(format!("artifact referrer `{referrer}` has ended"));
+    assert_eq!(
+        artifact_referrer_ended(&quoted),
+        None,
+        "prose that quotes the refusal is not a typed fence"
     );
-    assert!(
-        !artifact_owner_is_permanently_retired(&quoted),
-        "prose that quotes the sentinel is not a typed retirement"
-    );
-
-    let missing = artifact_staging_edge_missing_error("process execution environment `env`");
-    assert!(artifact_staging_owner_edge_is_missing(&missing));
-    assert!(
-        !artifact_owner_is_permanently_retired(&missing),
-        "a missing edge is not a retirement"
-    );
-    let quoted_edge = crate::PluginError::Session(
-        "outer failure: inner is not retained by the staging owner".to_string(),
-    );
-    assert!(
-        !artifact_staging_owner_edge_is_missing(&quoted_edge),
-        "prose that quotes the fragment is not a typed staging-edge miss"
+    let missing: crate::PluginError = crate::ArtifactStoreError::ArtifactMissing {
+        artifact_ref: "env".to_string(),
+    }
+    .into();
+    assert_eq!(
+        artifact_referrer_ended(&missing),
+        None,
+        "missing bytes are not a fence"
     );
 }

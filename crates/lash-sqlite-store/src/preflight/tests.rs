@@ -394,13 +394,19 @@ mod walk {
             lashlang::Expr::Finish(Box::new(lashlang::Expr::String("done".into()))),
         ]))
         .expect("a one-statement module forms an artifact");
-        lashlang::LashlangArtifacts::new(std::sync::Arc::new(store))
-            .publish_module_artifact(
-                &lash_core_execution::ArtifactOwner::host("preflight-test"),
-                &artifact,
+        lash_core_execution::ModuleArtifactStore::publish_module_artifact(
+            &store,
+            &lash_core_execution::ReferrerClaim::unguarded(
+                lash_core_execution::ArtifactReferrer::HostPin(
+                    lash_core_execution::HostArtifactPin::mint(),
+                ),
             )
-            .await
-            .expect("persist module artifact");
+            .expect("host pin claim"),
+            artifact.module_ref().as_str(),
+            &artifact.to_store_bytes().expect("encode module"),
+        )
+        .await
+        .expect("persist module artifact");
 
         let page = SqliteStorePreflight::for_session_store_root(root.path())
             .scan_durable(&DurableScan::first(DurableSurface::ModuleArtifact, 10))
