@@ -523,3 +523,11 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         .await
         .expect("drop Postgres CHECK fixture schema");
 }
+
+#[path = "support/obligation_constraint_cases.rs"]
+mod obligation_constraint_cases;
+
+#[tokio::test]
+async fn postgres_obligation_checks_reject_incomplete_variants() {
+    obligation_constraint_cases::postgres_obligation_checks_reject_incomplete_variants().await;
+}
