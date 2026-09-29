@@ -445,9 +445,31 @@ async fn first_turn_continue_as_fences_its_initial_frame() {
         .await
         .expect("switch turn");
     assert!(switched.is_success(), "first-turn switch: {switched:?}");
-    let frames = &switched.result.state.agent_frames;
+    // The session is resident from its current frame (ADR 0112), so the
+    // initial frame is read back through the history pages.
+    let history = core
+        .session("artifact-referrers-first-switch")
+        .durable()
+        .await
+        .expect("durable session")
+        .history(
+            lash::persistence::HistoryAnchor::Head,
+            lash::persistence::HistoryBudget {
+                max_nodes: std::num::NonZeroU32::new(256).expect("nonzero node budget"),
+                max_bytes: std::num::NonZeroU64::new(1 << 24).expect("nonzero byte budget"),
+            },
+        )
+        .await
+        .expect("read the session history");
+    assert!(history.next.is_none(), "one page holds the whole ancestry");
+    let mut frames = Vec::new();
+    for node in history.nodes.iter().rev() {
+        if !frames.contains(&node.frame_node_id) {
+            frames.push(node.frame_node_id.clone());
+        }
+    }
     assert_eq!(frames.len(), 2, "the switch opens a second frame");
-    let first_frame = frames[0].frame_node_id.as_str();
+    let first_frame = frames[0].as_str();
     let after = wait_edges(&double, |edges| {
         !edges
             .iter()

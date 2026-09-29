@@ -211,8 +211,6 @@ impl HistoryCursor {
 pub struct LineageStamp([u8; 32]);
 
 impl LineageStamp {
-    const DOMAIN: &'static str = "lash-history-lineage/v1";
-
     /// Stamp the `(ancestor_session_id, fork_generation)` rows of one
     /// session's `fork_lineage`, in any order. Each row is encoded as the
     /// id's byte length (u64, big-endian), the id's bytes, then the
@@ -227,7 +225,7 @@ impl LineageStamp {
             preimage.extend_from_slice(id);
             preimage.extend_from_slice(&fork_generation.to_be_bytes());
         }
-        let hex = crate::stable_hash::blake3_hex(Self::DOMAIN, &preimage);
+        let hex = crate::stable_hash::blake3_hex("lash-history-lineage/v1", &preimage);
         let mut bytes = [0_u8; 32];
         let (pairs, _) = hex.as_bytes().as_chunks::<2>();
         for (byte, [high, low]) in bytes.iter_mut().zip(pairs) {
