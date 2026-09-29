@@ -941,6 +941,15 @@ impl LashSession {
         )
     }
 
+    /// The stopped partial output of one of this session's turns; see
+    /// [`DurableSession::stopped_partial`].
+    pub async fn stopped_partial(
+        &self,
+        turn: &lash_core::TurnId,
+    ) -> Result<crate::StoppedPartialRead> {
+        self.durable().stopped_partial(turn).await
+    }
+
     /// Cancel every outstanding durable wait for this session without deleting
     /// the session.
     ///

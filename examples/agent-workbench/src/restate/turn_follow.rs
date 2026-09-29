@@ -105,6 +105,18 @@ pub(crate) async fn start_user_turn(
     request: UserTurnRequest,
 ) -> Result<tokio::task::JoinHandle<TurnSettlement>, AppError> {
     let input = workbench_turn_input(state, &request).await?;
+    start_user_turn_with_input(state, request, input).await
+}
+
+/// Accept an input the host built itself, through the same `send()` a typed
+/// message takes: a stopped turn's partial output resubmitted as ordinary
+/// input (ADR 0114 §5.4). Lash never feeds a partial back on its own; this
+/// runs only when the page's user asked to continue in context.
+pub(crate) async fn start_user_turn_with_input(
+    state: &AppState,
+    request: UserTurnRequest,
+    input: TurnInput,
+) -> Result<tokio::task::JoinHandle<TurnSettlement>, AppError> {
     let turn_model = model_spec_from_selection(request.model.clone());
     let session = state
         .open_session(&request.session_id, "api.turn")
@@ -384,6 +396,15 @@ async fn follow_once(
         Some(output) if !matches!(outcome.status, lash::TurnStatus::Parked(_)) => output.result,
         _ => return Err(unsettled_turn(&outcome.status)),
     };
+    // A stopped turn's partial output is durable data for the page's panel,
+    // read back through its own route; it never becomes a transcript row.
+    if let Some(partial) = &output.stopped_partial {
+        state.trace_for_session(
+            &session.session_id(),
+            "turn.stopped_partial",
+            json!({ "turn_id": turn_id, "summary": partial.summary() }),
+        );
+    }
     let selected_model;
     let model = match model {
         Some(model) => Some(model),

@@ -512,6 +512,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/attachments/{attachment_id}", get(retrieve_attachment))
         .route("/api/turn/input", post(enqueue_turn_input))
         .route("/api/turn/cancel", post(cancel_turn))
+        .route("/api/turns/{turn_id}/stopped-partial", get(stopped_partial::read_stopped_partial))
+        .route("/api/turns/{turn_id}/stopped-partial/continue", post(stopped_partial::continue_stopped_partial))
         .route("/api/session", delete(reset_chat))
         .route("/api/reset", post(reset_chat))
         .route("/api/sessions", get(list_sessions).post(create_session))

@@ -42,6 +42,35 @@ pub struct RemoteTurnReport {
     pub stopped_partial: Option<lash_sansio::StoppedPartial>,
 }
 
+/// A report's partial belongs to a stopped turn of the same session, and its
+/// digest is the digest of its content (ADR 0114 §1.4).
+fn validate_stopped_partial(
+    report: &RemoteTurnReport,
+    partial: &lash_sansio::StoppedPartial,
+) -> Result<(), RemoteProtocolError> {
+    if !matches!(report.outcome, RemoteTurnOutcome::Stopped { .. }) {
+        return Err(RemoteProtocolError::InvalidEnvelope {
+            type_name: "RemoteTurnReport",
+            message: "stopped_partial is present on a turn that did not stop".to_string(),
+        });
+    }
+    if partial.id.session_id != report.session_id {
+        return Err(RemoteProtocolError::InvalidEnvelope {
+            type_name: "RemoteTurnReport",
+            message: format!(
+                "stopped_partial names session `{}`, not the report's `{}`",
+                partial.id.session_id, report.session_id
+            ),
+        });
+    }
+    if partial.verify_digest().is_err() {
+        return Err(RemoteProtocolError::StoppedPartialDigestMismatch {
+            turn_id: partial.id.turn_id.to_string(),
+        });
+    }
+    Ok(())
+}
+
 impl RemoteTurnReport {
     pub fn status(&self) -> RemoteTurnStatus {
         RemoteTurnStatus::from(&self.outcome)
@@ -79,12 +108,8 @@ impl RemoteTurnReport {
         {
             evidence.validate()?;
         }
-        if let Some(partial) = &self.stopped_partial
-            && partial.verify_digest().is_err()
-        {
-            return Err(RemoteProtocolError::StoppedPartialDigestMismatch {
-                turn_id: partial.id.turn_id.to_string(),
-            });
+        if let Some(partial) = &self.stopped_partial {
+            validate_stopped_partial(self, partial)?;
         }
         let mut summary_records = HashMap::new();
         for record in &self.llm_calls {

@@ -1521,6 +1521,98 @@
     .queued-work-meta { font-family: var(--font-ui); font-size: 0.72rem; color: var(--ash-text); }
     .queued-work-actions { display: flex; justify-content: flex-end; gap: var(--space-xs); }
 
+    /* stopped partial — a stopped turn's kept output, above the composer. It
+       reuses the ledger cards' look: the heading row, approval cards, and the
+       approve / cancel buttons for resubmit / discard. */
+    .stopped-partial-panel {
+      max-height: 44vh;
+      overflow: auto;
+      overscroll-behavior: contain;
+      padding: var(--space-sm) var(--space-lg) 0;
+      border-top: 1px solid var(--line-strong);
+      background: var(--sodium-tint);
+    }
+    .stopped-partial-panel[hidden] { display: none; }
+    .stopped-partial-items { display: grid; gap: var(--space-xs); }
+    .stopped-partial-facts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-3xs) var(--space-sm);
+      margin-bottom: var(--space-xs);
+      font-family: var(--font-ui);
+      font-size: 0.72rem;
+      color: var(--chalk-dim);
+    }
+    .stopped-partial-facts span + span::before {
+      content: "·";
+      margin-right: var(--space-sm);
+      color: var(--ash-text);
+    }
+    .stopped-partial-item-head {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+    .stopped-partial-item-head .approval-tool { flex: 1; min-width: 0; }
+    .stopped-partial-state {
+      font-family: var(--font-ui);
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ash-text);
+    }
+    .stopped-partial-state.interrupted,
+    .stopped-partial-state.outcome_unknown { color: var(--sodium-soft); }
+    .stopped-partial-state.invalid { color: var(--error); }
+    .stopped-partial-choice,
+    .stopped-partial-follow-up {
+      font-family: var(--font-ui);
+      font-size: 0.72rem;
+      color: var(--chalk-mid);
+      background: var(--form);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+    }
+    .stopped-partial-choice { min-height: 2rem; padding: 0 var(--space-2xs); }
+    .stopped-partial-choice.unchosen { border-color: var(--sodium); }
+    .stopped-partial-choice:focus-visible,
+    .stopped-partial-follow-up:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+    .stopped-partial-follow-up {
+      width: 100%;
+      min-height: 2.6rem;
+      margin-top: var(--space-xs);
+      padding: var(--space-2xs) var(--space-xs);
+      resize: vertical;
+    }
+    .stopped-partial-preview { margin-top: var(--space-xs); }
+    .stopped-partial-preview .approval-args {
+      max-height: 16rem;
+      overflow: auto;
+      margin-top: var(--space-2xs);
+    }
+    .stopped-partial-preview summary {
+      font-family: var(--font-ui);
+      font-size: 0.72rem;
+      color: var(--ash-text);
+      cursor: pointer;
+    }
+    .stopped-partial-omissions { margin-top: var(--space-2xs); }
+    .stopped-partial-refusal {
+      margin-top: var(--space-2xs);
+      font-family: var(--font-ui);
+      font-size: 0.72rem;
+      color: var(--error);
+    }
+    /* The decision stays in reach however far the items scroll. */
+    .stopped-partial-panel > .approval-actions {
+      position: sticky;
+      bottom: 0;
+      margin: var(--space-xs) calc(-1 * var(--space-lg)) 0;
+      padding: var(--space-xs) var(--space-lg) var(--space-sm);
+      border-top: 1px solid var(--line);
+      background: var(--form-deep);
+    }
+
     .work-list {
       min-width: 0;
       min-height: 0;
@@ -2586,6 +2678,29 @@
           <aside id="nodeInspector" class="node-inspector" aria-label="Node inspector">
             <div class="inspector-empty">select a graph node</div>
           </aside>
+        </div>
+      </section>
+
+      <section id="stoppedPartialPanel" class="stopped-partial-panel" aria-label="Stopped turn output" hidden>
+        <div class="queued-work-heading">
+          <span>stopped turn · kept output</span>
+          <span id="stoppedPartialCount"></span>
+        </div>
+        <div id="stoppedPartialFacts" class="stopped-partial-facts"></div>
+        <div id="stoppedPartialItems" class="stopped-partial-items"></div>
+        <textarea id="stoppedPartialFollowUp" class="stopped-partial-follow-up" rows="1"
+                  placeholder="follow-up to send after the quoted output (optional)"></textarea>
+        <details id="stoppedPartialPreview" class="stopped-partial-preview">
+          <summary>what resubmitting sends</summary>
+          <pre id="stoppedPartialPreviewText" class="approval-args"></pre>
+        </details>
+        <div id="stoppedPartialRefusal" class="stopped-partial-refusal" hidden></div>
+        <div id="stoppedPartialOmissions" class="approval-meta stopped-partial-omissions"></div>
+        <div class="approval-actions">
+          <button id="stoppedPartialDiscard" class="work-cancel" type="button"
+                  title="Keep lash's default: the stopped output stays out of the conversation">discard</button>
+          <button id="stoppedPartialResubmit" class="approval-approve" type="button"
+                  title="Send the chosen output, quoted and labeled, as a new input">resubmit as new input</button>
         </div>
       </section>
 
@@ -4850,6 +4965,7 @@
       if (event.type === "done") {
         finishTransientRows(event.turn_id);
         refreshUsage(event.turn_id);
+        globalThis.refreshStoppedPartial?.(event.turn_id);
         /* A turn that failed committed nothing its optimistic rows can stand
            for, and the server has already retired them from the lane
            (FIG-1000). This tab may still be rendering them, and rows are only
@@ -6067,6 +6183,7 @@
         executionScorecard
       );
       recordTurnInputApplications(state.turn_input_applications);
+      globalThis.syncStoppedPartialFromSnapshot?.(state);
       return true;
     }
     // END WORKBENCH_STATE_SNAPSHOT
@@ -6634,6 +6751,366 @@
         queuedWorkCount.textContent = "updates paused";
       }
     }
+
+    // BEGIN WORKBENCH_STOPPED_PARTIAL_PANEL
+    /* A stopped turn's kept output (ADR 0114). Lash saves it durably and
+       returns it; it never enters the conversation on its own. Discard closes
+       the panel and records nothing: the next message is an ordinary send,
+       lash's backtrack default. Resubmit quotes the chosen items, labeled, as a
+       new input through the same send /api/turn uses. */
+    const stoppedPartialPanel = document.getElementById("stoppedPartialPanel");
+    const stoppedPartialCount = document.getElementById("stoppedPartialCount");
+    const stoppedPartialFacts = document.getElementById("stoppedPartialFacts");
+    const stoppedPartialItems = document.getElementById("stoppedPartialItems");
+    const stoppedPartialFollowUp = document.getElementById("stoppedPartialFollowUp");
+    const stoppedPartialRefusal = document.getElementById("stoppedPartialRefusal");
+    const stoppedPartialPreviewText = document.getElementById("stoppedPartialPreviewText");
+    const stoppedPartialOmissions = document.getElementById("stoppedPartialOmissions");
+    const stoppedPartialDiscard = document.getElementById("stoppedPartialDiscard");
+    const stoppedPartialResubmit = document.getElementById("stoppedPartialResubmit");
+    const SETTLED_PARTIALS_KEY = "agent-workbench.settled-stopped-partials";
+    /* { turnId, key, partial, choices } for the partial on screen. */
+    let shownStoppedPartial = null;
+    let stoppedPartialPreviewSeq = 0;
+
+    function stoppedPartialKey(partial) {
+      const id = partial.id;
+      return [id.session_id, id.turn_id, id.base, id.sealed_through].join("/");
+    }
+
+    /* Partials this viewer discarded or resubmitted, so a reload does not
+       offer them again. Browser-local: lash records nothing for a discard. */
+    function settledStoppedPartials() {
+      try {
+        const stored = JSON.parse(localStorage.getItem(SETTLED_PARTIALS_KEY) || "[]");
+        return Array.isArray(stored) ? stored : [];
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function rememberSettledStoppedPartial(key) {
+      try {
+        const kept = settledStoppedPartials().filter(item => item !== key).slice(-49);
+        kept.push(key);
+        localStorage.setItem(SETTLED_PARTIALS_KEY, JSON.stringify(kept));
+      } catch (_) {}
+    }
+
+    function hideStoppedPartial() {
+      shownStoppedPartial = null;
+      stoppedPartialPreviewSeq += 1;
+      stoppedPartialPanel.hidden = true;
+      stoppedPartialItems.innerHTML = "";
+      stoppedPartialFacts.innerHTML = "";
+      stoppedPartialFollowUp.value = "";
+    }
+
+    function stopReasonLabel(reason) {
+      if (reason?.kind === "user_cancel") return "stopped by you";
+      if (reason?.kind === "process_loss") return "worker lost";
+      return String(reason?.cause || "stopped").replaceAll("_", " ");
+    }
+
+    function partialItemLabel(item) {
+      if (item.kind === "text") return "assistant text";
+      if (item.kind === "reasoning") return "reasoning summary";
+      if (item.kind === "tool_call") return "tool call · " + item.call.tool_name;
+      return "unfinished arguments" + (item.tool_name ? " · " + item.tool_name : "");
+    }
+
+    function partialItemState(item) {
+      if (item.kind === "text" || item.kind === "reasoning") return item.state;
+      if (item.kind === "argument_fragment") return item.state.state;
+      const execution = item.execution;
+      if (execution.state === "running") return "outcome_unknown";
+      return execution.state;
+    }
+
+    function capturedOutputText(capture) {
+      if (capture?.capture !== "captured") return "(the tool reports no progress)";
+      const text = capture.chunks.map(chunk => chunk.text).join("");
+      const omitted = capture.omitted_bytes
+        ? "\n… " + capture.omitted_bytes + " more bytes counted, not kept"
+        : "";
+      return (text || "(no output yet)") + omitted;
+    }
+
+    function partialItemBody(item) {
+      if (item.kind === "text") return item.text;
+      if (item.kind === "reasoning") return item.summary;
+      if (item.kind === "argument_fragment") {
+        const invalid = item.state.state === "invalid" ? "\n× " + item.state.parse_error : "";
+        return item.raw_arguments + invalid;
+      }
+      const args = JSON.stringify(item.call.arguments, null, 2);
+      const execution = item.execution;
+      if (execution.state === "running") {
+        return args + "\n── output before the stop ──\n" + capturedOutputText(execution.output);
+      }
+      if (execution.state === "settled") {
+        return args + "\n── result ──\n" + JSON.stringify(execution.output, null, 2);
+      }
+      return args;
+    }
+
+    /* Text and calls are included or omitted; reasoning and fragments are
+       quoted or omitted, and start unchosen. */
+    function partialItemChoices(item) {
+      if (item.kind === "text" || item.kind === "tool_call") return ["include", "omit"];
+      return ["", "quote", "omit"];
+    }
+
+    function renderStoppedPartialFacts(summary) {
+      stoppedPartialFacts.innerHTML = "";
+      const facts = [stopReasonLabel(summary.reason)];
+      if (summary.recovered_after_process_loss) facts.push("recovered after a worker loss");
+      if (summary.coverage === "acknowledged_prefix") {
+        facts.push("only the output the lost worker saved is here");
+      }
+      if (summary.cut_mid_tool_call) facts.push("cut inside a tool call");
+      if (summary.tool_outcome_unknown) facts.push("a tool may have partly run");
+      const eligibility = summary.eligibility;
+      if (eligibility.eligibility === "ready") facts.push("ready to resubmit as is");
+      if (eligibility.eligibility === "needs_selection") {
+        const items = eligibility.reasons.filter(reason => reason.item).length;
+        facts.push(items
+          ? items + (items === 1 ? " item needs" : " items need") + " your choice"
+          : "choose what to keep");
+      }
+      for (const fact of facts) {
+        const span = document.createElement("span");
+        span.textContent = fact;
+        stoppedPartialFacts.appendChild(span);
+      }
+    }
+
+    function renderStoppedPartialItem(item, choice) {
+      const card = document.createElement("article");
+      card.className = "approval-card";
+      card.dataset.partialItem = item.id;
+
+      const head = document.createElement("div");
+      head.className = "stopped-partial-item-head";
+      const label = document.createElement("div");
+      label.className = "approval-tool";
+      label.textContent = partialItemLabel(item);
+      const state = partialItemState(item);
+      const stateLabel = document.createElement("span");
+      stateLabel.className = "stopped-partial-state " + state;
+      stateLabel.textContent = state.replaceAll("_", " ");
+      const body = document.createElement("pre");
+      body.className = "approval-args";
+      body.textContent = partialItemBody(item);
+
+      const select = document.createElement("select");
+      select.className = "stopped-partial-choice";
+      select.setAttribute("aria-label", "What to do with " + partialItemLabel(item));
+      for (const value of partialItemChoices(item)) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value || "choose…";
+        select.appendChild(option);
+      }
+      select.value = choice || "";
+      select.classList.toggle("unchosen", !select.value);
+      select.addEventListener("change", () => {
+        if (!shownStoppedPartial) return;
+        if (select.value) shownStoppedPartial.choices[item.id] = select.value;
+        else delete shownStoppedPartial.choices[item.id];
+        select.classList.toggle("unchosen", !select.value);
+        refreshStoppedPartialPreview();
+      });
+      head.append(label, stateLabel, select);
+
+      card.append(head, body);
+      return card;
+    }
+
+    /* The helper's refusal in the panel's words: the items it names by their
+       labels, not their ids. */
+    function stoppedPartialRefusalText(error) {
+      const items = shownStoppedPartial?.partial.items || [];
+      const named = (error.items || []).map(id => {
+        const item = items.find(candidate => candidate.id === id);
+        return item ? partialItemLabel(item) : id;
+      });
+      if (error.code === "selection_incomplete") return "choose quote or omit for: " + named.join(", ");
+      if (error.code === "choice_not_allowed") return "that choice is not allowed for: " + named.join(", ");
+      if (error.code === "empty") return "nothing to resubmit: keep an item or write a follow-up";
+      return error.message;
+    }
+
+    function renderStoppedPartialPreview(preview) {
+      stoppedPartialOmissions.innerHTML = "";
+      if (preview.outcome === "refused") {
+        stoppedPartialRefusal.hidden = false;
+        stoppedPartialRefusal.textContent = stoppedPartialRefusalText(preview.error);
+        stoppedPartialPreviewText.textContent = "";
+        stoppedPartialResubmit.disabled = true;
+        return;
+      }
+      stoppedPartialRefusal.hidden = true;
+      stoppedPartialResubmit.disabled = false;
+      stoppedPartialPreviewText.textContent = preview.input
+        .filter(item => item.type === "text")
+        .map(item => item.text)
+        .join("\n\n");
+      for (const omitted of preview.omissions.omitted) {
+        const span = document.createElement("span");
+        span.className = "approval-key";
+        span.textContent = "left out · " + omitted.kind.replaceAll("_", " ") + " · " + omitted.item;
+        span.title = omitted.item;
+        stoppedPartialOmissions.appendChild(span);
+      }
+    }
+
+    function showStoppedPartial(turnId, body) {
+      const partial = body.partial;
+      shownStoppedPartial = {
+        turnId,
+        key: stoppedPartialKey(partial),
+        partial,
+        choices: { ...body.default_choices }
+      };
+      stoppedPartialCount.textContent =
+        partial.items.length + " item" + (partial.items.length === 1 ? "" : "s");
+      renderStoppedPartialFacts(body.summary);
+      stoppedPartialItems.innerHTML = "";
+      if (!partial.items.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "the turn stopped before it produced any output";
+        stoppedPartialItems.appendChild(empty);
+      }
+      for (const item of partial.items) {
+        stoppedPartialItems.appendChild(
+          renderStoppedPartialItem(item, shownStoppedPartial.choices[item.id])
+        );
+      }
+      renderStoppedPartialPreview(body.preview);
+      stoppedPartialPanel.hidden = false;
+    }
+
+    function stoppedPartialPath(turnId, suffix) {
+      return "/api/turns/" + encodeURIComponent(turnId) + "/stopped-partial" + (suffix || "");
+    }
+
+    async function postStoppedPartialContinue(preview) {
+      const shown = shownStoppedPartial;
+      const response = await fetch(stoppedPartialPath(shown.turnId, "/continue"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          choices: shown.choices,
+          text: stoppedPartialFollowUp.value,
+          preview
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      return { response, body };
+    }
+
+    async function refreshStoppedPartialPreview() {
+      if (!shownStoppedPartial) return;
+      const seq = ++stoppedPartialPreviewSeq;
+      try {
+        const { response, body } = await postStoppedPartialContinue(true);
+        if (seq !== stoppedPartialPreviewSeq) return;
+        if (!response.ok) throw new Error(body.error || "preview failed");
+        renderStoppedPartialPreview(body.preview);
+      } catch (error) {
+        if (seq !== stoppedPartialPreviewSeq) return;
+        stoppedPartialRefusal.hidden = false;
+        stoppedPartialRefusal.textContent = cleanErrorText(error.message);
+      }
+    }
+
+    /* Read one turn's partial and show it when there is one to offer. A turn
+       that settled without one moves the conversation past the panel. */
+    async function refreshStoppedPartial(turnId, attempt = 0) {
+      if (!turnId) return;
+      try {
+        const response = await fetch(stoppedPartialPath(turnId));
+        if (!response.ok) return;
+        const body = await response.json();
+        if (body.status === "pending" && attempt < 4) {
+          setTimeout(() => refreshStoppedPartial(turnId, attempt + 1), 600);
+          return;
+        }
+        if (body.status !== "available") {
+          if (shownStoppedPartial && shownStoppedPartial.turnId !== turnId) hideStoppedPartial();
+          return;
+        }
+        if (settledStoppedPartials().includes(stoppedPartialKey(body.partial))) return;
+        if (shownStoppedPartial?.key === stoppedPartialKey(body.partial)) return;
+        showStoppedPartial(turnId, body);
+      } catch (_) {}
+    }
+
+    /* After a load or a reconnect the panel follows the conversation's last
+       sent turn: its partial, if it stopped with one. */
+    function syncStoppedPartialFromSnapshot(state) {
+      const rows = state.transcript ||
+        (state.messages || []).map(message => ({ type: "message", message }));
+      let lastTurnId = null;
+      for (const row of rows) {
+        const id = row.type === "message" ? String(row.message?.id || "") : "";
+        if (id.startsWith("workbench-user:")) lastTurnId = id.slice("workbench-user:".length);
+      }
+      if (!lastTurnId) {
+        hideStoppedPartial();
+        return;
+      }
+      if (shownStoppedPartial && shownStoppedPartial.turnId !== lastTurnId) hideStoppedPartial();
+      refreshStoppedPartial(lastTurnId);
+    }
+
+    stoppedPartialDiscard.addEventListener("click", () => {
+      if (!shownStoppedPartial) return;
+      rememberSettledStoppedPartial(shownStoppedPartial.key);
+      hideStoppedPartial();
+      renderNote("stopped output discarded · the next message continues from the last checkpoint");
+    });
+
+    stoppedPartialResubmit.addEventListener("click", async () => {
+      if (!shownStoppedPartial) return;
+      if (busy) {
+        renderNote("turn already running");
+        return;
+      }
+      stoppedPartialResubmit.disabled = true;
+      stoppedPartialResubmit.textContent = "sending";
+      try {
+        const { response, body } = await postStoppedPartialContinue(false);
+        if (response.status === 422 && body.resubmission) {
+          renderStoppedPartialPreview({ outcome: "refused", error: body.resubmission });
+          return;
+        }
+        if (!response.ok) throw new Error(body.error || "resubmit failed");
+        rememberSettledStoppedPartial(shownStoppedPartial.key);
+        hideStoppedPartial();
+        refreshBusyState();
+      } catch (error) {
+        stoppedPartialRefusal.hidden = false;
+        stoppedPartialRefusal.textContent = cleanErrorText(error.message);
+      } finally {
+        stoppedPartialResubmit.textContent = "resubmit as new input";
+        if (shownStoppedPartial) stoppedPartialResubmit.disabled = false;
+      }
+    });
+
+    stoppedPartialFollowUp.addEventListener("input", () => {
+      clearTimeout(stoppedPartialFollowUp.previewTimer);
+      stoppedPartialFollowUp.previewTimer = setTimeout(refreshStoppedPartialPreview, 250);
+    });
+
+    /* An ordinary send leaves the partial out: that is the discard. */
+    composer.addEventListener("submit", () => {
+      if (shownStoppedPartial) rememberSettledStoppedPartial(shownStoppedPartial.key);
+      hideStoppedPartial();
+    });
+    // END WORKBENCH_STOPPED_PARTIAL_PANEL
 
     function renderWork(items) {
       lastWorkItems = items;

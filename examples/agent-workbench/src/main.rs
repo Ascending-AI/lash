@@ -132,6 +132,8 @@ pub(crate) use active_turns::*;
 #[path = "main_sections/turn_cancel.rs"]
 mod turn_cancel;
 pub(crate) use turn_cancel::*;
+#[path = "main_sections/stopped_partial.rs"]
+mod stopped_partial;
 #[path = "main_sections/unknown_terminals.rs"]
 mod unknown_terminals;
 pub(crate) use unknown_terminals::*;

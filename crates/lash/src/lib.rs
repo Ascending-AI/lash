@@ -113,8 +113,8 @@ pub use crate::send::{
 };
 pub use crate::session::{LashSession, ObservableSession, ParkedSession, SessionBuilder};
 pub use crate::stopped_partial::{
-    ItemChoice, OmissionReport, OmittedItem, PartialItemKind, Resubmission, ResubmissionError,
-    ResubmissionSelection,
+    ItemChoice, OmissionReport, OmittedItem, PartialItemKind, RESUBMISSION_PREAMBLE, Resubmission,
+    ResubmissionError, ResubmissionSelection, build_resubmission,
 };
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
 pub use crate::turn::{
@@ -139,6 +139,7 @@ pub use lash_core::facade_support::{
     TurnCancelRequestRecord,
 };
 pub use lash_core::runtime::ExternalCompletionError;
+pub use lash_core::store::StoppedPartialRead;
 pub use lash_core::store::{
     ObligationId, ObligationKey, ObligationKind, ObligationState, StallReason, StalledObligation,
     UndecodableObligation, session_delete::SessionCleanup,
