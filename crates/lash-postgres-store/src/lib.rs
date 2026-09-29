@@ -1291,6 +1291,15 @@ impl PostgresStorage {
         ))
     }
 
+    /// Generations with current pinned work or an operator drain mark.
+    pub async fn fleet_generations(
+        &self,
+    ) -> Result<Vec<(lash_core_execution::engine::BuildGeneration, bool)>, StoreError> {
+        crate::generation_drain::PostgresGenerationDrain::new(self.pool.clone())
+            .fleet_generations()
+            .await
+    }
+
     /// The store→engine delivery obligation ledger of `kind` over this
     /// catalog (ADR 0109 §1.3).
     pub fn obligation_ledger(

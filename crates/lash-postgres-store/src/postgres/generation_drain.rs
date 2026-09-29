@@ -56,6 +56,45 @@ impl PostgresGenerationDrain {
             .map_err(store_sqlx_error)?;
         Ok(count(counted))
     }
+
+    /// Current work pins and drain marks, grouped in generation order.
+    pub(crate) async fn fleet_generations(
+        &self,
+    ) -> Result<Vec<(BuildGeneration, bool)>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT generation, BOOL_OR(draining) FROM (
+                SELECT generation, TRUE AS draining FROM lash_draining_generations
+                UNION ALL
+                SELECT segment_generation, FALSE FROM lash_processes
+                    WHERE status IN ('running', 'waiting') AND segment_generation IS NOT NULL
+                UNION ALL
+                SELECT park_build_generation, FALSE FROM lash_processes
+                    WHERE parked_since_ms IS NOT NULL AND park_build_generation IS NOT NULL
+                UNION ALL
+                SELECT park_build_generation, FALSE FROM lash_turn_parks
+                    WHERE park_build_generation IS NOT NULL
+                UNION ALL
+                SELECT admitted_generation, FALSE FROM lash_session_roots
+                    WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
+                      AND admitted_generation IS NOT NULL
+            ) AS pinned(generation, draining)
+            GROUP BY generation ORDER BY generation",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        rows.into_iter()
+            .map(|row| {
+                let generation: String = row.try_get(0).map_err(store_sqlx_error)?;
+                let draining: bool = row.try_get(1).map_err(store_sqlx_error)?;
+                Ok((
+                    BuildGeneration::parse(&generation)
+                        .map_err(|error| corrupt("BuildGeneration", error))?,
+                    draining,
+                ))
+            })
+            .collect()
+    }
 }
 
 #[async_trait::async_trait]
