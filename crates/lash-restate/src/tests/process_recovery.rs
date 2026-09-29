@@ -303,7 +303,10 @@ pub(super) async fn trigger_lashlang_registration(resource: &str) -> ProcessRegi
     .expect("link lashlang trigger module");
     lashlang::LashlangArtifacts::publish_module_artifact(
         &recovery_artifact_store(),
-        &lash_core::ArtifactOwner::host("restate-recovery-test"),
+        &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .expect("host pin claim"),
         &linked_module.artifact,
     )
     .await
@@ -376,7 +379,10 @@ pub(super) async fn typescript_process_registration() -> ProcessRegistration {
     .expect("link TypeScript process");
     lashlang::LashlangArtifacts::publish_module_artifact(
         &recovery_artifact_store(),
-        &lash_core::ArtifactOwner::host("restate-recovery-test"),
+        &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .expect("host pin claim"),
         &linked.artifact,
     )
     .await
@@ -428,7 +434,10 @@ pub(super) async fn sleeping_process_registration() -> ProcessRegistration {
     .expect("link sleeping TypeScript process");
     lashlang::LashlangArtifacts::publish_module_artifact(
         &recovery_artifact_store(),
-        &lash_core::ArtifactOwner::host("restate-recovery-test"),
+        &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .expect("host pin claim"),
         &linked.artifact,
     )
     .await
@@ -503,7 +512,10 @@ pub(super) async fn sleeping_then_tool_process_registration() -> ProcessRegistra
     .expect("link sleeping post-wake-effect process");
     lashlang::LashlangArtifacts::publish_module_artifact(
         &recovery_artifact_store(),
-        &lash_core::ArtifactOwner::host("restate-recovery-test"),
+        &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .expect("host pin claim"),
         &linked.artifact,
     )
     .await

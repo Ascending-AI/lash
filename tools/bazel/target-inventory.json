@@ -19248,6 +19248,7 @@
         "futures-util",
         "http",
         "http-body-util",
+        "lash-internal-core-execution",
         "lash-internal-http-transport",
         "lash-internal-lashlang",
         "lash-internal-lashlang-runtime",

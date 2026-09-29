@@ -70,7 +70,10 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
     let artifact_store = lashlang::LashlangArtifacts::of_backend(&artifact_backend);
     artifact_store
         .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("restate-serializable-input"),
+            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+                lash_core::HostArtifactPin::mint(),
+            ))
+            .expect("host pin claim"),
             &linked_module.artifact,
         )
         .await

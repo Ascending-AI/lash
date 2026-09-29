@@ -103,7 +103,7 @@ fn last_cell_finish(output: &TurnOutput) -> Option<serde_json::Value> {
                 .cloned(),
             _ => None,
         })
-        .last()
+        .next_back()
 }
 
 fn response(code: &str) -> LlmResponse {
@@ -179,7 +179,6 @@ fn serve_processes(double: &lash_restate_test::RestateTestBackend, core: &LashCo
     double.install_process_worker(worker);
 }
 
-#[expect(clippy::expect_used, reason = "acceptance test validates each turn")]
 #[tokio::test]
 async fn cold_reopen_globals_across_turns() {
     let double =
@@ -223,9 +222,14 @@ async fn cold_reopen_globals_across_turns() {
 
     let second_core = rlm_core(
         &double,
-        vec![response(
-            "const run = await processes.start({ definition: saved }); finish(await run);",
-        )],
+        vec![
+            response(
+                "const run = await processes.start({ definition: saved }); finish(await run);",
+            ),
+            response(
+                "const run = await processes.start({ definition: saved }); finish(await run);",
+            ),
+        ],
     );
     serve_processes(&double, &second_core);
     let second_session = second_core
@@ -256,10 +260,6 @@ async fn cold_reopen_globals_across_turns() {
     );
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "acceptance test validates each turn and edge set"
-)]
 #[tokio::test]
 async fn overwrite_retains_old_module_until_frame_end() {
     let double =
@@ -327,10 +327,6 @@ async fn overwrite_retains_old_module_until_frame_end() {
     );
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "acceptance test validates the carry and the absent edge"
-)]
 #[tokio::test]
 async fn continue_as_carries_only_seeded_definition() {
     let double =
@@ -420,10 +416,6 @@ async fn continue_as_carries_only_seeded_definition() {
     assert_eq!(last_cell_finish(&result), Some(serde_json::json!(11)));
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "acceptance test validates the frame transition"
-)]
 #[tokio::test]
 async fn first_turn_continue_as_fences_its_initial_frame() {
     let double =
@@ -467,10 +459,6 @@ async fn first_turn_continue_as_fences_its_initial_frame() {
     );
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "acceptance test validates the definition revision edge"
-)]
 #[tokio::test]
 async fn named_definition_survives_uncarried_frame_switch() {
     let double =

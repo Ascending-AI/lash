@@ -529,6 +529,13 @@ impl lash_core::AwaitEventResolver for KeyJournalController {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for KeyJournalController {
+    async fn journal_replay(
+        &self,
+        _journal: &lash_sansio::EffectJournalIdentity,
+    ) -> std::result::Result<lash_core::JournalReplay, lash_core::RuntimeError> {
+        Ok(lash_core::JournalReplay::MayReplay)
+    }
+
     fn turn_control_binding_id(&self) -> String {
         "key-journal-controller".to_string()
     }
@@ -655,6 +662,13 @@ impl lash_core::AwaitEventResolver for AdmissionCrashController {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for AdmissionCrashController {
+    async fn journal_replay(
+        &self,
+        _journal: &lash_sansio::EffectJournalIdentity,
+    ) -> std::result::Result<lash_core::JournalReplay, lash_core::RuntimeError> {
+        Ok(lash_core::JournalReplay::MayReplay)
+    }
+
     fn turn_control_binding_id(&self) -> String {
         "admission-crash-controller".to_string()
     }
@@ -1428,7 +1442,8 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
     assert!(
         env_store
             .get_process_execution_env(&env_ref)
-            .await?
+            .await
+            .map_err(lash_core::PluginError::from)?
             .is_some(),
         "the redriven process environment is usable"
     );
@@ -1533,6 +1548,28 @@ struct IngressAdmissionEngine;
 impl lash_core::ProcessEngine for IngressAdmissionEngine {
     fn kind(&self) -> &'static str {
         INGRESS_ENGINE_KIND
+    }
+
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &lash_core::ResolvedArtifactCleanup,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &lash_core::ReferrerClaim,
+        _artifact_ref: &str,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        unreachable!("the ingress engine stores no artifacts")
     }
 
     async fn run(

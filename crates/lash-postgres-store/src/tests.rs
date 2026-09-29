@@ -592,9 +592,13 @@ async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidat
             .begin()
             .await
             .expect("begin witness bulk delete");
-        crate::session_factory::delete_process_sessions_tx(&mut tx, &session_ids)
-            .await
-            .expect("bulk delete witness sessions");
+        crate::session_factory::delete_process_sessions_tx(
+            &mut tx,
+            &session_ids,
+            lash_core_execution::FleetFormat::current(),
+        )
+        .await
+        .expect("bulk delete witness sessions");
         tx.commit().await.expect("commit witness bulk delete");
         let after: std::collections::BTreeSet<String> = sqlx::query_scalar(
             "SELECT node_id FROM lash_graph_nodes WHERE node_id LIKE $1 ORDER BY node_id",
@@ -1771,9 +1775,13 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
         .begin()
         .await
         .expect("begin the batch delete");
-    crate::session_factory::delete_process_sessions_tx(&mut tx, &session_ids)
-        .await
-        .expect("batch delete the parked sessions");
+    crate::session_factory::delete_process_sessions_tx(
+        &mut tx,
+        &session_ids,
+        lash_core_execution::FleetFormat::current(),
+    )
+    .await
+    .expect("batch delete the parked sessions");
     tx.commit().await.expect("commit the batch delete");
 
     let after = factory

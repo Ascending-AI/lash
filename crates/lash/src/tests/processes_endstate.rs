@@ -3,13 +3,11 @@ use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 
 use lashlang::testing::ast_builders as b;
 
-use lash_core::{
-    ProcessEngine as _, ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessRetention as _,
-};
+use lash_core::ProcessEventLogTestSupport as _;
 use lash_sansio::ProcessId;
 use lash_sansio::sync::MutexExt;
 use programs::{child_join_process, wait_signal_process};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use event_pages::full_events;
@@ -198,47 +196,6 @@ async fn wait_for_terminal(
         process.lifecycle == status
     })
     .await
-}
-
-/// Contributes one process engine to a facade host, the way a plugin does.
-struct EnginePlugin(Arc<dyn lash_core::ProcessEngine>);
-
-impl crate::plugins::PluginFactory for EnginePlugin {
-    fn id(&self) -> &'static str {
-        "test-process-engine"
-    }
-
-    fn process_engine_contributions(
-        &self,
-        _context: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> std::result::Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError>
-    {
-        Ok(vec![lash_core::ProcessEngineRegistration::accepting(
-            Arc::clone(&self.0),
-        )])
-    }
-
-    fn build(
-        &self,
-        _context: &crate::plugins::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn crate::plugins::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(EngineSessionPlugin))
-    }
-}
-
-struct EngineSessionPlugin;
-
-impl crate::plugins::SessionPlugin for EngineSessionPlugin {
-    fn id(&self) -> &'static str {
-        "test-process-engine"
-    }
-
-    fn register(
-        &self,
-        _registrar: &mut crate::plugins::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        Ok(())
-    }
 }
 
 fn process_test_core(backend: lash_core::Backend) -> Result<LashCore> {

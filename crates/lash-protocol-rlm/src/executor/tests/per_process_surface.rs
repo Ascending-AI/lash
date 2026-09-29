@@ -232,6 +232,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         QueuedWorkBatchingConfig::new(1),
     )
     .with_process_engine_registration(lashlang_process_engine_registration(engine()));
+    let process_engines = runtime_host.process_engines.clone();
     table.install_worker(
         vec![
             Arc::clone(&factory) as Arc<dyn lash_core::facade_support::PluginFactory>,
@@ -248,11 +249,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         Arc::clone(&trigger_store),
         backend.process_work(),
     )
-    .with_process_artifacts(
-        Arc::clone(&env_store),
-        lash_core::ProcessEngineRegistry::new()
-            .with_registration(lashlang_process_engine_registration(engine())),
-    );
+    .with_process_artifacts(Arc::clone(&env_store), process_engines);
     let handler = table
         .open_handler(crate::testing::default_cell_scope())
         .await;

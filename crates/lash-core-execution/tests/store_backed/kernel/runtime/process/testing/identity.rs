@@ -11,41 +11,32 @@ struct PriorFamilyEnv {
 impl crate::ProcessExecutionEnvStore for PriorFamilyEnv {
     async fn publish_process_execution_env(
         &self,
-        _owner: &crate::ArtifactOwner,
+        _claim: &crate::ReferrerClaim,
         _env_ref: &ProcessExecutionEnvRef,
         _bytes: &[u8],
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), crate::ArtifactStoreError> {
         unreachable!("the prior-family entry is read-only")
     }
 
-    async fn transfer_process_execution_env(
+    async fn acquire_process_execution_env(
         &self,
-        _from: &crate::ArtifactOwner,
-        _to: &crate::ArtifactOwner,
+        _claim: &crate::ReferrerClaim,
         _env_ref: &ProcessExecutionEnvRef,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), crate::ArtifactStoreError> {
         unreachable!("the prior-family entry is read-only")
     }
 
-    async fn release_process_execution_env(
+    async fn end_process_env_referrer(
         &self,
-        _owner: &crate::ArtifactOwner,
-        _env_ref: &ProcessExecutionEnvRef,
-    ) -> Result<(), crate::PluginError> {
-        unreachable!("the prior-family entry is read-only")
-    }
-
-    async fn retire_process_execution_env_owner(
-        &self,
-        _owner: &crate::ArtifactOwner,
-    ) -> Result<(), crate::PluginError> {
+        _cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError> {
         unreachable!("the prior-family entry is read-only")
     }
 
     async fn get_process_execution_env(
         &self,
         env_ref: &ProcessExecutionEnvRef,
-    ) -> Result<Option<Vec<u8>>, crate::PluginError> {
+    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
         Ok((env_ref == &self.env_ref).then(|| self.bytes.clone()))
     }
 }
@@ -53,8 +44,7 @@ impl crate::ProcessExecutionEnvStore for PriorFamilyEnv {
 #[tokio::test]
 async fn runtime_feedback_process_environment_refuses_prior_family() {
     use crate::{
-        ArtifactOwner, ProcessExecutionEnvStore, load_process_execution_env,
-        publish_process_execution_env,
+        ProcessExecutionEnvStore, load_process_execution_env, publish_process_execution_env,
     };
     let backend = crate::support::memory_store_set().await;
     let store = backend.process_env_store();
@@ -69,6 +59,10 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
             ..Default::default()
         });
     let spec = ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy);
+    let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
+        crate::HostArtifactPin::mint(),
+    ))
+    .expect("host pin claim");
     let bytes = spec.to_store_bytes().unwrap();
     for (prefix, domain) in [
         ("process-env:v4:blake3:", "lash-process-env/v4"),
@@ -78,14 +72,12 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
             "{prefix}{}",
             crate::stable_hash::blake3_hex(domain, &bytes)
         ));
-        assert!(
+        assert!(matches!(
             store
-                .publish_process_execution_env(&ArtifactOwner::host("version-test"), &old, &bytes)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("do not match")
-        );
+                .publish_process_execution_env(&claim, &old, &bytes)
+                .await,
+            Err(crate::ArtifactStoreError::Immutable { .. })
+        ));
         // A store only accepts bytes under their own reference, so the bytes
         // an older build stored under its family's reference come from a
         // store that answers them as-is.
@@ -101,10 +93,9 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
                 .contains("recreate")
         );
     }
-    let current =
-        publish_process_execution_env(store.as_ref(), &ArtifactOwner::host("version-test"), &spec)
-            .await
-            .unwrap();
+    let current = publish_process_execution_env(store.as_ref(), &claim, &spec)
+        .await
+        .unwrap();
     assert!(current.as_str().starts_with("process-env:v6:blake3:"));
     assert_eq!(
         load_process_execution_env(store.as_ref(), &current)

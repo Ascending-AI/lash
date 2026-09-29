@@ -50,12 +50,10 @@ mod tests {
 
     /// The session path publishes nothing before the process-start effect is journaled.
     ///
-    /// This is the FIG-3028 / #1390 regression, re-pointed at the journaled publish (FIG-3050).
-    /// #1390 kept the pre-journal staging publish and taught it to tolerate the permanently retired
-    /// staging owner a replay revisits; the spec now travels in the command instead, so there is no
-    /// pre-journal artifact and no owner to revisit. The journaled publish keeps the tolerance, and
-    /// `process_start_transfers_environment_and_replays_after_staging_retirement`
-    /// (`runtime::effect::executor::process_local`) exercises it there.
+    /// This is the FIG-3028 / #1390 regression, re-pointed at the journaled
+    /// publish (FIG-3050). The spec travels in the command; no artifact is
+    /// published before that command is journaled. The process-local replay
+    /// test exercises the start referrer's later carry to the process record.
     #[tokio::test]
     async fn a_session_path_process_start_publishes_no_environment_before_its_journal() {
         let backend = crate::support::memory_store_backend().await;
@@ -90,38 +88,37 @@ mod tests {
         );
     }
 
-    /// The replay tolerance is scoped to process-start staging. A durable owner (trigger
-    /// registration publishes under the execution's own artifact owner and then persists the
-    /// reference) must still fail at publish time once that owner is fenced, rather than record a
-    /// reference to bytes the retirement reclaimed.
+    /// An execution that publishes a durable environment cannot publish again
+    /// after its referrer is fenced; the public helper preserves that refusal.
     #[tokio::test]
-    async fn a_retired_durable_owner_still_fails_the_public_env_ref_publish() {
+    async fn an_ended_execution_referrer_still_fails_the_public_env_ref_publish() {
         let backend = crate::support::memory_store_backend().await;
         let env_store = backend.process_env_store();
         let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
             .session_id("session")
             .build()
             .into_runtime();
-        let owner = crate::ArtifactOwner::Execution(crate::ExecutionScope::runtime_operation(
-            "durable-owner",
-        ));
+        let claim = context.execution_claim().expect("execution claim");
 
         context
-            .captured_process_execution_env_ref(&owner)
+            .captured_process_execution_env_ref(&claim)
             .await
             .expect("first publish under a live owner");
 
         env_store
-            .retire_process_execution_env_owner(&owner)
+            .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+                referrer: claim.referrer().clone(),
+                carries: Vec::new(),
+            })
             .await
             .expect("retire the durable owner");
 
         let error = context
-            .captured_process_execution_env_ref(&owner)
+            .captured_process_execution_env_ref(&claim)
             .await
             .expect_err("a fenced durable owner must not resolve to a reclaimed reference");
         assert!(
-            crate::artifact_owner_is_permanently_retired(&error),
+            crate::artifact_referrer_ended(&error) == Some(claim.referrer()),
             "unexpected error: {error}"
         );
     }

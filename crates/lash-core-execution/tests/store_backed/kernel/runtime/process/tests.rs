@@ -2,15 +2,13 @@ use crate::support::prelude::*;
 use std::sync::Arc;
 
 use crate::runtime::process::{
-    ArtifactOwner, ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput,
-    ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority, ProcessEventAppendRequest,
-    ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemanticsSpec, ProcessEventType,
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessInput, ProcessObserverBy,
-    ProcessProvenance, ProcessRegistration, ProcessValueSelector, ProcessWakeSpec,
-    ProjectionWatermark, artifact_owner_is_permanently_retired,
-    artifact_staging_owner_edge_is_missing,
+    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
+    ProcessEventAppendRequest, ProcessEventQueryMode, ProcessEventReadOutcome,
+    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
+    ProcessWakeSpec, ProjectionWatermark,
 };
-use crate::{Lifetime, ProcessId, ProcessRegistry, SessionId};
+use crate::{Lifetime, ProcessId, ProcessRegistry, SessionId, StoreSet as _};
 
 use crate::support::memory_store_set;
 
@@ -165,7 +163,9 @@ async fn register_after_prune(registry: &Arc<dyn ProcessRegistry>) -> (ProcessId
 
 #[tokio::test]
 async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
-    let registry = memory_registry().await;
+    let backend = memory_store_set().await;
+    let registry = backend.process_registry();
+    let cleanup_ledger = backend.artifact_cleanup();
     let registration = ProcessRegistration::new(
         ProcessInput::Engine {
             kind: "test-engine".to_string(),
@@ -194,47 +194,61 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
         .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
         .await
         .expect("prune process row and persist cleanup evidence atomically");
-    let pending = registry
-        .pending_process_artifact_cleanup()
+    let pending = cleanup_ledger
+        .claim_due(
+            i64::MAX as u64 / 2,
+            1000,
+            std::num::NonZeroUsize::new(1).expect("nonzero"),
+        )
         .await
-        .expect("read pending artifact cleanup");
+        .expect("claim pending artifact cleanup");
+    assert_eq!(pending.len(), 1);
+    let cleanup = cleanup_ledger
+        .load_cleanup(&pending[0].id)
+        .await
+        .expect("read cleanup")
+        .expect("cleanup exists");
     assert_eq!(
-        pending,
-        vec![ProcessArtifactCleanup::from_record(&registered)],
-        "row deletion must leave its exact env and engine release inputs"
+        cleanup,
+        crate::ArtifactCleanup::ended(
+            crate::ArtifactReferrer::ProcessRecord(registered.id.clone()),
+            Vec::new(),
+            None,
+        ),
+        "row deletion must leave the process referrer cleanup"
     );
     assert_eq!(
         registry
             .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None)
             .await
             .expect("compact while cleanup is pending"),
-        0,
-        "the tombstone is the durable parent of pending cleanup evidence"
+        1,
+        "the self-contained cleanup obligation survives tombstone compaction"
     );
 
-    let acknowledgement = registry
-        .complete_process_artifact_cleanup(&registered.id)
+    let acknowledgement = cleanup_ledger
+        .settle(
+            &pending[0].id,
+            &pending[0].token,
+            crate::store::ObligationSettlement::Delivered,
+            i64::MAX as u64 / 2,
+        )
         .await
         .expect("acknowledge artifact cleanup");
-    assert_eq!(
-        acknowledgement,
-        ProcessArtifactCleanupAck::Acknowledged {
-            process_id: registered.id.clone(),
-        }
-    );
+    assert_eq!(acknowledgement, crate::store::SettleOutcome::Applied);
     assert!(
-        registry
-            .pending_process_artifact_cleanup()
+        cleanup_ledger
+            .load_cleanup(&pending[0].id)
             .await
             .expect("read cleanup after acknowledgement")
-            .is_empty()
+            .is_none()
     );
     assert_eq!(
         registry
             .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None)
             .await
             .expect("compact after cleanup acknowledgement"),
-        1
+        0
     );
 }
 
@@ -425,7 +439,7 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
 /// The store's refusals carry the typed reasons, so every caller downstream of
 /// `ProcessExecutionEnvStore` classifies by code.
 #[tokio::test]
-async fn env_store_reports_typed_retirement_and_edge_refusals() {
+async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
     let backend = memory_store_set().await;
     let store = backend.process_env_store();
     let spec = ProcessExecutionEnvSpec::new(
@@ -434,51 +448,88 @@ async fn env_store_reports_typed_retirement_and_edge_refusals() {
     );
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
-    let staged = ArtifactOwner::process_start(&crate::ProcessId::fixture("env-typed-staged"));
-    let retired_destination =
-        ArtifactOwner::process_start(&crate::ProcessId::fixture("env-typed-destination"));
+    let staged = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
+    let staged_claim = crate::ReferrerClaim::unguarded(staged.clone()).expect("staged claim");
+    let retired_destination = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
 
     store
-        .retire_process_execution_env_owner(&retired_destination)
+        .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+            referrer: retired_destination.clone(),
+            carries: Vec::new(),
+        })
         .await
         .expect("retire destination owner");
     store
-        .publish_process_execution_env(&staged, &env_ref, &bytes)
+        .publish_process_execution_env(&staged_claim, &env_ref, &bytes)
         .await
         .expect("stage env");
 
-    let destination_error = store
-        .transfer_process_execution_env(&staged, &retired_destination, &env_ref)
+    store
+        .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+            referrer: staged.clone(),
+            carries: vec![crate::ArtifactCarry {
+                artifact: crate::ArtifactName {
+                    store: crate::ArtifactStoreId::ProcessEnv,
+                    artifact_ref: env_ref.as_str().to_owned(),
+                },
+                to: retired_destination.clone(),
+            }],
+        })
         .await
-        .expect_err("a retired destination owner refuses the transfer");
+        .expect("a carry into an ended destination does not revive its edge");
+    assert_eq!(
+        store
+            .get_process_execution_env(&env_ref)
+            .await
+            .expect("read env"),
+        None,
+    );
+    let destination_claim =
+        crate::ReferrerClaim::unguarded(retired_destination.clone()).expect("destination claim");
+    let destination_error = store
+        .publish_process_execution_env(&destination_claim, &env_ref, &bytes)
+        .await
+        .expect_err("the destination remains fenced");
     assert!(
-        artifact_owner_is_permanently_retired(&destination_error),
-        "destination retirement classifies as owner retirement: {destination_error}"
+        matches!(destination_error, crate::ArtifactStoreError::ReferrerEnded { ref referrer } if *referrer == retired_destination),
+        "destination fence classifies by referrer: {destination_error}"
     );
 
+    let absent = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
     let missing_edge = store
-        .transfer_process_execution_env(
-            &ArtifactOwner::process_start(&crate::ProcessId::fixture("env-typed-absent")),
-            &ArtifactOwner::process_start(&crate::ProcessId::fixture("env-typed-other")),
-            &env_ref,
-        )
+        .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+            referrer: absent,
+            carries: vec![crate::ArtifactCarry {
+                artifact: crate::ArtifactName {
+                    store: crate::ArtifactStoreId::ProcessEnv,
+                    artifact_ref: "process-env:missing".to_owned(),
+                },
+                to: crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint()),
+            }],
+        })
         .await
         .expect_err("a transfer with neither edge refuses");
     assert!(
-        artifact_staging_owner_edge_is_missing(&missing_edge),
-        "missing staging edge classifies by code: {missing_edge}"
+        matches!(
+            missing_edge,
+            crate::ArtifactStoreError::CarryArtifactMissing { .. }
+        ),
+        "missing carry bytes classify by code: {missing_edge}"
     );
 
     store
-        .retire_process_execution_env_owner(&staged)
+        .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+            referrer: staged.clone(),
+            carries: Vec::new(),
+        })
         .await
         .expect("retire staged owner");
     let retired_error = store
-        .publish_process_execution_env(&staged, &env_ref, &bytes)
+        .publish_process_execution_env(&staged_claim, &env_ref, &bytes)
         .await
         .expect_err("a retired staging owner refuses publication");
     assert!(
-        artifact_owner_is_permanently_retired(&retired_error),
-        "staged-owner retirement classifies by code: {retired_error}"
+        matches!(retired_error, crate::ArtifactStoreError::ReferrerEnded { ref referrer } if *referrer == staged),
+        "staged referrer fence classifies by code: {retired_error}"
     );
 }

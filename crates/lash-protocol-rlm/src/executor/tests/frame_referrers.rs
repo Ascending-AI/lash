@@ -3,7 +3,7 @@
 use super::lifecycle_and_diagnostics::block_on;
 use super::*;
 
-const SEED: u64 = 0x4031_f;
+const SEED: u64 = 0x0004_031f;
 
 /// One write the executor made through the module port.
 #[derive(Clone, Debug, PartialEq, Eq)]

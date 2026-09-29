@@ -5,6 +5,7 @@ use super::tests::{
 use super::*;
 use lash::ProcessId;
 use lash::SessionId;
+use lash::StoreSet as _;
 
 #[test]
 fn workbench_work_rail_exposes_process_cancellation() {
@@ -353,12 +354,10 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         SessionScope,
     };
     let registry_dir = tempfile::tempdir().expect("process registry tempdir");
-    let registry = crate::tests::standalone_process_registry(
-        registry_dir.path(),
-        Arc::new(lash::runtime::SystemClock),
-        None,
-    )
-    .await;
+    let stores = lash_sqlite_store::SqliteStoreSet::open(registry_dir.path())
+        .await
+        .expect("open a durable registry store set");
+    let registry: Arc<dyn lash::process::ProcessRegistry> = stores.process_registry();
     let process_id = "invoice-export";
     let frame_node_id =
         lash::testing::frame_node_id(&SessionId::from("session-finance"), "frame-review");
@@ -930,33 +929,46 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         compacted, 0,
         "unprojected deletions must retain their tombstones"
     );
-    let pending_cleanup = registry
-        .pending_process_artifact_cleanup()
+    let cleanup_ledger = stores.artifact_cleanup();
+    let pending_cleanup = cleanup_ledger
+        .claim_due(
+            i64::MAX as u64 / 2,
+            1_000,
+            std::num::NonZeroUsize::new(10).expect("nonzero page size"),
+        )
         .await
-        .expect("list retained process artifact cleanup");
+        .expect("claim retained process artifact cleanup");
+    let mut cleanup_process_ids = Vec::new();
+    for claim in &pending_cleanup {
+        let cleanup = cleanup_ledger
+            .load_cleanup(&claim.id)
+            .await
+            .expect("read claimed cleanup")
+            .expect("cleanup exists");
+        assert_eq!(cleanup.referrer.kind().to_string(), "process_record");
+        cleanup_process_ids.push(cleanup.referrer.canonical_id());
+    }
+    cleanup_process_ids.sort();
     assert_eq!(
-        pending_cleanup
-            .iter()
-            .map(|cleanup| cleanup.process_id.clone())
-            .collect::<Vec<_>>(),
+        cleanup_process_ids,
         {
-            let mut pruned = vec![process_id, external_id];
+            let mut pruned = vec![process_id.to_string(), external_id.to_string()];
             pruned.sort();
             pruned
         },
-        "tombstones remain protected until exact artifact cleanup is acknowledged"
+        "each pruned process owes a referrer cleanup"
     );
-    for cleanup in pending_cleanup {
-        let acknowledgement = registry
-            .complete_process_artifact_cleanup(&cleanup.process_id)
+    for claim in pending_cleanup {
+        let acknowledgement = cleanup_ledger
+            .settle(
+                &claim.id,
+                &claim.token,
+                lash::persistence::ObligationSettlement::Delivered,
+                i64::MAX as u64 / 2,
+            )
             .await
             .expect("acknowledge process artifact cleanup");
-        assert_eq!(
-            acknowledgement,
-            lash::process::ProcessArtifactCleanupAck::Acknowledged {
-                process_id: cleanup.process_id,
-            }
-        );
+        assert_eq!(acknowledgement, lash::persistence::SettleOutcome::Applied);
     }
     assert_eq!(
         registry
