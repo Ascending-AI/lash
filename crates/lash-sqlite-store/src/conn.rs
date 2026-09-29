@@ -161,7 +161,7 @@ pub struct SqliteConnectionPolicy {
 impl Default for SqliteConnectionPolicy {
     fn default() -> Self {
         Self {
-            read_connections: std::num::NonZeroUsize::new(4).expect("four is nonzero"),
+            read_connections: std::num::NonZeroUsize::new(4).unwrap_or(std::num::NonZeroUsize::MIN),
             busy_timeout: Duration::from_millis(BUSY_TIMEOUT_MS as u64),
             synchronous: SqliteSynchronous::Normal,
             wal_autocheckpoint_pages: 1_000,
