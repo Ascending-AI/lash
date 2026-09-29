@@ -409,6 +409,18 @@ commands = [
   ["cargo", "check", "-p", "lash-upgrade-harness", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
 ]
 
+# The operator binary used by Phase A must carry the same N+1 Restate epoch.
+[[lane]]
+name = "lashctl-synthetic-next"
+features = [
+  "lashctl/synthetic-next:on",
+  "lashctl/synthetic-next:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lashctl", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lashctl", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+]
+
 [[lane]]
 name = "regress-stable-features"
 features = [

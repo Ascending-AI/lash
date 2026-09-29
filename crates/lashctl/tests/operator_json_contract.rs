@@ -115,6 +115,20 @@ fn operator_json_contract() {
     assert_eq!(failed["error"]["code"], "unexpected_failure");
 }
 
+#[cfg(feature = "synthetic-next")]
+#[test]
+fn synthetic_next_version_reports_next_generation() {
+    let (code, version) = run(&["version", "--json"], None);
+    assert_eq!(code, 0);
+    assert_envelope(&version, "version", true, false);
+    assert_eq!(lash_restate::JOURNAL_LOGIC_EPOCH, 2);
+    assert_eq!(
+        version["result"]["generation"],
+        lash::formats::build_generation().as_str()
+    );
+    assert_ne!(version["result"]["generation"], "21c7af909642");
+}
+
 #[tokio::test]
 async fn operator_json_contract_postgres() {
     let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {

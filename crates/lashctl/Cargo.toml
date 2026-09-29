@@ -14,6 +14,9 @@ autotests = false
 [lints]
 workspace = true
 
+[features]
+synthetic-next = ["lash-restate/synthetic-next"]
+
 [dependencies]
 lash = { workspace = true, features = ["rlm", "restate"] }
 lash-core-execution = { workspace = true }
