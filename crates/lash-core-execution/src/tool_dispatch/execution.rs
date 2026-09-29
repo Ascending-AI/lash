@@ -3,11 +3,9 @@ use std::sync::Arc;
 use crate::plugin::ToolResultHookContext;
 use crate::{PreparedToolCall, ToolContext, ToolFailureClass, ToolManifest, ToolOutcome};
 
+use super::context::{ToolCallIds, ToolDispatchContext, attempt_done, runtime_failure};
 #[cfg(any(test, feature = "testing"))]
-use super::context::ToolDispatchOutcome;
-use super::context::{
-    ToolCallIds, ToolCallLaunch, ToolDispatchContext, attempt_done, runtime_failure,
-};
+use super::context::{ToolCallLaunch, ToolDispatchOutcome};
 use super::directives::apply_after_tool_directives;
 use super::retry::{execute_leaf_tool_attempt, normalized_outcome};
 

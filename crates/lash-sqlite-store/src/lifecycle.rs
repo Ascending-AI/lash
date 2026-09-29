@@ -11,7 +11,9 @@
 //!   move them in), not borrows of `self`.
 
 use super::*;
-use crate::location::{DatabaseLocation, DatabaseTarget, validate_file_database_path};
+#[cfg(any(test, feature = "testing"))]
+use crate::location::validate_file_database_path;
+use crate::location::{DatabaseLocation, DatabaseTarget};
 use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 

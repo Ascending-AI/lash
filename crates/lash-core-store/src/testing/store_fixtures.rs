@@ -1,3 +1,4 @@
+use crate::session_identity::SessionCreationHead;
 use crate::*;
 use std::sync::Arc;
 pub fn durable_turn_scope(
@@ -105,7 +106,7 @@ pub fn session_store_request(
             generation: crate::GenerationOptions::default(),
         }
         .into(),
-        head: crate::SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::CommittedByCreator,
     }
 }
 

@@ -287,7 +287,6 @@ fn sqlite_error(err: rusqlite::Error) -> StoreError {
 /// The `conn.call`/`conn.write` boundary returns [`tokio_rusqlite::Error`];
 /// the synchronous arm unwraps to the rusqlite error [`sqlite_error`] already
 /// reads, and anything else is the async driver failing.
-#[cfg(feature = "testing")]
 fn sqlite_async_error(error: tokio_rusqlite::Error) -> StoreError {
     match error {
         tokio_rusqlite::Error::Error(error) => sqlite_error(error),

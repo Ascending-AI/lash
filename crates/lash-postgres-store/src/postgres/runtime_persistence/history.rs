@@ -6,6 +6,7 @@ use lash_core_execution::store::{
     SessionWindowRead, UsageLedgerCursor, UsageLedgerPage, UsageLedgerRow, WindowSelector,
 };
 use std::num::NonZeroU32;
+#[cfg(any(test, feature = "testing"))]
 use std::sync::atomic::Ordering;
 
 type PgTx<'a> = sqlx::Transaction<'a, sqlx::Postgres>;
@@ -358,7 +359,7 @@ impl SessionHistoryStore for PostgresStore {
             }
             lash_core_execution::SessionGraph::default()
         };
-        let usage = load_usage_totals_tx(self, &mut tx, session_id).await?;
+        let usage = self.load_usage_totals_tx(&mut tx, session_id).await?;
         let read = SessionWindowRead::new(
             session_id.clone(),
             revision,
@@ -606,7 +607,7 @@ impl SessionHistoryStore for PostgresStore {
     ) -> Result<SessionUsageTotals, StoreError> {
         let mut tx = read_tx(self).await?;
         check_live(&mut tx, session_id).await?;
-        let totals = load_usage_totals_tx(self, &mut tx, session_id).await?;
+        let totals = self.load_usage_totals_tx(&mut tx, session_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(totals)
     }
@@ -835,13 +836,14 @@ fn aggregate_counter(
         })
 }
 
-async fn load_usage_totals_tx(
-    store: &PostgresStore,
-    tx: &mut PgTx<'_>,
-    session_id: &SessionId,
-) -> Result<SessionUsageTotals, StoreError> {
-    let rows = sqlx::query(
-        "SELECT source, model,
+impl PostgresStore {
+    async fn load_usage_totals_tx(
+        &self,
+        tx: &mut PgTx<'_>,
+        session_id: &SessionId,
+    ) -> Result<SessionUsageTotals, StoreError> {
+        let rows = sqlx::query(
+            "SELECT source, model,
            COALESCE(SUM(input_tokens), 0)::text AS input_tokens,
            COALESCE(SUM(output_tokens), 0)::text AS output_tokens,
            COALESCE(SUM(cache_read_input_tokens), 0)::text AS cache_read_input_tokens,
@@ -856,100 +858,100 @@ async fn load_usage_totals_tx(
                 OR EXISTS (SELECT 1 FROM lash_usage_delta_holes AS hole
                            WHERE hole.seq = usage.seq AND hole.session_id = $1))
          GROUP BY source, model ORDER BY source, model",
-    )
-    .bind(session_id.as_str())
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    let mut totals = SessionUsageTotals::default();
-    for row in rows {
-        let source: String = row.get("source");
-        let model: String = row.get("model");
-        let usage = lash_core_execution::TokenUsage {
-            input_tokens: aggregate_counter(&row, "input_tokens", &source, &model)?,
-            output_tokens: aggregate_counter(&row, "output_tokens", &source, &model)?,
-            cache_read_input_tokens: aggregate_counter(
-                &row,
-                "cache_read_input_tokens",
-                &source,
-                &model,
-            )?,
-            cache_write_input_tokens: aggregate_counter(
-                &row,
-                "cache_write_input_tokens",
-                &source,
-                &model,
-            )?,
-            reasoning_output_tokens: aggregate_counter(
-                &row,
-                "reasoning_output_tokens",
-                &source,
-                &model,
-            )?,
-        };
-        usage
-            .checked_total()
-            .map_err(|overflow| StoreError::TokenUsageAccountingOverflow {
-                usage_source: source.clone(),
-                model: model.clone(),
-                counter: overflow.counter(),
-            })?;
-        totals.rows.push(UsageTotalRow {
-            source,
-            model,
-            usage,
-            unreported_attempts: 0,
-            reconciled_attempts: u64_from_sql(
-                "TokenLedgerEntry",
-                "reconciled_attempts",
-                row.get("reconciled_attempts"),
-            )?,
-        });
-    }
-    let conflict: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM lash_usage_delta_holes AS hole
+        )
+        .bind(session_id.as_str())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let mut totals = SessionUsageTotals::default();
+        for row in rows {
+            let source: String = row.get("source");
+            let model: String = row.get("model");
+            let usage = lash_core_execution::TokenUsage {
+                input_tokens: aggregate_counter(&row, "input_tokens", &source, &model)?,
+                output_tokens: aggregate_counter(&row, "output_tokens", &source, &model)?,
+                cache_read_input_tokens: aggregate_counter(
+                    &row,
+                    "cache_read_input_tokens",
+                    &source,
+                    &model,
+                )?,
+                cache_write_input_tokens: aggregate_counter(
+                    &row,
+                    "cache_write_input_tokens",
+                    &source,
+                    &model,
+                )?,
+                reasoning_output_tokens: aggregate_counter(
+                    &row,
+                    "reasoning_output_tokens",
+                    &source,
+                    &model,
+                )?,
+            };
+            usage
+                .checked_total()
+                .map_err(|overflow| StoreError::TokenUsageAccountingOverflow {
+                    usage_source: source.clone(),
+                    model: model.clone(),
+                    counter: overflow.counter(),
+                })?;
+            totals.rows.push(UsageTotalRow {
+                source,
+                model,
+                usage,
+                unreported_attempts: 0,
+                reconciled_attempts: u64_from_sql(
+                    "TokenLedgerEntry",
+                    "reconciled_attempts",
+                    row.get("reconciled_attempts"),
+                )?,
+            });
+        }
+        let conflict: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM lash_usage_delta_holes AS hole
          JOIN lash_usage_deltas AS usage ON usage.seq = hole.seq
          WHERE hole.session_id = $1 AND usage.session_id = $1
          GROUP BY hole.call_id, hole.attempt_ordinal
          HAVING COUNT(DISTINCT (usage.source, usage.model, hole.generation_id)) > 1)",
-    )
-    .bind(session_id.as_str())
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    if conflict {
-        return Err(corrupt(
-            "TokenLedgerEntry",
-            "hole attribution differs across usage rows",
-        ));
-    }
-    let counts = sqlx::query(
-        "SELECT usage.source, usage.model,
+        )
+        .bind(session_id.as_str())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if conflict {
+            return Err(corrupt(
+                "TokenLedgerEntry",
+                "hole attribution differs across usage rows",
+            ));
+        }
+        let counts = sqlx::query(
+            "SELECT usage.source, usage.model,
                 COUNT(DISTINCT (hole.call_id, hole.attempt_ordinal)) AS hole_count
          FROM lash_usage_delta_holes AS hole
          JOIN lash_usage_deltas AS usage ON usage.seq = hole.seq
          WHERE hole.session_id = $1 AND usage.session_id = $1
          GROUP BY usage.source, usage.model",
-    )
-    .bind(session_id.as_str())
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    for row in counts {
-        let source: String = row.get("source");
-        let model: String = row.get("model");
-        let Some(total) = totals
-            .rows
-            .iter_mut()
-            .find(|total| total.source == source && total.model == model)
-        else {
-            return Err(corrupt("TokenLedgerEntry", "hole has no usage aggregate"));
-        };
-        total.unreported_attempts =
-            u64_from_sql("TokenLedgerEntry", "hole_count", row.get("hole_count"))?;
-    }
-    let outstanding = sqlx::query(
-        "SELECT DISTINCT ON (hole.call_id, hole.attempt_ordinal)
+        )
+        .bind(session_id.as_str())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        for row in counts {
+            let source: String = row.get("source");
+            let model: String = row.get("model");
+            let Some(total) = totals
+                .rows
+                .iter_mut()
+                .find(|total| total.source == source && total.model == model)
+            else {
+                return Err(corrupt("TokenLedgerEntry", "hole has no usage aggregate"));
+            };
+            total.unreported_attempts =
+                u64_from_sql("TokenLedgerEntry", "hole_count", row.get("hole_count"))?;
+        }
+        let outstanding = sqlx::query(
+            "SELECT DISTINCT ON (hole.call_id, hole.attempt_ordinal)
                 hole.call_id, hole.attempt_ordinal, usage.source, usage.model, hole.generation_id
          FROM lash_usage_delta_holes AS hole
          JOIN lash_usage_deltas AS usage ON usage.seq = hole.seq
@@ -959,22 +961,23 @@ async fn load_usage_totals_tx(
                AND correction.reconciled_call_id = hole.call_id
                AND correction.reconciled_attempt_ordinal = hole.attempt_ordinal)
          ORDER BY hole.call_id, hole.attempt_ordinal, hole.seq",
-    )
-    .bind(session_id.as_str())
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    for row in outstanding {
-        totals.outstanding.push(UnreportedUsageAttempt {
-            call_id: row.get("call_id"),
-            attempt_ordinal: u32::try_from(row.get::<i64, _>("attempt_ordinal"))
-                .map_err(|_| corrupt("TokenLedgerEntry", "invalid attempt ordinal"))?,
-            source: row.get("source"),
-            model: row.get("model"),
-            generation_id: row.get("generation_id"),
-        });
-        #[cfg(any(test, feature = "testing"))]
-        store.decoded_usage_holes.fetch_add(1, Ordering::Relaxed);
+        )
+        .bind(session_id.as_str())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        for row in outstanding {
+            totals.outstanding.push(UnreportedUsageAttempt {
+                call_id: row.get("call_id"),
+                attempt_ordinal: u32::try_from(row.get::<i64, _>("attempt_ordinal"))
+                    .map_err(|_| corrupt("TokenLedgerEntry", "invalid attempt ordinal"))?,
+                source: row.get("source"),
+                model: row.get("model"),
+                generation_id: row.get("generation_id"),
+            });
+            #[cfg(any(test, feature = "testing"))]
+            self.decoded_usage_holes.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(totals)
     }
-    Ok(totals)
 }

@@ -311,6 +311,7 @@ pub(crate) fn read_recorded(
     Ok(fleet)
 }
 
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn recorded_or_current(conn: &Connection) -> rusqlite::Result<FleetFormat> {
     read_recorded(conn, FleetFormat::writable())
 }
