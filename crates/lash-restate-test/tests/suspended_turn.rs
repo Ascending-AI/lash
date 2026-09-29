@@ -534,10 +534,12 @@ async fn a_tool_turn_finishes_when_every_await_suspends_its_handler() {
     assert_eq!(answer, "done");
 }
 
-/// The same suspension, with the tool reached through `batch`: the batch
-/// child, running with no live turn, has no stream to send its nested call's
-/// events to. They are recorded on its settlement and reach the turn when it
-/// incorporates the child, never dropped.
+/// The same suspension, with the tool reached through `batch`: the member's
+/// child, running with no live turn, has no stream to send its events to.
+/// They are recorded on its settlement and reach the turn when it
+/// incorporates the child, never dropped. A member is one of the step's flat
+/// slots, `{wrapper}/batch/{i}` (ADR 0116 §2), so its completion is a slot's,
+/// exactly as a live turn reports it, with no batch parent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_batch_child_with_no_live_turn_records_its_nested_events_for_the_turn() {
     let turn = start_turn(ServerConfig::default().time(TimeMode::Manual), false, true).await;
@@ -560,21 +562,33 @@ async fn a_batch_child_with_no_live_turn_records_its_nested_events_for_the_turn(
     let (answer, activities) = turn.finish_with_activities(Duration::from_secs(20)).await;
     ticker.abort();
     assert_eq!(answer, "done");
-    let nested: Vec<_> = activities
+    let completed: Vec<_> = activities
         .iter()
         .filter_map(|activity| match &activity.event {
             lash::TurnEvent::ToolCallCompleted {
+                call_id,
                 name,
-                parent_call_id: Some(parent),
+                output,
+                parent_call_id,
                 ..
-            } => Some((name.clone(), parent.clone())),
+            } => Some((
+                name.clone(),
+                call_id.clone(),
+                parent_call_id.clone(),
+                output.is_success(),
+            )),
             _ => None,
         })
         .collect();
     assert_eq!(
-        nested,
-        vec![(TOOL.to_owned(), "call-1".to_owned())],
-        "the batch's nested call completed on the turn's stream, under the batch"
+        completed,
+        vec![(
+            TOOL.to_owned(),
+            Some("call-1/batch/0".to_owned()),
+            None,
+            true
+        )],
+        "the batch's member completed on the turn's stream, as the step's slot"
     );
 }
 
