@@ -18,7 +18,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 141
+version 142
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null

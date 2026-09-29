@@ -1023,7 +1023,10 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// session; the queued-run ledger is gone and a queued-work head is admitted
 /// as an ordinary root (FIG-3927). A database written before these changes
 /// has the old shape; recreate it.
-pub(crate) const SCHEMA_VERSION: i32 = 99;
+/// Bumped to 100 for FIG-4057: tool-intent submissions admit process-definition
+/// and trigger registration. A pre-100 catalog's check constraint rejects both
+/// kinds, so the durable-core database must be recreated before opening.
+pub(crate) const SCHEMA_VERSION: i32 = 100;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -1317,7 +1320,7 @@ CREATE TABLE IF NOT EXISTS tool_intent_submissions (
     kind                TEXT NOT NULL,
     payload_hash        TEXT NOT NULL,
     submission_json     TEXT NOT NULL,
-    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger'))
+    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger', 'register_process_definition', 'register_trigger'))
 );
 CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
     ON tool_intent_submissions(session_id, execution_scope_id, intent_index);
