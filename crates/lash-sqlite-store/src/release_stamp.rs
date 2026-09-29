@@ -1,6 +1,6 @@
 //! Which lash release wrote this SQLite deployment.
 //!
-//! The three `PRAGMA user_version` integers say what *this* build requires. They
+//! The three `lash_compat` rows say what *this* build requires. They
 //! never say which build produced the rows, so the only way a host could learn
 //! that was to upgrade crates, open the store, and read the refusal — which
 //! names schema integers, not releases. The stamp closes that gap with one row

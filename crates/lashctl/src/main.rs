@@ -61,10 +61,7 @@ impl CliError {
 
     fn store(error: StoreError) -> Self {
         let exit = match &error {
-            StoreError::Incompatible { .. }
-            | StoreError::SchemaVersionOutOfRange { .. }
-            | StoreError::FleetFormatOutsideWritableRange { .. }
-            | StoreError::WriterFenced { .. } => Exit::Incompatible,
+            StoreError::Incompatible { .. } | StoreError::WriterFenced { .. } => Exit::Incompatible,
             _ => Exit::Unexpected,
         };
         let refusal = match &error {
@@ -280,15 +277,17 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             let status = status?;
             let outcome = status.outcome();
             let databases = status.databases.iter().map(|database| {
-                let (verdict, found, reason) = match &database.verdict {
-                    StoreSchemaVerdict::Matches => ("matches", None, None),
-                    StoreSchemaVerdict::Migratable { found } => ("migratable", Some(*found), None),
-                    StoreSchemaVerdict::Mismatch { found } => ("mismatch", Some(*found), None),
-                    StoreSchemaVerdict::Absent => ("absent", None, None),
-                    StoreSchemaVerdict::Unreadable { reason } => ("unreadable", None, Some(reason.as_str())),
-                    _ => ("unknown", None, None),
+                let (verdict, found, refusal, reason) = match &database.verdict {
+                    StoreSchemaVerdict::Matches => ("matches", None, None, None),
+                    StoreSchemaVerdict::Expanded { found } => ("expanded", Some(*found), None, None),
+                    StoreSchemaVerdict::Refused { refusal } => ("refused", None, Some(refusal), None),
+                    StoreSchemaVerdict::Migratable { found } => ("migratable", Some(*found), None, None),
+                    StoreSchemaVerdict::Mismatch { found } => ("mismatch", Some(*found), None, None),
+                    StoreSchemaVerdict::Absent => ("absent", None, None, None),
+                    StoreSchemaVerdict::Unreadable { reason } => ("unreadable", None, None, Some(reason.as_str())),
+                    _ => ("unknown", None, None, None),
                 };
-                json!({"name":database.name,"location":database.location,"expected":database.expected,"verdict":verdict,"found":found,"reason":reason})
+                json!({"name":database.name,"location":database.location,"expected":database.expected,"min_reader":database.min_reader,"verdict":verdict,"found":found,"refusal":refusal,"reason":reason})
             }).collect::<Vec<_>>();
             let release = match &status.release {
                 StoreReleaseState::Stamped(stamp) => {

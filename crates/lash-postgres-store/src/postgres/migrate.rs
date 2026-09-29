@@ -394,7 +394,14 @@ async fn read_state(
         Vec::new()
     };
     let writing_release = crate::release_stamp::read_release_in_tx(tx).await;
-    let ddl_version = applied.iter().map(|step| step.to_version).max();
+    let ddl_version = if applied.is_empty() && ledger_present {
+        // Hosts may install the published schema.sql directly. Its 1.0
+        // compatibility stamp is not the pre-1.0 DDL migration counter.
+        let report = verify_schema_shape(&mut *tx).await?;
+        report.is_conformant().then_some(SCHEMA_VERSION)
+    } else {
+        applied.iter().map(|step| step.to_version).max()
+    };
     Ok(MigrationState {
         installation: Some(installation),
         ddl_version,

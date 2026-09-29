@@ -94,11 +94,17 @@ pub struct SchemaDatabaseReport {
     pub location: String,
     /// The version this build requires.
     pub expected: i64,
+    /// The recorded reader floor, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_reader: Option<i64>,
     /// `matches`, `mismatch`, `absent` or `unreadable`.
     pub verdict: &'static str,
     /// The version stamped in the store, when one was read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub found: Option<i64>,
+    /// A typed admission or shape refusal, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<lash_core::compat::CompatRefusal>,
     /// The backend's diagnostic, when the read could not decide.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,

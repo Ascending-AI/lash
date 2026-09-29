@@ -18,11 +18,9 @@
 //! tables are not is rejected at open with a per-object diff rather than
 //! failing at the first query — or silently losing a guard, which is what a
 //! dropped unique index or a dropped cascade does. [`SchemaCheck`] controls
-//! whether a structural mismatch is fatal. The component-version stamp is a
-//! separate, unconditional gate: open admits a stamp inside the supported
-//! range [min supported, latest] and refuses anything outside it with a typed
-//! [`StoreError::SchemaVersionOutOfRange`] naming the found version and the
-//! range — no [`SchemaCheck`] relaxes it (FIG-3797).
+//! whether a structural mismatch is fatal. The compatibility row is a
+//! separate, unconditional gate: open admits its version and reader floor
+//! through the component descriptor and returns a typed refusal when needed.
 //! [`PostgresStorage::verify_schema_for`] exposes the same check against a bare
 //! pool so a host can gate its own migration CI on it. See ADR 0052.
 //!
@@ -1027,22 +1025,14 @@ impl PostgresStorage {
         TEARDOWN_DDL
     }
 
-    /// The component schema version this build implements, as stamped in
-    /// `lash_schema_versions` — the newest version the supported range admits.
-    ///
-    /// Open refuses a stamp outside
-    /// `[Self::min_supported_schema_version, Self::schema_version]` with a
-    /// typed [`StoreError::SchemaVersionOutOfRange`], whichever direction it
-    /// differs in (FIG-3797).
+    /// The pre-1.0 DDL revision used by the migration ledger and shape artifact.
+    /// Compatibility admission reads the version and floor in
+    /// `lash_schema_versions` through the PostgreSQL descriptor.
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION
     }
 
-    /// The oldest component schema version this build admits at open
-    /// (FIG-3797).
-    ///
-    /// For 1.0 the supported range is the single current version; a
-    /// compatibility release widens the floor when it declares one.
+    /// The pre-1.0 DDL planning floor, retained for the migration ledger.
     pub fn min_supported_schema_version() -> i32 {
         MIN_SUPPORTED_SCHEMA_VERSION
     }

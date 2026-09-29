@@ -173,11 +173,10 @@ use pending_turn_inputs::*;
 use queued_work::*;
 use schema::{apply_pragmas, ensure_versioned_schema};
 
-/// The SQLite durable-core session schema version stamped in `PRAGMA user_version`.
+/// The pre-1.0 durable-core DDL revision retained for schema artifacts.
 ///
-/// Hosts can use this constant for compatibility stamps. It moves whenever the
-/// SQLite session-store format changes; it does not cover the process, trigger,
-/// or effect schemas.
+/// Compatibility admission uses [`SqliteDatabase::expected_version`] and the
+/// `lash_compat` row in each physical database.
 pub const SESSION_SCHEMA_VERSION: i32 = schema::SCHEMA_VERSION;
 
 pub use process_definitions::SqliteProcessDefinitionRegistry;

@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 142.
+-- lash-postgres-store schema, DDL revision 142; compatibility stamp 1/1.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns

@@ -58,6 +58,7 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     let root = temp_root();
     let path = root.path().join("durable-core.db");
     Store::open(&path).await.expect("provision the database");
+    let expected = SqliteDatabase::DurableCore.expected_version();
     // Component 45 introduced BLAKE3 identities, 46 the durable vocabulary
     // CHECKs, 47 the all-or-none session lease identity, 48 the queued-work
     // vocabulary and claim correlation, 49 the pending-input checks and
@@ -86,7 +87,12 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     stamp_compat(&path, 43, 43);
 
     let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
-    assert_eq!(found.verdict, StoreSchemaVerdict::Mismatch { found: 43 });
+    assert!(matches!(
+        found.verdict,
+        StoreSchemaVerdict::Refused {
+            refusal: lash_core_execution::compat::CompatRefusal::ReaderFloorAbove { found: 43, .. }
+        }
+    ));
     assert_eq!(found.expected, expected);
     assert!(
         found.verdict.refuses_open(),
@@ -129,7 +135,12 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     )
     .await
     .expect("preflight answers while the write lock is held");
-    assert_eq!(answered.verdict, StoreSchemaVerdict::Mismatch { found: 2 });
+    assert!(matches!(
+        answered.verdict,
+        StoreSchemaVerdict::Refused {
+            refusal: lash_core_execution::compat::CompatRefusal::ReaderFloorAbove { found: 2, .. }
+        }
+    ));
 
     holder.execute_batch("ROLLBACK").expect("release the lock");
 }

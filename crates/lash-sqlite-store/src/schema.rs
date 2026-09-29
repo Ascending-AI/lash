@@ -1605,10 +1605,9 @@ pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<(
     .await
 }
 
-/// Apply `schema` if the database is already at `schema_version`, initialise it
-/// (under one transaction stamping `user_version`) if the database is empty, or
-/// reject the open if the on-disk `user_version` is anything else. Runs entirely
-/// on the connection thread so the version check and DDL share one connection.
+/// Admit the compatibility row, provision an empty database and its stamp, or
+/// refuse a populated database that cannot be read by this build. Runs on the
+/// connection thread so admission and DDL share one transaction.
 pub(crate) async fn ensure_versioned_schema(
     conn: &SqliteConnection,
     database: SqliteDatabase,

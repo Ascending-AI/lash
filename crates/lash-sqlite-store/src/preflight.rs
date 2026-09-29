@@ -3,7 +3,7 @@
 //! PostgreSQL has had [`verify_schema_for`] since ADR 0052: a check that reads
 //! a database too broken to open, which is most of the ones worth reading.
 //! SQLite had no equivalent, and the gap was not cosmetic. Its open path takes
-//! `BEGIN IMMEDIATE` *before* reading `PRAGMA user_version`
+//! `BEGIN IMMEDIATE` *before* reading `lash_compat`
 //! (`schema::prepare_versioned_schema`) — deliberately, because a
 //! read-then-upgrade races concurrent first-openers into a lock-upgrade
 //! deadlock — and it opens with `SQLITE_OPEN_CREATE`, so an open that is going
@@ -55,19 +55,23 @@ use crate::schema::SqliteDatabase;
 /// be read yields [`StoreSchemaVerdict::Unreadable`] carrying SQLite's own
 /// words, because an unreadable database is undecided rather than refused.
 pub async fn verify_schema_at(path: &Path, database: SqliteDatabase) -> StoreSchemaDatabase {
-    let verdict = read_compat_verdict(path, database).await;
+    let (verdict, min_reader) = read_compat_verdict(path, database).await;
     StoreSchemaDatabase {
         name: database.name().to_string(),
         location: path.display().to_string(),
         expected: database.expected_version(),
+        min_reader,
         verdict,
     }
 }
 
 /// Inspect the authoritative compatibility row without changing the file.
-async fn read_compat_verdict(path: &Path, database: SqliteDatabase) -> StoreSchemaVerdict {
+async fn read_compat_verdict(
+    path: &Path,
+    database: SqliteDatabase,
+) -> (StoreSchemaVerdict, Option<i64>) {
     if !path.exists() {
-        return StoreSchemaVerdict::Absent;
+        return (StoreSchemaVerdict::Absent, None);
     }
     // A failed read-only open is an undecided database, never a reason to reach for a
     // connection that can write.
@@ -78,9 +82,12 @@ async fn read_compat_verdict(path: &Path, database: SqliteDatabase) -> StoreSche
     {
         Ok(conn) => conn,
         Err(error) => {
-            return StoreSchemaVerdict::Unreadable {
-                reason: error.to_string(),
-            };
+            return (
+                StoreSchemaVerdict::Unreadable {
+                    reason: error.to_string(),
+                },
+                None,
+            );
         }
     };
     let probe = conn
@@ -89,28 +96,81 @@ async fn read_compat_verdict(path: &Path, database: SqliteDatabase) -> StoreSche
             // statement that would write fails here, including the implicit
             // ones a pragma could trigger.
             c.pragma_update(None, "query_only", true)?;
-            let Some((stamp, _)) = crate::compat::read(c, database)? else {
+            let Some((stamp, fleet)) = crate::compat::read(c, database)? else {
                 return if crate::schema::has_user_schema_objects(c)? {
-                    Ok(StoreSchemaVerdict::Mismatch { found: 0 })
+                    Ok((
+                        StoreSchemaVerdict::Refused {
+                            refusal: lash_core_execution::compat::CompatRefusal::Unstamped {
+                                component: database.component().as_str().to_owned(),
+                            },
+                        },
+                        None,
+                    ))
                 } else {
-                    Ok(StoreSchemaVerdict::Absent)
+                    Ok((StoreSchemaVerdict::Absent, None))
                 };
             };
             let descriptor = lash_core_execution::compat::descriptor(database.component())
                 .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
-            match lash_core_execution::compat::admit(
+            let floor = Some(i64::from(stamp.min_reader));
+            let admission = match lash_core_execution::compat::admit(
                 descriptor,
                 lash_core_execution::compat::StampRead::Present(stamp),
             ) {
-                Ok(_) => Ok(StoreSchemaVerdict::Matches),
-                Err(_) => Ok(StoreSchemaVerdict::Mismatch {
-                    found: i64::from(stamp.version),
-                }),
+                Ok(admission) => admission,
+                Err(refusal) => return Ok((StoreSchemaVerdict::Refused { refusal }, floor)),
+            };
+            if let Err(error) = lash_core_execution::FleetFormat::admit(
+                fleet,
+                lash_core_execution::FleetFormat::writable(),
+            ) {
+                return Ok((
+                    match error {
+                        StoreError::Incompatible { refusal } => {
+                            StoreSchemaVerdict::Refused { refusal }
+                        }
+                        error => StoreSchemaVerdict::Unreadable {
+                            reason: error.to_string(),
+                        },
+                    },
+                    floor,
+                ));
             }
+            let verdict = match admission {
+                lash_core_execution::compat::CompatAdmission::Expanded { .. } => {
+                    match crate::compat::verify_tolerant(c, database) {
+                        Ok(()) => StoreSchemaVerdict::Expanded {
+                            found: i64::from(stamp.version),
+                        },
+                        Err(rusqlite::Error::ToSqlConversionFailure(source)) => {
+                            match source.downcast_ref::<StoreError>() {
+                                Some(StoreError::Incompatible { refusal }) => {
+                                    StoreSchemaVerdict::Refused {
+                                        refusal: refusal.clone(),
+                                    }
+                                }
+                                _ => StoreSchemaVerdict::Unreadable {
+                                    reason: source.to_string(),
+                                },
+                            }
+                        }
+                        Err(error) => StoreSchemaVerdict::Unreadable {
+                            reason: error.to_string(),
+                        },
+                    }
+                }
+                _ => StoreSchemaVerdict::Matches,
+            };
+            Ok((verdict, floor))
         })
         .await;
-    probe.unwrap_or_else(|error| StoreSchemaVerdict::Unreadable {
-        reason: error.to_string(),
+    probe.unwrap_or_else(|error| {
+        (
+            StoreSchemaVerdict::Unreadable {
+                reason: error.to_string(),
+            },
+            None,
+        )
     })
 }
 

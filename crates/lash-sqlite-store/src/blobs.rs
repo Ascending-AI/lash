@@ -166,7 +166,7 @@ impl Store {
         profile: BuiltinBlobProfile,
         blob_ref: &BlobRef,
     ) -> Result<(), StoreError> {
-        let fleet = crate::fleet_format::recorded_or_current(conn).map_err(sqlite_error)?;
+        let fleet = crate::compat::recorded_or_current(conn).map_err(sqlite_error)?;
         let version = fleet.writer_version(lash_core_execution::surface_format!(
             SQLITE_BLOB_ENVELOPE_VERSION
         ));

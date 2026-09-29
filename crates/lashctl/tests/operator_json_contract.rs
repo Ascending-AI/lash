@@ -187,6 +187,9 @@ async fn operator_json_contract_postgres() {
         &preflight["result"],
         &["databases", "fleet_format", "outcome", "release"],
     );
+    assert_eq!(preflight["result"]["databases"][0]["expected"], 1);
+    assert_eq!(preflight["result"]["databases"][0]["min_reader"], 1);
+    assert_eq!(preflight["result"]["databases"][0]["verdict"], "matches");
 
     let generation = "0123456789ab";
     let (code, before) = run(&["drain-status", generation, "--json"], Some(&scratch_url));
@@ -234,14 +237,36 @@ async fn operator_json_contract_postgres() {
     let mut scratch = PgConnection::connect(&scratch_url)
         .await
         .expect("connect scratch catalog");
-    sqlx::query("UPDATE lash_schema_versions SET version = version + 1 WHERE component = 'lash-postgres-store'")
-        .execute(&mut scratch).await.expect("advance stamp beyond this build");
+    sqlx::query(
+        "UPDATE lash_schema_versions SET version = 2 WHERE component = 'lash-postgres-store'",
+    )
+    .execute(&mut scratch)
+    .await
+    .expect("expand stamp under the old floor");
+    let (code, expanded) = run(&["preflight", "--json"], Some(&scratch_url));
+    assert_eq!(code, 0);
+    assert_eq!(expanded["result"]["databases"][0]["verdict"], "expanded");
+    assert_eq!(expanded["result"]["databases"][0]["found"], 2);
+    assert_eq!(expanded["result"]["databases"][0]["min_reader"], 1);
+
+    sqlx::query(
+        "UPDATE lash_schema_versions SET min_reader = 2 WHERE component = 'lash-postgres-store'",
+    )
+    .execute(&mut scratch)
+    .await
+    .expect("raise the reader floor");
     scratch.close().await.expect("close scratch catalog");
     let (code, incompatible) = run(&["preflight", "--json"], Some(&scratch_url));
     assert_eq!(code, 4);
     assert_envelope(&incompatible, "preflight", true, true);
     assert_eq!(incompatible["error"]["code"], "incompatible_store");
     assert_eq!(incompatible["result"]["outcome"], "incompatible_store");
+    assert_eq!(incompatible["result"]["databases"][0]["verdict"], "refused");
+    assert_eq!(incompatible["result"]["databases"][0]["min_reader"], 2);
+    assert_eq!(
+        incompatible["result"]["databases"][0]["refusal"]["refusal"],
+        "reader_floor_above"
+    );
 
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&mut admin)
