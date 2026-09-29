@@ -13,7 +13,7 @@ stop that host before replacing its binary. Do not treat three separate files
 as one atomic transaction. A partially advanced set must be completed forward
 by a build with the needed migrations; an older build refuses it. The current
 `lashctl` store commands require `LASH_POSTGRES_DATABASE_URL` and do not migrate
-SQLite. SQLite migrate-on-open after a backup arrives **after 1.0**.
+SQLite. SQLite migrates on open after a backup.
 
 **PostgreSQL with Restate workers.** Workers share one PostgreSQL store and a
 Restate namespace. Run `lashctl` with `LASH_POSTGRES_DATABASE_URL` pointing at
@@ -33,7 +33,9 @@ lashctl version --json
 The JSON envelope has `schema_version`, `command`, `result` and `error`.
 `result` reports the release, drain generation `G`, fleet epoch `F`'s writable
 range, each component's `reads` and `writes` ranges, and the remote and Restate
-wire ranges. A component is the PostgreSQL schema, one of the three SQLite
+wire ranges. This `G` describes the CLI build; read each serving node's
+generation from its deployment before a drain. A component is the PostgreSQL
+schema, one of the three SQLite
 databases, or a Restate object family. Each store stamp has a version and a
 `min_reader` floor. An older build admits a safely expanded component while
 the floor still allows it; an unsafe schema addition is refused. `F` selects

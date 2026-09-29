@@ -2788,6 +2788,9 @@ jobs:
       - name: Check example facade imports
         run: python3 scripts/check_facade_only_examples.py
 
+      - name: Check operator guide command coverage
+        run: python3 scripts/check_operator_guide_commands.py
+
       - name: Check diff hygiene
         run: bash scripts/ci/check-diff-hygiene.sh
 
