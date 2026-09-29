@@ -415,8 +415,9 @@ fn an_existing_start_answered_to_another_originator_is_caught() {
 }
 
 /// FIG-4110 F8: a node placed in a frame that is not its nearest open, a
-/// frame opened twice, a frame opened from a frame that was not current, and
-/// a frame named with no open each break the frame chain.
+/// frame opened twice, a frame opened from a frame that was not current, a
+/// frame named with no open, and a parent cycle each break the frame chain,
+/// on the active path or off it (FIG-4134).
 #[test]
 fn a_broken_frame_chain_breaks_frame_lineage() {
     let clean = clean();
@@ -491,6 +492,34 @@ fn a_broken_frame_chain_breaks_frame_lineage() {
     // A frame named with no open.
     assert_caught(
         &extend(vec![node("orphan", Some(&leaf), "no-such-frame", false)]),
+        "frames-form-one-chain",
+    );
+    // Off the active path: a branch the head never reaches is checked too.
+    let beside = |nodes: Vec<GraphNodeRow>| {
+        let mut history = clean.clone();
+        history.stores[0].graph_nodes.extend(nodes);
+        history
+    };
+    let kept = beside(vec![
+        node("side-f", Some(&leaf), "side-f", true),
+        node("side-n", Some("side-f"), "side-f", false),
+    ]);
+    let report = check_with(&kept, &[checker("frames-form-one-chain")]);
+    assert!(report.passed(), "{}", report.failure());
+    // An off-path node placed in the frame its branch left.
+    assert_caught(
+        &beside(vec![
+            node("side-f", Some(&leaf), "side-f", true),
+            node("side-n", Some("side-f"), &first.node_id, false),
+        ]),
+        "frames-form-one-chain",
+    );
+    // An off-path parent cycle through a frame open.
+    assert_caught(
+        &beside(vec![
+            node("cycle-f", Some("cycle-n"), "cycle-f", true),
+            node("cycle-n", Some("cycle-f"), "cycle-f", false),
+        ]),
         "frames-form-one-chain",
     );
 }

@@ -30,7 +30,10 @@ impl LashRuntime {
     /// Record the base the compaction running under `controller` summarizes,
     /// as one recorded step, and adopt it as the resident session.
     ///
-    /// The first execution records the resident head and frame. A replay
+    /// The first execution records the resident head and frame, and the drive
+    /// fence current when it starts, which the compaction's frame commit
+    /// presents as a writer beside the drive (FIG-4134). A replay presents
+    /// the recorded fence, so an admission sealed since refuses it. A replay
     /// adopts the recorded head through
     /// [`load_session_at`](crate::store::SessionCommitStore::load_session_at)
     /// when the live head has moved since, and refuses a base whose frame the
@@ -49,6 +52,14 @@ impl LashRuntime {
             RuntimeAttribution::for_session(session_id.clone()),
             format!("compaction-base:{ordinal}"),
         );
+        // Read on every execution, recorded by the first: a replay adopts the
+        // journaled fence and never the one read here.
+        let drive_fence = self.beside_drive_fence().await.map_err(|error| {
+            RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                format!("the compaction's drive fence could not be read: {error}"),
+            )
+        })?;
         let runner = RecordCompactionBaseRunner {
             base: CompactionBase {
                 head: crate::store::SessionHeadRef {
@@ -58,6 +69,7 @@ impl LashRuntime {
                     checkpoint: self.state.checkpoint_ref.clone(),
                 },
                 frame: self.state.current_frame_node_id.clone(),
+                drive_fence,
             },
         };
         let base = controller

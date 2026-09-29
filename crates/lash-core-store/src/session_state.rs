@@ -1148,6 +1148,12 @@ impl RuntimeSessionState {
 
     /// Ensures agent frame initialized with clock exists for protocol and process-engine
     /// implementors while materializing or restoring protocol session state.
+    ///
+    /// The bootstrap exception to the one frame-open primitive
+    /// ([`open_agent_frame_in_state_with_clock`], FIG-4110 F1): this writes a
+    /// session's first `FrameOpen` directly, before any frame exists to leave,
+    /// so the open has no seed to carry artifacts from, no execution state to
+    /// reset and no live interpreter to restart (FIG-4134).
     #[expect(
         clippy::expect_used,
         reason = "a frame node identity and the initial frame material are non-empty"
@@ -1286,6 +1292,11 @@ impl RuntimeSessionState {
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
+    /// Opens a new session's initial frame under `assignment`, over a graph
+    /// session creation has just emptied. Like
+    /// [`Self::ensure_agent_frame_initialized_with_clock`], a bootstrap
+    /// exception to the one frame-open primitive (FIG-4110 F1): there is no
+    /// frame to leave and no execution state to reset (FIG-4134).
     #[expect(
         clippy::expect_used,
         reason = "the initial frame material is a non-empty literal"

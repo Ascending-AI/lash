@@ -1,7 +1,7 @@
 //! A new frame starts without a reload (ADR 0112 §14.6): explicit compaction
-//! (6a) and `continue_as` (6c) each commit a frame switch that leaves only the
-//! new frame resident, adopted from the commit itself rather than read back
-//! from the store.
+//! (6a), a context-pressure frame (6b, FIG-4134) and `continue_as` (6c) each
+//! commit a frame switch that leaves only the new frame resident, adopted
+//! from the commit itself rather than read back from the store.
 
 use super::*;
 use lash_core::testing::TestTurnDrive as _;
@@ -219,6 +219,97 @@ pub(super) async fn explicit_compaction_starts_a_frame_without_a_reload() {
         .await
         .expect("close the compaction's handler");
     assert!(compacted, "the compactor answered a summary");
+
+    assert_new_frame_resident_without_reload(&runtime, &store, &old_frame, window_loads_before)
+        .await;
+}
+
+/// Opens one compaction frame on the turn after the test arms it.
+struct ArmedPressure {
+    armed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::ContextPressureHook for ArmedPressure {
+    fn id(&self) -> &'static str {
+        "test.frame_residency_pressure"
+    }
+
+    async fn decide(
+        &self,
+        _ctx: &lash_core::plugin::ContextPressureContext<'_>,
+    ) -> Result<lash_core::plugin::ContextPressureDecision, lash_core::plugin::ContextError> {
+        if !self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            return Ok(lash_core::plugin::ContextPressureDecision::Continue);
+        }
+        Ok(lash_core::plugin::ContextPressureDecision::OpenFrame {
+            records: Vec::new(),
+            task: "residency pressure compaction".to_string(),
+            seed: vec![lash_core::SessionAppendNode::message(
+                lash_core::PluginMessage::text(
+                    lash_core::MessageRole::Assistant,
+                    "Pressure summary: the earlier frame",
+                ),
+            )],
+        })
+    }
+}
+
+/// 14.6b (FIG-4134, F7): a context-pressure frame, committed on its own
+/// before its turn's model call, leaves only the new frame resident after
+/// the turn commits, without a reload: the old frame is retired, and the
+/// resident graph is the durable window of the new frame.
+#[tokio::test(flavor = "multi_thread")]
+pub(super) async fn a_pressure_frame_starts_without_a_reload() {
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
+    let armed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![Arc::new(StaticPluginFactory::new(
+            "frame-residency-pressure",
+            lash_core::facade_support::PluginSpec::new().with_context_pressure_hook(
+                100,
+                Arc::new(ArmedPressure {
+                    armed: Arc::clone(&armed),
+                }),
+            ),
+        ))],
+        Arc::new(EmptyTools),
+        mock_provider(vec![text_call("first answer"), text_call("second answer")]),
+        test_host_config(&backend),
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
+    )
+    .await;
+    drive_text_turn(
+        &mut runtime,
+        &double,
+        "frame-residency-first",
+        "first request",
+    )
+    .await;
+    let old_frame = runtime
+        .state()
+        .current_frame_node_id
+        .clone()
+        .expect("the first frame");
+    let probe = store.load_session_count();
+    durable_window(store.clone(), SESSION).await;
+    assert_eq!(
+        store.load_session_count(),
+        probe + 1,
+        "the counter counts window reads on the runtime's store"
+    );
+    let window_loads_before = store.load_session_count();
+
+    armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    drive_text_turn(
+        &mut runtime,
+        &double,
+        "frame-residency-pressure",
+        "second request",
+    )
+    .await;
 
     assert_new_frame_resident_without_reload(&runtime, &store, &old_frame, window_loads_before)
         .await;

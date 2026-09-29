@@ -656,7 +656,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             omitted: None,
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Clear {
-                carries: Vec::new(),
+                carries: SeedCarries::none(),
             },
             agent_frame_switch_materializes: true,
             store: Some(&store),
@@ -1427,12 +1427,12 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
 
     // Nothing is committed yet, so an open ends no frame.
     assert_eq!(
-        committed_frame_transition(&state, None, Vec::new(), &committing, &[]).unwrap(),
+        committed_frame_transition(&state, None, SeedCarries::none(), &committing, &[]).unwrap(),
         None
     );
     state.mark_node_ids_persisted([crate::NodeId::new(committed.as_str().to_string())]);
     assert_eq!(
-        committed_frame_transition(&state, None, Vec::new(), &committing, &[]).unwrap(),
+        committed_frame_transition(&state, None, SeedCarries::none(), &committing, &[]).unwrap(),
         None,
         "a commit that opens no frame ends none"
     );
@@ -1470,7 +1470,7 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
         committed_frame_transition(
             &state,
             Some(committed.clone()),
-            vec![carried.clone()],
+            SeedCarries::from_names(vec![carried.clone()]),
             &committing,
             &[]
         )
@@ -1494,7 +1494,7 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
         committed_frame_transition(
             &state,
             Some(uncommitted.clone()),
-            vec![carried.clone()],
+            SeedCarries::from_names(vec![carried.clone()]),
             &committing,
             &appended,
         )
@@ -1510,8 +1510,14 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
     // the committed frame and carries nothing out of it.
     for named in [None, Some(uncommitted)] {
         assert_eq!(
-            committed_frame_transition(&state, named, vec![carried.clone()], &committing, &[])
-                .unwrap(),
+            committed_frame_transition(
+                &state,
+                named,
+                SeedCarries::from_names(vec![carried.clone()]),
+                &committing,
+                &[]
+            )
+            .unwrap(),
             Some(crate::store::FrameTransition {
                 ended: ended.clone(),
                 successor: opened.clone(),
@@ -1565,7 +1571,7 @@ fn a_first_commit_that_switches_ends_the_first_frame_it_opens() {
         committed_frame_transition(
             &state,
             Some(first.clone()),
-            vec![carried.clone()],
+            SeedCarries::from_names(vec![carried.clone()]),
             &committing,
             &appended,
         )
@@ -1579,8 +1585,14 @@ fn a_first_commit_that_switches_ends_the_first_frame_it_opens() {
     );
     // A frame this commit does not append cannot be ended by it.
     assert_eq!(
-        committed_frame_transition(&state, Some(first.clone()), vec![carried], &committing, &[])
-            .unwrap(),
+        committed_frame_transition(
+            &state,
+            Some(first.clone()),
+            SeedCarries::from_names(vec![carried]),
+            &committing,
+            &[]
+        )
+        .unwrap(),
         None
     );
 }
@@ -1602,7 +1614,8 @@ fn a_registration_turn_then_a_switch_ends_the_committed_frame_with_its_carries()
     // nothing: it ends no frame.
     let appended = [crate::NodeId::new(first.as_str().to_string())];
     assert_eq!(
-        committed_frame_transition(&state, None, Vec::new(), &registering, &appended).unwrap(),
+        committed_frame_transition(&state, None, SeedCarries::none(), &registering, &appended)
+            .unwrap(),
         None
     );
     state.mark_node_ids_persisted(appended);
@@ -1623,7 +1636,7 @@ fn a_registration_turn_then_a_switch_ends_the_committed_frame_with_its_carries()
         committed_frame_transition(
             &state,
             Some(first.clone()),
-            vec![carried.clone()],
+            SeedCarries::from_names(vec![carried.clone()]),
             &switching,
             &[crate::NodeId::new(successor.as_str().to_string())],
         )

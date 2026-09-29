@@ -491,6 +491,32 @@ pub(crate) fn prepare_compaction_request(
     ))
 }
 
+/// The compaction session id and turn id the context-pressure compaction
+/// over `ctx` derives for its summarizer request, or `None` when there is
+/// nothing to summarize: the same derivation the pressure hook's summary
+/// runs, exposed so a replay law can compare what every execution of one
+/// turn derives, a redrive from its admitted window included (FIG-4072).
+#[doc(hidden)]
+pub fn pressure_compaction_request_ids(
+    ctx: &ContextPressureContext<'_>,
+) -> Result<Option<(SessionId, TurnId)>, ContextError> {
+    let history = ctx.state.messages();
+    let summarized = history[leading_system_prefix_len(history)..].to_vec();
+    if summarized.is_empty() {
+        return Ok(None);
+    }
+    let state = ctx.state.to_snapshot();
+    let (snapshot, prompt_text) = prepare_compaction_request(&state, summarized, None)?;
+    compaction_request_ids(
+        &ctx.session_id,
+        &state,
+        &snapshot,
+        &prompt_text,
+        ctx.scoped_effect_controller.execution_scope(),
+    )
+    .map(Some)
+}
+
 /// One direct LLM completion on the parent's own session (FIG-3374).
 ///
 /// The request keeps the durable identities the child-session lane derived:

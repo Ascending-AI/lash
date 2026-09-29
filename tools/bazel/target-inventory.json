@@ -4,11 +4,137 @@
   "cargo_target_count": 188,
   "feature_lane_units": [
     {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_057245af",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_19c2d941",
+      "package": "lash-internal-conformance"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_19c2d941",
+      "package": "lash-internal-conformance"
+    },
+    {
       "features": [
         "lashlang"
       ],
       "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_1038f788",
+      "label": "//crates/lash-conformance:lash-conformance__fv_8b307d0c",
       "package": "lash-internal-conformance"
     },
     {
@@ -16,7 +142,7 @@
         "lashlang"
       ],
       "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_1038f788",
+      "label": "//crates/lash-conformance:lash-conformance__fv_8b307d0c",
       "package": "lash-internal-conformance"
     },
     {
@@ -24,7 +150,7 @@
         "lashlang"
       ],
       "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_1038f788",
+      "label": "//crates/lash-conformance:lash-conformance__fv_8b307d0c",
       "package": "lash-internal-conformance"
     },
     {
@@ -32,7 +158,7 @@
         "lashlang"
       ],
       "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_1038f788",
+      "label": "//crates/lash-conformance:lash-conformance__fv_8b307d0c",
       "package": "lash-internal-conformance"
     },
     {
@@ -40,7 +166,7 @@
         "lashlang"
       ],
       "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_1038f788",
+      "label": "//crates/lash-conformance:lash-conformance__fv_8b307d0c",
       "package": "lash-internal-conformance"
     },
     {
@@ -48,7 +174,7 @@
         "lashlang"
       ],
       "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_1038f788",
+      "label": "//crates/lash-conformance:lash-conformance__fv_8b307d0c",
       "package": "lash-internal-conformance"
     },
     {
@@ -56,139 +182,13 @@
         "lashlang"
       ],
       "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_1038f788",
+      "label": "//crates/lash-conformance:lash-conformance__fv_8b307d0c",
       "package": "lash-internal-conformance"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_50242608",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_8f4876c2",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_d281bfea",
-      "package": "lash-internal-conformance"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-conformance:lash-conformance__fv_d281bfea",
+      "label": "//crates/lash-conformance:lash-conformance__fv_e1830f8a",
       "package": "lash-internal-conformance"
     },
     {
@@ -1149,7 +1149,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core-execution:effect_model__test__fv_8c411eb1",
+      "label": "//crates/lash-core-execution:effect_model__test__fv_b84b7acb",
       "package": "lash-internal-core-execution"
     },
     {
@@ -2067,7 +2067,7 @@
         "testing"
       ],
       "kind": "bin",
-      "label": "//crates/lash-core-execution:process_event_schema_generator__bin__fv_8c411eb1",
+      "label": "//crates/lash-core-execution:process_event_schema_generator__bin__fv_b84b7acb",
       "package": "lash-internal-core-execution"
     },
     {
@@ -2076,7 +2076,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core-execution:process_model__test__fv_8c411eb1",
+      "label": "//crates/lash-core-execution:process_model__test__fv_b84b7acb",
       "package": "lash-internal-core-execution"
     },
     {
@@ -6112,20 +6112,20 @@
     {
       "features": [
         "default",
+        "otel-trace",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:integration_boundary__test__fv_b4087815",
+      "label": "//crates/lash-core:integration_boundary__test__fv_4b7169fd",
       "package": "lash-internal-core"
     },
     {
       "features": [
         "default",
-        "otel-trace",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:integration_boundary__test__fv_bbbc42c1",
+      "label": "//crates/lash-core:integration_boundary__test__fv_b53950d1",
       "package": "lash-internal-core"
     },
     {
@@ -6898,20 +6898,11 @@
     {
       "features": [
         "default",
-        "testing"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash-core:lash-core__unit_test__fv_b4087815",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
         "otel-trace",
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-core:lash-core__unit_test__fv_bbbc42c1",
+      "label": "//crates/lash-core:lash-core__unit_test__fv_4b7169fd",
       "package": "lash-internal-core"
     },
     {
@@ -6919,27 +6910,8 @@
         "default",
         "testing"
       ],
-      "kind": "test",
-      "label": "//crates/lash-core:panic_containment__test__fv_b4087815",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "otel-trace",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:panic_containment__test__fv_bbbc42c1",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:restate_double__test__fv_b4087815",
+      "kind": "unit-test",
+      "label": "//crates/lash-core:lash-core__unit_test__fv_b53950d1",
       "package": "lash-internal-core"
     },
     {
@@ -6949,7 +6921,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:restate_double__test__fv_bbbc42c1",
+      "label": "//crates/lash-core:panic_containment__test__fv_4b7169fd",
       "package": "lash-internal-core"
     },
     {
@@ -6958,26 +6930,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:runtime_effect__test__fv_b4087815",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "otel-trace",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:runtime_effect__test__fv_bbbc42c1",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:runtime_lifecycle__test__fv_b4087815",
+      "label": "//crates/lash-core:panic_containment__test__fv_b53950d1",
       "package": "lash-internal-core"
     },
     {
@@ -6987,7 +6940,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:runtime_lifecycle__test__fv_bbbc42c1",
+      "label": "//crates/lash-core:restate_double__test__fv_4b7169fd",
       "package": "lash-internal-core"
     },
     {
@@ -6996,26 +6949,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:runtime_observability__test__fv_b4087815",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "otel-trace",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:runtime_observability__test__fv_bbbc42c1",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:runtime_scenarios__test__fv_b4087815",
+      "label": "//crates/lash-core:restate_double__test__fv_b53950d1",
       "package": "lash-internal-core"
     },
     {
@@ -7025,7 +6959,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:runtime_scenarios__test__fv_bbbc42c1",
+      "label": "//crates/lash-core:runtime_effect__test__fv_4b7169fd",
       "package": "lash-internal-core"
     },
     {
@@ -7034,26 +6968,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:runtime_turns__test__fv_b4087815",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "otel-trace",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:runtime_turns__test__fv_bbbc42c1",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:tool_execution_grant_layout__test__fv_b4087815",
+      "label": "//crates/lash-core:runtime_effect__test__fv_b53950d1",
       "package": "lash-internal-core"
     },
     {
@@ -7063,7 +6978,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:tool_execution_grant_layout__test__fv_bbbc42c1",
+      "label": "//crates/lash-core:runtime_lifecycle__test__fv_4b7169fd",
       "package": "lash-internal-core"
     },
     {
@@ -7072,7 +6987,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:turn_event_schema__test__fv_b4087815",
+      "label": "//crates/lash-core:runtime_lifecycle__test__fv_b53950d1",
       "package": "lash-internal-core"
     },
     {
@@ -7082,7 +6997,92 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:turn_event_schema__test__fv_bbbc42c1",
+      "label": "//crates/lash-core:runtime_observability__test__fv_4b7169fd",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:runtime_observability__test__fv_b53950d1",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "otel-trace",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:runtime_scenarios__test__fv_4b7169fd",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:runtime_scenarios__test__fv_b53950d1",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "otel-trace",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:runtime_turns__test__fv_4b7169fd",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:runtime_turns__test__fv_b53950d1",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "otel-trace",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:tool_execution_grant_layout__test__fv_4b7169fd",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:tool_execution_grant_layout__test__fv_b53950d1",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "otel-trace",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:turn_event_schema__test__fv_4b7169fd",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:turn_event_schema__test__fv_b53950d1",
       "package": "lash-internal-core"
     },
     {
@@ -8889,6 +8889,78 @@
     {
       "features": [],
       "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_dd741a4d",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "features": [],
+      "kind": "lib",
       "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
       "package": "lash-internal-plugin-standard-compaction"
     },
@@ -8978,10 +9050,11 @@
     },
     {
       "features": [
+        "synthetic-next",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:conformance__test__fv_e4daf51f",
+      "label": "//crates/lash-postgres-store:conformance__test__fv_06d5a61f",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8989,7 +9062,15 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:conformance__test__fv_e4daf51f",
+      "label": "//crates/lash-postgres-store:conformance__test__fv_d4cd478e",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:conformance__test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8998,7 +9079,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:conformance__test__fv_ee02aefc",
+      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_06d5a61f",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9006,7 +9087,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_e4daf51f",
+      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9014,32 +9095,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_e4daf51f",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "synthetic-next",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_ee02aefc",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_e4daf51f",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_e4daf51f",
+      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9048,7 +9104,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_ee02aefc",
+      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_06d5a61f",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9056,7 +9112,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:integration__test__fv_e4daf51f",
+      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9064,7 +9120,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:integration__test__fv_e4daf51f",
+      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9073,7 +9129,23 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:integration__test__fv_ee02aefc",
+      "label": "//crates/lash-postgres-store:integration__test__fv_06d5a61f",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:integration__test__fv_d4cd478e",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:integration__test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9310,68 +9382,27 @@
     },
     {
       "features": [
-        "testing"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_e4daf51f",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_e4daf51f",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
         "synthetic-next",
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_ee02aefc",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_06d5a61f",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [
         "testing"
       ],
-      "kind": "test",
-      "label": "//crates/lash-postgres-store:migrate__test__fv_e4daf51f",
+      "kind": "unit-test",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [
         "testing"
       ],
-      "kind": "test",
-      "label": "//crates/lash-postgres-store:migrate__test__fv_e4daf51f",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "synthetic-next",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-postgres-store:migrate__test__fv_ee02aefc",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_e4daf51f",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_e4daf51f",
+      "kind": "unit-test",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9380,7 +9411,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_ee02aefc",
+      "label": "//crates/lash-postgres-store:migrate__test__fv_06d5a61f",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9388,7 +9419,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_e4daf51f",
+      "label": "//crates/lash-postgres-store:migrate__test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9396,32 +9427,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_e4daf51f",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "synthetic-next",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_ee02aefc",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_e4daf51f",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_e4daf51f",
+      "label": "//crates/lash-postgres-store:migrate__test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9430,7 +9436,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_ee02aefc",
+      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_06d5a61f",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9438,7 +9444,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_drift__test__fv_e4daf51f",
+      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9446,7 +9452,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_drift__test__fv_e4daf51f",
+      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9455,7 +9461,73 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_drift__test__fv_ee02aefc",
+      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_06d5a61f",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_d4cd478e",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_d4cd478e",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "synthetic-next",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_06d5a61f",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_d4cd478e",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_d4cd478e",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "synthetic-next",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:schema_drift__test__fv_06d5a61f",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:schema_drift__test__fv_d4cd478e",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:schema_drift__test__fv_d4cd478e",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9464,7 +9536,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:frame_open_redrive__test__fv_75c6d3f0",
+      "label": "//crates/lash-protocol-rlm:frame_open_redrive__test__fv_c46a4f89",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -9709,7 +9781,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_75c6d3f0",
+      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_c46a4f89",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -9718,7 +9790,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:protocol_drivers__test__fv_75c6d3f0",
+      "label": "//crates/lash-protocol-rlm:protocol_drivers__test__fv_c46a4f89",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -9727,7 +9799,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_75c6d3f0",
+      "label": "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_c46a4f89",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -14036,7 +14108,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:conformance__test__fv_72a6b522",
+      "label": "//crates/lash-sqlite-store:conformance__test__fv_4a8da3b9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14044,7 +14116,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:conformance__test__fv_9621310a",
+      "label": "//crates/lash-sqlite-store:conformance__test__fv_b6013de9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14052,32 +14124,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:conformance__test__fv_9621310a",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "synthetic-next",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-sqlite-store:conformance_memory__test__fv_72a6b522",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-sqlite-store:conformance_memory__test__fv_9621310a",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-sqlite-store:conformance_memory__test__fv_9621310a",
+      "label": "//crates/lash-sqlite-store:conformance__test__fv_b6013de9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14086,7 +14133,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:durable_read_fixture__test__fv_72a6b522",
+      "label": "//crates/lash-sqlite-store:conformance_memory__test__fv_4a8da3b9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14094,7 +14141,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:durable_read_fixture__test__fv_9621310a",
+      "label": "//crates/lash-sqlite-store:conformance_memory__test__fv_b6013de9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14102,32 +14149,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:durable_read_fixture__test__fv_9621310a",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "synthetic-next",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_72a6b522",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_9621310a",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_9621310a",
+      "label": "//crates/lash-sqlite-store:conformance_memory__test__fv_b6013de9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14136,7 +14158,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:integration__test__fv_72a6b522",
+      "label": "//crates/lash-sqlite-store:durable_read_fixture__test__fv_4a8da3b9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14144,7 +14166,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:integration__test__fv_9621310a",
+      "label": "//crates/lash-sqlite-store:durable_read_fixture__test__fv_b6013de9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14152,7 +14174,57 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:integration__test__fv_9621310a",
+      "label": "//crates/lash-sqlite-store:durable_read_fixture__test__fv_b6013de9",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "synthetic-next",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_4a8da3b9",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_b6013de9",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_b6013de9",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "synthetic-next",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-sqlite-store:integration__test__fv_4a8da3b9",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-sqlite-store:integration__test__fv_b6013de9",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-sqlite-store:integration__test__fv_b6013de9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14457,7 +14529,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_72a6b522",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_4a8da3b9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14465,7 +14537,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_9621310a",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_b6013de9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14473,7 +14545,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_9621310a",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_b6013de9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14482,7 +14554,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_72a6b522",
+      "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_4a8da3b9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14490,7 +14562,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_9621310a",
+      "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_b6013de9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -14498,7 +14570,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_9621310a",
+      "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_b6013de9",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -19110,6 +19182,7 @@
         "lash-internal-core",
         "lash-internal-core-worker",
         "lash-internal-lashlang",
+        "lash-internal-plugin-standard-compaction",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",
         "pretty_assertions",

@@ -5,7 +5,9 @@
 //! pressure frame the way a standard one does, and a root whose turn then
 //! ends in `control.continue_as` commits both frames, in order, each exactly
 //! once, however its execution dies. The live interpreter restarts from the
-//! pressure frame's seed exactly as the durable execution state does.
+//! new frame's seed exactly as the durable execution state does, whichever
+//! path opens the frame: a pressure hook, a staged open, `/compact` with a
+//! store and `/compact` without one (FIG-4134).
 //!
 //! The laws live in lash-conformance; this file supplies the RLM protocol
 //! plugin, how its model answers, switches frames and touches a session
@@ -68,6 +70,7 @@ impl lash_conformance::FrameLawProtocol for RlmFrameLawProtocol {
 
     fn execution_state(&self) -> Option<lash_conformance::ExecutionStateScript> {
         Some(lash_conformance::ExecutionStateScript {
+            global: "frameLawGlobal",
             set_global: cell("globalThis.frameLawGlobal = \"kept\";\nfinish(\"set\");"),
             answer_global_type: cell("finish(typeof globalThis.frameLawGlobal);"),
         })

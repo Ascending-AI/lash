@@ -10,15 +10,18 @@
 //! - `OpenFrame` commits on its own, before the turn's model call, exactly as
 //!   `/compact`'s frame does: the records every hook decided land in the
 //!   frame being left, the frame opens with its seed through the one
-//!   frame-open primitive (which resets execution state and the prompt
-//!   usage), and the commit makes all of it durable together. The turn then
-//!   runs in the new frame on resident state, with no reload (ADR 0112 §9),
-//!   and the protocol restores its live execution state from the seed. A
-//!   later failure of the turn leaves the frame in place.
+//!   frame-open primitive (which derives what the seed carries, and resets
+//!   execution state and the prompt usage), and the commit makes all of it
+//!   durable together, carrying the seed's artifacts into the new frame. The
+//!   turn then runs in the new frame on resident state, with no reload
+//!   (ADR 0112 §9), and the protocol restores its live execution state from
+//!   the seed. A later failure of the turn leaves the frame in place.
 //!
 //! The commit is an idempotent fenced store write under an operation named by
 //! the turn and the hook (ADR 0105 §9), and the frame key is core's, derived
-//! from the session, the frame current at open, the turn and the hook. A
+//! from the session, the frame current at open, the turn and the hook. A hook
+//! is named by the plugin that registered it and its own id, so two plugins
+//! whose hooks share an id never share a record or frame namespace. A
 //! redriven turn replays the head its root was admitted on (ADR 0105 §2), so
 //! it decides again over the same base, reads the summarizer completion back
 //! from its journal, and meets the frame commit's receipt: it never opens a
@@ -31,12 +34,22 @@ use super::*;
 struct ContextPressureWrite<'a> {
     session_id: &'a SessionId,
     turn_id: &'a str,
+    plugin_id: &'a str,
     hook_id: &'a str,
 }
 
 impl ContextPressureWrite<'_> {
+    /// The hook's author name within the turn: the registering plugin's id,
+    /// length-prefixed so no pair of ids can spell another pair, and the
+    /// hook's own id.
     fn author(&self) -> String {
-        format!("{}/context-pressure/{}", self.turn_id, self.hook_id)
+        format!(
+            "{}/context-pressure/{}:{}/{}",
+            self.turn_id,
+            self.plugin_id.len(),
+            self.plugin_id,
+            self.hook_id
+        )
     }
 
     /// The append a decision's records ride. Named by the turn and the hook,
@@ -193,10 +206,16 @@ impl LashRuntime {
         let session_id = self.state.session_id.clone();
         let mut turn_records = Vec::new();
         let mut frame_records = Vec::new();
-        for crate::plugin::DecidedContextPressure { hook_id, decision } in decided {
+        for crate::plugin::DecidedContextPressure {
+            plugin_id,
+            hook_id,
+            decision,
+        } in decided
+        {
             let write = ContextPressureWrite {
                 session_id: &session_id,
                 turn_id: trace_turn_id.as_str(),
+                plugin_id: &plugin_id,
                 hook_id,
             };
             match decision {
@@ -236,9 +255,10 @@ impl LashRuntime {
     }
 
     /// Opens an `OpenFrame` decision's frame and commits it on its own (F2):
-    /// the records in the frame being left, the frame node, its seed and the
-    /// execution-state reset become durable together, or none of them do
-    /// and resident state is rebuilt from the store.
+    /// the records in the frame being left, the frame node, its seed, the
+    /// execution-state reset and the artifacts the seed carries become
+    /// durable together, or none of them do and resident state is rebuilt
+    /// from the store.
     async fn commit_context_pressure_frame(
         &mut self,
         write: &ContextPressureWrite<'_>,
@@ -248,16 +268,16 @@ impl LashRuntime {
         committing: &crate::ExecutionScope,
         drive_fence: Option<&DriveFence>,
     ) -> Result<(), RuntimeError> {
-        let opened = self.open_context_pressure_frame(write, records, seed);
-        let opened = match opened {
+        let opened = match self.open_context_pressure_frame(write, records, seed).await {
             Ok(opened) => opened,
             Err(error) => {
                 self.invalidate_resident_session_state();
                 return Err(error);
             }
         };
+        let frame_node_id = opened.result.frame_node_id.clone();
         if let Err(error) = self
-            .persist_context_pressure_frame(write, opened.ended, committing, drive_fence)
+            .persist_context_pressure_frame(write, opened, committing, drive_fence)
             .await
         {
             // Nothing of the frame is durable: drop it from resident state,
@@ -275,8 +295,9 @@ impl LashRuntime {
                 name: "context_pressure.frame_opened".to_string(),
                 payload: serde_json::json!({
                     "hook": write.hook_id,
+                    "plugin": write.plugin_id,
                     "task": task,
-                    "frame_node_id": opened.frame_node_id,
+                    "frame_node_id": frame_node_id,
                 }),
             },
             self.host.core.clock.as_ref(),
@@ -286,12 +307,12 @@ impl LashRuntime {
         self.restore_protocol_session_after_frame_open().await
     }
 
-    fn open_context_pressure_frame(
+    async fn open_context_pressure_frame(
         &mut self,
         write: &ContextPressureWrite<'_>,
         records: Vec<(String, Vec<crate::SessionAppendNode>)>,
         seed: Vec<crate::SessionAppendNode>,
-    ) -> Result<OpenedPressureFrame, RuntimeError> {
+    ) -> Result<crate::runtime::frame_open::OpenedFrame, RuntimeError> {
         let clock = Arc::clone(&self.host.core.clock);
         let ended = self.state.current_frame_node_id.clone();
         for (namespace, nodes) in &records {
@@ -302,26 +323,20 @@ impl LashRuntime {
                 clock.as_ref(),
             );
         }
-        let result = open_agent_frame_in_state_with_clock(
-            &mut self.state,
+        self.open_frame(
             crate::OpenAgentFrameRequest::new(
                 write.frame_key(ended.as_ref().map(|frame| frame.as_str())),
                 crate::AgentFrameReason::compaction(),
             )
             .with_initial_nodes(seed),
-            clock.as_ref(),
-        )?;
-        self.stamp_live_plugin_state();
-        Ok(OpenedPressureFrame {
-            ended,
-            frame_node_id: result.frame_node_id,
-        })
+        )
+        .await
     }
 
     async fn persist_context_pressure_frame(
         &mut self,
         write: &ContextPressureWrite<'_>,
-        ended: Option<crate::FrameNodeId>,
+        opened: crate::runtime::frame_open::OpenedFrame,
         committing: &crate::ExecutionScope,
         drive_fence: Option<&DriveFence>,
     ) -> Result<(), RuntimeError> {
@@ -343,8 +358,8 @@ impl LashRuntime {
         commit.drive_fence = drive_fence.cloned().map(Box::new);
         commit.frame_transition = super::turn_boundary::committed_frame_transition(
             &self.state,
-            ended,
-            Vec::new(),
+            opened.ended,
+            opened.carries,
             committing,
             &persisted_node_ids,
         )
@@ -357,37 +372,4 @@ impl LashRuntime {
         self.state.mark_node_ids_persisted(persisted_node_ids);
         Ok(())
     }
-
-    /// Restores the live protocol session from the resident state after a
-    /// frame opened, so the live execution state matches the durable one:
-    /// the open cleared the stored snapshot, and the protocol restarts from
-    /// the new frame's seed nodes (ADR 0113 §3.1). Every frame author goes
-    /// through here.
-    pub(in crate::runtime) async fn restore_protocol_session_after_frame_open(
-        &mut self,
-    ) -> Result<(), RuntimeError> {
-        let Some(session) = self.session.as_mut() else {
-            return Ok(());
-        };
-        let protocol_session = Arc::clone(session.plugins().protocol_session());
-        let session_id = self.state.session_id.clone();
-        let restored = protocol_session
-            .restore_session(
-                crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                crate::plugin::ProtocolSessionRestoreView::new(&self.state),
-            )
-            .await;
-        restored.map_err(|err| {
-            self.invalidate_resident_session_state();
-            RuntimeError::new(
-                RuntimeErrorCode::ContextPrepareTurn,
-                format!("failed to restore the protocol session after a frame opened: {err}"),
-            )
-        })
-    }
-}
-
-struct OpenedPressureFrame {
-    ended: Option<crate::FrameNodeId>,
-    frame_node_id: String,
 }

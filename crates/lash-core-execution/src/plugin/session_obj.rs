@@ -410,6 +410,7 @@ impl PluginSession {
             let opens_frame = matches!(decision, ContextPressureDecision::OpenFrame { .. });
             if !matches!(decision, ContextPressureDecision::Continue) {
                 decided.push(DecidedContextPressure {
+                    plugin_id: registered.plugin_id.clone(),
                     hook_id: registered.hook.id(),
                     decision,
                 });

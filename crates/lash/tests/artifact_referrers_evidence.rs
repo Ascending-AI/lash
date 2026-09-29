@@ -92,10 +92,18 @@ fn rlm_core(
     rlm_core_with_queue(double, Arc::new(Mutex::new(VecDeque::from(responses))))
 }
 
-#[expect(clippy::expect_used, reason = "test fixture validates its setup")]
 fn rlm_core_with_queue(
     double: &lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
     queue: Arc<Mutex<VecDeque<LlmResponse>>>,
+) -> LashCore {
+    rlm_core_with_plugins(double, queue, Vec::new())
+}
+
+#[expect(clippy::expect_used, reason = "test fixture validates its setup")]
+fn rlm_core_with_plugins(
+    double: &lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
+    queue: Arc<Mutex<VecDeque<LlmResponse>>>,
+    plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> LashCore {
     let provider = lash::testing::TestProvider::builder()
         .kind("artifact-referrers")
@@ -119,7 +127,11 @@ fn rlm_core_with_queue(
             .build(),
         &backend,
     );
-    LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+    let builder = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory);
+    let builder = plugins
+        .into_iter()
+        .fold(builder, |builder, plugin| builder.plugin(plugin));
+    builder
         .provider(provider)
         .model(
             lash::ModelSpec::builder("artifact-referrers")
@@ -383,6 +395,121 @@ async fn continue_as_carries_only_seeded_definition() {
         .expect("new-frame turn");
     assert!(result.is_success());
     assert_eq!(last_cell_finish(&result), Some(serde_json::json!(11)));
+}
+
+/// A context-pressure hook that opens a frame seeded with an RLM seed once
+/// the test hands it the seed's value, and continues otherwise.
+struct SeedingPressureHook {
+    seed: Arc<Mutex<Option<serde_json::Value>>>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::ContextPressureHook for SeedingPressureHook {
+    fn id(&self) -> &'static str {
+        "artifact-referrers.seeding_pressure"
+    }
+
+    async fn decide(
+        &self,
+        _ctx: &lash_core::plugin::ContextPressureContext<'_>,
+    ) -> Result<lash_core::plugin::ContextPressureDecision, lash_core::plugin::ContextError> {
+        let Some(seed) = self.seed.lock_recover().take() else {
+            return Ok(lash_core::plugin::ContextPressureDecision::Continue);
+        };
+        let seed = lash_protocol_rlm::RlmSeed::from_seed_value(&seed)
+            .map_err(lash_core::plugin::ContextError::Pipeline)?;
+        Ok(lash_core::plugin::ContextPressureDecision::OpenFrame {
+            records: Vec::new(),
+            task: "pressure frame seeded with a definition".to_string(),
+            seed: lash_protocol_rlm::rlm_seed_initial_nodes(seed),
+        })
+    }
+}
+
+/// FIG-4134: a context-pressure hook's RLM seed carries its module-backed
+/// values into the frame it opens, exactly as a `continue_as` seed does
+/// (ADR 0113 §3.1). The hook seeds a definition the first frame bound; once
+/// the old frame's cleanup settles, the new frame alone holds the module's
+/// edge, and after a cold reopen the seeded definition still starts.
+#[tokio::test]
+async fn a_pressure_seed_carries_its_module_into_the_new_frame() {
+    let fixture = Fixture::new(0x4134_0001).await;
+    let double = &fixture.double;
+    let session_id = "artifact-referrers-pressure-seed";
+    let run_carried =
+        "const run = await processes.start({ definition: carried }); finish(await run);";
+    let responses = Arc::new(Mutex::new(VecDeque::from(vec![
+        response("const carried = async () => 13; finish(carried);"),
+        response(run_carried),
+        response(run_carried),
+    ])));
+    let seed = Arc::new(Mutex::new(None));
+    let hook: Arc<dyn lash_core::facade_support::PluginFactory> =
+        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "artifact-referrers-seeding-pressure",
+            lash_core::facade_support::PluginSpec::new().with_context_pressure_hook(
+                100,
+                Arc::new(SeedingPressureHook {
+                    seed: Arc::clone(&seed),
+                }),
+            ),
+        ));
+    let core = rlm_core_with_plugins(double, Arc::clone(&responses), vec![Arc::clone(&hook)]);
+    serve_processes(double, &core);
+    let session = core.session(session_id).open().await.expect("session");
+    let bound = session
+        .send(TurnInput::text("bind the definition"))
+        .output()
+        .await
+        .expect("binding turn");
+    assert!(bound.is_success(), "binding: {bound:?}");
+    let definition = last_cell_finish(&bound).expect("the cell finished with the definition");
+    let before = wait_edges(&fixture, |edges| frame_artifacts(edges).len() == 1).await;
+    let module_ref = frame_artifacts(&before)
+        .into_iter()
+        .next()
+        .expect("the definition's module")
+        .to_owned();
+    let old_frame = before
+        .iter()
+        .find(|edge| edge.kind == "frame_environment")
+        .expect("frame edge")
+        .id
+        .clone();
+
+    *seed.lock_recover() = Some(serde_json::json!({ "carried": definition }));
+    let seeded = session
+        .send(TurnInput::text("run the seeded definition"))
+        .output()
+        .await
+        .expect("the pressure frame's turn");
+    assert!(seeded.is_success(), "seeded turn: {seeded:?}");
+    assert_eq!(last_cell_finish(&seeded), Some(serde_json::json!(13)));
+    let after = wait_edges(&fixture, |edges| {
+        let frame: Vec<_> = edges
+            .iter()
+            .filter(|edge| edge.kind == "frame_environment")
+            .collect();
+        frame.len() == 1 && frame[0].id != old_frame && frame[0].artifact_ref == module_ref
+    })
+    .await;
+    assert!(
+        !after.iter().any(|edge| edge.id == old_frame),
+        "the ended frame's cleanup settled"
+    );
+    drop(session);
+    drop(core);
+
+    let reopened = rlm_core_with_plugins(double, responses, vec![hook]);
+    serve_processes(double, &reopened);
+    let session = reopened.session(session_id).open().await.expect("reopen");
+    let result = session
+        .send(TurnInput::text("run it after a reopen"))
+        .output()
+        .await
+        .expect("the reopened turn");
+    assert!(result.is_success(), "reopened turn: {result:?}");
+    assert_eq!(last_cell_finish(&result), Some(serde_json::json!(13)));
 }
 
 #[tokio::test]

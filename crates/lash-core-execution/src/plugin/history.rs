@@ -147,9 +147,12 @@ pub enum ContextPressureDecision {
     },
 }
 
-/// The decision a named hook returned, as core applies it.
+/// The decision a named hook returned, as core applies it. A hook is named
+/// by the plugin that registered it and its own id, so two plugins that
+/// register hooks with the same id never share a record or frame namespace.
 #[derive(Clone, Debug)]
 pub struct DecidedContextPressure {
+    pub plugin_id: String,
     pub hook_id: &'static str,
     pub decision: ContextPressureDecision,
 }

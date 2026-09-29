@@ -2,12 +2,14 @@
 //!
 //! A frame opens exactly once, through one `FrameOpen` node, whoever authors
 //! it: a context-pressure hook, overflow recovery, `/compact` or a
-//! `continue_as`. Walking a session's committed active path from its first
-//! node to its head leaf, the path starts with a `FrameOpen`, every node
-//! belongs to the frame whose `FrameOpen` is its nearest ancestor on the
-//! path, no frame opens twice, and each `FrameOpen` after the first is the
-//! child of a node of the frame that was current when it opened. A frame a
-//! node names must have its own `FrameOpen` in the session.
+//! `continue_as`. For every node a session holds, on its active path or off
+//! it (a fork's branch, an abandoned open): the node belongs to the frame
+//! whose `FrameOpen` is its nearest ancestor, itself included, so every
+//! `FrameOpen` names only itself and hangs off a node of the frame that was
+//! current when it opened; a node with no parent opens the session's first
+//! frame; and a frame a node names has its own `FrameOpen` in the session.
+//! A frame opened twice would be a `FrameOpen` placed in another frame, and a
+//! path that revisits a node is a parent cycle.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,7 +43,7 @@ impl HistoryChecker for FrameLineage {
                     .or_default()
                     .insert(node.node_id.as_str(), node);
             }
-            for (session, leaf) in &store.heads {
+            for session in store.heads.iter().map(|(session, _)| session) {
                 let Some(nodes) = sessions.get(session.as_str()) else {
                     continue;
                 };
@@ -52,8 +54,15 @@ impl HistoryChecker for FrameLineage {
                         |violation, row| violation.row(row.render()),
                     )
                 };
-                // Every frame a node names has its own open.
+                // Every node's nearest `FrameOpen`, itself included, memoized
+                // over the walk from the node to its session's root.
+                let mut nearest: BTreeMap<&str, Option<&str>> = BTreeMap::new();
+                let mut rooted: BTreeSet<&str> = BTreeSet::new();
                 for node in nodes.values() {
+                    if let Err(at) = reaches_a_root(nodes, node, &mut rooted) {
+                        violations.push(broken(format!("has a parent cycle at {at}"), &[node]));
+                        continue;
+                    }
                     match nodes.get(node.frame.as_str()) {
                         Some(open) if open.frame_open => {}
                         _ => violations.push(broken(
@@ -64,68 +73,20 @@ impl HistoryChecker for FrameLineage {
                             &[node],
                         )),
                     }
-                }
-                // The active path, first node to leaf.
-                let mut path = Vec::new();
-                let mut seen = BTreeSet::new();
-                let mut cursor = Some(leaf.as_str());
-                while let Some(id) = cursor {
-                    let Some(node) = nodes.get(id) else {
-                        break;
-                    };
-                    if !seen.insert(id) {
-                        violations.push(broken(format!("has a parent cycle at {id}"), &[node]));
-                        break;
+                    if node.parent.is_none() && !node.frame_open {
+                        violations.push(broken(
+                            "does not open its first frame before its first node".to_owned(),
+                            &[node],
+                        ));
                     }
-                    path.push(*node);
-                    cursor = node.parent.as_deref();
-                }
-                path.reverse();
-                let Some(first) = path.first() else {
-                    continue;
-                };
-                if !first.frame_open {
-                    violations.push(broken(
-                        "does not open its first frame before its first node".to_owned(),
-                        &[first],
-                    ));
-                    continue;
-                }
-                let mut opened = BTreeSet::new();
-                let mut current: Option<&GraphNodeRow> = None;
-                for node in path {
-                    if node.frame_open {
-                        if !opened.insert(node.node_id.as_str()) {
-                            violations.push(broken(
-                                format!("opens frame {} twice", node.node_id),
-                                &[node],
-                            ));
-                        }
-                        if let (Some(previous), Some(parent)) = (current, node.parent.as_deref()) {
-                            let parent_frame =
-                                nodes.get(parent).map(|parent| parent.frame.as_str());
-                            if parent_frame != Some(previous.node_id.as_str()) {
-                                violations.push(broken(
-                                    format!(
-                                        "opens frame {} from frame {}, not from frame {}, the one current when it opened",
-                                        node.node_id,
-                                        parent_frame.unwrap_or("-"),
-                                        previous.node_id
-                                    ),
-                                    &[previous, node],
-                                ));
-                            }
-                        }
-                        current = Some(node);
-                    }
-                    let frame = current.map(|open| open.node_id.as_str());
-                    if frame != Some(node.frame.as_str()) {
+                    let open = nearest_frame_open(nodes, node, &mut nearest);
+                    if open != Some(node.frame.as_str()) {
                         violations.push(broken(
                             format!(
                                 "places {} in frame {}, but its nearest FrameOpen is {}",
                                 node.node_id,
                                 node.frame,
-                                frame.unwrap_or("-")
+                                open.unwrap_or("-")
                             ),
                             &[node],
                         ));
@@ -135,4 +96,64 @@ impl HistoryChecker for FrameLineage {
         }
         violations
     }
+}
+
+/// Whether `node`'s ancestry ends, at a root or at a parent the session does
+/// not hold, without revisiting a node. `Err` names the node it revisits.
+/// `rooted` memoizes the nodes already known to end.
+fn reaches_a_root<'a>(
+    nodes: &BTreeMap<&'a str, &'a GraphNodeRow>,
+    node: &'a GraphNodeRow,
+    rooted: &mut BTreeSet<&'a str>,
+) -> Result<(), &'a str> {
+    let mut walked = BTreeSet::new();
+    let mut cursor = Some(node);
+    while let Some(at) = cursor {
+        let id = at.node_id.as_str();
+        if rooted.contains(id) {
+            break;
+        }
+        if !walked.insert(id) {
+            return Err(id);
+        }
+        cursor = at
+            .parent
+            .as_deref()
+            .and_then(|parent| nodes.get(parent).copied());
+    }
+    rooted.extend(walked);
+    Ok(())
+}
+
+/// The nearest `FrameOpen` at or above `node`, or `None` when its ancestry
+/// leaves the session before reaching one. The ancestry is acyclic
+/// ([`reaches_a_root`]).
+fn nearest_frame_open<'a>(
+    nodes: &BTreeMap<&'a str, &'a GraphNodeRow>,
+    node: &'a GraphNodeRow,
+    nearest: &mut BTreeMap<&'a str, Option<&'a str>>,
+) -> Option<&'a str> {
+    let mut walked = Vec::new();
+    let mut cursor = Some(node);
+    let found = loop {
+        let Some(at) = cursor else {
+            break None;
+        };
+        let id = at.node_id.as_str();
+        if let Some(known) = nearest.get(id) {
+            break *known;
+        }
+        if at.frame_open {
+            break Some(id);
+        }
+        walked.push(id);
+        cursor = at
+            .parent
+            .as_deref()
+            .and_then(|parent| nodes.get(parent).copied());
+    };
+    for id in walked {
+        nearest.insert(id, found);
+    }
+    found
 }

@@ -1103,13 +1103,17 @@ pub enum AdmittedHeadVerdict {
 }
 
 /// The base an administrative compaction records before its summarizer
-/// runs (FIG-4133): the durable head it summarizes and the frame it opens its
-/// frame from. Plain store identities, so any build replays it.
+/// runs (FIG-4133): the durable head it summarizes, the frame it opens its
+/// frame from, and the drive fence its frame commit presents (FIG-4134), so a
+/// replay presents the fence the first execution read, never a newer one.
+/// Plain store identities, so any build replays it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompactionBase {
     pub head: crate::store::SessionHeadRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<crate::FrameNodeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drive_fence: Option<crate::store::DriveFence>,
 }
 
 /// Serializable result of a runtime effect command.

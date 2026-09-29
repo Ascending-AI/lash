@@ -1,5 +1,6 @@
 //! How a turn's protocol-owned execution-state capture is probed, taken,
-//! applied, and settled.
+//! applied, and settled, and what a frame open carries out of the frame it
+//! leaves.
 
 use crate::SessionId;
 use crate::{PluginSession, Session, SessionError, StoreError};
@@ -14,7 +15,7 @@ pub(super) enum ExecutionStateUpdate {
     /// names the artifacts the switch hands to the successor frame
     /// (ADR 0113 §3.1); every other clear carries none.
     Clear {
-        carries: Vec<crate::ArtifactName>,
+        carries: SeedCarries,
     },
 }
 
@@ -29,12 +30,62 @@ impl ExecutionStateUpdate {
     }
 
     /// The artifacts a clear carries into the successor frame.
-    pub(super) fn carries(&self) -> &[crate::ArtifactName] {
+    pub(super) fn carries(&self) -> SeedCarries {
         match self {
-            Self::Clear { carries } => carries,
-            Self::Clean | Self::Replace(_) => &[],
+            Self::Clear { carries } => carries.clone(),
+            Self::Clean | Self::Replace(_) => SeedCarries::none(),
         }
     }
+}
+
+/// The artifacts a frame open carries out of the frame it leaves into the
+/// frame it opens (ADR 0113 §3.1): exactly what the code executor finds in
+/// the new frame's seed. Every frame author derives them the same way,
+/// through [`derive_seed_carries`], whatever wrote the seed: a
+/// context-pressure hook, overflow recovery, `/compact` or `continue_as`
+/// (FIG-4134). A protocol-specific seed (an RLM seed holding a module-backed
+/// value) therefore keeps its artifacts alive in the successor frame, and
+/// no author can hand a frame transition carries its seed did not name.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::runtime) struct SeedCarries(Vec<crate::ArtifactName>);
+
+impl SeedCarries {
+    /// What a commit that opens no frame carries: nothing.
+    pub(in crate::runtime) fn none() -> Self {
+        Self(Vec::new())
+    }
+
+    #[cfg(test)]
+    pub(in crate::runtime) fn from_names(names: Vec<crate::ArtifactName>) -> Self {
+        Self(names)
+    }
+
+    fn into_names(self) -> Vec<crate::ArtifactName> {
+        self.0
+    }
+}
+
+/// The one carry derivation every frame open goes through (FIG-4134): the
+/// artifacts the session's code executor finds in `seed`, the new frame's
+/// initial nodes. A session with no code executor carries nothing.
+pub(in crate::runtime) async fn derive_seed_carries(
+    session: Option<&mut Session>,
+    seed: &[crate::SessionAppendNode],
+) -> Result<SeedCarries, SessionError> {
+    let Some(session) = session else {
+        return Ok(SeedCarries::none());
+    };
+    let Some(code_executor) = session.plugins().code_executor() else {
+        return Ok(SeedCarries::none());
+    };
+    let session_id = session.session_id().to_string();
+    let carries = code_executor
+        .frame_switch_carries(
+            crate::plugin::ProtocolSessionContext::new(session, &SessionId::from(session_id)),
+            seed,
+        )
+        .await?;
+    Ok(SeedCarries(carries))
 }
 
 /// The clear a committed frame switch makes: the frame's globals are wiped,
@@ -44,19 +95,9 @@ pub(super) async fn frame_switch_execution_state_update(
     session: &mut Session,
     initial_nodes: &[crate::SessionAppendNode],
 ) -> Result<ExecutionStateUpdate, SessionError> {
-    let Some(code_executor) = session.plugins().code_executor() else {
-        return Ok(ExecutionStateUpdate::Clear {
-            carries: Vec::new(),
-        });
-    };
-    let session_id = session.session_id().to_string();
-    let carries = code_executor
-        .frame_switch_carries(
-            crate::plugin::ProtocolSessionContext::new(session, &SessionId::from(session_id)),
-            initial_nodes,
-        )
-        .await?;
-    Ok(ExecutionStateUpdate::Clear { carries })
+    Ok(ExecutionStateUpdate::Clear {
+        carries: derive_seed_carries(Some(session), initial_nodes).await?,
+    })
 }
 
 /// The artifact half of a commit that moves the session from frame `ended`
@@ -80,7 +121,7 @@ pub(super) async fn frame_switch_execution_state_update(
 pub(in crate::runtime) fn committed_frame_transition(
     state: &RuntimeSessionState,
     ended: Option<crate::FrameNodeId>,
-    carries: Vec<crate::ArtifactName>,
+    carries: SeedCarries,
     committing: &crate::ExecutionScope,
     appended: &[crate::NodeId],
 ) -> Result<Option<crate::store::FrameTransition>, StoreError> {
@@ -95,7 +136,7 @@ pub(in crate::runtime) fn committed_frame_transition(
                 .any(|node_id| node_id.as_str() == ended.as_str())
     };
     let (ended, carries) = match ended.filter(endable) {
-        Some(ended) => (ended, carries),
+        Some(ended) => (ended, carries.into_names()),
         None => match committed {
             Some(ended) => (ended, Vec::new()),
             None => return Ok(None),
@@ -158,7 +199,7 @@ pub(super) async fn capture_execution_state_update(
         ExecutionStateUpdate::Replace(snapshot)
     } else {
         ExecutionStateUpdate::Clear {
-            carries: Vec::new(),
+            carries: SeedCarries::none(),
         }
     })
 }

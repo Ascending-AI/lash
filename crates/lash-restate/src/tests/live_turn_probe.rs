@@ -623,8 +623,10 @@ impl LiveTurnRunner {
             .is_some_and(|attempt| attempt.crash.is_some());
         let crash = attempts.last().and_then(|attempt| attempt.crash.clone());
         let (ends, mut ended) = tokio::sync::mpsc::unbounded_channel();
-        let mut open = self.open.lock().await;
-        let reopened = open.remove(&scope);
+        // The map is locked only to take and park an open invocation, so a
+        // law can run a second scope's turn while a first one is held
+        // (FIG-4134's overlapping-open laws).
+        let reopened = self.open.lock().await.remove(&scope);
         let key = reopened.as_ref().map_or_else(
             || {
                 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -688,7 +690,7 @@ impl LiveTurnRunner {
                     // stays open, and the law's next run of the scope is
                     // Restate's redelivery of it.
                     Some(AttemptEnd::Crashed) if leave_open_on_crash => {
-                        open.insert(scope, OpenInvocation { key: key.clone(), call });
+                        self.open.lock().await.insert(scope, OpenInvocation { key: key.clone(), call });
                         crashed = true;
                         break;
                     }
@@ -712,7 +714,7 @@ impl LiveTurnRunner {
                     Some(AttemptEnd::Aborted) if until_paused => aborted += 1,
                     Some(AttemptEnd::Aborted) => {
                         aborted += 1;
-                        open.insert(scope, OpenInvocation { key: key.clone(), call });
+                        self.open.lock().await.insert(scope, OpenInvocation { key: key.clone(), call });
                         break;
                     }
                     None => panic!("the live conformance turn `{key}` lost its attempt channel"),
@@ -724,7 +726,7 @@ impl LiveTurnRunner {
                 }, if crash.is_some() && !crash_fired => crash_fired = true,
                 _ = poll.tick(), if (until_paused && aborted > 0) || crash_fired => {
                     if crash_fired && !execution_live(&key) {
-                        open.insert(scope, OpenInvocation { key: key.clone(), call });
+                        self.open.lock().await.insert(scope, OpenInvocation { key: key.clone(), call });
                         crashed = true;
                         break;
                     }

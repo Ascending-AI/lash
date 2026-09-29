@@ -29,6 +29,7 @@ pub(crate) use lash_core_execution::runtime::effect;
 #[doc(hidden)]
 mod environment;
 mod error;
+mod frame_open;
 mod observation_publisher;
 mod turn_settlement;
 use lash_core_execution::runtime::host;

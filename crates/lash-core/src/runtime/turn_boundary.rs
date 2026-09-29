@@ -21,8 +21,10 @@ use materialize::*;
 mod accepted_commit;
 pub(super) use accepted_commit::AcceptedTurnCommit;
 mod execution_state;
-pub(in crate::runtime) use execution_state::committed_frame_transition;
 use execution_state::*;
+pub(in crate::runtime) use execution_state::{
+    SeedCarries, committed_frame_transition, derive_seed_carries,
+};
 mod final_commit_input;
 use final_commit_input::FinalCommitInput;
 mod recorded_assembly;
@@ -84,7 +86,7 @@ pub(super) struct TurnBoundary {
 /// committing turn is the gate.
 pub(super) struct FrameSwitchCommit {
     ended: Option<crate::FrameNodeId>,
-    carries: Vec<crate::ArtifactName>,
+    carries: SeedCarries,
     committing: crate::ExecutionScope,
 }
 
@@ -590,7 +592,7 @@ impl TurnBoundary {
         // The frame the turn was admitted on, which a switch this commit
         // opens ends (ADR 0113 §3.1), and what the switch carries out of it.
         let admitted_frame = state.current_frame_node_id.clone();
-        let frame_carries = execution_state_update.carries().to_vec();
+        let frame_carries = execution_state_update.carries();
         execution_state_update.apply(state)?;
         materialize_terminal_output(
             state,

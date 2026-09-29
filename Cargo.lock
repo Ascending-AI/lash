@@ -2064,6 +2064,7 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-core-worker",
  "lash-internal-lashlang",
+ "lash-internal-plugin-standard-compaction",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "pretty_assertions",
