@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 49,
-  "cargo_target_count": 188,
+  "cargo_target_count": 189,
   "feature_lane_units": [
     {
       "features": [
@@ -19204,7 +19204,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 249,
+  "generated_label_count": 250,
   "packages": [
     {
       "declared_features": [
@@ -20854,6 +20854,12 @@
           "tags": []
         },
         {
+          "cargo": "crash_windows",
+          "kind": "test",
+          "label": "//crates/lash-restate-test:crash_windows__test",
+          "tags": []
+        },
+        {
           "cargo": "drop",
           "kind": "test",
           "label": "//crates/lash-restate-test:drop__test",
@@ -20966,6 +20972,7 @@
         "label": "//crates/lash-restate-test:test_batch",
         "members": [
           "//crates/lash-restate-test:admission_invariant__test",
+          "//crates/lash-restate-test:crash_windows__test",
           "//crates/lash-restate-test:drop__test",
           "//crates/lash-restate-test:follow_on_crash_replay__test",
           "//crates/lash-restate-test:host_send_wait__test",

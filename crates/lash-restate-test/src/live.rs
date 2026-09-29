@@ -256,6 +256,25 @@ impl LiveRestateBackend {
     /// Build the engine over a fresh SQLite memory store set, serve its
     /// endpoint on `config.endpoint_bind` and register it with the server.
     pub async fn start(config: LiveConfig) -> Result<Self, LiveError> {
+        Self::start_on(config, None).await
+    }
+
+    /// [`start`](Self::start), with an endpoint that cuts every process
+    /// segment after `segment_effect_budget` completed effects instead of
+    /// the default 10,000, so a short process crosses segment boundaries:
+    /// the live counterpart of
+    /// [`backend_with_segment_budget`](crate::backend_with_segment_budget).
+    pub async fn start_with_segment_budget(
+        config: LiveConfig,
+        segment_effect_budget: u64,
+    ) -> Result<Self, LiveError> {
+        Self::start_on(config, Some(segment_effect_budget)).await
+    }
+
+    async fn start_on(
+        config: LiveConfig,
+        segment_effect_budget: Option<u64>,
+    ) -> Result<Self, LiveError> {
         let clock = Arc::new(LiveClock::default());
         // Process ids are minted at random: the server keys a process's
         // workflow by its id, and it outlives this backend.
@@ -283,8 +302,13 @@ impl LiveRestateBackend {
         ));
         let processes = RestateProcessWorkerSlot::new();
         let jobs = Arc::new(ParkedJobs::with_prefix(format!("{}-", config.run_tag)));
+        let serving = RestateProcessServing::from(processes.clone());
+        let serving = match segment_effect_budget {
+            Some(budget) => serving.with_segment_effect_budget_selector(move |_| budget),
+            None => serving,
+        };
         let endpoint = bind_handler_host(
-            restate.endpoint_builder(RestateProcessServing::from(processes.clone())),
+            restate.endpoint_builder(serving),
             HandlerHost {
                 jobs: Arc::clone(&jobs),
                 authority,

@@ -660,3 +660,7 @@ lifecycle_vocabulary!(WakeDeliveryState, as_str, by_value {
     Enqueued => "enqueued",
     Discarded => "discarded",
 });
+
+#[cfg(test)]
+#[path = "process_identity_tests.rs"]
+mod tests;

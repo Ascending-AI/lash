@@ -319,6 +319,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-render:lash-render__unit_test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-render:render__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-restate-test:admission_invariant__test": {"cpu_count": 2, "memory_kb": 1048576},
+    "//crates/lash-restate-test:crash_windows__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-restate-test:drop__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-restate-test:follow_on_crash_replay__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-restate-test:host_send_wait__test": {"cpu_count": 2, "memory_kb": 1048576},

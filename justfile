@@ -211,8 +211,10 @@ effect-group-conformance-e2e:
 # part B): newest-deployment routing and invocation pinning, so the double
 # cannot drift; and the deployment-namespace laws (FIG-3898): namespaced cores
 # share the server, and a registration over another deployment's names is
-# refused. Suite wiring lives in `scripts/restate-suites.toml` under
-# `server-double` and `namespaces`.
+# refused; and the crash windows (FIG-4095): a crash inside a process
+# segment's handover, and between a tool presentation's put and its journaled
+# outcome. Suite wiring lives in `scripts/restate-suites.toml` under
+# `server-double`, `namespaces` and `crash-windows`.
 server-double-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -223,6 +225,8 @@ server-double-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite server-double --leg replay
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite namespaces --leg live
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite namespaces --leg replay
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite crash-windows --leg live
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite crash-windows --leg replay
 
 # The crash-point matrix (FIG-3849) with a live `restate-server` as its engine
 # (FIG-3872): every active cell of `lash_sim::crash_matrix::MATRIX` over its

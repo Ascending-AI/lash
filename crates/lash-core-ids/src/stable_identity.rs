@@ -227,6 +227,21 @@ mod tests {
         assert_eq!(encoder.finish(), b"\0\0\0\0\0\0\0\x08preimage");
     }
 
+    /// ADR 0097: exactly the three grandfathered families mint unframed
+    /// preimages; the unframed path never grows a fourth member.
+    #[test]
+    fn frozen_unframed_domains_are_exactly_the_grandfathered_three() {
+        assert_eq!(
+            FROZEN_UNFRAMED_DOMAINS
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>(),
+            ["lash.append-request", "lash.history-node", "lash.intent"]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>(),
+        );
+    }
+
     #[test]
     fn durable_identity_family_domains_are_unique() {
         let unique = FAMILY_DOMAINS

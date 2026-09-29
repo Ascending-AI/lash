@@ -266,6 +266,36 @@ async fn trigger_registration_refuses_an_unregistered_engine_kind() {
     );
 }
 
+/// ADR 0013: an engine kind is registered once on a runtime host. The
+/// registry's enforcement point refuses a second registration under a kind it
+/// already holds, whichever way the engine arrived.
+#[test]
+fn a_duplicate_engine_kind_is_refused() {
+    let registry = registry();
+    let refusal = match registry
+        .clone()
+        .try_with_engine(ProcessEngineRegistration::accepting(
+            Arc::new(SignedEngine) as Arc<dyn ProcessEngine>
+        )) {
+        Err(refusal) => refusal,
+        Ok(_) => panic!("a second engine under a held kind is refused"),
+    };
+    assert!(
+        matches!(refusal, crate::PluginError::Registration(_)),
+        "the refusal is a registration error: {refusal}"
+    );
+    assert_eq!(
+        refusal.to_string(),
+        format!(
+            "plugin registration error: duplicate process engine kind `{SIGNED_ENGINE_KIND}`; each engine kind may be registered once"
+        )
+    );
+    assert!(
+        registry.get(SIGNED_ENGINE_KIND).is_some(),
+        "the refused registration replaces nothing"
+    );
+}
+
 /// The same boundary pins the authority on the way through: a registration
 /// naming a registered engine keeps its target and leaves registration with the
 /// artifact's signature, not the unknown claim that arrived.
