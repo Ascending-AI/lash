@@ -105,6 +105,17 @@ fn append_nodes(state: &mut RuntimeSessionState, count: usize) -> Vec<NodeId> {
         .collect()
 }
 
+/// The ids of the last `count` nodes on the active path. Read after a
+/// commit, these are the finalized ids the store persisted: a commit remaps
+/// the draft ids `append_nodes` returned.
+fn active_tail(state: &RuntimeSessionState, count: usize) -> Vec<NodeId> {
+    let path = state.session_graph.active_path_nodes();
+    path[path.len() - count..]
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect()
+}
+
 async fn window(
     store: &dyn ConformanceDeployment,
     session_id: &SessionId,
@@ -234,6 +245,10 @@ pub async fn history_pages_are_bounded_and_pinned(store: Arc<dyn ConformanceDepl
     state.ensure_agent_frame_initialized();
     append_nodes(&mut state, 5);
     commit(store.as_ref(), &mut state).await;
+    let initial_frame = state
+        .current_frame_node_id
+        .clone()
+        .expect("the initial frame is current");
     open_frame(&mut state, "history-pages-second-frame");
     append_nodes(&mut state, 3);
     commit(store.as_ref(), &mut state).await;
@@ -290,8 +305,9 @@ pub async fn history_pages_are_bounded_and_pinned(store: Arc<dyn ConformanceDepl
         "initial frame, five nodes, second frame, three nodes"
     );
     assert_eq!(
-        seen.last(),
-        state.session_graph.nodes.first().map(|node| &node.node_id)
+        seen.last().map(NodeId::as_str),
+        Some(initial_frame.as_str()),
+        "the last page ends at the initial frame's generation-0 row"
     );
 
     let too_small = store
@@ -374,8 +390,9 @@ where
         let mut state = state(&format!("history-corrupt-{case}"));
         admit(store.as_ref(), &state.session_id).await;
         state.ensure_agent_frame_initialized();
-        let ids = append_nodes(&mut state, 3);
+        append_nodes(&mut state, 3);
         commit(store.as_ref(), &mut state).await;
+        let ids = active_tail(&state, 3);
         if case == "base-no-parent" {
             open_frame(&mut state, "history-corrupt-second-frame");
             append_nodes(&mut state, 1);
@@ -464,9 +481,15 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
     append_nodes(&mut source, 2);
     commit(store.as_ref(), &mut source).await;
     let frame = open_frame(&mut source, "history-fork-middle");
-    let middle = append_nodes(&mut source, 2);
+    append_nodes(&mut source, 1);
     commit(store.as_ref(), &mut source).await;
-    store.pin(&middle[0]).await.expect("retain fork point");
+    // A pin retains a live tip, so the fork point is pinned while it is the
+    // source's leaf, before the source grows past it.
+    let fork_point = active_tail(&source, 1).remove(0);
+    store.pin(&fork_point).await.expect("retain fork point");
+    append_nodes(&mut source, 1);
+    commit(store.as_ref(), &mut source).await;
+    let middle = [fork_point, active_tail(&source, 1).remove(0)];
     store
         .fork_session(&ForkSessionRequest {
             session_id: SessionId::from("history-fork-child"),

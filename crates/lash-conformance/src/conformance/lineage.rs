@@ -324,11 +324,24 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     injector
         .force_lineage(&SessionId::from("lineage-c"), &unrelated_nodes[0])
         .await;
+    // A forged lineage row is corrupt data. The store may refuse the probe as
+    // unreadable or as corrupt, but it must never serve the unrelated node.
+    let forged = super::helpers::load_one_node(
+        deep.store().as_ref(),
+        deep.session_id(),
+        &unrelated_nodes[0],
+    )
+    .await;
     assert!(
-        !node_readable(&deep, &unrelated_nodes[0])
-            .await
-            .expect("false lineage accelerator is not authority"),
-        "lineage-readable must imply edge-reachable"
+        matches!(
+            forged,
+            Err(crate::StoreError::HistoryAnchorUnavailable {
+                reason: crate::store::AnchorUnavailable::NotReadable,
+                ..
+            }) | Err(crate::StoreError::StoredDataCorrupt { .. })
+        ),
+        "lineage-readable must imply edge-reachable: a false lineage row must \
+         not serve the unrelated node, got {forged:?}"
     );
 
     let (_carrier_root, carrier_root_nodes) = seed(

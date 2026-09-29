@@ -169,35 +169,116 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
     );
 }
 
+/// The store is multi-session (ADR 0112): a session the catalog never admitted
+/// is `Absent` and its history read is refused as `SessionNotFound`, and a
+/// second admitted session is served beside the first without either seeing
+/// the other's head.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimeStore>) {
-    let alpha = RuntimeSessionState {
-        session_id: SessionId::from("alpha"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<dyn RuntimeStore>) {
+    let state_for = |session_id: &str| {
+        let mut state = RuntimeSessionState {
+            session_id: SessionId::from(session_id),
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        };
+        state.ensure_agent_frame_initialized();
+        state
     };
+    let window = |session_id: &'static str| {
+        let store = Arc::clone(&store);
+        async move {
+            store
+                .load_session_window(
+                    &SessionId::from(session_id),
+                    crate::store::WindowSelector::Current,
+                )
+                .await
+                .unwrap_or_else(|error| panic!("load {session_id}'s window: {error}"))
+                .unwrap_or_else(|| panic!("{session_id} has a committed head"))
+        }
+    };
+
+    let alpha = state_for("alpha");
     commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&alpha, &[]),
-        "bind-alpha",
+        "commit-alpha",
     )
     .await
-    .expect("first commit binds the session");
-    let beta = RuntimeSessionState {
-        session_id: SessionId::from("beta"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let result = commit_runtime_state_for_test(
+    .expect("the admitted session commits");
+
+    let unknown = SessionId::from("never-admitted");
+    assert!(
+        matches!(
+            store
+                .lookup_session(&unknown)
+                .await
+                .expect("look up a session the catalog never admitted"),
+            crate::SessionLookup::Absent
+        ),
+        "a session the catalog never admitted is Absent"
+    );
+    let refused = store
+        .load_ancestors(
+            &unknown,
+            crate::store::HistoryAnchor::Head,
+            crate::store::HistoryBudget {
+                max_nodes: std::num::NonZeroU32::MIN,
+                max_bytes: std::num::NonZeroU64::new(1024).expect("nonzero byte budget"),
+            },
+        )
+        .await
+        .expect_err("a session with no head row has no history to read");
+    assert!(
+        matches!(
+            refused,
+            crate::StoreError::SessionNotFound { ref session_id } if session_id == &unknown
+        ),
+        "an unknown session is refused as SessionNotFound, got {refused:?}"
+    );
+
+    store
+        .admit_session(&lash_core::testing::store_fixtures::root_session_request(
+            &SessionId::from("beta"),
+        ))
+        .await
+        .expect("admit a second session beside the first");
+    let beta = state_for("beta");
+    commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&beta, &[]),
-        "bind-beta",
+        "commit-beta",
     )
-    .await;
+    .await
+    .expect("the second admitted session commits");
+
+    let alpha_read = window("alpha").await;
+    let beta_read = window("beta").await;
+    assert_eq!(alpha_read.session_id, "alpha");
+    assert_eq!(beta_read.session_id, "beta");
+    assert_eq!(
+        alpha_read.head_revision, 1,
+        "beta's commit leaves alpha's head alone"
+    );
+    assert_eq!(
+        beta_read.head_revision, 1,
+        "beta's head starts at its own first commit"
+    );
+    let node_ids = |read: &crate::store::SessionWindowRead| {
+        read.window
+            .nodes
+            .iter()
+            .map(|node| node.node_id.to_string())
+            .collect::<Vec<_>>()
+    };
+    let alpha_nodes = node_ids(&alpha_read);
+    let beta_nodes = node_ids(&beta_read);
+    assert!(!alpha_nodes.is_empty() && !beta_nodes.is_empty());
     assert!(
-        result.is_err(),
-        "a single-session store must reject a commit for a different session id"
+        alpha_nodes.iter().all(|node| !beta_nodes.contains(node)),
+        "each session's window holds only its own rows: alpha={alpha_nodes:?} beta={beta_nodes:?}"
     );
 }
 

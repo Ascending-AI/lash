@@ -106,7 +106,7 @@ macro_rules! runtime_persistence_tests {
             (the_command_lane_is_bindless, "command-lane-bindless"),
             (settlement_is_predicated_on_the_root, "settlement-predicated-on-root"),
             (a_command_enqueued_behind_a_roots_head_never_starves_it, "command-behind-the-head"),
-            (commit_rejects_a_different_session_id, "alpha"),
+            (serves_each_admitted_session_and_refuses_an_unknown_one, "alpha"),
             (commit_rejects_carried_nondefault_node_budget, "root"),
             (commit_rejects_carried_nondefault_byte_budget, "root"),
             (commit_rejects_follow_on_bytes_over_budget, "root"),
