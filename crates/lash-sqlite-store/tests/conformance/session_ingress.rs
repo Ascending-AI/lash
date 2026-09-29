@@ -1,7 +1,7 @@
 //! The session-ingress store laws (ADR 0101 §16) on SQLite.
 
-use lash_core::SessionStoreFactory as _;
 use lash_core::store::{ObligationKind, TurnInputAdmission};
+use lash_core::{SessionCatalogStore as _, SessionCommitStore as _, TurnInputStore as _};
 use lash_core_execution::StoreSet as _;
 
 use super::SUBSTRATE;
@@ -9,12 +9,12 @@ use crate::backend_fixture::TestBackend;
 
 lash_conformance::session_ingress_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    let runtime = backend
-        .session_store_factory()
-        .create_store(&lash_conformance::session_ingress_session_request())
+    let runtime = backend.store().await;
+    runtime
+        .admit_session(&lash_conformance::session_ingress_session_request())
         .await
         .expect("create the SQLite session-ingress session");
-    let ingress = backend.store().await;
+    let ingress = runtime.clone();
     (
         backend,
         lash_conformance::SessionIngressHandles { runtime, ingress },
@@ -29,9 +29,9 @@ lash_conformance::session_ingress_tests!({
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn admission_folds_the_producer_round_into_one_commit() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    let runtime = backend
-        .session_store_factory()
-        .create_store(&lash_conformance::session_ingress_session_request())
+    let runtime = backend.store().await;
+    runtime
+        .admit_session(&lash_conformance::session_ingress_session_request())
         .await
         .expect("create the session");
     let session_id = lash_sansio::SessionId::from(lash_conformance::SESSION_INGRESS_SESSION_ID);
@@ -90,7 +90,9 @@ async fn admission_folds_the_producer_round_into_one_commit() {
     }
 
     let reread = runtime
-        .load_session_head_meta()
+        .load_session_head_meta(&lash_sansio::SessionId::from(
+            lash_conformance::SESSION_INGRESS_SESSION_ID,
+        ))
         .await
         .expect("read the head");
     assert_eq!(

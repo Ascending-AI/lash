@@ -7,7 +7,8 @@ use lash_core_execution::attachments::{SessionAttachmentStore, reclaim_unreferen
 use lash_core_execution::{
     AttachmentCreateMeta, AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRef,
     AttachmentSource, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
-    EmptyRootSetPolicy, Message, MessageRole, Part, RuntimeSessionState, SessionRelation,
+    EmptyRootSetPolicy, Message, MessageRole, Part, RuntimeSessionState, SessionCatalogStore,
+    SessionRelation,
 };
 use lash_sansio::MediaType;
 
@@ -90,7 +91,7 @@ fn checkpoint_blob_count(backend: &TestBackend) -> i64 {
 }
 
 async fn sweep(
-    factory: &lash_sqlite_store::SqliteSessionStoreFactory,
+    factory: &lash_sqlite_store::SqliteStore,
     attachments: &Arc<dyn AttachmentStore>,
 ) -> lash_core_execution::attachments::AttachmentReclamationReport {
     reclaim_unreferenced_attachments(
@@ -114,10 +115,10 @@ async fn sweep(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    let factory = backend.session_store_factory();
+    let factory = backend.store().await;
     let session_id = SessionId::from("attachment-gc-holder");
-    let session = factory
-        .create_store(
+    factory
+        .admit_session(
             &lash_core_execution::testing::store_fixtures::session_store_request(
                 &session_id,
                 "attachment-gc",
@@ -126,13 +127,13 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
         )
         .await
         .expect("create holding session");
+    let session = Arc::clone(&factory);
     let attachments: Arc<dyn AttachmentStore> = backend.attachment_store();
 
-    let held =
-        SessionAttachmentSqliteStore::new(Arc::clone(&attachments), session.clone(), &session_id)
-            .put(b"held by a committed turn".to_vec(), octet_meta())
-            .await
-            .expect("session put records an intent and stores the bytes");
+    let held = SessionAttachmentStore::new(Arc::clone(&attachments), session.clone(), &session_id)
+        .put(b"held by a committed turn".to_vec(), octet_meta())
+        .await
+        .expect("session put records an intent and stores the bytes");
     let mut commit = lash_core_execution::store::RuntimeCommit::persisted_state_for_test(
         &state_referencing(&session_id, &held),
         &[],
