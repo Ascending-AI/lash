@@ -1,9 +1,0 @@
-# On the replay leg every await suspends and every resumption replays the
-# journal. The group dispatch now starts every member within a few
-# resumptions, but the opener still consumes the group's settlements one rank
-# at a time: an await and a read per rank, each a resumption that replays a
-# turn journal growing with the width, so the barrier law's width-64 rows
-# outrun the suite's bound. Every member still starts and overlaps; the live
-# leg gates the law.
-[suites.effect-group.replay.divergent]
-"tests::conformance_and_poison::tool_group_members_start_before_any_finishes" = "a width-64 group's opener reads its settlements one replayed resumption per rank under replay (FIG-4088)"

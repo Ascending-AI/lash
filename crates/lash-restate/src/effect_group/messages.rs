@@ -194,6 +194,13 @@ pub enum EffectGroupReadRankResponse {
         /// than stored twice on the settlement record.
         child_replay_key: String,
     },
+    /// The answer to a read that asked for the run (FIG-4088): every rank
+    /// seated consecutively from the one asked for, in rank order, each with
+    /// its stored payload. A reader takes a burst of settlements from one
+    /// journaled call instead of a read and a payload get per rank.
+    SettledRun {
+        ranks: Vec<EffectGroupServedRank>,
+    },
     NotSettled,
     Closed,
     UnknownGroup,
@@ -304,6 +311,23 @@ pub struct EffectGroupReadRankRequest {
     /// finalization, the settlement reader) see every recorded rank.
     #[serde(default)]
     pub for_caller: bool,
+    /// Answer a seated `rank` with the run seated consecutively from it,
+    /// payloads included ([`EffectGroupReadRankResponse::SettledRun`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub run: bool,
+}
+
+/// One seated rank as a run read serves it (FIG-4088).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EffectGroupServedRank {
+    pub settlement: EffectGroupSettlementRecord,
+    /// The settled child's durable identity, as
+    /// [`EffectGroupReadRankResponse::Settled`] names it.
+    pub child_replay_key: String,
+    /// The child's payload, for a [`EffectGroupSettlementTerminal::StoredPayload`]
+    /// settlement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<EffectGroupPayloadGetResponse>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

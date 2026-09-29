@@ -57,10 +57,8 @@ use crate::durable_wait::{
 use crate::effect_group::{
     EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
     EffectGroupDispatchRequest, EffectGroupOpenRequest, EffectGroupOpenResponse,
-    EffectGroupPayloadGetResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
-    EffectGroupReadRankResponse, EffectGroupSettlementTerminal, EffectGroupShape,
-    EffectGroupWaitResolution, decode_wait_resolution, group_shape_error, payload_key,
-    rank_wait_request, ready_wait_request, settlement_from_payload,
+    EffectGroupProbeResponse, EffectGroupShape, EffectGroupWaitResolution, decode_wait_resolution,
+    group_shape_error, ready_wait_request,
 };
 use crate::ingress::RestateAuthorityId;
 use crate::process::RestateProcessCancelRequest;
@@ -299,6 +297,8 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     /// (FIG-3898): the durable waits, process workflow and effect groups it
     /// addresses are that namespace's.
     namespace: crate::RestateNamespace,
+    /// The ranks this controller's run reads served (FIG-4088).
+    read_ahead: group_read::GroupReadAhead,
     _ctx: PhantomData<&'ctx ()>,
 }
 
@@ -324,6 +324,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             build_generation: None,
             folded_sentinel: None,
             namespace: crate::RestateNamespace::default(),
+            read_ahead: group_read::GroupReadAhead::default(),
             _ctx: PhantomData,
         }
     }
@@ -759,6 +760,8 @@ where
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         group.validate_execution_scope(opener.scope())?;
         let group_key = group.group_key().to_string();
+        // An open (or a reopen) starts the caller's reads from the index.
+        self.read_ahead.opened(&group_key);
         let handle = EffectGroupHandle::new(&group);
         let (shape, membership) = EffectGroupShape::from_group(&group, opener)?;
         // The route the dispatch is sent under is data (FIG-3795 S10): the
@@ -918,158 +921,7 @@ where
         handle: &mut EffectGroupHandle,
         cancel: lash_core::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
-        if handle.is_exhausted() {
-            return Err(group_shape_error(format!(
-                "effect group {} has no settlement after its {} children",
-                handle.group_key(),
-                handle.children()
-            )));
-        }
-        let rank = u64::try_from(handle.consumed() + 1).map_err(|error| {
-            group_shape_error(format!("effect group rank does not fit u64: {error}"))
-        })?;
-        let mut read = self
-            .context
-            .effect_group_read_rank(
-                &self.namespace,
-                handle.group_key().to_string(),
-                EffectGroupReadRankRequest {
-                    rank,
-                    for_caller: true,
-                },
-            )
-            .await
-            .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
-        if matches!(read, EffectGroupReadRankResponse::NotSettled) {
-            let scope = ExecutionScope::runtime_operation(handle.group_key());
-            let request = rank_wait_request(&scope, handle.group_key(), rank)?;
-            // A turn-observing rank wait races the turn's durable cancellation
-            // gate, and a process drive's rank wait that observes no turn
-            // races the segment's durable cancel promise; never a live token.
-            // The journal records which completed first (FIG-3672 P9,
-            // FIG-3673).
-            let turn_cancel = restate_group_turn_cancel_wait_request(&self.authority_id, &cancel)?;
-            let resolution = match self
-                .context
-                .await_effect_group_wait(
-                    &self.namespace,
-                    request,
-                    handle.group_key().to_string(),
-                    turn_cancel,
-                    self.options.process_cancel,
-                )
-                .await
-                .map_err(|error| {
-                    effect_group_engine_error(
-                        "LashDurableWaitWorkflow/await_resolution(RANK)",
-                        error,
-                    )
-                })? {
-                RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
-                RestateTurnCancelRaceOutcome::TurnCancelled
-                | RestateTurnCancelRaceOutcome::ProcessCancelled => {
-                    return Err(RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
-                        format!(
-                            "awaiting effect group {} rank {rank} was cancelled",
-                            handle.group_key()
-                        ),
-                    ));
-                }
-                RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
-                    return Err(RuntimeEffectControllerError::from(
-                        lash_core::StoreError::SessionDeleted { session_id },
-                    ));
-                }
-            };
-            match decode_wait_resolution(resolution)? {
-                EffectGroupWaitResolution::Rank => {}
-                EffectGroupWaitResolution::Retired => {
-                    return Err(group_shape_error(format!(
-                        "effect group {} was retired while awaiting rank {rank}",
-                        handle.group_key()
-                    )));
-                }
-                other => {
-                    return Err(group_shape_error(format!(
-                        "effect group {} rank {rank} wait resolved as {other:?}",
-                        handle.group_key()
-                    )));
-                }
-            }
-            read = self
-                .context
-                .effect_group_read_rank(
-                    &self.namespace,
-                    handle.group_key().to_string(),
-                    EffectGroupReadRankRequest {
-                        rank,
-                        for_caller: true,
-                    },
-                )
-                .await
-                .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
-        }
-        let record = match read {
-            EffectGroupReadRankResponse::Settled { settlement, .. } => settlement,
-            EffectGroupReadRankResponse::NotSettled => {
-                return Err(group_shape_error(format!(
-                    "effect group {} rank {rank} remained unsettled after its notification",
-                    handle.group_key()
-                )));
-            }
-            EffectGroupReadRankResponse::Closed => {
-                return Err(group_shape_error(format!(
-                    "effect group {} is closed to this caller",
-                    handle.group_key()
-                )));
-            }
-            EffectGroupReadRankResponse::UnknownGroup => {
-                return Err(group_shape_error(format!(
-                    "effect group {} is unknown",
-                    handle.group_key()
-                )));
-            }
-            EffectGroupReadRankResponse::Retired => {
-                return Err(group_shape_error(format!(
-                    "effect group {} is retired",
-                    handle.group_key()
-                )));
-            }
-        };
-        let payload = if matches!(
-            record.terminal,
-            EffectGroupSettlementTerminal::StoredPayload
-        ) {
-            match self
-                .context
-                .effect_group_payload_get(
-                    &self.namespace,
-                    payload_key(handle.group_key(), record.position),
-                )
-                .await
-                .map_err(|error| effect_group_engine_error("EffectGroupPayload/get", error))?
-            {
-                EffectGroupPayloadGetResponse::Stored { bytes } => Some(bytes),
-                EffectGroupPayloadGetResponse::Missing => {
-                    return Err(group_shape_error(format!(
-                        "effect group {} rank {rank} refers to a missing payload",
-                        handle.group_key()
-                    )));
-                }
-                EffectGroupPayloadGetResponse::Retired => {
-                    return Err(group_shape_error(format!(
-                        "effect group {} payload was retired",
-                        handle.group_key()
-                    )));
-                }
-            }
-        } else {
-            None
-        };
-        let settlement = settlement_from_payload(record, payload)?;
-        handle.advance()?;
-        Ok(settlement)
+        group_read::await_next_settlement(self, handle, cancel).await
     }
 
     /// The cursorless rank read the §6 incorporation record needs (ADR 0099
@@ -1079,7 +931,7 @@ where
         group_key: &str,
         rank: u64,
     ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
-        group_read::read_group_settlement(&self.context, &self.namespace, group_key, rank).await
+        group_read::read_group_settlement(self, group_key, rank).await
     }
 
     async fn close_effect_group(
@@ -1088,6 +940,9 @@ where
         disposition: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         let group_key = handle.group_key().to_string();
+        // A closed group answers its caller from the index again: a rank
+        // read ahead before the close is not served past it.
+        self.read_ahead.closed(&group_key);
         let response = self
             .context
             .effect_group_close(

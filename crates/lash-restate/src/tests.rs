@@ -237,6 +237,7 @@ mod determinism;
 mod drive_laws_on_the_double;
 mod effect_group_child_cancel;
 mod effect_group_conformance;
+mod effect_group_drain_transitivity;
 mod effect_group_generation_routing;
 mod effect_group_sdk_preconditions;
 mod effect_group_session_gate;

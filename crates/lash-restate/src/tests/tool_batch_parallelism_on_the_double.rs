@@ -160,13 +160,14 @@ async fn batch_scaling_child() {
     .await;
 }
 
-/// The dispatch half of the perf guard (FIG-4088): on an endpoint double that
-/// replays at every await, the `INACTIVITY_TIMEOUT=0s` mode of the e2e replay
-/// leg, a width-64 group's dispatch resumes about as often as a width-8
-/// group's, held to `scripts/perf_guard_budgets.json`. A dispatch that
-/// suspended once per child replayed its whole journal each time.
+/// The resumption half of the perf guard (FIG-4088): on an endpoint double
+/// that replays at every await, the `INACTIVITY_TIMEOUT=0s` mode of the e2e
+/// replay leg, a width-64 group's dispatch and opener resume about as often as
+/// a width-8 group's, held to `scripts/perf_guard_budgets.json`. A dispatch
+/// that suspended once per child, or an opener that suspended once per rank,
+/// replayed its whole journal each time.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn tool_batch_dispatch_resumptions_stay_bounded() {
+async fn tool_batch_resumptions_stay_bounded() {
     let budget = lash_conformance::ToolBatchScalingBudget::from_perf_guard_budgets(include_str!(
         "../../../../scripts/perf_guard_budgets.json"
     ));
@@ -185,20 +186,20 @@ async fn tool_batch_dispatch_resumptions_stay_bounded() {
     let mut measured = Vec::new();
     for width in [budget.small_width, budget.large_width] {
         measured.push(
-            lash_conformance::measure_tool_batch_dispatch_resumptions(
-                "dispatch-resumptions",
+            lash_conformance::measure_tool_batch_resumptions(
+                "resumptions",
                 harness.endpoint_host(),
                 harness.law_stores(),
                 harness.turn_runner(),
                 &producer,
                 width,
                 budget.large_width,
-                || group_dispatch_suspensions(&server),
+                || resumption_counts(&server),
             )
             .await,
         );
     }
-    lash_conformance::assert_tool_batch_dispatch_resumptions_bounded(
+    lash_conformance::assert_tool_batch_resumptions_bounded(
         "restate-endpoint-double/always-replay/parallel-model-tool-calls",
         measured[0],
         measured[1],
@@ -206,14 +207,17 @@ async fn tool_batch_dispatch_resumptions_stay_bounded() {
     );
 }
 
-/// Every group dispatch's suspensions on `server`, once none still runs: a
-/// dispatch holds its children's calls past the turn that opened the group.
-async fn group_dispatch_suspensions(server: &lash_restate_test::RestateTestServer) -> u64 {
+/// Every group dispatch's and every turn's suspensions on `server`, once no
+/// dispatch still runs: a dispatch holds its children's calls past the turn
+/// that opened the group. The scenario's turn is the group's opener.
+async fn resumption_counts(
+    server: &lash_restate_test::RestateTestServer,
+) -> lash_conformance::ToolBatchResumptionCounts {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     loop {
-        let dispatches = server
-            .invocations()
-            .into_iter()
+        let invocations = server.invocations();
+        let dispatches = invocations
+            .iter()
             .filter(|invocation| {
                 invocation.target.contains("EffectGroupDispatch")
                     && invocation.target.ends_with("/run")
@@ -223,10 +227,20 @@ async fn group_dispatch_suspensions(server: &lash_restate_test::RestateTestServe
             .iter()
             .all(|invocation| invocation.status == "completed")
         {
-            return dispatches
-                .iter()
-                .map(|invocation| u64::from(invocation.suspensions))
-                .sum();
+            let suspensions =
+                |invocations: &mut dyn Iterator<Item = &lash_restate_test::InvocationView>| {
+                    invocations
+                        .map(|invocation| u64::from(invocation.suspensions))
+                        .sum()
+                };
+            return lash_conformance::ToolBatchResumptionCounts {
+                dispatch: suspensions(&mut dispatches.iter().copied()),
+                opener: suspensions(
+                    &mut invocations
+                        .iter()
+                        .filter(|invocation| invocation.target.contains("ConformanceTurnProbe")),
+                ),
+            };
         }
         assert!(
             std::time::Instant::now() < deadline,

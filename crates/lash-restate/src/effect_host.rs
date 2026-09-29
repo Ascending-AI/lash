@@ -1164,6 +1164,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 &EffectGroupReadRankRequest {
                     rank,
                     for_caller: true,
+                    run: false,
                 },
             )
             .await
@@ -1227,6 +1228,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                     &EffectGroupReadRankRequest {
                         rank,
                         for_caller: true,
+                        run: false,
                     },
                 )
                 .await
@@ -1234,6 +1236,12 @@ impl RuntimeEffectController for RestateEffectHostController {
         }
         let record = match read {
             EffectGroupReadRankResponse::Settled { settlement, .. } => settlement,
+            EffectGroupReadRankResponse::SettledRun { .. } => {
+                return Err(group_shape_error(format!(
+                    "effect group {} answered a one-rank read of rank {rank} with a run",
+                    handle.group_key()
+                )));
+            }
             EffectGroupReadRankResponse::NotSettled => {
                 return Err(group_shape_error(format!(
                     "effect group {} rank {rank} remained unsettled after its notification",
@@ -1323,6 +1331,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 &EffectGroupReadRankRequest {
                     rank,
                     for_caller: false,
+                    run: false,
                 },
             )
             .await
@@ -1332,6 +1341,11 @@ impl RuntimeEffectController for RestateEffectHostController {
                 settlement,
                 child_replay_key,
             } => (settlement, child_replay_key),
+            EffectGroupReadRankResponse::SettledRun { .. } => {
+                return Err(group_shape_error(format!(
+                    "effect group {group_key} answered a one-rank read of rank {rank} with a run"
+                )));
+            }
             EffectGroupReadRankResponse::NotSettled | EffectGroupReadRankResponse::Closed => {
                 return Ok(None);
             }
