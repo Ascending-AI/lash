@@ -142,6 +142,7 @@ impl RuntimeTurnDriver<'_> {
                     reasoning_published,
                     stream_hook_states,
                 },
+            capture: _,
         } = match self
             .invoke_turn_llm_effect(machine, id, request, event_tx)
             .await

@@ -1233,6 +1233,10 @@ struct RuntimeCommitIntent<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     interrupted_turn_input_cancellation: Option<&'a crate::TurnCancellationEvidence>,
     committed_attachment_ids: &'a [crate::AttachmentId],
+    /// The sealed partial a stopped turn's commit publishes (ADR 0114 §3.3):
+    /// a reference, never payload. Absent from every other commit's identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stopped_partial: Option<&'a super::StoppedPartialCommit>,
 }
 
 /// Explicit allowlist for durable commit intent.
@@ -1286,6 +1290,7 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
                 .interrupted_turn_input_cancellation
                 .as_ref(),
             committed_attachment_ids: &commit.committed_attachment_ids,
+            stopped_partial: commit.stopped_partial.as_ref(),
         }
     }
 }

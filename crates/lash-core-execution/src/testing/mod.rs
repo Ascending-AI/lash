@@ -1996,6 +1996,7 @@ pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTu
         errors: Vec::new(),
         turn_input_acceptance: None,
         turn_cancel_input_outcome: Default::default(),
+        stopped_partial: None,
     }
 }
 

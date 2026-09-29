@@ -113,6 +113,14 @@ macro_rules! persistence_operations {
                 fn root_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 fn bind_root_inputs(&self, session_id: &SessionId, root: &crate::TurnId, inputs: &[crate::InputId]) -> Result<(), StoreError>;
             }
+            TurnCaptureStore {
+                fn open_capture_writer(&self, request: &OpenCaptureWriter) -> Result<CaptureWriterLease, StoreError>;
+                fn append_capture_batch(&self, batch: &CaptureBatch) -> Result<CaptureAck, StoreError>;
+                fn persist_attempt_reset(&self, reset: &CaptureAttemptReset) -> Result<CaptureWriterLease, StoreError>;
+                fn advance_capture_base(&self, advance: &CaptureBaseAdvance) -> Result<(), StoreError>;
+                fn seal_turn_capture(&self, request: &SealTurnCapture) -> Result<SealedCapture, StoreError>;
+                fn read_stopped_partial(&self, request: &StoppedPartialReadRequest) -> Result<StoppedPartialRead, StoreError>;
+            }
             StoreMaintenance {
                 fn vacuum(&self) -> MaintenanceResult<VacuumReport>;
                 fn gc_unreachable(&self) -> MaintenanceResult<GcReport>;

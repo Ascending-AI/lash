@@ -477,6 +477,15 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 checkpoint: checkpoint.into(),
             }),
             lash_core::TurnEvent::Error { message } => Ok(Self::Error { message }),
+            // Tool progress has no remote form yet: the activity is left out,
+            // and the chunks reach a remote host through the stopped
+            // partial (ADR 0114 §2.2).
+            lash_core::TurnEvent::ToolOutputProgress { .. } => {
+                Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name: "RemoteTurnEvent",
+                    message: "tool output progress has no remote form".to_string(),
+                })
+            }
         }
     }
 }

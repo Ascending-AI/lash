@@ -52,8 +52,8 @@ pub use effect::await_event_identity;
 pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CanonicalRuntimeEffectEnvelope,
-    CausalRef, CheckpointClaimSet, CommandJournalGuard, CompletionKeyPreparation, EffectAddress,
-    EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
+    CaptureWatermark, CausalRef, CheckpointClaimSet, CommandJournalGuard, CompletionKeyPreparation,
+    EffectAddress, EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
     EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
     ExecutionScope, ExternalCompletionError, GroupChildBinding, GroupChildCancelWatch,
     GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, IndependentEffectWork,

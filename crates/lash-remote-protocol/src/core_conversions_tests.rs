@@ -1079,6 +1079,7 @@ fn remote_turn_result_maps_core_semantics() {
     let turn = lash_core::facade_support::AssembledTurn {
         turn_input_acceptance: None,
         turn_cancel_input_outcome: Default::default(),
+        stopped_partial: None,
         state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -1246,6 +1247,7 @@ fn assert_terminal_call_record_converts_and_validates(
     let turn = lash_core::facade_support::AssembledTurn {
         turn_input_acceptance: None,
         turn_cancel_input_outcome: Default::default(),
+        stopped_partial: None,
         state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),

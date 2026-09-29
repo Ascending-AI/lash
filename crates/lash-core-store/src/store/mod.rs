@@ -3,6 +3,7 @@ use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
 pub mod attachment_manifest;
+mod capture;
 mod checkpoint;
 pub mod namespace;
 pub use checkpoint::{
@@ -70,6 +71,12 @@ pub use attachment_manifest::{
     AttachmentManifestEntry, AttachmentOwner, AttachmentOwnerKind, AttachmentWriteFence,
     AttachmentWritePermit, AttachmentWriteToken, decode_attachment_condemnation_record,
     decode_attachment_owner,
+};
+pub use capture::{
+    CAPTURE_BATCH_MAX_BYTES, CAPTURE_BATCH_MAX_FRAMES, CaptureAck, CaptureAttemptReset,
+    CaptureBaseAdvance, CaptureBatch, CaptureFrame, CaptureFrameKey, CaptureInvocationKey,
+    CaptureWriterLease, CaptureWriterLeaseRef, OpenCaptureWriter, SealTurnCapture, SealedCapture,
+    StoppedPartialRead, StoppedPartialReadRequest, TurnCaptureStore,
 };
 pub use claim_authority::{ClaimAuthority, LeaseOwnerIdentity};
 pub use claim_plan::{
@@ -165,7 +172,7 @@ pub use runtime_commit::{
     AppendRequestIdentity, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
     RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit, RuntimeCommitReceipt,
     RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
-    SemanticBoundaryOperation, decode_runtime_commit_receipt,
+    SemanticBoundaryOperation, StoppedPartialCommit, decode_runtime_commit_receipt,
     decode_runtime_commit_receipt_for_fleet, ensure_supported_receipt_version,
     ensure_supported_receipt_version_for_fleet,
 };
@@ -616,6 +623,7 @@ impl RuntimeCommit {
             turn_cancel_closure_settlement,
             adopted_intent_rows,
             committed_attachment_ids,
+            stopped_partial,
         } = self;
         debug_assert!(
             completed_queue_claims.is_empty()
@@ -629,6 +637,7 @@ impl RuntimeCommit {
                 && *adopted_intent_rows == 0
                 && failure_evidence.is_empty()
                 && committed_attachment_ids.is_empty()
+                && stopped_partial.is_none()
                 && root_terminal.is_none()
                 && park_root.is_none(),
             "append-session-nodes constructor gained unrelated settlement side effects"
@@ -816,6 +825,7 @@ impl RuntimeCommit {
             turn_cancel_closure_settlement: None,
             adopted_intent_rows: 0,
             committed_attachment_ids: Vec::new(),
+            stopped_partial: None,
         })
     }
 
@@ -2023,7 +2033,8 @@ pub trait FleetFormatStore: Send + Sync {
 /// lifecycle), [`QueuedWorkStore`] (queued-work ingress and claiming),
 /// [`DriveEpochStore`] (the drive epoch a session drive's seal raises, FIG-3600),
 /// [`RootStore`] (logical roots' terminal evidence and input bindings, FIG-3600
-/// S7) and [`StoreMaintenance`] (vacuum/GC). The segments share one transactional
+/// S7), [`TurnCaptureStore`] (a physical turn's capture frames and its sealed
+/// stopped partial, ADR 0114) and [`StoreMaintenance`] (vacuum/GC). The segments share one transactional
 /// domain: claims granted by the input and queue segments settle atomically in
 /// [`SessionCommitStore::commit_runtime_state`]. In-flight nondeterministic
 /// work belongs to the active [`EffectHost`](crate::EffectHost), not to the
@@ -2043,6 +2054,7 @@ pub trait RuntimePersistence:
     + QueuedWorkStore
     + DriveEpochStore
     + RootStore
+    + TurnCaptureStore
     + StoreMaintenance
 {
 }
@@ -2054,6 +2066,7 @@ impl<T> RuntimePersistence for T where
         + QueuedWorkStore
         + DriveEpochStore
         + RootStore
+        + TurnCaptureStore
         + StoreMaintenance
         + ?Sized
 {

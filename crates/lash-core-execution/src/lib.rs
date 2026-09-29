@@ -740,8 +740,8 @@ pub use runtime::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, AdmittedScope, Ancestry,
     ArtifactOwner, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BindingId, BoundaryReason, CapabilityRef,
-    CausalRef, ChargeSafetyRefusalEvidence, CheckpointClaimSet, Clock, ClockWallTime,
-    CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
+    CaptureWatermark, CausalRef, ChargeSafetyRefusalEvidence, CheckpointClaimSet, Clock,
+    ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
     DeclaredProcessIdentity, DefinitionRef, DeliveryPolicy, DrainMode, DrainModePolicy,
     EffectAddress, EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
     EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate,
@@ -883,8 +883,9 @@ pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, ExternalLaunchAudit,
     InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall, InternalProcessToolDef,
     InternalProcessToolImplementation, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall,
-    ToolCall, ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolContext,
-    ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    ProgressRefused, ToolCall, ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolContext,
+    ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProgressReporter,
+    ToolProgressSink, ToolProvider,
 };
 
 #[doc(hidden)]

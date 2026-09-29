@@ -789,6 +789,7 @@ pub(super) async fn durable_report(
         state,
         outcome,
         assistant_output,
+        stopped_partial: None,
         usage: Default::default(),
         llm_calls: Vec::new(),
         failure_evidence: Vec::new(),

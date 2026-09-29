@@ -36,6 +36,10 @@ pub struct RemoteTurnReport {
     pub activities: Vec<RemoteTurnActivity>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub metadata: HashMap<String, serde_json::Value>,
+    /// The stopped turn's sealed partial output (ADR 0114 §1.4), beside
+    /// `assistant_output` and never inside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_partial: Option<lash_sansio::StoppedPartial>,
 }
 
 impl RemoteTurnReport {
@@ -74,6 +78,13 @@ impl RemoteTurnReport {
         } = &self.outcome
         {
             evidence.validate()?;
+        }
+        if let Some(partial) = &self.stopped_partial
+            && partial.verify_digest().is_err()
+        {
+            return Err(RemoteProtocolError::StoppedPartialDigestMismatch {
+                turn_id: partial.id.turn_id.to_string(),
+            });
         }
         let mut summary_records = HashMap::new();
         for record in &self.llm_calls {

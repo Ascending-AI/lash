@@ -157,6 +157,12 @@ pub struct TurnReport {
     pub outcome: TurnOutcome,
     /// Assistant output committed by the turn.
     pub assistant_output: AssistantOutput,
+    /// The stopped turn's sealed partial output: `Some` exactly when the
+    /// outcome is `Stopped`. Data returned to the host; it never enters
+    /// `assistant_output`, the graph or history, and a host that wants it in
+    /// context resubmits it as ordinary input (ADR 0114).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_partial: Option<lash_sansio::StoppedPartial>,
     /// This session's own LLM tokens for the turn. Every session owns its
     /// usage; child-session tokens live on each child's own turn report.
     pub usage: TokenUsage,
@@ -237,11 +243,13 @@ impl TurnReport {
             omitted,
             failure_evidence,
             errors,
+            stopped_partial,
         } = turn;
         Self {
             state,
             outcome,
             assistant_output,
+            stopped_partial,
             usage: token_usage,
             llm_calls,
             failure_evidence,
@@ -277,6 +285,7 @@ impl TurnReport {
             omitted: self.omitted.clone(),
             failure_evidence: self.failure_evidence.clone(),
             errors: self.errors.clone(),
+            stopped_partial: self.stopped_partial.clone(),
         };
         let activities = activities
             .iter()

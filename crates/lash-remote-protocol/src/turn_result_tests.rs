@@ -92,6 +92,7 @@ fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode(
         issues: Vec::new(),
         activities: Vec::new(),
         metadata: HashMap::new(),
+        stopped_partial: None,
     })
     .expect("serialize version 43 report");
     payload["protocol_version"] = serde_json::json!(43);
@@ -318,6 +319,7 @@ fn answered_report() -> RemoteTurnReport {
         issues: Vec::new(),
         activities: Vec::new(),
         metadata: HashMap::new(),
+        stopped_partial: None,
     }
 }
 

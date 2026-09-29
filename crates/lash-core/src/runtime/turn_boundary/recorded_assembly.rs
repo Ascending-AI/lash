@@ -274,6 +274,9 @@ impl RecordedTurnAssembly {
             // owns the acceptance identity assembly never sees.
             turn_input_acceptance: None,
             turn_cancel_input_outcome: Default::default(),
+            // Set by the stop's finisher from the sealed capture, which
+            // assembly never sees (ADR 0114 §4.3).
+            stopped_partial: None,
         }
     }
 

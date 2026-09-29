@@ -1360,6 +1360,7 @@ impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
                     launch: Box::new(outcome.launch),
                     triggers: outcome.triggers,
                     capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
+                    capture_watermark: outcome.capture_watermark.map(Box::new),
                 })
             }
             command => Err(RuntimeEffectControllerError::new(
@@ -1462,6 +1463,7 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
             launch: Box::new(outcome.launch),
             triggers: outcome.triggers,
             capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
+            capture_watermark: outcome.capture_watermark.map(Box::new),
         })
     }
 }

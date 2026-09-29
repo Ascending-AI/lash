@@ -499,6 +499,7 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
         launch,
         triggers,
         capture,
+        capture_watermark: None,
     })
 }
 

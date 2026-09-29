@@ -30,6 +30,7 @@ pub(super) fn map_effect_task_join(
             }),
             triggers: Vec::new(),
             capture: None,
+            capture_watermark: None,
         }),
         None => Err(RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::EffectPanicked,

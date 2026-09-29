@@ -113,6 +113,12 @@ pub struct AssembledTurn {
         skip_serializing_if = "crate::TurnCancelInputOutcome::is_empty"
     )]
     pub turn_cancel_input_outcome: crate::TurnCancelInputOutcome,
+    /// The stopped turn's sealed and committed partial output: `Some`
+    /// exactly when the turn's terminal is `TurnOutcome::Stopped(_)`
+    /// (ADR 0114 §1.2). Data returned to the caller; it never enters the
+    /// graph, `assistant_output` or history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_partial: Option<lash_sansio::StoppedPartial>,
 }
 
 /// Result of driving one logical host turn through any AgentFrame switches.
@@ -281,6 +287,12 @@ pub enum TurnEvent {
     ModelAttemptReset {
         assistant_prose_correlation_ids: Vec<TurnActivityId>,
         reasoning_correlation_ids: Vec<TurnActivityId>,
+    },
+    /// One chunk a running tool reported through its progress sink, published
+    /// after the chunk was persisted to the turn's capture (ADR 0114 §2.2).
+    ToolOutputProgress {
+        call_id: String,
+        chunk: lash_sansio::ToolOutputChunk,
     },
     /// A sealed per-call attempt ledger, including provider-reported evidence.
     ModelCallRecorded {

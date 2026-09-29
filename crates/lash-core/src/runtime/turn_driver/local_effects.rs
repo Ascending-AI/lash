@@ -70,6 +70,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     text_streamed,
                     call_record,
                     stream,
+                    capture,
                 } = Box::pin(control.run_step_body(&host, honoured, |stop| async move {
                     driver
                         .run_llm_call(request, protocol_iteration, invocation, &event_tx, &stop)
@@ -81,6 +82,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     text_streamed,
                     call_record,
                     stream: Box::new(stream),
+                    capture: capture.map(Box::new),
                 })
             }
             RuntimeEffectCommand::AssistantResponseHooks {

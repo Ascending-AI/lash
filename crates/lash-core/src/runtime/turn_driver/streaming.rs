@@ -227,6 +227,7 @@ impl RuntimeTurnDriver<'_> {
                     text_streamed: false,
                     call_record: None,
                     stream: crate::runtime::LlmStreamRecord::default(),
+                    capture: None,
                 };
             }
         };
@@ -698,6 +699,7 @@ impl RuntimeTurnDriver<'_> {
                 reasoning_published: reasoning_publication.into_published_blocks(),
                 stream_hook_states,
             },
+            capture: None,
         }
     }
 
@@ -1429,6 +1431,10 @@ impl RuntimeTurnDriver<'_> {
                     envelope: None,
                 });
             }
+            // Argument streaming publishes nothing (ADR 0114 §2.1).
+            LlmStreamEvent::ToolInputStart { .. }
+            | LlmStreamEvent::ToolInputDelta { .. }
+            | LlmStreamEvent::ToolInputEnd { .. } => {}
         }
         Ok(())
     }

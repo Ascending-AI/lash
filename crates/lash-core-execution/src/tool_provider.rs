@@ -439,6 +439,62 @@ pub struct ToolContext<'run> {
     /// from the scope alone is always observing, which would wire a child
     /// admitted with no cooperative authority to a gate it must never see.
     pub(crate) turn_cancel_wait: Option<crate::runtime::TurnCancelWait>,
+    /// Where this call's progress chunks are persisted (ADR 0114 §2.2).
+    /// `None` outside a turn's capture: the call's progress is then accepted
+    /// and kept nowhere.
+    pub(crate) progress_reporter: Option<Arc<dyn ToolProgressReporter>>,
+}
+
+/// The runtime side of a [`ToolProgressSink`]: the turn's capture writer,
+/// which persists each chunk before it is published (ADR 0114 §4.1).
+#[async_trait::async_trait]
+pub trait ToolProgressReporter: Send + Sync {
+    /// Persist and then publish one chunk of call `call_id`'s output.
+    async fn report(
+        &self,
+        call_id: &str,
+        chunk: lash_sansio::ToolOutputChunk,
+    ) -> Result<(), ProgressRefused>;
+}
+
+/// One tool call's progress sink (ADR 0114 §2.2). A tool that never calls
+/// [`report`](Self::report) is captured as
+/// [`ToolOutputCapture::Unavailable`](lash_sansio::ToolOutputCapture::Unavailable).
+#[derive(Clone)]
+pub struct ToolProgressSink {
+    reporter: Option<Arc<dyn ToolProgressReporter>>,
+    call_id: Option<String>,
+}
+
+impl ToolProgressSink {
+    /// Persist one chunk before it is published. The first call flips the
+    /// capture from `Unavailable` to `Captured`. It waits under
+    /// backpressure. After the fence it returns [`ProgressRefused::Fenced`],
+    /// and the tool should stop.
+    pub async fn report(&self, chunk: lash_sansio::ToolOutputChunk) -> Result<(), ProgressRefused> {
+        match (&self.reporter, &self.call_id) {
+            (Some(reporter), Some(call_id)) => reporter.report(call_id, chunk).await,
+            _ => Ok(()),
+        }
+    }
+}
+
+impl std::fmt::Debug for ToolProgressSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolProgressSink")
+            .field("call_id", &self.call_id)
+            .field("captured", &self.reporter.is_some())
+            .finish()
+    }
+}
+
+/// Why a [`ToolProgressSink::report`] was not persisted.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ProgressRefused {
+    #[error("the turn's capture is fenced")]
+    Fenced,
+    #[error("capture persistence failed: {0}")]
+    Store(String),
 }
 
 #[derive(Clone)]
@@ -511,6 +567,7 @@ pub struct ToolContextBuilder<'run> {
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
     orchestrating_sinks: Option<crate::tool_dispatch::OrchestratingChildSinks>,
     turn_cancel_wait: Option<crate::runtime::TurnCancelWait>,
+    progress_reporter: Option<Arc<dyn ToolProgressReporter>>,
 }
 
 impl<'run> ToolContextBuilder<'run> {
@@ -542,6 +599,7 @@ impl<'run> ToolContextBuilder<'run> {
             child_execution_trace_hook: None,
             orchestrating_sinks: None,
             turn_cancel_wait: None,
+            progress_reporter: None,
         }
     }
 
@@ -656,6 +714,13 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
+    /// Installs the turn capture writer that persists this call's progress
+    /// (ADR 0114 §2.2). Only the runtime's tool step body sets one.
+    pub fn progress_reporter(mut self, reporter: Arc<dyn ToolProgressReporter>) -> Self {
+        self.progress_reporter = Some(reporter);
+        self
+    }
+
     pub fn build(self) -> ToolContext<'run> {
         ToolContext {
             session_id: self.session_id,
@@ -684,11 +749,21 @@ impl<'run> ToolContextBuilder<'run> {
             child_execution_trace_hook: self.child_execution_trace_hook,
             orchestrating_sinks: self.orchestrating_sinks,
             turn_cancel_wait: self.turn_cancel_wait,
+            progress_reporter: self.progress_reporter,
         }
     }
 }
 
 impl<'run> ToolContext<'run> {
+    /// This call's progress sink. A tool that never calls `report` is
+    /// captured as `ToolOutputCapture::Unavailable`.
+    pub fn progress(&self) -> ToolProgressSink {
+        ToolProgressSink {
+            reporter: self.progress_reporter.clone(),
+            call_id: self.tool_call_id.clone(),
+        }
+    }
+
     /// The lineage of the process this tool call runs inside (FIG-3607 R1):
     /// the runtime context's when the call has one, else the dispatch's.
     pub(crate) fn process_lineage(&self) -> Option<crate::ProcessLineage> {
@@ -758,6 +833,7 @@ impl<'run> ToolContext<'run> {
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
             orchestrating_sinks: self.orchestrating_sinks.clone(),
             turn_cancel_wait: self.turn_cancel_wait.clone(),
+            progress_reporter: self.progress_reporter.clone(),
         })
     }
 
@@ -809,6 +885,7 @@ impl<'run> ToolContext<'run> {
             child_execution_trace_hook: None,
             orchestrating_sinks: None,
             turn_cancel_wait: None,
+            progress_reporter: None,
         }
     }
 

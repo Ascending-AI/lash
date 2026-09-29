@@ -761,6 +761,98 @@ pub enum StoreError {
         /// The lowest feed position the store still serves.
         horizon: crate::store::ParkFeedCursor,
     },
+    /// A capture append or reset named an attempt epoch a later writer of
+    /// the same invocation has fenced (ADR 0114 §3.2).
+    #[error(
+        "capture writer {invocation}#{attempt_epoch} of turn `{turn_id}` in session `{session_id}` is fenced by epoch {current_epoch}"
+    )]
+    CaptureWriterFenced {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+        invocation: String,
+        attempt_epoch: u32,
+        current_epoch: u32,
+    },
+    /// A capture write arrived after the turn's capture was sealed.
+    #[error(
+        "capture of turn `{turn_id}` in session `{session_id}` is sealed through sequence {sealed_through}"
+    )]
+    CaptureSealed {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+        sealed_through: u64,
+    },
+    /// A capture batch passed the frame or byte bound. Nothing was stored.
+    #[error(
+        "capture batch of {frames} frames and {bytes} bytes exceeds {max_frames} frames or {max_bytes} bytes"
+    )]
+    CaptureBatchTooLarge {
+        frames: usize,
+        bytes: u64,
+        max_frames: usize,
+        max_bytes: u64,
+    },
+    /// A batch ordinal already stored a different body under the same
+    /// writer.
+    #[error(
+        "capture batch {batch_ordinal} of writer {invocation}#{attempt_epoch} of turn `{turn_id}` in session `{session_id}` was already stored with a different body"
+    )]
+    CaptureBatchConflict {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+        invocation: String,
+        attempt_epoch: u32,
+        batch_ordinal: u64,
+    },
+    /// A capture write or base advance named a base other than the turn's
+    /// current one.
+    #[error(
+        "capture base {offered} of turn `{turn_id}` in session `{session_id}` is stale; the turn is at base {current}"
+    )]
+    CaptureBaseStale {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+        offered: u32,
+        current: u32,
+    },
+    /// A seal would stop short of a sequence the drive's recorded outcomes
+    /// already reference.
+    #[error(
+        "capture seal of turn `{turn_id}` in session `{session_id}` through {sealed_through} is below the recorded watermark {recorded}"
+    )]
+    CaptureSealBelowWatermark {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+        sealed_through: u64,
+        recorded: u64,
+    },
+    /// The turn's capture frames do not fold into a partial.
+    #[error("capture of turn `{turn_id}` in session `{session_id}` is corrupt: {violation:?}")]
+    CaptureCorrupt {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+        violation: crate::capture::CaptureReduceViolation,
+    },
+    /// A commit named a stopped partial the store holds no seal for.
+    #[error("stopped partial of turn `{turn_id}` in session `{session_id}` is not sealed")]
+    StoppedPartialNotSealed {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+    },
+    /// A commit named a stopped partial whose digest differs from the one
+    /// already sealed or committed for its turn. The digests are boxed so
+    /// they do not grow every `Result` that returns a store error.
+    #[error(
+        "stopped partial of turn `{turn_id}` in session `{session_id}` is {}, not {}",
+        existing.to_hex(),
+        offered.to_hex()
+    )]
+    StoppedPartialConflict {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+        existing: Box<lash_sansio::StoppedPartialDigest>,
+        offered: Box<lash_sansio::StoppedPartialDigest>,
+    },
     /// The storage substrate failed an operation before a trustworthy value
     /// could be returned.
     #[error("{backend} storage failure: {message}")]
@@ -924,6 +1016,15 @@ impl StoreError {
             Self::ArtifactDestinationOwnerRetired => "ArtifactDestinationOwnerRetired",
             Self::ArtifactStagingEdgeMissing { .. } => "ArtifactStagingEdgeMissing",
             Self::ParkFeedCursorCompacted { .. } => "ParkFeedCursorCompacted",
+            Self::CaptureWriterFenced { .. } => "CaptureWriterFenced",
+            Self::CaptureSealed { .. } => "CaptureSealed",
+            Self::CaptureBatchTooLarge { .. } => "CaptureBatchTooLarge",
+            Self::CaptureBatchConflict { .. } => "CaptureBatchConflict",
+            Self::CaptureBaseStale { .. } => "CaptureBaseStale",
+            Self::CaptureSealBelowWatermark { .. } => "CaptureSealBelowWatermark",
+            Self::CaptureCorrupt { .. } => "CaptureCorrupt",
+            Self::StoppedPartialNotSealed { .. } => "StoppedPartialNotSealed",
+            Self::StoppedPartialConflict { .. } => "StoppedPartialConflict",
             Self::StorageFailure { .. } => "StorageFailure",
             Self::SchemaVersionOutOfRange { .. } => "SchemaVersionOutOfRange",
             Self::Backend(_) => "Backend",

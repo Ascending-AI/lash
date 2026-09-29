@@ -68,6 +68,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-runtime-usage-payload/v4",
     "lash-session-append-draft-fallback/v2",
     "lash-stable-identity/v2",
+    "lash-stopped-partial/v1",
     "lash-tool-catalog-authority/v2",
     "lash-tool-intent-payload/v2",
     "lash-tool-intent-payload/v3",

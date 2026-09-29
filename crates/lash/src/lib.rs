@@ -79,6 +79,7 @@ pub mod sync {
 mod send;
 mod session;
 mod session_binding;
+mod stopped_partial;
 mod support;
 #[cfg(test)]
 mod tests;
@@ -111,6 +112,10 @@ pub use crate::send::{
     TurnStatus,
 };
 pub use crate::session::{LashSession, ObservableSession, ParkedSession, SessionBuilder};
+pub use crate::stopped_partial::{
+    ItemChoice, OmissionReport, OmittedItem, PartialItemKind, Resubmission, ResubmissionError,
+    ResubmissionSelection,
+};
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
 pub use crate::turn::{
     ReportSource, TurnActivityFanout, TurnOutput, TurnReport, message_role, message_text,
@@ -174,6 +179,13 @@ pub use lash_core::{
     RunShapeError, RunSpec, SlotId,
 };
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
+pub use lash_sansio::{
+    CaptureBase, CaptureCoverage, CompleteToolCall, CutState, FragmentState,
+    InterruptedToolOutcome, OtherStopCause, PartialItem, PartialItemId, ResubmissionEligibility,
+    RunningTool, SelectionReason, StopReason, StoppedPartial, StoppedPartialDigest,
+    StoppedPartialDigestMismatch, StoppedPartialId, StoppedPartialSummary, ToolExecutionState,
+    ToolOutputCapture, ToolOutputChunk,
+};
 /// Cooperative cancellation handle; re-exported so embedders hold one
 /// without depending on `tokio-util` themselves.
 pub use tokio_util::sync::CancellationToken;
