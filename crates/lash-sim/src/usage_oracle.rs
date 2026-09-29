@@ -58,7 +58,7 @@ fn check_usage_conservation(
             .as_ref()
             .ok_or_else(|| format!("{context} has no accepted raw-row projection"))?;
         let accepted_ledger = fold_rows(
-            accepted_raw.get("token_ledger").unwrap_or(&Value::Null),
+            accepted_raw.pointer("/usage/rows").unwrap_or(&Value::Null),
             &format!("{context} accepted token ledger"),
         )?;
         require_equal(cumulative, &accepted_ledger, &context, "durable ledger")?;

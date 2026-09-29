@@ -14,7 +14,6 @@ use lash_sansio::SessionId;
 // No attachment_store_*_tests!: those laws certify the separate FileAttachmentStore component.
 // No live_replay_tests!: live replay is an in-process cache, not PostgreSQL-backed storage.
 // No append_usage_cancellation_tests!: exactly-once cancellation requires the SQLite worker seam.
-// No unbound_session_read_tests!: PostgreSQL reads require an explicit session binding.
 // No runtime_persistence_clock_tests!: the backend clock is PostgreSQL-owned and not controllable.
 // No queued-lane resolver macro: engine pacing belongs to Restate, not a persistence store.
 
@@ -100,7 +99,7 @@ use std::sync::Arc;
 use lash_conformance::{
     FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
-    ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
+    ReopenableProcessRegistry, ReopenableRuntimeStore, ReopenableTriggerStore,
 };
 use lash_core_execution::compat::CompatRefusal;
 use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
@@ -421,7 +420,10 @@ lash_conformance::runtime_persistence_reopenable_tests!({
         eprintln!("skipping Postgres conformance: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    let storage = Arc::new(storage);
+    // One reset per law: a law that opens several sessions (the factory
+    // laws) admits each through `make`, and the catalog must keep them all.
+    reset(storage.pool()).await;
+    drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
     let lease_clock = Arc::clone(&clock);
@@ -430,12 +432,10 @@ lash_conformance::runtime_persistence_reopenable_tests!({
         (database_lock, promise_guard),
         move |session_id: &str| {
             let effect_host = Arc::clone(&effect_host);
-            let storage = Arc::clone(&storage);
             let database_url = database_url.clone();
             let clock = Arc::clone(&clock);
             let session_id = SessionId::from(session_id.to_string());
             sync_await(async move {
-                reset(storage.pool()).await;
                 let open_storage = PostgresStorage::connect(&database_url)
                     .await
                     .expect("open first Postgres conformance pool");
@@ -467,7 +467,7 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                     .expect("admit Postgres conformance session");
                 let open = Arc::new(open_factory) as Arc<dyn RuntimeStore>;
                 let reopen = Arc::new(reopen_factory) as Arc<dyn RuntimeStore>;
-                ReopenableRuntimePersistence {
+                ReopenableRuntimeStore {
                     open,
                     reopen,
                     effect_host: Arc::clone(&effect_host),

@@ -450,6 +450,16 @@ impl SqliteStore {
         &self.readers[index % self.readers.len()]
     }
 
+    /// Close the write connection and every read connection, so each read
+    /// family can be shown to surface the closed handle as a storage failure.
+    #[cfg(test)]
+    pub(crate) async fn close_for_testing(&self) {
+        self.conn.close_for_testing().await;
+        for reader in &self.readers {
+            reader.close_for_testing().await;
+        }
+    }
+
     fn turn_cancel_closure_owner_binding(
         &self,
     ) -> Option<lash_core_execution::TurnCancelClosureOwnerBinding> {

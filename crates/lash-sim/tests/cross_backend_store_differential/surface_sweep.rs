@@ -131,6 +131,9 @@ pub(super) enum SurfaceMethod {
     /// [`RootStore::root_of_input`](lash_core::store::RootStore::root_of_input)
     /// of the sweep's next-turn input.
     RootOfInput,
+    /// [`RootStore::bound_turn_scopes`](lash_core::store::RootStore::bound_turn_scopes)
+    /// of the sweep's root: the turn scopes its bound inputs name.
+    BoundTurnScopes,
     /// [`IngressStore::enqueue_pending_turn_input`] of a keyed next-turn
     /// input under a non-default run spec, which interns the spec (FIG-3838).
     EnqueueRunSpecInput,
@@ -249,6 +252,7 @@ impl SurfaceMethod {
             Self::EndRefusedRoot => "surface:end_refused_root",
             Self::RootBinding => "surface:root_binding",
             Self::RootOfInput => "surface:root_of_input",
+            Self::BoundTurnScopes => "surface:bound_turn_scopes",
             Self::EnqueueRunSpecInput => "surface:enqueue_run_spec_input",
             Self::EnqueueTurnInputBatch { conflicting: false } => {
                 "surface:enqueue_turn_input_batch"
@@ -507,9 +511,11 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             // An input's root binding: unbound, bound once, read back, and a
             // second binding to another root refused.
             surface(SurfaceMethod::RootBinding),
+            surface(SurfaceMethod::BoundTurnScopes),
             surface(SurfaceMethod::BindRootInputs { conflicting: false }),
             surface(SurfaceMethod::RootBinding),
             surface(SurfaceMethod::RootOfInput),
+            surface(SurfaceMethod::BoundTurnScopes),
             surface(SurfaceMethod::BindRootInputs { conflicting: false }),
             surface(SurfaceMethod::BindRootInputs { conflicting: true }),
             surface(SurfaceMethod::RootBinding),
@@ -1386,6 +1392,16 @@ impl BackendRunner {
                     Some(root) => format!("root={root}"),
                     None => "root=none".to_string(),
                 }
+            }
+            SurfaceMethod::BoundTurnScopes => {
+                let root = lash_core::TurnId::from(SURFACE_ROOT_ID);
+                let scopes = store
+                    .bound_turn_scopes(&session_id, &root)
+                    .await?
+                    .iter()
+                    .map(|scope| scope.as_str().replace(session_id.as_str(), "<session>"))
+                    .collect::<Vec<_>>();
+                format!("scopes={scopes:?}")
             }
             SurfaceMethod::EnqueueRunSpecInput => {
                 let input = store

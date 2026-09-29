@@ -12,7 +12,7 @@ pub(crate) mod helpers {
     #[tokio::test]
     async fn recording_factory_root_set_keeps_committed_blob() {
         let sqlite = crate::testing::memory_store_set().await;
-        let factory = RecordingSessionStoreFactory::over(sqlite.session_store_factory());
+        let factory = RecordingDeploymentStore::over(sqlite.session_store_factory());
         let request = crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),

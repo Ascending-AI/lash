@@ -245,10 +245,9 @@ The plugin demonstrates:
   `TurnEvent::ReasoningDelta`, assistant prose as
   `TurnEvent::AssistantProseDelta`, code/tool activity as structured cards, and
   RLM `finish` as `TurnEvent::FinalValue`.
-- Runtime persistence is handled by `SqliteSessionStoreFactory`; all requests
-  share one factory-wide durable-core SQLite catalog, and each store handle
-  remains bound to one session. Each request opens the Lash session from the
-  chat id and store instead of keeping runtime
+- Runtime persistence is handled by the SQLite store set; all requests share
+  one durable-core SQLite catalog, which serves every session. Each request
+  opens the Lash session from the chat id and store instead of keeping runtime
   sessions in a process-global map.
 - Product persistence is app-owned: chat rows, board snapshots, reasoning, code
   blocks, tool cards, tool outbox events, and titles stay in the app database.

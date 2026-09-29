@@ -62,7 +62,7 @@ pub struct ReopenableProcessRegistry {
 /// A pair of [`RuntimeStore`] handles opened against the same durable
 /// backing store, and the effect host of the same substrate: the owner of the
 /// turn-control promises a closure authorization names.
-pub struct ReopenableRuntimePersistence {
+pub struct ReopenableRuntimeStore {
     pub open: Arc<dyn RuntimeStore>,
     pub reopen: Arc<dyn RuntimeStore>,
     pub effect_host: Arc<dyn crate::EffectHost>,

@@ -13,7 +13,7 @@ use lash_core::Backend;
 use lash_core::sync::MutexExt as _;
 
 use crate::runner::FixedScriptRunnerError;
-use crate::store::{CheckpointWriteCollector, ObservedSessionStoreFactory};
+use crate::store::{CheckpointWriteCollector, ObservedDeploymentStore};
 
 /// Where the simulator runs turns: lash-restate's engine on a fresh
 /// in-process Restate server double under the scenario's seed, with serial
@@ -279,7 +279,7 @@ impl DecoratedBackend {
     pub fn observing(self, collector: CheckpointWriteCollector) -> Self {
         Self {
             layered: self.layered.map_session_store_factory(|factory| {
-                Arc::new(ObservedSessionStoreFactory::new(factory, collector))
+                Arc::new(ObservedDeploymentStore::new(factory, collector))
             }),
         }
     }

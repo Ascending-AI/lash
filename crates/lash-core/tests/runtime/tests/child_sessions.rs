@@ -332,7 +332,7 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
             }),
         },
     ]);
-    let child_factory = RecordingSessionStoreFactory::over(backend.session_store_factory());
+    let child_factory = RecordingDeploymentStore::over(backend.session_store_factory());
     let root_store = double_unbound_recording_store(&double).await;
     let bytes = backend.attachment_store();
     let backend = LayeredBackend::over(backend)
@@ -468,7 +468,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
             }),
         },
     ]);
-    let child_factory = RecordingSessionStoreFactory::over(backend.session_store_factory());
+    let child_factory = RecordingDeploymentStore::over(backend.session_store_factory());
     let root_store = double_unbound_recording_store(&double).await;
     let registry = backend.process_registry();
     let backend = LayeredBackend::over(backend)

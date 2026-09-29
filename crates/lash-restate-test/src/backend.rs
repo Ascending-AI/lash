@@ -247,12 +247,21 @@ impl RestateTestBackend {
         let first_label = first_label.into();
         // The double is deterministic under its seed, so its registrar mints
         // the sequential test ids: one seed names the same processes on
-        // every run.
+        // every run. A simulation holds hundreds of doubles open at once, so
+        // each keeps a single read connection rather than a reader pool.
+        let memory = lash_sqlite_store::SqliteStoreSetOptions::memory();
         let stores = Arc::new(
             lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(
                 lash_sqlite_store::SqliteStoreSetOptions {
                     process_id_mint: lash_core::ProcessIdMint::sequential_for_testing(),
-                    ..lash_sqlite_store::SqliteStoreSetOptions::memory()
+                    store: lash_sqlite_store::StoreOptions {
+                        connection_policy: lash_sqlite_store::SqliteConnectionPolicy {
+                            read_connections: std::num::NonZeroUsize::MIN,
+                            ..memory.store.connection_policy
+                        },
+                        ..memory.store
+                    },
+                    ..memory
                 },
                 Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
             )

@@ -108,7 +108,7 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
 async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     let root = temp_root();
     let path = root.path().join("durable-core.db");
-    SqliteStore::open(&path)
+    SqliteStore::open_file_for_testing(&path)
         .await
         .expect("provision the database");
     stamp_compat(&path, 2, 2);

@@ -14,7 +14,7 @@
 //! the engine drives.
 
 use super::*;
-use lash_core::testing::runtime_helpers::{LayeredStores, RecordingSessionStoreFactory};
+use lash_core::testing::runtime_helpers::{LayeredStores, RecordingDeploymentStore};
 
 const SESSION: &str = "commit-superseded";
 const TURN: &str = "superseded-turn";
@@ -49,13 +49,13 @@ impl Fixture {
         arm: impl Fn(&lash_core::testing::runtime_helpers::RecordingStore) + Send + Sync + 'static,
     ) -> Self {
         let arm = Arc::new(arm);
-        let catalog = Arc::new(std::sync::OnceLock::<Arc<RecordingSessionStoreFactory>>::new());
+        let catalog = Arc::new(std::sync::OnceLock::<Arc<RecordingDeploymentStore>>::new());
         let installed = Arc::clone(&catalog);
         let backend =
             double_backend_over(lash_restate_test::ServerConfig::default(), move |stores| {
                 LayeredStores::over(stores)
                     .map_session_store_factory(|inner| {
-                        let recording = Arc::new(RecordingSessionStoreFactory::over(inner));
+                        let recording = Arc::new(RecordingDeploymentStore::over(inner));
                         let _ = installed.set(Arc::clone(&recording));
                         recording
                     })

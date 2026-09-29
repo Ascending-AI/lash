@@ -404,6 +404,15 @@ impl SqliteConnection {
         self.fault_injector.clone()
     }
 
+    #[cfg(test)]
+    pub(crate) async fn close_for_testing(&self) {
+        self.inner
+            .clone()
+            .close()
+            .await
+            .expect("close SQLite test connection");
+    }
+
     /// Open (or create) `target`, applying WAL + busy-timeout PRAGMAs on the
     /// connection thread.
     pub(crate) async fn open(target: &DatabaseTarget) -> tokio_rusqlite::Result<Self> {

@@ -1578,4 +1578,238 @@ fn drain_area_witnesses() {
     let _ = lash::testing::TestClock::advance;
     // W0525: lash::testing::TestClock::set [function]
     let _ = lash::testing::TestClock::set;
+    // W0526: lash::persistence::SessionCatalogStore [trait]
+    fn trait_witness_0526<T: lash::persistence::SessionCatalogStore + ?Sized>() {}
+    // W0527: lash::persistence::SessionCatalogStore::admit_session [function]
+    let _ = <dyn lash::persistence::SessionCatalogStore>::admit_session;
+    // W0528: lash::persistence::SessionCatalogStore::lookup_session [function]
+    let _ = <dyn lash::persistence::SessionCatalogStore>::lookup_session;
+    // W0529: lash::persistence::SessionLookup [enum]
+    type_witness::<lash::persistence::SessionLookup>();
+    // W0530: lash::persistence::SessionLookup::Live [variant]
+    variant_witness(|value: &lash::persistence::SessionLookup| {
+        matches!(value, lash::persistence::SessionLookup::Live(_))
+    });
+    // W0531: lash::persistence::SessionLookup::Deleted [variant]
+    variant_witness(|value: &lash::persistence::SessionLookup| {
+        matches!(value, lash::persistence::SessionLookup::Deleted)
+    });
+    // W0532: lash::persistence::SessionLookup::Absent [variant]
+    variant_witness(|value: &lash::persistence::SessionLookup| {
+        matches!(value, lash::persistence::SessionLookup::Absent)
+    });
+    // W0533: lash::persistence::StoreMaintenance::vacuum [function]
+    let _ = <dyn lash::persistence::StoreMaintenance>::vacuum;
+    // W0534: lash::persistence::SessionHistoryStore [trait]
+    fn trait_witness_0534<T: lash::persistence::SessionHistoryStore + ?Sized>() {}
+    // W0535: lash::persistence::SessionHistoryStore::load_session_window [function]
+    let _ = <dyn lash::persistence::SessionHistoryStore>::load_session_window;
+    // W0536: lash::persistence::SessionHistoryStore::load_ancestors [function]
+    let _ = <dyn lash::persistence::SessionHistoryStore>::load_ancestors;
+    // W0537: lash::persistence::SessionHistoryStore::contains_active_ancestor [function]
+    let _ = <dyn lash::persistence::SessionHistoryStore>::contains_active_ancestor;
+    // W0538: lash::persistence::SessionHistoryStore::load_usage_totals [function]
+    let _ = <dyn lash::persistence::SessionHistoryStore>::load_usage_totals;
+    // W0539: lash::persistence::SessionHistoryStore::load_usage_ledger_page [function]
+    let _ = <dyn lash::persistence::SessionHistoryStore>::load_usage_ledger_page;
+    // W0540: lash::persistence::SessionHistoryStore::load_failure_evidence_page [function]
+    let _ = <dyn lash::persistence::SessionHistoryStore>::load_failure_evidence_page;
+    // W0541: lash::persistence::WindowSelector [enum]
+    type_witness::<lash::persistence::WindowSelector>();
+    // W0542: lash::persistence::WindowSelector::Current [variant]
+    variant_witness(|value: &lash::persistence::WindowSelector| {
+        matches!(value, lash::persistence::WindowSelector::Current)
+    });
+    // W0543: lash::persistence::WindowSelector::Admitted [variant]
+    variant_witness(|value: &lash::persistence::WindowSelector| {
+        matches!(value, lash::persistence::WindowSelector::Admitted(_))
+    });
+    // W0544: lash::persistence::SessionWindowRead [struct]
+    type_witness::<lash::persistence::SessionWindowRead>();
+    // W0545: lash::persistence::SessionWindowRead::session_id [field]
+    field_witness(|value: &lash::persistence::SessionWindowRead| {
+        let _ = &value.session_id;
+    });
+    // W0546: lash::persistence::SessionWindowRead::head_revision [field]
+    field_witness(|value: &lash::persistence::SessionWindowRead| {
+        let _ = &value.head_revision;
+    });
+    // W0547: lash::persistence::SessionWindowRead::config [field]
+    field_witness(|value: &lash::persistence::SessionWindowRead| {
+        let _ = &value.config;
+    });
+    // W0548: lash::persistence::SessionWindowRead::current_frame_node_id [field]
+    field_witness(|value: &lash::persistence::SessionWindowRead| {
+        let _ = &value.current_frame_node_id;
+    });
+    // W0549: lash::persistence::SessionWindowRead::pending_follow_on [field]
+    field_witness(|value: &lash::persistence::SessionWindowRead| {
+        let _ = &value.pending_follow_on;
+    });
+    // W0550: lash::persistence::SessionWindowRead::window [field]
+    field_witness(|value: &lash::persistence::SessionWindowRead| {
+        let _ = &value.window;
+    });
+    // W0551: lash::persistence::SessionWindowRead::checkpoint_ref [field]
+    field_witness(|value: &lash::persistence::SessionWindowRead| {
+        let _ = &value.checkpoint_ref;
+    });
+    // W0552: lash::persistence::SessionWindowRead::checkpoint [field]
+    field_witness(|value: &lash::persistence::SessionWindowRead| {
+        let _ = &value.checkpoint;
+    });
+    // W0553: lash::persistence::SessionWindowRead::usage [field]
+    field_witness(|value: &lash::persistence::SessionWindowRead| {
+        let _ = &value.usage;
+    });
+    // W0554: lash::persistence::HistoryAnchor [enum]
+    type_witness::<lash::persistence::HistoryAnchor>();
+    // W0555: lash::persistence::HistoryAnchor::Head [variant]
+    variant_witness(|value: &lash::persistence::HistoryAnchor| {
+        matches!(value, lash::persistence::HistoryAnchor::Head)
+    });
+    // W0556: lash::persistence::HistoryAnchor::Node [variant]
+    variant_witness(|value: &lash::persistence::HistoryAnchor| {
+        matches!(value, lash::persistence::HistoryAnchor::Node(_))
+    });
+    // W0557: lash::persistence::HistoryAnchor::Cursor [variant]
+    variant_witness(|value: &lash::persistence::HistoryAnchor| {
+        matches!(value, lash::persistence::HistoryAnchor::Cursor(_))
+    });
+    // W0558: lash::persistence::HistoryBudget [struct]
+    type_witness::<lash::persistence::HistoryBudget>();
+    // W0559: lash::persistence::HistoryBudget::max_nodes [field]
+    field_witness(|value: &lash::persistence::HistoryBudget| {
+        let _ = &value.max_nodes;
+    });
+    // W0560: lash::persistence::HistoryBudget::max_bytes [field]
+    field_witness(|value: &lash::persistence::HistoryBudget| {
+        let _ = &value.max_bytes;
+    });
+    // W0561: lash::persistence::HistoryPage [struct]
+    type_witness::<lash::persistence::HistoryPage>();
+    // W0562: lash::persistence::HistoryPage::pinned_leaf [field]
+    field_witness(|value: &lash::persistence::HistoryPage| {
+        let _ = &value.pinned_leaf;
+    });
+    // W0563: lash::persistence::HistoryPage::nodes [field]
+    field_witness(|value: &lash::persistence::HistoryPage| {
+        let _ = &value.nodes;
+    });
+    // W0564: lash::persistence::HistoryPage::stop [field]
+    field_witness(|value: &lash::persistence::HistoryPage| {
+        let _ = &value.stop;
+    });
+    // W0565: lash::persistence::HistoryPage::next [field]
+    field_witness(|value: &lash::persistence::HistoryPage| {
+        let _ = &value.next;
+    });
+    // W0566: lash::persistence::HistoryNode [struct]
+    type_witness::<lash::persistence::HistoryNode>();
+    // W0567: lash::persistence::HistoryNode::generation [field]
+    field_witness(|value: &lash::persistence::HistoryNode| {
+        let _ = &value.generation;
+    });
+    // W0568: lash::persistence::HistoryNode::owner_session_id [field]
+    field_witness(|value: &lash::persistence::HistoryNode| {
+        let _ = &value.owner_session_id;
+    });
+    // W0569: lash::persistence::HistoryNode::frame_node_id [field]
+    field_witness(|value: &lash::persistence::HistoryNode| {
+        let _ = &value.frame_node_id;
+    });
+    // W0570: lash::persistence::HistoryNode::body_bytes [field]
+    field_witness(|value: &lash::persistence::HistoryNode| {
+        let _ = &value.body_bytes;
+    });
+    // W0571: lash::persistence::HistoryNode::record [field]
+    field_witness(|value: &lash::persistence::HistoryNode| {
+        let _ = &value.record;
+    });
+    // W0572: lash::persistence::HistoryStop [enum]
+    type_witness::<lash::persistence::HistoryStop>();
+    // W0573: lash::persistence::HistoryStop::NodeBudget [variant]
+    variant_witness(|value: &lash::persistence::HistoryStop| {
+        matches!(value, lash::persistence::HistoryStop::NodeBudget)
+    });
+    // W0574: lash::persistence::HistoryStop::ByteBudget [variant]
+    variant_witness(|value: &lash::persistence::HistoryStop| {
+        matches!(value, lash::persistence::HistoryStop::ByteBudget)
+    });
+    // W0575: lash::persistence::HistoryStop::Root [variant]
+    variant_witness(|value: &lash::persistence::HistoryStop| {
+        matches!(value, lash::persistence::HistoryStop::Root)
+    });
+    // W0576: lash::persistence::HistoryCursor [struct]
+    type_witness::<lash::persistence::HistoryCursor>();
+    // W0577: lash::persistence::HistoryCursor::session_id [function]
+    let _ = lash::persistence::HistoryCursor::session_id;
+    // W0578: lash::persistence::HistoryCursor::pinned_leaf [function]
+    let _ = lash::persistence::HistoryCursor::pinned_leaf;
+    // W0579: lash::persistence::AnchorUnavailable [enum]
+    type_witness::<lash::persistence::AnchorUnavailable>();
+    // W0580: lash::persistence::AnchorUnavailable::NotReadable [variant]
+    variant_witness(|value: &lash::persistence::AnchorUnavailable| {
+        matches!(value, lash::persistence::AnchorUnavailable::NotReadable)
+    });
+    // W0581: lash::persistence::AnchorUnavailable::Tombstoned [variant]
+    variant_witness(|value: &lash::persistence::AnchorUnavailable| {
+        matches!(value, lash::persistence::AnchorUnavailable::Tombstoned)
+    });
+    // W0582: lash::persistence::UsageLedgerPage [struct]
+    type_witness::<lash::persistence::UsageLedgerPage>();
+    // W0583: lash::persistence::UsageLedgerPage::rows [field]
+    field_witness(|value: &lash::persistence::UsageLedgerPage| {
+        let _ = &value.rows;
+    });
+    // W0584: lash::persistence::UsageLedgerPage::next [field]
+    field_witness(|value: &lash::persistence::UsageLedgerPage| {
+        let _ = &value.next;
+    });
+    // W0585: lash::persistence::UsageLedgerRow [struct]
+    type_witness::<lash::persistence::UsageLedgerRow>();
+    // W0586: lash::persistence::UsageLedgerRow::seq [field]
+    field_witness(|value: &lash::persistence::UsageLedgerRow| {
+        let _ = &value.seq;
+    });
+    // W0587: lash::persistence::UsageLedgerRow::operation_storage_key [field]
+    field_witness(|value: &lash::persistence::UsageLedgerRow| {
+        let _ = &value.operation_storage_key;
+    });
+    // W0588: lash::persistence::UsageLedgerRow::entry [field]
+    field_witness(|value: &lash::persistence::UsageLedgerRow| {
+        let _ = &value.entry;
+    });
+    // W0589: lash::persistence::UsageLedgerCursor [struct]
+    type_witness::<lash::persistence::UsageLedgerCursor>();
+    // W0590: lash::persistence::FailureEvidencePage [struct]
+    type_witness::<lash::persistence::FailureEvidencePage>();
+    // W0591: lash::persistence::FailureEvidencePage::settlements [field]
+    field_witness(|value: &lash::persistence::FailureEvidencePage| {
+        let _ = &value.settlements;
+    });
+    // W0592: lash::persistence::FailureEvidencePage::next [field]
+    field_witness(|value: &lash::persistence::FailureEvidencePage| {
+        let _ = &value.next;
+    });
+    // W0593: lash::persistence::FailureEvidenceCursor [struct]
+    type_witness::<lash::persistence::FailureEvidenceCursor>();
+    // W0594: lash::persistence::SessionStore [struct]
+    type_witness::<lash::persistence::SessionStore>();
+    // W0595: lash::persistence::SessionStore::new [function]
+    let _ = lash::persistence::SessionStore::new;
+    // W0596: lash::persistence::SessionStore::session_id [function]
+    let _ = lash::persistence::SessionStore::session_id;
+    // W0597: lash::persistence::SessionStore::store [function]
+    let _ = lash::persistence::SessionStore::store;
+    // W0598: lash::persistence::load_session_window_state [function]
+    let _ = lash::persistence::load_session_window_state;
+    // W0599: lash::persistence::load_session_read_view [function]
+    let _ = lash::persistence::load_session_read_view;
+    // W0600: lash::persistence::refresh_session_window [function]
+    let _ = lash::persistence::refresh_session_window;
+    // W0601: lash::DurableSession::history [function]
+    let _ = lash::DurableSession::history;
+    // W0602: lash::DurableSession::failure_evidence [function]
+    let _ = lash::DurableSession::failure_evidence;
 }

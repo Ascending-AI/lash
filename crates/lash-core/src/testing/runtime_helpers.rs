@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub use super::layered_backend::{LayeredBackend, LayeredStores};
-pub use super::recording_store::{RecordingSessionStoreFactory, RecordingStore};
+pub use super::recording_store::{RecordingDeploymentStore, RecordingStore};
 
 pub struct FixedAttachmentRoots(pub std::collections::BTreeSet<crate::AttachmentId>);
 

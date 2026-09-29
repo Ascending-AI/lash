@@ -316,6 +316,19 @@ impl SessionCommitStore for PostgresStore {
         // alone cannot serialize create-versus-delete. This session-keyed lock
         // is the common authority for every history commit and deletion.
         ensure_session_not_deleted_tx(&mut tx, &commit.session_id).await?;
+        // The store is multi-session (ADR 0112): only a session the catalog
+        // admitted commits, and admission is what writes its meta row.
+        let admitted =
+            sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
+                .bind(commit.session_id.as_str())
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        if !admitted {
+            return Err(StoreError::SessionNotFound {
+                session_id: commit.session_id.clone(),
+            });
+        }
         // A root's commit is fenced by the admission its root was sealed
         // under: a successor's seal refuses it before anything is read or
         // written (ADR 0105 §2).
@@ -326,12 +339,6 @@ impl SessionCommitStore for PostgresStore {
         let existing =
             load_session_head_meta_tx(&mut tx, &commit.session_id, false, self.fleet_format)
                 .await?;
-        let direct_meta = SessionMeta {
-            owning_process_id: None,
-            session_id: commit.session_id.clone(),
-            relation: lash_core_execution::SessionRelation::Root,
-            pending_observer_intents: Vec::new(),
-        };
         planner.validate_node_derivation()?;
         {
             // A root's commit settles its park (FIG-3586, FIG-3600 S7) in the
@@ -384,15 +391,6 @@ impl SessionCommitStore for PostgresStore {
                     append_request_identity,
                 };
                 if let Some(replay) = planner.decide_receipt(Some(prior))? {
-                    crate::session_meta::write_session_meta_tx(
-                        &mut tx,
-                        &direct_meta,
-                        crate::session_meta::SessionMetaWrite::Insert,
-                        now,
-                        self.fleet_format,
-                    )
-                    .await?;
-
                     if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref()
                         && settlement.authorization().session_id() == commit.session_id
                         && commit.interrupted_turn_input_turn_id.as_ref()
@@ -538,14 +536,6 @@ impl SessionCommitStore for PostgresStore {
         // commit locks or writes any checkpoint owner edge, graph row, or head.
         let (checkpoint_ref, manifest) =
             put_checkpoint_tx(&mut tx, &commit.checkpoint, self.fleet_format).await?;
-        crate::session_meta::write_session_meta_tx(
-            &mut tx,
-            &direct_meta,
-            crate::session_meta::SessionMetaWrite::Insert,
-            now,
-            self.fleet_format,
-        )
-        .await?;
         let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
         if existing.is_none() {
             let placeholder = SessionHeadMeta::assemble(

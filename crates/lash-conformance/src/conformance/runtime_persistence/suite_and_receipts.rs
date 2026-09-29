@@ -2,7 +2,7 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 /// Prove that independently opened handles mint distinct pending-input identities.
-pub async fn reopen_mint_identity(probe: ReopenableRuntimePersistence) {
+pub async fn reopen_mint_identity(probe: ReopenableRuntimeStore) {
     assert_fresh_instances(&probe.open, &probe.reopen, "runtime_persistence_reopenable");
     pending_turn_input_mint_is_unique_across_store_instances(
         probe.open.as_ref(),

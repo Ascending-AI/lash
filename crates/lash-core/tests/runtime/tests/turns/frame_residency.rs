@@ -345,6 +345,32 @@ pub(super) async fn the_admitted_window_of_a_frame_switching_turn_is_its_admissi
         leaf: admitted_head.window.leaf_node_id.clone(),
         checkpoint: admitted_head.checkpoint_ref.clone(),
     };
+    // The standard-compaction request identity hashes the session snapshot,
+    // projecting the graph to its nodes, leaf and current frame (ADR 0112
+    // §14.4): a replay that adopts the admitted window at the admission
+    // boundary sees the snapshot the first execution saw. The window anchor is
+    // outside that projection; a resident session opened fresh carries none.
+    let identity_projection = |snapshot: lash_core::SessionSnapshot| {
+        let mut value = serde_json::to_value(snapshot).expect("encode the snapshot");
+        value["session_graph"]
+            .as_object_mut()
+            .expect("the snapshot carries a graph")
+            .remove("anchor");
+        value
+    };
+    let resident_snapshot = identity_projection(runtime.state().to_snapshot());
+    let replayed = lash_core::store::load_session_window_state(
+        &session_view(store.clone(), SESSION),
+        lash_core::store::WindowSelector::Admitted(base.clone()),
+    )
+    .await
+    .expect("adopt the admitted window")
+    .expect("the admission base is retained");
+    assert_eq!(
+        identity_projection(replayed.state.to_snapshot()),
+        resident_snapshot,
+        "a replay at the admission boundary hashes the first execution's snapshot"
+    );
 
     drive_text_turn(
         &mut runtime,

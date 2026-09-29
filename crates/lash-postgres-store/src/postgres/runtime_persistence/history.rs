@@ -186,8 +186,18 @@ impl SessionHistoryStore for PostgresStore {
         let checkpoint = match checkpoint_ref.as_ref() {
             Some(reference) => {
                 let checkpoint = get_checkpoint_tx(&mut tx, reference, self.fleet_format).await?;
-                if admitted && checkpoint.is_none() {
-                    return Err(StoreError::TurnBaseNotRetained { revision });
+                if checkpoint.is_none() {
+                    // An admitted base may have been collected since; the
+                    // current head's own manifest never is, so its absence is
+                    // corruption.
+                    return Err(if admitted {
+                        StoreError::TurnBaseNotRetained { revision }
+                    } else {
+                        StoreError::CheckpointComponentMissing {
+                            key: "manifest".to_string(),
+                            blob_ref: reference.clone(),
+                        }
+                    });
                 }
                 checkpoint
             }

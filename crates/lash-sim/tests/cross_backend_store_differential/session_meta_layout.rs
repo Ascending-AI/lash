@@ -722,7 +722,7 @@ pub(super) async fn verify_independent_session_meta_layout(
     let sqlite_path =
         sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
     let sqlite_factory = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&sqlite_path)
+        lash_sqlite_store::SqliteStore::open(&sqlite_case_root)
             .await
             .expect("open SQLite metadata store"),
     );

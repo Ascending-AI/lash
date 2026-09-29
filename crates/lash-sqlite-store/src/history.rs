@@ -140,8 +140,17 @@ fn window(
     let checkpoint = match checkpoint_ref.as_ref() {
         Some(reference) => {
             let value = SqliteStore::get_checkpoint_conn(conn, reference, fleet)?;
-            if admitted && value.is_none() {
-                return Err(StoreError::TurnBaseNotRetained { revision });
+            if value.is_none() {
+                // An admitted base may have been collected since; the current
+                // head's own manifest never is, so its absence is corruption.
+                return Err(if admitted {
+                    StoreError::TurnBaseNotRetained { revision }
+                } else {
+                    StoreError::CheckpointComponentMissing {
+                        key: "manifest".to_string(),
+                        blob_ref: reference.clone(),
+                    }
+                });
             }
             value
         }

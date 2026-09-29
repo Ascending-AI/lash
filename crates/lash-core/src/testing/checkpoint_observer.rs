@@ -297,12 +297,12 @@ impl CheckpointWriteCollector {
 /// It preserves the backend contract exactly and adds observation only after a real commit
 /// succeeds, which is what makes the resulting durable-write transcript lines real facts
 /// rather than harness-constructed ones.
-pub struct ObservedSessionStoreFactory {
+pub struct ObservedDeploymentStore {
     inner: Arc<dyn DeploymentStore>,
     collector: CheckpointWriteCollector,
 }
 
-impl ObservedSessionStoreFactory {
+impl ObservedDeploymentStore {
     pub fn new(inner: Arc<dyn DeploymentStore>, collector: CheckpointWriteCollector) -> Self {
         Self { inner, collector }
     }
@@ -319,7 +319,7 @@ pub fn fresh_runtime_persistence_handle(inner: Arc<dyn RuntimeStore>) -> Arc<dyn
 }
 
 #[async_trait::async_trait]
-impl RuntimeStoreDecorator for ObservedSessionStoreFactory {
+impl RuntimeStoreDecorator for ObservedDeploymentStore {
     type Inner = dyn DeploymentStore;
 
     fn inner(&self) -> &Self::Inner {
@@ -334,7 +334,7 @@ impl RuntimeStoreDecorator for ObservedSessionStoreFactory {
     }
 }
 
-impl DeploymentStoreDecorator for ObservedSessionStoreFactory {}
+impl DeploymentStoreDecorator for ObservedDeploymentStore {}
 
 struct ObservedRuntimeStore {
     inner: Arc<dyn RuntimeStore>,
@@ -539,7 +539,7 @@ mod tests {
         use crate::testing::behavior_transcript::{Actor, Entry, Transcript, Usage};
 
         let collector = CheckpointWriteCollector::default();
-        let factory: Arc<dyn DeploymentStore> = Arc::new(ObservedSessionStoreFactory::new(
+        let factory: Arc<dyn DeploymentStore> = Arc::new(ObservedDeploymentStore::new(
             crate::testing::memory_store_set()
                 .await
                 .session_store_factory(),

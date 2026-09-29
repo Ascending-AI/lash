@@ -1647,9 +1647,7 @@ impl BackendRunner {
 
                         let concrete_factory = Arc::new(
                             lash_sqlite_store::SqliteStore::open_with_clock(
-                                &root.join(
-                                    lash_sqlite_store::SqliteDatabase::DurableCore.file_name(),
-                                ),
+                                &root,
                                 Arc::clone(&self.clock),
                             )
                             .await
@@ -1982,9 +1980,11 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
 
-    let sqlite_path = sqlite_root.join("storage-failure-mapping.db");
+    let sqlite_case_root = sqlite_root.join("storage-failure-mapping");
+    let sqlite_path =
+        sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
     let sqlite_factory = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&sqlite_path)
+        lash_sqlite_store::SqliteStore::open(&sqlite_case_root)
             .await
             .expect("open SQLite storage-failure fixture"),
     );
@@ -2183,12 +2183,9 @@ async fn runners_for_case_with_clock(
     let sqlite_case_root = sqlite_root.join(case.as_str());
     std::fs::create_dir_all(&sqlite_case_root).expect("create SQLite differential root");
     let sqlite_factory = Arc::new(
-        lash_sqlite_store::SqliteStore::open_with_clock(
-            &sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
-            Arc::clone(&clock),
-        )
-        .await
-        .expect("open SQLite differential store"),
+        lash_sqlite_store::SqliteStore::open_with_clock(&sqlite_case_root, Arc::clone(&clock))
+            .await
+            .expect("open SQLite differential store"),
     );
     let sqlite_path =
         sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());

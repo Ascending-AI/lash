@@ -56,7 +56,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
             },
         }
     );
-    assert!(SqliteStore::open(&path).await.is_err());
+    assert!(SqliteStore::open_file_for_testing(&path).await.is_err());
 
     let connection = rusqlite::Connection::open(&path).expect("inspect refused catalog");
     let stored: Vec<u8> = connection
@@ -119,7 +119,7 @@ async fn sqlite_graph_sequence_unique_constraint_is_rejected_without_migration()
         }
         verdict => panic!("unsafe graph constraint must be refused: {verdict:?}"),
     }
-    assert!(SqliteStore::open(&path).await.is_err());
+    assert!(SqliteStore::open_file_for_testing(&path).await.is_err());
 
     let connection = rusqlite::Connection::open(&path).expect("inspect refused SQLite catalog");
     let version: i64 = connection

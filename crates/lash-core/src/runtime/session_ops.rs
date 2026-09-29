@@ -890,7 +890,7 @@ mod plugin_state_boundary_tests {
     use super::*;
     use crate::plugin::{PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin};
     use crate::testing::checkpoint_observer::{
-        CheckpointComponentWriteKind, CheckpointWriteCollector, ObservedSessionStoreFactory,
+        CheckpointComponentWriteKind, CheckpointWriteCollector, ObservedDeploymentStore,
     };
 
     #[derive(Clone, Default)]
@@ -920,7 +920,7 @@ mod plugin_state_boundary_tests {
     async fn plugin_event_boundary_itself_contains_the_accepted_state_write() {
         let collector = CheckpointWriteCollector::default();
         let backend = crate::testing::memory_store_backend().await;
-        let factory: Arc<dyn crate::DeploymentStore> = Arc::new(ObservedSessionStoreFactory::new(
+        let factory: Arc<dyn crate::DeploymentStore> = Arc::new(ObservedDeploymentStore::new(
             backend.session_store_factory(),
             collector.clone(),
         ));

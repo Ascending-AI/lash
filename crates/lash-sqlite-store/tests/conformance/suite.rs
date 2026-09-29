@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use lash_conformance::{
     FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
-    ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
+    ReopenableProcessRegistry, ReopenableRuntimeStore, ReopenableTriggerStore,
 };
 use lash_core_execution::store::{ConformanceDeployment, RuntimeStore};
 use lash_core_execution::{
@@ -815,7 +815,7 @@ lash_conformance::runtime_persistence_reopenable_tests!({
             });
             let effect_host = Arc::clone(&effect_host);
             retained.keep(&backend);
-            ReopenableRuntimePersistence {
+            ReopenableRuntimeStore {
                 open: open as Arc<dyn RuntimeStore>,
                 reopen: reopen as Arc<dyn RuntimeStore>,
                 effect_host,

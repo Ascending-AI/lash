@@ -155,7 +155,7 @@ pub(super) async fn frame_switch_state_after_cold_reopen(
     let backend =
         DecoratedBackend::over(double.lash_backend()).session_store_factory(move |inner| {
             Arc::new(
-                lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
+                lash_core::testing::checkpoint_observer::ObservedDeploymentStore::new(
                     inner,
                     observed_writes,
                 ),

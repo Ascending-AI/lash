@@ -612,7 +612,7 @@ async fn deleting_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
 #[tokio::test]
 async fn deleting_a_trigger_cancels_its_cron_without_opening_a_contended_session() {
     let trigger_store = crate::tests::memory_trigger_store();
-    let store_factory = Arc::new(ContendedSessionStoreFactory::new());
+    let store_factory = Arc::new(ContendedDeploymentStore::new());
     let double = crate::tests::test_double_backend(0).await;
     let mut state = crate::tests::recoverable_chat_test_state_with_store_factory_and_trigger_store(
         &double,
@@ -928,18 +928,18 @@ async fn a_failed_delete_cancel_preserves_the_registration() {
     assert!(!trace.contains("agent_workbench.api.triggers.delete"));
 }
 
-struct MetaLossSessionStoreFactory {
+struct MetaLossDeploymentStore {
     inner: Arc<lash_sqlite_store::SqliteStore>,
     absent_session_ids: std::sync::Mutex<std::collections::HashSet<SessionId>>,
 }
 
-struct ContendedSessionStoreFactory {
+struct ContendedDeploymentStore {
     inner: Arc<lash_sqlite_store::SqliteStore>,
     contend: Arc<std::sync::atomic::AtomicBool>,
     contended_attempts: Arc<std::sync::atomic::AtomicUsize>,
 }
 
-impl ContendedSessionStoreFactory {
+impl ContendedDeploymentStore {
     pub(crate) fn new() -> Self {
         Self {
             inner: crate::tests::memory_session_store_factory(),
@@ -960,7 +960,7 @@ impl ContendedSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl lash::persistence::RuntimeStoreDecorator for ContendedSessionStoreFactory {
+impl lash::persistence::RuntimeStoreDecorator for ContendedDeploymentStore {
     type Inner = dyn lash::persistence::DeploymentStore;
 
     fn inner(&self) -> &Self::Inner {
@@ -980,9 +980,9 @@ impl lash::persistence::RuntimeStoreDecorator for ContendedSessionStoreFactory {
     }
 }
 
-impl lash::persistence::DeploymentStoreDecorator for ContendedSessionStoreFactory {}
+impl lash::persistence::DeploymentStoreDecorator for ContendedDeploymentStore {}
 
-impl MetaLossSessionStoreFactory {
+impl MetaLossDeploymentStore {
     pub(crate) fn new() -> Self {
         Self {
             inner: crate::tests::memory_session_store_factory(),
@@ -998,7 +998,7 @@ impl MetaLossSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl lash::persistence::RuntimeStoreDecorator for MetaLossSessionStoreFactory {
+impl lash::persistence::RuntimeStoreDecorator for MetaLossDeploymentStore {
     type Inner = dyn lash::persistence::DeploymentStore;
 
     fn inner(&self) -> &Self::Inner {
@@ -1017,7 +1017,7 @@ impl lash::persistence::RuntimeStoreDecorator for MetaLossSessionStoreFactory {
     }
 }
 
-impl lash::persistence::DeploymentStoreDecorator for MetaLossSessionStoreFactory {}
+impl lash::persistence::DeploymentStoreDecorator for MetaLossDeploymentStore {}
 
 async fn materialize_cron_test_session(state: &crate::AppState, session_id: &SessionId) {
     drop(
@@ -1362,7 +1362,7 @@ fn corrupt_journaled_cron_disposition_carries_a_typed_terminal_code() {
 #[tokio::test]
 async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a_tombstone() {
     let trigger_store = crate::tests::memory_trigger_store();
-    let store_factory = Arc::new(MetaLossSessionStoreFactory::new());
+    let store_factory = Arc::new(MetaLossDeploymentStore::new());
     let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_store_factory_and_trigger_store(
         &double,

@@ -7,13 +7,13 @@ use super::*;
 #[tokio::test]
 async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> Result<()> {
     let catalog = Arc::new(std::sync::OnceLock::<
-        Arc<lash_core::testing::runtime_helpers::RecordingSessionStoreFactory>,
+        Arc<lash_core::testing::runtime_helpers::RecordingDeploymentStore>,
     >::new());
     let armed = Arc::clone(&catalog);
     let backend = DecoratedBackend::over(double_backend_explicit_reconcile().await)
         .session_store_factory(move |inner| {
             let recording = Arc::new(
-                lash_core::testing::runtime_helpers::RecordingSessionStoreFactory::over(inner),
+                lash_core::testing::runtime_helpers::RecordingDeploymentStore::over(inner),
             );
             let _ = armed.set(Arc::clone(&recording));
             recording

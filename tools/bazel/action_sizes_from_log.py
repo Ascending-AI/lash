@@ -251,8 +251,12 @@ TEST_RUN_KINDS = ("unit-test", "bin-unit-test", "test")
 # 1.5) even while the measured samples stay warm. A `__fv_` feature variant
 # is the same binary under another resolution and inherits its base label's
 # floor, as it does a measured row in `test_run_request`.
+# `//crates/lash-sim:lash-sim__unit_test` logged 220 MiB, but a shard running
+# four whole-deployment simulations at once peaks at 2.3 GiB when it faults its
+# own pages, and its heaviest shards were OOM-killed at the logged request.
 TEST_RUN_MINIMUM_MEMORY_KB = {
     "//crates/lash:lash__unit_test": 3 * 1024 * 1024,
+    "//crates/lash-sim:lash-sim__unit_test": 3584 * 1024,
 }
 
 

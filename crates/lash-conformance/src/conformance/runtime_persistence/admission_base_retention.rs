@@ -106,7 +106,7 @@ fn generation_of(read: crate::store::SessionWindowRead) -> Option<u64> {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn an_admission_base_survives_collection_until_the_next_admission(
-    factory: ReopenableRuntimePersistence,
+    factory: ReopenableRuntimeStore,
 ) {
     let store = factory.open;
     let session_id = SessionId::from("admission-base-retention");

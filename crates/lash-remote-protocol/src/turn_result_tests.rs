@@ -244,9 +244,9 @@ fn turn_issue_failure_vocabulary_is_typed_and_wire_stable() {
         ),
         (
             RemoteTurnFailureKind::Runtime,
-            RemoteFailureCode::lash(lash_sansio::TurnFailureCode::SessionGraphScope),
+            RemoteFailureCode::lash(lash_sansio::TurnFailureCode::ReconfigureFailed),
             "runtime",
-            "lash:session_graph_scope",
+            "lash:reconfigure_failed",
         ),
         (
             RemoteTurnFailureKind::TokenUsageAccounting,

@@ -66,7 +66,12 @@ fn frame_transition(
 }
 
 async fn assert_no_frame_commit_rows(storage: &PostgresStorage, session_id: &SessionId) {
-    for table in ["lash_sessions", "lash_graph_nodes", "lash_session_meta"] {
+    // Admission wrote the one catalog row; the refused commit adds nothing.
+    for (table, admitted) in [
+        ("lash_sessions", 0),
+        ("lash_graph_nodes", 0),
+        ("lash_session_meta", 1),
+    ] {
         let count: i64 = sqlx::query_scalar(&format!(
             "SELECT COUNT(*) FROM {table} WHERE session_id = $1"
         ))
@@ -74,7 +79,7 @@ async fn assert_no_frame_commit_rows(storage: &PostgresStorage, session_id: &Ses
         .fetch_one(storage.pool())
         .await
         .expect("count refused commit rows");
-        assert_eq!(count, 0, "refused commit wrote {table}");
+        assert_eq!(count, admitted, "refused commit wrote {table}");
     }
     let fences: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM lash_artifact_referrer_fences")
         .fetch_one(storage.pool())

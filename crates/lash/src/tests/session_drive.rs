@@ -166,7 +166,7 @@ struct HeldDriveFixture {
 impl HeldDriveFixture {
     async fn with_pending(session: &str, inputs: usize) -> Result<Self> {
         let catalog = Arc::new(std::sync::OnceLock::<
-            Arc<lash_core::testing::runtime_helpers::RecordingSessionStoreFactory>,
+            Arc<lash_core::testing::runtime_helpers::RecordingDeploymentStore>,
         >::new());
         let installed = Arc::clone(&catalog);
         let backend = double_backend_over_explicit_reconcile(
@@ -175,7 +175,7 @@ impl HeldDriveFixture {
                 lash_core::testing::runtime_helpers::LayeredStores::over(stores)
                     .map_session_store_factory(|inner| {
                         let recording = Arc::new(
-                            lash_core::testing::runtime_helpers::RecordingSessionStoreFactory::over(
+                            lash_core::testing::runtime_helpers::RecordingDeploymentStore::over(
                                 inner,
                             ),
                         );

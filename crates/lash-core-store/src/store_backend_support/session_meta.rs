@@ -459,7 +459,7 @@ impl SessionMetaCodec {
 
 /// Refuse a rebind whose declared lineage disagrees with the recorded one.
 ///
-/// Every `SessionCommitStore::admit_and_bind_session` implementation calls this
+/// Every `SessionCatalogStore::admit_session` implementation calls this
 /// on the rebind branch so all backends answer the same conflict with the same
 /// typed error (rule 6 of the admission contract).
 pub fn guard_rebind_lineage(

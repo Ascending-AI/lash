@@ -177,6 +177,79 @@ pub(crate) fn store_area_test_support_witnesses() {
     fn method_witness_0074<T: lash_conformance::LineageConformanceInjector>(value: &T) {
         std::mem::drop(lash_conformance::LineageConformanceInjector::tombstone_node(value, "node"));
     }
+    // FIG-2105-TEST-WITNESS-0075: lash::persistence::StoreTestSupport::decoded_row_counts_for_testing [function]
+    fn method_witness_0075<T: lash::persistence::StoreTestSupport>(value: &T) {
+        let _ = lash::persistence::StoreTestSupport::decoded_row_counts_for_testing(value);
+    }
+    // FIG-2105-TEST-WITNESS-0076: lash::persistence::StoreTestSupport::corrupt_graph_row_for_testing [function]
+    fn method_witness_0076<T: lash::persistence::StoreTestSupport>(
+        value: &T,
+        node_id: &lash_core::NodeId,
+    ) {
+        std::mem::drop(
+            lash::persistence::StoreTestSupport::corrupt_graph_row_for_testing(
+                value,
+                node_id,
+                lash::persistence::GraphRowCorruption::DeleteRow,
+            ),
+        );
+    }
+    // FIG-2105-TEST-WITNESS-0077: lash::persistence::StoreTestSupport::set_head_current_frame_for_testing [function]
+    fn method_witness_0077<T: lash::persistence::StoreTestSupport>(value: &T) {
+        std::mem::drop(
+            lash::persistence::StoreTestSupport::set_head_current_frame_for_testing(
+                value,
+                &SessionId::from("session"),
+                None,
+            ),
+        );
+    }
+    // FIG-2105-TEST-WITNESS-0078: lash::persistence::DecodedRowCounts [struct]
+    type_witness::<lash::persistence::DecodedRowCounts>();
+    // FIG-2105-TEST-WITNESS-0079: lash::persistence::DecodedRowCounts::graph_node_bodies [field]
+    field_witness(|value: &lash::persistence::DecodedRowCounts| {
+        let _ = &value.graph_node_bodies;
+    });
+    // FIG-2105-TEST-WITNESS-0080: lash::persistence::DecodedRowCounts::usage_rows [field]
+    field_witness(|value: &lash::persistence::DecodedRowCounts| {
+        let _ = &value.usage_rows;
+    });
+    // FIG-2105-TEST-WITNESS-0081: lash::persistence::DecodedRowCounts::usage_holes [field]
+    field_witness(|value: &lash::persistence::DecodedRowCounts| {
+        let _ = &value.usage_holes;
+    });
+    // FIG-2105-TEST-WITNESS-0082: lash::persistence::DecodedRowCounts::turn_receipt_bodies [field]
+    field_witness(|value: &lash::persistence::DecodedRowCounts| {
+        let _ = &value.turn_receipt_bodies;
+    });
+    // FIG-2105-TEST-WITNESS-0083: lash::persistence::GraphRowCorruption [enum]
+    type_witness::<lash::persistence::GraphRowCorruption>();
+    // FIG-2105-TEST-WITNESS-0084: lash::persistence::GraphRowCorruption::DeleteRow [variant]
+    variant_witness(|value: &lash::persistence::GraphRowCorruption| {
+        matches!(value, lash::persistence::GraphRowCorruption::DeleteRow)
+    });
+    // FIG-2105-TEST-WITNESS-0085: lash::persistence::GraphRowCorruption::SetParent [variant]
+    variant_witness(|value: &lash::persistence::GraphRowCorruption| {
+        matches!(value, lash::persistence::GraphRowCorruption::SetParent(_))
+    });
+    // FIG-2105-TEST-WITNESS-0086: lash::persistence::GraphRowCorruption::SetFramePointer [variant]
+    variant_witness(|value: &lash::persistence::GraphRowCorruption| {
+        matches!(
+            value,
+            lash::persistence::GraphRowCorruption::SetFramePointer(_)
+        )
+    });
+    // FIG-2105-TEST-WITNESS-0087: lash::persistence::GraphRowCorruption::SetBodyBytes [variant]
+    variant_witness(|value: &lash::persistence::GraphRowCorruption| {
+        matches!(
+            value,
+            lash::persistence::GraphRowCorruption::SetBodyBytes(_)
+        )
+    });
+    // FIG-2105-TEST-WITNESS-0088: lash::persistence::ConformanceStore [trait]
+    fn trait_witness_0088<T: lash::persistence::ConformanceStore + ?Sized>() {}
+    // FIG-2105-TEST-WITNESS-0089: lash::persistence::ConformanceDeployment [trait]
+    fn trait_witness_0089<T: lash::persistence::ConformanceDeployment + ?Sized>() {}
     // FIG-2107-TEST-WITNESS-0001: lash::persistence::AppendRequestIdentity::Append [variant]
     variant_witness(|value: &lash::persistence::AppendRequestIdentity| {
         matches!(

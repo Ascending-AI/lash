@@ -451,5 +451,5 @@ rlm_gated = [
 ]
 store_seam = [
   "attachment_store_head_has_no_default",
-  "session_store_factory_requires_deletion_answer",
+  "session_catalog_requires_lookup_answer",
 ]

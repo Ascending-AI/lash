@@ -455,7 +455,7 @@ fn concurrent_admissions_never_double_own_a_batch() {
 async fn unsupported_compatibility_floor_reports_real_versions() {
     let path = unique_db_path("schema");
     drop(
-        SqliteStore::open(&path)
+        SqliteStore::open_file_for_testing(&path)
             .await
             .expect("provision current catalog"),
     );
@@ -482,7 +482,7 @@ async fn unsupported_compatibility_floor_reports_real_versions() {
             },
         }
     );
-    assert!(SqliteStore::open(&path).await.is_err());
+    assert!(SqliteStore::open_file_for_testing(&path).await.is_err());
 }
 
 #[test]
@@ -625,7 +625,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
             },
         }
     );
-    assert!(SqliteStore::open(&path).await.is_err());
+    assert!(SqliteStore::open_file_for_testing(&path).await.is_err());
     let conn = rusqlite::Connection::open(&path).unwrap();
     let version: i64 = conn
         .query_row("SELECT version FROM lash_compat", [], |row| row.get(0))

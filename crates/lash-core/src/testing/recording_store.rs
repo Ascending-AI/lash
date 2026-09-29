@@ -7,7 +7,7 @@
 //! applies a write itself, so a test that runs over it runs over the real
 //! store.
 //!
-//! [`RecordingSessionStoreFactory`] decorates a backend's session catalog the
+//! [`RecordingDeploymentStore`] decorates a backend's session catalog the
 //! same way, wrapping every store it creates or reopens in a
 //! [`RecordingStore`] and keeping the ones it created for the test to read.
 
@@ -342,7 +342,7 @@ impl RuntimeStoreDecorator for RecordingStore {
 /// the same session hands back that wrapper, so a fault armed on
 /// [`Self::store_for`] reaches whichever runtime holds the session.
 #[derive(Clone)]
-pub struct RecordingSessionStoreFactory {
+pub struct RecordingDeploymentStore {
     inner: Arc<dyn DeploymentStore>,
     stores: Arc<Mutex<WrappedStores>>,
     fail_next_delete: Arc<Mutex<Option<DeleteFailure>>>,
@@ -351,10 +351,10 @@ pub struct RecordingSessionStoreFactory {
 /// A storage delete's injected stop, with its partial report.
 type DeleteFailure = crate::store::MaintenanceFailure<crate::store::SessionBlobReclaimReport>;
 
-/// The per-session wrappers a [`RecordingSessionStoreFactory`] handed out.
+/// The per-session wrappers a [`RecordingDeploymentStore`] handed out.
 type WrappedStores = Vec<(SessionId, Arc<RecordingStore>)>;
 
-impl RecordingSessionStoreFactory {
+impl RecordingDeploymentStore {
     /// Record over `inner`, a backend's session catalog.
     pub fn over(inner: Arc<dyn DeploymentStore>) -> Self {
         Self {
@@ -403,7 +403,7 @@ impl RecordingSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl RuntimeStoreDecorator for RecordingSessionStoreFactory {
+impl RuntimeStoreDecorator for RecordingDeploymentStore {
     type Inner = dyn DeploymentStore;
 
     fn inner(&self) -> &Self::Inner {
@@ -479,6 +479,18 @@ impl RuntimeStoreDecorator for RecordingSessionStoreFactory {
         self.record(session_id).list_queued_work(session_id).await
     }
 
+    async fn end_refused_root(
+        &self,
+        session_id: &SessionId,
+        root: &crate::TurnId,
+        refusal: &crate::RuntimeError,
+        at_ms: u64,
+    ) -> Result<Option<crate::store::RootTerminal>, StoreError> {
+        self.record(session_id)
+            .end_refused_root(session_id, root, refusal, at_ms)
+            .await
+    }
+
     async fn delete_session(
         &self,
         session_id: &SessionId,
@@ -491,7 +503,7 @@ impl RuntimeStoreDecorator for RecordingSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl DeploymentStoreDecorator for RecordingSessionStoreFactory {
+impl DeploymentStoreDecorator for RecordingDeploymentStore {
     async fn reclaim_retained_evidence(
         &self,
         bound: crate::store::RetentionBound,

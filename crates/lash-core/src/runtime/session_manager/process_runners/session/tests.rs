@@ -2,16 +2,14 @@ use super::*;
 
 fn recording_factory(
     backend: &crate::Backend,
-) -> crate::testing::runtime_helpers::RecordingSessionStoreFactory {
-    crate::testing::runtime_helpers::RecordingSessionStoreFactory::over(
-        backend.session_store_factory(),
-    )
+) -> crate::testing::runtime_helpers::RecordingDeploymentStore {
+    crate::testing::runtime_helpers::RecordingDeploymentStore::over(backend.session_store_factory())
 }
 
 /// `backend` with its session catalog recorded by `factory`.
 fn recording_backend(
     backend: crate::Backend,
-    factory: &crate::testing::runtime_helpers::RecordingSessionStoreFactory,
+    factory: &crate::testing::runtime_helpers::RecordingDeploymentStore,
 ) -> crate::Backend {
     let factory = factory.clone();
     crate::testing::runtime_helpers::LayeredBackend::over(backend)

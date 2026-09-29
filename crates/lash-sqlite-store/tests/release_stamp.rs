@@ -102,7 +102,7 @@ async fn a_refused_open_names_the_release_that_wrote_the_store() {
     assert!(
         matches!(status.release, StoreReleaseState::Stamped(stamp) if stamp.release == env!("CARGO_PKG_VERSION"))
     );
-    assert!(SqliteStore::open(&path).await.is_err());
+    assert!(SqliteStore::open_file_for_testing(&path).await.is_err());
 }
 
 /// A missing release stamp stays missing when compatibility admission refuses.
@@ -141,5 +141,5 @@ async fn an_unstamped_store_is_refused_without_inventing_a_release() {
         }
     );
     assert_eq!(status.release, StoreReleaseState::Unstamped);
-    assert!(SqliteStore::open(&path).await.is_err());
+    assert!(SqliteStore::open_file_for_testing(&path).await.is_err());
 }

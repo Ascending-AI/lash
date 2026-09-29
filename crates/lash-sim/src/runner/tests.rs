@@ -1250,7 +1250,7 @@ async fn determinism_projection_canonicalizes_entropy_but_keeps_state_semantics(
         .iter_mut()
         .filter_map(|write| write.state.as_mut())
         .filter_map(|state| state.accepted_raw_rows.as_mut())
-        .filter_map(|raw| raw.pointer_mut("/token_ledger/0/usage/output_tokens"))
+        .filter_map(|raw| raw.pointer_mut("/usage/rows/0/usage/output_tokens"))
         .next()
         .expect("accepted token-ledger usage");
     *usage = json!(31_337);

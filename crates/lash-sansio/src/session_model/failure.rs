@@ -193,8 +193,6 @@ pub enum TurnFailureCode {
     TokenUsageOverflow,
     /// Refreshing the live execution environment failed.
     ReconfigureFailed,
-    /// The assembled turn's session graph could not be scoped.
-    SessionGraphScope,
     /// The turn stream ended without a `Done` event.
     MissingDone,
     /// Assistant output was recovered from persisted messages because none was assembled.
@@ -327,7 +325,6 @@ impl TurnFailureCode {
             Self::BodyReadFailed => "body_read_failed",
             Self::TokenUsageOverflow => "token_usage_overflow",
             Self::ReconfigureFailed => "reconfigure_failed",
-            Self::SessionGraphScope => "session_graph_scope",
             Self::MissingDone => "missing_done",
             Self::AssistantOutputRecoveredFromState => "assistant_output_recovered_from_state",
             Self::InvalidTurnInput => "invalid_turn_input",
@@ -430,7 +427,6 @@ impl TurnFailureCode {
             "body_read_failed" => Self::BodyReadFailed,
             "token_usage_overflow" => Self::TokenUsageOverflow,
             "reconfigure_failed" => Self::ReconfigureFailed,
-            "session_graph_scope" => Self::SessionGraphScope,
             "missing_done" => Self::MissingDone,
             "assistant_output_recovered_from_state" => Self::AssistantOutputRecoveredFromState,
             "invalid_turn_input" => Self::InvalidTurnInput,
@@ -512,7 +508,6 @@ impl TurnFailureCode {
         Self::BodyReadFailed,
         Self::TokenUsageOverflow,
         Self::ReconfigureFailed,
-        Self::SessionGraphScope,
         Self::MissingDone,
         Self::AssistantOutputRecoveredFromState,
         Self::InvalidTurnInput,
@@ -1131,7 +1126,6 @@ mod tests {
             TurnFailureCode::BodyReadFailed,
             TurnFailureCode::TokenUsageOverflow,
             TurnFailureCode::ReconfigureFailed,
-            TurnFailureCode::SessionGraphScope,
             TurnFailureCode::MissingDone,
             TurnFailureCode::AssistantOutputRecoveredFromState,
             TurnFailureCode::InvalidTurnInput,

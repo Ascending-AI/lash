@@ -533,7 +533,7 @@
   },
   "//crates/lash-sim:lash-sim__unit_test": {
     "cpu_count": 4,
-    "memory_kb": 1048576,
+    "memory_kb": 3670016,
     "p95_cores": 3.57,
     "peak_bytes": 230223872,
     "samples": 125

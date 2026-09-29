@@ -11,7 +11,7 @@ const SEED: u64 = 0xd0a4_b1e5;
 /// A Durable Session must resolve through the non-creating by-id seam exactly
 /// once per handle and must never reach `admit_session`; these counters are what
 /// makes that a test rather than a claim.
-struct CountingSessionStoreFactory {
+struct CountingDeploymentStore {
     inner: Arc<dyn DeploymentStore>,
     creates: Arc<AtomicUsize>,
     by_id_opens: Arc<AtomicUsize>,
@@ -19,7 +19,7 @@ struct CountingSessionStoreFactory {
     open_delay_ms: u64,
 }
 
-impl CountingSessionStoreFactory {
+impl CountingDeploymentStore {
     fn new(inner: Arc<dyn DeploymentStore>, open_delay_ms: u64) -> Self {
         Self {
             inner,
@@ -31,7 +31,7 @@ impl CountingSessionStoreFactory {
 }
 
 #[async_trait]
-impl lash_core::store::RuntimeStoreDecorator for CountingSessionStoreFactory {
+impl lash_core::store::RuntimeStoreDecorator for CountingDeploymentStore {
     type Inner = dyn DeploymentStore;
 
     fn inner(&self) -> &Self::Inner {
@@ -63,14 +63,14 @@ impl lash_core::store::RuntimeStoreDecorator for CountingSessionStoreFactory {
     }
 }
 
-impl lash_core::DeploymentStoreDecorator for CountingSessionStoreFactory {}
+impl lash_core::DeploymentStoreDecorator for CountingDeploymentStore {}
 
 /// A counting catalog over `inner`'s own.
 fn counting_factory(
     inner: &lash_core::Backend,
     open_delay_ms: u64,
-) -> (DecoratedBackend, Arc<CountingSessionStoreFactory>) {
-    let factory = Arc::new(CountingSessionStoreFactory::new(
+) -> (DecoratedBackend, Arc<CountingDeploymentStore>) {
+    let factory = Arc::new(CountingDeploymentStore::new(
         inner.session_store_factory(),
         open_delay_ms,
     ));

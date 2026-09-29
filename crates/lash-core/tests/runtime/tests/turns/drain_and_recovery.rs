@@ -567,7 +567,7 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
 pub(super) async fn session_manager_persists_child_sessions_in_separate_store() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
-    let factory = RecordingSessionStoreFactory::over(backend.session_store_factory());
+    let factory = RecordingDeploymentStore::over(backend.session_store_factory());
     let backend = LayeredBackend::over(backend)
         .map_session_store_factory(|_| Arc::new(factory.clone()))
         .into_backend();

@@ -1501,6 +1501,16 @@ fn postgres_statement_name(query: &str) -> &'static str {
         {
             "deleted-session-check"
         }
+        // The commit's admission probe: the session has a head or catalog
+        // row. The fork path's probe that also asks about tombstones stays
+        // out of this name.
+        q if q.starts_with("SELECT EXISTS(")
+            && q.contains("FROM lash_session_meta")
+            && q.contains("UNION")
+            && !q.contains("lash_deleted_sessions") =>
+        {
+            "session-admitted-check"
+        }
         q if q.starts_with("SELECT pending_follow_on_json FROM lash_sessions") => {
             "pending-follow-on-read"
         }
@@ -1698,7 +1708,8 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
     let commit_statements = postgres_statement_calls_by_name(storage.pool()).await;
     // The pending follow-on read (ADR 0101 §3, FIG-3542) adds one read to the
     // previous 16-round-trip head commit: the head-write invariant decides
-    // against the locked fact.
+    // against the locked fact. The commit refuses a session the catalog never
+    // admitted (ADR 0112) with one probe, where it used to insert the meta row.
     // This fixture does not pass through the testing lease-epoch probe.
     let expected_commit: std::collections::BTreeMap<&'static str, i64> =
         std::collections::BTreeMap::from([
@@ -1715,7 +1726,7 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
             ("blob-insert", 1),
             ("checkpoint-blob-refs-insert", 1),
             ("turn-commit-insert", 1),
-            ("session-meta-insert", 1),
+            ("session-admitted-check", 1),
             ("head-upsert", 1),
             ("attachment-manifest-commit", 1),
             ("session-meta-touch", 1),

@@ -304,7 +304,7 @@ impl AgentScenarioSetup {
         let backend =
             DecoratedBackend::over(double_backend().await).session_store_factory(move |inner| {
                 Arc::new(
-                    lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
+                    lash_core::testing::checkpoint_observer::ObservedDeploymentStore::new(
                         inner,
                         observed_writes,
                     ),

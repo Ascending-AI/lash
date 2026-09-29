@@ -421,7 +421,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::store::{CheckpointWriteCollector, ObservedSessionStoreFactory};
+    use crate::store::{CheckpointWriteCollector, ObservedDeploymentStore};
     use crate::trace::{AbstractWorldSummary, OracleVerdict};
 
     async fn collect_process_events(
@@ -625,7 +625,7 @@ mod tests {
             .await
             .expect("SQLite memory store set");
         let factory =
-            ObservedSessionStoreFactory::new(backend.session_store_factory(), collector.clone());
+            ObservedDeploymentStore::new(backend.session_store_factory(), collector.clone());
         factory
             .admit_session(&SessionStoreCreateRequest {
                 owning_process_id: None,

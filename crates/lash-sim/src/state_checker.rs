@@ -207,6 +207,24 @@ fn fold_usage_rows(
     Ok(())
 }
 
+/// Each usage row's `(source, model)` key and counters, sorted by key.
+fn usage_row_counters(rows: &[Value]) -> Vec<(Value, Value, Value)> {
+    let mut counters = rows
+        .iter()
+        .map(|row| {
+            (
+                row.get("source").cloned().unwrap_or(Value::Null),
+                row.get("model").cloned().unwrap_or(Value::Null),
+                row.get("usage").cloned().unwrap_or(Value::Null),
+            )
+        })
+        .collect::<Vec<_>>();
+    counters.sort_by(|left, right| {
+        (left.0.to_string(), left.1.to_string()).cmp(&(right.0.to_string(), right.1.to_string()))
+    });
+    counters
+}
+
 fn compare_raw_rows(
     checked: &CheckedSession,
     raw: &Value,
@@ -228,11 +246,18 @@ fn compare_raw_rows(
             "checkpoint checker `{session_id}` graph leaf diverged from accepted raw rows"
         ));
     }
-    if raw.get("token_ledger").and_then(Value::as_array) != Some(&checked.usage_rows) {
+    // The durable totals keep one row per `(source, model)`, sorted, with
+    // attempt counters beside the counters (ADR 0112 §8); the checker
+    // compares the key and the counters.
+    let raw_rows = raw
+        .pointer("/usage/rows")
+        .and_then(Value::as_array)
+        .map(|rows| usage_row_counters(rows));
+    if raw_rows != Some(usage_row_counters(&checked.usage_rows)) {
         return Err(format!(
             "checkpoint checker `{session_id}` usage reconstruction diverged from accepted raw rows: checker={}; raw={}",
             Value::Array(checked.usage_rows.clone()),
-            raw.get("token_ledger").unwrap_or(&Value::Null)
+            raw.pointer("/usage/rows").unwrap_or(&Value::Null)
         ));
     }
     if raw.get("turn_state") != Some(submitted_turn_state) {

@@ -515,7 +515,8 @@ pub(crate) async fn transcript(
     let mut anchor = HistoryAnchor::Head;
     let mut messages = Vec::new();
     loop {
-        let page = factory
+        let first = matches!(anchor, HistoryAnchor::Head);
+        let page = match factory
             .load_ancestors(
                 session,
                 anchor,
@@ -525,7 +526,13 @@ pub(crate) async fn transcript(
                 },
             )
             .await
-            .map_err(|error| format!("read session `{session}` ancestry: {error}"))?;
+        {
+            Ok(page) => page,
+            // An admitted session that never committed has no head to page
+            // from (ADR 0112 §6): its transcript is empty.
+            Err(lash_core::StoreError::SessionNotFound { .. }) if first => break,
+            Err(error) => return Err(format!("read session `{session}` ancestry: {error}")),
+        };
         for node in page.nodes {
             if let lash_core::SessionNodePayload::Event {
                 event: lash_core::SessionHistoryRecord::Conversation(message),

@@ -113,8 +113,8 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
 }
 
 /// The class-1 store seams carry no silent defaults: an implementor that never
-/// states its delete-time freshness answer or its tombstone answer does not
-/// compile.
+/// states its delete-time freshness answer or its catalog lookup answer does
+/// not compile.
 ///
 /// Both fixtures assert an `E0046` whose `help:` line renders the async-trait
 /// desugared signature. The `testing` feature changes rustc's choice of a
@@ -126,7 +126,7 @@ fn register_store_seam_contracts(t: &trybuild::TestCases) {
         return;
     }
     t.compile_fail("tests/ui/attachment_store_head_has_no_default.rs");
-    t.compile_fail("tests/ui/session_store_factory_requires_deletion_answer.rs");
+    t.compile_fail("tests/ui/session_catalog_requires_lookup_answer.rs");
 }
 
 /// The RLM config builder has no silent defaults: `build()` is absent until

@@ -344,7 +344,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-sim:crash_point_matrix__test": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-sim:cross_backend_store_differential__test": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-sim:lash-sim__bin__unit_test": {"cpu_count": 4, "memory_kb": 1048576},
-    "//crates/lash-sim:lash-sim__unit_test": {"cpu_count": 4, "memory_kb": 1048576},
+    "//crates/lash-sim:lash-sim__unit_test": {"cpu_count": 4, "memory_kb": 3670016},
     "//crates/lash-sim:logical_turn__test": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-sim:parent_end_detection_bounds__test": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-sim:possession_conservation__test": {"cpu_count": 4, "memory_kb": 1048576},

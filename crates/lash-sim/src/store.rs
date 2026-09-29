@@ -24,7 +24,7 @@ use boundary::{boundary_session_alias, is_suspend_boundary, project_suspend_boun
 pub use lash_core::testing::checkpoint_observer::{
     CHECKPOINT_WRITE_EVENT_SCHEMA, CheckpointAttribution, CheckpointComponent,
     CheckpointComponentWrite, CheckpointComponentWriteKind, CheckpointStateWrite,
-    CheckpointWriteCollector, CheckpointWriteEvent, ObservedSessionStoreFactory,
+    CheckpointWriteCollector, CheckpointWriteEvent, ObservedDeploymentStore,
 };
 
 pub fn backend_fault_observation(

@@ -143,7 +143,7 @@ pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimeStore
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn gc_blobs(factory: ReopenableRuntimePersistence) {
+pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
     let store = factory.open;
     // First commit writes a live checkpoint blob.
     let mut v1 = RuntimeSessionState {
@@ -311,7 +311,7 @@ pub(super) fn sha256_of(bytes: &[u8]) -> impl std::fmt::LowerHex {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn append_receipt_reopen(factory: ReopenableRuntimePersistence) {
+pub async fn append_receipt_reopen(factory: ReopenableRuntimeStore) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -350,7 +350,7 @@ pub async fn append_receipt_reopen(factory: ReopenableRuntimePersistence) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
+pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
     let meta = SessionMeta {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),

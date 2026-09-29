@@ -2,7 +2,7 @@
 
 use super::*;
 use lash_core::testing::TestTurnDrive;
-use lash_core::testing::runtime_helpers::RecordingSessionStoreFactory;
+use lash_core::testing::runtime_helpers::RecordingDeploymentStore;
 
 fn parked_provider(
     started: tokio::sync::mpsc::Sender<()>,
@@ -428,7 +428,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
         .await
         .expect("register SessionTurn")
         .id;
-    let factory = Arc::new(RecordingSessionStoreFactory::over(
+    let factory = Arc::new(RecordingDeploymentStore::over(
         memory_session_store_factory().await,
     ));
     let (worker, mut started, _double) =
