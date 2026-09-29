@@ -1031,9 +1031,10 @@ impl ChatStreamState {
         if started {
             tool_call.ordinal = Some(self.next_tool_ordinal);
             self.next_tool_ordinal += 1;
-            self.block_events.push(LlmStreamEvent::ToolInputStart {
-                call: Self::tool_input_identity(tool_call),
-            });
+            if let Some(call) = Self::tool_input_identity(tool_call) {
+                self.block_events
+                    .push(LlmStreamEvent::ToolInputStart { call });
+            }
         }
         if let Some(arguments) = value
             .get("function")
@@ -1041,20 +1042,22 @@ impl ChatStreamState {
             .and_then(Value::as_str)
             && !arguments.is_empty()
         {
-            self.block_events.push(LlmStreamEvent::ToolInputDelta {
-                call: Self::tool_input_identity(tool_call),
-                text: arguments.to_string(),
-            });
+            if let Some(call) = Self::tool_input_identity(tool_call) {
+                self.block_events.push(LlmStreamEvent::ToolInputDelta {
+                    call,
+                    text: arguments.to_string(),
+                });
+            }
         }
     }
 
-    fn tool_input_identity(call: &ChatStreamingToolCall) -> lash_sansio::ToolInputIdentity {
-        lash_sansio::ToolInputIdentity {
-            ordinal: call.ordinal.expect("started tool call has an ordinal"),
+    fn tool_input_identity(call: &ChatStreamingToolCall) -> Option<lash_sansio::ToolInputIdentity> {
+        Some(lash_sansio::ToolInputIdentity {
+            ordinal: call.ordinal?,
             call_id: (!call.call_id.is_empty()).then(|| call.call_id.clone()),
             tool_name: (!call.tool_name.is_empty()).then(|| call.tool_name.clone()),
             item_id: None,
-        }
+        })
     }
 
     fn finish_tool_inputs(&mut self) {
@@ -1073,10 +1076,12 @@ impl ChatStreamState {
             } else {
                 call.input_json.clone()
             };
-            self.block_events.push(LlmStreamEvent::ToolInputEnd {
-                call: Self::tool_input_identity(call),
-                raw_arguments,
-            });
+            if let Some(call) = Self::tool_input_identity(call) {
+                self.block_events.push(LlmStreamEvent::ToolInputEnd {
+                    call,
+                    raw_arguments,
+                });
+            }
         }
     }
 
