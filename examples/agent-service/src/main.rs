@@ -45,7 +45,6 @@ fn default_openrouter_model_capability() -> lash::provider::ModelCapability {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-            default_effort: Some("medium".to_string()),
             encoding: lash::provider::ReasoningEncoding::Effort,
             ..lash::provider::ReasoningCapability::default()
         }),

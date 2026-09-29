@@ -24,6 +24,13 @@ fn host_model_capability_validates_reasoning_effort_selections() {
         ModelEffortValidationCategory::UnsupportedEffort
     );
     assert!(unsupported.message.contains("Unsupported effort `ultra`"));
+    capability
+        .validate_selection(
+            "workbench-model",
+            "workbench-provider",
+            &ReasoningSelection::Effort("high".to_string()),
+        )
+        .expect("host capability accepts an advertised effort");
     assert_eq!(
         capability
             .validate_selection(
@@ -31,8 +38,9 @@ fn host_model_capability_validates_reasoning_effort_selections() {
                 "workbench-provider",
                 &ReasoningSelection::Effort(" HIGH ".to_string()),
             )
-            .expect("host capability accepts and normalizes an advertised effort"),
-        ReasoningSelection::Effort("high".to_string())
+            .expect_err("effort names match exactly")
+            .category,
+        ModelEffortValidationCategory::UnsupportedEffort
     );
 
     let not_configurable = lash::provider::ModelCapability::default()
@@ -75,10 +83,8 @@ fn host_model_capability_validates_reasoning_effort_selections() {
         attachment_acceptance: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["low".to_string(), "high".to_string()],
-            default_effort: None,
-            aliases: BTreeMap::new(),
             encoding: ReasoningEncoding::Budget(BTreeMap::from([("low".to_string(), 1_024)])),
-            disable: None,
+            disable: false,
             mandatory: false,
         }),
         ..Default::default()

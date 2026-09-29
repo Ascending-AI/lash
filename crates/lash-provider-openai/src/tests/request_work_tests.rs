@@ -99,7 +99,7 @@ fn bounded_error_projection_preserves_retry_delay_and_message_after_large_echo()
 
 #[test]
 fn request_work_budget_counts_repeated_stored_image_occurrences() {
-    for (occurrences, byte_len) in [(100, 32_768), (100, 1024), (1, 30_000)] {
+    for (occurrences, byte_len) in [(100, 32 * 1024), (100, 1024), (1, 30_000)] {
         let id = lash_core::AttachmentId::parse("repeated-image").unwrap();
         let source = AttachmentSource::stored(lash_core::AttachmentRef {
             id: id.clone(),

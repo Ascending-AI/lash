@@ -60,7 +60,10 @@ fn request() -> LlmRequest {
         ),
         output_spec: None,
         stream_events: None,
-        generation: GenerationOptions::default(),
+        generation: GenerationOptions {
+            output_token_cap: std::num::NonZeroUsize::new(4_096),
+            ..GenerationOptions::default()
+        },
         provider_trace: None,
     }
 }

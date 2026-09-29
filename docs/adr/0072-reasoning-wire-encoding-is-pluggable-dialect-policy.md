@@ -1,5 +1,12 @@
 # Reasoning wire encoding is pluggable dialect policy
 
+> **Superseded (2026-09-29, FIG-4120)** by
+> [ADR 0121](0121-host-generation-settings-are-sent-or-refused.md). The
+> pluggable encoder, the `none` default that dropped a validated selection,
+> and the direct-OpenAI URL rule are deleted. OpenAI-compatible routes now
+> carry a closed `OpenAiReasoningDialect`. The replay-route paragraph at the
+> end still holds.
+
 OpenAI-compatible Chat Completions gateways disagree on how reasoning intent is encoded, and
 many silently ignore fields from another dialect. Opper's compatibility endpoint, for example,
 requires top-level `reasoning_effort: "minimal"`; the nested `reasoning: { "effort":

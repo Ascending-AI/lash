@@ -27,14 +27,11 @@ fn tool_schema_cache_control_does_not_count_as_adapter_cache_emission() {
         output_schema: json!({}).into(),
     }]);
 
-    let (body, cache_control_emitted) = provider
-        .build_request_body_with_cache_evidence(&req)
-        .expect("body");
+    let (body, receipt) = provider.build_request(&req).expect("body");
 
     assert!(body["tools"][0]["input_schema"]["properties"]["cache_control"].is_object());
-    assert!(!cache_control_emitted);
     assert_eq!(
-        AnthropicProvider::generation_disposition(&req, &body, cache_control_emitted).cache,
+        receipt.cache,
         lash_core::GenerationOptionOutcome::OmittedUnsupported
     );
 }

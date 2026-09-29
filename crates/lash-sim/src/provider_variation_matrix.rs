@@ -110,7 +110,7 @@ fn matrix_is_a_complete_versioned_row_by_column_product() {
                         row.variation
                     );
                     match assertion {
-                        NotApplicableAssertion::OmittedUnsupportedStop => {
+                        NotApplicableAssertion::RefusedUnsupportedStop => {
                             assert_eq!(recordings.len(), 1)
                         }
                     }
@@ -758,7 +758,7 @@ async fn run_not_applicable(
         "{} {dialect} inapplicable cell requires a reason",
         row.variation
     );
-    assert_eq!(assertion, NotApplicableAssertion::OmittedUnsupportedStop);
+    assert_eq!(assertion, NotApplicableAssertion::RefusedUnsupportedStop);
     let recording = only_recording(recordings, dialect, &row.variation);
     let completion = complete_matrix(
         transport,
@@ -769,57 +769,35 @@ async fn run_not_applicable(
         CompletionMode::Streaming,
     )
     .await;
-    if transport == MatrixTransport::WebSocket {
-        assert_eq!(
-            completion.captured_websocket_requests.len(),
-            1,
-            "{dialect} must send one response.create"
-        );
-        let request = &completion.captured_websocket_requests[0];
-        assert_eq!(request["type"], "response.create", "{dialect}");
-        assert!(
-            !json_contains_key(request, "stop") && !json_contains_key(request, "stop_sequences"),
-            "{dialect} serialized an unsupported wire stop field: {request}"
-        );
-    }
-    let completion = completion
+    assert!(
+        completion.captured_websocket_requests.is_empty(),
+        "{dialect} sent a request it should have refused"
+    );
+    let error = completion
         .result
-        .unwrap_or_else(|error| panic!("{dialect} inapplicable proof failed: {error:?}"));
-    assert_unsupported_stop_disposition(dialect, &completion, recording);
-}
-
-fn json_contains_key(value: &Value, key: &str) -> bool {
-    match value {
-        Value::Object(object) => {
-            object.contains_key(key) || object.values().any(|value| json_contains_key(value, key))
-        }
-        Value::Array(values) => values.iter().any(|value| json_contains_key(value, key)),
-        _ => false,
-    }
-}
-
-fn assert_unsupported_stop_disposition(
-    dialect: &str,
-    completion: &ProviderCompletion,
-    recording: &Recording,
-) {
-    assert!(completion.full_text().contains(TYPESCRIPT_CLOSE_DELIMITER));
-    let disposition = completion
-        .generation_disposition
-        .as_ref()
-        .unwrap_or_else(|| panic!("{dialect} omitted generation disposition"));
+        .expect_err("a stop list on a wire without a stop field is refused");
     assert_eq!(
-        disposition.stop_sequences,
-        lash_core::GenerationOptionOutcome::OmittedUnsupported,
-        "{dialect} must report its unsupported wire-stop field"
+        error
+            .error
+            .code
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("lash:unsupported_generation_option"),
+        "{dialect} must refuse its unsupported wire-stop field"
     );
+    assert!(!error.error.is_retryable(), "{dialect}");
+    let attempts = &error.call_record.attempts;
+    assert_eq!(attempts.len(), 1, "{dialect} retried a refusal");
     assert_eq!(
-        completion.call_record.attempts[0]
-            .generation_disposition
-            .as_ref(),
-        Some(disposition)
+        attempts[0].protocol_position,
+        lash_core::ProtocolPosition::NoResponse,
+        "{dialect} refused after reaching the wire"
     );
-    assert_current_success_contract(dialect, completion, recording);
+    assert!(
+        attempts[0].generation_disposition.is_none(),
+        "{dialect} reported a disposition for a request it never built"
+    );
 }
 
 async fn complete_http_buffered(
@@ -874,6 +852,11 @@ fn http_provider(dialect: &str, transport: Arc<ScriptedLlmHttpTransport>) -> Pro
         "anthropic.messages" => ProviderHandle::new(
             AnthropicProvider::new("matrix-key")
                 .with_base_url(Some("https://anthropic.matrix".to_string()))
+                // Anthropic requires a cap, and lash invents none.
+                .with_options(ProviderOptions {
+                    max_output_tokens: Some(4_096),
+                    ..ProviderOptions::default()
+                })
                 .with_transport(transport)
                 .into_components(),
         ),

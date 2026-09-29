@@ -13,6 +13,12 @@ use process_fixtures::*;
 #[path = "core_conversions_tests/cancellation.rs"]
 mod cancellation;
 
+#[path = "core_conversions_tests/generation_receipt.rs"]
+mod generation_receipt;
+
+#[path = "core_conversions_tests/reasoning_capability.rs"]
+mod reasoning_capability;
+
 #[path = "core_conversions_tests/observation_projection.rs"]
 mod observation_projection;
 
@@ -229,16 +235,11 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             google_dialect: Default::default(),
             reasoning: Some(core_llm::ReasoningCapability {
                 efforts: vec!["fast".to_string(), "slow".to_string()],
-                default_effort: Some("fast".to_string()),
-                aliases: std::collections::BTreeMap::from([(
-                    "quick".to_string(),
-                    "fast".to_string(),
-                )]),
                 encoding: core_llm::ReasoningEncoding::Budget(std::collections::BTreeMap::from([
                     ("fast".to_string(), 1024u32),
                     ("slow".to_string(), 2048u32),
                 ])),
-                disable: Some(core_llm::ReasoningDisableEncoding::ToggleFalse),
+                disable: true,
                 mandatory: false,
             }),
             cache_control: Some(core_llm::CacheControlDialect::Anthropic),
@@ -253,6 +254,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             ),
             seed: Some(-9),
             stop_sequences: Vec::new(),
+            parallel_tool_calls: Some(false),
             projection_provenance: Default::default(),
         },
         scope: core_llm::LlmRequestScope::new(
@@ -273,7 +275,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     );
     assert_eq!(
         remote_json["model_intent"]["capability"]["reasoning"]["disable"],
-        serde_json::json!("toggle_false")
+        serde_json::json!(true)
     );
     assert_eq!(
         remote_json["model_intent"]["capability"]["cache_control"],
@@ -302,14 +304,10 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         .as_ref()
         .expect("capability must round-trip");
     assert_eq!(reasoning.efforts, vec!["fast", "slow"]);
-    assert_eq!(reasoning.default_effort.as_deref(), Some("fast"));
+    assert!(reasoning.disable);
     assert_eq!(
         core.model_capability.cache_control,
         Some(core_llm::CacheControlDialect::Anthropic)
-    );
-    assert_eq!(
-        reasoning.aliases.get("quick").map(String::as_str),
-        Some("fast")
     );
     assert_eq!(
         reasoning.encoding,
@@ -324,6 +322,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         Some(core_llm::NonNegativeFiniteF64::new(0.25).expect("finite temperature"))
     );
     assert_eq!(core.generation.seed, Some(-9));
+    assert_eq!(core.generation.parallel_tool_calls, Some(false));
     assert_eq!(core.session_id(), "session-1");
     assert_eq!(core.agent_frame_id(), "session-1:frame:test");
     assert_eq!(core.request_id(), "session-1:request:test");
@@ -677,6 +676,7 @@ fn process_start_requests_round_trip_core_values() {
                 ),
                 seed: Some(4242),
                 stop_sequences: Vec::new(),
+                parallel_tool_calls: None,
                 projection_provenance: Default::default(),
             },
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
@@ -2295,6 +2295,7 @@ fn remote_generation_options_round_trip_sampling_controls_losslessly() {
         temperature: Some(core_llm::NonNegativeFiniteF64::new(0.7).expect("finite temperature")),
         seed: Some(-1),
         stop_sequences: Vec::new(),
+        parallel_tool_calls: Some(true),
         projection_provenance: Default::default(),
     };
     let remote = RemoteGenerationOptions::from(core.clone());
@@ -2303,7 +2304,12 @@ fn remote_generation_options_round_trip_sampling_controls_losslessly() {
     // for a sampling temperature.
     assert_eq!(
         wire,
-        serde_json::json!({ "output_token_cap": 2_048, "temperature": 0.7, "seed": -1 })
+        serde_json::json!({
+            "output_token_cap": 2_048,
+            "temperature": 0.7,
+            "seed": -1,
+            "parallel_tool_calls": true,
+        })
     );
     assert_eq!(
         serde_json::to_value(&core).expect("serialize core generation options")["temperature"],
@@ -2369,6 +2375,7 @@ fn remote_generation_options_reject_a_negative_temperature() {
         temperature: Some(serde_json::Number::from_f64(-0.5).expect("finite")),
         seed: None,
         stop_sequences: Vec::new(),
+        parallel_tool_calls: None,
     };
     let error = core_llm::GenerationOptions::try_from(remote)
         .expect_err("a negative temperature must not convert");
@@ -2395,7 +2402,6 @@ fn every_generation_option_disposition_crosses_the_boundary_in_both_directions()
         core_llm::GenerationOptionOutcome::Applied,
         core_llm::GenerationOptionOutcome::SuppressedProtocolOwned,
         core_llm::GenerationOptionOutcome::OmittedUnsupported,
-        core_llm::GenerationOptionOutcome::OmittedSamplingPinned,
         core_llm::GenerationOptionOutcome::ClampedToCapacity,
     ] {
         let remote = RemoteGenerationOptionOutcome::from(core);

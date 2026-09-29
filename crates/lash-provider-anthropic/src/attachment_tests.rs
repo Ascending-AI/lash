@@ -31,7 +31,10 @@ fn request_with_inline_attachment(mime: &str) -> LlmRequest {
         ),
         output_spec: None,
         stream_events: None,
-        generation: Default::default(),
+        generation: lash_core::GenerationOptions {
+            output_token_cap: std::num::NonZeroUsize::new(4_096),
+            ..lash_core::GenerationOptions::default()
+        },
         provider_trace: None,
     }
 }

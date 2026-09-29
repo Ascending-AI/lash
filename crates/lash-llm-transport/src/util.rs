@@ -2,10 +2,7 @@
 //! previously copy-pasted into each provider; they live here because every
 //! provider already depends on `lash-llm-transport`.
 
-use lash_sansio::llm::types::{
-    GenerationOptionOutcome, LlmContentBlock, LlmProviderTraceEvent, LlmProviderTraceSender,
-    LlmRequest,
-};
+use lash_sansio::llm::types::{LlmProviderTraceEvent, LlmProviderTraceSender};
 use serde_json::Value;
 
 pub fn emit_provider_trace(tx: Option<&LlmProviderTraceSender>, provider: &'static str, raw: &str) {
@@ -79,29 +76,4 @@ pub fn extract_error_detail(raw: &str) -> Option<String> {
         return Some(msg.to_string());
     }
     Some(trimmed.chars().take(200).collect())
-}
-
-/// `cache_control_emitted` must come from the code path that wrote the
-/// provider-specific cache directive. Inspecting the completed JSON body is
-/// insufficient because host-owned tool schemas can contain identical keys.
-pub fn cache_intent_disposition(
-    request: &LlmRequest,
-    cache_control_emitted: bool,
-) -> GenerationOptionOutcome {
-    let requested = request.messages.iter().any(|message| {
-        message.blocks.iter().any(|block| {
-            matches!(
-                block,
-                LlmContentBlock::Text {
-                    cache_breakpoint: true,
-                    ..
-                }
-            )
-        })
-    });
-    if cache_control_emitted {
-        GenerationOptionOutcome::applied(requested)
-    } else {
-        GenerationOptionOutcome::unsupported(requested)
-    }
 }

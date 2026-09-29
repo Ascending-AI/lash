@@ -6,6 +6,7 @@ use crate::llm::types::{
     LlmContentBlock, LlmMessage, LlmOutputPart, LlmRole, LlmToolChoice, LlmUsage,
     ProviderReasoningReplay,
 };
+use crate::provider::ReasoningSelection;
 use crate::{GenerationOptions, NonNegativeFiniteF64};
 
 /// Every test double that completes with an empty `Stop` response shares
@@ -655,6 +656,8 @@ impl crate::Clock for RecordingClock {
 
 #[path = "tests/classifier_tests.rs"]
 mod classifier_tests;
+#[path = "tests/generation_policy_tests.rs"]
+mod generation_policy_tests;
 
 #[derive(Debug)]
 struct MetricsTransport {
@@ -1189,50 +1192,6 @@ fn provider_retry_zero_jitter_preserves_deterministic_ladder() {
 }
 
 #[test]
-fn generation_policy_prefers_request_then_provider_then_default() {
-    let provider_options = ProviderOptions {
-        max_output_tokens: Some(8_192),
-        cache_retention: CacheRetention::Long,
-        expose_thinking: true,
-        ..ProviderOptions::default()
-    };
-    let defaulted = resolve_generation_policy(
-        &GenerationOptions::default(),
-        &ProviderOptions::default(),
-        32_768,
-        "thinking",
-    );
-    assert_eq!(defaulted.max_output_tokens, 32_768);
-    assert_eq!(defaulted.cache_retention, CacheRetention::Short);
-    assert!(!defaulted.expose_thinking);
-    assert_eq!(defaulted.thinking, "thinking");
-    assert_eq!(defaulted.temperature, None);
-    assert_eq!(defaulted.seed, None);
-
-    let provider_limited =
-        resolve_generation_policy(&GenerationOptions::default(), &provider_options, 32_768, ());
-    assert_eq!(provider_limited.max_output_tokens, 8_192);
-    assert_eq!(provider_limited.cache_retention, CacheRetention::Long);
-    assert!(provider_limited.expose_thinking);
-
-    let request_generation = GenerationOptions {
-        output_token_cap: NonZeroUsize::new(2_048),
-        temperature: Some(NonNegativeFiniteF64::new(0.25).expect("finite temperature")),
-        seed: Some(-7),
-        stop_sequences: Vec::new(),
-        projection_provenance: Default::default(),
-    };
-    let request_limited =
-        resolve_generation_policy(&request_generation, &provider_options, 32_768, ());
-    assert_eq!(request_limited.max_output_tokens, 2_048);
-    assert_eq!(
-        request_limited.temperature.map(|value| value.get()),
-        Some(0.25)
-    );
-    assert_eq!(request_limited.seed, Some(-7));
-}
-
-#[test]
 fn non_negative_finite_f64_rejects_non_finite_and_negative_values() {
     for rejected in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.5] {
         NonNegativeFiniteF64::new(rejected).expect_err("non-finite or negative must be rejected");
@@ -1310,6 +1269,7 @@ fn generation_options_round_trip_and_stay_comparable() {
         temperature: Some(NonNegativeFiniteF64::new(0.0).expect("finite")),
         seed: Some(42),
         stop_sequences: Vec::new(),
+        parallel_tool_calls: Some(false),
         projection_provenance: Default::default(),
     };
     let encoded = serde_json::to_value(&options).expect("serialize");
@@ -1319,6 +1279,7 @@ fn generation_options_round_trip_and_stay_comparable() {
             "output_token_cap": 2_048,
             "temperature": 0.0,
             "seed": 42,
+            "parallel_tool_calls": false,
         })
     );
     let decoded: GenerationOptions = serde_json::from_value(encoded).expect("deserialize");
@@ -1800,7 +1761,7 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
             evidence: None,
             generation_disposition: Some(crate::GenerationReceipt {
                 temperature: crate::GenerationOptionOutcome::Applied,
-                seed: crate::GenerationOptionOutcome::OmittedUnsupported,
+                cache: crate::GenerationOptionOutcome::OmittedUnsupported,
                 ..crate::GenerationReceipt::default()
             }),
             usage: Some(LlmUsage {
@@ -1839,9 +1800,13 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
         serde_json::json!({
             "output_token_cap": "not_requested",
             "temperature": "applied",
-            "seed": "omitted_unsupported",
+            "reasoning": "not_requested",
+            "parallel_tool_calls": "not_requested",
+            "thinking_summary": "not_requested",
+            "thinking_visibility": "not_requested",
+            "seed": "not_requested",
             "stop_sequences": "not_requested",
-            "cache": "not_requested",
+            "cache": "omitted_unsupported",
         }),
         "the trace stream must carry the completed attempt's generation disposition",
     );

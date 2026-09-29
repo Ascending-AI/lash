@@ -323,14 +323,13 @@ fn stamping_foreign_replay_reports_conflict_and_preserves_the_original_origin() 
 #[test]
 fn only_requested_options_can_be_omitted() {
     let untouched = GenerationReceipt {
-        output_token_cap: GenerationOptionOutcome::applied(false),
-        temperature: GenerationOptionOutcome::sampling_pinned(false),
-        seed: GenerationOptionOutcome::unsupported(false),
-        stop_sequences: GenerationOptionOutcome::unsupported(false),
-        cache: GenerationOptionOutcome::unsupported(false),
+        output_token_cap: GenerationOptionOutcome::from_emission(false, true),
+        temperature: GenerationOptionOutcome::from_emission(false, false),
+        ..GenerationReceipt::default()
     };
     assert_eq!(untouched, GenerationReceipt::default());
     assert!(untouched.nothing_omitted());
+    assert!(untouched.fully_honored());
 
     let suppressed = GenerationReceipt {
         stop_sequences: GenerationOptionOutcome::SuppressedProtocolOwned,
@@ -339,27 +338,47 @@ fn only_requested_options_can_be_omitted() {
     assert!(!suppressed.nothing_omitted());
     assert!(!suppressed.fully_honored());
 
-    let dropped = GenerationReceipt {
-        output_token_cap: GenerationOptionOutcome::applied(true),
-        temperature: GenerationOptionOutcome::sampling_pinned(true),
-        seed: GenerationOptionOutcome::unsupported(true),
-        stop_sequences: GenerationOptionOutcome::unsupported(false),
-        cache: GenerationOptionOutcome::unsupported(true),
+    let clamped = GenerationReceipt {
+        output_token_cap: GenerationOptionOutcome::ClampedToCapacity,
+        ..Default::default()
     };
-    assert_eq!(dropped.output_token_cap, GenerationOptionOutcome::Applied);
-    assert!(!dropped.output_token_cap.is_omitted());
-    assert!(dropped.temperature.is_omitted());
-    assert!(dropped.seed.is_omitted());
-    assert!(!dropped.nothing_omitted());
+    assert!(clamped.nothing_omitted());
+    assert!(!clamped.fully_honored());
+
+    let reported = GenerationReceipt {
+        output_token_cap: GenerationOptionOutcome::from_emission(true, true),
+        temperature: GenerationOptionOutcome::from_emission(true, true),
+        cache: GenerationOptionOutcome::from_emission(true, false),
+        reasoning: GenerationOptionOutcome::Applied,
+        parallel_tool_calls: GenerationOptionOutcome::Applied,
+        thinking_summary: GenerationOptionOutcome::NotRequested,
+        thinking_visibility: GenerationOptionOutcome::Applied,
+        ..GenerationReceipt::default()
+    };
+    assert_eq!(reported.output_token_cap, GenerationOptionOutcome::Applied);
+    assert!(reported.cache.is_omitted());
+    assert!(!reported.nothing_omitted());
     assert_eq!(
-        serde_json::to_value(dropped).expect("serialize disposition"),
+        serde_json::to_value(reported).expect("serialize disposition"),
         serde_json::json!({
             "output_token_cap": "applied",
-            "temperature": "omitted_sampling_pinned",
-            "seed": "omitted_unsupported",
+            "temperature": "applied",
+            "seed": "not_requested",
             "stop_sequences": "not_requested",
             "cache": "omitted_unsupported",
+            "reasoning": "applied",
+            "parallel_tool_calls": "applied",
+            "thinking_summary": "not_requested",
+            "thinking_visibility": "applied",
         })
+    );
+    // The removed sampling-pinned disposition is refused: pinning now refuses
+    // the call before any I/O.
+    assert!(
+        serde_json::from_value::<GenerationOptionOutcome>(serde_json::json!(
+            "omitted_sampling_pinned"
+        ))
+        .is_err()
     );
 }
 
@@ -391,10 +410,14 @@ fn attempt_contract_round_trips_closed_outcomes_and_preserves_optional_zero() {
                 }),
                 generation_disposition: Some(GenerationReceipt {
                     output_token_cap: GenerationOptionOutcome::Applied,
-                    temperature: GenerationOptionOutcome::OmittedSamplingPinned,
-                    seed: GenerationOptionOutcome::OmittedUnsupported,
+                    temperature: GenerationOptionOutcome::Applied,
+                    seed: GenerationOptionOutcome::NotRequested,
                     stop_sequences: GenerationOptionOutcome::NotRequested,
-                    cache: GenerationOptionOutcome::Applied,
+                    cache: GenerationOptionOutcome::OmittedUnsupported,
+                    reasoning: GenerationOptionOutcome::Applied,
+                    parallel_tool_calls: GenerationOptionOutcome::NotRequested,
+                    thinking_summary: GenerationOptionOutcome::Applied,
+                    thinking_visibility: GenerationOptionOutcome::Applied,
                 }),
                 usage: None,
                 usage_disposition: Default::default(),

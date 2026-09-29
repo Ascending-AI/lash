@@ -95,7 +95,7 @@ pub use identity::{
 };
 pub use llm::capability::{
     ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
-    ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
+    ReasoningCapability, ReasoningEncoding, ReasoningIntent, ReasoningSelection,
 };
 pub use llm::types::{LlmTerminalReason, ProviderFailureKind, ToolInputIdentity};
 pub use plugin::{

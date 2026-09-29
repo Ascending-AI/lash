@@ -702,7 +702,6 @@
         "applied",
         "suppressed_protocol_owned",
         "omitted_unsupported",
-        "omitted_sampling_pinned",
         "clamped_to_capacity"
       ],
       "type": "string"
@@ -727,6 +726,22 @@
           ],
           "default": "not_requested"
         },
+        "parallel_tool_calls": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        },
+        "reasoning": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        },
         "seed": {
           "allOf": [
             {
@@ -744,6 +759,22 @@
           "default": "not_requested"
         },
         "temperature": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        },
+        "thinking_summary": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        },
+        "thinking_visibility": {
           "allOf": [
             {
               "$ref": "#/definitions/RemoteGenerationOptionOutcome"

@@ -20,7 +20,7 @@ no bearing on the result.
 `OpenAiCompat.cache_session_affinity` defaults to disabled; when the host enables it, the
 provider emits the bounded body `session_id` and call-specific `x-client-request-id` for any
 base URL. `OpenAiCompat::openrouter()` is an explicit host-selected endpoint preset that
-enables affinity and OpenRouter reasoning format. Choosing that preset is configuration, not
+enables affinity and the OpenRouter reasoning dialect. Choosing that preset is configuration, not
 endpoint detection: the same preset works for a custom proxy, and merely using the canonical
 OpenRouter URL enables nothing.
 
@@ -46,5 +46,11 @@ The URL heuristic is deleted. `OpenAiCompat::local()` is the explicit host-selec
 sets `request_fields`, `store`, and `streaming_usage` to `false`, and it works for every base URL.
 Without that preset (or the equivalent individual fields), all three remain enabled even for a
 localhost URL. A strict local server can therefore reject an undeclared field loudly, and the
-host fixes the mismatch by selecting the preset. The direct OpenAI equality retained by ADR 0072
-is unchanged and remains the sole URL-derived compatibility choice.
+host fixes the mismatch by selecting the preset. No URL selects any compatibility choice.
+
+## Amendment (FIG-4120, 2026-09-29): no URL-derived choice survives
+
+[ADR 0121](0121-host-generation-settings-are-sent-or-refused.md) deletes the
+direct-OpenAI URL rule that ADR 0072 kept for the reasoning dialect.
+`OpenAiProvider` and the `OpenAiCompat::openai_chat()` preset set the `OpenAi`
+dialect explicitly, like every other preset.

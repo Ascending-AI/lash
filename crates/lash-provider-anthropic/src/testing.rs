@@ -13,6 +13,8 @@ pub fn serialize_request(
     AnthropicProvider::new("test")
         .with_options(ProviderOptions {
             cache_retention: retention,
+            // Messages requires a cap, and lash invents none.
+            max_output_tokens: Some(4_096),
             ..ProviderOptions::default()
         })
         .build_request_body(request)

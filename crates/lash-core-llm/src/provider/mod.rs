@@ -28,15 +28,16 @@ pub use lash_sansio::llm::capability::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
     AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
     InstructionRole, ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
-    OpenAiReasoningContext, ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding,
+    OpenAiReasoningContext, ReasoningCapability, ReasoningEncoding, ReasoningIntent,
     ReasoningRetentionCapability, ReasoningRetentionPolicy, ReasoningRetentionSelection,
     ReasoningRetentionValidationCategory, ReasoningRetentionValidationError, ReasoningSelection,
     SamplingCapability, StreamTermination,
 };
 pub use options::{
     CacheRetention, DEFAULT_CHUNK_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS,
-    DEFAULT_THROTTLE_WAIT_BUDGET_MS, LlmTimeouts, ProviderOptions, ProviderRateLimitPolicy,
-    ProviderReliability, ProviderRetryPolicy, RequestTimeout, ResolvedGenerationPolicy,
+    DEFAULT_THROTTLE_WAIT_BUDGET_MS, GenerationEmission, GenerationWire, LlmTimeouts,
+    OutputCapWire, ProviderOptions, ProviderRateLimitPolicy, ProviderReliability,
+    ProviderRetryPolicy, RequestTimeout, ResolvedGenerationPolicy, ThinkingSummaryWire,
     resolve_generation_policy,
 };
 pub use rate_limit::{ProviderRateLimitPermit, ProviderRateLimiter};

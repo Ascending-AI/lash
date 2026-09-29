@@ -21,20 +21,19 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use crate::common::{
-    DEFAULT_HTTP_TRANSPORT, DEFAULT_MAX_OUTPUT_TOKENS, reasoning_intent,
-    reasoning_retention_transport_error,
-};
-use crate::reasoning::ReasoningWireIntent;
+use crate::common::{BuiltRequest, DEFAULT_HTTP_TRANSPORT, reasoning_retention_transport_error};
+use crate::config::OpenAiReasoningDialect;
+use crate::driver::CompletionEndpoint;
+use crate::reasoning::{apply_reasoning, reasoning_object};
 use crate::responses_shared as shared;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
-    GenerationOptionOutcome, GenerationReceipt, LlmOutputSpec, LlmRequest,
-    ProviderReasoningRetentionSupport, ReasoningRetentionSelection,
+    LlmOutputSpec, LlmRequest, ProviderReasoningRetentionSupport, ReasoningRetentionSelection,
 };
 use lash_core::provider::{
-    CacheRetention, Provider, ProviderComponents, ProviderOptions, ProviderReliability,
-    resolve_generation_policy,
+    CacheRetention, GenerationEmission, GenerationWire, OutputCapWire, Provider,
+    ProviderComponents, ProviderOptions, ProviderReliability, ResolvedGenerationPolicy,
+    ThinkingSummaryWire, resolve_generation_policy,
 };
 use lash_core::{facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose};
 use lash_llm_transport::LlmHttpTransport;
@@ -197,39 +196,33 @@ impl CodexProvider {
         )
     }
 
-    /// Which of the caller's generation options a Codex request carries: none
-    /// of them. The Responses dialect Codex speaks has no seed field, and this
-    /// adapter sends neither a temperature nor a token cap, for the same
-    /// reason it leaves the rest of the sampling surface to the endpoint.
-    fn generation_disposition(req: &LlmRequest, cache_control_emitted: bool) -> GenerationReceipt {
-        GenerationReceipt {
-            output_token_cap: GenerationOptionOutcome::unsupported(
-                req.generation.output_token_cap.is_some(),
-            ),
-            temperature: GenerationOptionOutcome::unsupported(req.generation.temperature.is_some()),
-            seed: GenerationOptionOutcome::unsupported(req.generation.seed.is_some()),
-            stop_sequences: GenerationOptionOutcome::unsupported(
-                !req.generation.stop_sequences.is_empty(),
-            ),
-            cache: lash_llm_transport::cache_intent_disposition(req, cache_control_emitted),
-        }
+    /// What the Codex Responses wire, as this adapter speaks it, can carry.
+    /// Codex takes no cap, sampling controls or stop sequences; a host that
+    /// sets one is refused rather than silently ignored.
+    const GENERATION_WIRE: GenerationWire = GenerationWire {
+        label: "OpenAI Codex",
+        output_token_cap: OutputCapWire::Unsupported,
+        temperature: false,
+        seed: false,
+        stop_sequences: false,
+        parallel_tool_calls: true,
+        thinking_summary: ThinkingSummaryWire::Always,
+        active_thinking_pins_sampling: false,
+    };
+
+    /// Refuse, before any credential, WebSocket or HTTP I/O, every host
+    /// setting this request carries that the Codex wire cannot send.
+    pub(crate) fn preflight(&self, req: &LlmRequest) -> Result<(), LlmTransportError> {
+        self.validated(req, |_, _, _| Ok(()))
     }
 
-    #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn build_request_body(
+    /// Run `then` over the retention-safe request with every host setting
+    /// resolved. Pure, so the builder and the preflight agree.
+    fn validated<T>(
         &self,
         req: &LlmRequest,
-        stream: bool,
-    ) -> Result<Value, LlmTransportError> {
-        self.build_request_body_with_cache_evidence(req, stream)
-            .map(|(body, _)| body)
-    }
-
-    pub(crate) fn build_request_body_with_cache_evidence(
-        &self,
-        req: &LlmRequest,
-        stream: bool,
-    ) -> Result<(Value, bool), LlmTransportError> {
+        then: impl FnOnce(&LlmRequest, ResolvedGenerationPolicy, Value) -> Result<T, LlmTransportError>,
+    ) -> Result<T, LlmTransportError> {
         let serving_route = self.route_identity(&req.model);
         let safe_request = req
             .reasoning_retention_safe_for(
@@ -240,28 +233,68 @@ impl CodexProvider {
             .map_err(reasoning_retention_transport_error)?;
         let req = safe_request.as_ref();
         shared::validate_responses_attachments(req, "OpenAI Codex")?;
+        let policy =
+            resolve_generation_policy(req, &self.options, self.kind(), &Self::GENERATION_WIRE)?;
+        // Codex is Responses in the OpenAI reasoning dialect.
+        let mut reasoning_body = json!({});
+        if let Some(intent) = &policy.reasoning {
+            apply_reasoning(
+                CompletionEndpoint::Responses,
+                Some(OpenAiReasoningDialect::OpenAi),
+                intent,
+                &mut reasoning_body,
+            )?;
+        }
+        then(req, policy, reasoning_body)
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn build_request_body(
+        &self,
+        req: &LlmRequest,
+        stream: bool,
+    ) -> Result<Value, LlmTransportError> {
+        self.build_request(req, stream).map(|built| built.body)
+    }
+
+    pub(crate) fn build_request(
+        &self,
+        req: &LlmRequest,
+        stream: bool,
+    ) -> Result<BuiltRequest, LlmTransportError> {
+        self.validated(req, |req, policy, reasoning_body| {
+            self.build_validated(req, stream, policy, reasoning_body)
+        })
+    }
+
+    fn build_validated(
+        &self,
+        req: &LlmRequest,
+        stream: bool,
+        policy: ResolvedGenerationPolicy,
+        reasoning_body: Value,
+    ) -> Result<BuiltRequest, LlmTransportError> {
         let tools = Self::build_tools(req)?;
         let input = shared::build_responses_input(req);
-        let requested_reasoning = reasoning_intent(req);
-        let policy = resolve_generation_policy(
-            &req.generation,
-            &self.options,
-            DEFAULT_MAX_OUTPUT_TOKENS,
-            requested_reasoning,
-        );
+        let mut emission = GenerationEmission {
+            reasoning: policy.reasoning.is_some(),
+            ..GenerationEmission::default()
+        };
+        // `store:false` and the encrypted reasoning include are replay
+        // mechanics of this stateless wire, not host settings.
         let mut body = json!({
             "model": req.model,
             "input": input,
             "tools": tools,
-            "parallel_tool_calls": !req.tools.is_empty(),
             "stream": stream,
             "store": false,
             "include": ["reasoning.encrypted_content"],
-            "text": {
-                "verbosity": "medium",
-            },
         });
         body["instructions"] = json!(req.instructions.as_deref().unwrap_or(""));
+        if let Some(parallel_tool_calls) = policy.parallel_tool_calls {
+            body["parallel_tool_calls"] = json!(parallel_tool_calls);
+            emission.parallel_tool_calls = true;
+        }
         // `tool_choice` is only meaningful when the request advertises tools.
         // In RLM mode we intentionally send `tools: []` because tools are
         // documented in the prompt body and invoked via `lashlang`, not the
@@ -272,31 +305,26 @@ impl CodexProvider {
         if !req.tools.is_empty() {
             body["tool_choice"] = json!(shared::tool_choice_value(&req.tool_choice));
         }
-        if let Some(config) = policy.thinking {
-            let mut reasoning = match config {
-                ReasoningWireIntent::Effort(effort) => json!({ "effort": effort }),
-                ReasoningWireIntent::Budget(max_tokens) => json!({ "max_tokens": max_tokens }),
-                ReasoningWireIntent::ToggleFalse => json!({ "enabled": false }),
-            };
-            if policy.expose_thinking {
-                reasoning["summary"] = json!("auto");
+        if let Value::Object(fields) = reasoning_body {
+            for (key, value) in fields {
+                body[key] = value;
             }
-            body["reasoning"] = reasoning;
         }
         if let ReasoningRetentionSelection::OpenAiContext { context } =
             req.model_capability.reasoning_retention.selection
         {
-            if !body["reasoning"].is_object() {
-                body["reasoning"] = json!({});
-            }
-            body["reasoning"]["context"] = json!(context.as_str());
+            reasoning_object(&mut body)["context"] = json!(context.as_str());
         }
-        let cache_control_emitted = policy.cache_retention != CacheRetention::None;
-        if cache_control_emitted {
+        if policy.request_thinking_summary {
+            reasoning_object(&mut body)["summary"] = json!("auto");
+            emission.thinking_summary = true;
+        }
+        emission.cache = policy.cache_retention != CacheRetention::None;
+        if emission.cache {
             body["prompt_cache_key"] = json!(req.provider_prompt_cache_key());
         }
         if let Some(output_spec) = &req.output_spec {
-            body["text"]["format"] = match output_spec {
+            let format = match output_spec {
                 LlmOutputSpec::JsonObject => json!({ "type": "json_object" }),
                 LlmOutputSpec::JsonSchema(schema) => {
                     let capabilities = ProviderSchemaCapabilities::openai(false);
@@ -314,8 +342,10 @@ impl CodexProvider {
                     })
                 }
             };
+            body["text"] = json!({ "format": format });
         }
-        Ok((body, cache_control_emitted))
+        let receipt = policy.receipt(req, &emission);
+        Ok(BuiltRequest { body, receipt })
     }
 }
 

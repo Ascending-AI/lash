@@ -23,6 +23,7 @@ mod tests {
     mod tool_result_shape;
     use runtime_feedback::request_with_instructions;
     mod epilogue;
+    mod generation_tests;
     use lash_sansio::sync::MutexExt;
 
     use crate::stream::StreamState;
@@ -97,10 +98,8 @@ mod tests {
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.iter().map(|e| e.to_string()).collect(),
-                default_effort: None,
-                aliases: BTreeMap::new(),
                 encoding: ReasoningEncoding::Effort,
-                disable: Some(lash_core::provider::ReasoningDisableEncoding::Native),
+                disable: true,
                 mandatory: false,
             }),
             cache_control: None,
@@ -126,10 +125,8 @@ mod tests {
                     .into_iter()
                     .map(String::from)
                     .collect(),
-                default_effort: None,
-                aliases: BTreeMap::new(),
                 encoding: ReasoningEncoding::Budget(budgets),
-                disable: Some(lash_core::provider::ReasoningDisableEncoding::Omit),
+                disable: false,
                 mandatory: false,
             }),
             cache_control: None,
@@ -160,7 +157,11 @@ mod tests {
             ),
             output_spec: None,
             stream_events: None,
-            generation: lash_core::GenerationOptions::default(),
+            // Anthropic requires a cap, and lash invents none.
+            generation: lash_core::GenerationOptions {
+                output_token_cap: std::num::NonZeroUsize::new(16_384),
+                ..lash_core::GenerationOptions::default()
+            },
             provider_trace: None,
         }
     }
@@ -896,76 +897,8 @@ mod tests {
         assert!(thinking.get("temperature").is_none());
     }
 
-    #[test]
-    fn requested_temperature_is_emitted_unless_thinking_pins_sampling() {
-        let provider = AnthropicProvider::new("key");
-        let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-        req.generation.temperature =
-            Some(NonNegativeFiniteF64::new(0.25).expect("finite temperature"));
-        req.generation.seed = Some(7);
-
-        let plain = provider.build_request_body(&req).expect("plain body");
-        assert_eq!(plain["temperature"], json!(0.25));
-        // Anthropic Messages has no seed field, so a requested seed is simply
-        // not expressible on this wire.
-        assert!(plain.get("seed").is_none());
-
-        let mut thinking_req = req.clone();
-        thinking_req.model_variant =
-            lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-        thinking_req.model_capability = effort_capability(&["low", "medium", "high"]);
-        let thinking = provider
-            .build_request_body(&thinking_req)
-            .expect("thinking body");
-        assert_eq!(thinking["thinking"]["type"], "adaptive");
-        // Extended thinking pins sampling; Anthropic rejects a temperature
-        // alongside it.
-        assert!(thinking.get("temperature").is_none());
-    }
-
-    #[test]
-    fn requested_temperature_is_omitted_for_a_model_that_pins_sampling() {
-        // Models released after Claude Opus 4.6 answer any caller-set
-        // temperature with HTTP 400, thinking or no thinking. The host says so
-        // through the capability; the adapter never reads the model name.
-        let provider = AnthropicProvider::new("key");
-        let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-        req.model = "claude-opus-4-7".to_string();
-        req.generation.temperature =
-            Some(NonNegativeFiniteF64::new(0.25).expect("finite temperature"));
-        req.model_capability.sampling = lash_core::SamplingCapability::Pinned;
-
-        let body = provider.build_request_body(&req).expect("body");
-        assert!(
-            body.get("thinking").is_none(),
-            "no thinking on this request"
-        );
-        assert!(body.get("temperature").is_none());
-
-        // Omission stays silent so one session-wide temperature keeps working
-        // across mixed models, but it is reported rather than invisible: the
-        // host can see that its request was not honored.
-        req.generation.seed = Some(11);
-        let pinned_disposition = AnthropicProvider::generation_disposition(&req, &body, false);
-        assert_eq!(
-            pinned_disposition.temperature,
-            lash_core::llm::types::GenerationOptionOutcome::OmittedSamplingPinned
-        );
-        assert_eq!(
-            pinned_disposition.seed,
-            lash_core::llm::types::GenerationOptionOutcome::OmittedUnsupported,
-            "Anthropic Messages has no seed field"
-        );
-        assert!(!pinned_disposition.nothing_omitted());
-
-        // The same request against a model that allows it still emits.
-        req.model_capability.sampling = lash_core::SamplingCapability::Configurable;
-        let configurable = provider.build_request_body(&req).expect("body");
-        assert_eq!(configurable["temperature"], json!(0.25));
-        assert_eq!(
-            AnthropicProvider::generation_disposition(&req, &configurable, false).temperature,
-            lash_core::llm::types::GenerationOptionOutcome::Applied
-        );
+    fn refusal_code(error: &lash_core::llm::transport::LlmTransportError) -> Option<String> {
+        error.code.as_ref().map(ToString::to_string)
     }
 
     #[test]
@@ -1005,17 +938,21 @@ mod tests {
     }
 
     #[test]
-    fn budget_capability_disabled_selection_uses_explicit_omit_encoding() {
+    fn disabled_selection_is_refused_without_a_declared_disable() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
         req.model = "claude-haiku-4".to_string();
         req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
         req.model_capability = budget_capability();
 
-        let body = provider.build_request_body(&req).expect("body");
+        let error = provider
+            .build_request_body(&req)
+            .expect_err("off is refused unless the capability declares disable");
 
-        assert!(body.get("thinking").is_none());
-        assert!(body.get("output_config").is_none());
+        assert_eq!(
+            refusal_code(&error).as_deref(),
+            Some("lash:unsupported_effort")
+        );
     }
 
     #[test]
@@ -1032,16 +969,19 @@ mod tests {
     }
 
     #[test]
-    fn no_reasoning_capability_emits_no_thinking() {
-        // A variant with no reasoning capability never produces a thinking block.
+    fn an_effort_without_reasoning_capability_is_refused() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
         req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
 
-        let body = provider.build_request_body(&req).expect("body");
+        let error = provider
+            .build_request_body(&req)
+            .expect_err("an effort on a model without reasoning capability is refused");
 
-        assert!(body.get("thinking").is_none());
-        assert!(body.get("output_config").is_none());
+        assert_eq!(
+            refusal_code(&error).as_deref(),
+            Some("lash:effort_not_configurable")
+        );
     }
 
     #[test]
@@ -1196,9 +1136,7 @@ mod tests {
             ],
         )]);
 
-        let (body, cache_control_emitted) = provider
-            .build_request_body_with_cache_evidence(&req)
-            .expect("body");
+        let (body, receipt) = provider.build_request(&req).expect("body");
 
         assert_eq!(
             body["messages"][0]["content"][0]["cache_control"],
@@ -1210,10 +1148,7 @@ mod tests {
                 .is_none()
         );
         assert_eq!(count_object_key(&body, "__lash_cache_breakpoint"), 0);
-        assert_eq!(
-            AnthropicProvider::generation_disposition(&req, &body, cache_control_emitted).cache,
-            lash_core::GenerationOptionOutcome::Applied,
-        );
+        assert_eq!(receipt.cache, lash_core::GenerationOptionOutcome::Applied);
     }
 
     #[cfg(test)]
@@ -1275,9 +1210,9 @@ mod tests {
         let body = provider.build_request_body(&req).expect("body");
 
         assert_eq!(body["max_tokens"], 2048);
-        let provider_limited_body = provider
-            .build_request_body(&request(vec![LlmMessage::text(LlmRole::User, "hello")]))
-            .expect("body");
+        let mut uncapped = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        uncapped.generation.output_token_cap = None;
+        let provider_limited_body = provider.build_request_body(&uncapped).expect("body");
         assert_eq!(provider_limited_body["max_tokens"], 9999);
     }
 
@@ -1287,11 +1222,11 @@ mod tests {
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
         req.generation.stop_sequences = vec!["</lashlang>".to_string()];
 
-        let body = provider.build_request_body(&req).expect("body");
+        let (body, receipt) = provider.build_request(&req).expect("body");
 
         assert_eq!(body["stop_sequences"], json!(["</lashlang>"]));
         assert_eq!(
-            AnthropicProvider::generation_disposition(&req, &body, false).stop_sequences,
+            receipt.stop_sequences,
             lash_core::GenerationOptionOutcome::Applied
         );
     }

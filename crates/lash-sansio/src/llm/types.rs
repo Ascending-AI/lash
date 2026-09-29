@@ -11,8 +11,8 @@ pub use crate::llm::capability::{
     AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
     InstructionRole, ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
     OpenAiReasoningContext, ProviderReasoningRetentionSupport, ReasoningCapability,
-    ReasoningDisableEncoding, ReasoningEncoding, ReasoningRetentionCapability,
-    ReasoningRetentionPolicy, ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
+    ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
+    ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
     ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 
@@ -657,26 +657,31 @@ pub struct GenerationProjectionProvenance {
 )]
 #[serde(deny_unknown_fields)]
 pub struct GenerationOptions {
+    /// Upper bound on output tokens. Unset means lash sends no cap on wires
+    /// where one is optional; a wire that requires one takes the provider
+    /// options' `max_output_tokens` or refuses the call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_token_cap: Option<NonZeroUsize>,
-    /// Sampling temperature. Adapters emit it on wires that accept one and
-    /// omit it on wires that do not; `None` leaves the endpoint default in
-    /// place.
+    /// Sampling temperature. A wire that has no temperature field, or a model
+    /// that pins sampling, refuses a set temperature before any I/O; `None`
+    /// leaves the endpoint default in place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<NonNegativeFiniteF64>,
     /// Sampling seed, a best-effort repeatability request. Carried by the
     /// OpenAI-compatible Chat Completions dialect and Google's
-    /// `generationConfig`; wires without a seed field omit it.
+    /// `generationConfig`; every other wire refuses a set seed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<i64>,
-    /// Literal sequences that terminate generation. Adapters emit these only
-    /// on provider wires with a native stop-sequence field; streaming callers
-    /// must still be prepared to stop locally when a provider cannot. A
-    /// protocol whose grammar owns the response boundary may suppress this
-    /// entire list; the resulting disposition is `SuppressedProtocolOwned`,
-    /// not `Applied`.
+    /// Literal sequences that terminate generation. Wires without a native
+    /// stop-sequence field refuse a non-empty list. A protocol whose grammar
+    /// owns the response boundary may suppress this entire list; the resulting
+    /// disposition is `SuppressedProtocolOwned`, not `Applied`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stop_sequences: Vec<String>,
+    /// Whether the model may call several tools in one response. Unset sends
+    /// nothing; a wire with no such control refuses a set value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
     /// In-process projection provenance. This is not caller generation intent
     /// and does not cross persistence or remote request boundaries.
     #[serde(skip)]
@@ -724,17 +729,19 @@ impl GenerationOptions {
             } else {
                 self.stop_sequences.clone()
             },
+            parallel_tool_calls: self.parallel_tool_calls.or(base.parallel_tool_calls),
             projection_provenance: GenerationProjectionProvenance::default(),
         }
     }
 }
 
-/// What became of one caller-requested generation option on one request.
+/// What became of one host-set generation setting on one request.
 ///
-/// Adapters emit what their wire can express and omit the rest — a model that
-/// pins sampling, extended thinking, or an endpoint with no seed field all
-/// take an option away without failing the call. This names which happened so
-/// a host can tell an honored request from a silently dropped one.
+/// A setting a host sets is sent, or the call is refused before any I/O with a
+/// typed failure; nothing is silently dropped. The receipt therefore names only
+/// the two deliberate non-send dispositions besides `Applied`: a cap reduced to
+/// the model's capacity, and stop sequences a protocol owns. `Applied` means
+/// lash put the value on the wire, never that the provider complied.
 #[derive(
     Clone,
     Copy,
@@ -749,23 +756,19 @@ impl GenerationOptions {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum GenerationOptionOutcome {
-    /// The caller expressed no preference, so there was nothing to apply.
+    /// The host expressed no preference, so there was nothing to apply.
     #[default]
     NotRequested,
-    /// The caller asked for it and the request carries it.
+    /// The host asked for it and the request carries it.
     Applied,
     /// A protocol suppressed the caller's non-empty stop list because its
     /// grammar owns the response boundary. This is intentional protocol
     /// ownership, but the caller's requested value did not reach the wire.
     SuppressedProtocolOwned,
-    /// The caller asked for it and it is not expressible here: the endpoint
-    /// has no field for it, or this adapter's use of the endpoint does not
-    /// send one. Codex declines request controls by policy even when its
-    /// underlying dialect has related fields.
+    /// Explicit prompt-cache breakpoints the protocol placed that this
+    /// adapter's wire has no cache directive for. Only the `cache` row, which
+    /// reports protocol-placed breakpoints rather than a host setting, uses it.
     OmittedUnsupported,
-    /// The caller asked for it and sampling is pinned for this request, by the
-    /// model's declared capability or by the thinking configuration in use.
-    OmittedSamplingPinned,
     /// The caller asked for an output-token cap above what this model can
     /// produce, and the request carries the model's capacity instead. The
     /// bound the caller asked for still holds; the number on the wire is
@@ -774,55 +777,39 @@ pub enum GenerationOptionOutcome {
 }
 
 impl GenerationOptionOutcome {
-    pub fn applied(requested: bool) -> Self {
-        if requested {
-            Self::Applied
-        } else {
-            Self::NotRequested
+    /// Report a setting from whether it was requested and whether the adapter
+    /// put it on the wire. A requested setting an adapter did not emit is an
+    /// adapter defect (it must refuse instead), so it is reported as omitted
+    /// rather than claimed as sent.
+    pub fn from_emission(requested: bool, emitted: bool) -> Self {
+        match (requested, emitted) {
+            (false, _) => Self::NotRequested,
+            (true, true) => Self::Applied,
+            (true, false) => Self::OmittedUnsupported,
         }
     }
 
-    /// Report an option this request cannot express — no field for it on the
-    /// endpoint, or none this adapter sends.
-    pub fn unsupported(requested: bool) -> Self {
-        if requested {
-            Self::OmittedUnsupported
-        } else {
-            Self::NotRequested
-        }
-    }
-
-    /// Report an option dropped because sampling is pinned for this request.
-    pub fn sampling_pinned(requested: bool) -> Self {
-        if requested {
-            Self::OmittedSamplingPinned
-        } else {
-            Self::NotRequested
-        }
-    }
-
-    /// Whether a requested option was dropped rather than sent.
+    /// Whether a requested setting was dropped rather than sent.
     pub fn is_omitted(self) -> bool {
         matches!(
             self,
-            Self::SuppressedProtocolOwned | Self::OmittedUnsupported | Self::OmittedSamplingPinned
+            Self::SuppressedProtocolOwned | Self::OmittedUnsupported
         )
     }
 
     /// Whether the request carries exactly what the caller asked for, if
-    /// anything. False for a dropped option and for a clamped one.
+    /// anything. False for a dropped setting and for a clamped one.
     pub fn is_honored(self) -> bool {
         matches!(self, Self::NotRequested | Self::Applied)
     }
 }
 
-/// Adapter-reported fate of a request's generation and prompt-cache intent.
+/// Per-call account of every host generation setting: resolution supplies
+/// what was requested, the adapter supplies what it emitted.
 ///
 /// This is request-side, adapter-owned bookkeeping and deliberately separate
 /// from [`ExecutionEvidence`], which carries only facts the provider reported
-/// about the execution. A host that needs repeatability asserts
-/// [`nothing_omitted`](Self::nothing_omitted) rather than trusting that a
-/// session-wide temperature survived every model it ran against.
+/// about the execution.
 #[derive(
     Clone,
     Copy,
@@ -835,6 +822,7 @@ impl GenerationOptionOutcome {
     schemars::JsonSchema,
 )]
 pub struct GenerationReceipt {
+    /// The effective cap: the request's, else the provider options'.
     #[serde(default)]
     pub output_token_cap: GenerationOptionOutcome,
     #[serde(default)]
@@ -846,27 +834,47 @@ pub struct GenerationReceipt {
     /// Fate of explicit prompt-cache breakpoints in the request.
     #[serde(default)]
     pub cache: GenerationOptionOutcome,
+    /// The model spec's reasoning selection; `ProviderDefault` is not a request.
+    #[serde(default)]
+    pub reasoning: GenerationOptionOutcome,
+    #[serde(default)]
+    pub parallel_tool_calls: GenerationOptionOutcome,
+    /// `expose_thinking`'s wire half: a reasoning summary requested from the
+    /// provider.
+    #[serde(default)]
+    pub thinking_summary: GenerationOptionOutcome,
+    /// `expose_thinking`'s local half: reasoning output published to the host.
+    #[serde(default)]
+    pub thinking_visibility: GenerationOptionOutcome,
 }
 
 impl GenerationReceipt {
+    fn rows(&self) -> [GenerationOptionOutcome; 9] {
+        [
+            self.output_token_cap,
+            self.temperature,
+            self.seed,
+            self.stop_sequences,
+            self.cache,
+            self.reasoning,
+            self.parallel_tool_calls,
+            self.thinking_summary,
+            self.thinking_visibility,
+        ]
+    }
+
     /// Every requested control reached the wire, though an
     /// output-token cap may have reached it reduced to the model's capacity.
     /// Use [`fully_honored`](Self::fully_honored) to reject that too.
     pub fn nothing_omitted(&self) -> bool {
-        !self.output_token_cap.is_omitted()
-            && !self.temperature.is_omitted()
-            && !self.seed.is_omitted()
-            && !self.stop_sequences.is_omitted()
-            && !self.cache.is_omitted()
+        self.rows().into_iter().all(|row| !row.is_omitted())
     }
 
     /// Every requested control reached the wire unchanged.
     pub fn fully_honored(&self) -> bool {
-        self.output_token_cap.is_honored()
-            && self.temperature.is_honored()
-            && self.seed.is_honored()
-            && self.stop_sequences.is_honored()
-            && self.cache.is_honored()
+        self.rows()
+            .into_iter()
+            .all(GenerationOptionOutcome::is_honored)
     }
 }
 

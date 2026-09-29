@@ -768,7 +768,7 @@ pub(super) fn queued_work_payload_cannot_encode_persisted_turn_input() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
+pub(super) async fn turn_driver_sends_an_exact_effort_unchanged() {
     let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     use std::sync::{Arc, Mutex};
@@ -804,7 +804,6 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
                 .into_iter()
                 .map(String::from)
                 .collect(),
-            aliases: std::collections::BTreeMap::from([("xhigh".to_string(), "max".to_string())]),
             ..Default::default()
         }),
         cache_control: None,
@@ -813,7 +812,7 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
         reasoning_retention: Default::default(),
     };
     let model = lash_core::ModelSpec::builder("mock-model")
-        .variant(lash_core::ReasoningSelection::Effort("xhigh".to_string()))
+        .variant(lash_core::ReasoningSelection::Effort("max".to_string()))
         .context_window_tokens(200_000)
         .build()
         .expect("valid model spec")
@@ -854,7 +853,7 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
     assert_eq!(
         seen,
         lash_core::ReasoningSelection::Effort("max".to_string()),
-        "alias `xhigh` must clamp to canonical `max` before the provider sees the request"
+        "an advertised effort travels to the provider exactly as selected"
     );
 }
 
@@ -1055,16 +1054,16 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
     let backend = double.lash_backend();
     use std::num::NonZeroUsize;
 
-    // The adapter's silent omission (a model that pins sampling, a wire with
-    // no seed field) stays silent so one session-wide setting works across
-    // mixed models — but the turn record says what actually reached the wire,
-    // so a host asserting repeatability learns it was not honored.
+    // The turn record says what actually reached the wire, so a host
+    // asserting that nothing was dropped learns when something was: here a
+    // protocol-placed cache breakpoint the adapter had no directive for.
     let dropped_sampling = lash_core::GenerationReceipt {
         output_token_cap: lash_core::GenerationOptionOutcome::Applied,
-        temperature: lash_core::GenerationOptionOutcome::OmittedSamplingPinned,
-        seed: lash_core::GenerationOptionOutcome::OmittedUnsupported,
+        temperature: lash_core::GenerationOptionOutcome::Applied,
+        seed: lash_core::GenerationOptionOutcome::NotRequested,
         stop_sequences: lash_core::GenerationOptionOutcome::NotRequested,
-        cache: lash_core::GenerationOptionOutcome::NotRequested,
+        cache: lash_core::GenerationOptionOutcome::OmittedUnsupported,
+        ..lash_core::GenerationReceipt::default()
     };
     let provider = TestProvider::builder()
         .kind("disposition-reporting")
@@ -1131,7 +1130,7 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
     assert_eq!(reported, dropped_sampling);
     assert!(
         !reported.nothing_omitted(),
-        "a host asserting repeatability must be able to see the omission"
+        "a host asserting nothing was dropped must be able to see the omission"
     );
 }
 
@@ -1167,6 +1166,7 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                         seed: lash_core::GenerationOptionOutcome::NotRequested,
                         stop_sequences: lash_core::GenerationOptionOutcome::NotRequested,
                         cache: lash_core::GenerationOptionOutcome::NotRequested,
+                        ..lash_core::GenerationReceipt::default()
                     }),
                     ..LlmResponse::default()
                 })

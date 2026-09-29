@@ -12,16 +12,17 @@ pub(crate) use lash_core::llm::transport::{
     known_attachment_acceptors, unsupported_attachment_capability,
 };
 pub(crate) use lash_core::llm::types::{
-    AttachmentSource, ExecutionEvidence, GenerationOptionOutcome, GenerationReceipt,
-    LlmContentBlock, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse, LlmRole,
-    LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage,
-    ProviderReasoningReplay, ProviderReasoningRetentionSupport, ProviderReplayMeta,
-    ProviderRouteIdentity, ReasoningRetentionValidationError, ResponseTextMeta,
-    StreamBlockIdentity, tool_call_input_replay_value,
+    AttachmentSource, ExecutionEvidence, GenerationReceipt, LlmContentBlock, LlmOutputPart,
+    LlmOutputSpec, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, LlmStreamEvidence,
+    LlmTerminalReason, LlmToolChoice, LlmUsage, ProviderReasoningReplay,
+    ProviderReasoningRetentionSupport, ProviderReplayMeta, ProviderRouteIdentity,
+    ReasoningRetentionValidationError, ResponseTextMeta, StreamBlockIdentity,
+    tool_call_input_replay_value,
 };
 pub(crate) use lash_core::provider::{
-    Provider, ProviderComponents, ProviderOptions, ReasoningDisableEncoding, ReasoningEncoding,
-    ReasoningSelection, StreamTermination, resolve_generation_policy,
+    GenerationEmission, GenerationWire, OutputCapWire, Provider, ProviderComponents,
+    ProviderOptions, ReasoningIntent, ResolvedGenerationPolicy, StreamTermination,
+    ThinkingSummaryWire, resolve_generation_policy,
 };
 pub(crate) use lash_llm_transport::normalize::{
     http_error_envelope, serialize_options_tail, terminal_reason_from_parts,

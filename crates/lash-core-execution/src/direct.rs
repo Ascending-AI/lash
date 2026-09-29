@@ -226,12 +226,11 @@ impl DirectLlmClient {
 
     pub async fn complete(
         &mut self,
-        mut request: DirectRequest,
+        request: DirectRequest,
     ) -> Result<DirectLlmOutcome, DirectLlmError> {
         // Validate the requested effort against the capability that travels
-        // with the request, and write the resolved (alias-normalized) effort
-        // back so the provider never sees an un-clamped value.
-        request.model_variant = request
+        // with the request; the selection itself travels unchanged.
+        request
             .model_capability
             .validate_selection(&request.model, self.provider.kind(), &request.model_variant)
             .map_err(|error| DirectLlmError::InvalidRequest {
@@ -874,10 +873,6 @@ mod tests {
                     .into_iter()
                     .map(String::from)
                     .collect(),
-                aliases: std::collections::BTreeMap::from([(
-                    "xhigh".to_string(),
-                    "max".to_string(),
-                )]),
                 ..Default::default()
             }),
             cache_control: None,
@@ -905,7 +900,8 @@ mod tests {
         let mut client = DirectLlmClient::new(provider);
 
         let mut request = DirectRequest::text("direct-model", "hi");
-        request.model_variant = crate::ReasoningSelection::Effort("turbo".to_string());
+        // Effort names match exactly: no alias, case folding or clamping.
+        request.model_variant = crate::ReasoningSelection::Effort("MAX".to_string());
         request.model_capability = reasoning_capability();
 
         let err = client
@@ -919,7 +915,7 @@ mod tests {
                 ..
             }
         ));
-        assert!(err.to_string().contains("Unsupported effort `turbo`"));
+        assert!(err.to_string().contains("Unsupported effort `MAX`"));
         assert!(
             !*called.lock_recover(),
             "the provider must not be called when the effort is rejected"
@@ -927,7 +923,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_client_normalizes_alias_effort_into_outgoing_request() {
+    async fn direct_client_sends_an_exact_effort_unchanged() {
         let captured: Arc<Mutex<Option<crate::ReasoningSelection>>> = Arc::new(Mutex::new(None));
         let captured_for_provider = Arc::clone(&captured);
         let provider = TestProvider::builder()
@@ -952,7 +948,7 @@ mod tests {
         let mut client = DirectLlmClient::new(provider);
 
         let mut request = DirectRequest::text("direct-model", "hi");
-        request.model_variant = crate::ReasoningSelection::Effort("XHigh".to_string());
+        request.model_variant = crate::ReasoningSelection::Effort("max".to_string());
         request.model_capability = reasoning_capability();
 
         client.complete(request).await.expect("completion");
@@ -963,7 +959,7 @@ mod tests {
         assert_eq!(
             seen,
             crate::ReasoningSelection::Effort("max".to_string()),
-            "alias `XHigh` must clamp to canonical `max` before the provider sees the request"
+            "an advertised effort travels to the provider exactly as selected"
         );
     }
 

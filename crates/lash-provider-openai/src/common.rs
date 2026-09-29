@@ -4,11 +4,8 @@ use std::sync::{Arc, LazyLock};
 use lash_core::llm::transport::{
     LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
 };
-use lash_core::llm::types::{LlmRequest, ReasoningRetentionValidationError};
-use lash_core::provider::{ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection};
+use lash_core::llm::types::ReasoningRetentionValidationError;
 use lash_llm_transport::{LlmHttpTransport, ReqwestLlmHttpTransport};
-
-use crate::reasoning::ReasoningWireIntent;
 
 pub(crate) use lash_llm_transport::{
     merge_usage,
@@ -21,31 +18,14 @@ pub(crate) use lash_llm_transport::{
 
 pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
-pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: u64 = 32_768;
 
-pub(crate) fn reasoning_intent(req: &LlmRequest) -> Option<ReasoningWireIntent> {
-    let reasoning = req.model_capability.reasoning.as_ref()?;
-    match &req.model_variant {
-        ReasoningSelection::ProviderDefault => None,
-        ReasoningSelection::Effort(effort) => match &reasoning.encoding {
-            ReasoningEncoding::Effort => Some(ReasoningWireIntent::Effort(effort.clone())),
-            ReasoningEncoding::Budget(budgets) => budgets
-                .get(effort)
-                .copied()
-                .map(ReasoningWireIntent::Budget),
-        },
-        ReasoningSelection::Disabled => match reasoning.disable.as_ref()? {
-            ReasoningDisableEncoding::Native => {
-                Some(ReasoningWireIntent::Effort("none".to_string()))
-            }
-            ReasoningDisableEncoding::Omit => None,
-            ReasoningDisableEncoding::Effort(effort) => {
-                Some(ReasoningWireIntent::Effort(effort.clone()))
-            }
-            ReasoningDisableEncoding::Budget(budget) => Some(ReasoningWireIntent::Budget(*budget)),
-            ReasoningDisableEncoding::ToggleFalse => Some(ReasoningWireIntent::ToggleFalse),
-        },
-    }
+/// A request body and the receipt of the host settings it carries, built
+/// together so the receipt comes from what each branch emitted rather than
+/// from reading the body back.
+#[derive(Clone, Debug)]
+pub(crate) struct BuiltRequest {
+    pub(crate) body: Value,
+    pub(crate) receipt: lash_core::llm::types::GenerationReceipt,
 }
 
 pub(crate) fn reasoning_retention_transport_error(
@@ -103,56 +83,16 @@ pub(crate) fn empty_response_diagnostic(
         .with_raw(raw)
 }
 
-/// Which of the caller's generation options an assembled OpenAI-compatible
-/// body carries.
-///
-/// Ordinary generation controls are read from the body, so their record cannot
-/// drift from what was sent. Prompt-cache evidence is supplied separately by
-/// the builder branch that emitted the adapter's dialect; body-wide scans would
-/// mistake host tool-schema properties for provider request controls. None of
-/// these endpoints drops a control because sampling is pinned; that is an
-/// Anthropic-only fact.
-pub(crate) fn generation_disposition(
-    request: &LlmRequest,
-    body: &Value,
-    cache_control_emitted: bool,
-) -> lash_core::llm::types::GenerationReceipt {
-    use lash_core::llm::types::{GenerationOptionOutcome, GenerationReceipt};
-
-    fn record(requested: bool, emitted: bool) -> GenerationOptionOutcome {
-        if emitted {
-            GenerationOptionOutcome::applied(requested)
-        } else {
-            GenerationOptionOutcome::unsupported(requested)
-        }
-    }
-
-    let cap_emitted = ["max_tokens", "max_completion_tokens", "max_output_tokens"]
-        .iter()
-        .any(|field| body.get(field).is_some());
-    GenerationReceipt {
-        output_token_cap: record(request.generation.output_token_cap.is_some(), cap_emitted),
-        temperature: record(
-            request.generation.temperature.is_some(),
-            body.get("temperature").is_some(),
-        ),
-        seed: record(
-            request.generation.seed.is_some(),
-            body.get("seed").is_some(),
-        ),
-        stop_sequences: record(
-            !request.generation.stop_sequences.is_empty(),
-            body.get("stop").is_some() || body.get("stop_sequences").is_some(),
-        ),
-        cache: lash_llm_transport::cache_intent_disposition(request, cache_control_emitted),
-    }
-}
-
+/// Write the cap in the endpoint's field and report whether one was written.
+/// `Omit` endpoints never get here with a cap: resolution refuses it.
 pub(crate) fn apply_max_tokens_field(
     body: &mut Value,
     field: crate::config::OpenAiCompatMaxTokensField,
-    value: u64,
-) {
+    value: Option<u64>,
+) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
     match field {
         crate::config::OpenAiCompatMaxTokensField::MaxTokens => {
             body["max_tokens"] = json!(value);
@@ -163,6 +103,19 @@ pub(crate) fn apply_max_tokens_field(
         crate::config::OpenAiCompatMaxTokensField::MaxOutputTokens => {
             body["max_output_tokens"] = json!(value);
         }
-        crate::config::OpenAiCompatMaxTokensField::Omit => {}
+        crate::config::OpenAiCompatMaxTokensField::Omit => return false,
+    }
+    true
+}
+
+/// How an OpenAI-compatible endpoint's cap field reads to resolution.
+pub(crate) fn output_cap_wire(
+    field: crate::config::OpenAiCompatMaxTokensField,
+) -> lash_core::provider::OutputCapWire {
+    match field {
+        crate::config::OpenAiCompatMaxTokensField::Omit => {
+            lash_core::provider::OutputCapWire::Unsupported
+        }
+        _ => lash_core::provider::OutputCapWire::Optional,
     }
 }

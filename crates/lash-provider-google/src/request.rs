@@ -8,13 +8,6 @@ use lash_core::facade_support::{
     ProviderSchemaCapabilities, SchemaPurpose, SchemaResolutionRequest, resolve_schema,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum GoogleThinkingConfig {
-    Level { level: String },
-    Budget { budget_tokens: u32 },
-    ToggleFalse,
-}
-
 impl GoogleOAuthProvider {
     pub(crate) fn reasoning_retention_safe_request<'a>(
         &self,
@@ -358,103 +351,163 @@ impl GoogleOAuthProvider {
             .map(|text| json!({"parts": [{"text": text}]}))
     }
 
-    fn thinking_config_from_capability(req: &LlmRequest) -> Option<GoogleThinkingConfig> {
-        let reasoning = req.model_capability.reasoning.as_ref()?;
-        match &req.model_variant {
-            ReasoningSelection::ProviderDefault => None,
-            ReasoningSelection::Effort(variant) => match &reasoning.encoding {
-                ReasoningEncoding::Effort => Some(GoogleThinkingConfig::Level {
-                    level: variant.clone(),
-                }),
-                ReasoningEncoding::Budget(map) => {
-                    map.get(variant)
-                        .map(|budget_tokens| GoogleThinkingConfig::Budget {
-                            budget_tokens: *budget_tokens,
-                        })
-                }
-            },
-            ReasoningSelection::Disabled => match reasoning.disable.as_ref()? {
-                ReasoningDisableEncoding::Native => {
-                    Some(GoogleThinkingConfig::Budget { budget_tokens: 0 })
-                }
-                ReasoningDisableEncoding::Omit => None,
-                ReasoningDisableEncoding::Effort(level) => Some(GoogleThinkingConfig::Level {
-                    level: level.clone(),
-                }),
-                ReasoningDisableEncoding::Budget(budget_tokens) => {
-                    Some(GoogleThinkingConfig::Budget {
-                        budget_tokens: *budget_tokens,
-                    })
-                }
-                ReasoningDisableEncoding::ToggleFalse => Some(GoogleThinkingConfig::ToggleFalse),
-            },
+    /// What Cloud Code's `generationConfig` can carry for this request.
+    /// Gemini has no parallel-tool-call control. Claude served through
+    /// Vertex pins sampling while it thinks, as it does on Anthropic.
+    fn generation_wire(req: &LlmRequest) -> GenerationWire {
+        GenerationWire {
+            label: "Google Cloud Code",
+            output_token_cap: OutputCapWire::Optional,
+            temperature: true,
+            seed: true,
+            stop_sequences: true,
+            parallel_tool_calls: false,
+            thinking_summary: ThinkingSummaryWire::Always,
+            active_thinking_pins_sampling: matches!(
+                req.model_capability.google_dialect,
+                GoogleDialect::ClaudeOnVertex
+            ),
         }
     }
 
+    /// The one Google reasoning mapping: a resolved intent onto
+    /// `thinkingConfig` for the host-selected dialect, or a refusal.
+    ///
+    /// | Dialect | Effort | Budget | Off |
+    /// |---|---|---|---|
+    /// | Legacy | `thinkingLevel` | `thinkingBudget` | `thinkingBudget: 0` |
+    /// | Gemini3 | `thinkingLevel` | `thinkingBudget` | refused |
+    /// | ClaudeOnVertex | refused | `thinkingBudget`, below the cap | refused |
+    ///
+    /// Off also requires the host capability's `disable`, which resolution
+    /// already checked. `includeThoughts` requests the summary whenever
+    /// `expose_thinking` is set, with or without a reasoning intent.
+    fn thinking_config(
+        dialect: GoogleDialect,
+        intent: Option<&ReasoningIntent>,
+        include_thoughts: bool,
+        max_output_tokens: Option<u64>,
+    ) -> Result<Option<Value>, LlmTransportError> {
+        let unrepresentable = |detail: &str| {
+            LlmTransportError::new(format!("reasoning selection cannot be sent: {detail}"))
+                .with_lash_code(TurnFailureCode::ReasoningEncodingUnrepresentable)
+                .with_retry_verdict(TransportRetryVerdict::Forbidden)
+        };
+        let mut config = match (dialect, intent) {
+            (_, None) => json!({}),
+            (
+                GoogleDialect::Legacy | GoogleDialect::Gemini3,
+                Some(ReasoningIntent::Effort(level)),
+            ) => {
+                json!({ "thinkingLevel": level })
+            }
+            (GoogleDialect::ClaudeOnVertex, Some(ReasoningIntent::Effort(_))) => {
+                return Err(unrepresentable(
+                    "Claude on Vertex takes a thinking budget, not a thinking level",
+                ));
+            }
+            (GoogleDialect::ClaudeOnVertex, Some(ReasoningIntent::Budget(budget)))
+                if max_output_tokens.is_some_and(|cap| u64::from(*budget) >= cap) =>
+            {
+                return Err(LlmTransportError::new(format!(
+                    "Claude on Vertex needs a thinking budget below the output-token cap; the selected budget of {budget} tokens does not fit."
+                ))
+                .with_kind(ProviderFailureKind::Validation)
+                .with_lash_code(TurnFailureCode::ReasoningBudgetExceedsOutputCap)
+                .with_retry_verdict(TransportRetryVerdict::Forbidden));
+            }
+            (_, Some(ReasoningIntent::Budget(budget))) => json!({ "thinkingBudget": budget }),
+            (GoogleDialect::Legacy, Some(ReasoningIntent::Off)) => json!({ "thinkingBudget": 0 }),
+            (GoogleDialect::Gemini3, Some(ReasoningIntent::Off)) => {
+                return Err(unrepresentable("Gemini 3 cannot turn thinking off"));
+            }
+            (GoogleDialect::ClaudeOnVertex, Some(ReasoningIntent::Off)) => {
+                return Err(unrepresentable(
+                    "Claude on Vertex has no verified thinking-off field",
+                ));
+            }
+        };
+        if include_thoughts {
+            config["includeThoughts"] = json!(true);
+        }
+        Ok((config != json!({})).then_some(config))
+    }
+
+    /// Resolve every host setting for this request and map its reasoning,
+    /// refusing what Cloud Code cannot send. Pure, so `complete` runs it
+    /// before the project lookup and any upload, and the builder agrees.
+    pub(crate) fn resolve_generation(
+        provider: &GoogleOAuthProvider,
+        req: &LlmRequest,
+    ) -> Result<(ResolvedGenerationPolicy, Option<Value>), LlmTransportError> {
+        let policy = resolve_generation_policy(
+            req,
+            &provider.options,
+            Self::PROVIDER_KIND,
+            &Self::generation_wire(req),
+        )?;
+        let thinking_config = Self::thinking_config(
+            req.model_capability.google_dialect,
+            policy.reasoning.as_ref(),
+            policy.request_thinking_summary,
+            policy.max_output_tokens,
+        )?;
+        Ok((policy, thinking_config))
+    }
+
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn build_request(
         provider: &GoogleOAuthProvider,
         req: &LlmRequest,
         contents: Vec<Value>,
         project_id: Option<&str>,
     ) -> Result<Value, LlmTransportError> {
-        let thinking_config = Self::thinking_config_from_capability(req);
-        let policy =
-            resolve_generation_policy(&req.generation, &provider.options, 32_768, thinking_config);
-        // Both sampling controls live under `generationConfig`. The adapter's
-        // greedy temperature default applies only when the caller expressed no
-        // preference; a seed is emitted only when one was asked for.
-        let temperature = policy
-            .temperature
-            .clone()
-            .map(|value| Value::Number(value.into()))
-            .unwrap_or_else(|| json!(0));
+        Self::build_request_with_receipt(provider, req, contents, project_id).map(|(body, _)| body)
+    }
+
+    /// The Cloud Code request and the receipt of the host settings it carries.
+    pub(crate) fn build_request_with_receipt(
+        provider: &GoogleOAuthProvider,
+        req: &LlmRequest,
+        contents: Vec<Value>,
+        project_id: Option<&str>,
+    ) -> Result<(Value, GenerationReceipt), LlmTransportError> {
+        let (policy, thinking_config) = Self::resolve_generation(provider, req)?;
+        let mut emission = GenerationEmission::default();
+        let mut generation_config = json!({});
+        if let Some(temperature) = &policy.temperature {
+            generation_config["temperature"] = Value::Number(temperature.clone().into());
+            emission.temperature = true;
+        }
+        if let Some(max_output_tokens) = policy.max_output_tokens {
+            generation_config["maxOutputTokens"] = json!(max_output_tokens);
+            emission.output_token_cap = true;
+        }
+        if let Some(seed) = policy.seed {
+            generation_config["seed"] = json!(seed);
+            emission.seed = true;
+        }
+        if !policy.stop_sequences.is_empty() {
+            generation_config["stopSequences"] = json!(policy.stop_sequences);
+            emission.stop_sequences = true;
+        }
+        if let Some(thinking_config) = thinking_config {
+            generation_config["thinkingConfig"] = thinking_config;
+            emission.reasoning = policy.reasoning.is_some();
+            emission.thinking_summary = policy.request_thinking_summary;
+        }
         let mut request = json!({
             "model": req.model,
             "user_prompt_id": uuid::Uuid::new_v4().to_string(),
             "request": {
                 "contents": contents,
-                "generationConfig": {
-                    "temperature": temperature,
-                    "maxOutputTokens": policy.max_output_tokens,
-                }
+                "generationConfig": generation_config,
             }
         });
-        if let Some(seed) = policy.seed {
-            request["request"]["generationConfig"]["seed"] = json!(seed);
-        }
-        if !policy.stop_sequences.is_empty() {
-            request["request"]["generationConfig"]["stopSequences"] = json!(policy.stop_sequences);
-        }
         if let Some(system_instruction) = Self::system_instruction(req) {
             request["request"]["systemInstruction"] = system_instruction;
         }
         request["request"]["sessionId"] = json!(req.provider_session_affinity_key());
-        if let Some(config) = policy.thinking {
-            match config {
-                GoogleThinkingConfig::Level { level } => {
-                    let mut thinking_config = json!({
-                        "thinkingLevel": level,
-                    });
-                    if policy.expose_thinking {
-                        thinking_config["includeThoughts"] = json!(true);
-                    }
-                    request["request"]["generationConfig"]["thinkingConfig"] = thinking_config;
-                }
-                GoogleThinkingConfig::Budget { budget_tokens } => {
-                    let mut thinking_config = json!({
-                        "thinkingBudget": budget_tokens,
-                    });
-                    if policy.expose_thinking {
-                        thinking_config["includeThoughts"] = json!(true);
-                    }
-                    request["request"]["generationConfig"]["thinkingConfig"] = thinking_config;
-                }
-                GoogleThinkingConfig::ToggleFalse => {
-                    request["request"]["generationConfig"]["thinkingConfig"] =
-                        json!({ "thinkingEnabled": false });
-                }
-            }
-        }
         if !req.tools.is_empty() {
             let use_claude_on_vertex_parameters = matches!(
                 req.model_capability.google_dialect,
@@ -497,7 +550,10 @@ impl GoogleOAuthProvider {
         if let Some(project) = project_id.filter(|p| !p.trim().is_empty()) {
             request["project"] = json!(project);
         }
-        Ok(request)
+        // Cloud Code reports cached-token usage, but Lash emits no
+        // prompt-cache directive in this request dialect.
+        let receipt = policy.receipt(req, &emission);
+        Ok((request, receipt))
     }
 
     fn project_schema(

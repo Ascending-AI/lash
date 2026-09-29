@@ -118,6 +118,7 @@ fn main() {
                     temperature: None,
                     seed: Some(7),
                     stop_sequences: Vec::new(),
+                    parallel_tool_calls: None,
                 },
                 session_id: None,
                 autonomous: false,
@@ -136,10 +137,14 @@ fn main() {
 
     let disposition = lash::remote::llm::RemoteGenerationReceipt {
         output_token_cap: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
-        temperature: lash::remote::llm::RemoteGenerationOptionOutcome::OmittedSamplingPinned,
+        temperature: lash::remote::llm::RemoteGenerationOptionOutcome::ClampedToCapacity,
         seed: lash::remote::llm::RemoteGenerationOptionOutcome::OmittedUnsupported,
         stop_sequences: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
         cache: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
+        reasoning: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
+        parallel_tool_calls: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
+        thinking_summary: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
+        thinking_visibility: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
     };
     assert_ne!(
         disposition.seed,

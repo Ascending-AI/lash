@@ -224,8 +224,17 @@ pub enum TurnFailureCode {
     ProviderFileMediaTypeRequired,
     /// The model does not support the requested reasoning-retention mode.
     UnsupportedReasoningRetention,
-    /// Reasoning evidence could not be encoded for the provider's wire form.
+    /// The route's wire cannot carry the resolved reasoning intent, or the
+    /// route declares no reasoning dialect for an explicit selection.
     ReasoningEncodingUnrepresentable,
+    /// A host-set generation setting has no field on this wire, or the model
+    /// pins it; the call is refused before any I/O instead of dropping it.
+    UnsupportedGenerationOption,
+    /// The wire requires an output-token cap and neither the request nor the
+    /// provider options set one.
+    OutputTokenCapRequired,
+    /// The selected reasoning budget does not fit under the output-token cap.
+    ReasoningBudgetExceedsOutputCap,
     /// A provider tool call carried arguments that were not valid JSON.
     InvalidToolCallInputJson,
     /// The credential refresh was rejected; the host must re-authenticate.
@@ -342,6 +351,9 @@ impl TurnFailureCode {
             Self::ProviderFileMediaTypeRequired => "provider_file_media_type_required",
             Self::UnsupportedReasoningRetention => "unsupported_reasoning_retention",
             Self::ReasoningEncodingUnrepresentable => "reasoning_encoding_unrepresentable",
+            Self::UnsupportedGenerationOption => "unsupported_generation_option",
+            Self::OutputTokenCapRequired => "output_token_cap_required",
+            Self::ReasoningBudgetExceedsOutputCap => "reasoning_budget_exceeds_output_cap",
             Self::InvalidToolCallInputJson => "invalid_tool_call_input_json",
             Self::CredentialInvalidGrant => "credential_invalid_grant",
             Self::CredentialRefreshTransient => "credential_refresh_transient",
@@ -445,6 +457,9 @@ impl TurnFailureCode {
             "provider_file_media_type_required" => Self::ProviderFileMediaTypeRequired,
             "unsupported_reasoning_retention" => Self::UnsupportedReasoningRetention,
             "reasoning_encoding_unrepresentable" => Self::ReasoningEncodingUnrepresentable,
+            "unsupported_generation_option" => Self::UnsupportedGenerationOption,
+            "output_token_cap_required" => Self::OutputTokenCapRequired,
+            "reasoning_budget_exceeds_output_cap" => Self::ReasoningBudgetExceedsOutputCap,
             "invalid_tool_call_input_json" => Self::InvalidToolCallInputJson,
             "credential_invalid_grant" => Self::CredentialInvalidGrant,
             "credential_refresh_transient" => Self::CredentialRefreshTransient,
@@ -527,6 +542,9 @@ impl TurnFailureCode {
         Self::ProviderFileMediaTypeRequired,
         Self::UnsupportedReasoningRetention,
         Self::ReasoningEncodingUnrepresentable,
+        Self::UnsupportedGenerationOption,
+        Self::OutputTokenCapRequired,
+        Self::ReasoningBudgetExceedsOutputCap,
         Self::InvalidToolCallInputJson,
         Self::CredentialInvalidGrant,
         Self::CredentialRefreshTransient,
@@ -1146,6 +1164,9 @@ mod tests {
             TurnFailureCode::ProviderFileMediaTypeRequired,
             TurnFailureCode::UnsupportedReasoningRetention,
             TurnFailureCode::ReasoningEncodingUnrepresentable,
+            TurnFailureCode::UnsupportedGenerationOption,
+            TurnFailureCode::OutputTokenCapRequired,
+            TurnFailureCode::ReasoningBudgetExceedsOutputCap,
             TurnFailureCode::InvalidToolCallInputJson,
             TurnFailureCode::CredentialInvalidGrant,
             TurnFailureCode::CredentialRefreshTransient,
@@ -1320,7 +1341,7 @@ mod tests {
     fn all_named_covers_every_named_arm() {
         assert_eq!(
             TurnFailureCode::ALL_NAMED.len(),
-            72,
+            75,
             "a new named arm must be added to ALL_NAMED"
         );
         for code in TurnFailureCode::ALL_NAMED {

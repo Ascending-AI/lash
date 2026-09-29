@@ -269,10 +269,14 @@ fn remote_llm_response_json_round_trips() {
         }),
         generation_disposition: Some(RemoteGenerationReceipt {
             output_token_cap: RemoteGenerationOptionOutcome::Applied,
-            temperature: RemoteGenerationOptionOutcome::OmittedSamplingPinned,
-            seed: RemoteGenerationOptionOutcome::OmittedUnsupported,
+            temperature: RemoteGenerationOptionOutcome::Applied,
+            seed: RemoteGenerationOptionOutcome::NotRequested,
             stop_sequences: RemoteGenerationOptionOutcome::NotRequested,
-            cache: RemoteGenerationOptionOutcome::Applied,
+            cache: RemoteGenerationOptionOutcome::OmittedUnsupported,
+            reasoning: RemoteGenerationOptionOutcome::Applied,
+            parallel_tool_calls: RemoteGenerationOptionOutcome::NotRequested,
+            thinking_summary: RemoteGenerationOptionOutcome::NotRequested,
+            thinking_visibility: RemoteGenerationOptionOutcome::NotRequested,
         }),
         expose_thinking: Some(false),
     };
@@ -287,10 +291,14 @@ fn remote_llm_response_json_round_trips() {
         value["generation_disposition"],
         serde_json::json!({
             "output_token_cap": "applied",
-            "temperature": "omitted_sampling_pinned",
-            "seed": "omitted_unsupported",
+            "temperature": "applied",
+            "seed": "not_requested",
             "stop_sequences": "not_requested",
-            "cache": "applied",
+            "cache": "omitted_unsupported",
+            "reasoning": "applied",
+            "parallel_tool_calls": "not_requested",
+            "thinking_summary": "not_requested",
+            "thinking_visibility": "not_requested",
         })
     );
     let decoded = serde_json::from_value::<Envelope<RemoteLlmResponse>>(value)
@@ -1879,6 +1887,7 @@ fn process_execution_policy_carries_session_generation_options() {
         temperature: Some(serde_json::Number::from_f64(0.25).expect("finite temperature")),
         seed: Some(7),
         stop_sequences: Vec::new(),
+        parallel_tool_calls: None,
     };
     let value = serde_json::to_value(&policy).expect("serialize policy");
     assert_eq!(

@@ -27,6 +27,7 @@ pub use config::{GoogleOAuthClient, GoogleOAuthProvider};
 #[cfg(test)]
 mod tests {
     mod epilogue;
+    mod generation_tests;
     mod tool_result_shape;
     use lash_sansio::sync::MutexExt;
 
@@ -781,10 +782,8 @@ mod tests {
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.iter().copied().map(str::to_string).collect(),
-                default_effort: None,
-                aliases: Default::default(),
                 encoding: ReasoningEncoding::Effort,
-                disable: None,
+                disable: false,
                 mandatory: false,
             }),
             cache_control: None,
@@ -805,15 +804,13 @@ mod tests {
                     .iter()
                     .map(|(effort, _)| (*effort).to_string())
                     .collect(),
-                default_effort: None,
-                aliases: Default::default(),
                 encoding: ReasoningEncoding::Budget(
                     entries
                         .iter()
                         .map(|(effort, tokens)| ((*effort).to_string(), *tokens))
                         .collect(),
                 ),
-                disable: Some(lash_core::provider::ReasoningDisableEncoding::Budget(0)),
+                disable: true,
                 mandatory: false,
             }),
             cache_control: None,
@@ -1126,30 +1123,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn thinking_config_is_omitted_without_capability() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
-        let body = GoogleOAuthProvider::build_request(
-            &provider,
-            &request_with_capability(Some("medium"), ModelCapability::default()),
-            Vec::new(),
-            None,
-        )
-        .expect("schema projection");
-
-        assert!(
-            body["request"]["generationConfig"]
-                .get("thinkingConfig")
-                .is_none()
-        );
+    fn refusal_code(error: &lash_core::llm::transport::LlmTransportError) -> Option<String> {
+        error.code.as_ref().map(ToString::to_string)
     }
 
     #[test]
@@ -1241,6 +1216,20 @@ mod tests {
             provider_limited["request"]["generationConfig"]["maxOutputTokens"],
             9999
         );
+
+        // Lash invents no cap.
+        let uncapped = GoogleOAuthProvider::build_request(
+            &GoogleOAuthProvider::for_test(),
+            &request(None),
+            Vec::new(),
+            None,
+        )
+        .expect("schema projection");
+        assert!(
+            uncapped["request"]["generationConfig"]
+                .get("maxOutputTokens")
+                .is_none()
+        );
     }
 
     #[test]
@@ -1257,15 +1246,16 @@ mod tests {
         let mut req = request(None);
         req.generation.stop_sequences = vec!["</lashlang>".to_string()];
 
-        let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None)
-            .expect("schema projection");
+        let (body, receipt) =
+            GoogleOAuthProvider::build_request_with_receipt(&provider, &req, Vec::new(), None)
+                .expect("schema projection");
 
         assert_eq!(
             body["request"]["generationConfig"]["stopSequences"],
             json!(["</lashlang>"])
         );
         assert_eq!(
-            GoogleOAuthProvider::generation_disposition(&req).stop_sequences,
+            receipt.stop_sequences,
             lash_core::GenerationOptionOutcome::Applied
         );
     }
@@ -1282,9 +1272,23 @@ mod tests {
             },
         );
 
-        let defaulted = GoogleOAuthProvider::build_request(&provider, &request(None), vec![], None)
-            .expect("schema projection");
-        assert_eq!(defaulted["request"]["generationConfig"]["temperature"], 0);
+        let (defaulted, defaulted_receipt) = GoogleOAuthProvider::build_request_with_receipt(
+            &provider,
+            &request(None),
+            vec![],
+            None,
+        )
+        .expect("schema projection");
+        // No temperature is invented when the host sets none.
+        assert!(
+            defaulted["request"]["generationConfig"]
+                .get("temperature")
+                .is_none()
+        );
+        assert_eq!(
+            defaulted_receipt.temperature,
+            lash_core::GenerationOptionOutcome::NotRequested
+        );
         // A seed is emitted only when one was asked for.
         assert!(
             defaulted["request"]["generationConfig"]
@@ -1296,10 +1300,38 @@ mod tests {
         req.generation.temperature =
             Some(lash_core::NonNegativeFiniteF64::new(0.8).expect("finite temperature"));
         req.generation.seed = Some(11);
-        let body = GoogleOAuthProvider::build_request(&provider, &req, vec![], None)
-            .expect("schema projection");
+        let (body, receipt) =
+            GoogleOAuthProvider::build_request_with_receipt(&provider, &req, vec![], None)
+                .expect("schema projection");
         assert_eq!(body["request"]["generationConfig"]["temperature"], 0.8);
         assert_eq!(body["request"]["generationConfig"]["seed"], 11);
+        assert_eq!(
+            (receipt.temperature, receipt.seed),
+            (
+                lash_core::GenerationOptionOutcome::Applied,
+                lash_core::GenerationOptionOutcome::Applied
+            )
+        );
+
+        // A pinned model refuses the temperature instead of dropping it.
+        req.model_capability.sampling = lash_core::SamplingCapability::Pinned;
+        let error = GoogleOAuthProvider::build_request(&provider, &req, vec![], None)
+            .expect_err("pinned sampling");
+        assert_eq!(
+            refusal_code(&error).as_deref(),
+            Some("lash:unsupported_generation_option")
+        );
+        // Gemini has no parallel-tool-call control.
+        let mut parallel = request(None);
+        parallel.generation.parallel_tool_calls = Some(true);
+        assert_eq!(
+            refusal_code(
+                &GoogleOAuthProvider::build_request(&provider, &parallel, vec![], None)
+                    .expect_err("no parallel field")
+            )
+            .as_deref(),
+            Some("lash:unsupported_generation_option")
+        );
     }
 
     #[test]
@@ -1328,15 +1360,15 @@ mod tests {
         let contents = provider
             .build_contents_with_attachment_parts(&req, &[])
             .expect("retention policy");
-        let body = GoogleOAuthProvider::build_request(&provider, &req, contents, None)
-            .expect("schema projection");
+        let (body, disposition) =
+            GoogleOAuthProvider::build_request_with_receipt(&provider, &req, contents, None)
+                .expect("schema projection");
         assert!(
             body["request"]["tools"][0]["functionDeclarations"][0]
                 ["parametersJsonSchema"]["properties"]["cachedContent"]
                 .is_object()
         );
 
-        let disposition = GoogleOAuthProvider::generation_disposition(&req);
         assert_eq!(
             disposition.cache,
             lash_core::GenerationOptionOutcome::OmittedUnsupported

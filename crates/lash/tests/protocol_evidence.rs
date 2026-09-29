@@ -318,13 +318,6 @@ fn drain_area_witnesses() {
     variant_witness(|value: &lash::direct::GenerationOptionOutcome| {
         matches!(value, lash::direct::GenerationOptionOutcome::NotRequested)
     });
-    // W0089: lash::direct::GenerationOptionOutcome::OmittedSamplingPinned [variant]
-    variant_witness(|value: &lash::direct::GenerationOptionOutcome| {
-        matches!(
-            value,
-            lash::direct::GenerationOptionOutcome::OmittedSamplingPinned
-        )
-    });
     // W0090: lash::direct::GenerationOptionOutcome::OmittedUnsupported [variant]
     variant_witness(|value: &lash::direct::GenerationOptionOutcome| {
         matches!(
@@ -339,16 +332,12 @@ fn drain_area_witnesses() {
             lash::direct::GenerationOptionOutcome::SuppressedProtocolOwned
         )
     });
-    // W0092: lash::direct::GenerationOptionOutcome::applied [function]
-    let _ = lash::direct::GenerationOptionOutcome::applied;
+    // W0092: lash::direct::GenerationOptionOutcome::from_emission [function]
+    let _ = lash::direct::GenerationOptionOutcome::from_emission;
     // W0093: lash::direct::GenerationOptionOutcome::is_honored [function]
     let _ = lash::direct::GenerationOptionOutcome::is_honored;
     // W0094: lash::direct::GenerationOptionOutcome::is_omitted [function]
     let _ = lash::direct::GenerationOptionOutcome::is_omitted;
-    // W0095: lash::direct::GenerationOptionOutcome::sampling_pinned [function]
-    let _ = lash::direct::GenerationOptionOutcome::sampling_pinned;
-    // W0096: lash::direct::GenerationOptionOutcome::unsupported [function]
-    let _ = lash::direct::GenerationOptionOutcome::unsupported;
     // W0097: lash::direct::GenerationOptions [struct]
     type_witness::<lash::direct::GenerationOptions>();
     // W0098: lash::direct::GenerationOptions::merged_over [function]

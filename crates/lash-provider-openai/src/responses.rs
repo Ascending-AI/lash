@@ -10,26 +10,40 @@ impl OpenAiCompatibleProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
-        self.build_responses_request_body_with_cache_evidence(req, stream)
-            .map(|(body, _)| body)
+        self.build_responses_request(req, stream)
+            .map(|built| built.body)
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn build_responses_request_body_with_cache_evidence(
+    pub(crate) fn build_responses_request(
         &self,
         req: &LlmRequest,
         stream: bool,
-    ) -> Result<(Value, bool), LlmTransportError> {
+    ) -> Result<BuiltRequest, LlmTransportError> {
         let serving_route = self.route_identity(&req.model);
-        self.build_responses_request_body_for_route_with_cache_evidence(req, stream, &serving_route)
+        self.build_responses_request_for_route(req, stream, &serving_route)
     }
 
-    pub(crate) fn build_responses_request_body_for_route_with_cache_evidence(
+    /// What Responses, as this endpoint's compat configures it, can carry.
+    fn responses_generation_wire(compat: &OpenAiResolvedCompat) -> GenerationWire {
+        GenerationWire {
+            label: "OpenAI Responses",
+            output_token_cap: output_cap_wire(compat.max_tokens_field),
+            temperature: true,
+            seed: false,
+            stop_sequences: false,
+            parallel_tool_calls: compat.request_fields,
+            thinking_summary: ThinkingSummaryWire::Always,
+            active_thinking_pins_sampling: false,
+        }
+    }
+
+    pub(crate) fn build_responses_request_for_route(
         &self,
         req: &LlmRequest,
         stream: bool,
         serving_route: &ProviderRouteIdentity,
-    ) -> Result<(Value, bool), LlmTransportError> {
+    ) -> Result<BuiltRequest, LlmTransportError> {
         let safe_request = req
             .reasoning_retention_safe_for(
                 serving_route,
@@ -40,6 +54,23 @@ impl OpenAiCompatibleProvider {
         let req = safe_request.as_ref();
         shared::validate_responses_attachments(req, "OpenAI Responses")?;
         let compat = self.resolved_compat(CompletionEndpoint::Responses);
+        let policy = resolve_generation_policy(
+            req,
+            &self.options,
+            self.kind(),
+            &Self::responses_generation_wire(&compat),
+        )?;
+        let mut emission = GenerationEmission::default();
+        let mut reasoning_body = json!({});
+        if let Some(intent) = &policy.reasoning {
+            apply_reasoning(
+                CompletionEndpoint::Responses,
+                compat.reasoning,
+                intent,
+                &mut reasoning_body,
+            )?;
+            emission.reasoning = true;
+        }
         let tools = shared::build_tools_with_capabilities(
             PROVIDER,
             req,
@@ -47,12 +78,6 @@ impl OpenAiCompatibleProvider {
             &compat.schema_capabilities,
         )?;
         let input = shared::build_responses_input(req);
-        let policy = resolve_generation_policy(
-            &req.generation,
-            &self.options,
-            DEFAULT_MAX_OUTPUT_TOKENS,
-            (),
-        );
         let mut body = json!({
             "model": req.model,
             "input": null,
@@ -63,41 +88,40 @@ impl OpenAiCompatibleProvider {
         if let Some(instructions) = &req.instructions {
             body["instructions"] = json!(instructions);
         }
-        apply_max_tokens_field(&mut body, compat.max_tokens_field, policy.max_output_tokens);
-        // Responses accepts `temperature` but has no `seed` field, so a
-        // requested seed is simply not expressible on this wire.
+        emission.output_token_cap =
+            apply_max_tokens_field(&mut body, compat.max_tokens_field, policy.max_output_tokens);
         if let Some(temperature) = &policy.temperature {
             body["temperature"] = Value::Number(temperature.clone().into());
+            emission.temperature = true;
         }
         if !req.tools.is_empty() {
             body["tool_choice"] = json!(shared::tool_choice_value(&req.tool_choice));
         }
+        if let Some(parallel_tool_calls) = policy.parallel_tool_calls {
+            body["parallel_tool_calls"] = json!(parallel_tool_calls);
+            emission.parallel_tool_calls = true;
+        }
+        // Replay mechanics, not host settings: stateless requests keep the
+        // encrypted reasoning items that the next request replays.
         if compat.request_fields {
             body["include"] = json!(["reasoning.encrypted_content"]);
-            body["parallel_tool_calls"] = json!(!req.tools.is_empty());
-            body["text"] = json!({"verbosity": "medium"});
         }
         if compat.store {
             body["store"] = json!(false);
         }
-        if let Some(intent) = reasoning_intent(req) {
-            compat
-                .reasoning_format
-                .encode(CompletionEndpoint::Responses, &intent, &mut body)
-                .map_err(|error| {
-                    reasoning_encode_transport_error(CompletionEndpoint::Responses, &intent, error)
-                })?;
+        if let Value::Object(fields) = reasoning_body {
+            for (key, value) in fields {
+                body[key] = value;
+            }
         }
         if let ReasoningRetentionSelection::OpenAiContext { context } =
             req.model_capability.reasoning_retention.selection
         {
-            if !body["reasoning"].is_object() {
-                body["reasoning"] = json!({});
-            }
-            body["reasoning"]["context"] = json!(context.as_str());
+            reasoning_object(&mut body)["context"] = json!(context.as_str());
         }
-        if policy.expose_thinking && body["reasoning"].is_object() {
-            body["reasoning"]["summary"] = json!("auto");
+        if policy.request_thinking_summary {
+            reasoning_object(&mut body)["summary"] = json!("auto");
+            emission.thinking_summary = true;
         }
         if let Some(output_spec) = &req.output_spec {
             let format = match output_spec {
@@ -117,20 +141,17 @@ impl OpenAiCompatibleProvider {
                     })
                 }
             };
-            if body.get("text").is_none() {
-                body["text"] = json!({});
-            }
-            body["text"]["format"] = format;
+            body["text"] = json!({ "format": format });
         }
-        let cache_control_emitted =
-            policy.cache_retention != CacheRetention::None && compat.prompt_cache_key;
-        if cache_control_emitted {
+        emission.cache = policy.cache_retention != CacheRetention::None && compat.prompt_cache_key;
+        if emission.cache {
             body["prompt_cache_key"] = json!(req.provider_prompt_cache_key());
         }
         if policy.cache_retention == CacheRetention::Long && compat.prompt_cache_retention {
             body["prompt_cache_retention"] = json!("24h");
         }
-        Ok((body, cache_control_emitted))
+        let receipt = policy.receipt(req, &emission);
+        Ok(BuiltRequest { body, receipt })
     }
 
     pub(crate) fn process_sse_event(

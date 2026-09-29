@@ -432,6 +432,7 @@ mod tests {
             temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
             seed: Some(1234),
             stop_sequences: Vec::new(),
+            parallel_tool_calls: None,
             projection_provenance: Default::default(),
         };
         let value = serde_json::to_value(&policy).expect("serialize policy");
@@ -513,6 +514,7 @@ mod tests {
                 temperature: base.generation.temperature.clone(),
                 seed: Some(42),
                 stop_sequences: base.generation.stop_sequences.clone(),
+                parallel_tool_calls: None,
                 projection_provenance: Default::default(),
             }
         );

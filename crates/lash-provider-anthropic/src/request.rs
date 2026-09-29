@@ -2,7 +2,6 @@
 //! Messages wire shape (messages, tools, cache control, thinking config,
 //! structured output).
 
-use crate::policy::AnthropicThinkingConfig;
 use crate::support::*;
 use lash_core::llm::types::LlmMessage;
 use lash_sansio::core_support::Blake3DomainHasher;
@@ -421,53 +420,35 @@ impl AnthropicProvider {
         cache_control_emitted
     }
 
-    /// Derive the Anthropic thinking config from the resolved selection and
-    /// host-supplied capability.
-    fn thinking_config(req: &LlmRequest) -> Option<AnthropicThinkingConfig> {
-        let reasoning = req.model_capability.reasoning.as_ref()?;
-        match &req.model_variant {
-            ReasoningSelection::ProviderDefault => None,
-            ReasoningSelection::Effort(variant) => match &reasoning.encoding {
-                ReasoningEncoding::Effort => Some(AnthropicThinkingConfig::Adaptive {
-                    effort: variant.clone(),
-                }),
-                ReasoningEncoding::Budget(budgets) => {
-                    budgets
-                        .get(variant)
-                        .map(|&budget_tokens| AnthropicThinkingConfig::Budget {
-                            budget_tokens: budget_tokens as i32,
-                        })
-                }
-            },
-            ReasoningSelection::Disabled => match reasoning.disable.as_ref()? {
-                ReasoningDisableEncoding::Native | ReasoningDisableEncoding::ToggleFalse => {
-                    Some(AnthropicThinkingConfig::Disabled)
-                }
-                ReasoningDisableEncoding::Omit => None,
-                ReasoningDisableEncoding::Effort(effort) => {
-                    Some(AnthropicThinkingConfig::Adaptive {
-                        effort: effort.clone(),
-                    })
-                }
-                ReasoningDisableEncoding::Budget(budget_tokens) => {
-                    Some(AnthropicThinkingConfig::Budget {
-                        budget_tokens: *budget_tokens as i32,
-                    })
-                }
-            },
+    /// What Anthropic Messages can carry for this request. It requires a
+    /// cap, has no seed field, and its active thinking pins sampling and is
+    /// the only place a reasoning summary can be requested.
+    fn generation_wire(req: &LlmRequest) -> GenerationWire {
+        GenerationWire {
+            label: "Anthropic Messages",
+            output_token_cap: OutputCapWire::Required,
+            temperature: true,
+            seed: false,
+            stop_sequences: true,
+            // `disable_parallel_tool_use` lives on `tool_choice`, which is
+            // only sent with tools.
+            parallel_tool_calls: !req.tools.is_empty(),
+            thinking_summary: ThinkingSummaryWire::WithActiveThinking,
+            active_thinking_pins_sampling: true,
         }
     }
 
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn build_request_body(&self, req: &LlmRequest) -> Result<Value, LlmTransportError> {
-        self.build_request_body_with_cache_evidence(req)
-            .map(|(body, _)| body)
+        self.build_request(req).map(|(body, _)| body)
     }
 
-    pub(crate) fn build_request_body_with_cache_evidence(
+    /// The request body and the receipt of the host settings it carries.
+    /// Every refusal happens here, before the caller does any I/O.
+    pub(crate) fn build_request(
         &self,
         req: &LlmRequest,
-    ) -> Result<(Value, bool), LlmTransportError> {
+    ) -> Result<(Value, GenerationReceipt), LlmTransportError> {
         let serving_route = self.route_identity(&req.model);
         let safe_request = req
             .reasoning_retention_safe_for(
@@ -536,16 +517,37 @@ impl AnthropicProvider {
                 })?;
             }
         }
+        let policy = resolve_generation_policy(
+            req,
+            &self.options,
+            self.kind(),
+            &Self::generation_wire(req),
+        )?;
+        // Resolution refuses a call with no effective cap on this wire.
+        let max_tokens = policy.max_output_tokens.ok_or_else(|| {
+            LlmTransportError::new("Anthropic Messages requires an output-token cap.")
+                .with_lash_code(TurnFailureCode::OutputTokenCapRequired)
+                .with_retry_verdict(TransportRetryVerdict::Forbidden)
+        })?;
+        let mut emission = GenerationEmission {
+            output_token_cap: true,
+            ..GenerationEmission::default()
+        };
+        let mut thinking_body = json!({});
+        if let Some(intent) = &policy.reasoning {
+            apply_thinking(
+                intent,
+                policy.request_thinking_summary,
+                max_tokens,
+                &mut thinking_body,
+            )?;
+            emission.reasoning = true;
+            // `display` exists only inside active thinking, which is exactly
+            // when resolution asks for the summary.
+            emission.thinking_summary = policy.request_thinking_summary;
+        }
         let (system_text, mut messages, breakpoint) = self.build_messages(req)?;
         let mut tools = self.build_tools(req)?;
-
-        let thinking_config = Self::thinking_config(req);
-        let policy = resolve_generation_policy(
-            &req.generation,
-            &self.options,
-            DEFAULT_MAX_OUTPUT_TOKENS,
-            thinking_config,
-        );
 
         let mut system_value: Option<Value> = system_text.map(|text| {
             json!([{
@@ -557,7 +559,7 @@ impl AnthropicProvider {
         // Cache control: mark system, last user message, and last tool as
         // ephemeral to benefit from prompt caching. Applied before the body
         // is assembled so we only serialize the final state once.
-        let cache_control_emitted = self.apply_cache_control(
+        emission.cache = self.apply_cache_control(
             policy.cache_retention,
             &mut system_value,
             &mut messages,
@@ -567,7 +569,7 @@ impl AnthropicProvider {
 
         let mut body = json!({
             "model": req.model,
-            "max_tokens": policy.max_output_tokens,
+            "max_tokens": max_tokens,
             "messages": messages,
         });
 
@@ -593,6 +595,7 @@ impl AnthropicProvider {
         }
         if !policy.stop_sequences.is_empty() {
             body["stop_sequences"] = json!(policy.stop_sequences);
+            emission.stop_sequences = true;
         }
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools);
@@ -601,52 +604,21 @@ impl AnthropicProvider {
                 LlmToolChoice::None => json!({ "type": "none" }),
                 LlmToolChoice::Required => json!({ "type": "any" }),
             };
+            if let Some(parallel_tool_calls) = policy.parallel_tool_calls {
+                body["tool_choice"]["disable_parallel_tool_use"] = json!(!parallel_tool_calls);
+                emission.parallel_tool_calls = true;
+            }
         }
 
-        // Anthropic Messages has no seed field, so a requested seed is not expressible on this
-        // wire.
-        // Temperature is expressible, but two separate facts can take it away, and both answer
-        // with HTTP 400 when ignored: extended thinking pins sampling for the request, and
-        // some models pin it outright (everything released after Claude Opus 4.6).
-        // The second is host-supplied capability, never inferred from the model name here.
-        if let Some(temperature) = &policy.temperature
-            && !policy
-                .thinking
-                .as_ref()
-                .is_some_and(AnthropicThinkingConfig::pins_sampling)
-            && req.model_capability.allows_caller_temperature()
-        {
+        // Resolution refused a temperature that the model's capability or
+        // active thinking pins, so one that survives is sent.
+        if let Some(temperature) = &policy.temperature {
             body["temperature"] = Value::Number(temperature.clone().into());
+            emission.temperature = true;
         }
-
-        // Extended thinking.
-        if let Some(cfg) = policy.thinking {
-            let display = if policy.expose_thinking {
-                "summarized"
-            } else {
-                "omitted"
-            };
-            match cfg {
-                AnthropicThinkingConfig::Adaptive { effort } => {
-                    // The variant is already validated and alias-normalized by
-                    // lash-core against the host-supplied capability, so it is
-                    // sent verbatim as the wire effort.
-                    body["thinking"] = json!({
-                        "type": "adaptive",
-                        "display": display,
-                    });
-                    body["output_config"] = json!({ "effort": effort });
-                }
-                AnthropicThinkingConfig::Budget { budget_tokens } => {
-                    body["thinking"] = json!({
-                        "type": "enabled",
-                        "budget_tokens": budget_tokens,
-                        "display": display,
-                    });
-                }
-                AnthropicThinkingConfig::Disabled => {
-                    body["thinking"] = json!({ "type": "disabled" });
-                }
+        if let Value::Object(fields) = thinking_body {
+            for (key, value) in fields {
+                body[key] = value;
             }
         }
 
@@ -684,7 +656,8 @@ impl AnthropicProvider {
         }
 
         body["stream"] = json!(true);
-        Ok((body, cache_control_emitted))
+        let receipt = policy.receipt(req, &emission);
+        Ok((body, receipt))
     }
 }
 

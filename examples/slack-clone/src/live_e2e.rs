@@ -48,7 +48,7 @@ const MAX_MODEL_TURNS_PER_SESSION_TURN: usize =
     MAX_MODEL_TURNS_PER_AGENT / MAX_SESSION_TURNS_PER_AGENT;
 const SMOKE_RLM_CALL_BUDGET: usize = 1;
 const SMOKE_STANDARD_CALL_BUDGET: usize = 4;
-const MAX_INPUT_TOKENS_PER_CALL: usize = 32_768;
+const MAX_INPUT_TOKENS_PER_CALL: usize = 32 * 1024;
 const MIN_OUTPUT_TOKENS: usize = 128;
 const MAX_OUTPUT_TOKENS: usize = 512;
 const TURN_TIMEOUT: Duration = Duration::from_secs(120);

@@ -79,7 +79,6 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
     assert_eq!(
         assembled,
         json!({
-            "max_tokens": 32768,
             "messages": [
                 {
                     "content": [{
@@ -102,7 +101,6 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
                 }
             ],
             "model": "openai/gpt-5.4",
-            "parallel_tool_calls": true,
             "stream": true,
             "stream_options": { "include_usage": true },
             "tool_choice": "auto",
@@ -142,9 +140,9 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
             }]
         })
     );
-    assert_eq!(requests[1]["event"]["body_len"], 1208);
+    assert_eq!(requests[1]["event"]["body_len"], 1162);
     assert_eq!(
         requests[1]["event"]["body_sha256"],
-        "f8beeb4ace379d0bad50f2b4b4802aecd289525eff4d4ab6a9d95ee71f67fee5"
+        "563f5dbe2fe6ddd4cdceb55052daf6e259aa8d502098f05d4249a43b589fcc1c"
     );
 }

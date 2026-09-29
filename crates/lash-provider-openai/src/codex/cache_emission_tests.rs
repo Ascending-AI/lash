@@ -26,24 +26,20 @@ fn codex_tool_schema_prompt_cache_key_is_not_cache_emission() {
         output_schema: json!({}).into(),
     }]);
 
-    let (body, cache_control_emitted) = provider
-        .build_request_body_with_cache_evidence(&req, false)
-        .unwrap();
+    let built = provider.build_request(&req, false).unwrap();
 
-    assert!(body["tools"][0]["parameters"]["properties"]["prompt_cache_key"].is_object());
-    assert!(!cache_control_emitted);
+    assert!(built.body["tools"][0]["parameters"]["properties"]["prompt_cache_key"].is_object());
+    assert!(built.body.get("prompt_cache_key").is_none());
     assert_eq!(
-        CodexProvider::generation_disposition(&req, cache_control_emitted).cache,
+        built.receipt.cache,
         lash_core::GenerationOptionOutcome::OmittedUnsupported
     );
 
     let enabled = CodexProvider::new("access", "refresh", 0);
-    let (_, cache_control_emitted) = enabled
-        .build_request_body_with_cache_evidence(&req, false)
-        .unwrap();
-    assert!(cache_control_emitted);
+    let built = enabled.build_request(&req, false).unwrap();
+    assert!(built.body.get("prompt_cache_key").is_some());
     assert_eq!(
-        CodexProvider::generation_disposition(&req, cache_control_emitted).cache,
+        built.receipt.cache,
         lash_core::GenerationOptionOutcome::Applied
     );
 }

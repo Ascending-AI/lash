@@ -1024,10 +1024,8 @@ pub(crate) fn workbench_model_capability() -> lash::provider::ModelCapability {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-            default_effort: Some("medium".to_string()),
-            aliases: Default::default(),
             encoding: lash::provider::ReasoningEncoding::Effort,
-            disable: None,
+            disable: false,
             mandatory: false,
         }),
         cache_control: Some(lash::provider::CacheControlDialect::Anthropic),

@@ -103,7 +103,7 @@ use lash::provider::ProviderComponents as _;
 use lash::provider::ProviderFailureKind as _;
 use lash::provider::ProviderReliability as _;
 use lash::provider::ReasoningCapability as _;
-use lash::provider::ReasoningDisableEncoding as _;
+use lash::provider::ReasoningIntent as _;
 use lash::provider::ReasoningSelection as _;
 use lash::provider::ReasoningSelection as _;
 use lash::provider::StreamTermination as _;

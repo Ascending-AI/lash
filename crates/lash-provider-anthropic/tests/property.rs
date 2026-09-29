@@ -119,7 +119,10 @@ fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
                 deltas.lock_recover().push(text);
             }
         })),
-        generation: lash_core::GenerationOptions::default(),
+        generation: lash_core::GenerationOptions {
+            output_token_cap: std::num::NonZeroUsize::new(4_096),
+            ..lash_core::GenerationOptions::default()
+        },
         provider_trace: None,
     }
 }

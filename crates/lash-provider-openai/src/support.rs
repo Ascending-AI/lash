@@ -27,8 +27,9 @@ pub(crate) use crate::schema::{classify_openai_error, responses_error_retry_verd
 #[cfg(test)]
 pub(crate) use lash_core::llm::types::{LlmRequestScope, ResponsePhase, ResponseTextMeta};
 pub(crate) use lash_core::provider::{
-    CacheControlDialect, CacheRetention, GenerationRetryGuarantee, Provider, ProviderComponents,
-    ProviderOptions, StreamTermination, resolve_generation_policy,
+    CacheControlDialect, CacheRetention, GenerationEmission, GenerationRetryGuarantee,
+    GenerationWire, Provider, ProviderComponents, ProviderOptions, StreamTermination,
+    ThinkingSummaryWire, resolve_generation_policy,
 };
 pub(crate) use lash_llm_transport::streaming::{
     SseStreamBounds, drive_sse_response, emit_stream_progress,

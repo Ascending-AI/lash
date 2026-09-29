@@ -213,6 +213,14 @@ pub struct RemoteGenerationReceipt {
     pub stop_sequences: RemoteGenerationOptionOutcome,
     #[serde(default)]
     pub cache: RemoteGenerationOptionOutcome,
+    #[serde(default)]
+    pub reasoning: RemoteGenerationOptionOutcome,
+    #[serde(default)]
+    pub parallel_tool_calls: RemoteGenerationOptionOutcome,
+    #[serde(default)]
+    pub thinking_summary: RemoteGenerationOptionOutcome,
+    #[serde(default)]
+    pub thinking_visibility: RemoteGenerationOptionOutcome,
 }
 
 /// Mirror of the core `GenerationOptionOutcome`.
@@ -224,7 +232,6 @@ pub enum RemoteGenerationOptionOutcome {
     Applied,
     SuppressedProtocolOwned,
     OmittedUnsupported,
-    OmittedSamplingPinned,
     ClampedToCapacity,
 }
 
@@ -649,19 +656,18 @@ pub enum RemoteStreamTermination {
     EofTolerated,
 }
 
-/// Mirror of the core `ReasoningCapability`.
+/// Mirror of the core `ReasoningCapability`. Recorded shapes that carry a
+/// removed field (the default effort, `aliases`) or an encoded `disable` are
+/// refused.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteReasoningCapability {
     #[serde(default)]
     pub efforts: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_effort: Option<String>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub aliases: BTreeMap<String, String>,
     #[serde(default)]
     pub encoding: RemoteReasoningEncoding,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disable: Option<RemoteReasoningDisableEncoding>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disable: bool,
     #[serde(default)]
     pub mandatory: bool,
 }
@@ -673,16 +679,6 @@ pub enum RemoteReasoningSelection {
     ProviderDefault,
     Disabled,
     Effort(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteReasoningDisableEncoding {
-    Native,
-    Omit,
-    Effort(String),
-    Budget(u32),
-    ToggleFalse,
 }
 
 /// Mirror of the core `ReasoningEncoding`.
@@ -732,11 +728,14 @@ pub struct RemoteGenerationOptions {
     pub seed: Option<i64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stop_sequences: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
 }
 
 impl RemoteGenerationOptions {
     pub fn is_empty(&self) -> bool {
         self.output_token_cap.is_none()
+            && self.parallel_tool_calls.is_none()
             && self.temperature.is_none()
             && self.seed.is_none()
             && self.stop_sequences.is_empty()
