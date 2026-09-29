@@ -2073,6 +2073,7 @@ fn replay_conformance_tool_attempt_outcome(
         }),
         triggers: Vec::new(),
         capture: None,
+        capture_watermark: None,
     }
 }
 

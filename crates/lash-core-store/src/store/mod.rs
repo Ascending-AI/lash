@@ -64,6 +64,7 @@ pub use record_schema_version::{
     ensure_supported_record_schema_version, ensure_supported_schema_version,
 };
 
+pub use crate::capture::reduce_capture;
 pub use crate::session_graph::RealizedNodeTimestamp;
 pub use attachment_manifest::{
     AttachmentCondemnation, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,

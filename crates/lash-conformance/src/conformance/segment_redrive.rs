@@ -361,6 +361,7 @@ impl Scenario {
                 }),
                 triggers: Vec::new(),
                 capture: None,
+                capture_watermark: None,
             })
         })
     }

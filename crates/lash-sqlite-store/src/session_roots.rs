@@ -208,6 +208,7 @@ pub(crate) fn end_lost_root_conn(
         cause,
         head_revision: None,
         at_ms,
+        stopped_partial: None,
     };
     crate::conn::cached_execute(
         tx,
@@ -710,6 +711,7 @@ pub(crate) fn begin_session_close_conn(
                     cause: RootTerminalCause::SessionDeleted { intent: intent.id },
                     head_revision: None,
                     at_ms,
+                    stopped_partial: None,
                 },
             )?;
         }

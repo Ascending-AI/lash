@@ -317,6 +317,54 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     CONSTRAINT ck_runtime_turn_commits_identity CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL) AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL))
 );
 
+CREATE TABLE IF NOT EXISTS turn_capture_turns (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    base INTEGER NOT NULL DEFAULT 0 CHECK (base >= 0),
+    next_sequence INTEGER NOT NULL DEFAULT 1 CHECK (next_sequence >= 1),
+    recovered INTEGER NOT NULL DEFAULT 0 CHECK (recovered IN (0, 1)),
+    PRIMARY KEY (session_id, turn_id)
+);
+CREATE TABLE IF NOT EXISTS turn_capture_writers (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    invocation TEXT NOT NULL,
+    attempt_epoch INTEGER NOT NULL CHECK (attempt_epoch >= 0),
+    state TEXT NOT NULL CHECK (state IN ('live', 'retracted', 'fenced')),
+    PRIMARY KEY (session_id, turn_id, invocation, attempt_epoch)
+);
+CREATE TABLE IF NOT EXISTS turn_capture_frames (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence >= 1),
+    base INTEGER NOT NULL CHECK (base >= 0),
+    invocation TEXT NOT NULL,
+    attempt_epoch INTEGER NOT NULL CHECK (attempt_epoch >= 0),
+    batch_ordinal INTEGER NOT NULL CHECK (batch_ordinal >= 0),
+    frame_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, turn_id, sequence),
+    UNIQUE (session_id, turn_id, invocation, attempt_epoch, batch_ordinal, sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_turn_capture_frames_batch ON turn_capture_frames
+    (session_id, turn_id, invocation, attempt_epoch, batch_ordinal);
+CREATE TABLE IF NOT EXISTS stopped_partials (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    base INTEGER NOT NULL CHECK (base >= 0),
+    sealed_through INTEGER NOT NULL CHECK (sealed_through >= 0),
+    reason TEXT NOT NULL,
+    recovered INTEGER NOT NULL CHECK (recovered IN (0, 1)),
+    digest TEXT NOT NULL,
+    partial_json TEXT NOT NULL,
+    body_bytes INTEGER NOT NULL CHECK (body_bytes >= 0),
+    sealed_at_ms INTEGER NOT NULL,
+    committed_at_ms INTEGER,
+    PRIMARY KEY (session_id, turn_id),
+    UNIQUE (session_id, root)
+);
+
 CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     session_id TEXT NOT NULL,
     turn_id    TEXT NOT NULL,
@@ -1022,7 +1070,7 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// session; the queued-run ledger is gone and a queued-work head is admitted
 /// as an ordinary root (FIG-3927). A database written before these changes
 /// has the old shape; recreate it.
-pub(crate) const SCHEMA_VERSION: i32 = 99;
+pub(crate) const SCHEMA_VERSION: i32 = 100;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
