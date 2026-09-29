@@ -296,60 +296,6 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     launch_done(outcome)
 }
 
-/// One tool attempt's writer of its turn's capture (ADR 0114 §2.2, §4.1): the
-/// attempt's start persists before the tool runs, each progress chunk before
-/// it publishes, and its settlement before the step returns. `None` outside a
-/// turn.
-///
-/// The step body opens it before the tool runs under the step's cancel watch
-/// and settles it after that race, so its store writes are never in flight
-/// beside the watch: an engine that sequences its steps sees them as the
-/// step's own work, not as work a parked step left running (FIG-4071).
-pub struct ToolAttemptTurnCapture(Option<Arc<dyn crate::ToolAttemptCaptureWriter>>);
-
-impl ToolAttemptTurnCapture {
-    /// Opens the attempt's writer and persists that `call` started.
-    pub async fn open(
-        context: &ToolDispatchContext<'_>,
-        call: &super::ToolCallIds,
-    ) -> Result<Self, crate::RuntimeEffectControllerError> {
-        let invocation = context
-            .parent_invocation
-            .as_ref()
-            .and_then(crate::RuntimeInvocation::effect_replay_key);
-        let (Some(capture), Some(invocation)) = (context.turn_capture.as_ref(), invocation) else {
-            return Ok(Self(None));
-        };
-        let writer = capture
-            .open_attempt(invocation, call, Arc::clone(&context.observer))
-            .await?;
-        Ok(Self(Some(writer)))
-    }
-
-    /// Persists the settlement `outcome` records for `call_id` and stamps
-    /// the outcome with the writer's watermark.
-    ///
-    /// A cancelled attempt is the stop's own consequence, not a result
-    /// before the cutoff: the capture keeps the call running, with the
-    /// chunks it reported, as a call whose outcome is unknown.
-    pub async fn settle(
-        self,
-        call_id: &lash_sansio::ToolCallId,
-        outcome: &mut crate::ToolAttemptEffectOutcome,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        let Some(writer) = self.0 else {
-            return Ok(());
-        };
-        if let crate::ToolAttemptLaunch::Done { record, .. } = &outcome.launch
-            && !matches!(record.output.outcome, crate::ToolCallOutcome::Cancelled(_))
-        {
-            writer.settled(call_id, &record.output).await?;
-        }
-        outcome.capture_watermark = writer.watermark();
-        Ok(())
-    }
-}
-
 /// Executes one atomic tool attempt and reports everything it produced.
 ///
 /// The caller installs a fresh `checkpoint_messages` buffer and a per-attempt
@@ -358,22 +304,15 @@ impl ToolAttemptTurnCapture {
 /// prefix of a shared buffer a sibling may still be writing into. Consuming the
 /// outcome restores those facts into the caller's own buffers, which is what
 /// makes a journaled replay equivalent to a live execution.
-///
-/// The caller opened `turn_capture` before this runs and settles it after:
-/// the tool's progress chunks persist through it as the tool reports them.
 pub async fn execute_prepared_tool_attempt_effect<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: PreparedToolCall,
     execution_grant: Option<Box<crate::ToolExecutionGrant>>,
     attempt: u32,
     max_attempts: u32,
-    mut tool_context: ToolContext<'run>,
-    turn_capture: &ToolAttemptTurnCapture,
+    tool_context: ToolContext<'run>,
 ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
     let ids = ToolCallIds::of(&prepared);
-    if let Some(capture) = turn_capture.0.as_ref() {
-        tool_context.progress_reporter = Some(Arc::clone(capture) as _);
-    }
     let launch = Box::pin(
         dispatch_prepared_tool_attempt_launch_with_execution_context(
             context,
@@ -415,7 +354,6 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
         launch,
         triggers,
         capture,
-        capture_watermark: None,
     })
 }
 

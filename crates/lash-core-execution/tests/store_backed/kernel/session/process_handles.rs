@@ -165,7 +165,6 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
             process_lineage: None,
-            turn_capture: None,
             process_originator: None,
         });
         let context = RuntimeExecutionContext::new(
@@ -369,7 +368,6 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
             process_lineage: None,
-            turn_capture: None,
             process_originator: None,
         });
         let context = RuntimeExecutionContext::new(
@@ -480,7 +478,6 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
             process_lineage: None,
-            turn_capture: None,
             process_originator: None,
         });
         let context = RuntimeExecutionContext::new(
@@ -642,7 +639,6 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
             process_lineage: None,
-            turn_capture: None,
             process_originator: None,
         });
         let context = RuntimeExecutionContext::new(
@@ -1008,7 +1004,6 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
             process_lineage: None,
-            turn_capture: None,
             process_originator: None,
         });
         let context = RuntimeExecutionContext::new(

@@ -345,7 +345,7 @@ pub(in crate::runtime) struct LogicalTurnErrorContext<'error, 'run> {
 impl LashRuntime {
     /// Commit one physical turn. A stopped turn's terminal, held since the
     /// turn recorded it, publishes only once this commit is accepted; a
-    /// failed commit publishes none of it (ADR 0114 §4.3).
+    /// failed commit publishes none of it (ADR 0122).
     pub(super) async fn finish_turn(
         &mut self,
         context: TurnCommitContext<'_, '_>,
@@ -356,44 +356,6 @@ impl LashRuntime {
             observer.abandon_terminal();
         }
         finished
-    }
-
-    /// Fence, seal and materialize a stopped turn's capture (ADR 0114 §4.3,
-    /// steps 1 and 2): the store fences every writer, seals the cutoff and
-    /// reduces the partial in one transaction, first writer wins. The
-    /// lagging deltas the partial now carries stop streaming here. `None`
-    /// when the turn did not stop, or has no durable store to seal in.
-    async fn seal_stopped_turn_capture(
-        &self,
-        outcome: &TurnOutcome,
-        scoped_effect_controller: &ScopedEffectController<'_>,
-        trace_turn_id: &TurnId,
-        recorded_watermark: Option<u64>,
-        drive_fence: Option<&DriveFence>,
-        observer: &TurnObserver,
-    ) -> Result<Option<lash_sansio::StoppedPartial>, RuntimeError> {
-        let TurnOutcome::Stopped(stop) = outcome else {
-            return Ok(None);
-        };
-        let Some(store) = self.session.as_ref().and_then(Session::history_store) else {
-            return Ok(None);
-        };
-        observer.discard_lagging_deltas();
-        let root = scoped_effect_controller
-            .execution_scope()
-            .logical_root()
-            .unwrap_or_else(|| trace_turn_id.clone());
-        let sealed = store
-            .seal_turn_capture(&crate::store::SealTurnCapture {
-                turn: crate::TurnAddress::new(&self.state.session_id, trace_turn_id),
-                root,
-                reason: lash_sansio::StopReason::of_stop(stop),
-                recorded_watermark,
-                drive_fence: drive_fence.cloned(),
-            })
-            .await
-            .map_err(runtime_error_from_store_commit)?;
-        Ok(Some(sealed.into_partial()))
     }
 
     async fn commit_finished_turn(
@@ -605,26 +567,12 @@ impl LashRuntime {
             .cloned();
         turn_pipeline.state_mut().last_prompt_usage = last_prompt_usage;
         let assembled_state = turn_pipeline.export_state_for_assembly();
-        let capture_watermark = assembly.capture_watermark;
-        let mut assembled = assembly.finish(
+        let assembled = assembly.finish(
             assembled_state,
             cancellation.clone(),
             None,
             &self.host.core.control.termination,
         );
-        let sealed = self
-            .seal_stopped_turn_capture(
-                &assembled.outcome,
-                scoped_effect_controller,
-                &trace_turn_id,
-                capture_watermark,
-                drive_fence,
-                observer,
-            )
-            .await?;
-        assembled.stopped_partial = sealed.clone();
-        turn_pipeline
-            .set_stopped_partial(sealed.as_ref().map(crate::store::StoppedPartialCommit::of));
 
         let Some(session) = self.session.as_ref() else {
             // A store-less session keeps the head's follow-on resident: the
@@ -641,7 +589,7 @@ impl LashRuntime {
             self.resident_session
                 .record_committed_observation_turn(observation_revision.as_u64(), &trace_turn_id);
             self.emit_completed_turn_trace(&assembled.state, &assembled.outcome, &trace_turn_id);
-            observer.release_terminal(None);
+            observer.release_terminal();
             observer.published().await;
             publish_terminal_after_commit(
                 turn_control,
@@ -691,9 +639,7 @@ impl LashRuntime {
                 return Err(err.into_turn_failure(RuntimeErrorCode::PluginFinalizeTurn));
             }
         };
-        let mut returned_turn = finalized.turn;
-        // The seal is the partial's only source: finalize hooks never write it.
-        returned_turn.stopped_partial = sealed;
+        let returned_turn = finalized.turn;
         let prepared = PreparedTurn {
             turn_pipeline,
             turn: returned_turn,
@@ -829,13 +775,7 @@ impl LashRuntime {
         self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
 
-        observer.release_terminal(
-            delivery
-                .turn
-                .stopped_partial
-                .as_ref()
-                .map(lash_sansio::StoppedPartial::summary),
-        );
+        observer.release_terminal();
         emit_session_events(observer, delivery.events);
         observer.published().await;
         publish_terminal_after_commit(

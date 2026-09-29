@@ -438,10 +438,9 @@ struct TerminalDiagnostic<'a> {
 /// recorded on `recorded_assembly` here, so the committed turn carries the
 /// same terminal facts the host is sent.
 ///
-/// Nothing publishes before the commit that seals the turn's partial
-/// (ADR 0114 §4.3): the sequence is held on the observer and released after
-/// the commit, with `StoppedPartialAvailable` before `Done`, or abandoned
-/// when the commit fails.
+/// Nothing publishes before the turn's commit (ADR 0122): the sequence is
+/// held on the observer and released after the commit, or abandoned when the
+/// commit fails.
 fn hold_terminal_sequence(
     recorded_assembly: &mut RecordedTurnAssembly,
     observer: &TurnObserver,

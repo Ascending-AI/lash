@@ -30,7 +30,6 @@ impl RemoteTurnReport {
             // duplicate remote execution-result payload.
             failure_evidence: _,
             errors,
-            stopped_partial: _,
         } = turn;
         let activities = activities.into_iter().collect::<Vec<_>>();
         let outcome = RemoteTurnOutcome::from(outcome);

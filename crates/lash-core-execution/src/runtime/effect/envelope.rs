@@ -20,9 +20,7 @@ use crate::{
 
 use super::executor::RuntimeEffectControllerError;
 use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
-use super::llm_outcome::{
-    AssistantStreamHookState, CaptureWatermark, LlmStreamRecord, RuntimeLlmCallOutcome,
-};
+use super::llm_outcome::{AssistantStreamHookState, LlmStreamRecord, RuntimeLlmCallOutcome};
 use super::tool_settlement::{ToolAttemptCapture, ToolSettlement};
 
 /// Effect-specific header whose address is present by construction.
@@ -1043,9 +1041,6 @@ pub struct ToolAttemptEffectOutcome {
     /// just executed or served by replay (ADR 0099 §6, §13).
     #[serde(default)]
     pub capture: ToolAttemptCapture,
-    /// The attempt's capture watermark (ADR 0114 §4.2); `None` outside a turn.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub capture_watermark: Option<CaptureWatermark>,
 }
 
 /// What one tool child of a durable effect group settled on, unpacked.
@@ -1137,8 +1132,6 @@ pub enum RuntimeEffectOutcome {
         call_record: Option<crate::LlmCallRecord>,
         /// What the provider stream left that later steps read.
         stream: Box<LlmStreamRecord>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        capture: Option<Box<CaptureWatermark>>,
     },
     /// Phase 2 of the staged LLM-call boundary.
     ///
@@ -1171,8 +1164,6 @@ pub enum RuntimeEffectOutcome {
         /// exactly as they did before this field existed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         capture: Option<Box<ToolAttemptCapture>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        capture_watermark: Option<Box<CaptureWatermark>>,
     },
     /// What one tool child of a durable effect group settled on
     /// (ADR 0099 §2, §6, §13).
@@ -1467,13 +1458,11 @@ impl RuntimeEffectOutcome {
                 text_streamed,
                 call_record,
                 stream,
-                capture,
             } => Ok(RuntimeLlmCallOutcome {
                 result: *result,
                 text_streamed,
                 call_record,
                 stream: *stream,
-                capture: capture.map(|capture| *capture),
             }),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::LlmCall,
@@ -1517,7 +1506,6 @@ impl RuntimeEffectOutcome {
                 launch,
                 triggers,
                 capture,
-                capture_watermark,
             } => {
                 let capture = capture.map(|capture| *capture).unwrap_or_default();
                 capture.validate()?;
@@ -1525,7 +1513,6 @@ impl RuntimeEffectOutcome {
                     launch: *launch,
                     triggers,
                     capture,
-                    capture_watermark: capture_watermark.map(|watermark| *watermark),
                 })
             }
             other => Err(RuntimeEffectControllerError::wrong_outcome(

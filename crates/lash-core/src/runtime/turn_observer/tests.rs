@@ -190,8 +190,19 @@ fn each_lane_merges_on_its_own_and_never_across_blocks_kinds_or_events() {
     );
 }
 
+fn stopped_cancelled(observer: &TurnObserver, cursor: &mut ObservationCursor) {
+    cursor.observe(
+        observer,
+        ObservedEvent::Session(SessionStreamEvent::TurnOutcome {
+            outcome: TurnOutcome::Stopped(TurnStop::Cancelled {
+                evidence: TurnCancellationEvidence::internal("observer-test"),
+            }),
+        }),
+    );
+}
+
 #[test]
-fn a_cancellation_discards_the_lagging_deltas_and_keeps_every_other_event() {
+fn a_cancellation_keeps_every_lagging_delta_merged() {
     let (observer, mut observations) = TurnObserver::unread();
     let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
     for index in 0..LAG_BUDGET / 2 {
@@ -201,28 +212,104 @@ fn a_cancellation_discards_the_lagging_deltas_and_keeps_every_other_event() {
     for index in 0..40 {
         delta(&observer, &mut cursor, false, "A", &format!("late{index}"));
     }
-    cursor.observe(
-        &observer,
-        ObservedEvent::Session(SessionStreamEvent::TurnOutcome {
-            outcome: TurnOutcome::Stopped(TurnStop::Cancelled {
-                evidence: TurnCancellationEvidence::internal("observer-test"),
-            }),
-        }),
-    );
+    stopped_cancelled(&observer, &mut cursor);
     cursor.observe(&observer, ObservedEvent::Session(SessionStreamEvent::Done));
     let rows = drain(&mut observations);
 
-    assert_eq!(rows.len(), LAG_BUDGET + 3, "{:?}", &rows[LAG_BUDGET..]);
+    assert_eq!(rows.len(), LAG_BUDGET + 5, "{:?}", &rows[LAG_BUDGET..]);
     assert!(
         rows[..LAG_BUDGET]
             .iter()
             .all(|(lane, _, _)| lane.ends_with("_text")),
         "the deltas next in line for the host are kept"
     );
+    let late = (0..40)
+        .map(|index| format!("late{index}"))
+        .collect::<String>();
     let beyond = &rows[LAG_BUDGET..];
     assert!(beyond[0].2.contains("\"tool\""), "{beyond:?}");
-    assert!(beyond[1].2.contains("Cancelled"), "{beyond:?}");
-    assert_eq!(beyond[2].2, "Done");
+    // The lagging tail survives the cancellation whole, merged per lane.
+    assert_eq!(beyond[1], row("session_text", "A", &late));
+    assert_eq!(beyond[2], row("turn_text", "A", &late));
+    assert!(beyond[3].2.contains("Cancelled"), "{beyond:?}");
+    assert_eq!(beyond[4].2, "Done");
+}
+
+#[test]
+fn a_cancellation_keeps_an_alternating_block_backlog_whole() {
+    // An activity-only host: blocks that alternate never merge, so the
+    // backlog grows past the budget one delta at a time.
+    let (observer, mut observations) = TurnObserver::with_quiet_lanes(true, false);
+    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
+    for index in 0..LAG_BUDGET {
+        marker(&observer, &mut cursor, &index.to_string());
+    }
+    let mut expected = Vec::new();
+    for index in 0..30 {
+        let block = if index % 2 == 0 { "A" } else { "B" };
+        let text = format!("<{index}>");
+        delta(&observer, &mut cursor, false, block, &text);
+        expected.push(row("turn_text", block, &text));
+    }
+    stopped_cancelled(&observer, &mut cursor);
+    let rows = drain(&mut observations);
+
+    assert_eq!(rows[LAG_BUDGET..LAG_BUDGET + 30].to_vec(), expected);
+    assert_eq!(
+        rows.len(),
+        LAG_BUDGET + 30,
+        "the outcome rides the session lane"
+    );
+}
+
+#[test]
+fn a_held_terminal_publishes_only_on_release_and_in_order() {
+    let (observer, mut observations) = TurnObserver::unread();
+    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
+    delta(&observer, &mut cursor, false, "A", "before");
+    observer.hold_terminal();
+    delta(&observer, &mut cursor, false, "A", "held");
+    stopped_cancelled(&observer, &mut cursor);
+    cursor.observe(&observer, ObservedEvent::Session(SessionStreamEvent::Done));
+    assert_eq!(
+        drain(&mut observations),
+        vec![
+            row("session_text", "A", "before"),
+            row("turn_text", "A", "before"),
+        ],
+        "nothing after the hold publishes before the commit"
+    );
+
+    observer.release_terminal();
+    let released = drain(&mut observations);
+    assert_eq!(released.len(), 4, "{released:?}");
+    assert_eq!(released[0], row("session_text", "A", "held"));
+    assert_eq!(released[1], row("turn_text", "A", "held"));
+    assert!(released[2].2.contains("Cancelled"), "{released:?}");
+    assert_eq!(released[3].2, "Done");
+}
+
+#[test]
+fn an_abandoned_terminal_publishes_nothing() {
+    let (observer, mut observations) = TurnObserver::unread();
+    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
+    delta(&observer, &mut cursor, false, "A", "before");
+    observer.hold_terminal();
+    delta(&observer, &mut cursor, false, "A", "held");
+    stopped_cancelled(&observer, &mut cursor);
+    cursor.observe(&observer, ObservedEvent::Session(SessionStreamEvent::Done));
+
+    observer.abandon_terminal();
+    // A release after the abandon finds nothing to publish.
+    observer.release_terminal();
+    assert_eq!(
+        drain(&mut observations),
+        vec![
+            row("session_text", "A", "before"),
+            row("turn_text", "A", "before"),
+        ],
+        "a failed commit publishes none of the held terminal"
+    );
 }
 
 #[test]

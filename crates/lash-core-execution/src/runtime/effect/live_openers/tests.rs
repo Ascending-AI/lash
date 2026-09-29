@@ -58,7 +58,6 @@ fn live_context() -> LiveOpenerContext {
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
         process_lineage: None,
-        turn_capture: None,
         process_originator: None,
     };
     let lent_controller = dispatch

@@ -113,12 +113,6 @@ pub struct AssembledTurn {
         skip_serializing_if = "crate::TurnCancelInputOutcome::is_empty"
     )]
     pub turn_cancel_input_outcome: crate::TurnCancelInputOutcome,
-    /// The stopped turn's sealed and committed partial output: `Some`
-    /// exactly when the turn's terminal is `TurnOutcome::Stopped(_)`
-    /// (ADR 0114 §1.2). Data returned to the caller; it never enters the
-    /// graph, `assistant_output` or history.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stopped_partial: Option<lash_sansio::StoppedPartial>,
 }
 
 /// Result of driving one logical host turn through any AgentFrame switches.
@@ -218,19 +212,6 @@ impl TurnActivity {
         let correlation_id = TurnActivityId::new(uuid::Uuid::new_v4().to_string());
         Self::new(correlation_id, event)
     }
-
-    /// The announcement that `summary`'s partial is durable (ADR 0114 §5.2).
-    /// Its id derives from the partial's turn, so the turn's own terminal and
-    /// a lost root's announcement name one activity, and a redelivery
-    /// collapses into it.
-    pub fn stopped_partial_available(summary: lash_sansio::StoppedPartialSummary) -> Self {
-        let id = TurnActivityId::new(format!("{}:stopped_partial", summary.id.turn_id));
-        Self {
-            correlation_id: id.clone(),
-            id,
-            event: TurnEvent::StoppedPartialAvailable { summary },
-        }
-    }
 }
 
 /// App-facing semantic event payload for a turn activity.
@@ -305,19 +286,6 @@ pub enum TurnEvent {
     ModelAttemptReset {
         assistant_prose_correlation_ids: Vec<TurnActivityId>,
         reasoning_correlation_ids: Vec<TurnActivityId>,
-    },
-    /// One chunk a running tool reported through its progress sink, published
-    /// after the chunk was persisted to the turn's capture (ADR 0114 §2.2).
-    ToolOutputProgress {
-        call_id: crate::ToolCallId,
-        chunk: lash_sansio::ToolOutputChunk,
-    },
-    /// A stopped turn's partial is durable: published after the commit that
-    /// made it so, or after the lost-root write that sealed it (ADR 0114
-    /// §4.3, §4.4). Identity and facts, never payload; the host reads the
-    /// partial by its id.
-    StoppedPartialAvailable {
-        summary: lash_sansio::StoppedPartialSummary,
     },
     /// A sealed per-call attempt ledger, including provider-reported evidence.
     ModelCallRecorded {

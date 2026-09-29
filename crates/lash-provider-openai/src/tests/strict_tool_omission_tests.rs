@@ -718,7 +718,6 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
                                 text_streamed: false,
                                 call_record: Some(completion.call_record),
                                 stream: Box::default(),
-                                capture: None,
                             })
                         }),
                     )

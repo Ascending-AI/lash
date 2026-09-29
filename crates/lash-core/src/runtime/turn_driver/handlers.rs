@@ -142,7 +142,6 @@ impl RuntimeTurnDriver<'_> {
                     reasoning_published,
                     stream_hook_states,
                 },
-            capture,
         } = match self
             .invoke_turn_llm_effect(machine, id, request, event_tx)
             .await
@@ -153,8 +152,6 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
-        self.recorded_assembly
-            .note_capture_watermark(capture.as_ref());
         if let (Err(error), Some(record)) = (&result, call_record.as_ref()) {
             let sealed_attempt_count = self
                 .llm_calls
@@ -227,6 +224,9 @@ impl RuntimeTurnDriver<'_> {
             .await?;
         if let Some(evidence) = pending_cancel {
             self.record_turn_cancel(evidence.clone());
+            // The stop is recorded here: its `Done` is the terminal's first
+            // event and publishes after the commit (ADR 0122).
+            event_tx.hold_terminal();
             self.emit_recorded(event_tx, SessionStreamEvent::Done);
             machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
                 evidence,
@@ -371,6 +371,9 @@ impl RuntimeTurnDriver<'_> {
             return Ok(());
         };
         self.record_turn_cancel(evidence.clone());
+        // The stop is recorded here: its `Done` is the terminal's first event
+        // and publishes after the commit (ADR 0122).
+        event_tx.hold_terminal();
         self.emit_recorded(event_tx, SessionStreamEvent::Done);
         machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
             evidence,

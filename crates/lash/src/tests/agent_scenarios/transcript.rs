@@ -197,9 +197,7 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &SessionId) -> Optio
         | lash_core::TurnEvent::StreamBlockCompleted { .. }
         | lash_core::TurnEvent::ModelCallRecorded { .. }
         | lash_core::TurnEvent::Usage { .. }
-        | lash_core::TurnEvent::PluginRuntime { .. }
-        | lash_core::TurnEvent::ToolOutputProgress { .. }
-        | lash_core::TurnEvent::StoppedPartialAvailable { .. } => return None,
+        | lash_core::TurnEvent::PluginRuntime { .. } => return None,
     })
 }
 

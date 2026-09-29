@@ -343,10 +343,6 @@ pub struct ParkReconcileReport {
     /// Roots whose only engine run failed without a Lash terminal. Their
     /// scope close is now owed by the terminal row.
     pub ended_roots: Vec<RootRef>,
-    /// The partials the terminal writes of `ended_roots` sealed (ADR 0114
-    /// §4.4), in the order their roots ended: the core that runs the pass
-    /// announces each to its session's hosts.
-    pub sealed_partials: Vec<lash_sansio::StoppedPartialSummary>,
     /// Sessions whose stopped drive this pass resumed: it stopped only behind
     /// a redrive that has since settled (D15). Any other stopped drive is
     /// never resumed here (ADR 0109 §3): it is parked, and only the park's

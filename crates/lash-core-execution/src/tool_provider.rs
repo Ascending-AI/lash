@@ -159,24 +159,12 @@ pub struct AttemptContext<'run> {
     completion: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     tool_execution_route: ToolExecutionRoute,
-    /// Where this attempt's progress chunks are persisted (ADR 0114 §2.2);
-    /// `None` outside a turn's capture.
-    progress_reporter: Option<Arc<dyn ToolProgressReporter>>,
     /// The catalog the attempt was dispatched against. `None` outside a
     /// runtime dispatch.
     tool_catalog: Option<Arc<crate::ToolCatalog>>,
 }
 
 impl<'run> AttemptContext<'run> {
-    /// This call's progress sink. A tool that never calls `report` is
-    /// captured as `ToolOutputCapture::Unavailable`.
-    pub fn progress(&self) -> ToolProgressSink {
-        ToolProgressSink {
-            reporter: self.progress_reporter.clone(),
-            call_id: self.call_id.clone(),
-        }
-    }
-
     /// The logical root this attempt runs under, read from the admitted
     /// scope it was recorded in (FIG-3607 item 6): never a live read. `None`
     /// outside a session turn (a process body, a runtime operation).
@@ -242,7 +230,6 @@ impl<'run> AttemptContext<'run> {
             completion,
             phase_probe,
             tool_execution_route: context.tool_execution_route.clone(),
-            progress_reporter: context.progress_reporter.clone(),
             tool_catalog: context
                 .runtime_dispatch
                 .as_ref()
@@ -460,99 +447,6 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
-    /// Where this call's progress chunks are persisted (ADR 0114 §2.2).
-    /// `None` outside a turn's capture: the call's progress is then accepted
-    /// and kept nowhere.
-    pub(crate) progress_reporter: Option<Arc<dyn ToolProgressReporter>>,
-}
-
-/// The runtime side of a [`ToolProgressSink`]: the turn's capture writer,
-/// which persists each chunk before it is published (ADR 0114 §4.1).
-#[async_trait::async_trait]
-pub trait ToolProgressReporter: Send + Sync {
-    /// Persist and then publish one chunk of call `call_id`'s output.
-    async fn report(
-        &self,
-        call_id: &lash_sansio::ToolCallId,
-        chunk: lash_sansio::ToolOutputChunk,
-    ) -> Result<(), ProgressRefused>;
-}
-
-/// One tool call's progress sink (ADR 0114 §2.2). A tool that never calls
-/// [`report`](Self::report) is captured as
-/// [`ToolOutputCapture::Unavailable`](lash_sansio::ToolOutputCapture::Unavailable).
-#[derive(Clone)]
-pub struct ToolProgressSink {
-    reporter: Option<Arc<dyn ToolProgressReporter>>,
-    call_id: lash_sansio::ToolCallId,
-}
-
-impl ToolProgressSink {
-    /// Persist one chunk before it is published. The first call flips the
-    /// capture from `Unavailable` to `Captured`. It waits under
-    /// backpressure. After the fence it returns [`ProgressRefused::Fenced`],
-    /// and the tool should stop.
-    pub async fn report(&self, chunk: lash_sansio::ToolOutputChunk) -> Result<(), ProgressRefused> {
-        match &self.reporter {
-            Some(reporter) => reporter.report(&self.call_id, chunk).await,
-            None => Ok(()),
-        }
-    }
-}
-
-impl std::fmt::Debug for ToolProgressSink {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ToolProgressSink")
-            .field("call_id", &self.call_id)
-            .field("captured", &self.reporter.is_some())
-            .finish()
-    }
-}
-
-/// The turn capture a tool attempt's step body writes (ADR 0114 §2.2,
-/// §4.1): the attempt's start, the chunks it reports, and its settlement,
-/// each persisted before it is published.
-#[async_trait::async_trait]
-pub trait ToolAttemptCaptureWriter: ToolProgressReporter {
-    /// Persist the attempt's settled output for call `call_id`. A seal that
-    /// already fenced the writer is no fault: the partial stays as it was
-    /// sealed. Any other failure is the step's: a transient store fault is
-    /// retried, and a refusal ends the step typed.
-    async fn settled(
-        &self,
-        call_id: &lash_sansio::ToolCallId,
-        output: &crate::ToolCallOutput,
-    ) -> Result<(), crate::RuntimeEffectControllerError>;
-
-    /// Where the attempt's writer stood: the reference its recorded outcome
-    /// carries.
-    fn watermark(&self) -> Option<crate::runtime::CaptureWatermark>;
-}
-
-/// A turn's capture, as the tool step bodies of that turn open it. The
-/// runtime installs one on a turn's execution context; a process has none.
-#[async_trait::async_trait]
-pub trait TurnToolCapture: Send + Sync {
-    /// Open the writer of one tool attempt, keyed by its invocation's
-    /// replay key, and persist that the attempt started for `call`: its
-    /// `ToolCallId`, and the provider correlation that pairs it with the
-    /// streamed call it runs. Each persisted progress chunk publishes on
-    /// `observer`: the stream of the dispatch the attempt runs under.
-    async fn open_attempt(
-        &self,
-        invocation: &str,
-        call: &crate::tool_dispatch::ToolCallIds,
-        observer: Arc<dyn crate::engine::ObservationSink>,
-    ) -> Result<Arc<dyn ToolAttemptCaptureWriter>, crate::RuntimeEffectControllerError>;
-}
-
-/// Why a [`ToolProgressSink::report`] was not persisted.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum ProgressRefused {
-    #[error("the turn's capture is fenced")]
-    Fenced,
-    #[error("capture persistence failed: {0}")]
-    Store(String),
 }
 
 #[derive(Clone)]
@@ -668,7 +562,6 @@ pub(crate) struct ToolContextBuilder<'run> {
     parent_invocation: Option<crate::RuntimeInvocation>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
-    progress_reporter: Option<Arc<dyn ToolProgressReporter>>,
 }
 
 impl<'run> ToolContextBuilder<'run> {
@@ -700,7 +593,6 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: dispatch.parent_invocation.clone(),
             execution_env_spec: dispatch.execution_env_spec.clone(),
             child_execution_trace_hook: None,
-            progress_reporter: None,
         }
     }
 
@@ -809,7 +701,6 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: self.parent_invocation,
             execution_env_spec: self.execution_env_spec,
             child_execution_trace_hook: self.child_execution_trace_hook,
-            progress_reporter: self.progress_reporter,
         }
     }
 }
@@ -870,7 +761,6 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
-            progress_reporter: self.progress_reporter.clone(),
         })
     }
 
@@ -920,7 +810,6 @@ impl<'run> ToolContext<'run> {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             child_execution_trace_hook: None,
-            progress_reporter: None,
         }
     }
 

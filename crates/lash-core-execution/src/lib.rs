@@ -753,8 +753,8 @@ pub use runtime::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, AdmittedScope, AdmittedTurnInputs,
     Ancestry, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BindingId, BoundaryReason, CapabilityRef,
-    CaptureWatermark, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
-    ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
+    CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock, ClockWallTime,
+    CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
     DeclaredProcessIdentity, DefinitionRef, DeliveryPolicy, DeploymentStore,
     DeploymentStoreDecorator, DrainMode, DrainModePolicy, EffectAddress, EffectGroupDrainBudget,
     EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener,
@@ -896,10 +896,9 @@ pub use tool_provider::ProcessToolCallWiring;
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, PreparedToolBatch,
-    PreparedToolBatchCall, PreparedToolCall, ProcessToolCall, ProgressRefused,
-    ToolAttemptCaptureWriter, ToolCall, ToolChildExecutionTraceHook, ToolChildProcessStarted,
-    ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProgressReporter,
-    ToolProgressSink, ToolProvider, TurnToolCapture,
+    PreparedToolBatchCall, PreparedToolCall, ProcessToolCall, ToolCall,
+    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
+    ToolPrepareContext, ToolProvider,
 };
 
 pub(crate) use lash_core_store::process_identity::StartKeyDerivation;

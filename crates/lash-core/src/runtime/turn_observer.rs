@@ -17,22 +17,16 @@
 //!   are queued ahead of the host, a new stream delta merges into the last
 //!   queued event of its own lane when that is a delta of the same block and
 //!   kind. Each lane merges on its own, so a host listening to one lane only is
-//!   bounded the same way. Merging never loses text. Every non-delta event is
-//!   always queued and always delivered.
-//! - **A cancelled turn stops streaming.** When a cancellation is published
-//!   (a cancelled model call, or a `Stopped(Cancelled)` outcome), or a stop
-//!   seals the turn's capture, the deltas still queued beyond [`LAG_BUDGET`]
-//!   are discarded, as the old bounded channel discarded its unforwarded
-//!   backlog, so a lagging host sees the cancelled result promptly. The
-//!   completed blocks carry their full text, and the stopped partial carries
-//!   every discarded delta (ADR 0114 §4.3).
+//!   bounded the same way. Merging never loses text, including across a
+//!   cancellation: a stopped turn delivers every delta it queued, merged, so a
+//!   host that keeps up holds the streamed tail lash does not keep (ADR 0122).
+//!   Every non-delta event is always queued and always delivered.
 //! - **A stop publishes after its commit.** From the moment a turn records a
 //!   `Stopped` terminal, everything it publishes is held
-//!   ([`TurnObserver::hold_terminal`]) until the commit that makes its partial
-//!   durable is accepted, and is then released in order with the
-//!   `StoppedPartialAvailable` observation after the outcome
-//!   ([`TurnObserver::release_terminal`]). A commit that fails publishes none
-//!   of it ([`TurnObserver::abandon_terminal`]).
+//!   ([`TurnObserver::hold_terminal`]) until the turn's commit is accepted,
+//!   and is then released in order ([`TurnObserver::release_terminal`]). A
+//!   commit that fails publishes none of it
+//!   ([`TurnObserver::abandon_terminal`]).
 //! - **"Finished" comes after the last event.** The turn commits inside the
 //!   drive and never waits on the host to do so. The turn's terminal
 //!   publication to waiters (turn attach, await-event resolution) and the turn
@@ -56,11 +50,10 @@ use super::RuntimeStreamEvent;
 use super::observation_publisher::ObservationSource;
 use crate::engine::{DriveObservation, ObservationSink, ObservedEvent};
 use crate::session_model::SessionStreamEvent;
-use crate::{TurnActivity, TurnActivityId, TurnEvent, TurnId, TurnOutcome, TurnStop};
+use crate::{TurnActivity, TurnActivityId, TurnEvent, TurnId};
 
-/// How many events may queue ahead of the host before new stream deltas merge
-/// and a cancellation discards the delta backlog. It is the capacity of the
-/// bounded host channel this queue replaces.
+/// How many events may queue ahead of the host before new stream deltas merge.
+/// It is the capacity of the bounded host channel this queue replaces.
 pub(in crate::runtime) const LAG_BUDGET: usize = 100;
 
 /// The sending end of one logical turn's observation queue. Cloning it adds a
@@ -192,7 +185,7 @@ impl TurnObserver {
     }
 
     /// Hold everything published from now on: the turn recorded a `Stopped`
-    /// terminal, which no host may see before its commit (ADR 0114 §4.3).
+    /// terminal, which no host may see before its commit (ADR 0122).
     pub(in crate::runtime) fn hold_terminal(&self) {
         let mut state = self.queue.state.lock_recover();
         if state.held.is_none() {
@@ -200,13 +193,8 @@ impl TurnObserver {
         }
     }
 
-    /// The commit was accepted: publish what was held, in order, with the
-    /// announcement of `partial` on both lanes right after the held
-    /// `TurnOutcome` (or last, when none was held).
-    pub(in crate::runtime) fn release_terminal(
-        &self,
-        partial: Option<lash_sansio::StoppedPartialSummary>,
-    ) {
+    /// The commit was accepted: publish what was held, in order.
+    pub(in crate::runtime) fn release_terminal(&self) {
         let mut state = self.queue.state.lock_recover();
         let Some(held) = state.held.take() else {
             return;
@@ -214,32 +202,7 @@ impl TurnObserver {
         if state.closed {
             return;
         }
-        let mut after_outcome = partial.map(|summary| {
-            let session = (!self.quiet_sessions).then(|| Observation {
-                turn: None,
-                event: RuntimeStreamEvent::Session(SessionStreamEvent::StoppedPartialAvailable {
-                    summary: summary.clone(),
-                }),
-            });
-            let activity = (!self.quiet_activities).then(|| Observation {
-                turn: self.turn.clone(),
-                event: RuntimeStreamEvent::Turn(TurnActivity::stopped_partial_available(summary)),
-            });
-            [session, activity]
-        });
         for observation in held {
-            let outcome = matches!(
-                observation.event,
-                RuntimeStreamEvent::Session(SessionStreamEvent::TurnOutcome { .. })
-            );
-            push_observation(&mut state, observation);
-            if outcome && let Some(extra) = after_outcome.take() {
-                for observation in extra.into_iter().flatten() {
-                    push_observation(&mut state, observation);
-                }
-            }
-        }
-        for observation in after_outcome.into_iter().flatten().flatten() {
             push_observation(&mut state, observation);
         }
         if let Some(publisher) = state.publisher.take() {
@@ -251,12 +214,6 @@ impl TurnObserver {
     /// The commit failed: nothing held is ever published.
     pub(in crate::runtime) fn abandon_terminal(&self) {
         self.queue.state.lock_recover().held = None;
-    }
-
-    /// Discard the stream deltas still queued beyond [`LAG_BUDGET`]: a model
-    /// call was cancelled, and its backlog is not worth delivering.
-    pub(in crate::runtime) fn discard_lagging_deltas(&self) {
-        discard_lagging_deltas(&mut self.queue.state.lock_recover().events);
     }
 
     /// Whether the drive is over and publications are dropped.
@@ -535,39 +492,11 @@ fn merge_lagging_delta(events: &mut VecDeque<Observation>, incoming: &Observatio
     }
 }
 
-/// Queue one observation for the host: a published cancellation discards the
-/// lagging deltas first, and a lagging delta merges into the tail.
+/// Queue one observation for the host: a lagging delta merges into the tail.
 fn push_observation(state: &mut QueueState, observation: Observation) {
-    if publishes_cancellation(&observation.event) {
-        discard_lagging_deltas(&mut state.events);
-    }
     if !merge_lagging_delta(&mut state.events, &observation) {
         state.events.push_back(observation);
     }
-}
-
-/// Drop the stream deltas queued beyond [`LAG_BUDGET`]; every other event
-/// keeps its place.
-fn discard_lagging_deltas(events: &mut VecDeque<Observation>) {
-    if events.len() <= LAG_BUDGET {
-        return;
-    }
-    let mut position = 0;
-    events.retain(|event| {
-        let keep = position < LAG_BUDGET || delta_key(&event.event).is_none();
-        position += 1;
-        keep
-    });
-}
-
-/// Whether publishing `event` announces that the turn was cancelled.
-fn publishes_cancellation(event: &RuntimeStreamEvent) -> bool {
-    matches!(
-        event,
-        RuntimeStreamEvent::Session(SessionStreamEvent::TurnOutcome {
-            outcome: TurnOutcome::Stopped(TurnStop::Cancelled { .. }),
-        })
-    )
 }
 
 #[cfg(test)]

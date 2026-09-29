@@ -198,7 +198,6 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             turn_context: crate::TurnContext::default(),
             clock: Arc::clone(&self.services.current.host.core.clock),
             process_lineage: self.process_lineage,
-            turn_capture: None,
             process_originator: self.process_originator,
         });
         // Publish the process incarnation as a live opener, lending this

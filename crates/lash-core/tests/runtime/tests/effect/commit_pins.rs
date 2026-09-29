@@ -22,6 +22,11 @@
 //! protocol sugar, so the test protocol registers no `batch` tool and the
 //! committed tool state, which recorded that registration, is now empty. The
 //! code-cell pin, whose protocol never registered `batch`, is unchanged.
+//!
+//! The two cancelled pins were re-pinned for ADR 0122 (FIG-4113): lash keeps
+//! no stopped partial, so a stopped turn's commit no longer carries
+//! `stopped_partial`. Removing that field from each ADR 0116 pin's masked
+//! commit reproduces the new digest; the code-cell pin is unchanged.
 
 use super::*;
 use crate::runtime_support::commit_pins::assert_commit_pins;
@@ -124,7 +129,7 @@ async fn cancel_observed_after_the_model_call_commits_the_pinned_bytes() {
     assert_commit_pins(
         "cancel after the model call",
         &commits,
-        &["4251c43136ecf7c7c54fdb6271dd3add6c8b233f99b4d019b5315a1d63b2857f"],
+        &["43cbfdf86c8c3f7226a766f6ca1603661cb631a9ee57bb581347aa43e09f8134"],
     );
 }
 
@@ -148,6 +153,6 @@ async fn after_step_cancel_at_the_step_boundary_commits_the_pinned_bytes() {
     assert_commit_pins(
         "after-step cancel",
         &commits,
-        &["467e54af24e3349a94af2a8d0f75c622d4a282b355450b674e40c9e32b3f2791"],
+        &["bc9e079d51ba77e5307911f0ea92c6daf938ccaba96952591e2ad44285fc5b6f"],
     );
 }

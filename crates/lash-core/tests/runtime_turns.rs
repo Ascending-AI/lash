@@ -71,5 +71,5 @@ mod runtime {
         mod turns;
     }
 
-    mod stopped_partial;
+    mod stop_publication;
 }

@@ -133,12 +133,8 @@ impl RuntimeTurnDriver<'_> {
                 results[source_index] = Some(completed.completed);
             }
         }
-        // A group wait that lost to the turn's gate, or a call settled
-        // cancelled, is a recorded fact: the checkpoint after this batch
-        // keeps the capture tail for the stop.
-        let lost_to_stop = prepare_context.turn_cancel_observed();
         drop(prepare_context);
-        let results = results
+        results
             .into_iter()
             .enumerate()
             .map(|(index, result)| {
@@ -149,12 +145,7 @@ impl RuntimeTurnDriver<'_> {
                     )
                 })
             })
-            .collect::<Result<Vec<crate::sansio::CompletedToolCall>, _>>()?;
-        self.interrupted_calls = lost_to_stop
-            || results.iter().any(|result| {
-                matches!(result.output.outcome, crate::ToolCallOutcome::Cancelled(_))
-            });
-        Ok(results)
+            .collect()
     }
 }
 

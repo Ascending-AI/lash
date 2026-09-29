@@ -253,7 +253,6 @@ impl RuntimeBoundaryHarness {
             }),
             triggers: Vec::new(),
             capture: None,
-            capture_watermark: None,
         };
         let first = Arc::new(BoundaryEffect {
             envelope: envelope.clone(),
@@ -399,7 +398,6 @@ impl RuntimeBoundaryHarness {
                         }),
                         triggers: Vec::new(),
                         capture: None,
-                        capture_watermark: None,
                     },
                 },
             )

@@ -82,9 +82,7 @@ pub use identity_types::{
 pub use lash_sansio::{CausalRef, EffectAddress};
 #[cfg(any(test, feature = "testing"))]
 pub use layered_host::{EffectLayer, LayeredEffectHost};
-pub use llm_outcome::{
-    AssistantStreamHookState, CaptureWatermark, LlmStreamRecord, RuntimeLlmCallOutcome,
-};
+pub use llm_outcome::{AssistantStreamHookState, LlmStreamRecord, RuntimeLlmCallOutcome};
 pub use validation::{
     CanonicalRuntimeEffectEnvelope, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
     validate_replayed_effect_envelope,

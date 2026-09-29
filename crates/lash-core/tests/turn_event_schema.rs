@@ -58,8 +58,6 @@ turn_event_tags! {
     CodeBlockCompleted => "code_block_completed",
     ToolCallStarted => "tool_call_started",
     ToolCallCompleted => "tool_call_completed",
-    ToolOutputProgress => "tool_output_progress",
-    StoppedPartialAvailable => "stopped_partial_available",
     ToolIntentOutcome => "tool_intent_outcome",
     FinalValue => "final_value",
     ToolValue => "tool_value",
@@ -564,67 +562,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 message: "boom".to_string(),
             },
             json!({ "type": "error", "message": "boom" }),
-        ),
-        (
-            "tool_output_progress",
-            TurnEvent::ToolOutputProgress {
-                call_id: lash_core::ToolCallId::fixture("call-1"),
-                chunk: lash_sansio::ToolOutputChunk {
-                    text: "line 1\n".to_string(),
-                },
-            },
-            json!({
-                "type": "tool_output_progress",
-                "call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
-                "chunk": { "text": "line 1\n" },
-            }),
-        ),
-        (
-            "stopped_partial_available",
-            TurnEvent::StoppedPartialAvailable {
-                summary: lash_sansio::StoppedPartialSummary {
-                    id: lash_sansio::StoppedPartialId {
-                        session_id: "session-1".into(),
-                        root: "root-1".into(),
-                        turn_id: "turn-1".into(),
-                        base: lash_sansio::CaptureBase(0),
-                        sealed_through: 3,
-                    },
-                    digest: lash_sansio::StoppedPartialDigest([7; 32]),
-                    reason: lash_sansio::StopReason::ProcessLoss,
-                    recovered_after_process_loss: true,
-                    coverage: lash_sansio::CaptureCoverage::AcknowledgedPrefix,
-                    eligibility: lash_sansio::ResubmissionEligibility::NeedsSelection {
-                        reasons: vec![lash_sansio::SelectionReason::AcknowledgedPrefixOnly],
-                    },
-                    cut_mid_tool_call: false,
-                    tool_outcome_unknown: false,
-                    item_count: 1,
-                },
-            },
-            json!({
-                "type": "stopped_partial_available",
-                "summary": {
-                    "id": {
-                        "session_id": "session-1",
-                        "root": "root-1",
-                        "turn_id": "turn-1",
-                        "base": 0,
-                        "sealed_through": 3,
-                    },
-                    "digest": vec![7u8; 32],
-                    "reason": { "kind": "process_loss" },
-                    "recovered_after_process_loss": true,
-                    "coverage": "acknowledged_prefix",
-                    "eligibility": {
-                        "eligibility": "needs_selection",
-                        "reasons": [{ "reason": "acknowledged_prefix_only" }],
-                    },
-                    "cut_mid_tool_call": false,
-                    "tool_outcome_unknown": false,
-                    "item_count": 1,
-                },
-            }),
         ),
     ]
 }

@@ -67,13 +67,6 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
                 (Some(stop.clone()), tool_context.with_step_stop(stop))
             }
         };
-        // The attempt's capture is written outside the watched body, before
-        // and after it (see `ToolAttemptTurnCapture`).
-        let turn_capture = crate::tool_dispatch::ToolAttemptTurnCapture::open(
-            dispatch.as_ref(),
-            &crate::tool_dispatch::ToolCallIds::of(&call),
-        )
-        .await?;
         let body = Box::pin(crate::tool_dispatch::execute_prepared_tool_attempt_effect(
             dispatch.as_ref(),
             *call,
@@ -81,9 +74,8 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
             attempt,
             max_attempts,
             tool_context,
-            &turn_capture,
         ));
-        let mut outcome = match (cancel_watch, stop) {
+        let outcome = match (cancel_watch, stop) {
             (Some(watch), Some(stop)) => {
                 crate::runtime::run_step_body_until_cancelled(
                     stop,
@@ -97,7 +89,6 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
             }
             _ => body.await?,
         };
-        turn_capture.settle(&call_id, &mut outcome).await?;
         Ok(tool_attempt_outcome(outcome))
     }
 }

@@ -32,7 +32,6 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
     let _ = attempt.intent_identity(0);
     let _ = attempt.logical_root();
     let _ = attempt.tool_catalog();
-    let _ = attempt.progress();
     let sessions = attempt.sessions();
     let _ = sessions.model().await;
     let _ = sessions.snapshot_current().await;

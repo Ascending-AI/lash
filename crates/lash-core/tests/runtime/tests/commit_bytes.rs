@@ -34,6 +34,11 @@
 //! tool state, which recorded that registration, is now empty. That body is
 //! the only difference.
 //!
+//! The three stopped-turn pins were re-pinned for ADR 0122 (FIG-4113): lash
+//! keeps no stopped partial, so a stopped turn's commit no longer carries
+//! `stopped_partial`. Removing that field from each ADR 0116 pin's masked
+//! commit reproduces the new digest; every other committed byte is unchanged.
+//!
 //! The digest is over the commit's serialized form with the values that differ
 //! between two runs of the same turn masked: worker and lease identities,
 //! random ids, wall-clock timestamps, and the hashes computed over them. Every
@@ -378,7 +383,7 @@ async fn provider_failure_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "provider failure",
         &pinned,
-        &["751f5c2ee9c669cb00962f62bbbaf0124c1a36a4048cda51a86d0b34abd09ddb"],
+        &["d68b80456ee947541489192df54e23e6d2aec7b175e1b27e423b2e27aa2a87a9"],
         r#"{
             "assistant_output": "",
             "errors": [
@@ -416,7 +421,7 @@ async fn cancelled_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled",
         &pinned,
-        &["98e61bbe4df019ce8e80949f29791be08c941558e700a68bb347744de3f62fa6"],
+        &["6263a62fca36053117bf446c4403f0c80df01aa88c207017f8aefcd6ee3520bf"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -478,7 +483,7 @@ async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled mid tool",
         &pinned,
-        &["6b1ac972335f7fda2a83c84d45a6f76083320c66012d1855e943dbd899a05e48"],
+        &["56a8d8f55bd47c8b1847454dd2e4345f26feffa10fbc7be1a8989b3918176475"],
         r#"{
             "assistant_output": "",
             "errors": [],

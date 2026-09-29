@@ -31,7 +31,7 @@ pub use context::{
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
 pub(crate) use execution::execute_prepared_tool_attempt_effect;
-pub use execution::{ToolAttemptTurnCapture, finalize_tool_result_with_execution_context};
+pub use execution::finalize_tool_result_with_execution_context;
 #[cfg(feature = "testing")]
 pub use intent_executor::execute_final_tool_intents;
 #[cfg(not(feature = "testing"))]

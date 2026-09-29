@@ -241,7 +241,6 @@ impl TurnReport {
             omitted,
             failure_evidence,
             errors,
-            stopped_partial: _,
         } = turn;
         Self {
             state,
@@ -282,7 +281,6 @@ impl TurnReport {
             omitted: self.omitted.clone(),
             failure_evidence: self.failure_evidence.clone(),
             errors: self.errors.clone(),
-            stopped_partial: None,
         };
         let activities = activities
             .iter()

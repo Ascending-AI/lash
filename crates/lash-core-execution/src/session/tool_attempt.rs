@@ -1,6 +1,5 @@
 //! One tool attempt as a turn's execution context runs it: a recorded step
-//! whose body watches the turn's gate, with the attempt's capture written
-//! before and after that watched body (ADR 0114 §2.2, FIG-4071).
+//! whose body watches the turn's gate.
 
 use super::execution_context::RuntimeExecutionContext;
 
@@ -36,18 +35,10 @@ impl RuntimeExecutionContext<'_> {
         attempt_context.dispatch = std::sync::Arc::clone(&attempt_dispatch);
         attempt_context.parent_invocation = Some(attempt_invocation.clone());
 
-        // The attempt's capture is written outside the watched body, before
-        // and after it (see `ToolAttemptTurnCapture`).
-        let call_id = prepared.call_id.clone();
-        let turn_capture = crate::tool_dispatch::ToolAttemptTurnCapture::open(
-            attempt_dispatch.as_ref(),
-            &crate::tool_dispatch::ToolCallIds::of(&prepared),
-        )
-        .await?;
         // The attempt is a recorded step its engine cannot select away: its
         // body watches the turn's gate itself and gets the stop as its token,
         // so the recorded outcome says whether the stop won (FIG-3672 P9).
-        let mut outcome = Box::pin(self.run_turn_step_body(|stop| {
+        Box::pin(self.run_turn_step_body(|stop| {
             self.execute_prepared_tool_attempt_body(
                 prepared,
                 execution_grant,
@@ -59,12 +50,9 @@ impl RuntimeExecutionContext<'_> {
                 attempt_dispatch,
                 attempt_context,
                 stop,
-                &turn_capture,
             )
         }))
-        .await?;
-        turn_capture.settle(&call_id, &mut outcome).await?;
-        Ok(outcome)
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -80,7 +68,6 @@ impl RuntimeExecutionContext<'_> {
         attempt_dispatch: std::sync::Arc<crate::tool_dispatch::ToolDispatchContext<'_>>,
         attempt_context: Self,
         stop: Option<tokio_util::sync::CancellationToken>,
-        turn_capture: &crate::tool_dispatch::ToolAttemptTurnCapture,
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
         let mut tool_context =
             crate::ToolContext::from_dispatch(std::sync::Arc::clone(&attempt_dispatch), &prepared)
@@ -112,7 +99,6 @@ impl RuntimeExecutionContext<'_> {
             attempt,
             max_attempts,
             tool_context,
-            turn_capture,
         ))
         .await
     }

@@ -780,7 +780,6 @@ async fn strict_mcp_dispatch_context<'h>(
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
         process_lineage: None,
-        turn_capture: None,
         process_originator: None,
     }
 }
@@ -834,7 +833,6 @@ async fn dispatch_context<'h>(ports: crate::support::DispatchPorts<'h>) -> ToolD
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
         process_lineage: None,
-        turn_capture: None,
         process_originator: None,
     }
 }
@@ -896,7 +894,6 @@ async fn projection_policy_dispatch_context<'h>(
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
         process_lineage: None,
-        turn_capture: None,
         process_originator: None,
     }
 }
@@ -1069,7 +1066,6 @@ async fn pinned_contract_dispatch_context<'h>(
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
         process_lineage: None,
-        turn_capture: None,
         process_originator: None,
     }
 }
@@ -1145,7 +1141,6 @@ async fn authority_hidden_dispatch_context<'h>(
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
         process_lineage: None,
-        turn_capture: None,
         process_originator: None,
     }
 }
@@ -1197,7 +1192,6 @@ async fn exact_dispatch_context_with_plugins<'h>(
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
         process_lineage: None,
-        turn_capture: None,
         process_originator: None,
     }
 }
@@ -1333,7 +1327,6 @@ async fn pending_dispatch_context<'h>(
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
         process_lineage: None,
-        turn_capture: None,
         process_originator: None,
     }
 }

@@ -176,7 +176,6 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
         | SessionStreamEvent::LlmResponse { .. }
         | SessionStreamEvent::TokenUsage { .. }
         | SessionStreamEvent::PluginEvent { .. }
-        | SessionStreamEvent::StoppedPartialAvailable { .. }
         | SessionStreamEvent::Done => {}
     }
 }

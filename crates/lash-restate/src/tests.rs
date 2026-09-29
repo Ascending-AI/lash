@@ -1314,7 +1314,6 @@ fn fig793_llm_outcome() -> RuntimeEffectOutcome {
             ..lash_core::LlmResponse::default()
         })),
         text_streamed: false,
-        capture: None,
         call_record: None,
         stream: Box::default(),
     }
@@ -1683,7 +1682,6 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
                         }),
                         triggers: Vec::new(),
                         capture: None,
-                        capture_watermark: None,
                     })
                 }),
             )

@@ -1105,7 +1105,6 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                         }),
                         triggers: Vec::new(),
                         capture: None,
-                        capture_watermark: None,
                     })
                 }),
             )

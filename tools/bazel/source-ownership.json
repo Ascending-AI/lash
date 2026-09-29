@@ -100,7 +100,7 @@
         "tests/runtime/tests/turns/**/*.rs",
         "tests/runtime/tests/commit_placement.rs",
         "tests/runtime/tests/turn_cancel_modes.rs",
-        "tests/runtime/stopped_partial.rs"
+        "tests/runtime/stop_publication.rs"
       ]
     }
   },

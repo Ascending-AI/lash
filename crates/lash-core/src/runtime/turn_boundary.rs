@@ -75,9 +75,6 @@ pub(super) struct TurnBoundary {
     /// The logical root the turn runs under, whose park the final commit
     /// clears (FIG-3600 S7, D2 §1.3 P3).
     park_root: Option<crate::TurnId>,
-    /// The sealed partial a stopped turn's final commit publishes
-    /// (ADR 0114 §3.3).
-    stopped_partial: Option<crate::store::StoppedPartialCommit>,
 }
 
 /// The frame end a final commit makes (ADR 0113 §3.1). A switch the turn
@@ -165,7 +162,6 @@ impl TurnBoundary {
             protocol_terminal_output: materialize::ProtocolTerminalOutput::default(),
             drive_commit: None,
             park_root: None,
-            stopped_partial: None,
         }
     }
 
@@ -177,14 +173,6 @@ impl TurnBoundary {
     /// Clear `root`'s park with the final commit.
     pub(super) fn set_park_root(&mut self, root: crate::TurnId) {
         self.park_root = Some(root);
-    }
-
-    /// Publish the stopped turn's sealed partial with the final commit.
-    pub(super) fn set_stopped_partial(
-        &mut self,
-        partial: Option<crate::store::StoppedPartialCommit>,
-    ) {
-        self.stopped_partial = partial;
     }
 
     pub(super) fn record_protocol_terminal_output(
@@ -639,7 +627,6 @@ impl TurnBoundary {
         let commit_budget = self.commit_budget;
         let drive_commit = self.drive_commit.clone();
         let park_root = self.park_root.clone();
-        let stopped_partial = self.stopped_partial.clone();
         // A switch this turn makes ends the frame the turn was admitted on;
         // otherwise the commit ends whatever frame a resident open left
         // behind, if any.
@@ -685,7 +672,6 @@ impl TurnBoundary {
                 adopted_intent_rows,
                 drive_commit,
                 park_root,
-                stopped_partial,
                 frame_switch,
             )
             .await
@@ -727,7 +713,6 @@ impl TurnBoundary {
         adopted_intent_rows: u64,
         drive_commit: Option<DriveCommit>,
         park_root: Option<TurnId>,
-        stopped_partial: Option<crate::store::StoppedPartialCommit>,
         frame_switch: FrameSwitchCommit,
     ) -> FinalCommitResult {
         let session_id = state.session_id.clone();
@@ -808,7 +793,6 @@ impl TurnBoundary {
             None => {}
         }
         commit.park_root = park_root;
-        commit.stopped_partial = stopped_partial;
         commit.frame_transition = frame_transition;
         // Cancellation-intent retries are progress-fenced: every refusal
         // proves a newer durable intent revision. Refresh only that snapshot:

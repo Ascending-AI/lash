@@ -104,7 +104,6 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
         process_lineage: None,
-        turn_capture: None,
         process_originator: None,
     });
     let ctx = RuntimeExecutionContext::new(
@@ -172,7 +171,6 @@ fn test_execution_context_with_env_store(
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
         process_lineage: None,
-        turn_capture: None,
         process_originator: None,
     });
     RuntimeExecutionContext::new(
