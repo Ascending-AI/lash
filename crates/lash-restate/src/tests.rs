@@ -1540,6 +1540,7 @@ mod process_session_turn_cancel;
 mod process_session_turn_laws;
 mod process_start_engine_cancel;
 mod process_start_replay_on_the_double;
+mod process_start_store_refusals;
 mod process_terminal_obligation_on_the_double;
 mod process_workflow;
 mod recording_context;

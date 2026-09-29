@@ -155,3 +155,43 @@ mod cancelled_turn_withheld_input {
         }
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+async fn process_start_store_refusals_and_transient_faults_on_postgres() {
+    use super::process_start_store_refusals::{Fault, Step, server_config, start_store_fault_law};
+
+    let url = database_url().expect("the PostgreSQL start laws require a database");
+    let _lock = DatabaseLock::acquire(&url).await;
+    for seed in 0x4204_0000..0x4204_0014 {
+        for step in [Step::Claim, Step::Settle] {
+            for fault in [Fault::WriterFenced, Fault::Incompatible, Fault::Transient] {
+                let storage = lash_postgres_store::PostgresStorage::connect(&url)
+                    .await
+                    .expect("connect PostgreSQL start law store");
+                reset(storage.pool()).await;
+                let attachments = tempfile::tempdir().expect("attachment directory");
+                let backend = lash_restate_test::backend_with_store_set(
+                    seed,
+                    server_config(),
+                    |clock| async {
+                        Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                            &storage,
+                            Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+                                attachments.path(),
+                            )),
+                            lash_core::WakeDeliveryConfig::default(),
+                            clock,
+                        )) as Arc<dyn lash_core::StoreSet>)
+                    },
+                )
+                .await
+                .expect("the Restate SDK over PostgreSQL");
+                start_store_fault_law(&backend, step, fault).await;
+                eprintln!(
+                    "start-store-fault PostgreSQL/Restate {step:?} {fault:?} seed={seed:x} PASS"
+                );
+            }
+        }
+    }
+}

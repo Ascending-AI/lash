@@ -99,7 +99,7 @@ where
     let claimant = process_command_journal_name(invocation, "process-start-claim");
     let claim_token = match &starts {
         Some(starts) => {
-            let Json(token) = run_past_engine_cancel(
+            let Json(claim) = run_past_engine_cancel(
                 context,
                 invocation,
                 ["process-start-claim", "process-start-claim-after-cancel"],
@@ -112,13 +112,22 @@ where
                             .claim_start(&claimed_id, &claimant)
                             .await
                             .map(|token| token.map(|token| token.as_str().to_owned()))
-                            .map_err(|error| error.to_string())
+                            .map_or_else(
+                                |error| match error {
+                                    error @ (lash_core::StoreError::WriterFenced { .. }
+                                    | lash_core::StoreError::Incompatible { .. }) => {
+                                        Ok(Err(RuntimeEffectControllerError::from(error)))
+                                    }
+                                    error => Err(error.to_string()),
+                                },
+                                |token| Ok(Ok(token)),
+                            )
                     }
                 },
             )
             .await
             .map_err(|error| process_command_journal_error("start claim", error))?;
-            token
+            claim?
         }
         None => None,
     };
@@ -350,7 +359,7 @@ where
     C: RestateControllerContext<'ctx> + ?Sized,
 {
     // A settle that already applied answers `ClaimLost` when it runs again.
-    let Json(()) = run_past_engine_cancel(
+    let Json(settled) = run_past_engine_cancel(
         context,
         invocation,
         ["process-start-settle", "process-start-settle-after-cancel"],
@@ -364,13 +373,22 @@ where
                     .settle_start(&process_id, token, settlement)
                     .await
                     .map(|_| ())
-                    .map_err(|error| error.to_string())
+                    .map_or_else(
+                        |error| match error {
+                            error @ (lash_core::StoreError::WriterFenced { .. }
+                            | lash_core::StoreError::Incompatible { .. }) => {
+                                Ok(Err(RuntimeEffectControllerError::from(error)))
+                            }
+                            error => Err(error.to_string()),
+                        },
+                        |settled| Ok(Ok(settled)),
+                    )
             }
         },
     )
     .await
     .map_err(|error| process_command_journal_error("start settle", error))?;
-    Ok(())
+    settled
 }
 
 /// One journaled step of the scheduling boundary that the engine's
