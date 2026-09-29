@@ -863,7 +863,6 @@ finish("done");"#,
         call_id,
         output,
         graph_key: tool_completed_graph_key,
-        parent_call_id: tool_completed_parent,
         ..
     } = &events[tool_completed].event
     else {
@@ -926,10 +925,9 @@ finish("done");"#,
     assert_eq!(tool_call_ids.len(), 1);
     assert_eq!(completed_graph_key, started_graph_key);
     // Task 4: the RLM tool call carries the enclosing block's graph_key for
-    // structural containment, and no batch parent for a top-level call.
+    // structural containment.
     let TurnEvent::ToolCallStarted {
         graph_key: tool_started_graph_key,
-        parent_call_id: tool_started_parent,
         ..
     } = &events[tool_started].event
     else {
@@ -937,8 +935,6 @@ finish("done");"#,
     };
     assert_eq!(tool_started_graph_key, started_graph_key);
     assert_eq!(tool_completed_graph_key, started_graph_key);
-    assert_eq!(tool_started_parent, &None);
-    assert_eq!(tool_completed_parent, &None);
     let read_view = result.state.read_view();
     assert!(
         read_view.messages().iter().all(|message| message

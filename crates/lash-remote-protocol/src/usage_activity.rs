@@ -189,8 +189,6 @@ pub enum RemoteTurnEvent {
         args: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent_call_id: Option<String>,
     },
     ToolCallCompleted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -201,8 +199,6 @@ pub enum RemoteTurnEvent {
         duration_ms: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent_call_id: Option<String>,
     },
     ToolIntentOutcome {
         call_id: String,

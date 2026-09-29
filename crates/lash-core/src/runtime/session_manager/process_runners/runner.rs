@@ -32,7 +32,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
         let input = Arc::clone(&registration.input);
         // Hybrid process model by design:
         // - ToolCall, SessionTurn, and External are kernel primitives because
-        //   core owns their orchestration contracts directly.
+        //   core owns their process contracts directly.
         // - Engine rows are deployment runtimes looked up from the registry.
         // This split keeps core process coordination explicit without pulling
         // language-specific runtimes into the kernel.

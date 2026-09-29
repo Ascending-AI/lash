@@ -344,9 +344,6 @@ pub enum TurnEvent {
         /// inside one. `None` when the call did not run inside a code block.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
-        /// `None` for top-level tool calls.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent_call_id: Option<String>,
     },
     ToolCallCompleted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -359,9 +356,6 @@ pub enum TurnEvent {
         /// inside one. `None` when the call did not run inside a code block.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
-        /// `None` for top-level tool calls.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent_call_id: Option<String>,
     },
     ToolIntentOutcome {
         call_id: String,

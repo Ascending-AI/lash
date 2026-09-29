@@ -1379,7 +1379,6 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
                 output: lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true })),
                 duration_ms: 3,
                 graph_key: None,
-                parent_call_id: None,
             },
         ))
         .await;

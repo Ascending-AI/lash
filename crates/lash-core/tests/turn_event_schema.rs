@@ -324,7 +324,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 name: "read_file".to_string(),
                 args: json!({ "path": "x" }),
                 graph_key: Some("effect:s:e".to_string()),
-                parent_call_id: Some("parent-1".to_string()),
             },
             json!({
                 "type": "tool_call_started",
@@ -332,7 +331,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "name": "read_file",
                 "args": { "path": "x" },
                 "graph_key": "effect:s:e",
-                "parent_call_id": "parent-1",
             }),
         ),
         (
@@ -342,7 +340,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 name: "read_file".to_string(),
                 args: json!({ "path": "x" }),
                 graph_key: None,
-                parent_call_id: None,
             },
             json!({
                 "type": "tool_call_started",
@@ -359,7 +356,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 output: ToolCallOutput::success("ok"),
                 duration_ms: 7,
                 graph_key: Some("effect:s:e".to_string()),
-                parent_call_id: Some("parent-1".to_string()),
             },
             json!({
                 "type": "tool_call_completed",
@@ -377,7 +373,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 },
                 "duration_ms": 7,
                 "graph_key": "effect:s:e",
-                "parent_call_id": "parent-1",
             }),
         ),
         (
@@ -393,7 +388,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 )),
                 duration_ms: 7,
                 graph_key: None,
-                parent_call_id: None,
             },
             json!({
                 "type": "tool_call_completed",

@@ -992,7 +992,6 @@ mod tests {
                 })),
                 duration_ms: 7,
                 graph_key: None,
-                parent_call_id: None,
             },
         )
         .expect("persist completed tool call");
@@ -1209,7 +1208,6 @@ mod tests {
                 output: lash::tools::ToolCallOutput::success(json!({ "accepted": true })),
                 duration_ms: 1,
                 graph_key: None,
-                parent_call_id: None,
             },
         )
         .expect("persist tool call");

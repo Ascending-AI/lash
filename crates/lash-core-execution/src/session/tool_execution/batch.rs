@@ -114,7 +114,8 @@ impl RuntimeExecutionContext<'_> {
         };
         // The leaf's own key namespaces the prepare's directive lanes —
         // `observation_keyed` qualifies it under this dispatch's base, which
-        // for a nested batch is the opener call's invocation (ADR 0105 §1).
+        // for a batch opened under a parent effect is that effect's invocation
+        // (ADR 0105 §1).
         let keyed_dispatch = self.dispatch.observation_keyed(&call_key);
         match authorization
             .prepare(&keyed_dispatch, pending, call.id.clone())

@@ -140,7 +140,7 @@ the CI lane's cost bound. The runner records each as
   again as the VM gets faster (FIG-3730), not by being edited out.
 
 Separately, a wall-clock backstop bounds any single test at 300 s. Worker
-threads cannot be killed once a test starts, so the orchestrating thread
+threads cannot be killed once a test starts, so the coordinating thread
 records each test's start time and, once the backstop passes, reports the
 unfinished tests by name and exits non-zero: the CI job fails fast with names
 instead of hanging.

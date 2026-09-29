@@ -772,7 +772,6 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         name: "mcp__parallel__web_search_57jmhsdk2uvtc7o55qwq73sqyq".to_string(),
         args: serde_json::json!({ "query": "FIG-1350" }),
         graph_key: None,
-        parent_call_id: None,
     });
     let tool_completed_event = to_event_value(lash::TurnEvent::ToolCallCompleted {
         call_id: Some("tool-call-1".to_string()),
@@ -783,14 +782,12 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         ),
         duration_ms: 4,
         graph_key: None,
-        parent_call_id: None,
     });
     let no_id_tool_started_event = to_event_value(lash::TurnEvent::ToolCallStarted {
         call_id: None,
         name: "mcp__parallel__web_search_57jmhsdk2uvtc7o55qwq73sqyq".to_string(),
         args: serde_json::json!({ "query": "FIG-1350 no id" }),
         graph_key: None,
-        parent_call_id: None,
     });
     let no_id_tool_completed_event = to_event_value(lash::TurnEvent::ToolCallCompleted {
         call_id: None,
@@ -801,7 +798,6 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         ),
         duration_ms: 5,
         graph_key: None,
-        parent_call_id: None,
     });
     let code_completed_event = to_event_value(lash::TurnEvent::CodeBlockCompleted {
         language: "typescript".to_string(),

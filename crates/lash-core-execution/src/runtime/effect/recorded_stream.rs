@@ -21,13 +21,13 @@
 //! * **Deltas are coalesced.** A text or reasoning delta for the same block as
 //!   the channel's previous event is appended to it, so a streamed block costs
 //!   one entry, not one per delta.
-//! * **Call arguments and outputs are stored once.** A nested call's `args`
-//!   and `output` appear on its session event and on its activity. A payload
+//! * **Call arguments and outputs are stored once.** A call's `args` and
+//!   `output` appear on its session event and on its activity. A payload
 //!   whose field equals the same call's earlier recorded field keeps a
 //!   reference to that entry instead, and emission restores it.
-//! * **What the settlement already holds is not recorded again.** A child's
-//!   own result often embeds what its nested calls returned (a batch's
-//!   results carry each nested output). Once the child's drive has returned,
+//! * **What the settlement already holds is not recorded again.** The
+//!   child's call events carry the arguments and output its own journaled
+//!   call record holds. Once the child's drive has returned,
 //!   any sizable part of a recorded payload equal to a part of the child's
 //!   own journaled call record is replaced by a reference to it, and
 //!   emission restores it from that record.
@@ -48,7 +48,7 @@ use serde_json::Value;
 /// is dropped and counted in its [`ChildStreamTruncation`].
 pub const CHILD_STREAM_BYTE_BUDGET: usize = 256 * 1024;
 
-/// The fields a nested call's session event and activity both carry, stored
+/// The fields a call's session event and activity both carry, stored
 /// once per call.
 const SHARED_CALL_FIELDS: [&str; 2] = ["args", "output"];
 
@@ -441,30 +441,30 @@ mod tests {
 
     #[test]
     fn a_part_the_childs_own_record_holds_is_referenced_and_restored() {
-        let nested = serde_json::json!({"status": "success", "value": {"rows": "z".repeat(128)}});
+        let output = serde_json::json!({"status": "success", "value": {"rows": "z".repeat(128)}});
         let activity = serde_json::json!({
             "id": "a1",
             "event": {
                 "type": "tool_call_completed",
-                "call_id": "nested",
+                "call_id": "call-1",
                 "name": "leaf",
                 "args": {},
-                "output": nested.clone(),
+                "output": output.clone(),
                 "duration_ms": 1,
             }
         });
         let mut stream = builder_with(vec![(RecordedChildChannel::Activity, activity.clone())]);
         let record = serde_json::json!({
-            "tool": "batch",
+            "tool": "leaf",
             "args": {},
-            "output": {"results": [{"index": 0, "result": nested}]},
+            "output": output,
         });
         stream.settle_against(&record);
         let entry = &stream.events[0];
         assert_eq!(entry.payload["event"]["output"], Value::Null);
         assert_eq!(
             entry.settled.get("/event/output").map(String::as_str),
-            Some("/output/results/0/result")
+            Some("/output")
         );
         let bytes = serde_json::to_vec(&stream).expect("serializes").len();
         assert!(
@@ -473,26 +473,25 @@ mod tests {
         );
     }
 
-    /// A real nested completion round-trips through the settled reference:
+    /// A real completion round-trips through the settled reference:
     /// emission restores the output from the child's own record.
     #[test]
-    fn a_settled_nested_completion_decodes_to_its_output() {
+    fn a_settled_completion_decodes_to_its_output() {
         let output = crate::ToolCallOutput::success(serde_json::json!({"rows": "q".repeat(128)}));
         let mut builder = RecordedChildStreamBuilder::default();
         builder.push_activity(&crate::TurnActivity::new(
-            crate::TurnActivityId::new("tool:nested"),
+            crate::TurnActivityId::new("tool:call-1"),
             crate::TurnEvent::ToolCallCompleted {
-                call_id: Some("nested".to_string()),
+                call_id: Some("call-1".to_string()),
                 name: "leaf".to_string(),
                 args: serde_json::json!({}),
                 output: output.clone(),
                 duration_ms: 1,
                 graph_key: None,
-                parent_call_id: Some("call-1".to_string()),
             },
         ));
         let mut stream = builder.finish();
-        let record = serde_json::json!({"tool": "batch", "results": [output.clone()]});
+        let record = serde_json::json!({"tool": "leaf", "args": {}, "output": output.clone()});
         stream.settle_against(&record);
         assert!(
             !stream.events[0].settled.is_empty(),

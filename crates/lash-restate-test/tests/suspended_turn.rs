@@ -539,9 +539,9 @@ async fn a_tool_turn_finishes_when_every_await_suspends_its_handler() {
 /// They are recorded on its settlement and reach the turn when it
 /// incorporates the child, never dropped. A member is one of the step's flat
 /// slots, `{wrapper}/batch/{i}` (ADR 0116 §2), so its completion is a slot's,
-/// exactly as a live turn reports it, with no batch parent.
+/// exactly as a live turn reports it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_batch_child_with_no_live_turn_records_its_nested_events_for_the_turn() {
+async fn a_batch_child_with_no_live_turn_records_its_events_for_the_turn() {
     let turn = start_turn(ServerConfig::default().time(TimeMode::Manual), false, true).await;
     let child = turn.tool_child().await;
     while turn.executions.load(Ordering::SeqCst) == 0 {
@@ -569,25 +569,14 @@ async fn a_batch_child_with_no_live_turn_records_its_nested_events_for_the_turn(
                 call_id,
                 name,
                 output,
-                parent_call_id,
                 ..
-            } => Some((
-                name.clone(),
-                call_id.clone(),
-                parent_call_id.clone(),
-                output.is_success(),
-            )),
+            } => Some((name.clone(), call_id.clone(), output.is_success())),
             _ => None,
         })
         .collect();
     assert_eq!(
         completed,
-        vec![(
-            TOOL.to_owned(),
-            Some("call-1/batch/0".to_owned()),
-            None,
-            true
-        )],
+        vec![(TOOL.to_owned(), Some("call-1/batch/0".to_owned()), true)],
         "the batch's member completed on the turn's stream, as the step's slot"
     );
 }

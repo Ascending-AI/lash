@@ -413,7 +413,6 @@ mod tests {
                 ref name,
                 ref args,
                 graph_key: None,
-                parent_call_id: None,
             } if call_id == "start-order"
                 && name == "granted_leaf_probe"
                 && args == &serde_json::json!({ "probe": true })
