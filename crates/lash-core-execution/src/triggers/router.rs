@@ -273,19 +273,15 @@ fn project_trigger_process_input(
             definition_key,
             create_request: _,
             turn_input: _,
-            output_contract,
+            result,
         } => {
             identity.tag(3);
             identity.string(definition_key);
-            match output_contract {
-                crate::ToolOutputContract::Static => identity.tag(1),
-                crate::ToolOutputContract::FromInputSchema {
-                    input_field,
-                    default_schema,
-                } => {
+            match result {
+                crate::SessionTurnResult::Turn => identity.tag(1),
+                crate::SessionTurnResult::FinalValue { schema } => {
                     identity.tag(2);
-                    identity.string(input_field);
-                    identity.optional(default_schema.as_ref(), project_process_schema_leaf);
+                    identity.optional(schema.as_ref(), project_process_schema_leaf);
                 }
             }
         }

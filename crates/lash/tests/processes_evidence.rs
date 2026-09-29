@@ -618,13 +618,10 @@ fn processes_area_witnesses() {
             let _ = definition_key;
         }
     });
-    // W0207: lash::process::ProcessInput::SessionTurn::output_contract [field]
+    // W0207: lash::process::ProcessInput::SessionTurn::result [field]
     field_witness(|value: &lash::process::ProcessInput| {
-        if let lash::process::ProcessInput::SessionTurn {
-            output_contract, ..
-        } = value
-        {
-            let _ = output_contract;
+        if let lash::process::ProcessInput::SessionTurn { result, .. } = value {
+            let _ = result;
         }
     });
     // W0208: lash::process::ProcessInput::SessionTurn::turn_input [field]

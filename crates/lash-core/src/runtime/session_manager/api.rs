@@ -325,6 +325,24 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
+    async fn release_consumer_hold(
+        &self,
+        process_id: &ProcessId,
+        key: &str,
+    ) -> Result<(), crate::PluginError> {
+        let registry = self
+            .services
+            .current
+            .host
+            .process_registry()
+            .ok_or_else(|| {
+                crate::PluginError::Session(
+                    "process registry is unavailable in this runtime".to_string(),
+                )
+            })?;
+        registry.release_consumer_hold(process_id, key).await
+    }
+
     async fn list_visible(
         &self,
         session_id: &SessionId,

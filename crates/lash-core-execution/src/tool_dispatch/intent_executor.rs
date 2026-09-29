@@ -122,6 +122,100 @@ pub async fn execute_final_tool_intents(
     Ok(outcomes)
 }
 
+/// The declared-start launch entry (ADR 0116 §3.2): realizes the one start a
+/// pending call declared exactly as a `StartProcess` drain realizes it — the
+/// same request under the same derived key, the same journaled admission and
+/// the same child-trace hook — and answers the call's launch receipt.
+///
+/// `scope` carries the call's lineage as its parent. A realized start answers
+/// `Executed`; a typed refusal answers `Refused` and settles the call. An
+/// `Err` is a fault the call cannot settle (see [`declared_start_fault`]).
+pub(crate) async fn realize_declared_start(
+    processes: &dyn crate::ProcessService,
+    start: &crate::DeclaredStart,
+    scope: crate::ProcessOpScope<'_>,
+    child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
+) -> Result<crate::ToolIntentExecutionOutcome, crate::RuntimeEffectControllerError> {
+    let identity = start.identity().clone();
+    let parent = scope.parent_invocation.clone().map(|parent| {
+        parent.with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
+            identity.clone(),
+        ))
+    });
+    let scope = scope.with_parent_invocation(parent);
+    let kind = crate::ToolIntentKind::StartProcess;
+    match processes
+        .start_from_recorded_intent(&start.start().session_id, start.request(), scope)
+        .await
+    {
+        Ok(handle) => {
+            // The declared kind names the child's entry, so a trace links the
+            // call to a child it can name.
+            if let Some(hook) = child_trace_hook {
+                hook.child_process_started(crate::tool_provider::ToolChildProcessStarted {
+                    process_id: handle.process_id.clone(),
+                    attempt: None,
+                    child_entry_name: start
+                        .start()
+                        .declaration
+                        .identity
+                        .as_ref()
+                        .map(|identity| identity.kind.as_str().to_string()),
+                });
+            }
+            record_executed_metric(kind);
+            Ok(crate::ToolIntentExecutionOutcome::Executed {
+                identity,
+                kind,
+                result: serde_json::to_value(handle).unwrap_or(serde_json::Value::Null),
+            })
+        }
+        Err(error) => match declared_start_fault(&error) {
+            Some(fault) => Err(fault),
+            None => Ok(refused(
+                identity.intent_index as usize,
+                kind,
+                Some(identity),
+                crate::ToolIntentRefusalReason::CommandFailed {
+                    code: error_code(&error),
+                    message: error_message(&error),
+                },
+            )),
+        },
+    }
+}
+
+/// A declared start's error the call cannot settle as its result: a replay
+/// divergence, a cancel decided before the launch, or a live fault left
+/// unrecorded, which the engine's redelivery retries (ADR 0116 §3.2 rule 7).
+/// Every other error is the start's typed refusal.
+pub(crate) fn declared_start_fault(
+    error: &crate::PluginError,
+) -> Option<crate::RuntimeEffectControllerError> {
+    match error {
+        crate::PluginError::RuntimeEffectController(error)
+            if error.code.is_replay_mismatch()
+                || error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided
+                || !error.journaled =>
+        {
+            Some(error.clone())
+        }
+        crate::PluginError::SessionExecutionLeaseLost { .. } => {
+            Some(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::SessionExecutionLeaseLost,
+                error.to_string(),
+            ))
+        }
+        crate::PluginError::Session(_) | crate::PluginError::ProcessExecutionSuperseded { .. } => {
+            Some(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::PluginSessionManager,
+                error.to_string(),
+            ))
+        }
+        _ => None,
+    }
+}
+
 fn admit_batch(
     session_id: &SessionId,
     tool_call_id: Option<&str>,

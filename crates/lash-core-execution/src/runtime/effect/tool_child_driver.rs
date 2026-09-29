@@ -1168,7 +1168,7 @@ async fn run_tool_child<'run>(
         &dispatch,
         request,
         &outcome,
-        &outcome.intent_outcomes,
+        crate::tool_dispatch::model_visible_intent_outcomes(&outcome),
         dispatch
             .clock
             .now()
@@ -1527,24 +1527,36 @@ pub(crate) async fn await_journaled_tool_completion(
     pending: crate::tool_dispatch::PendingToolDispatchOutcome,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
 ) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
-    if let Err(error) = crate::tool_dispatch::arm_pending_resolver(
-        dispatch.processes.as_ref(),
-        &pending.pending,
-        &pending.key,
-        dispatch.process_scope(),
-    )
-    .await
-    {
-        return Ok(unarmed_child_outcome(pending, &error.to_string()));
-    }
+    let site = crate::tool_dispatch::ParkSite {
+        processes: dispatch.processes.as_ref(),
+        session_id: &dispatch.session_id,
+        call_id,
+        scope: dispatch.process_scope(),
+        child_trace_hook: None,
+    };
     let Some(invocation) =
         parent_invocation.map(|parent| journaled_await_invocation(dispatch, parent, call_id))
     else {
         return Ok(unarmed_child_outcome(
             pending,
-            "the caller's lineage names no invocation to hang an await on",
+            crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Internal,
+                "pending_tool_resolver_unarmed",
+                "the declared resolver for this group child could not be armed: the caller's \
+                 lineage names no invocation to hang an await on",
+            ),
+            crate::tool_dispatch::ArmedResolver::default(),
         ));
     };
+    let armed =
+        match crate::tool_dispatch::arm_pending_resolver(&site, &pending.pending, &pending.key)
+            .await?
+        {
+            crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
+            crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
+                return Ok(unarmed_child_outcome(pending, *failure, armed));
+            }
+        };
     let resolver = pending.pending.resolved_by.clone();
     // The journaled await's replay key is the settled call's observation key:
     // unique per (parent, call id) and re-derived identically on a redrive
@@ -1581,10 +1593,18 @@ pub(crate) async fn await_journaled_tool_completion(
         // live journal fault — is a refusal, returned so the caller refuses
         // the call rather than settling the error as its result (FIG-3679).
         Err(error) if error.journaled => {
-            return Ok(failed_child_outcome(pending, &error.to_string()));
+            return Ok(failed_child_outcome(pending, &error.to_string(), &armed));
         }
         Err(error) => return Err(error),
     };
+    crate::tool_dispatch::finish_parked_wait(
+        &site,
+        &pending.pending,
+        &armed,
+        &pending.key,
+        &resolution,
+    )
+    .await?;
     let settle_dispatch = dispatch.observation_keyed(settle_key);
     let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
         &settle_dispatch,
@@ -1611,6 +1631,10 @@ pub(crate) async fn await_journaled_tool_completion(
     let mut triggers = pending.triggers;
     triggers.extend(outcome.triggers);
     outcome.triggers = triggers;
+    // A declared start's launch receipt is the call's one intent outcome
+    // (ADR 0116 §3.8): host-facing metadata that also grants the opener
+    // possession of the child.
+    outcome.intent_outcomes = armed.intent_outcomes();
     Ok(outcome)
 }
 
@@ -1631,25 +1655,23 @@ fn journaled_await_invocation(
     )
 }
 
-/// A wait nobody will resolve is a failure, never a park.
+/// A wait nobody will resolve, or a declared start that was refused, is a
+/// failure, never a park.
 fn unarmed_child_outcome(
     pending: crate::tool_dispatch::PendingToolDispatchOutcome,
-    reason: &str,
+    failure: crate::ToolFailure,
+    armed: crate::tool_dispatch::ArmedResolver,
 ) -> ToolDispatchOutcome {
     ToolDispatchOutcome {
         record: crate::ToolCallRecord {
             call_id: None,
             tool: pending.tool_name,
             args: pending.args,
-            output: crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Internal,
-                "pending_tool_resolver_unarmed",
-                format!("the declared resolver for this group child could not be armed: {reason}"),
-            )),
+            output: crate::ToolCallOutput::failure(failure),
         },
         attempts: pending.attempts,
         intents: crate::ToolIntents::default(),
-        intent_outcomes: Vec::new(),
+        intent_outcomes: armed.intent_outcomes(),
         captures: pending.captures,
         triggers: pending.triggers,
     }
@@ -1659,6 +1681,7 @@ fn unarmed_child_outcome(
 fn failed_child_outcome(
     pending: crate::tool_dispatch::PendingToolDispatchOutcome,
     reason: &str,
+    armed: &crate::tool_dispatch::ArmedResolver,
 ) -> ToolDispatchOutcome {
     ToolDispatchOutcome {
         record: crate::ToolCallRecord {
@@ -1673,7 +1696,7 @@ fn failed_child_outcome(
         },
         attempts: pending.attempts,
         intents: crate::ToolIntents::default(),
-        intent_outcomes: Vec::new(),
+        intent_outcomes: armed.intent_outcomes(),
         captures: pending.captures,
         triggers: pending.triggers,
     }

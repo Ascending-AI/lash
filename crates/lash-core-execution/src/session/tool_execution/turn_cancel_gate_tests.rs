@@ -172,6 +172,7 @@ async fn deferred_tool_await_shape(
             "call:await".to_string(),
             pending_tool(),
             None,
+            None,
         )
         .await
         .expect("the recorded wait settles");

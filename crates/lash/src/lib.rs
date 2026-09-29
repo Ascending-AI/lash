@@ -286,6 +286,7 @@ pub mod tools {
         facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
         facade_support::ToolTriggerClient, turn_outcome_from_tool_control,
     };
+    pub use lash_core::{DeclaredStart, DeclaredStartRefused};
     pub use lash_core::{
         InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
         InternalProcessToolDef, InternalProcessToolImplementation,
@@ -816,6 +817,7 @@ pub mod process {
         ProcessObservationHub, ProcessObservationItem, ProcessObservationProjection,
         ProcessObservationSnapshot, ProcessObservationSubscription,
     };
+    pub use lash_core::SessionTurnResult;
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
     pub use lash_core::runtime::publish_process_execution_env;

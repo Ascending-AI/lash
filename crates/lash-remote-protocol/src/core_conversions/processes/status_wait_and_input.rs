@@ -216,7 +216,7 @@ impl TryFrom<lash_core::ProcessInput> for RemoteProcessInput {
                 definition_key,
                 create_request,
                 turn_input,
-                output_contract,
+                result,
             } => Ok(Self::SessionTurn {
                 definition_key,
                 create_request: serde_json::to_value(create_request.as_ref()).map_err(|err| {
@@ -226,7 +226,7 @@ impl TryFrom<lash_core::ProcessInput> for RemoteProcessInput {
                     }
                 })?,
                 turn_input: RemoteTurnInput::try_from(*turn_input)?,
-                output_contract: output_contract.into(),
+                result: result.into(),
             }),
             lash_core::ProcessInput::External { metadata } => Ok(Self::External { metadata }),
         }
@@ -251,7 +251,7 @@ impl TryFrom<RemoteProcessInput> for lash_core::ProcessInput {
                 definition_key,
                 create_request,
                 turn_input,
-                output_contract,
+                result,
             } => Ok(Self::SessionTurn {
                 definition_key,
                 create_request: Box::new(decode_remote_json(
@@ -260,9 +260,27 @@ impl TryFrom<RemoteProcessInput> for lash_core::ProcessInput {
                     "create_request",
                 )?),
                 turn_input: Box::new(lash_core::TurnInput::try_from(turn_input)?),
-                output_contract: output_contract.into(),
+                result: result.into(),
             }),
             RemoteProcessInput::External { metadata } => Ok(Self::External { metadata }),
+        }
+    }
+}
+
+impl From<lash_core::SessionTurnResult> for crate::RemoteSessionTurnResult {
+    fn from(value: lash_core::SessionTurnResult) -> Self {
+        match value {
+            lash_core::SessionTurnResult::Turn => Self::Turn,
+            lash_core::SessionTurnResult::FinalValue { schema } => Self::FinalValue { schema },
+        }
+    }
+}
+
+impl From<crate::RemoteSessionTurnResult> for lash_core::SessionTurnResult {
+    fn from(value: crate::RemoteSessionTurnResult) -> Self {
+        match value {
+            crate::RemoteSessionTurnResult::Turn => Self::Turn,
+            crate::RemoteSessionTurnResult::FinalValue { schema } => Self::FinalValue { schema },
         }
     }
 }

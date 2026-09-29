@@ -698,10 +698,9 @@ fn process_start_requests_round_trip_core_values() {
                 .with_session_id("child-session"),
             ),
             turn_input: Box::new(lash_core::TurnInput::text("hello child")),
-            output_contract: lash_core::ToolOutputContract::from_input_schema(
-                "schema",
-                Some(serde_json::json!({ "type": "object" })),
-            ),
+            result: lash_core::SessionTurnResult::FinalValue {
+                schema: Some(serde_json::json!({ "type": "object" })),
+            },
         },
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,

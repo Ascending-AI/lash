@@ -13,6 +13,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
         observers.sort();
         observers.dedup();
         let wake_session_id = registration.wake_session_id.clone();
+        let consumer_hold = registration.consumer_hold.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
         let process_id_mint = self.process_id_mint.clone();
@@ -80,6 +81,9 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                             record.lifetime.storage_label(),
                             cancel_requested_at_ms(&record),
                             process_encode_json(&record)?,
+                            consumer_hold.as_ref().map(|hold| hold.key.as_str()),
+                            consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()),
+                            consumer_hold.as_ref().map(|hold| hold.owner.storage_id()),
                         ],
                     )
                     .map_err(process_sqlite_error)?;

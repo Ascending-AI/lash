@@ -588,6 +588,7 @@ pub use tool_result::{
     CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, TimeoutBehavior,
     ToolOutcome,
 };
+pub use tool_result::{DeclaredStart, DeclaredStartRefused};
 pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
     TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
@@ -785,6 +786,7 @@ pub(crate) use runtime::{
     process_wake_turn_cause, process_wake_turn_text, require_event_replay,
     settle_started_process_engine_artifacts, settle_started_process_execution_env,
 };
+pub use runtime::{ConsumerHold, SessionTurnResult};
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
 pub(crate) use session_model::plugin_runtime_protocol_event;
 

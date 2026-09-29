@@ -77,11 +77,20 @@ pub(super) fn record_conn(
         conn,
         &lash_core_execution::store::ObligationKey::ParentEnd {
             parent_kind: kind.to_string(),
-            parent_id: id,
+            parent_id: id.clone(),
         },
         ended_at_ms,
     )
     .map_err(|error| PluginError::Session(error.to_string()))?;
+    // The close ends every wait the scope's calls still hold (ADR 0116
+    // §3.6): an abandoned call leaks no hold, and a late start under the
+    // closed scope is refused above, so no redrive needs the row pinned.
+    crate::conn::cached_execute(
+        conn,
+        process_sql().process.release_consumer_holds_owned_by.sql(),
+        params![kind, id],
+    )
+    .map_err(process_sqlite_error)?;
     Ok(())
 }
 

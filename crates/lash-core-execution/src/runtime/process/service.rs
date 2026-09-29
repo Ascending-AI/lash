@@ -151,6 +151,24 @@ pub trait ProcessService: Send + Sync {
         ))
     }
 
+    /// Releases a parked call's hold on the process whose terminal it
+    /// consumed (ADR 0116 §3.6), keyed by the call's completion key id.
+    ///
+    /// Controller-free and idempotent, like a caller departure: the release
+    /// is a reconciliation write that every redrive may repeat, and nothing
+    /// about replay depends on it. The default refuses: only a service whose
+    /// starts register holds can release them.
+    async fn release_consumer_hold(
+        &self,
+        process_id: &ProcessId,
+        key: &str,
+    ) -> Result<(), PluginError> {
+        let _ = (process_id, key);
+        Err(PluginError::Session(
+            "process consumer holds are unavailable in this service".to_string(),
+        ))
+    }
+
     async fn list_visible(
         &self,
         session_id: &SessionId,

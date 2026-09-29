@@ -261,6 +261,9 @@ table lash_process_wake_deliveries
 table lash_processes
   column cancel_requested_at_ms bigint nullable
   column change_seq bigint not-null
+  column consumer_hold_key text nullable
+  column consumer_hold_scope_id text nullable
+  column consumer_hold_scope_kind text nullable
   column created_at_ms bigint not-null
   column identity_kind text not-null
   column identity_label text nullable

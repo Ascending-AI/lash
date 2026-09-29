@@ -442,7 +442,8 @@ impl<'run> ScopedEffectController<'run> {
             guard.admit(Some(envelope.invocation.replay_key()))?;
             // A wait on an external completion dispatches nothing
             // (FIG-3587) — an await event, or the await of a process the
-            // command started, whose start answers for itself (FIG-3779) —
+            // command started, or the arming of its terminal on a parked
+            // call's wait, whose start answers for itself (FIG-3779) —
             // and neither does the host's deterministic work around a call —
             // reading the recorded environment, presenting a result,
             // recording an incorporation (FIG-3725): only a dispatching
@@ -453,9 +454,11 @@ impl<'run> ScopedEffectController<'run> {
                 | crate::RuntimeEffectCommand::LoadExecutionEnv { .. }
                 | crate::RuntimeEffectCommand::PresentToolResult { .. }
                 | crate::RuntimeEffectCommand::IncorporateGroupSettlements { .. } => false,
-                crate::RuntimeEffectCommand::Process { command } => {
-                    !matches!(command.as_ref(), crate::ProcessCommand::Await { .. })
-                }
+                crate::RuntimeEffectCommand::Process { command } => !matches!(
+                    command.as_ref(),
+                    crate::ProcessCommand::Await { .. }
+                        | crate::ProcessCommand::AttachTerminal { .. }
+                ),
                 _ => true,
             };
             let key = envelope.invocation.replay_key();

@@ -894,6 +894,14 @@ pub struct CheckpointAdmittedSet {
     pub incorporation: crate::session::IncorporationLedger,
 }
 
+/// The replay-key suffix of a parked call's cancel obligation (ADR 0116
+/// §3.4): the process cancel a cancelled or timed-out wait owes is journaled
+/// beneath `{call id}:cancel-work` under the call's lineage, so every redrive
+/// re-issues the same command.
+pub fn tool_cancel_work_replay_suffix(call_id: &str) -> String {
+    format!("{call_id}:cancel-work")
+}
+
 impl ProcessCommand {
     /// The effect id of a start under `start_key`: its admitted operation
     /// identity. A journaled start always carries a key; the unkeyed spelling

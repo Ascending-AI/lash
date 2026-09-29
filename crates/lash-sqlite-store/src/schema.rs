@@ -1067,6 +1067,10 @@ CREATE TABLE IF NOT EXISTS processes (
     obligation_stall_reason TEXT,
     obligation_last_error TEXT,
     obligation_settled_at_ms INTEGER,
+    consumer_hold_key     TEXT,
+    consumer_hold_scope_kind TEXT,
+    consumer_hold_scope_id TEXT,
+    CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
     CONSTRAINT ck_processes_start_obligation CHECK ((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_processes_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
@@ -1099,6 +1103,10 @@ CREATE INDEX IF NOT EXISTS idx_processes_status
 -- A start key maps to the one retained process minted for it (ADR 0107).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_start_key
     ON processes(start_key) WHERE start_key IS NOT NULL;
+-- A held row names the scope whose close releases it (ADR 0116 §3.6).
+CREATE INDEX IF NOT EXISTS idx_processes_consumer_hold_owner
+    ON processes(consumer_hold_scope_kind, consumer_hold_scope_id)
+    WHERE consumer_hold_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_processes_non_terminal
     ON processes(process_id) WHERE status IN ('running', 'waiting');
 
@@ -1451,6 +1459,13 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 /// the same freeze): `draining_generations` names each build generation an
 /// operator marked draining. A registry written before the change lacks the
 /// table until it is next opened, which creates it empty.
+///
+/// Version 44 also carries consumer holds (ADR 0116 §3.6, changed in place
+/// under the same freeze): `processes` gains `consumer_hold_key` and the
+/// owning scope's `consumer_hold_scope_kind` and `consumer_hold_scope_id`,
+/// set together or not at all, and indexed by owner. A held row is never
+/// pruned. A registry written before the change lacks the columns; recreate
+/// it.
 pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 44;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "

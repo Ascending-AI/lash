@@ -82,6 +82,7 @@ pub use model::{
     process_child_session_id, process_runtime_session_ids, publish_process_execution_env,
     settle_started_process_execution_env,
 };
+pub use model::{ConsumerHold, SessionTurnResult};
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
     ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState, ProcessWorkObserver,

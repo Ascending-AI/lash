@@ -57,6 +57,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
             crate::ProcessInput::SessionTurn {
                 create_request,
                 turn_input,
+                result,
                 ..
             } => {
                 let execution_write_authority = execution_context
@@ -67,6 +68,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                     registration.lineage(&process_id),
                     *create_request.clone(),
                     *turn_input.clone(),
+                    result.clone(),
                     execution_write_authority,
                     scoped_effect_controller,
                     cancellation,

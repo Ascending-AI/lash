@@ -744,6 +744,14 @@ macro_rules! delegate_process_retention {
                     .prunable_terminal_processes(cutoff_epoch_ms, filter, watermark)
                     .await
             }
+
+            async fn release_consumer_hold(
+                &self,
+                process_id: &$crate::ProcessId,
+                key: &str,
+            ) -> Result<(), $crate::PluginError> {
+                self.$inner.release_consumer_hold(process_id, key).await
+            }
         }
     };
 }

@@ -318,6 +318,7 @@ pub use process::{
     ProcessEventLogTestSupport, ProcessRegistryTestSupport, TestProcessRegistryWriteExt,
     accepted_process_registration, fail_parent_end_once, refused_process_registrations,
 };
+pub use process::{ConsumerHold, SessionTurnResult};
 pub use process::{ProcessStartStores, RegisteredProcessStart, register_process_start};
 pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{

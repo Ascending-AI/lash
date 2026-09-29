@@ -46,6 +46,7 @@ mod outcome;
 pub use lash_core_effect::await_event_identity;
 mod validation;
 
+pub use envelope::tool_cancel_work_replay_suffix;
 pub use envelope::{
     AdmittedHeadVerdict, AssistantResponseHookEvents, AssistantStreamHookState,
     CheckpointAdmittedSet, LlmRequestSpec, LlmStreamRecord, ProcessCommand, ProcessEffectOutcome,
