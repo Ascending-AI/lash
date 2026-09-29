@@ -208,7 +208,7 @@ impl lash_core_execution::ProcessQuery for SqliteProcessRegistry {
 
     async fn summarize_parked_processes(
         &self,
-    ) -> Result<lash_core_execution::store::ParkSummary, lash_core_execution::PluginError> {
+    ) -> Result<lash_core_execution::store::ParkReport, lash_core_execution::PluginError> {
         park_feed::summarize_parked_processes(self).await
     }
 }
@@ -1215,8 +1215,8 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
         claim_token: &str,
     ) -> Result<lash_core_execution::WakeDeliveryClaimOutcome, lash_core_execution::PluginError>
     {
-        let disposition = lash_core_execution::WakeDeliveryDisposition::Enqueued;
-        update_wake_delivery_state(&self.conn, delivery_id, claim_token, disposition).await
+        let lifecycle = lash_core_execution::WakeDeliveryLifecycle::Enqueued;
+        update_wake_delivery_state(&self.conn, delivery_id, claim_token, lifecycle).await
     }
 
     async fn discard_wake_delivery(
@@ -1226,8 +1226,8 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
         reason: lash_core_execution::WakeDiscardReason,
     ) -> Result<lash_core_execution::WakeDeliveryClaimOutcome, lash_core_execution::PluginError>
     {
-        let disposition = lash_core_execution::WakeDeliveryDisposition::Discarded { reason };
-        update_wake_delivery_state(&self.conn, delivery_id, claim_token, disposition).await
+        let lifecycle = lash_core_execution::WakeDeliveryLifecycle::Discarded { reason };
+        update_wake_delivery_state(&self.conn, delivery_id, claim_token, lifecycle).await
     }
 
     async fn redrive_wake_delivery(

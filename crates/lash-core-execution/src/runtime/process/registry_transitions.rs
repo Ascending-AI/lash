@@ -16,9 +16,7 @@ use crate::ProcessId;
 use crate::plugin::PluginError;
 
 use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWakeDelivery};
-use super::registry::{
-    WakeDelivery, WakeDeliveryDisposition, WakeDeliveryState, WakeDiscardReason,
-};
+use super::registry::{WakeDelivery, WakeDeliveryLifecycle, WakeDeliveryState, WakeDiscardReason};
 
 /// Failure text for a persisted registry payload that will not decode.
 ///
@@ -227,9 +225,9 @@ impl WakeDeliveryRow {
             self.discard_reason_label.as_deref(),
         )?;
         let disposition = match (state, self.claim_token) {
-            (WakeDeliveryState::Pending, _) => WakeDeliveryDisposition::Pending,
+            (WakeDeliveryState::Pending, _) => WakeDeliveryLifecycle::Pending,
             (WakeDeliveryState::Enqueuing, Some(claim_token)) => {
-                WakeDeliveryDisposition::Enqueuing { claim_token }
+                WakeDeliveryLifecycle::Enqueuing { claim_token }
             }
             (WakeDeliveryState::Enqueuing, None) => {
                 return Err(PluginError::Session(format!(
@@ -237,10 +235,10 @@ impl WakeDeliveryRow {
                     self.delivery_id
                 )));
             }
-            (WakeDeliveryState::Enqueued, _) => WakeDeliveryDisposition::Enqueued,
+            (WakeDeliveryState::Enqueued, _) => WakeDeliveryLifecycle::Enqueued,
             (WakeDeliveryState::Discarded, _) => match discard_reason {
-                Some(reason) => WakeDeliveryDisposition::Discarded { reason },
-                None => WakeDeliveryDisposition::DiscardedUnattributed,
+                Some(reason) => WakeDeliveryLifecycle::Discarded { reason },
+                None => WakeDeliveryLifecycle::DiscardedUnattributed,
             },
         };
         let wake = decode_process_wake_delivery(&self.delivery_json, fleet_format)?;

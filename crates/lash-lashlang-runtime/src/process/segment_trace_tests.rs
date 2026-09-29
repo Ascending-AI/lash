@@ -832,7 +832,7 @@ fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
     let cap = lash_core::PROCESS_EFFECT_OCCURRENCE_CAP;
     let nodes = ["node:a", "node:b", "node:c"];
     let occurrence = |node: &str, occurrence: u64| {
-        lash_core::ProcessEffectSummaryOccurrence::new(
+        lash_core::ProcessEffectOccurrence::new(
             node,
             occurrence,
             "tool:bounded",

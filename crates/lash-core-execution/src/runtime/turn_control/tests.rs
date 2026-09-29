@@ -155,21 +155,21 @@ fn every_shared_scope_cancel_peek_key_covers_physical_turn_and_gate() {
 }
 
 #[test]
-fn cancel_request_without_disposition_fails_decode() {
+fn cancel_request_without_undelivered_fails_decode() {
     let missing: Result<TurnCancelRequest, _> = serde_json::from_value(serde_json::json!({
         "address": { "session_id": "legacy-session", "turn_id": "legacy-turn" },
         "request_id": "legacy-request"
     }));
     assert!(
         missing.is_err(),
-        "a pre-disposition cancel request is refused, not defaulted"
+        "a cancel request without an undelivered policy is refused, not defaulted"
     );
     let encoded =
         serde_json::to_value(request(address("encoded"), "request")).expect("encode request");
     assert_eq!(
         encoded.get("undelivered"),
         Some(&serde_json::json!("defer")),
-        "the disposition is always encoded on the durable row"
+        "the undelivered policy is always encoded on the durable row"
     );
 }
 
@@ -196,7 +196,7 @@ fn legacy_cancel_request_without_mode_decodes_as_immediate() {
     }))
     .expect("decode a pre-mode cancel request");
     assert_eq!(decoded.mode, TurnCancelMode::Immediate);
-    assert_eq!(decoded.undelivered, TurnCancelDisposition::Drop);
+    assert_eq!(decoded.undelivered, TurnCancelUndeliveredInputPolicy::Drop);
     let encoded = serde_json::to_value(&decoded).expect("encode defaulted request");
     assert!(
         encoded.get("mode").is_none(),

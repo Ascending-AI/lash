@@ -1,7 +1,7 @@
 use super::*;
 
-fn occurrence(node: &str, occurrence: u64) -> ProcessEffectSummaryOccurrence {
-    ProcessEffectSummaryOccurrence::new(
+fn occurrence(node: &str, occurrence: u64) -> ProcessEffectOccurrence {
+    ProcessEffectOccurrence::new(
         node,
         occurrence,
         "fixture.operation",
@@ -14,7 +14,7 @@ fn occurrence(node: &str, occurrence: u64) -> ProcessEffectSummaryOccurrence {
 
 #[test]
 fn the_append_payload_is_the_serde_encoding_and_round_trips() {
-    let outcome = ProcessEffectSummaryOccurrence::new(
+    let outcome = ProcessEffectOccurrence::new(
         "node",
         3,
         "triggers.disable",
@@ -33,8 +33,7 @@ fn the_append_payload_is_the_serde_encoding_and_round_trips() {
         Some("effect:node:3")
     );
     assert_eq!(
-        ProcessEffectSummaryOccurrence::decode(request.payload, crate::FleetFormat::current())
-            .unwrap(),
+        ProcessEffectOccurrence::decode(request.payload, crate::FleetFormat::current()).unwrap(),
         outcome
     );
 }
@@ -44,23 +43,23 @@ fn decode_refuses_other_versions_unknown_fields_and_uncapped_occurrences() {
     let mut payload = occurrence("node", 1).append_request().payload;
     payload["vocabulary_version"] = serde_json::json!(0);
     assert!(matches!(
-        ProcessEffectSummaryOccurrence::decode(payload, crate::FleetFormat::current()),
-        Err(ProcessEffectSummaryError::UnsupportedVocabularyVersion { actual: 0, .. })
+        ProcessEffectOccurrence::decode(payload, crate::FleetFormat::current()),
+        Err(ProcessEffectReportError::UnsupportedVocabularyVersion { actual: 0, .. })
     ));
 
     let mut payload = occurrence("node", 1).append_request().payload;
     payload["unknown"] = serde_json::json!(true);
     assert!(matches!(
-        ProcessEffectSummaryOccurrence::decode(payload, crate::FleetFormat::current()),
-        Err(ProcessEffectSummaryError::InvalidPayload(_))
+        ProcessEffectOccurrence::decode(payload, crate::FleetFormat::current()),
+        Err(ProcessEffectReportError::InvalidPayload(_))
     ));
 
     let beyond = PROCESS_EFFECT_OCCURRENCE_CAP + 1;
-    assert!(!ProcessEffectSummaryOccurrence::is_within_cap(beyond));
-    assert!(!ProcessEffectSummaryOccurrence::is_within_cap(0));
+    assert!(!ProcessEffectOccurrence::is_within_cap(beyond));
+    assert!(!ProcessEffectOccurrence::is_within_cap(0));
     assert!(matches!(
-        ProcessEffectSummaryOccurrence::decode(occurrence("node", beyond).append_request().payload, crate::FleetFormat::current()),
-        Err(ProcessEffectSummaryError::OccurrenceOutsideCap { occurrence }) if occurrence == beyond
+        ProcessEffectOccurrence::decode(occurrence("node", beyond).append_request().payload, crate::FleetFormat::current()),
+        Err(ProcessEffectReportError::OccurrenceOutsideCap { occurrence }) if occurrence == beyond
     ));
 }
 
@@ -72,7 +71,7 @@ fn omission_records_are_strict() {
             empty.append_request("omissions").payload,
             crate::FleetFormat::current()
         ),
-        Err(ProcessEffectSummaryError::EmptyOmissions)
+        Err(ProcessEffectReportError::EmptyOmissions)
     ));
     let mut counts = ProcessEffectOmittedCounts::default();
     counts.record(ProcessEffectOutcomeClass::Failure);
@@ -86,7 +85,7 @@ fn omission_records_are_strict() {
             omissions.append_request("omissions").payload,
             crate::FleetFormat::current()
         ),
-        Err(ProcessEffectSummaryError::UnsupportedOccurrenceCap { .. })
+        Err(ProcessEffectReportError::UnsupportedOccurrenceCap { .. })
     ));
 }
 
@@ -107,7 +106,7 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
         .append_request("omissions"),
         ProcessEventAppendRequest::new("process.custom", serde_json::json!({})),
     ];
-    let mut forward = ProcessEffectSummary::default();
+    let mut forward = ProcessEffectReport::default();
     for request in &events {
         forward
             .fold_event(
@@ -117,7 +116,7 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
             )
             .unwrap();
     }
-    let mut reverse = ProcessEffectSummary::default();
+    let mut reverse = ProcessEffectReport::default();
     for request in events.iter().rev() {
         reverse
             .fold_event(

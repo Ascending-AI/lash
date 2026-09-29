@@ -117,7 +117,7 @@ fn turn_cancel_peek_replay_key(
     )
 }
 
-pub use lash_sansio::{TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence};
+pub use lash_sansio::{TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence};
 
 mod local_stop;
 pub use local_stop::{
@@ -138,7 +138,7 @@ pub enum TurnCancelOutcome {
     /// timing escalation may change when that cancellation is honoured, but
     /// it never changes who accepted the policy or what that policy is.
     PolicyConflict {
-        requested: TurnCancelDisposition,
+        requested: TurnCancelUndeliveredInputPolicy,
         accepted: TurnCancellationEvidence,
     },
     CompletionWonRace,
@@ -713,7 +713,7 @@ struct TurnEscalationEvidence {
     /// only over an internal base; over a host-accepted base the base policy
     /// stands (FIG-2874).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adopted_undelivered: Option<TurnCancelDisposition>,
+    pub adopted_undelivered: Option<TurnCancelUndeliveredInputPolicy>,
 }
 
 impl From<&TurnCancellationEvidence> for TurnEscalationEvidence {

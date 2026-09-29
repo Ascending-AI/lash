@@ -29,7 +29,7 @@ pub mod core_internal {
 pub(crate) use lash_core_ids::clock::{Clock, SystemClock};
 pub(crate) use lash_core_ids::{operational_metrics, panic_containment};
 pub(crate) use lash_sansio::llm::types::{
-    AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,
+    AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
     GenerationReceipt, LlmCallRecord, LlmTerminalReason, NonNegativeFiniteF64, ProviderFailureKind,
     ProviderReplayDrop,

@@ -268,31 +268,35 @@ fn release_root_rows_conn(
     let request =
         crate::persistence::turn_cancel::load_turn_cancel_request_conn(tx, session_id, root)?;
     let disposition = request.as_ref().map_or(
-        lash_core_execution::TurnCancelDisposition::Defer,
+        lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer,
         |record| record.request.undelivered,
     );
     for (input_id, input_json) in addressed {
         match disposition {
-            lash_core_execution::TurnCancelDisposition::Defer => crate::conn::cached_execute(
-                tx,
-                sql.pending_inputs.defer_to_next_turn.sql(),
-                params![
-                    session_id.as_str(),
-                    input_id.as_str(),
-                    deferred.as_str(),
-                    deferred_ingress.as_str(),
-                ],
-            ),
-            lash_core_execution::TurnCancelDisposition::Drop => crate::conn::cached_execute(
-                tx,
-                sql.pending_inputs.cancel.sql(),
-                params![
-                    session_id.as_str(),
-                    input_id.as_str(),
-                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
-                    crate::clamp_epoch_ms(at_ms),
-                ],
-            ),
+            lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
+                crate::conn::cached_execute(
+                    tx,
+                    sql.pending_inputs.defer_to_next_turn.sql(),
+                    params![
+                        session_id.as_str(),
+                        input_id.as_str(),
+                        deferred.as_str(),
+                        deferred_ingress.as_str(),
+                    ],
+                )
+            }
+            lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
+                crate::conn::cached_execute(
+                    tx,
+                    sql.pending_inputs.cancel.sql(),
+                    params![
+                        session_id.as_str(),
+                        input_id.as_str(),
+                        lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                        crate::clamp_epoch_ms(at_ms),
+                    ],
+                )
+            }
         }
         .map_err(sqlite_error)?;
         if request.is_some() {

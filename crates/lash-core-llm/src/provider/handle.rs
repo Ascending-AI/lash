@@ -403,7 +403,7 @@ impl ProviderHandle {
                         evidence: response.execution_evidence.clone(),
                         generation_disposition: response.generation_disposition,
                         usage: usage.clone(),
-                        usage_disposition: AttemptUsageDisposition::for_attempt(
+                        usage_disposition: AttemptUsageOutcome::for_attempt(
                             outcome,
                             usage.as_ref(),
                         ),
@@ -1146,7 +1146,7 @@ fn failure_attempt_record(
         }),
         evidence,
         generation_disposition: partial.and_then(|response| response.generation_disposition),
-        usage_disposition: AttemptUsageDisposition::for_attempt(outcome, usage.as_ref()),
+        usage_disposition: AttemptUsageOutcome::for_attempt(outcome, usage.as_ref()),
         usage,
     }
 }

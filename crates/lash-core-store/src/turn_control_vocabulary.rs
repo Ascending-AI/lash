@@ -5,8 +5,8 @@
 //! the effect-executor gate stay in `lash-core`.
 
 use crate::{
-    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, RuntimeError, SessionId,
-    TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence, TurnId,
+    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, RuntimeError, SessionId, TurnCancelMode,
+    TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -41,7 +41,7 @@ impl TurnAddress {
 pub struct TurnCancelAffectedInput {
     pub input_id: crate::InputId,
     pub payload: crate::TurnInput,
-    pub disposition: TurnCancelDisposition,
+    pub disposition: TurnCancelUndeliveredInputPolicy,
 }
 impl PartialEq for TurnCancelAffectedInput {
     fn eq(&self, other: &Self) -> bool {
@@ -59,7 +59,7 @@ impl Eq for TurnCancelAffectedInput {}
 /// cancel commit releases its claim, the row keeps its queue position, and
 /// its process's redelivery floor is unchanged. The request's `undelivered`
 /// disposition governs host-authored input only, so a held wake's
-/// disposition is always [`TurnCancelDisposition::Defer`]; only an explicit
+/// disposition is always [`TurnCancelUndeliveredInputPolicy::Defer`]; only an explicit
 /// host withdrawal drops a wake.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TurnCancelAffectedWake {
@@ -70,7 +70,7 @@ pub struct TurnCancelAffectedWake {
     /// is keyed on.
     pub item_id: String,
     pub wake: crate::ProcessWakeDelivery,
-    pub disposition: TurnCancelDisposition,
+    pub disposition: TurnCancelUndeliveredInputPolicy,
 }
 impl TurnCancelAffectedWake {
     /// The record of a wake a turn cancel deferred.
@@ -83,7 +83,7 @@ impl TurnCancelAffectedWake {
             batch_id,
             item_id,
             wake,
-            disposition: TurnCancelDisposition::Defer,
+            disposition: TurnCancelUndeliveredInputPolicy::Defer,
         }
     }
 }
@@ -367,7 +367,7 @@ pub struct TurnCancelRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// Policy for active-turn input the cancelled turn did not deliver.
-    pub undelivered: TurnCancelDisposition,
+    pub undelivered: TurnCancelUndeliveredInputPolicy,
     /// When the request is honoured. `Immediate` fires the cooperative token
     /// and backtracks to the last checkpoint; `AfterStep` waits for the step
     /// boundary that closes the current protocol iteration. Records written
@@ -386,7 +386,7 @@ impl TurnCancelRequest {
             request_id: request_id.into(),
             origin,
             reason: None,
-            undelivered: TurnCancelDisposition::Defer,
+            undelivered: TurnCancelUndeliveredInputPolicy::Defer,
             mode: TurnCancelMode::Immediate,
         }
     }
@@ -396,8 +396,8 @@ impl TurnCancelRequest {
         self
     }
 
-    pub fn undelivered(mut self, disposition: TurnCancelDisposition) -> Self {
-        self.undelivered = disposition;
+    pub fn undelivered(mut self, policy: TurnCancelUndeliveredInputPolicy) -> Self {
+        self.undelivered = policy;
         self
     }
 

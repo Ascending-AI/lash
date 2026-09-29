@@ -380,7 +380,7 @@ impl LashRuntime {
         if !settlement.is_empty() {
             commit.ingress = Some(settlement.into_ingress(
                 drive_commit.root.clone(),
-                crate::TurnCancelDisposition::Defer,
+                crate::TurnCancelUndeliveredInputPolicy::Defer,
             ));
         }
         commit.drive_fence = Some(Box::new(drive_commit.fence.clone()));

@@ -9,7 +9,7 @@ use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum RemoteTurnCancelDisposition {
+pub enum RemoteTurnCancelUndeliveredInputPolicy {
     #[default]
     Defer,
     Drop,
@@ -23,8 +23,8 @@ pub struct RemoteTurnCancellationEvidence {
     pub origin: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "remote_disposition_is_defer")]
-    pub undelivered: RemoteTurnCancelDisposition,
+    #[serde(default, skip_serializing_if = "remote_undelivered_is_defer")]
+    pub undelivered: RemoteTurnCancelUndeliveredInputPolicy,
 }
 
 impl RemoteTurnCancellationEvidence {
@@ -47,12 +47,12 @@ pub struct RemoteTurnCancelRequest {
     pub origin: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "remote_disposition_is_defer")]
-    pub undelivered: RemoteTurnCancelDisposition,
+    #[serde(default, skip_serializing_if = "remote_undelivered_is_defer")]
+    pub undelivered: RemoteTurnCancelUndeliveredInputPolicy,
 }
 
-fn remote_disposition_is_defer(value: &RemoteTurnCancelDisposition) -> bool {
-    matches!(value, RemoteTurnCancelDisposition::Defer)
+fn remote_undelivered_is_defer(value: &RemoteTurnCancelUndeliveredInputPolicy) -> bool {
+    matches!(value, RemoteTurnCancelUndeliveredInputPolicy::Defer)
 }
 
 impl RemoteTurnCancelRequest {
@@ -73,7 +73,7 @@ pub enum RemoteTurnCancelOutcome {
         cancellation: RemoteTurnCancellationEvidence,
     },
     PolicyConflict {
-        requested: RemoteTurnCancelDisposition,
+        requested: RemoteTurnCancelUndeliveredInputPolicy,
         accepted: RemoteTurnCancellationEvidence,
     },
     CompletionWonRace,

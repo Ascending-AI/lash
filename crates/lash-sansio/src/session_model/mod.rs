@@ -660,13 +660,13 @@ pub enum TurnStop {
     schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum TurnCancelDisposition {
+pub enum TurnCancelUndeliveredInputPolicy {
     #[default]
     Defer,
     Drop,
 }
 
-impl TurnCancelDisposition {
+impl TurnCancelUndeliveredInputPolicy {
     pub(crate) fn is_defer(&self) -> bool {
         *self == Self::Defer
     }
@@ -717,8 +717,11 @@ pub struct TurnCancellationEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// Applied policy for active-turn input this turn did not deliver.
-    #[serde(default, skip_serializing_if = "TurnCancelDisposition::is_defer")]
-    pub undelivered: TurnCancelDisposition,
+    #[serde(
+        default,
+        skip_serializing_if = "TurnCancelUndeliveredInputPolicy::is_defer"
+    )]
+    pub undelivered: TurnCancelUndeliveredInputPolicy,
     /// Mode of the request that produced this evidence.
     #[serde(default, skip_serializing_if = "TurnCancelMode::is_immediate")]
     pub mode: TurnCancelMode,
@@ -740,7 +743,7 @@ impl TurnCancellationEvidence {
             request_id: format!("{}{subject}", Self::INTERNAL_REQUEST_ID_PREFIX),
             origin: None,
             reason: None,
-            undelivered: TurnCancelDisposition::Defer,
+            undelivered: TurnCancelUndeliveredInputPolicy::Defer,
             mode: TurnCancelMode::Immediate,
             honoured_after_step: None,
         }

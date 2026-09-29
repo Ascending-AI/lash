@@ -85,7 +85,7 @@ mod concern_isolation_tests {
         }
         async fn summarize_parked_processes(
             &self,
-        ) -> Result<lash_core_execution::store::ParkSummary, PluginError> {
+        ) -> Result<lash_core_execution::store::ParkReport, PluginError> {
             self.inner.summarize_parked_processes().await
         }
     }

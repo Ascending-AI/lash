@@ -209,7 +209,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
     let base_request =
         crate::TurnCancelRequest::new(address.clone(), "final-cancel-cas:base", None)
             .mode(crate::TurnCancelMode::AfterStep)
-            .undelivered(crate::TurnCancelDisposition::Drop);
+            .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop);
     let driver = crate::TurnWorkDriver::for_session(
         host.clone(),
         address.session_id.clone(),
@@ -285,7 +285,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
 
     let later_request =
         crate::TurnCancelRequest::new(address.clone(), "final-cancel-cas:later", None)
-            .undelivered(crate::TurnCancelDisposition::Drop);
+            .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop);
     recording.inject_turn_cancel_before_next_runtime_commit(later_request);
     pipeline
         .prepared_checkpoint(
@@ -342,7 +342,10 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         .affected_inputs;
     assert_eq!(affected.len(), 1);
     assert_eq!(affected[0].input_id, pending.input_id);
-    assert_eq!(affected[0].disposition, crate::TurnCancelDisposition::Drop);
+    assert_eq!(
+        affected[0].disposition,
+        crate::TurnCancelUndeliveredInputPolicy::Drop
+    );
     assert!(
         store
             .pending_turn_cancel_closure_pins()

@@ -44,7 +44,7 @@
     "outcome_class",
     "replay_key"
   ],
-  "title": "ProcessEffectSummaryOccurrence",
+  "title": "ProcessEffectOccurrence",
   "type": "object",
   "x-lash-event-type": "process.effect_outcome",
   "x-lash-schema-version": 1,

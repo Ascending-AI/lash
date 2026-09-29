@@ -710,15 +710,13 @@ impl From<core_llm::AttemptRecord> for RemoteAttemptRecord {
     }
 }
 
-impl From<core_llm::AttemptUsageDisposition> for RemoteAttemptUsageDisposition {
-    fn from(value: core_llm::AttemptUsageDisposition) -> Self {
+impl From<core_llm::AttemptUsageOutcome> for RemoteAttemptUsageOutcome {
+    fn from(value: core_llm::AttemptUsageOutcome) -> Self {
         match value {
-            core_llm::AttemptUsageDisposition::Reported => Self::Reported,
-            core_llm::AttemptUsageDisposition::UnreportedByProvider => Self::UnreportedByProvider,
-            core_llm::AttemptUsageDisposition::UnreportedAfterAbort => Self::UnreportedAfterAbort,
-            core_llm::AttemptUsageDisposition::UnreportedAfterFailure => {
-                Self::UnreportedAfterFailure
-            }
+            core_llm::AttemptUsageOutcome::Reported => Self::Reported,
+            core_llm::AttemptUsageOutcome::UnreportedByProvider => Self::UnreportedByProvider,
+            core_llm::AttemptUsageOutcome::UnreportedAfterAbort => Self::UnreportedAfterAbort,
+            core_llm::AttemptUsageOutcome::UnreportedAfterFailure => Self::UnreportedAfterFailure,
         }
     }
 }

@@ -609,8 +609,8 @@
       ],
       "type": "object"
     },
-    "TraceAttemptUsageDisposition": {
-      "description": "Why an attempt's provider-reported usage is present or absent.\n\nMirrors `lash_sansio::llm::types::AttemptUsageDisposition`, the vocabulary's owner, with the same wire spellings; the trace layer was the only one that flattened it to a free-form string.\n\n# Integrator class\n\nReporting integrations exhaustively render these dispositions when explaining a call whose usage never arrived.",
+    "TraceAttemptUsageOutcome": {
+      "description": "Why an attempt's provider-reported usage is present or absent.\n\nMirrors `lash_sansio::llm::types::AttemptUsageOutcome`, the vocabulary's owner, with the same wire spellings; the trace layer was the only one that flattened it to a free-form string.\n\n# Integrator class\n\nReporting integrations exhaustively render these outcomes when explaining a call whose usage never arrived.",
       "oneOf": [
         {
           "description": "The provider reported usage for this attempt.",
@@ -2400,7 +2400,7 @@
         "usage_disposition": {
           "anyOf": [
             {
-              "$ref": "#/definitions/TraceAttemptUsageDisposition"
+              "$ref": "#/definitions/TraceAttemptUsageOutcome"
             },
             {
               "type": "null"

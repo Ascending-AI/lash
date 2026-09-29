@@ -427,7 +427,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 .bind(&request.request_id)
                 .bind(&request.origin)
                 .bind(&request.reason)
-                .bind(turn_cancel_disposition_wire(request.undelivered))
+                .bind(turn_cancel_undelivered_wire(request.undelivered))
                 .bind(turn_cancel_mode_wire(request.mode))
                 .execute(&mut **tx)
                 .await

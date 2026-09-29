@@ -37,10 +37,9 @@ pub use definition_ref::{
 };
 pub use effect_summary::{
     PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectNodeSummary,
-    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
-    ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence,
-    tool_failure_code,
+    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectNodeReport,
+    ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
+    ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError, tool_failure_code,
 };
 pub use engine::{
     AdmittedProcessIdentity, PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission,
@@ -107,7 +106,7 @@ pub use registry::{
     ProcessRetention, ProcessScopeFenceHosts, ProcessSegmentKey, ProcessTerminalPublication,
     ProcessToolIntents, ProcessWakeOutbox, ProjectionWatermark, SegmentStartMarker,
     WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,
     WakeDeliveryState, WakeDiscardReason, reconcile_pruned_trigger_deliveries,
 };
 pub use scope_close::RegistryScopeClose;

@@ -239,7 +239,7 @@ async fn drive_lashlang_effect_summary(context: Arc<ReplayableRecordingContext>,
         .filter(|request| request.event_type == lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
         .collect::<Vec<_>>();
     assert_eq!(outcomes.len(), 1, "one summary record per journaled effect");
-    let summary = lash_core::ProcessEffectSummaryOccurrence::decode(
+    let summary = lash_core::ProcessEffectOccurrence::decode(
         outcomes[0].payload.clone(),
         lash_core::FleetFormat::current(),
     )

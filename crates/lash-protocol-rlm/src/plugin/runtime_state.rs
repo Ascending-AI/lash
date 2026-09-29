@@ -251,12 +251,9 @@ impl RlmRuntimeState {
 
     pub(crate) async fn settle_code_execution(
         &self,
-        disposition: lash_core::plugin::CodeExecutionDisposition,
+        outcome: lash_core::plugin::CodeExecutionOutcome,
     ) -> Result<(), SessionError> {
-        self.execution
-            .lock()
-            .await
-            .settle_code_execution(disposition)
+        self.execution.lock().await.settle_code_execution(outcome)
     }
 
     pub(crate) async fn restore_execution_state(
@@ -413,9 +410,9 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
 
     async fn settle_code_execution(
         &self,
-        disposition: lash_core::plugin::CodeExecutionDisposition,
+        outcome: lash_core::plugin::CodeExecutionOutcome,
     ) -> Result<(), SessionError> {
-        self.state.settle_code_execution(disposition).await
+        self.state.settle_code_execution(outcome).await
     }
 }
 
@@ -748,7 +745,7 @@ mod tests {
                     "`web.fetch` resolves to nothing, so the parked cell ends in a link error"
                 );
                 state
-                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
                     .await
                     .expect("settle the first returned cell");
 
@@ -767,7 +764,7 @@ mod tests {
                 handler.close().await.expect("close the cell's handler");
                 assert_eq!(second.error, None);
                 state
-                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
                     .await
                     .expect("settle the second returned cell");
 
@@ -810,7 +807,7 @@ mod tests {
                 ));
 
                 state
-                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
                     .await
                     .expect("settle first response");
                 execute_cell(&state, cell("let second = 2;"))
@@ -865,7 +862,7 @@ mod tests {
                     .await
                     .expect("execute accepted cell");
                 state
-                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
                     .await
                     .expect("accept first cell");
                 execute_cell(&state, cell("let cancelled_tail = 1;"))
@@ -878,7 +875,7 @@ mod tests {
                 assert!(rendered.contains("cancelled_tail"));
 
                 state
-                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Cancelled)
+                    .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Cancelled)
                     .await
                     .expect("cancel second cell");
                 let rendered = state
@@ -970,7 +967,7 @@ mod tests {
             .await
             .expect("the baton cell runs");
         state
-            .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+            .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
             .await
             .expect("settle the baton cell");
         assert_eq!(response.error, None);
@@ -1123,7 +1120,7 @@ mod tests {
                     Some(serde_json::json!("uncommitted"))
                 );
                 state
-                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
                     .await
                     .expect("settle the mutating cell");
 
@@ -1177,7 +1174,7 @@ mod tests {
                     Some(serde_json::json!("uncommitted"))
                 );
                 state
-                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
                     .await
                     .expect("settle the mutating cell");
 

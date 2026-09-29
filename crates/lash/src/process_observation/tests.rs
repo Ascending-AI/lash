@@ -220,7 +220,7 @@ impl Fixture {
 
     /// Commit one runtime-owned effect-summary occurrence.
     async fn commit_outcome(&self, occurrence: u64, publish: bool) -> ProcessEvent {
-        let outcome = lash_core::ProcessEffectSummaryOccurrence::new(
+        let outcome = lash_core::ProcessEffectOccurrence::new(
             "node",
             occurrence,
             "tools.echo",
@@ -275,8 +275,8 @@ impl Fixture {
 
     /// The effect-summary fold through `high_water`, read independently of
     /// the hub.
-    async fn fold_through(&self, high_water: u64) -> ProcessEffectSummary {
-        let mut summary = ProcessEffectSummary::default();
+    async fn fold_through(&self, high_water: u64) -> ProcessEffectReport {
+        let mut summary = ProcessEffectReport::default();
         let limit = std::num::NonZeroUsize::new(4096).expect("page size");
         let ProcessEventReadOutcome::Retained(page) = self
             .registry

@@ -238,7 +238,7 @@ impl Harness {
 async fn withheld_cancel_case(
     harness: &mut Harness,
     case: &str,
-    disposition: crate::TurnCancelDisposition,
+    disposition: crate::TurnCancelUndeliveredInputPolicy,
     texts: &[&str],
 ) {
     let session_id = SessionId::from(SESSION_ID);
@@ -266,14 +266,14 @@ async fn withheld_cancel_case(
 
     let local = CancellationToken::new();
     let stop = match disposition {
-        crate::TurnCancelDisposition::Defer => Stop::Local(local.clone()),
-        crate::TurnCancelDisposition::Drop => Stop::Durable(Box::new(
+        crate::TurnCancelUndeliveredInputPolicy::Defer => Stop::Local(local.clone()),
+        crate::TurnCancelUndeliveredInputPolicy::Drop => Stop::Durable(Box::new(
             crate::TurnCancelRequest::new(
                 crate::TurnAddress::new(&session_id, &cancelled_turn_id),
                 format!("{case}-stop"),
                 Some("conformance-user".to_string()),
             )
-            .undelivered(crate::TurnCancelDisposition::Drop)
+            .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop)
             .mode(crate::TurnCancelMode::Immediate),
         )),
     };
@@ -345,11 +345,11 @@ async fn withheld_cancel_case(
         .map(|pending| (pending.input.input_id, pending.input.state))
         .collect::<Vec<_>>();
     let expected_pending = match disposition {
-        crate::TurnCancelDisposition::Defer => input_ids
+        crate::TurnCancelUndeliveredInputPolicy::Defer => input_ids
             .iter()
             .map(|input_id| (input_id.clone(), crate::TurnInputState::DeferredNextTurn))
             .collect(),
-        crate::TurnCancelDisposition::Drop => Vec::new(),
+        crate::TurnCancelUndeliveredInputPolicy::Drop => Vec::new(),
     };
     assert_eq!(pending, expected_pending, "{case}: rows after the cancel");
 
@@ -397,18 +397,19 @@ async fn withheld_cancel_case(
         .map(|application| (application.input_id, application.turn_id))
         .collect::<Vec<_>>();
     let expected_delivered = match disposition {
-        crate::TurnCancelDisposition::Defer => input_ids
+        crate::TurnCancelUndeliveredInputPolicy::Defer => input_ids
             .iter()
             .map(|input_id| (input_id.clone(), crate::TurnId::from(input_ids[0].as_str())))
             .collect(),
-        crate::TurnCancelDisposition::Drop => Vec::new(),
+        crate::TurnCancelUndeliveredInputPolicy::Drop => Vec::new(),
     };
     assert_eq!(
         delivered, expected_delivered,
         "{case}: what the next turn delivers"
     );
     for text in texts {
-        let expected_mentions = usize::from(disposition == crate::TurnCancelDisposition::Defer);
+        let expected_mentions =
+            usize::from(disposition == crate::TurnCancelUndeliveredInputPolicy::Defer);
         assert_eq!(
             harness.request_mentions(text),
             expected_mentions,
@@ -491,21 +492,21 @@ pub async fn immediate_cancel_defers_withheld_inject_now_input(
     withheld_cancel_case(
         &mut harness,
         &format!("{prefix}-withheld-defer"),
-        crate::TurnCancelDisposition::Defer,
+        crate::TurnCancelUndeliveredInputPolicy::Defer,
         &["also check the tests"],
     )
     .await;
     withheld_cancel_case(
         &mut harness,
         &format!("{prefix}-withheld-ordered"),
-        crate::TurnCancelDisposition::Defer,
+        crate::TurnCancelUndeliveredInputPolicy::Defer,
         &["first follow-up", "second follow-up"],
     )
     .await;
     withheld_cancel_case(
         &mut harness,
         &format!("{prefix}-withheld-drop"),
-        crate::TurnCancelDisposition::Drop,
+        crate::TurnCancelUndeliveredInputPolicy::Drop,
         &["dropped follow-up"],
     )
     .await;
@@ -549,7 +550,7 @@ fn wake_delivery(process: &str, sequence: u64, text: &str) -> crate::ProcessWake
 async fn withheld_wake_case(
     harness: &mut Harness,
     case: &str,
-    disposition: crate::TurnCancelDisposition,
+    disposition: crate::TurnCancelUndeliveredInputPolicy,
     sequence: u64,
     text: &str,
 ) {
@@ -569,14 +570,14 @@ async fn withheld_wake_case(
 
     let local = CancellationToken::new();
     let stop = match disposition {
-        crate::TurnCancelDisposition::Defer => Stop::Local(local.clone()),
-        crate::TurnCancelDisposition::Drop => Stop::Durable(Box::new(
+        crate::TurnCancelUndeliveredInputPolicy::Defer => Stop::Local(local.clone()),
+        crate::TurnCancelUndeliveredInputPolicy::Drop => Stop::Durable(Box::new(
             crate::TurnCancelRequest::new(
                 crate::TurnAddress::new(&session_id, &cancelled_turn_id),
                 format!("{case}-stop"),
                 Some("conformance-user".to_string()),
             )
-            .undelivered(crate::TurnCancelDisposition::Drop)
+            .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop)
             .mode(crate::TurnCancelMode::Immediate),
         )),
     };
@@ -729,7 +730,7 @@ pub async fn immediate_cancel_defers_withheld_process_wakes(
     withheld_wake_case(
         &mut harness,
         &format!("{prefix}-wake-drop"),
-        crate::TurnCancelDisposition::Drop,
+        crate::TurnCancelUndeliveredInputPolicy::Drop,
         1,
         "the build finished",
     )
@@ -737,7 +738,7 @@ pub async fn immediate_cancel_defers_withheld_process_wakes(
     withheld_wake_case(
         &mut harness,
         &format!("{prefix}-wake-defer"),
-        crate::TurnCancelDisposition::Defer,
+        crate::TurnCancelUndeliveredInputPolicy::Defer,
         1,
         "the deploy finished",
     )

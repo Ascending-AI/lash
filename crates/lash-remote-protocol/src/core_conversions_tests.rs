@@ -1243,7 +1243,8 @@ fn assert_terminal_call_record_converts_and_validates(
                         request_id: "cancel-request".to_string(),
                         origin: None,
                         reason: None,
-                        undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
+                        undelivered:
+                            lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer,
                         mode: lash_core::facade_support::TurnCancelMode::Immediate,
                         honoured_after_step: None,
                     },
@@ -2376,7 +2377,7 @@ fn remote_generation_options_are_omitted_from_the_wire_when_unset() {
 }
 
 #[test]
-fn every_generation_option_disposition_crosses_the_boundary_in_both_directions() {
+fn every_generation_option_outcome_crosses_the_boundary_in_both_directions() {
     for core in [
         core_llm::GenerationOptionOutcome::NotRequested,
         core_llm::GenerationOptionOutcome::Applied,

@@ -572,7 +572,7 @@ mod tests {
             request_id: "request".to_string(),
             origin: None,
             reason: None,
-            undelivered: crate::TurnCancelDisposition::Defer,
+            undelivered: crate::TurnCancelUndeliveredInputPolicy::Defer,
             mode: crate::TurnCancelMode::Immediate,
             honoured_after_step: None,
         });

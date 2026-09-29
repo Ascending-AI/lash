@@ -275,8 +275,8 @@ pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn Run
 pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("addressed-to-ended-root");
     for (case, disposition) in [
-        ("defer", crate::TurnCancelDisposition::Defer),
-        ("drop", crate::TurnCancelDisposition::Drop),
+        ("defer", crate::TurnCancelUndeliveredInputPolicy::Defer),
+        ("drop", crate::TurnCancelUndeliveredInputPolicy::Drop),
     ] {
         let root = format!("{case}-composing-root");
         let member_turn = TurnId::from(format!("{case}-member-turn"));
@@ -345,7 +345,7 @@ pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(store: Arc<dyn 
             "{case}: the root composes the member's acceptance, and no addressed input"
         );
         let address = crate::TurnAddress::new(session.clone(), TurnId::from(root.as_str()));
-        if disposition == crate::TurnCancelDisposition::Drop {
+        if disposition == crate::TurnCancelUndeliveredInputPolicy::Drop {
             store
                 .record_turn_cancel_request(
                     crate::TurnCancelRequest::new(address.clone(), format!("{case}-cancel"), None)
@@ -394,7 +394,7 @@ pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(store: Arc<dyn 
         );
 
         match disposition {
-            crate::TurnCancelDisposition::Defer => {
+            crate::TurnCancelUndeliveredInputPolicy::Defer => {
                 for input in &swept {
                     let read = pending
                         .iter()
@@ -426,7 +426,7 @@ pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(store: Arc<dyn 
                 )
                 .await;
             }
-            crate::TurnCancelDisposition::Drop => {
+            crate::TurnCancelUndeliveredInputPolicy::Drop => {
                 assert!(
                     pending
                         .iter()
@@ -448,7 +448,7 @@ pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(store: Arc<dyn 
                         .collect::<Vec<_>>(),
                     swept
                         .iter()
-                        .map(|input| (input.clone(), crate::TurnCancelDisposition::Drop))
+                        .map(|input| (input.clone(), crate::TurnCancelUndeliveredInputPolicy::Drop))
                         .collect::<Vec<_>>(),
                     "drop: the outcome names every withdrawn input"
                 );

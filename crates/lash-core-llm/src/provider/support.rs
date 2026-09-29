@@ -9,7 +9,7 @@ pub(super) use crate::llm::transport::{
     LlmTransportError, ProviderFailureKind, TransportRetryVerdict,
 };
 pub(super) use crate::llm::types::{
-    AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,
+    AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, GenerationOptionOutcome, GenerationReceipt,
     LlmCallId, LlmCallRecord, LlmContentBlock, LlmRequest, LlmRequestScope, LlmResponse,
     LlmTerminalReason, NormalizedError, ProtocolPosition, ProviderReplayOriginConflict,

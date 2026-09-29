@@ -679,7 +679,7 @@ impl SessionHistoryStore for PostgresStore {
             let attempts = holes_by_seq.remove(&seq).unwrap_or_default();
             let disposition = match (reconciled_call_id, ordinal) {
                 (Some(call_id), Some(ordinal)) if attempts.is_empty() => {
-                    lash_core_execution::LedgerUsageDisposition::Reconciled {
+                    lash_core_execution::LedgerUsageOutcome::Reconciled {
                         call_id,
                         attempt_ordinal: u32::try_from(ordinal).map_err(|_| {
                             corrupt("TokenLedgerEntry", "invalid reconciled ordinal")
@@ -687,9 +687,9 @@ impl SessionHistoryStore for PostgresStore {
                     }
                 }
                 (None, None) if !attempts.is_empty() => {
-                    lash_core_execution::LedgerUsageDisposition::unreported(attempts)
+                    lash_core_execution::LedgerUsageOutcome::unreported(attempts)
                 }
-                (None, None) => lash_core_execution::LedgerUsageDisposition::Reported,
+                (None, None) => lash_core_execution::LedgerUsageOutcome::Reported,
                 _ => {
                     return Err(corrupt(
                         "TokenLedgerEntry",

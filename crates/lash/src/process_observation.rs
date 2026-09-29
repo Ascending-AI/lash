@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use lash_core::{
-    PluginError, ProcessEffectSummary, ProcessEvent, ProcessEventHistoryRetention,
+    PluginError, ProcessEffectReport, ProcessEvent, ProcessEventHistoryRetention,
     ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
     ProcessRegistry, ProcessStatus,
 };
@@ -103,7 +103,7 @@ pub enum ProcessDurableSnapshot {
     Retained {
         sequence: u64,
         status: ProcessStatus,
-        summary: ProcessEffectSummary,
+        summary: ProcessEffectReport,
         completeness: ProcessDurableCompleteness,
     },
     /// The process's history is typed-absent: it was pruned.
@@ -240,7 +240,7 @@ fn remote_snapshot(
     use lash_remote_protocol::{
         RemoteProcessDurableCompleteness as DurableCompleteness,
         RemoteProcessDurableGapReason as DurableGap, RemoteProcessDurableSnapshot as Durable,
-        RemoteProcessEffectNodeSummary, RemoteProcessEffectOccurrence,
+        RemoteProcessEffectNodeReport, RemoteProcessEffectOccurrence,
         RemoteProcessEffectOmittedCounts, RemoteProcessEffectOutcomeClass as OutcomeClass,
         RemoteProcessHistoryRetention as Retention,
         RemoteProcessObservationCompleteness as LiveCompleteness,
@@ -257,7 +257,7 @@ fn remote_snapshot(
             status: status.into(),
             summary: summary
                 .nodes()
-                .map(|node| RemoteProcessEffectNodeSummary {
+                .map(|node| RemoteProcessEffectNodeReport {
                     node_id: node.node_id.clone(),
                     occurrences: node
                         .occurrences
@@ -772,7 +772,7 @@ async fn acquire_durable(
     };
     let high_water = record.last_event_sequence;
     let fleet_format = registry.fleet_format();
-    let mut summary = ProcessEffectSummary::default();
+    let mut summary = ProcessEffectReport::default();
     let mut completeness = ProcessDurableCompleteness::Complete;
     let mut after = 0;
     let mut pages = 0;

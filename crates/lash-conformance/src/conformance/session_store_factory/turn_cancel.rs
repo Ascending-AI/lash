@@ -368,7 +368,7 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
             request_id: "conflicting-terminal".to_string(),
             origin: None,
             reason: None,
-            undelivered: crate::TurnCancelDisposition::Defer,
+            undelivered: crate::TurnCancelUndeliveredInputPolicy::Defer,
             mode: crate::TurnCancelMode::Immediate,
             honoured_after_step: None,
         }),
@@ -965,11 +965,11 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
     }
 }
 
-/// Every persisted disposition survives the owner crash that separates cancel
+/// Every persisted undelivered-input policy survives the owner crash that separates cancel
 /// observation from repair. The reopened repair applies the requested policy
 /// only to the undelivered active-turn row, records its payload in the durable
 /// cancel outcome, and leaves already-next-turn work untouched.
-pub(super) async fn turn_cancel_disposition_crash_matrix(factory: Arc<dyn crate::DeploymentStore>) {
+pub(super) async fn turn_cancel_undelivered_crash_matrix(factory: Arc<dyn crate::DeploymentStore>) {
     #[derive(Clone, Copy, Debug)]
     enum RepairPath {
         Commit,
@@ -981,15 +981,15 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(factory: Arc<dyn crate:
         crate::TurnCancelMode::AfterStep,
     ] {
         for disposition in [
-            crate::TurnCancelDisposition::Defer,
-            crate::TurnCancelDisposition::Drop,
+            crate::TurnCancelUndeliveredInputPolicy::Defer,
+            crate::TurnCancelUndeliveredInputPolicy::Drop,
         ] {
             for path in [
                 RepairPath::Commit,
                 RepairPath::Teardown,
                 RepairPath::CrashBeforeRepair,
             ] {
-                turn_cancel_disposition_crash_cell(Arc::clone(&factory), mode, disposition, path)
+                turn_cancel_undelivered_crash_cell(Arc::clone(&factory), mode, disposition, path)
                     .await;
             }
         }
@@ -999,10 +999,10 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(factory: Arc<dyn crate:
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn turn_cancel_disposition_crash_cell(
+    async fn turn_cancel_undelivered_crash_cell(
         factory: Arc<dyn crate::DeploymentStore>,
         mode: crate::TurnCancelMode,
-        disposition: crate::TurnCancelDisposition,
+        disposition: crate::TurnCancelUndeliveredInputPolicy,
         path: RepairPath,
     ) {
         let suffix = format!("{:?}-{:?}-{:?}", mode, disposition, path).to_ascii_lowercase();
@@ -1201,8 +1201,9 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(factory: Arc<dyn crate:
                 .map(|read| read.input.input_id)
                 .collect::<Vec<_>>(),
             match disposition {
-                crate::TurnCancelDisposition::Defer => vec![dropped.input_id, untouched.input_id],
-                crate::TurnCancelDisposition::Drop => vec![untouched.input_id],
+                crate::TurnCancelUndeliveredInputPolicy::Defer =>
+                    vec![dropped.input_id, untouched.input_id],
+                crate::TurnCancelUndeliveredInputPolicy::Drop => vec![untouched.input_id],
             },
             "cancel repair applies disposition only to ActiveTurn and never touches NextTurn"
         );
@@ -1296,7 +1297,7 @@ pub(super) async fn turn_cancel_request_escalation_advances_intent_without_repla
         "turn-cancel-unaccepted-stronger:A",
         None,
     )
-    .undelivered(crate::TurnCancelDisposition::Drop);
+    .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop);
     store
         .record_turn_cancel_request(unaccepted_immediate)
         .await
@@ -1309,7 +1310,7 @@ pub(super) async fn turn_cancel_request_escalation_advances_intent_without_repla
         request_id: "turn-cancel-unaccepted-stronger:B".to_string(),
         origin: None,
         reason: None,
-        undelivered: crate::TurnCancelDisposition::Defer,
+        undelivered: crate::TurnCancelUndeliveredInputPolicy::Defer,
         mode: crate::TurnCancelMode::AfterStep,
         honoured_after_step: None,
     };
@@ -1340,7 +1341,7 @@ pub(super) async fn turn_cancel_request_escalation_advances_intent_without_repla
         Some("conformance-host".to_string()),
     )
     .with_reason("stop after the step")
-    .undelivered(crate::TurnCancelDisposition::Drop)
+    .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop)
     .mode(crate::TurnCancelMode::AfterStep);
     store
         .record_turn_cancel_request(stop.clone())
@@ -1362,7 +1363,7 @@ pub(super) async fn turn_cancel_request_escalation_advances_intent_without_repla
     // Same disposition as `stop`, so this isolates same-strength
     // non-replacement: it is refused for its timing alone, not because it also
     // disagrees about the undelivered-input policy.
-    .undelivered(crate::TurnCancelDisposition::Drop)
+    .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop)
     .mode(crate::TurnCancelMode::AfterStep);
     store
         .record_turn_cancel_request(weaker_again)
@@ -1390,7 +1391,7 @@ pub(super) async fn turn_cancel_request_escalation_advances_intent_without_repla
     .with_reason("escalated to abort")
     // A timing escalation agrees with the accepted disposition; one that
     // disagrees is a policy conflict and never advances the durable intent.
-    .undelivered(crate::TurnCancelDisposition::Drop);
+    .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop);
     store
         .record_turn_cancel_request(abort.clone())
         .await
@@ -1564,7 +1565,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         "turn-cancel-intent-first:request",
         None,
     )
-    .undelivered(crate::TurnCancelDisposition::Drop)
+    .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop)
     .mode(crate::TurnCancelMode::AfterStep);
     store
         .record_turn_cancel_request(cancel.clone())
@@ -1596,7 +1597,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         "turn-cancel-intent-first:immediate",
         Some("conformance-operator".to_string()),
     )
-    .undelivered(crate::TurnCancelDisposition::Drop);
+    .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop);
     store
         .record_turn_cancel_request(stronger_cancel.clone())
         .await
@@ -1642,7 +1643,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
     assert_eq!(cancelled.affected_inputs[0].input_id, row.input_id);
     assert_eq!(
         cancelled.affected_inputs[0].disposition,
-        crate::TurnCancelDisposition::Drop
+        crate::TurnCancelUndeliveredInputPolicy::Drop
     );
 
     let request = session_store_request(
@@ -1686,7 +1687,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         "turn-cancel-repair-first:request",
         None,
     )
-    .undelivered(crate::TurnCancelDisposition::Drop);
+    .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop);
     store
         .record_turn_cancel_request(cancel.clone())
         .await
@@ -1746,7 +1747,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         "turn-cancel-completion-wins:request",
         None,
     )
-    .undelivered(crate::TurnCancelDisposition::Drop);
+    .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop);
     store
         .record_turn_cancel_request(stale_drop.clone())
         .await
@@ -1776,7 +1777,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
     assert_eq!(repaired.affected_inputs[0].input_id, row.input_id);
     assert_eq!(
         repaired.affected_inputs[0].disposition,
-        crate::TurnCancelDisposition::Defer,
+        crate::TurnCancelUndeliveredInputPolicy::Defer,
         "a losing request row cannot select Drop"
     );
     assert!(
@@ -1829,7 +1830,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
     // it from moving the closure-CAS predicate.
     let after_step =
         crate::TurnCancelRequest::new(address.clone(), "turn-cancel-final-cas:after-step", None)
-            .undelivered(crate::TurnCancelDisposition::Drop)
+            .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop)
             .mode(crate::TurnCancelMode::AfterStep);
     store
         .record_turn_cancel_request(after_step.clone())
@@ -1885,7 +1886,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
 
     let immediate =
         crate::TurnCancelRequest::new(address.clone(), "turn-cancel-final-cas:immediate", None)
-            .undelivered(crate::TurnCancelDisposition::Drop);
+            .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop);
     store
         .record_turn_cancel_request(immediate.clone())
         .await
@@ -1948,7 +1949,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
     );
     assert_eq!(
         receipt.turn_cancel_input_outcome.affected_inputs[0].disposition,
-        crate::TurnCancelDisposition::Drop
+        crate::TurnCancelUndeliveredInputPolicy::Drop
     );
     assert_eq!(
         store
@@ -2011,7 +2012,7 @@ pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
     let address = crate::TurnAddress::new(&request.session_id, &turn_id);
 
     let accepted = crate::TurnCancelRequest::new(address.clone(), "accepted-drop", None)
-        .undelivered(crate::TurnCancelDisposition::Drop)
+        .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop)
         .mode(crate::TurnCancelMode::AfterStep);
     assert_eq!(
         store
@@ -2033,7 +2034,7 @@ pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
     // A conflicting repeat, in the strongest mode it could ask for: neither
     // the row nor the CAS predicate may move.
     let conflicting = crate::TurnCancelRequest::new(address.clone(), "conflicting-defer", None)
-        .undelivered(crate::TurnCancelDisposition::Defer)
+        .undelivered(crate::TurnCancelUndeliveredInputPolicy::Defer)
         .mode(crate::TurnCancelMode::Immediate);
     assert_eq!(
         store
@@ -2055,7 +2056,7 @@ pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
 
     // The same-disposition escalation is unaffected by that refusal.
     let escalation = crate::TurnCancelRequest::new(address.clone(), "escalating-drop", None)
-        .undelivered(crate::TurnCancelDisposition::Drop)
+        .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop)
         .mode(crate::TurnCancelMode::Immediate);
     assert_eq!(
         store
@@ -2157,9 +2158,9 @@ pub(super) async fn turn_cancel_concurrent_opposing_requests_converge(
     let racers = (0..8).map(|index| {
         crate::TurnCancelRequest::new(address.clone(), format!("racer-{index}"), None)
             .undelivered(if index % 2 == 0 {
-                crate::TurnCancelDisposition::Drop
+                crate::TurnCancelUndeliveredInputPolicy::Drop
             } else {
-                crate::TurnCancelDisposition::Defer
+                crate::TurnCancelUndeliveredInputPolicy::Defer
             })
             .mode(crate::TurnCancelMode::Immediate)
     });

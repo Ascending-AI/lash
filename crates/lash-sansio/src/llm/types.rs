@@ -1619,19 +1619,19 @@ pub enum ChargeSafetyDecision {
 }
 
 /// ADR 0031: absence means unreported and an explicit zero is information.
-/// The disposition makes the reason for an absence part of the sealed record,
+/// The outcome makes the reason for an absence part of the sealed record,
 /// so a host summing cost can tell "the provider reported nothing" from "the
 /// call was cut off before the provider's final usage chunk arrived" — the
 /// latter is billed by the provider even though lash never saw the count.
 ///
-/// A `Reported` disposition means provider usage was observed before the
+/// A `Reported` outcome means provider usage was observed before the
 /// attempt ended. Dialects that stream usage incrementally may have delivered
 /// only an early partial; the record carries what was observed, never a guess.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AttemptUsageDisposition {
+pub enum AttemptUsageOutcome {
     /// Provider-reported usage was observed; `usage` is `Some`. Records
-    /// sealed before this disposition existed decode here.
+    /// sealed before this outcome existed decode here.
     #[default]
     Reported,
     /// The attempt completed and the provider reported no usage at all.
@@ -1645,8 +1645,8 @@ pub enum AttemptUsageDisposition {
     UnreportedAfterFailure,
 }
 
-impl AttemptUsageDisposition {
-    /// Derive the disposition from what the attempt actually observed.
+impl AttemptUsageOutcome {
+    /// Derive the outcome from what the attempt actually observed.
     pub fn for_attempt(outcome: AttemptOutcome, usage: Option<&LlmUsage>) -> Self {
         if usage.is_some() {
             return Self::Reported;
@@ -1692,9 +1692,9 @@ pub struct AttemptRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<LlmUsage>,
     /// Why `usage` is present or absent. Additive: records sealed without it
-    /// decode as [`AttemptUsageDisposition::Reported`].
-    #[serde(default, skip_serializing_if = "AttemptUsageDisposition::is_reported")]
-    pub usage_disposition: AttemptUsageDisposition,
+    /// decode as [`AttemptUsageOutcome::Reported`].
+    #[serde(default, skip_serializing_if = "AttemptUsageOutcome::is_reported")]
+    pub usage_disposition: AttemptUsageOutcome,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -55,7 +55,7 @@ use crate::durable_wait::{
     restate_unknown_or_revoked,
 };
 use crate::effect_group::{
-    EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
+    EffectGroupCloseOutcome, EffectGroupCloseRequest, EffectGroupCloseResponse,
     EffectGroupDispatchRequest, EffectGroupOpenRequest, EffectGroupOpenResponse,
     EffectGroupProbeResponse, EffectGroupShape, EffectGroupWaitResolution, decode_wait_resolution,
     group_shape_error, ready_wait_request,
@@ -873,11 +873,12 @@ where
             }
             EffectGroupOpenResponse::ReopenedReady => Ok(handle),
             EffectGroupOpenResponse::ReopenedClosed { effective } => match effective {
-                EffectGroupCloseDisposition::Refused { reason } => Err(group_shape_error(format!(
+                EffectGroupCloseOutcome::Refused { reason } => Err(group_shape_error(format!(
                     "effect group {group_key} routing was refused: {reason:?}"
                 ))),
-                EffectGroupCloseDisposition::RunToCompletion
-                | EffectGroupCloseDisposition::Cancel => Ok(handle),
+                EffectGroupCloseOutcome::RunToCompletion | EffectGroupCloseOutcome::Cancel => {
+                    Ok(handle)
+                }
             },
             EffectGroupOpenResponse::Retired => Err(group_shape_error(format!(
                 "effect group {group_key} is retired"

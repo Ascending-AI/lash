@@ -610,7 +610,7 @@ fn probed_call_record() -> crate::LlmCallRecord {
                 cache_write_input_tokens: 0,
                 reasoning_output_tokens: 0,
             }),
-            usage_disposition: crate::AttemptUsageDisposition::default(),
+            usage_disposition: crate::AttemptUsageOutcome::default(),
         }],
     }
 }

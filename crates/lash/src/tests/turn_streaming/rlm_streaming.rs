@@ -603,7 +603,7 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
         // grace, so the aborted attempt is reported, not a hole.
         assert_eq!(
             attempt.usage_disposition,
-            lash_core::AttemptUsageDisposition::Reported
+            lash_core::AttemptUsageOutcome::Reported
         );
         assert_eq!(
             attempt.usage.as_ref().map(|usage| usage.input_tokens),
@@ -715,7 +715,7 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
         assert_eq!(attempt.usage, None);
         assert_eq!(
             attempt.usage_disposition,
-            lash_core::AttemptUsageDisposition::UnreportedAfterAbort
+            lash_core::AttemptUsageOutcome::UnreportedAfterAbort
         );
 
         let report = session.usage_report();
@@ -776,7 +776,7 @@ pub(super) fn rlm_turn_without_interruption_or_usage_writes_no_ledger_row() -> R
         assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Completed);
         assert_eq!(
             attempt.usage_disposition,
-            lash_core::AttemptUsageDisposition::UnreportedByProvider
+            lash_core::AttemptUsageOutcome::UnreportedByProvider
         );
         let report = session.usage_report();
         assert_eq!(

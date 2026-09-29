@@ -647,12 +647,12 @@ impl SqliteStore {
                         for entry in &commit.usage_deltas {
                             let (reconciled_call_id, reconciled_attempt_ordinal) =
                                 match &entry.entry.usage_disposition {
-                                    lash_core_execution::LedgerUsageDisposition::Reconciled {
+                                    lash_core_execution::LedgerUsageOutcome::Reconciled {
                                         call_id,
                                         attempt_ordinal,
                                     } => (Some(call_id.as_str()), Some(i64::from(*attempt_ordinal))),
-                                    lash_core_execution::LedgerUsageDisposition::Reported
-                                    | lash_core_execution::LedgerUsageDisposition::Unreported { .. } =>
+                                    lash_core_execution::LedgerUsageOutcome::Reported
+                                    | lash_core_execution::LedgerUsageOutcome::Unreported { .. } =>
                                         (None, None),
                                 };
                             let entry_ordinal = i64::try_from(entry.identity.entry_ordinal)

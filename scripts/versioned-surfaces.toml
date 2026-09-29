@@ -483,7 +483,7 @@ constant = "PROCESS_EVENT_VOCABULARY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/effect_summary.rs"
 upgrade = "migrate"
 description = "runtime-owned durable effect-summary kinds: event types, strict serde payloads, occurrence cap and failure-code mappings"
-manifest = "ProcessEffectSummary"
+manifest = "ProcessEffectReport"
 
 [[surface]]
 constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"

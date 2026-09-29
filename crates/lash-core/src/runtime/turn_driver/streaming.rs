@@ -506,7 +506,7 @@ impl RuntimeTurnDriver<'_> {
                                     generation_disposition: None,
                                     usage: None,
                                     usage_disposition:
-                                        crate::AttemptUsageDisposition::UnreportedAfterFailure,
+                                        crate::AttemptUsageOutcome::UnreportedAfterFailure,
                                 }],
                             });
                             let failure = LlmCallError {
@@ -1425,7 +1425,7 @@ impl RuntimeTurnDriver<'_> {
     /// attempt and must not be cleared by a provider retry that raced with cancellation.
     /// If the deadline wins, an uncooperative provider's late usage is unavailable for this
     /// attempt and the sealed record says so
-    /// (`AttemptUsageDisposition::UnreportedAfterAbort`).
+    /// (`AttemptUsageOutcome::UnreportedAfterAbort`).
     /// The deadline is the host's `abort_drain_grace` lever, not a literal.
     async fn collect_trailing_stream_events_before_abort<T>(
         &mut self,

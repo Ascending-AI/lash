@@ -622,9 +622,9 @@ impl RuntimeTurnDriver<'_> {
                 if let Some(code_executor) = self.session.plugins().code_executor() {
                     code_executor
                         .settle_code_execution(if cancellation_evidence.is_some() {
-                            crate::plugin::CodeExecutionDisposition::Cancelled
+                            crate::plugin::CodeExecutionOutcome::Cancelled
                         } else {
-                            crate::plugin::CodeExecutionDisposition::Discarded
+                            crate::plugin::CodeExecutionOutcome::Discarded
                         })
                         .await
                         .map_err(|error| {
@@ -792,9 +792,9 @@ impl RuntimeTurnDriver<'_> {
         if let Some(code_executor) = self.session.plugins().code_executor() {
             code_executor
                 .settle_code_execution(if cancellation_evidence.is_some() || tool_call_cancelled {
-                    crate::plugin::CodeExecutionDisposition::Cancelled
+                    crate::plugin::CodeExecutionOutcome::Cancelled
                 } else {
-                    crate::plugin::CodeExecutionDisposition::Accepted
+                    crate::plugin::CodeExecutionOutcome::Accepted
                 })
                 .await
                 .map_err(|error| {

@@ -383,14 +383,14 @@ impl StoppedPartial {
     pub fn eligibility(&self) -> ResubmissionEligibility;
     /// `true` only for `Ready`.
     pub fn safe_to_resubmit(&self) -> bool;
-    pub fn summary(&self) -> StoppedPartialSummary;
+    pub fn summary(&self) -> StoppedPartialView;
     /// Recomputes the digest and compares it.
     pub fn verify_digest(&self) -> Result<(), StoppedPartialDigestMismatch>;
 }
 
 /// What the observation carries: identity and facts, never payload.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct StoppedPartialSummary {
+pub struct StoppedPartialView {
     pub id: StoppedPartialId,
     pub digest: StoppedPartialDigest,
     pub reason: StopReason,
@@ -1017,7 +1017,7 @@ id and digest, and hosts dedupe on the id.
   §1.3: `ProcessLoss`, or `UserCancel` when `cancelled_by` is `Some`. The
   coverage is `AcknowledgedPrefix`. This is the only place `ProcessLoss` is
   sealed. `RootTerminal` gains `stopped_partial:
-  Option<StoppedPartialSummary>`. The lost-root pass
+  Option<StoppedPartialView>`. The lost-root pass
   (`crates/lash-restate/src/session_control.rs:48`) publishes
   `StoppedPartialAvailable` through the core's Live Replay publisher after
   the write. That publication is best-effort, and the read of §5.2 is the
@@ -1077,7 +1077,7 @@ where one exists. A root that ended through `end_lost_root` has no
 /// Published after the commit that made the partial durable. It holds
 /// identity and facts, never payload.
 #[serde(rename = "stopped_partial_available")]
-StoppedPartialAvailable { summary: StoppedPartialSummary },
+StoppedPartialAvailable { summary: StoppedPartialView },
 ```
 
 **The authorized read.** After a reconnect, or a `Trimmed` gap, the host

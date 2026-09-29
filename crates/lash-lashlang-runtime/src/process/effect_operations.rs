@@ -16,7 +16,7 @@ use super::*;
 /// so a redrive re-derives and re-commits the same summary.
 #[derive(Default)]
 pub(super) struct EffectSummaryWriter {
-    pending: std::sync::Mutex<Vec<lash_core::ProcessEffectSummaryOccurrence>>,
+    pending: std::sync::Mutex<Vec<lash_core::ProcessEffectOccurrence>>,
     omissions: std::sync::Mutex<BTreeMap<String, lash_core::ProcessEffectOmittedCounts>>,
     incorporation_fault: std::sync::Mutex<Option<lash_core::PluginError>>,
 }
@@ -31,7 +31,7 @@ pub(super) struct SummaryPrelude {
 
 impl EffectSummaryWriter {
     pub(super) fn restore(
-        pending: Vec<lash_core::ProcessEffectSummaryOccurrence>,
+        pending: Vec<lash_core::ProcessEffectOccurrence>,
         omissions: BTreeMap<String, lash_core::ProcessEffectOmittedCounts>,
     ) -> Self {
         Self {
@@ -45,7 +45,7 @@ impl EffectSummaryWriter {
         self.incorporation_fault.lock_recover().take()
     }
 
-    pub(super) fn pending(&self) -> Vec<lash_core::ProcessEffectSummaryOccurrence> {
+    pub(super) fn pending(&self) -> Vec<lash_core::ProcessEffectOccurrence> {
         self.pending.lock_recover().clone()
     }
 
@@ -60,8 +60,8 @@ impl EffectSummaryWriter {
     /// ids are the compiled program's execution sites, each entry spelling
     /// only runtime-minted values (the node id, the program's host operation,
     /// the run's replay key).
-    pub(super) fn record(&self, occurrence: lash_core::ProcessEffectSummaryOccurrence) {
-        if lash_core::ProcessEffectSummaryOccurrence::is_within_cap(occurrence.occurrence) {
+    pub(super) fn record(&self, occurrence: lash_core::ProcessEffectOccurrence) {
+        if lash_core::ProcessEffectOccurrence::is_within_cap(occurrence.occurrence) {
             self.pending.lock_recover().push(occurrence);
         } else {
             self.omissions
@@ -79,7 +79,7 @@ impl EffectSummaryWriter {
         SummaryPrelude {
             requests: pending
                 .iter()
-                .map(lash_core::ProcessEffectSummaryOccurrence::append_request)
+                .map(lash_core::ProcessEffectOccurrence::append_request)
                 .collect(),
             flushed: pending.len(),
         }
@@ -153,7 +153,7 @@ impl LashlangProcessHost<'_> {
         replay_key: &str,
     ) {
         self.effect_summary
-            .record(lash_core::ProcessEffectSummaryOccurrence::new(
+            .record(lash_core::ProcessEffectOccurrence::new(
                 call_site.site.node_id.clone(),
                 call_site.occurrence,
                 operation,

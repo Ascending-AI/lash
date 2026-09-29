@@ -151,14 +151,14 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
                 Some("test-user".to_string()),
             )
             .with_reason("drop undelivered input")
-            .undelivered(lash_core::TurnCancelDisposition::Drop),
+            .undelivered(lash_core::TurnCancelUndeliveredInputPolicy::Drop),
         )
         .await
         .expect("record Drop before the owner reaches finish");
     assert!(matches!(
         receipt.outcome,
         lash_core::facade_support::TurnCancelOutcome::Requested(ref evidence)
-            if evidence.undelivered == lash_core::TurnCancelDisposition::Drop
+            if evidence.undelivered == lash_core::TurnCancelUndeliveredInputPolicy::Drop
     ));
 
     tokio::select! {
@@ -256,6 +256,6 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         .affected_inputs;
     assert!(affected.iter().any(|input| {
         input.input_id == undelivered.input_id
-            && input.disposition == lash_core::TurnCancelDisposition::Drop
+            && input.disposition == lash_core::TurnCancelUndeliveredInputPolicy::Drop
     }));
 }

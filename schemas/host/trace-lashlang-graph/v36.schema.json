@@ -1364,7 +1364,7 @@
           ]
         },
         "summary": {
-          "$ref": "#/definitions/TraceLashlangNodeSummary"
+          "$ref": "#/definitions/TraceLashlangNodeReport"
         }
       },
       "required": [
@@ -1372,6 +1372,51 @@
         "kind",
         "label",
         "summary"
+      ],
+      "type": "object"
+    },
+    "TraceLashlangNodeReport": {
+      "properties": {
+        "first_terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TraceLashlangNodeTerminalRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TraceLashlangNodeTerminalRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retained_occurrences": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "started_count": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "terminal_count": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "retained_occurrences",
+        "started_count",
+        "terminal_count"
       ],
       "type": "object"
     },
@@ -1428,61 +1473,7 @@
       ],
       "type": "object"
     },
-    "TraceLashlangNodeSummary": {
-      "properties": {
-        "first_terminal": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/TraceLashlangNodeTerminalSummary"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "last_terminal": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/TraceLashlangNodeTerminalSummary"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "retained_occurrences": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "started_count": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "terminal_count": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "retained_occurrences",
-        "started_count",
-        "terminal_count"
-      ],
-      "type": "object"
-    },
-    "TraceLashlangNodeTerminalStatus": {
-      "enum": [
-        "completed",
-        "failed",
-        "cancelled",
-        "skipped"
-      ],
-      "type": "string"
-    },
-    "TraceLashlangNodeTerminalSummary": {
+    "TraceLashlangNodeTerminalRecord": {
       "properties": {
         "end": {
           "format": "date-time",
@@ -1503,6 +1494,15 @@
         "status"
       ],
       "type": "object"
+    },
+    "TraceLashlangNodeTerminalStatus": {
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled",
+        "skipped"
+      ],
+      "type": "string"
     },
     "TraceNodeAwaited": {
       "oneOf": [

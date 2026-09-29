@@ -487,7 +487,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                 reopened,
                 ..
             } => {
-                if !matches!(effective, EffectGroupCloseDisposition::Refused { .. }) && !*reopened {
+                if !matches!(effective, EffectGroupCloseOutcome::Refused { .. }) && !*reopened {
                     *reopened = true;
                     marked = true;
                 }
@@ -703,7 +703,7 @@ impl EffectGroupState for EffectGroupStateImpl {
         let response = match &record.lifecycle {
             EffectGroupLifecycle::Preparing { live, .. } => {
                 record.lifecycle = EffectGroupLifecycle::Closed {
-                    effective: EffectGroupCloseDisposition::Refused {
+                    effective: EffectGroupCloseOutcome::Refused {
                         reason: request.reason.clone(),
                     },
                     reopened: false,
@@ -1104,7 +1104,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                 effective,
                 reopened,
                 ..
-            } if !reopened || matches!(effective, EffectGroupCloseDisposition::Refused { .. })
+            } if !reopened || matches!(effective, EffectGroupCloseOutcome::Refused { .. })
         );
         // A caller is refused its closed group whether or not the rank settled.
         if request.for_caller && closed_to_caller {
@@ -1174,9 +1174,9 @@ impl EffectGroupState for EffectGroupStateImpl {
                 ..
             } => {
                 let declared = match effective {
-                    EffectGroupCloseDisposition::RunToCompletion => LoserPolicy::RunToCompletion,
-                    EffectGroupCloseDisposition::Cancel => LoserPolicy::Cancel,
-                    EffectGroupCloseDisposition::Refused { .. } => {
+                    EffectGroupCloseOutcome::RunToCompletion => LoserPolicy::RunToCompletion,
+                    EffectGroupCloseOutcome::Cancel => LoserPolicy::Cancel,
+                    EffectGroupCloseOutcome::Refused { .. } => {
                         return Ok(Reply::at(wire, EffectGroupCloseResponse::AlreadyClosed));
                     }
                 };
@@ -1190,7 +1190,7 @@ impl EffectGroupState for EffectGroupStateImpl {
             Ok(effective) => effective,
             Err(_) => return Ok(Reply::at(wire, EffectGroupCloseResponse::WidenRefused)),
         };
-        if prior.as_ref() == Some(&EffectGroupCloseDisposition::from(effective)) {
+        if prior.as_ref() == Some(&EffectGroupCloseOutcome::from(effective)) {
             return Ok(Reply::at(wire, EffectGroupCloseResponse::AlreadyClosed));
         }
         let mut decided = Vec::new();

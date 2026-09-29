@@ -560,7 +560,7 @@ fn remote_turn_result_derives_status_from_its_outcome() {
                     request_id: "request-1".to_string(),
                     origin: Some("workbench-user".to_string()),
                     reason: Some("stop".to_string()),
-                    undelivered: RemoteTurnCancelDisposition::Defer,
+                    undelivered: RemoteTurnCancelUndeliveredInputPolicy::Defer,
                 },
             },
         },
@@ -602,7 +602,7 @@ fn remote_cancelled_stop_requires_and_preserves_evidence() {
             request_id: "request-1".to_string(),
             origin: Some("workbench-user".to_string()),
             reason: Some("stop".to_string()),
-            undelivered: RemoteTurnCancelDisposition::Drop,
+            undelivered: RemoteTurnCancelUndeliveredInputPolicy::Drop,
         },
     };
     let wire = serde_json::to_value(&stop).unwrap();
@@ -629,7 +629,7 @@ fn remote_turn_cancel_envelopes_round_trip() {
         request_id: "request-1".to_string(),
         origin: Some("test-host".to_string()),
         reason: Some("superseded by newer input".to_string()),
-        undelivered: RemoteTurnCancelDisposition::Drop,
+        undelivered: RemoteTurnCancelUndeliveredInputPolicy::Drop,
     };
     request.validate().expect("valid cancellation request");
     let decoded: RemoteTurnCancelRequest = serde_json::from_value(
@@ -653,7 +653,7 @@ fn remote_turn_cancel_envelopes_round_trip() {
         request_id: "request-1".to_string(),
         origin: Some("test-host".to_string()),
         reason: None,
-        undelivered: RemoteTurnCancelDisposition::Defer,
+        undelivered: RemoteTurnCancelUndeliveredInputPolicy::Defer,
     };
     for outcome in [
         RemoteTurnCancelOutcome::Requested {
@@ -663,7 +663,7 @@ fn remote_turn_cancel_envelopes_round_trip() {
             cancellation: evidence.clone(),
         },
         RemoteTurnCancelOutcome::PolicyConflict {
-            requested: RemoteTurnCancelDisposition::Drop,
+            requested: RemoteTurnCancelUndeliveredInputPolicy::Drop,
             accepted: evidence.clone(),
         },
         RemoteTurnCancelOutcome::CompletionWonRace,

@@ -7,7 +7,7 @@
 //! re-exports every one of them at its original path.
 
 use lash_trace::{
-    TraceAttemptUsageDisposition, TraceChargeSafetyDecision, TraceChargeSafetyDenialReason,
+    TraceAttemptUsageOutcome, TraceChargeSafetyDecision, TraceChargeSafetyDenialReason,
     TraceExecutionEvidence, TraceLlmResponse, TraceRetryAttempt, TraceRetryAttemptOutcome,
     TraceTokenUsage,
 };
@@ -113,18 +113,18 @@ pub fn trace_llm_attempts(record: Option<&crate::LlmCallRecord>) -> Option<Vec<T
 }
 
 fn trace_attempt_usage_disposition(
-    disposition: crate::AttemptUsageDisposition,
-) -> TraceAttemptUsageDisposition {
+    disposition: crate::AttemptUsageOutcome,
+) -> TraceAttemptUsageOutcome {
     match disposition {
-        crate::AttemptUsageDisposition::Reported => TraceAttemptUsageDisposition::Reported,
-        crate::AttemptUsageDisposition::UnreportedByProvider => {
-            TraceAttemptUsageDisposition::UnreportedByProvider
+        crate::AttemptUsageOutcome::Reported => TraceAttemptUsageOutcome::Reported,
+        crate::AttemptUsageOutcome::UnreportedByProvider => {
+            TraceAttemptUsageOutcome::UnreportedByProvider
         }
-        crate::AttemptUsageDisposition::UnreportedAfterAbort => {
-            TraceAttemptUsageDisposition::UnreportedAfterAbort
+        crate::AttemptUsageOutcome::UnreportedAfterAbort => {
+            TraceAttemptUsageOutcome::UnreportedAfterAbort
         }
-        crate::AttemptUsageDisposition::UnreportedAfterFailure => {
-            TraceAttemptUsageDisposition::UnreportedAfterFailure
+        crate::AttemptUsageOutcome::UnreportedAfterFailure => {
+            TraceAttemptUsageOutcome::UnreportedAfterFailure
         }
     }
 }

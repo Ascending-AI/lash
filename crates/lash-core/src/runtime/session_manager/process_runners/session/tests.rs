@@ -284,7 +284,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         request_id: "child-request-17".to_string(),
         origin: Some("opaque-host-origin".to_string()),
         reason: Some("child turn stopped by its host".to_string()),
-        undelivered: crate::TurnCancelDisposition::Defer,
+        undelivered: crate::TurnCancelUndeliveredInputPolicy::Defer,
         mode: crate::TurnCancelMode::Immediate,
         honoured_after_step: None,
     };
@@ -540,7 +540,7 @@ fn spawn_agent_projects_final_value() {
             request_id: "cancel-child".to_string(),
             origin: None,
             reason: Some("the parent went away".to_string()),
-            undelivered: crate::TurnCancelDisposition::Defer,
+            undelivered: crate::TurnCancelUndeliveredInputPolicy::Defer,
             mode: crate::TurnCancelMode::Immediate,
             honoured_after_step: None,
         },

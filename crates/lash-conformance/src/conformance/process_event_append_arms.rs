@@ -278,7 +278,7 @@ async fn durable_effect_outcome_event_crash_windows(
         )
         .await
         .expect("record the invocation's execution start");
-    let recorded = lash_core::ProcessEffectSummaryOccurrence::new(
+    let recorded = lash_core::ProcessEffectOccurrence::new(
         "node:tool",
         1,
         "tool:fixture",

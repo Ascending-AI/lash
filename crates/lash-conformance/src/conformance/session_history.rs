@@ -162,7 +162,7 @@ async fn seed_window_fixture(
         source: "turn".to_string(),
         model: "history-model".to_string(),
         usage: TokenUsage::default(),
-        usage_disposition: crate::LedgerUsageDisposition::unreported((0..3).map(|ordinal| {
+        usage_disposition: crate::LedgerUsageOutcome::unreported((0..3).map(|ordinal| {
             crate::UnreportedLedgerAttempt {
                 call_id: format!("history-call-{ordinal}"),
                 attempt_ordinal: 0,

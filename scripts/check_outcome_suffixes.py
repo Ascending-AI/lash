@@ -47,31 +47,6 @@ RESULT_ALIASES = frozenset(
     }
 )
 
-# Retired-suffix types still nameable on the surface, owned by audit tickets
-# outside FIG-4107's three renames. Shrinks only: a rename lands by removing
-# the entry, a new name never joins.
-PENDING = frozenset(
-    {
-        "AttemptUsageDisposition",  # sans-io attempt usage outcome; pending rename
-        "CodeExecutionDisposition",  # code-effect settlement; pending rename
-        "EffectGroupCloseDisposition",  # restate group-close policy; pending
-        "ParkSummary",  # live-park aggregate; pending rename
-        "ParkedWorkSummary",  # parked-work aggregate; pending rename
-        "ProcessEffectNodeSummary",  # per-node effect aggregate; pending
-        "ProcessEffectSummary",  # effect-log aggregate; pending rename
-        "RemoteAttemptUsageDisposition",  # wire mirror of the pending core type
-        "RemoteProcessEffectNodeSummary",  # wire mirror of the pending core type
-        "RemoteTurnCancelDisposition",  # wire mirror of the pending core type
-        "StoppedPartialSummary",  # stopped-partial projection; pending rename
-        "TraceAttemptUsageDisposition",  # trace mirror of the pending core type
-        "TraceLashlangNodeSummary",  # trace node projection; pending rename
-        "TraceLashlangNodeTerminalSummary",  # trace terminal projection; pending
-        "TurnCancelDisposition",  # cancel-honour timing policy; pending rename
-        "WakeDeliveryDisposition",  # wake delivery state machine; pending rename
-    }
-)
-
-
 def rust_sources(crate: Path) -> list[Path]:
     return sorted(crate.glob("src/**/*.rs"))
 
@@ -160,7 +135,7 @@ def main() -> int:
 
     violations = {}
     for source, line, name in candidates:
-        if name in RESULT_ALIASES or name in PENDING:
+        if name in RESULT_ALIASES:
             continue
         if name.endswith(RETIRED):
             violations.setdefault(name, []).append(f"{source}:{line}")

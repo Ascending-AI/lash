@@ -77,7 +77,7 @@ pub(crate) enum TurnCancelReceipt {
     },
     PolicyConflict {
         address: lash::TurnAddress,
-        requested: lash::TurnCancelDisposition,
+        requested: lash::TurnCancelUndeliveredInputPolicy,
         accepted: lash::TurnCancellationEvidence,
     },
 }

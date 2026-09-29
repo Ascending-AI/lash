@@ -334,7 +334,7 @@ pub struct RemoteProcessEffectOmittedCounts {
 /// One effect node's recorded occurrences and omitted counts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct RemoteProcessEffectNodeSummary {
+pub struct RemoteProcessEffectNodeReport {
     pub node_id: String,
     pub occurrences: Vec<RemoteProcessEffectOccurrence>,
     pub omitted: RemoteProcessEffectOmittedCounts,
@@ -361,7 +361,7 @@ pub enum RemoteProcessDurableSnapshot {
     Retained {
         sequence: u64,
         status: crate::RemoteProcessStatus,
-        summary: Vec<RemoteProcessEffectNodeSummary>,
+        summary: Vec<RemoteProcessEffectNodeReport>,
         completeness: RemoteProcessDurableCompleteness,
     },
     NoLongerRetained {

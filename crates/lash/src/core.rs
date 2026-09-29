@@ -200,8 +200,8 @@ impl LashCore {
         let turns = self.store_factory.count_unsettled_turns().await?;
         let processes = self.process_registry.summarize_parked_processes().await?;
         let checked_at = self.env.core.clock.timestamp_ms();
-        let parked = crate::parked_work::ParkedWorkSummary {
-            turns: lash_core::store::ParkSummary {
+        let parked = crate::parked_work::ParkedWorkReport {
+            turns: lash_core::store::ParkReport {
                 by_reason: turns.parked_by_reason.clone(),
                 oldest_since_ms: turns.oldest_parked_since_ms,
                 retired_by_executable_generation: turns.retired_by_executable_generation.clone(),

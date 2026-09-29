@@ -794,7 +794,7 @@ impl PostgresStore {
             })?;
             let (reconciled_call_id, reconciled_attempt_ordinal) =
                 match &entry.entry.usage_disposition {
-                    lash_core_execution::LedgerUsageDisposition::Reconciled {
+                    lash_core_execution::LedgerUsageOutcome::Reconciled {
                         call_id,
                         attempt_ordinal,
                     } => (Some(call_id.as_str()), Some(i64::from(*attempt_ordinal))),
@@ -826,10 +826,8 @@ impl PostgresStore {
                     .fetch_optional(&mut **tx)
                     .await
                     .map_err(store_sqlx_error)?;
-            if let (
-                Some(seq),
-                lash_core_execution::LedgerUsageDisposition::Unreported { attempts },
-            ) = (inserted_seq, &entry.entry.usage_disposition)
+            if let (Some(seq), lash_core_execution::LedgerUsageOutcome::Unreported { attempts }) =
+                (inserted_seq, &entry.entry.usage_disposition)
             {
                 for attempt in attempts {
                     sqlx::query(session_sql().usage_holes.insert.sql())

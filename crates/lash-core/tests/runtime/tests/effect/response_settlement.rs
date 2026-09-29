@@ -8,7 +8,7 @@ struct SettlementExecutor {
     first_started: AtomicBool,
     started: tokio::sync::Notify,
     unsettled: AtomicBool,
-    dispositions: Mutex<Vec<lash_core::plugin::CodeExecutionDisposition>>,
+    dispositions: Mutex<Vec<lash_core::plugin::CodeExecutionOutcome>>,
     nested_error: bool,
 }
 
@@ -34,7 +34,7 @@ impl SettlementExecutor {
         }
     }
 
-    fn dispositions(&self) -> Vec<lash_core::plugin::CodeExecutionDisposition> {
+    fn dispositions(&self) -> Vec<lash_core::plugin::CodeExecutionOutcome> {
         self.dispositions.lock_recover().clone()
     }
 }
@@ -110,7 +110,7 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
 
     async fn settle_code_execution(
         &self,
-        disposition: lash_core::plugin::CodeExecutionDisposition,
+        disposition: lash_core::plugin::CodeExecutionOutcome,
     ) -> Result<(), lash_core::SessionError> {
         self.dispositions.lock_recover().push(disposition);
         self.unsettled.store(false, Ordering::SeqCst);
@@ -260,7 +260,7 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
     ));
     assert_eq!(
         executor.dispositions(),
-        vec![lash_core::plugin::CodeExecutionDisposition::Cancelled]
+        vec![lash_core::plugin::CodeExecutionOutcome::Cancelled]
     );
 }
 
@@ -355,8 +355,8 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
     assert_eq!(
         executor.dispositions(),
         vec![
-            lash_core::plugin::CodeExecutionDisposition::Cancelled,
-            lash_core::plugin::CodeExecutionDisposition::Accepted,
+            lash_core::plugin::CodeExecutionOutcome::Cancelled,
+            lash_core::plugin::CodeExecutionOutcome::Accepted,
         ]
     );
 }

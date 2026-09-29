@@ -243,18 +243,18 @@ impl TraceLashlangNodeObservation {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceLashlangNodeSummary {
+pub struct TraceLashlangNodeReport {
     pub retained_occurrences: u64,
     pub started_count: u64,
     pub terminal_count: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_terminal: Option<TraceLashlangNodeTerminalSummary>,
+    pub first_terminal: Option<TraceLashlangNodeTerminalRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_terminal: Option<TraceLashlangNodeTerminalSummary>,
+    pub last_terminal: Option<TraceLashlangNodeTerminalRecord>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceLashlangNodeTerminalSummary {
+pub struct TraceLashlangNodeTerminalRecord {
     pub occurrence: u64,
     pub status: TraceLashlangNodeTerminalStatus,
     pub end: DateTime<Utc>,
@@ -302,7 +302,7 @@ pub struct TraceLashlangGraphNode {
     pub branch_selection: Option<TraceBranchSelection>,
     #[serde(flatten)]
     pub observation: TraceLashlangNodeObservation,
-    pub summary: TraceLashlangNodeSummary,
+    pub summary: TraceLashlangNodeReport,
 }
 
 impl TraceLashlangGraphNode {
@@ -319,7 +319,7 @@ impl TraceLashlangGraphNode {
             label_metadata,
             branch_selection: None,
             observation: TraceLashlangNodeObservation::Unobserved,
-            summary: TraceLashlangNodeSummary::default(),
+            summary: TraceLashlangNodeReport::default(),
         }
     }
 }

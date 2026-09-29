@@ -233,7 +233,7 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "no bounded surface: one payload per scope-close row, refused at decode \
              rather than at rest",
         ),
-        DurableFormat::ProcessEffectSummary => SurfaceRelation::Unwalkable(
+        DurableFormat::ProcessEffectReport => SurfaceRelation::Unwalkable(
             "no bounded surface: carried on process-event rows, refused when a summary event is \
              appended or folded rather than at rest",
         ),

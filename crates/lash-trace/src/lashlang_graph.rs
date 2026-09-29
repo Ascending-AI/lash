@@ -790,7 +790,7 @@ fn apply_occurrences(
                             (TraceLashlangNodeTerminalStatus::Cancelled, end.to_owned())
                         }
                     };
-                    TraceLashlangNodeTerminalSummary {
+                    TraceLashlangNodeTerminalRecord {
                         occurrence: *occurrence,
                         status,
                         end,
@@ -875,7 +875,7 @@ fn apply_occurrences(
         node.summary.retained_occurrences += skipped_count;
         node.summary.terminal_count += skipped_count;
         if let Some(((.., branch_node_id, branch_occurrence), end)) = latest_skip {
-            let terminal = TraceLashlangNodeTerminalSummary {
+            let terminal = TraceLashlangNodeTerminalRecord {
                 occurrence: *branch_occurrence,
                 status: TraceLashlangNodeTerminalStatus::Skipped,
                 end: *end,
@@ -1045,7 +1045,7 @@ fn merge_late_retained_event(
             .find(|node| node.id == retention.node_id)
             .expect("watermark history materializes its node");
         if let Some(archived) = &retention.archived_node {
-            merge_node_summary(&mut watermark_node.summary, &archived.summary);
+            merge_node_report(&mut watermark_node.summary, &archived.summary);
         }
         retention.node = watermark_node;
         for edge in watermark_graph.edges {
@@ -1229,7 +1229,7 @@ fn merge_late_retained_event(
             };
             retention.node.observation = observation;
             retention.node.summary.terminal_count += 1;
-            let terminal = TraceLashlangNodeTerminalSummary {
+            let terminal = TraceLashlangNodeTerminalRecord {
                 occurrence: *occurrence,
                 status,
                 end: timestamp,
@@ -1273,7 +1273,7 @@ fn merge_late_retained_event(
     }
 }
 
-fn merge_node_summary(target: &mut TraceLashlangNodeSummary, archived: &TraceLashlangNodeSummary) {
+fn merge_node_report(target: &mut TraceLashlangNodeReport, archived: &TraceLashlangNodeReport) {
     target.retained_occurrences += archived.retained_occurrences;
     target.started_count += archived.started_count;
     target.terminal_count += archived.terminal_count;

@@ -57,7 +57,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
                 Some("turn-cancel-closure-conformance".to_string()),
             )
             .mode(crate::TurnCancelMode::AfterStep)
-            .undelivered(crate::TurnCancelDisposition::Drop),
+            .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop),
         )
         .await
         .expect("seed a durable after-step cancellation before the turn runs");
@@ -152,7 +152,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
                 && outcome
                     .affected_inputs
                     .iter()
-                    .all(|input| input.disposition == crate::TurnCancelDisposition::Drop),
+                    .all(|input| input.disposition == crate::TurnCancelUndeliveredInputPolicy::Drop),
             "{point:?}: the recovery drops the undelivered active-turn input: {outcome:?}"
         );
         assert!(

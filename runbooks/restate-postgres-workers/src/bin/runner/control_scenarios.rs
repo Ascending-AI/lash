@@ -334,7 +334,7 @@ async fn assert_repeat_requests_preserve_the_accepted_policy(
     match &matching.outcome {
         TurnCancelOutcome::AlreadyRequested(evidence) => anyhow::ensure!(
             evidence.request_id == accepted_request_id
-                && evidence.undelivered == TurnCancelDisposition::Defer,
+                && evidence.undelivered == TurnCancelUndeliveredInputPolicy::Defer,
             "matching repeat lost the accepted evidence: {evidence:?}"
         ),
         other => anyhow::bail!("matching repeat was not idempotent: {other:?}"),
@@ -343,7 +343,7 @@ async fn assert_repeat_requests_preserve_the_accepted_policy(
     let conflicting = driver
         .request_cancel(
             cancel_request(address.clone(), "e2e-cancel-repeat-conflicting")
-                .undelivered(TurnCancelDisposition::Drop),
+                .undelivered(TurnCancelUndeliveredInputPolicy::Drop),
         )
         .await
         .context("repeat with a conflicting policy")?;
@@ -352,9 +352,9 @@ async fn assert_repeat_requests_preserve_the_accepted_policy(
             requested,
             accepted,
         } => anyhow::ensure!(
-            *requested == TurnCancelDisposition::Drop
+            *requested == TurnCancelUndeliveredInputPolicy::Drop
                 && accepted.request_id == accepted_request_id
-                && accepted.undelivered == TurnCancelDisposition::Defer,
+                && accepted.undelivered == TurnCancelUndeliveredInputPolicy::Defer,
             "policy conflict did not name both policies: requested={requested:?} accepted={accepted:?}"
         ),
         other => anyhow::bail!("conflicting repeat did not report a conflict: {other:?}"),

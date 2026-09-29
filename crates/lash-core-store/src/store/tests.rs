@@ -441,7 +441,7 @@ fn cancellation_evidence_changes_intent_hash_from_current_shape() {
         request_id: "cancel-turn-42".to_string(),
         origin: Some("operator".to_string()),
         reason: Some("stop".to_string()),
-        undelivered: crate::TurnCancelDisposition::Drop,
+        undelivered: crate::TurnCancelUndeliveredInputPolicy::Drop,
         mode: crate::TurnCancelMode::Immediate,
         honoured_after_step: None,
     });

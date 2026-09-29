@@ -102,7 +102,7 @@ pub use crate::error::{EmbedError, Result, SendError};
 pub use crate::parked_work::{
     ParkedKinds, ParkedWork, ParkedWorkCursor, ParkedWorkEvent, ParkedWorkEventPage,
     ParkedWorkEventsCursor, ParkedWorkPage, ParkedWorkQuery, ParkedWorkRecord, ParkedWorkRef,
-    ParkedWorkSummary,
+    ParkedWorkReport,
 };
 pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
@@ -131,8 +131,8 @@ pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings};
 pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
     TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelClosureSettlement,
-    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
-    TurnCancelRequestRecord,
+    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
+    TurnCancelUndeliveredInputPolicy,
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::store::{
@@ -437,7 +437,7 @@ pub mod persistence {
         AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId, ParkCancelCause,
         ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId, ParkReason,
-        ParkReasonCode, ParkSummary, PendingFollowOn, PhysicalTurn, ProcessPark, ProcessParkKey,
+        ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, ProcessPark, ProcessParkKey,
         ProcessParkQuery, RuntimeCommit, RuntimeCommitReceipt, RuntimeStoreDecorator,
         RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
         SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
@@ -530,7 +530,7 @@ pub mod plugins {
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
-        CheckpointApplication, CodeExecutionDisposition, CodeExecutorPlugin,
+        CheckpointApplication, CodeExecutionOutcome, CodeExecutorPlugin,
         ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState,
         PluginAbort, PluginNamespaceState, PluginState, PrepareTurnRequest,
         ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
@@ -800,8 +800,8 @@ pub mod remote {
     /// Foreground-turn cancellation request and receipt envelopes.
     pub mod turn_control {
         pub use lash_remote_protocol::turn_control::{
-            RemoteTurnCancelDisposition, RemoteTurnCancelOutcome, RemoteTurnCancelReceipt,
-            RemoteTurnCancelRequest, RemoteTurnCancellationEvidence,
+            RemoteTurnCancelOutcome, RemoteTurnCancelReceipt, RemoteTurnCancelRequest,
+            RemoteTurnCancelUndeliveredInputPolicy, RemoteTurnCancellationEvidence,
         };
     }
 
@@ -850,7 +850,7 @@ pub mod process {
         ParentEndPlan, ProcessChange, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
         ProcessOutcome, ProcessStartOutcome, ProcessTerminalSemantics, ProcessTerminalSpec,
         ProcessTombstone, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-        WakeDeliveryClaimOutcome, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
+        WakeDeliveryClaimOutcome, WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState,
         WakeDiscardReason,
     };
     pub use lash_core::{
@@ -862,9 +862,9 @@ pub mod process {
         ProcessCancelReceipt, ProcessChangeCursor, ProcessClockRebind, ProcessCompletionAuthority,
         ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
         ProcessDefinitionRegistry, ProcessDefinitionResolution, ProcessDefinitionValue,
-        ProcessEffectNodeSummary, ProcessEffectOmissions, ProcessEffectOmittedCounts,
-        ProcessEffectOutcomeClass, ProcessEffectSummary, ProcessEffectSummaryError,
-        ProcessEffectSummaryOccurrence, ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt,
+        ProcessEffectNodeReport, ProcessEffectOccurrence, ProcessEffectOmissions,
+        ProcessEffectOmittedCounts, ProcessEffectOutcomeClass, ProcessEffectReport,
+        ProcessEffectReportError, ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt,
         ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog,
         ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
         ProcessEventReadOutcome, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
@@ -1022,7 +1022,7 @@ pub mod tracing {
     /// `lash-trace` re-exports rather than `rlm`-gated.
     pub use lash_trace::{
         DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT, ExecCodeFailureReason, TRACE_SCHEMA_VERSION,
-        TextProjectionMetadata, TraceAgentFrameSwitch, TraceAttemptUsageDisposition,
+        TextProjectionMetadata, TraceAgentFrameSwitch, TraceAttemptUsageOutcome,
         TraceBranchMembership, TraceDurableTimerStatus, TraceDurableWaitResolution,
         TraceExecToolCall, TraceExecutionEvidence, TraceJournaledEffectStatus,
         TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionFailure,
@@ -1033,8 +1033,8 @@ pub mod tracing {
         TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness, TraceLashlangGraphConflict,
         TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
         TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphStore,
-        TraceLashlangNodeObservation, TraceLashlangNodeSummary, TraceLashlangNodeTerminalStatus,
-        TraceLashlangNodeTerminalSummary, TraceNodeAwaited, TraceNodeWaitKind,
+        TraceLashlangNodeObservation, TraceLashlangNodeReport, TraceLashlangNodeTerminalRecord,
+        TraceLashlangNodeTerminalStatus, TraceNodeAwaited, TraceNodeWaitKind,
         TraceNodeWaitResolution, TraceRetryAttempt, TraceRetryAttemptOutcome, TraceRlmStepOutcome,
         TraceToolCallStatus, TraceTurnCancellationEvidence, TraceTurnCompletionReason,
         TraceTurnFailureReason, TraceTurnOutcome, fold_lashlang_graph,
@@ -1210,7 +1210,7 @@ pub mod provider {
     /// re-exported so hosts can implement provider decorators (admission
     /// gates, metrics taps) against the facade alone.
     pub use lash_core::{
-        AttemptOutcome, AttemptUsageDisposition, ExecutionEvidence,
+        AttemptOutcome, AttemptUsageOutcome, ExecutionEvidence,
         ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, LlmRequest,
         LlmRequestScope, LlmResponse, LlmStreamEvidence, NormalizedError, ProtocolPosition,
         ProviderEndpointError, facade_support::LlmTransportError,

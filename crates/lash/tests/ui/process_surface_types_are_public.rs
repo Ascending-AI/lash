@@ -41,7 +41,7 @@ use lash::process::{
     ProcessWorkSubstrate, ProcessWorkWiring, Processes, ProjectionWatermark, ScopeGrant, ScopeId,
     ScopeRef, SessionProcessAdmin, SessionScope, SessionScopeId, StartCx, StartCxError, WaitKind,
     WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryDriveReport, WakeDeliveryDriver,
+    WakeDeliveryConfig, WakeDeliveryDriveReport, WakeDeliveryDriver, WakeDeliveryLifecycle,
     WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WatchedRegistry, lifetime,
     process_wake_source_key, watch_process_registry, watch_process_registry_with_sink,
 };

@@ -21,7 +21,7 @@
 //! [`UsageTotals::unreported_attempts`] tells a host how many calls the
 //! counters do not cover. `session.reconcile_unreported_usage()` asks the
 //! provider after the fact and appends `Reconciled` correction rows
-//! ([`LedgerUsageDisposition`]) that the totals sum.
+//! ([`LedgerUsageOutcome`]) that the totals sum.
 //!
 //! Usage buckets are provider-normalized before they reach these surfaces:
 //! `input_tokens` is uncached ordinary input, `cache_read_input_tokens` is
@@ -35,7 +35,7 @@
 //! [`TurnReport::usage`]: crate::TurnReport::usage
 
 pub use lash_core::{
-    LedgerUsageDisposition, TokenLedgerEntry, TokenUsage, TokenUsageOverflow,
+    LedgerUsageOutcome, TokenLedgerEntry, TokenUsage, TokenUsageOverflow,
     facade_support::ReconciledUsageAttempt, facade_support::SessionUsageReport,
     facade_support::UnreportedUsageAttempt, facade_support::UsageReconciliationReport,
     facade_support::UsageReportRow, facade_support::UsageTotals, facade_support::diff_token_ledger,

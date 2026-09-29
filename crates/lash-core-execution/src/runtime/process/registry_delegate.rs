@@ -99,7 +99,7 @@ macro_rules! delegate_process_query {
 
             async fn summarize_parked_processes(
                 &self,
-            ) -> Result<$crate::store::ParkSummary, $crate::PluginError> {
+            ) -> Result<$crate::store::ParkReport, $crate::PluginError> {
                 self.$inner.summarize_parked_processes().await
             }
         }

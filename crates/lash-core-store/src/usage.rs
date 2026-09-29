@@ -30,9 +30,9 @@ pub struct TokenLedgerEntry {
     /// Whether `usage` is provider-reported, a typed hole left by attempts
     /// whose usage never arrived, or a host-invoked correction. Rows written
     /// before this field existed decode as
-    /// [`LedgerUsageDisposition::Reported`].
-    #[serde(default, skip_serializing_if = "LedgerUsageDisposition::is_reported")]
-    pub usage_disposition: LedgerUsageDisposition,
+    /// [`LedgerUsageOutcome::Reported`].
+    #[serde(default, skip_serializing_if = "LedgerUsageOutcome::is_reported")]
+    pub usage_disposition: LedgerUsageOutcome,
 }
 
 impl TokenLedgerEntry {
@@ -46,7 +46,7 @@ impl TokenLedgerEntry {
             source: source.into(),
             model: model.into(),
             usage,
-            usage_disposition: LedgerUsageDisposition::Reported,
+            usage_disposition: LedgerUsageOutcome::Reported,
         }
     }
 }
@@ -91,7 +91,7 @@ pub struct ReconciledUsageAttempt {
     pub provider_usage: serde_json::Value,
 }
 
-/// One interrupted attempt recorded inside an [`LedgerUsageDisposition::Unreported`]
+/// One interrupted attempt recorded inside an [`LedgerUsageOutcome::Unreported`]
 /// ledger row: the durable identity of a billed-but-uncounted call.
 ///
 /// The row's `(source, model)` pair supplies the attribution the descriptor
@@ -117,13 +117,13 @@ impl UnreportedLedgerAttempt {
     }
 }
 
-/// A stored disposition that does not describe a legal ledger row.
+/// A stored usage outcome that does not describe a legal ledger row.
 ///
-/// Reads are strict: a malformed persisted disposition is a typed refusal, never
-/// silently downgraded to [`LedgerUsageDisposition::Reported`] — that downgrade
+/// Reads are strict: a malformed persisted outcome is a typed refusal, never
+/// silently downgraded to [`LedgerUsageOutcome::Reported`] — that downgrade
 /// is exactly how a billed call becomes a free one.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum UsageDispositionError {
+pub enum UsageOutcomeError {
     /// An `Unreported` row carried no holes: the hole is the row's content.
     EmptyUnreportedRow,
     /// Two holes in one row claimed the same `(call_id, attempt_ordinal)`.
@@ -142,7 +142,7 @@ pub enum UsageDispositionError {
     },
 }
 
-impl std::fmt::Display for UsageDispositionError {
+impl std::fmt::Display for UsageOutcomeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyUnreportedRow => {
@@ -166,7 +166,7 @@ impl std::fmt::Display for UsageDispositionError {
     }
 }
 
-impl std::error::Error for UsageDispositionError {}
+impl std::error::Error for UsageOutcomeError {}
 
 /// How one ledger row relates to provider-reported usage.
 ///
@@ -178,7 +178,7 @@ impl std::error::Error for UsageDispositionError {}
 /// correction row attributed to the original attempt; rows are never rewritten.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum LedgerUsageDisposition {
+pub enum LedgerUsageOutcome {
     /// Provider-reported usage, accumulated per `(source, model)`.
     #[default]
     Reported,
@@ -200,7 +200,7 @@ pub enum LedgerUsageDisposition {
     },
 }
 
-impl LedgerUsageDisposition {
+impl LedgerUsageOutcome {
     /// An unreported row over `attempts`, canonicalised: sorted by
     /// `(call_id, attempt_ordinal)` so a row's identity does not depend on the
     /// order holes happened to be merged in.
@@ -215,12 +215,12 @@ impl LedgerUsageDisposition {
     }
 
     /// Reject a row that cannot describe real accounting.
-    pub fn validate(&self) -> Result<(), UsageDispositionError> {
+    pub fn validate(&self) -> Result<(), UsageOutcomeError> {
         let Self::Unreported { attempts } = self else {
             return Ok(());
         };
         if attempts.is_empty() {
-            return Err(UsageDispositionError::EmptyUnreportedRow);
+            return Err(UsageOutcomeError::EmptyUnreportedRow);
         }
         for (index, attempt) in attempts.iter().enumerate() {
             if let Some(previous) = attempts[..index]
@@ -228,12 +228,12 @@ impl LedgerUsageDisposition {
                 .find(|previous| previous.key() == attempt.key())
             {
                 return Err(if previous.generation_id == attempt.generation_id {
-                    UsageDispositionError::DuplicateAttempt {
+                    UsageOutcomeError::DuplicateAttempt {
                         call_id: attempt.call_id.clone(),
                         attempt_ordinal: attempt.attempt_ordinal,
                     }
                 } else {
-                    UsageDispositionError::ConflictingAttribution {
+                    UsageOutcomeError::ConflictingAttribution {
                         call_id: attempt.call_id.clone(),
                         attempt_ordinal: attempt.attempt_ordinal,
                     }
@@ -260,7 +260,7 @@ impl LedgerUsageDisposition {
         }
     }
 
-    /// The holes this row carries, empty for every other disposition.
+    /// The holes this row carries, empty for every other outcome.
     pub fn unreported_attempt_descriptors(&self) -> &[UnreportedLedgerAttempt] {
         match self {
             Self::Unreported { attempts } => attempts.as_slice(),
@@ -286,7 +286,7 @@ impl LedgerUsageDisposition {
     /// identity: a repeat of a hole already held is idempotent, and a
     /// disagreeing generation attribution is refused. Returns the conflict for
     /// the checked path; the saturating path keeps the row it already holds.
-    pub fn absorb_saturating(&mut self, other: &Self) -> Option<UsageDispositionError> {
+    pub fn absorb_saturating(&mut self, other: &Self) -> Option<UsageOutcomeError> {
         let (Self::Unreported { attempts }, Self::Unreported { attempts: incoming }) =
             (self, other)
         else {
@@ -300,7 +300,7 @@ impl LedgerUsageDisposition {
             {
                 Some(existing) => {
                     if existing.generation_id != candidate.generation_id && conflict.is_none() {
-                        conflict = Some(UsageDispositionError::ConflictingAttribution {
+                        conflict = Some(UsageOutcomeError::ConflictingAttribution {
                             call_id: candidate.call_id.clone(),
                             attempt_ordinal: candidate.attempt_ordinal,
                         });
@@ -329,7 +329,7 @@ pub fn outstanding_unreported_attempts(
     let mut outstanding = Vec::<UnreportedUsageAttempt>::new();
     let mut reconciled = std::collections::HashSet::<(String, u32)>::new();
     for entry in entries {
-        if let LedgerUsageDisposition::Reconciled {
+        if let LedgerUsageOutcome::Reconciled {
             call_id,
             attempt_ordinal,
         } = &entry.usage_disposition
@@ -676,11 +676,11 @@ impl SessionUsageTotals {
             }
         }
         let reconciled = match &entry.usage_disposition {
-            LedgerUsageDisposition::Reconciled {
+            LedgerUsageOutcome::Reconciled {
                 call_id,
                 attempt_ordinal,
             } => Some((call_id.as_str(), *attempt_ordinal)),
-            LedgerUsageDisposition::Reported | LedgerUsageDisposition::Unreported { .. } => None,
+            LedgerUsageOutcome::Reported | LedgerUsageOutcome::Unreported { .. } => None,
         };
 
         // Every check has passed: apply.
@@ -954,7 +954,7 @@ mod session_usage_totals_tests {
             source: "turn".to_string(),
             model: "m".to_string(),
             usage: TokenUsage::default(),
-            usage_disposition: LedgerUsageDisposition::unreported(holes),
+            usage_disposition: LedgerUsageOutcome::unreported(holes),
         }
     }
 
@@ -963,7 +963,7 @@ mod session_usage_totals_tests {
             source: "turn".to_string(),
             model: "m".to_string(),
             usage: usage(input_tokens),
-            usage_disposition: LedgerUsageDisposition::Reconciled {
+            usage_disposition: LedgerUsageOutcome::Reconciled {
                 call_id: call_id.to_string(),
                 attempt_ordinal: 0,
             },

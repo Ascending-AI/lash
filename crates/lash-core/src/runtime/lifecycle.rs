@@ -855,7 +855,7 @@ mod tests {
                 input_tokens: tokens,
                 ..crate::TokenUsage::default()
             },
-            usage_disposition: crate::LedgerUsageDisposition::Reconciled {
+            usage_disposition: crate::LedgerUsageOutcome::Reconciled {
                 call_id: call_id.to_string(),
                 attempt_ordinal: 0,
             },

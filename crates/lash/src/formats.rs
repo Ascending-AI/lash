@@ -121,7 +121,7 @@ pub enum DurableFormat {
     ScopeStoragePayload,
     /// The runtime-owned durable effect-summary events a process's log
     /// carries (`process.effect_outcome`, `process.effect_omissions`).
-    ProcessEffectSummary,
+    ProcessEffectReport,
     /// The identity bytes a retried append request must reproduce. Identity,
     /// not a stored stamp — see [`FormatProbe::IdentityOnly`].
     AppendRequestIdentity,
@@ -211,7 +211,7 @@ impl DurableFormat {
             DurableFormat::SessionStateGeneration => "session state generation",
             DurableFormat::ProtocolTurnOptions => "protocol turn options",
             DurableFormat::ScopeStoragePayload => "scope storage payload",
-            DurableFormat::ProcessEffectSummary => "process effect summary",
+            DurableFormat::ProcessEffectReport => "process effect summary",
             DurableFormat::AppendRequestIdentity => "append request identity",
             DurableFormat::RecordConfigRequestIdentity => "record-config request identity",
             DurableFormat::CreateSessionRequestIdentity => "create-session request identity",
@@ -255,7 +255,7 @@ impl DurableFormat {
             DurableFormat::SessionStateGeneration => UpgradePolicy::Migrate,
             DurableFormat::ProtocolTurnOptions => UpgradePolicy::Migrate,
             DurableFormat::ScopeStoragePayload => UpgradePolicy::Migrate,
-            DurableFormat::ProcessEffectSummary => UpgradePolicy::Migrate,
+            DurableFormat::ProcessEffectReport => UpgradePolicy::Migrate,
             DurableFormat::AppendRequestIdentity => UpgradePolicy::Coexist,
             DurableFormat::RecordConfigRequestIdentity => UpgradePolicy::Coexist,
             DurableFormat::CreateSessionRequestIdentity => UpgradePolicy::Coexist,
@@ -408,7 +408,7 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             probe: FormatProbe::Comparable,
         },
         DurableFormatEntry {
-            format: DurableFormat::ProcessEffectSummary,
+            format: DurableFormat::ProcessEffectReport,
             version: FormatVersion::Counter(PROCESS_EVENT_VOCABULARY_VERSION),
             owning_crate: "lash-core",
             constant: "PROCESS_EVENT_VOCABULARY_VERSION",

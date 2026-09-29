@@ -3,8 +3,8 @@ use super::{
     validate_process_registration,
 };
 use crate::runtime::process::{
-    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectOmissions,
-    ProcessEffectOmittedCounts, ProcessEffectOutcomeClass, ProcessEffectSummaryOccurrence,
+    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectOccurrence,
+    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
     validate_generic_process_event_append,
 };
 use crate::{
@@ -50,7 +50,7 @@ fn process_event_vocabulary_version_is_pinned() {
 }
 
 fn effect_summary_request() -> crate::ProcessEventAppendRequest {
-    ProcessEffectSummaryOccurrence::new(
+    ProcessEffectOccurrence::new(
         "resource_operation:node",
         1,
         "fixture.operation",
@@ -271,7 +271,7 @@ fn effect_summary_refuses_occurrences_beyond_the_cap_and_malformed_omissions() {
         fixture_registration("effect-summary-cap"),
         crate::process_id_for_test("record"),
     );
-    let beyond = ProcessEffectSummaryOccurrence::new(
+    let beyond = ProcessEffectOccurrence::new(
         "node",
         PROCESS_EFFECT_OCCURRENCE_CAP + 1,
         "fixture.operation",

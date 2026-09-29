@@ -18,7 +18,7 @@ pub enum EffectGroupOpenResponse {
         dispatch_route: String,
     },
     ReopenedClosed {
-        effective: EffectGroupCloseDisposition,
+        effective: EffectGroupCloseOutcome,
     },
     Retired,
     ShapeMismatch,

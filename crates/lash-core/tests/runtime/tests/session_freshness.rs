@@ -807,7 +807,7 @@ async fn checkpoint_adopt_rehydrates_outstanding_usage_attempts_from_the_adopted
         source: "turn".to_string(),
         model: model.clone(),
         usage: lash_core::TokenUsage::default(),
-        usage_disposition: lash_core::LedgerUsageDisposition::unreported([
+        usage_disposition: lash_core::LedgerUsageOutcome::unreported([
             lash_core::UnreportedLedgerAttempt {
                 call_id: "fig2782-call-alpha".to_string(),
                 attempt_ordinal: 1,
@@ -833,7 +833,7 @@ async fn checkpoint_adopt_rehydrates_outstanding_usage_attempts_from_the_adopted
                     input_tokens: 334,
                     ..lash_core::TokenUsage::default()
                 },
-                usage_disposition: lash_core::LedgerUsageDisposition::Reconciled {
+                usage_disposition: lash_core::LedgerUsageOutcome::Reconciled {
                     call_id: "fig2782-call-beta".to_string(),
                     attempt_ordinal: 1,
                 },

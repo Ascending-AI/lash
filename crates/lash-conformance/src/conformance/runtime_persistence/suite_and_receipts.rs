@@ -749,7 +749,7 @@ pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
             source: "turn".to_string(),
             model: "openrouter/model".to_string(),
             usage: TokenUsage::default(),
-            usage_disposition: crate::LedgerUsageDisposition::unreported([
+            usage_disposition: crate::LedgerUsageOutcome::unreported([
                 hole("call-a", 0, Some("gen-a")),
                 hole("call-b", 2, None),
                 hole("call-c", 1, Some("gen-c")),
@@ -762,7 +762,7 @@ pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
                 input_tokens: 334,
                 ..TokenUsage::default()
             },
-            usage_disposition: crate::LedgerUsageDisposition::Reconciled {
+            usage_disposition: crate::LedgerUsageOutcome::Reconciled {
                 call_id: "call-a".to_string(),
                 attempt_ordinal: 0,
             },
@@ -774,7 +774,7 @@ pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
             source: "turn".to_string(),
             model: "openrouter/model".to_string(),
             usage: TokenUsage::default(),
-            usage_disposition: crate::LedgerUsageDisposition::Reconciled {
+            usage_disposition: crate::LedgerUsageOutcome::Reconciled {
                 call_id: "call-c".to_string(),
                 attempt_ordinal: 1,
             },

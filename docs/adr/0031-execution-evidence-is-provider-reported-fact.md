@@ -36,13 +36,13 @@ field leaves it absent rather than guessing.
 Absence of usage on an attempt was being read as "free". It is not: an attempt the
 runtime aborted at the cell boundary, or that failed before its usage frame, consumed
 provider capacity that nobody reported. Each `AttemptRecord` therefore carries an
-`AttemptUsageDisposition` (`Reported`, `UnreportedByProvider`, `UnreportedAfterAbort`,
+`AttemptUsageOutcome` (`Reported`, `UnreportedByProvider`, `UnreportedAfterAbort`,
 `UnreportedAfterFailure`) derived from the attempt's outcome and observed usage, never
 from intent. The turn's usage ledger writes a `TokenLedgerEntry` for every interrupted
-unreported attempt even at zero usage, marked `LedgerUsageDisposition::Unreported`, and
+unreported attempt even at zero usage, marked `LedgerUsageOutcome::Unreported`, and
 the session report exposes `unreported_attempts` next to the summed counters. A host may
 later ask the runtime to reconcile those holes; recovered usage is appended as
-`LedgerUsageDisposition::Reconciled` correction rows attributed to the call and attempt
+`LedgerUsageOutcome::Reconciled` correction rows attributed to the call and attempt
 (never rewriting the original row), and the totals sum corrections while
 `reconciled_attempts` settles the outstanding count. A lookup only settles a hole when the
 provider actually accounts for the call: a generation record whose token counts are absent

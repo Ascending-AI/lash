@@ -1,19 +1,23 @@
 use super::*;
 
-impl From<lash_core::facade_support::TurnCancelDisposition> for RemoteTurnCancelDisposition {
-    fn from(value: lash_core::facade_support::TurnCancelDisposition) -> Self {
+impl From<lash_core::facade_support::TurnCancelUndeliveredInputPolicy>
+    for RemoteTurnCancelUndeliveredInputPolicy
+{
+    fn from(value: lash_core::facade_support::TurnCancelUndeliveredInputPolicy) -> Self {
         match value {
-            lash_core::facade_support::TurnCancelDisposition::Defer => Self::Defer,
-            lash_core::facade_support::TurnCancelDisposition::Drop => Self::Drop,
+            lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer => Self::Defer,
+            lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop => Self::Drop,
         }
     }
 }
 
-impl From<RemoteTurnCancelDisposition> for lash_core::facade_support::TurnCancelDisposition {
-    fn from(value: RemoteTurnCancelDisposition) -> Self {
+impl From<RemoteTurnCancelUndeliveredInputPolicy>
+    for lash_core::facade_support::TurnCancelUndeliveredInputPolicy
+{
+    fn from(value: RemoteTurnCancelUndeliveredInputPolicy) -> Self {
         match value {
-            RemoteTurnCancelDisposition::Defer => Self::Defer,
-            RemoteTurnCancelDisposition::Drop => Self::Drop,
+            RemoteTurnCancelUndeliveredInputPolicy::Defer => Self::Defer,
+            RemoteTurnCancelUndeliveredInputPolicy::Drop => Self::Drop,
         }
     }
 }
@@ -37,11 +41,11 @@ impl From<lash_core::facade_support::TurnCancellationEvidence> for RemoteTurnCan
             origin,
             reason,
             undelivered: match undelivered {
-                lash_core::facade_support::TurnCancelDisposition::Defer => {
-                    RemoteTurnCancelDisposition::Defer
+                lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer => {
+                    RemoteTurnCancelUndeliveredInputPolicy::Defer
                 }
-                lash_core::facade_support::TurnCancelDisposition::Drop => {
-                    RemoteTurnCancelDisposition::Drop
+                lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop => {
+                    RemoteTurnCancelUndeliveredInputPolicy::Drop
                 }
             },
         }
@@ -61,11 +65,11 @@ impl From<RemoteTurnCancellationEvidence> for lash_core::facade_support::TurnCan
             origin,
             reason,
             undelivered: match undelivered {
-                RemoteTurnCancelDisposition::Defer => {
-                    lash_core::facade_support::TurnCancelDisposition::Defer
+                RemoteTurnCancelUndeliveredInputPolicy::Defer => {
+                    lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer
                 }
-                RemoteTurnCancelDisposition::Drop => {
-                    lash_core::facade_support::TurnCancelDisposition::Drop
+                RemoteTurnCancelUndeliveredInputPolicy::Drop => {
+                    lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop
                 }
             },
             mode: lash_core::facade_support::TurnCancelMode::Immediate,
@@ -93,11 +97,11 @@ impl RemoteTurnCancelRequest {
             origin,
             reason,
             undelivered: match undelivered {
-                RemoteTurnCancelDisposition::Defer => {
-                    lash_core::facade_support::TurnCancelDisposition::Defer
+                RemoteTurnCancelUndeliveredInputPolicy::Defer => {
+                    lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer
                 }
-                RemoteTurnCancelDisposition::Drop => {
-                    lash_core::facade_support::TurnCancelDisposition::Drop
+                RemoteTurnCancelUndeliveredInputPolicy::Drop => {
+                    lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop
                 }
             },
             mode: lash_core::facade_support::TurnCancelMode::Immediate,
@@ -122,11 +126,11 @@ impl From<lash_core::facade_support::TurnCancelRequest> for RemoteTurnCancelRequ
             origin,
             reason,
             undelivered: match undelivered {
-                lash_core::facade_support::TurnCancelDisposition::Defer => {
-                    RemoteTurnCancelDisposition::Defer
+                lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer => {
+                    RemoteTurnCancelUndeliveredInputPolicy::Defer
                 }
-                lash_core::facade_support::TurnCancelDisposition::Drop => {
-                    RemoteTurnCancelDisposition::Drop
+                lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop => {
+                    RemoteTurnCancelUndeliveredInputPolicy::Drop
                 }
             },
         }

@@ -4,7 +4,7 @@ mod tests {
     use lash_core_execution::plugin::PluginError;
     use lash_core_execution::runtime::process::registry_transitions::*;
     use lash_core_execution::runtime::{
-        PROCESS_WAKE_DELIVERY_FORMAT_VERSION, WakeDeliveryDisposition, WakeDeliveryState,
+        PROCESS_WAKE_DELIVERY_FORMAT_VERSION, WakeDeliveryLifecycle, WakeDeliveryState,
         WakeDiscardReason,
     };
 
@@ -345,7 +345,7 @@ mod tests {
         assert_eq!(delivery.state(), WakeDeliveryState::Discarded);
         assert_eq!(
             delivery.disposition,
-            WakeDeliveryDisposition::Discarded {
+            WakeDeliveryLifecycle::Discarded {
                 reason: WakeDiscardReason::Retargeted
             }
         );
@@ -364,7 +364,7 @@ mod tests {
 
         assert_eq!(
             delivery.disposition,
-            WakeDeliveryDisposition::DiscardedUnattributed
+            WakeDeliveryLifecycle::DiscardedUnattributed
         );
         assert_eq!(delivery.state(), WakeDeliveryState::Discarded);
     }

@@ -60,8 +60,8 @@ pub use lashlang_graph::{
     TraceLashlangGraphCompleteness, TraceLashlangGraphConflict, TraceLashlangGraphConflictKind,
     TraceLashlangGraphEdge, TraceLashlangGraphFoldError, TraceLashlangGraphHistoryEvent,
     TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
-    TraceLashlangNodeRetention, TraceLashlangNodeSummary, TraceLashlangNodeTerminalStatus,
-    TraceLashlangNodeTerminalSummary, fold_lashlang_graph,
+    TraceLashlangNodeReport, TraceLashlangNodeRetention, TraceLashlangNodeTerminalRecord,
+    TraceLashlangNodeTerminalStatus, fold_lashlang_graph,
 };
 
 /// Version of the durable trace JSONL schema, written to
@@ -120,7 +120,7 @@ pub use lashlang_graph::{
 /// a trace reader can tell a recoverable overflow from a provider error.
 /// Version 22 types the last free-form outcome string in the crate — a retry
 /// attempt's `usage_disposition` becomes a closed
-/// [`TraceAttemptUsageDisposition`], so a record spelling it any other way is
+/// [`TraceAttemptUsageOutcome`], so a record spelling it any other way is
 /// refused instead of decoded — and drops the unreachable `rejected` branch-edge
 /// selection, replacing it with the typed arm the `branch_selected` event
 /// already carried.
@@ -694,22 +694,22 @@ pub struct TraceRetryAttempt {
     /// Why `usage` is absent when it is. LLM attempts only; tool attempts
     /// carry none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage_disposition: Option<TraceAttemptUsageDisposition>,
+    pub usage_disposition: Option<TraceAttemptUsageOutcome>,
 }
 
 /// Why an attempt's provider-reported usage is present or absent.
 ///
-/// Mirrors `lash_sansio::llm::types::AttemptUsageDisposition`, the vocabulary's
+/// Mirrors `lash_sansio::llm::types::AttemptUsageOutcome`, the vocabulary's
 /// owner, with the same wire spellings; the trace layer was the only one that
 /// flattened it to a free-form string.
 ///
 /// # Integrator class
 ///
-/// Reporting integrations exhaustively render these dispositions when
+/// Reporting integrations exhaustively render these outcomes when
 /// explaining a call whose usage never arrived.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum TraceAttemptUsageDisposition {
+pub enum TraceAttemptUsageOutcome {
     /// The provider reported usage for this attempt.
     Reported,
     /// The provider completed the attempt without reporting usage.

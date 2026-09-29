@@ -770,7 +770,7 @@ impl TurnBoundary {
         // disposition; every other handed-back row is deferred.
         let disposition = interrupted_turn_input_cancellation
             .as_ref()
-            .map_or(crate::TurnCancelDisposition::Defer, |evidence| {
+            .map_or(crate::TurnCancelUndeliveredInputPolicy::Defer, |evidence| {
                 evidence.undelivered
             });
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;

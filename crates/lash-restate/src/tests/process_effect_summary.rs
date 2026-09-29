@@ -224,7 +224,7 @@ async fn looping_waiting_registration() -> ProcessRegistration {
 /// abstracted, in log order), and its omission records.
 #[derive(Debug, PartialEq)]
 struct SummaryLog {
-    occurrences: Vec<lash_core::ProcessEffectSummaryOccurrence>,
+    occurrences: Vec<lash_core::ProcessEffectOccurrence>,
     omissions: Vec<lash_core::ProcessEffectOmissions>,
 }
 
@@ -238,7 +238,7 @@ async fn summary_log(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId
             .iter()
             .filter(|event| event.event_type == lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
             .map(|event| {
-                let mut occurrence = lash_core::ProcessEffectSummaryOccurrence::decode(
+                let mut occurrence = lash_core::ProcessEffectOccurrence::decode(
                     event.payload.clone(),
                     lash_core::FleetFormat::current(),
                 )

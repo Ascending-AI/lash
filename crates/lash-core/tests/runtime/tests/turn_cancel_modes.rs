@@ -724,8 +724,8 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     for mode in [TurnCancelMode::Immediate, TurnCancelMode::AfterStep] {
         for disposition in [
-            lash_core::TurnCancelDisposition::Defer,
-            lash_core::TurnCancelDisposition::Drop,
+            lash_core::TurnCancelUndeliveredInputPolicy::Defer,
+            lash_core::TurnCancelUndeliveredInputPolicy::Drop,
         ] {
             let transport = mock_provider(Vec::new());
             let session_id = SessionId::from(
@@ -813,8 +813,10 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             .map(|input| input.input.input_id)
             .collect();
             let expected = match disposition {
-                lash_core::TurnCancelDisposition::Defer => vec![undelivered.input_id.clone()],
-                lash_core::TurnCancelDisposition::Drop => Vec::new(),
+                lash_core::TurnCancelUndeliveredInputPolicy::Defer => {
+                    vec![undelivered.input_id.clone()]
+                }
+                lash_core::TurnCancelUndeliveredInputPolicy::Drop => Vec::new(),
             };
             assert_eq!(
                 pending, expected,

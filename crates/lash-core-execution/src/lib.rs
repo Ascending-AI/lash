@@ -311,7 +311,6 @@ pub mod facade_support {
     pub use crate::runtime::TurnCancelClosureAuthorizationOutcome;
     pub use crate::runtime::TurnCancelClosureProposal;
     pub use crate::runtime::TurnCancelClosureSettlement;
-    pub use crate::runtime::TurnCancelDisposition;
     pub use crate::runtime::TurnCancelInputOutcome;
     pub use crate::runtime::TurnCancelIntentSnapshot;
     pub use crate::runtime::TurnCancelMode;
@@ -319,6 +318,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnCancelReceipt;
     pub use crate::runtime::TurnCancelRequest;
     pub use crate::runtime::TurnCancelRequestRecord;
+    pub use crate::runtime::TurnCancelUndeliveredInputPolicy;
     pub use crate::runtime::TurnCancellationAuthority;
     pub use crate::runtime::TurnCancellationEvidence;
     pub use crate::runtime::TurnControlAttachment;
@@ -493,7 +493,7 @@ pub use attachments::{
     EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_sansio::llm::types::{
-    AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,
+    AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
     ExecutionEvidenceMergeError, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
     LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
@@ -761,7 +761,7 @@ pub use runtime::{
     EffectOpenerError, EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal,
     ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding,
     GroupChildCancelWatch, GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
-    InputItem, InvalidStartKey, JournalReplay, LedgerUsageDisposition, Lifetime, LifetimeDecision,
+    InputItem, InvalidStartKey, JournalReplay, LedgerUsageOutcome, Lifetime, LifetimeDecision,
     LifetimePolicy, LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoSessionWork, NonTerminalProcessPage,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndApplication,
@@ -813,17 +813,17 @@ pub use runtime::{
     TurnActivityId, TurnCancelAffectedInput, TurnCancelAffectedWake,
     TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
-    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
-    TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext, TurnControlAttachment,
-    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnEvent,
-    TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement,
-    TurnInput, TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary,
-    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputState,
-    TurnLaneAdmissionPolicy, UnreportedLedgerAttempt, UsageDispositionError, WaitKind, WaitState,
-    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
-    WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
-    admit_session_state_generation, admit_session_view, apply_parent_end_plan,
+    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
+    TurnCancelUndeliveredInputPolicy, TurnCancellationAuthority, TurnContext,
+    TurnControlAttachment, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
+    TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
+    TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
+    TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
+    TurnInputState, TurnLaneAdmissionPolicy, UnreportedLedgerAttempt, UsageOutcomeError, WaitKind,
+    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
+    WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError,
+    WorkCadencePolicy, admit_session_state_generation, admit_session_view, apply_parent_end_plan,
     artifact_referrer_ended, effect_groups_unsupported, end_parent_scope, end_session_roots,
     lifetime, live_session_view, mint_process_id, parent_end_delivery_key, parent_end_requester,
     park_turn_of_refused_group_child, park_turn_refused_by_generation, session_is_live,

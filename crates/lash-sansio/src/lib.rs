@@ -138,7 +138,7 @@ pub use session_model::{
     PromptSectionTitle, PromptSlot, PromptSlotLayer, PromptTemplate, PromptTemplateEntry,
     PromptTemplateSection, PromptTitleBuiltin, ProtocolEvent, RenderedPrompt, ResolvedPromptLayer,
     SessionAppendNode, SessionHistoryRecord, SessionStreamEvent, StreamMessageKind, TokenUsage,
-    TokenUsageOverflow, TurnBudget, TurnCancelDisposition, TurnCancelMode,
+    TokenUsageOverflow, TurnBudget, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
     TurnCancellationEvidence, TurnFailureCode, TurnFailureKind, TurnFinish, TurnOutcome, TurnStop,
     default_prompt_template, messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
 };

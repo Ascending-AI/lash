@@ -10,8 +10,8 @@
 //! row. An append that moves no park appends nothing.
 
 use lash_core_execution::store::{
-    ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId, ParkReasonCode,
-    ParkSummary, ProcessParkKey, ProcessParkQuery,
+    ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId, ParkReasonCode, ParkReport,
+    ProcessParkKey, ProcessParkQuery,
 };
 
 use super::*;
@@ -229,7 +229,7 @@ pub(super) async fn process_park_feed(
 
 pub(super) async fn summarize_parked_processes(
     registry: &SqliteProcessRegistry,
-) -> Result<ParkSummary, lash_core_execution::PluginError> {
+) -> Result<ParkReport, lash_core_execution::PluginError> {
     registry
         .conn
         .call(move |conn| {
@@ -246,7 +246,7 @@ pub(super) async fn summarize_parked_processes(
                         ))
                     })
                     .map_err(process_sqlite_error)?;
-                let mut summary = ParkSummary::default();
+                let mut summary = ParkReport::default();
                 for row in rows {
                     let (code, count, oldest) = row.map_err(process_sqlite_error)?;
                     let code = ParkReasonCode::from_code(&code).ok_or_else(|| {

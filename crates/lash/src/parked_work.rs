@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::store::{
-    ParkEventKind, ParkFeedCursor, ParkId, ParkReason, ParkReasonCode, ParkSummary,
+    ParkEventKind, ParkFeedCursor, ParkId, ParkReason, ParkReasonCode, ParkReport,
     ProcessParkQuery, TurnParkQuery,
 };
 use lash_core::{Clock, DeploymentStore, ProcessId, ProcessRegistry};
@@ -158,14 +158,14 @@ pub struct ParkedWorkPage {
 
 /// Live parks per kind.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ParkedWorkSummary {
+pub struct ParkedWorkReport {
     /// Parked turns.
-    pub turns: ParkSummary,
+    pub turns: ParkReport,
     /// Parked processes.
-    pub processes: ParkSummary,
+    pub processes: ParkReport,
 }
 
-impl ParkedWorkSummary {
+impl ParkedWorkReport {
     /// The oldest live park's first refusal over both kinds.
     #[must_use]
     pub fn oldest_since_ms(&self) -> Option<u64> {
@@ -333,19 +333,19 @@ impl ParkedWork {
     /// # Errors
     /// When either store refuses the read.
     #[tracing::instrument(name = "lash.parked_work.summary", skip_all)]
-    pub async fn summary(&self) -> Result<ParkedWorkSummary> {
+    pub async fn summary(&self) -> Result<ParkedWorkReport> {
         let turns = self.store_factory.count_unsettled_turns().await?;
         let processes = self.process_registry.summarize_parked_processes().await?;
-        let summary = ParkedWorkSummary {
-            turns: ParkSummary {
+        let report = ParkedWorkReport {
+            turns: ParkReport {
                 by_reason: turns.parked_by_reason,
                 oldest_since_ms: turns.oldest_parked_since_ms,
                 retired_by_executable_generation: turns.retired_by_executable_generation,
             },
             processes,
         };
-        record_park_gauges(&summary, self.clock.timestamp_ms());
-        Ok(summary)
+        record_park_gauges(&report, self.clock.timestamp_ms());
+        Ok(report)
     }
 
     /// Park transitions from both feeds strictly after `from`, at most
@@ -430,8 +430,8 @@ impl ParkedWork {
 
 /// Record the parked-work gauges for both kinds: every reason's count, zero
 /// included, and the oldest park's age.
-pub(crate) fn record_park_gauges(summary: &ParkedWorkSummary, now_ms: u64) {
-    for (kind, parks) in [("turn", &summary.turns), ("process", &summary.processes)] {
+pub(crate) fn record_park_gauges(report: &ParkedWorkReport, now_ms: u64) {
+    for (kind, parks) in [("turn", &report.turns), ("process", &report.processes)] {
         for reason in ParkReasonCode::ALL {
             let count = parks.by_reason.get(reason).copied().unwrap_or_default();
             lash_core::operational_metrics::record_parked_work_count(

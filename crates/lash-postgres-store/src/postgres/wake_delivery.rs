@@ -85,10 +85,10 @@ pub(super) async fn update_wake_delivery_state(
     fence: &crate::guarded_tx::WriterFence,
     delivery_id: &str,
     claim_token: &str,
-    disposition: lash_core_execution::WakeDeliveryDisposition,
+    lifecycle: lash_core_execution::WakeDeliveryLifecycle,
 ) -> Result<lash_core_execution::WakeDeliveryClaimOutcome, PluginError> {
-    let state = disposition.state();
-    let reason = disposition.discard_reason();
+    let state = lifecycle.state();
+    let reason = lifecycle.discard_reason();
     let changed = crate::guarded_tx::guarded(pool, fence, |tx| {
         Box::pin(async move {
             sqlx::query(process_sql().wake.settle_claim.sql())

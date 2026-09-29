@@ -673,7 +673,7 @@ impl LashRuntime {
                 root.root().clone(),
                 cancellation
                     .as_ref()
-                    .map_or(crate::TurnCancelDisposition::Defer, |evidence| {
+                    .map_or(crate::TurnCancelUndeliveredInputPolicy::Defer, |evidence| {
                         evidence.undelivered
                     }),
             )

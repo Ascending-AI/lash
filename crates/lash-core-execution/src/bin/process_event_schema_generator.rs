@@ -18,7 +18,7 @@ const SHAPES: [(&str, &str, &str); 2] = [
     (
         "process-effect-outcome",
         PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-        "ProcessEffectSummaryOccurrence",
+        "ProcessEffectOccurrence",
     ),
     (
         "process-effect-omissions",

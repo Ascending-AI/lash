@@ -903,7 +903,7 @@ pub struct ProcessParkQuery {
 
 /// The live parks of one kind of work, for drain and metrics.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ParkSummary {
+pub struct ParkReport {
     /// Live parks per reason code; codes with no park are absent.
     pub by_reason: BTreeMap<ParkReasonCode, usize>,
     /// The oldest live park's `since_ms`, `None` when nothing is parked.
@@ -916,7 +916,7 @@ pub struct ParkSummary {
         BTreeMap<crate::executable_generation::ExecutableGeneration, usize>,
 }
 
-impl ParkSummary {
+impl ParkReport {
     /// Every live park, over all reasons.
     #[must_use]
     pub fn total(&self) -> usize {

@@ -131,7 +131,7 @@ pub use process::{
     SessionId, SessionObserverIntentSource, SessionScope, SessionScopeId, StartCx, StartCxError,
     StartKey, StoreRealization, UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind,
     WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
+    WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState,
     WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry, abandoned_consumer_refusal,
     allocate_process_event_sequence, apply_parent_end_plan, apply_process_event_projection,
     apply_process_status_projection, artifact_referrer_ended, check_retained_start,
@@ -170,11 +170,11 @@ pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 pub use turn_control::{
     LocalTurnStop, StopDeliveryGuard, TurnAddress, TurnAttach, TurnCancelAffectedInput,
     TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
-    TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
-    TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord,
-    TurnCancellationEvidence, TurnTerminal, TurnWorkDriver, retry_cancel_watch,
-    run_step_body_until_cancelled,
+    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelGatePair,
+    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOutcome,
+    TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord,
+    TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
+    retry_cancel_watch, run_step_body_until_cancelled,
 };
 #[cfg(feature = "testing")]
 pub use turn_queue::SessionCommandSettlement;
@@ -189,8 +189,8 @@ pub use turn_queue::{
     process_wake_source_key,
 };
 pub use usage::{
-    LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, SessionUsageTotals,
-    TokenLedgerEntry, UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageDispositionError,
+    LedgerUsageOutcome, ReconciledUsageAttempt, SessionUsageReport, SessionUsageTotals,
+    TokenLedgerEntry, UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageOutcomeError,
     UsageReconciliationReport, UsageReportRow, UsageTotalRow, UsageTotals, diff_token_ledger,
     diff_usage_reports, outstanding_unreported_attempts,
 };

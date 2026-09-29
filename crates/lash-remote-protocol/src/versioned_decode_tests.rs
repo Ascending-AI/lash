@@ -240,7 +240,7 @@ fn wire_snapshot(
         durable: RemoteProcessDurableSnapshot::Retained {
             sequence: 3,
             status: crate::RemoteProcessStatus::Running,
-            summary: vec![RemoteProcessEffectNodeSummary {
+            summary: vec![RemoteProcessEffectNodeReport {
                 node_id: "node".to_string(),
                 occurrences: vec![RemoteProcessEffectOccurrence {
                     occurrence: 1,

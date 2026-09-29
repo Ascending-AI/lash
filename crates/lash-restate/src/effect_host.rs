@@ -29,7 +29,7 @@ use crate::durable_wait::{
     restate_unknown_or_revoked,
 };
 use crate::effect_group::{
-    EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
+    EffectGroupCloseOutcome, EffectGroupCloseRequest, EffectGroupCloseResponse,
     EffectGroupDispatchRequest, EffectGroupOpenRequest, EffectGroupOpenResponse,
     EffectGroupPayloadGetResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
     EffectGroupReadRankResponse, EffectGroupSettlementTerminal, EffectGroupShape,
@@ -1044,7 +1044,7 @@ impl RestateEffectHostController {
             }
             EffectGroupOpenResponse::ReopenedReady => Ok(handle),
             EffectGroupOpenResponse::ReopenedClosed { effective } => match effective {
-                EffectGroupCloseDisposition::Refused { reason } => {
+                EffectGroupCloseOutcome::Refused { reason } => {
                     if let Some(executors) = self.group_executors.get() {
                         executors.release_group(&group_key);
                     }
@@ -1052,8 +1052,8 @@ impl RestateEffectHostController {
                         "effect group {group_key} routing was refused: {reason:?}"
                     )))
                 }
-                EffectGroupCloseDisposition::RunToCompletion => Ok(handle),
-                EffectGroupCloseDisposition::Cancel => {
+                EffectGroupCloseOutcome::RunToCompletion => Ok(handle),
+                EffectGroupCloseOutcome::Cancel => {
                     if let Some(executors) = self.group_executors.get() {
                         executors.release_group(&group_key);
                     }

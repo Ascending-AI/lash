@@ -182,14 +182,14 @@ fn legacy_ledger_rows_decode_as_reported() {
         }
     });
     let entry: TokenLedgerEntry = serde_json::from_value(legacy.clone()).expect("legacy row");
-    assert_eq!(entry.usage_disposition, LedgerUsageDisposition::Reported);
+    assert_eq!(entry.usage_disposition, LedgerUsageOutcome::Reported);
     assert_eq!(serde_json::to_value(&entry).expect("encode"), legacy);
 
     let hole = TokenLedgerEntry {
         source: "turn".to_string(),
         model: "m".to_string(),
         usage: TokenUsage::default(),
-        usage_disposition: LedgerUsageDisposition::unreported([
+        usage_disposition: LedgerUsageOutcome::unreported([
             attempt("call-9", 0, Some("gen-9")),
             attempt("call-7", 1, None),
         ]),
@@ -212,7 +212,7 @@ fn legacy_ledger_rows_decode_as_reported() {
         source: "turn".to_string(),
         model: "m".to_string(),
         usage: usage(120, 35),
-        usage_disposition: LedgerUsageDisposition::Reconciled {
+        usage_disposition: LedgerUsageOutcome::Reconciled {
             call_id: "call-7".to_string(),
             attempt_ordinal: 1,
         },
@@ -234,7 +234,7 @@ fn usage_report_derives_outstanding_holes_from_unreported_and_reconciled_rows() 
             source: "turn".to_string(),
             model: "m".to_string(),
             usage: TokenUsage::default(),
-            usage_disposition: LedgerUsageDisposition::unreported([
+            usage_disposition: LedgerUsageOutcome::unreported([
                 attempt("call-7", 1, Some("gen-7")),
                 attempt("call-8", 0, None),
             ]),
@@ -243,7 +243,7 @@ fn usage_report_derives_outstanding_holes_from_unreported_and_reconciled_rows() 
             source: "turn".to_string(),
             model: "m".to_string(),
             usage: usage(120, 35),
-            usage_disposition: LedgerUsageDisposition::Reconciled {
+            usage_disposition: LedgerUsageOutcome::Reconciled {
                 call_id: "call-7".to_string(),
                 attempt_ordinal: 1,
             },
@@ -296,7 +296,7 @@ fn ledger_merge_keeps_dispositions_apart_and_never_drops_a_hole() {
         source: "turn".to_string(),
         model: "m".to_string(),
         usage: TokenUsage::default(),
-        usage_disposition: LedgerUsageDisposition::unreported([attempt(call_id, 0, None)]),
+        usage_disposition: LedgerUsageOutcome::unreported([attempt(call_id, 0, None)]),
     };
     merge_ledger_entry_saturating(&mut ledger, hole("call-a"));
     merge_ledger_entry_saturating(&mut ledger, hole("call-b"));
@@ -311,7 +311,7 @@ fn ledger_merge_keeps_dispositions_apart_and_never_drops_a_hole() {
         source: "turn".to_string(),
         model: "m".to_string(),
         usage: usage(7, 3),
-        usage_disposition: LedgerUsageDisposition::Reconciled {
+        usage_disposition: LedgerUsageOutcome::Reconciled {
             call_id: "c".to_string(),
             attempt_ordinal: 1,
         },
@@ -325,15 +325,12 @@ fn ledger_merge_keeps_dispositions_apart_and_never_drops_a_hole() {
     );
     assert_eq!(
         ledger[0].usage_disposition,
-        LedgerUsageDisposition::unreported([
-            attempt("call-a", 0, None),
-            attempt("call-b", 0, None),
-        ])
+        LedgerUsageOutcome::unreported([attempt("call-a", 0, None), attempt("call-b", 0, None),])
     );
     assert_eq!(ledger[1].usage, usage(5, 1));
     assert!(matches!(
         ledger[2].usage_disposition,
-        LedgerUsageDisposition::Reconciled { .. }
+        LedgerUsageOutcome::Reconciled { .. }
     ));
     // Diffs fold every row of a key, so the correction counts as usage.
     let delta = diff_token_ledger(&[], &ledger).expect("diff");
@@ -377,18 +374,18 @@ fn pending_ledger_records_holes_and_corrections_separately_from_live_usage() {
     assert_eq!(pending[0].entry.usage, usage(5, 5));
     assert_eq!(
         pending[0].entry.usage_disposition,
-        LedgerUsageDisposition::Reported
+        LedgerUsageOutcome::Reported
     );
     assert_eq!(
         pending[1].entry.usage_disposition,
-        LedgerUsageDisposition::unreported([
+        LedgerUsageOutcome::unreported([
             attempt("call-1", 1, Some("gen-1")),
             attempt("call-2", 0, None),
         ])
     );
     assert_eq!(
         pending[2].entry.usage_disposition,
-        LedgerUsageDisposition::Reconciled {
+        LedgerUsageOutcome::Reconciled {
             call_id: "call-1".to_string(),
             attempt_ordinal: 1,
         }

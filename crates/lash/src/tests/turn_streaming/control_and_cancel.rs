@@ -634,7 +634,7 @@ pub(super) async fn a_session_cancel_reaches_a_sent_input_its_waiter_drives() ->
 pub(super) async fn assert_session_turn_cancel_disposition(
     session_id: &SessionId,
     turn_id: &TurnId,
-    disposition: lash_core::facade_support::TurnCancelDisposition,
+    disposition: lash_core::facade_support::TurnCancelUndeliveredInputPolicy,
     default_disposition: bool,
 ) -> Result<()> {
     let (started_tx, started_rx) = oneshot::channel::<()>();
@@ -703,7 +703,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     assert_eq!(affected.disposition, disposition);
 
     match disposition {
-        lash_core::facade_support::TurnCancelDisposition::Drop => {
+        lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop => {
             let pending = session.durable().pending_turn_inputs().await?;
             let raw_pending = turn_input_states(&double);
             let dropped = raw_pending
@@ -718,7 +718,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
                 "dropped input must be absent from next-turn ingress"
             );
         }
-        lash_core::facade_support::TurnCancelDisposition::Defer => {
+        lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer => {
             let outcome = undelivered.outcome().await?;
             assert_eq!(outcome.status, crate::TurnStatus::Answered);
             assert_eq!(
@@ -755,7 +755,7 @@ pub(super) async fn a_root_cancel_with_the_drop_disposition_drops_undelivered_ac
     assert_session_turn_cancel_disposition(
         &SessionId::from("session-cancel-explicit-drop"),
         &TurnId::from("session-cancel-explicit-drop:turn"),
-        lash_core::facade_support::TurnCancelDisposition::Drop,
+        lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop,
         false,
     )
     .await
@@ -766,7 +766,7 @@ pub(super) async fn send_cancel_defaults_to_deferring_undelivered_active_input()
     assert_session_turn_cancel_disposition(
         &SessionId::from("session-cancel-legacy-defer"),
         &TurnId::from("session-cancel-legacy-defer:turn"),
-        lash_core::facade_support::TurnCancelDisposition::Defer,
+        lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer,
         true,
     )
     .await
@@ -843,7 +843,7 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
 
     let stopped = session
         .cancel(crate::CancelTarget::Root(TurnId::from(active_turn_id)))
-        .undelivered(lash_core::facade_support::TurnCancelDisposition::Defer)
+        .undelivered(lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer)
         .await?;
     assert!(matches!(stopped, crate::CancelReceipt::Requested { .. }));
     let interrupted = tokio::time::timeout(std::time::Duration::from_secs(10), turn)

@@ -6,7 +6,7 @@ fn cancelled_stop_conversion_keeps_every_evidence_field() {
         request_id: "cancel-exact".into(),
         origin: Some("host".into()),
         reason: Some("stop now".into()),
-        undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
+        undelivered: lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer,
         mode: lash_core::facade_support::TurnCancelMode::Immediate,
         honoured_after_step: None,
     };
@@ -49,7 +49,7 @@ fn turn_cancel_core_conversions_round_trip_every_envelope() {
         request_id: "cancel-request".to_string(),
         origin: Some("workbench-user".to_string()),
         reason: Some("stop button".to_string()),
-        undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
+        undelivered: lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer,
         mode: lash_core::facade_support::TurnCancelMode::Immediate,
         honoured_after_step: None,
     };
@@ -62,7 +62,7 @@ fn turn_cancel_core_conversions_round_trip_every_envelope() {
         request_id: "cancel-without-origin".to_string(),
         origin: None,
         reason: None,
-        undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
+        undelivered: lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer,
         mode: lash_core::facade_support::TurnCancelMode::Immediate,
         honoured_after_step: None,
     };
@@ -76,7 +76,7 @@ fn turn_cancel_core_conversions_round_trip_every_envelope() {
         lash_core::facade_support::TurnCancelOutcome::Requested(evidence.clone()),
         lash_core::facade_support::TurnCancelOutcome::AlreadyRequested(evidence.clone()),
         lash_core::facade_support::TurnCancelOutcome::PolicyConflict {
-            requested: lash_core::facade_support::TurnCancelDisposition::Drop,
+            requested: lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop,
             accepted: evidence.clone(),
         },
         lash_core::facade_support::TurnCancelOutcome::CompletionWonRace,

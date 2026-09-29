@@ -63,7 +63,7 @@ pub enum ProcessEffectOutcomeClass {
 /// Strict durable payload for one effect occurrence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProcessEffectSummaryOccurrence {
+pub struct ProcessEffectOccurrence {
     pub vocabulary_version: u32,
     pub node_id: String,
     pub occurrence: u64,
@@ -74,7 +74,7 @@ pub struct ProcessEffectSummaryOccurrence {
     pub replay_key: String,
 }
 
-impl ProcessEffectSummaryOccurrence {
+impl ProcessEffectOccurrence {
     pub fn new(
         node_id: impl Into<String>,
         occurrence: u64,
@@ -110,7 +110,7 @@ impl ProcessEffectSummaryOccurrence {
     pub fn decode(
         mut payload: serde_json::Value,
         fleet_format: crate::FleetFormat,
-    ) -> Result<Self, ProcessEffectSummaryError> {
+    ) -> Result<Self, ProcessEffectReportError> {
         let window = fleet_format.read_window(lash_core_store::surface_format!(
             PROCESS_EVENT_VOCABULARY_VERSION
         ));
@@ -123,17 +123,15 @@ impl ProcessEffectSummaryOccurrence {
                 window.newest(),
                 &mut payload,
             )
-            .map_err(
-                |_| ProcessEffectSummaryError::UnsupportedVocabularyVersion {
-                    expected: window.newest(),
-                    actual: u64::from(version),
-                },
-            )?;
+            .map_err(|_| ProcessEffectReportError::UnsupportedVocabularyVersion {
+                expected: window.newest(),
+                actual: u64::from(version),
+            })?;
         }
         let outcome: Self =
-            serde_json::from_value(payload).map_err(ProcessEffectSummaryError::InvalidPayload)?;
+            serde_json::from_value(payload).map_err(ProcessEffectReportError::InvalidPayload)?;
         if !Self::is_within_cap(outcome.occurrence) {
-            return Err(ProcessEffectSummaryError::OccurrenceOutsideCap {
+            return Err(ProcessEffectReportError::OccurrenceOutsideCap {
                 occurrence: outcome.occurrence,
             });
         }
@@ -198,11 +196,11 @@ impl ProcessEffectOmissions {
     }
 
     /// The fleet-window counterpart of
-    /// [`ProcessEffectSummaryOccurrence::decode`].
+    /// [`ProcessEffectOccurrence::decode`].
     pub fn decode(
         mut payload: serde_json::Value,
         fleet_format: crate::FleetFormat,
-    ) -> Result<Self, ProcessEffectSummaryError> {
+    ) -> Result<Self, ProcessEffectReportError> {
         let window = fleet_format.read_window(lash_core_store::surface_format!(
             PROCESS_EVENT_VOCABULARY_VERSION
         ));
@@ -215,24 +213,22 @@ impl ProcessEffectOmissions {
                 window.newest(),
                 &mut payload,
             )
-            .map_err(
-                |_| ProcessEffectSummaryError::UnsupportedVocabularyVersion {
-                    expected: window.newest(),
-                    actual: u64::from(version),
-                },
-            )?;
+            .map_err(|_| ProcessEffectReportError::UnsupportedVocabularyVersion {
+                expected: window.newest(),
+                actual: u64::from(version),
+            })?;
         }
         let omissions: Self =
-            serde_json::from_value(payload).map_err(ProcessEffectSummaryError::InvalidPayload)?;
+            serde_json::from_value(payload).map_err(ProcessEffectReportError::InvalidPayload)?;
         if omissions.occurrence_cap != PROCESS_EFFECT_OCCURRENCE_CAP {
-            return Err(ProcessEffectSummaryError::UnsupportedOccurrenceCap {
+            return Err(ProcessEffectReportError::UnsupportedOccurrenceCap {
                 expected: PROCESS_EFFECT_OCCURRENCE_CAP,
                 actual: omissions.occurrence_cap,
             });
         }
         if omissions.nodes.is_empty() || omissions.nodes.values().any(|counts| counts.total() == 0)
         {
-            return Err(ProcessEffectSummaryError::EmptyOmissions);
+            return Err(ProcessEffectReportError::EmptyOmissions);
         }
         Ok(omissions)
     }
@@ -251,20 +247,20 @@ impl ProcessEffectOmissions {
 fn require_vocabulary_version(
     payload: &serde_json::Value,
     window: lash_core_store::store::ReadWindow,
-) -> Result<u32, ProcessEffectSummaryError> {
+) -> Result<u32, ProcessEffectReportError> {
     let version = payload
         .as_object()
         .and_then(|object| object.get("vocabulary_version"))
         .and_then(serde_json::Value::as_u64)
-        .ok_or(ProcessEffectSummaryError::MissingVocabularyVersion)?;
+        .ok_or(ProcessEffectReportError::MissingVocabularyVersion)?;
     let version = u32::try_from(version).map_err(|_| {
-        ProcessEffectSummaryError::UnsupportedVocabularyVersion {
+        ProcessEffectReportError::UnsupportedVocabularyVersion {
             expected: window.newest(),
             actual: version,
         }
     })?;
     if !window.admits(version) {
-        return Err(ProcessEffectSummaryError::UnsupportedVocabularyVersion {
+        return Err(ProcessEffectReportError::UnsupportedVocabularyVersion {
             expected: window.newest(),
             actual: u64::from(version),
         });
@@ -300,9 +296,9 @@ pub fn tool_failure_code(failure: &crate::ToolFailure) -> lash_sansio::FailureCo
 
 /// One node's recorded occurrences and its omitted counts.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessEffectNodeSummary {
+pub struct ProcessEffectNodeReport {
     pub node_id: String,
-    pub occurrences: Vec<ProcessEffectSummaryOccurrence>,
+    pub occurrences: Vec<ProcessEffectOccurrence>,
     pub omitted: ProcessEffectOmittedCounts,
 }
 
@@ -314,16 +310,16 @@ pub struct ProcessEffectNodeSummary {
 /// itself, whose replay keys are unique; the result does not depend on page
 /// boundaries.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ProcessEffectSummary {
-    nodes: BTreeMap<String, ProcessEffectNodeSummary>,
+pub struct ProcessEffectReport {
+    nodes: BTreeMap<String, ProcessEffectNodeReport>,
 }
 
-impl ProcessEffectSummary {
-    pub fn nodes(&self) -> impl ExactSizeIterator<Item = &ProcessEffectNodeSummary> {
+impl ProcessEffectReport {
+    pub fn nodes(&self) -> impl ExactSizeIterator<Item = &ProcessEffectNodeReport> {
         self.nodes.values()
     }
 
-    pub fn node(&self, node_id: &str) -> Option<&ProcessEffectNodeSummary> {
+    pub fn node(&self, node_id: &str) -> Option<&ProcessEffectNodeReport> {
         self.nodes.get(node_id)
     }
 
@@ -336,11 +332,10 @@ impl ProcessEffectSummary {
         event_type: &str,
         payload: &serde_json::Value,
         fleet_format: crate::FleetFormat,
-    ) -> Result<(), ProcessEffectSummaryError> {
+    ) -> Result<(), ProcessEffectReportError> {
         match event_type {
             PROCESS_EFFECT_OUTCOME_EVENT_TYPE => {
-                let outcome =
-                    ProcessEffectSummaryOccurrence::decode(payload.clone(), fleet_format)?;
+                let outcome = ProcessEffectOccurrence::decode(payload.clone(), fleet_format)?;
                 let node = self.node_entry(&outcome.node_id);
                 let position = node
                     .occurrences
@@ -358,10 +353,10 @@ impl ProcessEffectSummary {
         Ok(())
     }
 
-    fn node_entry(&mut self, node_id: &str) -> &mut ProcessEffectNodeSummary {
+    fn node_entry(&mut self, node_id: &str) -> &mut ProcessEffectNodeReport {
         self.nodes
             .entry(node_id.to_string())
-            .or_insert_with(|| ProcessEffectNodeSummary {
+            .or_insert_with(|| ProcessEffectNodeReport {
                 node_id: node_id.to_string(),
                 occurrences: Vec::new(),
                 omitted: ProcessEffectOmittedCounts::default(),
@@ -370,7 +365,7 @@ impl ProcessEffectSummary {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ProcessEffectSummaryError {
+pub enum ProcessEffectReportError {
     #[error("effect summary payload is missing its vocabulary_version")]
     MissingVocabularyVersion,
     #[error("effect summary vocabulary version {actual} is unsupported; expected {expected}")]

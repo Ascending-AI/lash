@@ -63,7 +63,7 @@ fn turn_cancel_snapshot_from_row(
             request_id,
             origin,
             reason,
-            undelivered: turn_cancel_disposition_from_wire(&disposition)?,
+            undelivered: turn_cancel_undelivered_from_wire(&disposition)?,
             mode: turn_cancel_mode_from_wire(&mode)?,
         },
         revision,
@@ -153,7 +153,7 @@ pub(super) fn turn_cancel_record_from_rows(
     let (request_id, origin, reason, disposition, mode) = row;
     let mut outcome = lash_core_execution::TurnCancelInputOutcome::default();
     for (item_id, payload_json, applied_disposition, item_kind, batch_id) in affected_rows {
-        let applied_disposition = turn_cancel_disposition_from_wire(&applied_disposition)?;
+        let applied_disposition = turn_cancel_undelivered_from_wire(&applied_disposition)?;
         match (item_kind.as_str(), batch_id) {
             (AFFECTED_INPUT_KIND, None) => {
                 outcome
@@ -187,7 +187,7 @@ pub(super) fn turn_cancel_record_from_rows(
             request_id,
             origin,
             reason,
-            undelivered: turn_cancel_disposition_from_wire(&disposition)?,
+            undelivered: turn_cancel_undelivered_from_wire(&disposition)?,
             mode: turn_cancel_mode_from_wire(&mode)?,
         },
         outcome: (!outcome.is_empty()).then_some(outcome),
@@ -215,24 +215,24 @@ pub(super) fn turn_cancel_mode_from_wire(
     }
 }
 
-pub(crate) fn turn_cancel_disposition_from_wire(
+pub(crate) fn turn_cancel_undelivered_from_wire(
     disposition: &str,
-) -> Result<lash_core_execution::TurnCancelDisposition, StoreError> {
+) -> Result<lash_core_execution::TurnCancelUndeliveredInputPolicy, StoreError> {
     match disposition {
-        "defer" => Ok(lash_core_execution::TurnCancelDisposition::Defer),
-        "drop" => Ok(lash_core_execution::TurnCancelDisposition::Drop),
+        "defer" => Ok(lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer),
+        "drop" => Ok(lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop),
         other => Err(StoreError::Backend(format!(
             "unknown turn cancel disposition `{other}`"
         ))),
     }
 }
 
-pub(super) fn turn_cancel_disposition_wire(
-    disposition: lash_core_execution::TurnCancelDisposition,
+pub(super) fn turn_cancel_undelivered_wire(
+    policy: lash_core_execution::TurnCancelUndeliveredInputPolicy,
 ) -> &'static str {
-    match disposition {
-        lash_core_execution::TurnCancelDisposition::Defer => "defer",
-        lash_core_execution::TurnCancelDisposition::Drop => "drop",
+    match policy {
+        lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => "defer",
+        lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => "drop",
     }
 }
 
@@ -254,7 +254,7 @@ pub(crate) async fn append_turn_cancel_outcome_conn(
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
     .bind(&*affected.input_id)
-    .bind(turn_cancel_disposition_wire(affected.disposition))
+    .bind(turn_cancel_undelivered_wire(affected.disposition))
     .bind(encode_json(&affected.payload)?)
     .bind(AFFECTED_INPUT_KIND)
     .bind(None::<&str>)
@@ -283,7 +283,7 @@ pub(super) async fn append_turn_cancel_wake_tx(
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
     .bind(&affected.item_id)
-    .bind(turn_cancel_disposition_wire(affected.disposition))
+    .bind(turn_cancel_undelivered_wire(affected.disposition))
     .bind(encode_json(&affected.wake)?)
     .bind(AFFECTED_WAKE_KIND)
     .bind(affected.batch_id.as_str())
@@ -357,7 +357,7 @@ pub(super) async fn reconcile_turn_cancel_winner_tx(
     .bind(&evidence.request_id)
     .bind(&evidence.origin)
     .bind(&evidence.reason)
-    .bind(turn_cancel_disposition_wire(evidence.undelivered))
+    .bind(turn_cancel_undelivered_wire(evidence.undelivered))
     .bind(turn_cancel_mode_wire(evidence.mode))
     .bind(revision)
     .execute(&mut **tx)

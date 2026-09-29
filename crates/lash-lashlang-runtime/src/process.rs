@@ -201,7 +201,7 @@ struct LashlangSegmentState {
     /// successor already wrote is a replay-key no-op. Bounded by construction:
     /// at most [`lash_core::PROCESS_EFFECT_OCCURRENCE_CAP`] per execution site
     /// of the compiled program.
-    pending_summary: Vec<lash_core::ProcessEffectSummaryOccurrence>,
+    pending_summary: Vec<lash_core::ProcessEffectOccurrence>,
     /// Effect occurrences past the durable summary's per-node cap, counted by
     /// outcome class (FIG-3464). A successor segment keeps counting from here
     /// and the run's terminal omission record carries the total.

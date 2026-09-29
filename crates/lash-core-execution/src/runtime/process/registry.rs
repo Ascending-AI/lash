@@ -184,7 +184,7 @@ pub enum WakeDiscardReason {
 /// cannot exist without its ownership fence and a typed discard cannot exist without its reason.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WakeDeliveryDisposition {
+pub enum WakeDeliveryLifecycle {
     /// Awaiting its next claim attempt.
     Pending,
     /// Claimed while the receiver enqueue is in flight.
@@ -203,7 +203,7 @@ pub enum WakeDeliveryDisposition {
     DiscardedUnattributed,
 }
 
-impl WakeDeliveryDisposition {
+impl WakeDeliveryLifecycle {
     pub fn state(&self) -> WakeDeliveryState {
         match self {
             Self::Pending => WakeDeliveryState::Pending,
@@ -264,7 +264,7 @@ impl WakeDiscardReason {
 pub struct WakeDelivery {
     pub delivery_id: String,
     pub wake: ProcessWakeDelivery,
-    pub disposition: WakeDeliveryDisposition,
+    pub disposition: WakeDeliveryLifecycle,
     pub attempts: u64,
     pub first_attempt_ms: Option<u64>,
     pub next_attempt_at_ms: u64,
@@ -287,7 +287,7 @@ impl WakeDelivery {
             delivery_id,
             expires_at_ms: wake.created_at_ms.saturating_add(config.delivery_expiry_ms),
             wake,
-            disposition: WakeDeliveryDisposition::Pending,
+            disposition: WakeDeliveryLifecycle::Pending,
             attempts: 0,
             first_attempt_ms: None,
             next_attempt_at_ms,
@@ -302,7 +302,7 @@ impl WakeDelivery {
     /// settlement, or an error when the delivery is not enqueuing.
     pub fn claim_token(&self) -> Result<&str, PluginError> {
         match &self.disposition {
-            WakeDeliveryDisposition::Enqueuing { claim_token } => Ok(claim_token),
+            WakeDeliveryLifecycle::Enqueuing { claim_token } => Ok(claim_token),
             _ => Err(PluginError::Session(format!(
                 "wake delivery `{}` is not enqueuing",
                 self.delivery_id
@@ -421,10 +421,10 @@ impl WakeDeliveryReport {
         let mut report = Self::default();
         for delivery in &deliveries {
             match &delivery.disposition {
-                WakeDeliveryDisposition::Pending => report.pending += 1,
-                WakeDeliveryDisposition::Enqueuing { .. } => report.enqueuing += 1,
-                WakeDeliveryDisposition::Enqueued => report.enqueued += 1,
-                WakeDeliveryDisposition::Discarded { reason } => {
+                WakeDeliveryLifecycle::Pending => report.pending += 1,
+                WakeDeliveryLifecycle::Enqueuing { .. } => report.enqueuing += 1,
+                WakeDeliveryLifecycle::Enqueued => report.enqueued += 1,
+                WakeDeliveryLifecycle::Discarded { reason } => {
                     report.discarded += 1;
                     match reason {
                         WakeDiscardReason::Expired => report.expired += 1,
@@ -433,7 +433,7 @@ impl WakeDeliveryReport {
                         WakeDiscardReason::SequenceRewound => report.sequence_rewound += 1,
                     }
                 }
-                WakeDeliveryDisposition::DiscardedUnattributed => report.discarded += 1,
+                WakeDeliveryLifecycle::DiscardedUnattributed => report.discarded += 1,
             }
         }
 

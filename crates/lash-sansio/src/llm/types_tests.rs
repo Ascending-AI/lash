@@ -459,28 +459,28 @@ fn attempt_usage_disposition_follows_outcome_when_usage_is_absent() {
         AttemptOutcome::Interrupted,
     ] {
         assert_eq!(
-            AttemptUsageDisposition::for_attempt(outcome, Some(&usage)),
-            AttemptUsageDisposition::Reported
+            AttemptUsageOutcome::for_attempt(outcome, Some(&usage)),
+            AttemptUsageOutcome::Reported
         );
     }
     assert_eq!(
-        AttemptUsageDisposition::for_attempt(AttemptOutcome::Completed, None),
-        AttemptUsageDisposition::UnreportedByProvider
+        AttemptUsageOutcome::for_attempt(AttemptOutcome::Completed, None),
+        AttemptUsageOutcome::UnreportedByProvider
     );
     assert_eq!(
-        AttemptUsageDisposition::for_attempt(AttemptOutcome::Aborted, None),
-        AttemptUsageDisposition::UnreportedAfterAbort
+        AttemptUsageOutcome::for_attempt(AttemptOutcome::Aborted, None),
+        AttemptUsageOutcome::UnreportedAfterAbort
     );
     assert_eq!(
-        AttemptUsageDisposition::for_attempt(AttemptOutcome::Failed, None),
-        AttemptUsageDisposition::UnreportedAfterFailure
+        AttemptUsageOutcome::for_attempt(AttemptOutcome::Failed, None),
+        AttemptUsageOutcome::UnreportedAfterFailure
     );
     assert_eq!(
-        AttemptUsageDisposition::for_attempt(AttemptOutcome::Interrupted, None),
-        AttemptUsageDisposition::UnreportedAfterFailure
+        AttemptUsageOutcome::for_attempt(AttemptOutcome::Interrupted, None),
+        AttemptUsageOutcome::UnreportedAfterFailure
     );
-    assert!(AttemptUsageDisposition::UnreportedAfterAbort.is_unreported_after_interruption());
-    assert!(!AttemptUsageDisposition::UnreportedByProvider.is_unreported_after_interruption());
+    assert!(AttemptUsageOutcome::UnreportedAfterAbort.is_unreported_after_interruption());
+    assert!(!AttemptUsageOutcome::UnreportedByProvider.is_unreported_after_interruption());
 }
 
 #[test]
@@ -495,7 +495,7 @@ fn legacy_attempt_records_decode_as_reported_and_reported_stays_elided() {
         "retry_budget_consumed": true
     });
     let record: AttemptRecord = serde_json::from_value(legacy.clone()).expect("legacy attempt");
-    assert_eq!(record.usage_disposition, AttemptUsageDisposition::Reported);
+    assert_eq!(record.usage_disposition, AttemptUsageOutcome::Reported);
     // Sealed timing fields decode but are dropped on re-encode: recorded
     // content carries no wall-clock measurements.
     let mut stripped = legacy.clone();
@@ -506,12 +506,12 @@ fn legacy_attempt_records_decode_as_reported_and_reported_stays_elided() {
     assert_eq!(serde_json::to_value(&record).expect("encode"), stripped);
 
     let mut aborted = record.clone();
-    aborted.usage_disposition = AttemptUsageDisposition::UnreportedAfterAbort;
+    aborted.usage_disposition = AttemptUsageOutcome::UnreportedAfterAbort;
     let encoded = serde_json::to_value(&aborted).expect("encode aborted");
     assert_eq!(encoded["usage_disposition"], "unreported_after_abort");
     let decoded: AttemptRecord = serde_json::from_value(encoded).expect("decode aborted");
     assert_eq!(
         decoded.usage_disposition,
-        AttemptUsageDisposition::UnreportedAfterAbort
+        AttemptUsageOutcome::UnreportedAfterAbort
     );
 }

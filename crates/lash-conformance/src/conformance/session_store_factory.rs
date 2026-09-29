@@ -100,7 +100,7 @@ where
     session_store_factory_round_trips_every_relation_shape(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
     session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
-    turn_cancel::turn_cancel_disposition_crash_matrix(make()).await;
+    turn_cancel::turn_cancel_undelivered_crash_matrix(make()).await;
     session_store_factory_claimable_queued_work_peek(make()).await;
     config_commands::session_store_factory_coalesces_config_command_claims(make()).await;
     config_commands::session_store_factory_bounds_config_command_claims(make()).await;

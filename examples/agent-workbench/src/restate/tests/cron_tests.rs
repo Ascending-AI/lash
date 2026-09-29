@@ -1056,8 +1056,8 @@ fn cron_tick_test_state(session_id: &SessionId) -> crate::restate::WorkbenchCron
 }
 
 fn cron_tick_basis(
-    session: CronSessionDisposition,
-    registration: CronRegistrationDisposition,
+    session: CronSessionState,
+    registration: CronRegistrationState,
 ) -> CronTickBasis {
     CronTickBasis {
         session,
@@ -1140,10 +1140,7 @@ fn cron_tick_decision_runs_for_a_live_session_with_an_enabled_registration() {
 
     assert_eq!(
         crate::restate::cron_tick_decision(
-            cron_tick_basis(
-                CronSessionDisposition::Live,
-                CronRegistrationDisposition::Enabled,
-            ),
+            cron_tick_basis(CronSessionState::Live, CronRegistrationState::Enabled,),
             &state,
             "cron-job-live",
         ),
@@ -1156,10 +1153,7 @@ fn cron_tick_decision_cancels_a_retired_session_with_typed_trace() {
     let state = cron_tick_test_state(&SessionId::from("retired-cron-session"));
 
     let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
-        cron_tick_basis(
-            CronSessionDisposition::Retired,
-            CronRegistrationDisposition::Enabled,
-        ),
+        cron_tick_basis(CronSessionState::Retired, CronRegistrationState::Enabled),
         &state,
         "cron-job-retired",
     ) else {
@@ -1178,10 +1172,7 @@ fn cron_tick_decision_cancels_an_unknown_session_with_typed_trace() {
     let state = cron_tick_test_state(&SessionId::from("absent-cron-session"));
 
     let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
-        cron_tick_basis(
-            CronSessionDisposition::Unknown,
-            CronRegistrationDisposition::Enabled,
-        ),
+        cron_tick_basis(CronSessionState::Unknown, CronRegistrationState::Enabled),
         &state,
         "cron-job-absent",
     ) else {
@@ -1200,10 +1191,7 @@ fn cron_tick_decision_cancels_a_live_session_with_an_absent_registration() {
     let state = cron_tick_test_state(&SessionId::from("live-absent-registration"));
 
     let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
-        cron_tick_basis(
-            CronSessionDisposition::Live,
-            CronRegistrationDisposition::Absent,
-        ),
+        cron_tick_basis(CronSessionState::Live, CronRegistrationState::Absent),
         &state,
         "cron-job-registration-absent",
     ) else {
@@ -1228,10 +1216,7 @@ fn cron_tick_decision_cancels_a_live_session_with_a_disabled_registration() {
     let state = cron_tick_test_state(&SessionId::from("live-disabled-registration"));
 
     let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
-        cron_tick_basis(
-            CronSessionDisposition::Live,
-            CronRegistrationDisposition::Disabled,
-        ),
+        cron_tick_basis(CronSessionState::Live, CronRegistrationState::Disabled),
         &state,
         "cron-job-registration-disabled",
     ) else {
@@ -1256,10 +1241,7 @@ fn cron_tick_decision_keeps_session_arms_ahead_of_registration_arms() {
     let state = cron_tick_test_state(&SessionId::from("retired-regardless-of-registration"));
 
     let decision = crate::restate::cron_tick_decision(
-        cron_tick_basis(
-            CronSessionDisposition::Retired,
-            CronRegistrationDisposition::Absent,
-        ),
+        cron_tick_basis(CronSessionState::Retired, CronRegistrationState::Absent),
         &state,
         "cron-job-retired-absent-registration",
     );
@@ -1271,10 +1253,7 @@ fn cron_tick_decision_keeps_session_arms_ahead_of_registration_arms() {
 
 #[test]
 fn cron_tick_basis_journal_round_trips_and_legacy_live_replays_as_a_bounded_tick() {
-    let disabled = cron_tick_basis(
-        CronSessionDisposition::Live,
-        CronRegistrationDisposition::Disabled,
-    );
+    let disabled = cron_tick_basis(CronSessionState::Live, CronRegistrationState::Disabled);
     assert_eq!(disabled.journal_value(), "live:disabled");
     assert_eq!(
         CronTickBasis::from_journal_value("live:disabled").expect("decode combined basis"),
@@ -1289,10 +1268,7 @@ fn cron_tick_basis_journal_round_trips_and_legacy_live_replays_as_a_bounded_tick
     let legacy_live = CronTickBasis::from_journal_value("live").expect("decode legacy live basis");
     assert_eq!(
         legacy_live,
-        cron_tick_basis(
-            CronSessionDisposition::Live,
-            CronRegistrationDisposition::Enabled
-        )
+        cron_tick_basis(CronSessionState::Live, CronRegistrationState::Enabled)
     );
     assert_eq!(
         crate::restate::cron_tick_decision(
@@ -1306,18 +1282,18 @@ fn cron_tick_basis_journal_round_trips_and_legacy_live_replays_as_a_bounded_tick
         CronTickBasis::from_journal_value("retired")
             .expect("decode legacy retired basis")
             .session,
-        CronSessionDisposition::Retired
+        CronSessionState::Retired
     );
     assert!(CronTickBasis::from_journal_value("live:bogus").is_err());
     assert!(CronTickBasis::from_journal_value("bogus:enabled").is_err());
 }
 
-/// FIG-2362: corrupt journaled dispositions terminate with a stable, namespaced
+/// FIG-2362: corrupt journaled states terminate with a stable, namespaced
 /// code rather than prose alone.
 #[test]
-fn corrupt_journaled_cron_disposition_carries_a_typed_terminal_code() {
-    let session_error = CronSessionDisposition::from_journal_value("bogus")
-        .expect_err("unknown session disposition must fail");
+fn corrupt_journaled_cron_state_carries_a_typed_terminal_code() {
+    let session_error =
+        CronSessionState::from_journal_value("bogus").expect_err("unknown session state must fail");
     let session_error: &dyn std::error::Error = session_error.as_ref();
     let session_error = session_error.to_string();
     assert!(
@@ -1325,8 +1301,8 @@ fn corrupt_journaled_cron_disposition_carries_a_typed_terminal_code() {
         "terminal error must carry the typed code, got {session_error}"
     );
 
-    let registration_error = CronRegistrationDisposition::from_journal_value("bogus")
-        .expect_err("unknown registration disposition must fail");
+    let registration_error = CronRegistrationState::from_journal_value("bogus")
+        .expect_err("unknown registration state must fail");
     let registration_error: &dyn std::error::Error = registration_error.as_ref();
     let registration_error = registration_error.to_string();
     assert!(
@@ -1338,7 +1314,7 @@ fn corrupt_journaled_cron_disposition_carries_a_typed_terminal_code() {
     // the terminal message spells it `code: detail`.
     for (code, expected) in [
         (
-            CronTerminalCode::JournaledDisposition,
+            CronTerminalCode::JournaledState,
             "workbench_cron_invalid_journaled_disposition",
         ),
         (
@@ -1360,7 +1336,7 @@ fn corrupt_journaled_cron_disposition_carries_a_typed_terminal_code() {
 }
 
 #[tokio::test]
-async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a_tombstone() {
+async fn cron_session_state_is_unknown_when_store_meta_is_absent_without_a_tombstone() {
     let trigger_store = crate::tests::memory_trigger_store();
     let store_factory = Arc::new(MetaLossDeploymentStore::new());
     let double = crate::tests::test_double_backend(0).await;
@@ -1415,10 +1391,10 @@ async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a
             .expect("read absent-session metadata")
     );
     assert_eq!(
-        cron_session_disposition(&state.core, &SessionId::from(session_id))
+        cron_session_state(&state.core, &SessionId::from(session_id))
             .await
             .expect("classify absent cron session"),
-        CronSessionDisposition::Unknown
+        CronSessionState::Unknown
     );
 }
 
@@ -1443,10 +1419,10 @@ async fn cron_tick_allows_a_live_non_current_session_to_emit_a_delivery() {
     .await;
 
     assert_eq!(
-        cron_session_disposition(&state.core, &SessionId::from(session_id))
+        cron_session_state(&state.core, &SessionId::from(session_id))
             .await
             .expect("read live session tombstone state"),
-        CronSessionDisposition::Live
+        CronSessionState::Live
     );
     let controller = CountingProcessEffectController::default();
     let scoped = lash::runtime::ScopedEffectController::borrowed(
@@ -1638,13 +1614,13 @@ async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
     .await;
     retire_cron_test_session(&double, &state, &SessionId::from(session_id)).await;
 
-    let disposition = cron_session_disposition(&state.core, &SessionId::from(session_id))
+    let session_state = cron_session_state(&state.core, &SessionId::from(session_id))
         .await
         .expect("read retired session tombstone state");
     let mut cron_state = cron_tick_test_state(&SessionId::from(session_id));
     cron_state.request.source_key = source_key.to_string();
     let decision = crate::restate::cron_tick_decision(
-        cron_tick_basis(disposition, CronRegistrationDisposition::Enabled),
+        cron_tick_basis(session_state, CronRegistrationState::Enabled),
         &cron_state,
         "cron-job-retired-integration",
     );
@@ -1710,7 +1686,7 @@ async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
 }
 
 #[tokio::test]
-async fn cron_registration_disposition_aggregates_duplicate_registrations() {
+async fn cron_registration_state_aggregates_duplicate_registrations() {
     let trigger_store = crate::tests::memory_trigger_store();
     let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
@@ -1736,43 +1712,43 @@ async fn cron_registration_disposition_aggregates_duplicate_registrations() {
     .await;
 
     assert_eq!(
-        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+        crate::restate::cron_registration_state(&state, &session_id, source_key)
             .await
             .expect("classify duplicate registrations"),
-        CronRegistrationDisposition::Enabled
+        CronRegistrationState::Enabled
     );
 
     disable_cron_test_subscription(trigger_store.as_ref(), &first).await;
     assert_eq!(
-        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+        crate::restate::cron_registration_state(&state, &session_id, source_key)
             .await
             .expect("classify one-enabled duplicate"),
-        CronRegistrationDisposition::Enabled,
+        CronRegistrationState::Enabled,
         "any enabled match must dominate disabled matches"
     );
 
     disable_cron_test_subscription(trigger_store.as_ref(), &second).await;
     assert_eq!(
-        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+        crate::restate::cron_registration_state(&state, &session_id, source_key)
             .await
             .expect("classify all-disabled duplicates"),
-        CronRegistrationDisposition::Disabled
+        CronRegistrationState::Disabled
     );
 
     assert_eq!(
-        crate::restate::cron_registration_disposition(
+        crate::restate::cron_registration_state(
             &state,
             &session_id,
             "cron-source:fig1071-no-match"
         )
         .await
         .expect("classify no registration"),
-        CronRegistrationDisposition::Absent
+        CronRegistrationState::Absent
     );
 }
 
 #[tokio::test]
-async fn cron_registration_disposition_ignores_record_order() {
+async fn cron_registration_state_ignores_record_order() {
     let trigger_store = crate::tests::memory_trigger_store();
     let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
@@ -1799,10 +1775,10 @@ async fn cron_registration_disposition_ignores_record_order() {
     .await;
     disable_cron_test_subscription(trigger_store.as_ref(), &disabled_first).await;
     assert_eq!(
-        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+        crate::restate::cron_registration_state(&state, &session_id, source_key)
             .await
             .expect("classify disabled-first duplicates"),
-        CronRegistrationDisposition::Enabled,
+        CronRegistrationState::Enabled,
         "a leading disabled record must not mask a later enabled record"
     );
 
@@ -1824,16 +1800,16 @@ async fn cron_registration_disposition_ignores_record_order() {
     .await;
     disable_cron_test_subscription(trigger_store.as_ref(), &disabled_second).await;
     assert_eq!(
-        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+        crate::restate::cron_registration_state(&state, &session_id, source_key)
             .await
             .expect("classify enabled-first duplicates"),
-        CronRegistrationDisposition::Enabled,
+        CronRegistrationState::Enabled,
         "an enabled first record must dominate a trailing disabled record"
     );
 }
 
 #[tokio::test]
-async fn cron_registration_disposition_confines_matches_to_session_source_type_and_key() {
+async fn cron_registration_state_confines_matches_to_session_source_type_and_key() {
     let trigger_store = crate::tests::memory_trigger_store();
     let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
@@ -1880,25 +1856,25 @@ async fn cron_registration_disposition_confines_matches_to_session_source_type_a
     .await;
 
     assert_eq!(
-        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+        crate::restate::cron_registration_state(&state, &session_id, source_key)
             .await
             .expect("classify amid enabled decoys"),
-        CronRegistrationDisposition::Disabled,
+        CronRegistrationState::Disabled,
         "source type, source key, and session must all confine the read"
     );
 
     delete_cron_test_subscription(trigger_store.as_ref(), &matching).await;
     assert_eq!(
-        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+        crate::restate::cron_registration_state(&state, &session_id, source_key)
             .await
             .expect("classify absent amid enabled decoys"),
-        CronRegistrationDisposition::Absent,
+        CronRegistrationState::Absent,
         "enabled decoys outside the filter must not resurrect an absent registration"
     );
 }
 
 #[tokio::test]
-async fn cron_registration_disposition_is_absent_after_delete() {
+async fn cron_registration_state_is_absent_after_delete() {
     let trigger_store = crate::tests::memory_trigger_store();
     let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
@@ -1916,23 +1892,23 @@ async fn cron_registration_disposition_is_absent_after_delete() {
     )
     .await;
     assert_eq!(
-        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+        crate::restate::cron_registration_state(&state, &session_id, source_key)
             .await
             .expect("classify live registration"),
-        CronRegistrationDisposition::Enabled
+        CronRegistrationState::Enabled
     );
 
     delete_cron_test_subscription(trigger_store.as_ref(), &record).await;
     assert_eq!(
-        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+        crate::restate::cron_registration_state(&state, &session_id, source_key)
             .await
             .expect("classify tombstoned registration"),
-        CronRegistrationDisposition::Absent
+        CronRegistrationState::Absent
     );
 }
 
 #[tokio::test]
-async fn cron_registration_disposition_propagates_classified_store_failures() {
+async fn cron_registration_state_propagates_classified_store_failures() {
     let trigger_store = Arc::new(OccurrenceFailureTriggerStore::for_subscription_list(
         lash::plugins::PluginError::Session("temporary trigger-store outage".to_string()),
     )) as Arc<dyn lash::triggers::TriggerStore>;
@@ -1941,13 +1917,10 @@ async fn cron_registration_disposition_propagates_classified_store_failures() {
         crate::tests::recoverable_chat_test_state_with_trigger_store(&double, trigger_store).await;
     let session_id = state.current_session_id();
 
-    let error = crate::restate::cron_registration_disposition(
-        &state,
-        &session_id,
-        "cron-source:fig1071-fail",
-    )
-    .await
-    .expect_err("a failing subscription list must propagate");
+    let error =
+        crate::restate::cron_registration_state(&state, &session_id, "cron-source:fig1071-fail")
+            .await
+            .expect_err("a failing subscription list must propagate");
     let expected = crate::restate::classified_plugin_handler_error(
         lash::plugins::PluginError::Session("temporary trigger-store outage".to_string()),
     );
@@ -1985,21 +1958,20 @@ async fn cron_tick_cancels_a_live_session_with_a_deleted_registration_without_re
     delete_cron_test_subscription(trigger_store.as_ref(), &record).await;
 
     assert_eq!(
-        cron_session_disposition(&state.core, &session_id)
+        cron_session_state(&state.core, &session_id)
             .await
             .expect("classify live session"),
-        CronSessionDisposition::Live
+        CronSessionState::Live
     );
-    let registration =
-        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
-            .await
-            .expect("classify deleted registration");
-    assert_eq!(registration, CronRegistrationDisposition::Absent);
+    let registration = crate::restate::cron_registration_state(&state, &session_id, source_key)
+        .await
+        .expect("classify deleted registration");
+    assert_eq!(registration, CronRegistrationState::Absent);
 
     let mut cron_state = cron_tick_test_state(&session_id);
     cron_state.request.source_key = source_key.to_string();
     let decision = crate::restate::cron_tick_decision(
-        cron_tick_basis(CronSessionDisposition::Live, registration),
+        cron_tick_basis(CronSessionState::Live, registration),
         &cron_state,
         "cron-job-registration-deleted",
     );

@@ -43,7 +43,9 @@ use crate::support::{
 use crate::turn::{TurnOutput, TurnReport};
 use lash_core::{GenerationOptions, ModelSpec, PromptLayer, RunSpec};
 
-use lash_core::facade_support::{TurnCancelDisposition, TurnCancelMode, TurnCancelReceipt};
+use lash_core::facade_support::{
+    TurnCancelMode, TurnCancelReceipt, TurnCancelUndeliveredInputPolicy,
+};
 use lash_core::runtime::PendingTurnInputCancelReceipt;
 use lash_core::store::{ParkId, ParkReason, StallReason};
 
@@ -882,8 +884,8 @@ impl CancelBuilder {
         self
     }
 
-    pub fn undelivered(mut self, disposition: TurnCancelDisposition) -> Self {
-        self.request.undelivered = disposition;
+    pub fn undelivered(mut self, policy: TurnCancelUndeliveredInputPolicy) -> Self {
+        self.request.undelivered = policy;
         self
     }
 

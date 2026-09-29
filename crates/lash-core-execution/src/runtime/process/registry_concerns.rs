@@ -186,7 +186,7 @@ pub trait ProcessQuery: Send + Sync {
 
     /// Live process parks per reason code and the oldest one's `since_ms`,
     /// for drain and the parked-work gauges.
-    async fn summarize_parked_processes(&self) -> Result<crate::store::ParkSummary, PluginError>;
+    async fn summarize_parked_processes(&self) -> Result<crate::store::ParkReport, PluginError>;
 }
 
 /// Process admission: registration and the durable external backend reference.
@@ -1051,7 +1051,7 @@ pub trait ProcessClockRebind: Send + Sync {
 ///     }
 ///     async fn summarize_parked_processes(
 ///         &self,
-///     ) -> Result<lash_core::store::ParkSummary, PluginError> {
+///     ) -> Result<lash_core::store::ParkReport, PluginError> {
 ///         unimplemented!()
 ///     }
 /// }

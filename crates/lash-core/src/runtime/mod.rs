@@ -265,9 +265,9 @@ pub use process::{
     ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessChangeHub,
     ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome,
     ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
-    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEffectNodeSummary,
-    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
-    ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
+    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEffectNodeReport,
+    ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
+    ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError, ProcessEngine,
     ProcessEngineAdmission, ProcessEngineKind, ProcessEngineProcessContext,
     ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEvent, ProcessEventAppendPlan,
@@ -297,7 +297,7 @@ pub use process::{
     SessionObserverIntentSource, SessionScope, SessionScopeId, StartCx, StartCxError, StartKey,
     StoreRealization, UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind,
     WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
+    WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState,
     WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry, allocate_process_event_sequence,
     apply_process_event_projection, apply_process_status_projection, artifact_store_plugin_error,
     check_retained_start, current_epoch_ms, fold_process_record, lifetime,
@@ -333,10 +333,11 @@ pub use turn_boundary::{RecordedTurnAssembly, classify_output_state};
 pub use turn_control::{
     LocalTurnStop, StopDeliveryGuard, TurnAddress, TurnAttach, TurnCancelAffectedInput,
     TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
-    TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
-    TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord,
-    TurnCancellationEvidence, TurnTerminal, TurnWorkDriver, retry_cancel_watch,
+    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelGatePair,
+    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOutcome,
+    TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord,
+    TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
+    retry_cancel_watch,
 };
 #[cfg(feature = "testing")]
 pub use turn_input_ingress::ingress_message_id;
@@ -363,8 +364,8 @@ pub use turn_queue::{
 };
 use usage::nonzero_usage;
 pub use usage::{
-    LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, SessionUsageTotals,
-    TokenLedgerEntry, UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageDispositionError,
+    LedgerUsageOutcome, ReconciledUsageAttempt, SessionUsageReport, SessionUsageTotals,
+    TokenLedgerEntry, UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageOutcomeError,
     UsageReconciliationReport, UsageReportRow, UsageTotalRow, UsageTotals, diff_token_ledger,
     diff_usage_reports, outstanding_unreported_attempts,
 };

@@ -4,7 +4,8 @@
 
 use lash_core::drive::physical_turn_of;
 use lash_core::facade_support::{
-    TurnAddress, TurnCancelDisposition, TurnCancelMode, TurnCancelRequest, TurnWorkDriver,
+    TurnAddress, TurnCancelMode, TurnCancelRequest, TurnCancelUndeliveredInputPolicy,
+    TurnWorkDriver,
 };
 use lash_core::runtime::{
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
@@ -22,7 +23,7 @@ pub(crate) struct CancelRequestSpec {
     pub(crate) origin: Option<String>,
     pub(crate) reason: Option<String>,
     pub(crate) mode: TurnCancelMode,
-    pub(crate) undelivered: TurnCancelDisposition,
+    pub(crate) undelivered: TurnCancelUndeliveredInputPolicy,
 }
 
 pub(super) async fn apply(

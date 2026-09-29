@@ -1551,7 +1551,7 @@ fn llm_call_completed_full_shape() {
 
 #[test]
 fn unknown_attempt_usage_disposition_is_refused() {
-    // The four legal spellings are the vocabulary `AttemptUsageDisposition`
+    // The four legal spellings are the vocabulary `AttemptUsageOutcome`
     // owns upstream; the trace layer was the only one that flattened them to a
     // free-form string, so any capitalisation or invention decoded silently.
     let attempt = json!({
@@ -1606,7 +1606,7 @@ fn retry_attempts_are_optional_additive_event_fields() {
                 ..Default::default()
             }),
             usage: Some(token_usage_sample()),
-            usage_disposition: Some(lash_trace::TraceAttemptUsageDisposition::Reported),
+            usage_disposition: Some(lash_trace::TraceAttemptUsageOutcome::Reported),
         },
         lash_trace::TraceRetryAttempt {
             ordinal: 2,

@@ -726,7 +726,7 @@ pub fn prepare_process_event_append(
     }
     match ProcessEventKind::from_event_type(&request.event_type) {
         ProcessEventKind::EffectOutcome => {
-            let outcome = super::effect_summary::ProcessEffectSummaryOccurrence::decode(
+            let outcome = super::effect_summary::ProcessEffectOccurrence::decode(
                 request.payload.clone(),
                 fleet_format,
             )

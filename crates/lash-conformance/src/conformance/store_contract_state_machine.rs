@@ -9,7 +9,7 @@ use crate::ProcessEventLogTestSupport as _;
 use crate::{
     LeaseOwnerIdentity, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessObserverBy, ProcessRecord, ProcessStartOutcome, ProjectionWatermark,
-    WakeDelivery, WakeDeliveryClaimOutcome, WakeDeliveryDisposition, WakeDeliveryState,
+    WakeDelivery, WakeDeliveryClaimOutcome, WakeDeliveryLifecycle, WakeDeliveryState,
     WakeDiscardReason, apply_process_event_projection, fold_process_record,
     process_wake_batch_draft,
 };
@@ -945,7 +945,7 @@ async fn apply_operation(
                         && delivery.wake.process_id == id
                         && Some(delivery.wake.target_session_id.as_str()) != target.as_deref()
                     {
-                        delivery.disposition = WakeDeliveryDisposition::Discarded {
+                        delivery.disposition = WakeDeliveryLifecycle::Discarded {
                             reason: WakeDiscardReason::Retargeted,
                         };
                     }
@@ -1266,15 +1266,15 @@ async fn settle_wake(
             .expect("claimed delivery is modeled");
         match settle {
             WakeSettle::Mark => {
-                expected.disposition = WakeDeliveryDisposition::Enqueued;
+                expected.disposition = WakeDeliveryLifecycle::Enqueued;
             }
             WakeSettle::Discard => {
-                expected.disposition = WakeDeliveryDisposition::Discarded {
+                expected.disposition = WakeDeliveryLifecycle::Discarded {
                     reason: WakeDiscardReason::TargetGone,
                 };
             }
             WakeSettle::Defer => {
-                expected.disposition = WakeDeliveryDisposition::Pending;
+                expected.disposition = WakeDeliveryLifecycle::Pending;
                 expected.next_attempt_at_ms = delivery.next_attempt_at_ms.saturating_add(1);
             }
         }

@@ -281,7 +281,7 @@ impl ProcessRegistryFaults {
         wake: crate::ProcessWakeDelivery,
     ) -> Result<(), crate::PluginError> {
         let mut delivery = crate::WakeDelivery::pending(wake, self.inner.wake_delivery_config())?;
-        delivery.disposition = crate::WakeDeliveryDisposition::Enqueuing {
+        delivery.disposition = crate::WakeDeliveryLifecycle::Enqueuing {
             claim_token: format!("injected:{}", delivery.delivery_id),
         };
         delivery.attempts = 1;
@@ -442,7 +442,7 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
 
     async fn summarize_parked_processes(
         &self,
-    ) -> Result<crate::store::ParkSummary, crate::PluginError> {
+    ) -> Result<crate::store::ParkReport, crate::PluginError> {
         self.inner.summarize_parked_processes().await
     }
 }

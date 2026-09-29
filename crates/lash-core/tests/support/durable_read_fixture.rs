@@ -182,8 +182,8 @@ fn fixture_wake() -> lash_core::runtime::ProcessWakeDelivery {
 }
 const INPUT_SOURCE_KEY: &str = "durable-read-input-source";
 
-fn fixture_effect_outcome() -> lash_core::ProcessEffectSummaryOccurrence {
-    lash_core::ProcessEffectSummaryOccurrence::new(
+fn fixture_effect_outcome() -> lash_core::ProcessEffectOccurrence {
+    lash_core::ProcessEffectOccurrence::new(
         "durable-read-tool-node",
         1,
         "tool:fixture",
@@ -994,7 +994,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
     );
     assert_eq!(
-        lash_core::ProcessEffectSummaryOccurrence::decode(
+        lash_core::ProcessEffectOccurrence::decode(
             process_events[3].payload.clone(),
             lash_core::FleetFormat::current()
         )

@@ -265,20 +265,20 @@ async fn release_root_rows_conn(
     let disposition = request
         .as_ref()
         .map(|row| {
-            crate::runtime_persistence::turn_cancel::turn_cancel_disposition_from_wire(&row.3)
+            crate::runtime_persistence::turn_cancel::turn_cancel_undelivered_from_wire(&row.3)
         })
         .transpose()?
-        .unwrap_or(lash_core_execution::TurnCancelDisposition::Defer);
+        .unwrap_or(lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer);
     for input in addressed {
         match disposition {
-            lash_core_execution::TurnCancelDisposition::Defer => {
+            lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
                 sqlx::query(sql.pending_inputs.defer_to_next_turn.sql())
                     .bind(session_id.as_str())
                     .bind(input.input_id.as_str())
                     .bind(deferred.as_str())
                     .bind(&deferred_ingress)
             }
-            lash_core_execution::TurnCancelDisposition::Drop => {
+            lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
                 sqlx::query(sql.pending_inputs.cancel.sql())
                     .bind(session_id.as_str())
                     .bind(input.input_id.as_str())

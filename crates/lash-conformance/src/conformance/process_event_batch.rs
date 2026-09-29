@@ -58,7 +58,7 @@ async fn started(
 }
 
 fn occurrence(node: &str, occurrence: u64, replay_key: &str) -> ProcessEventAppendRequest {
-    lash_core::ProcessEffectSummaryOccurrence::new(
+    lash_core::ProcessEffectOccurrence::new(
         node,
         occurrence,
         "tool:batch_law",

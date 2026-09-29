@@ -57,8 +57,8 @@ fn usage_payload_identity_bytes(entry: &crate::TokenLedgerEntry) -> Vec<u8> {
     // hole projects its full descriptor — v3 projected only a count, which is
     // why a reloaded row could not rebuild the attempts a host owes usage for.
     match usage_disposition {
-        crate::LedgerUsageDisposition::Reported => identity.tag(0),
-        crate::LedgerUsageDisposition::Unreported { attempts } => {
+        crate::LedgerUsageOutcome::Reported => identity.tag(0),
+        crate::LedgerUsageOutcome::Unreported { attempts } => {
             identity.tag(1);
             identity.sequence(attempts, |identity, attempt| {
                 let crate::UnreportedLedgerAttempt {
@@ -73,7 +73,7 @@ fn usage_payload_identity_bytes(entry: &crate::TokenLedgerEntry) -> Vec<u8> {
                 });
             });
         }
-        crate::LedgerUsageDisposition::Reconciled {
+        crate::LedgerUsageOutcome::Reconciled {
             call_id,
             attempt_ordinal,
         } => {
@@ -539,7 +539,7 @@ mod usage_payload_identity_tests {
                 cache_write_input_tokens: 0,
                 reasoning_output_tokens: 0,
             },
-            usage_disposition: crate::LedgerUsageDisposition::Reported,
+            usage_disposition: crate::LedgerUsageOutcome::Reported,
         },
         "representative_nested_usage" => crate::TokenLedgerEntry {
             source: "turn\0source".to_string(),
@@ -551,7 +551,7 @@ mod usage_payload_identity_tests {
                 cache_write_input_tokens: 4,
                 reasoning_output_tokens: 5,
             },
-            usage_disposition: crate::LedgerUsageDisposition::Reported,
+            usage_disposition: crate::LedgerUsageOutcome::Reported,
         },
         "all_counters_i64_max" => crate::TokenLedgerEntry {
             source: "max".to_string(),
@@ -563,7 +563,7 @@ mod usage_payload_identity_tests {
                 cache_write_input_tokens: i64::MAX,
                 reasoning_output_tokens: i64::MAX,
             },
-            usage_disposition: crate::LedgerUsageDisposition::Reported,
+            usage_disposition: crate::LedgerUsageOutcome::Reported,
         },
         "signed_counter_edges" => crate::TokenLedgerEntry {
             source: "signed".to_string(),
@@ -575,7 +575,7 @@ mod usage_payload_identity_tests {
                 cache_write_input_tokens: 1,
                 reasoning_output_tokens: i64::MAX,
             },
-            usage_disposition: crate::LedgerUsageDisposition::Reported,
+            usage_disposition: crate::LedgerUsageOutcome::Reported,
         },
         "unreported_after_abort_hole" => crate::TokenLedgerEntry {
             source: "turn".to_string(),
@@ -587,7 +587,7 @@ mod usage_payload_identity_tests {
                 cache_write_input_tokens: 0,
                 reasoning_output_tokens: 0,
             },
-            usage_disposition: crate::LedgerUsageDisposition::unreported([
+            usage_disposition: crate::LedgerUsageOutcome::unreported([
                 crate::UnreportedLedgerAttempt {
                     call_id: "call-hole-1".to_string(),
                     attempt_ordinal: 0,
@@ -612,7 +612,7 @@ mod usage_payload_identity_tests {
                 cache_write_input_tokens: 0,
                 reasoning_output_tokens: 7,
             },
-            usage_disposition: crate::LedgerUsageDisposition::Reconciled {
+            usage_disposition: crate::LedgerUsageOutcome::Reconciled {
                 call_id: "call-7".to_string(),
                 attempt_ordinal: 1,
             },

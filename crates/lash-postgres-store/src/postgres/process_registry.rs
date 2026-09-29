@@ -223,7 +223,7 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
 
     async fn summarize_parked_processes(
         &self,
-    ) -> Result<lash_core_execution::store::ParkSummary, PluginError> {
+    ) -> Result<lash_core_execution::store::ParkReport, PluginError> {
         park_feed::summarize_parked_processes(self).await
     }
 }
@@ -998,15 +998,9 @@ impl lash_core_execution::ProcessWakeOutbox for PostgresProcessRegistry {
         delivery_id: &str,
         claim_token: &str,
     ) -> Result<lash_core_execution::WakeDeliveryClaimOutcome, PluginError> {
-        let disposition = lash_core_execution::WakeDeliveryDisposition::Enqueued;
-        update_wake_delivery_state(
-            &self.pool,
-            &self.fence,
-            delivery_id,
-            claim_token,
-            disposition,
-        )
-        .await
+        let lifecycle = lash_core_execution::WakeDeliveryLifecycle::Enqueued;
+        update_wake_delivery_state(&self.pool, &self.fence, delivery_id, claim_token, lifecycle)
+            .await
     }
 
     async fn discard_wake_delivery(
@@ -1015,15 +1009,9 @@ impl lash_core_execution::ProcessWakeOutbox for PostgresProcessRegistry {
         claim_token: &str,
         reason: lash_core_execution::WakeDiscardReason,
     ) -> Result<lash_core_execution::WakeDeliveryClaimOutcome, PluginError> {
-        let disposition = lash_core_execution::WakeDeliveryDisposition::Discarded { reason };
-        update_wake_delivery_state(
-            &self.pool,
-            &self.fence,
-            delivery_id,
-            claim_token,
-            disposition,
-        )
-        .await
+        let lifecycle = lash_core_execution::WakeDeliveryLifecycle::Discarded { reason };
+        update_wake_delivery_state(&self.pool, &self.fence, delivery_id, claim_token, lifecycle)
+            .await
     }
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {

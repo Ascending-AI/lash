@@ -224,14 +224,14 @@ impl DialectSession {
 
     pub(crate) fn settle_code_execution(
         &mut self,
-        disposition: lash_core::plugin::CodeExecutionDisposition,
+        outcome: lash_core::plugin::CodeExecutionOutcome,
     ) -> Result<(), SessionError> {
-        match disposition {
-            lash_core::plugin::CodeExecutionDisposition::Accepted => {
+        match outcome {
+            lash_core::plugin::CodeExecutionOutcome::Accepted => {
                 self.state.accept_code_execution();
             }
-            lash_core::plugin::CodeExecutionDisposition::Discarded
-            | lash_core::plugin::CodeExecutionDisposition::Cancelled => {
+            lash_core::plugin::CodeExecutionOutcome::Discarded
+            | lash_core::plugin::CodeExecutionOutcome::Cancelled => {
                 self.state.cancel_code_execution();
             }
         }

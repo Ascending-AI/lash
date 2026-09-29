@@ -915,7 +915,7 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_live_and_replay(
                     request_id: format!("stop-{restore_pending_exec}"),
                     origin: Some("test-host".to_string()),
                     reason: Some("user pressed Stop".to_string()),
-                    undelivered: lash_sansio::TurnCancelDisposition::Defer,
+                    undelivered: lash_sansio::TurnCancelUndeliveredInputPolicy::Defer,
                     mode: lash_sansio::TurnCancelMode::Immediate,
                     honoured_after_step: None,
                 };

@@ -247,12 +247,12 @@ pub(super) async fn compare_bounded_process_event_pages(
         } else {
             lash_core::ProcessEffectOutcomeClass::Success
         };
-        if !lash_core::ProcessEffectSummaryOccurrence::is_within_cap(occurrence) {
+        if !lash_core::ProcessEffectOccurrence::is_within_cap(occurrence) {
             omitted.record(class);
             continue;
         }
         recorded.push(
-            lash_core::ProcessEffectSummaryOccurrence::new(
+            lash_core::ProcessEffectOccurrence::new(
                 "repeated-node",
                 occurrence,
                 if is_failure {
@@ -357,7 +357,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         &sqlite as &dyn lash_core::ProcessRegistry,
         &postgres_registry as &dyn lash_core::ProcessRegistry,
     ] {
-        let mut summary = lash_core::ProcessEffectSummary::default();
+        let mut summary = lash_core::ProcessEffectReport::default();
         for event in registry
             .full_event_window(&effect_id, 0)
             .await

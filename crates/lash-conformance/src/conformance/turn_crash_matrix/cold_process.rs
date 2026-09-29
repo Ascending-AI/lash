@@ -413,7 +413,7 @@ async fn recover_turn_cancel_closure(
         outcome
             .affected_inputs
             .iter()
-            .all(|input| input.disposition == crate::TurnCancelDisposition::Drop),
+            .all(|input| input.disposition == crate::TurnCancelUndeliveredInputPolicy::Drop),
         "recovered cancellation applies the requested Drop disposition"
     );
     assert!(
@@ -524,7 +524,7 @@ pub async fn cold_process_real_turn_driver(
                     Some("cold-process-conformance".to_string()),
                 )
                 .mode(crate::TurnCancelMode::AfterStep)
-                .undelivered(crate::TurnCancelDisposition::Drop),
+                .undelivered(crate::TurnCancelUndeliveredInputPolicy::Drop),
             )
             .await
             .expect("seed durable after-step cancellation before the owner runs");

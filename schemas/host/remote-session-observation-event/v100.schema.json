@@ -379,7 +379,7 @@
         "usage_disposition": {
           "allOf": [
             {
-              "$ref": "#/definitions/RemoteAttemptUsageDisposition"
+              "$ref": "#/definitions/RemoteAttemptUsageOutcome"
             }
           ],
           "description": "Whether `usage` was provider-reported or the attempt ended before the provider's usage arrived (ADR 0031). Absent means reported."
@@ -393,8 +393,8 @@
       ],
       "type": "object"
     },
-    "RemoteAttemptUsageDisposition": {
-      "description": "Wire mirror of [`lash_core::AttemptUsageDisposition`].",
+    "RemoteAttemptUsageOutcome": {
+      "description": "Wire mirror of [`lash_core::AttemptUsageOutcome`].",
       "enum": [
         "reported",
         "unreported_by_provider",

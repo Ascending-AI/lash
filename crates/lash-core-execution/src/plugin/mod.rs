@@ -63,7 +63,7 @@ pub use hooks::{
     TurnHookReport, TurnResultHookContext,
 };
 pub use protocol::{
-    AssistantProseProjectorPlugin, CodeExecutionDisposition, CodeExecutorPlugin,
+    AssistantProseProjectorPlugin, CodeExecutionOutcome, CodeExecutorPlugin,
     EXECUTION_STATE_LEAF_MIN_BODY_BYTES, ExecutionStateComponentSnapshot, ExecutionStateSnapshot,
     HydratedExecutionState, PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
     ProtocolLlmCallAction, ProtocolRuntimeContext, ProtocolSessionContext,

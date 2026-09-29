@@ -69,7 +69,7 @@ pub enum EffectGroupLifecycle {
         live: EffectGroupStateLiveRecord,
     },
     Closed {
-        effective: EffectGroupCloseDisposition,
+        effective: EffectGroupCloseOutcome,
         /// The durable twin of the SQL entries' cleared `closed` flag
         /// (FIG-3481): a reopen is a new caller interest, so a reopened
         /// closed entry serves the ranks a still-running loser has yet to
@@ -89,13 +89,13 @@ pub enum EffectGroupLifecycle {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupCloseDisposition {
+pub enum EffectGroupCloseOutcome {
     RunToCompletion,
     Cancel,
     Refused { reason: EffectGroupRefusal },
 }
 
-impl From<LoserPolicy> for EffectGroupCloseDisposition {
+impl From<LoserPolicy> for EffectGroupCloseOutcome {
     fn from(value: LoserPolicy) -> Self {
         match value {
             LoserPolicy::RunToCompletion => Self::RunToCompletion,
@@ -286,12 +286,12 @@ pub(crate) fn decide_group_child_admission(
             live,
             ..
         } => match effective {
-            EffectGroupCloseDisposition::RunToCompletion => match addresses.get(&position) {
+            EffectGroupCloseOutcome::RunToCompletion => match addresses.get(&position) {
                 Some(id) if id == invocation_id => EffectGroupAdmissionResponse::Admitted,
                 Some(_) => EffectGroupAdmissionResponse::AttachExpired,
                 None => EffectGroupAdmissionResponse::Refused,
             },
-            EffectGroupCloseDisposition::Cancel
+            EffectGroupCloseOutcome::Cancel
                 if matches!(
                     live.commit_states.get(&position),
                     Some(EffectGroupChildCommitState::CancelDecided)
@@ -299,7 +299,7 @@ pub(crate) fn decide_group_child_admission(
             {
                 EffectGroupAdmissionResponse::CancelDecided
             }
-            EffectGroupCloseDisposition::Cancel | EffectGroupCloseDisposition::Refused { .. } => {
+            EffectGroupCloseOutcome::Cancel | EffectGroupCloseOutcome::Refused { .. } => {
                 EffectGroupAdmissionResponse::Refused
             }
         },
@@ -367,7 +367,7 @@ mod admission_tests {
                 live: live_record(),
             },
             EffectGroupLifecycle::Closed {
-                effective: EffectGroupCloseDisposition::RunToCompletion,
+                effective: EffectGroupCloseOutcome::RunToCompletion,
                 reopened: false,
                 addresses: [(0, "child-invocation-0".to_owned())].into_iter().collect(),
                 live: live_record(),
@@ -392,7 +392,7 @@ mod admission_tests {
             EffectGroupAdmissionResponse::NotYetRecorded
         );
         let cancelled = EffectGroupLifecycle::Closed {
-            effective: EffectGroupCloseDisposition::Cancel,
+            effective: EffectGroupCloseOutcome::Cancel,
             reopened: false,
             addresses: [(0, "child-invocation-0".to_owned())].into_iter().collect(),
             live: live_record(),
@@ -408,7 +408,7 @@ mod admission_tests {
             .commit_states
             .insert(0, EffectGroupChildCommitState::CancelDecided);
         let decided = EffectGroupLifecycle::Closed {
-            effective: EffectGroupCloseDisposition::Cancel,
+            effective: EffectGroupCloseOutcome::Cancel,
             reopened: false,
             addresses: [(0, "child-invocation-0".to_owned())].into_iter().collect(),
             live: decided,

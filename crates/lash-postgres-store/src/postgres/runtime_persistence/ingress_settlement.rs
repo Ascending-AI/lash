@@ -77,11 +77,11 @@ pub(super) async fn settle_commit_ingress_tx(
         for (rows, disposition) in [
             (
                 &ingress.released,
-                lash_core_execution::TurnCancelDisposition::Defer,
+                lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer,
             ),
             (
                 &ingress.dropped,
-                lash_core_execution::TurnCancelDisposition::Drop,
+                lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop,
             ),
         ] {
             for row in rows {
@@ -89,10 +89,10 @@ pub(super) async fn settle_commit_ingress_tx(
                     lash_core_execution::store::IngressRowId::Input(input_id) => {
                         let held = admitted_input_tx(tx, session_id, root, input_id).await?;
                         match disposition {
-                            lash_core_execution::TurnCancelDisposition::Defer => {
+                            lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
                                 release_admitted_input_tx(tx, session_id, root, input_id).await?;
                             }
-                            lash_core_execution::TurnCancelDisposition::Drop => {
+                            lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
                                 settle_admitted_input_tx(
                                     tx,
                                     session_id,
@@ -117,7 +117,7 @@ pub(super) async fn settle_commit_ingress_tx(
                             // A released wake keeps its position and its
                             // redelivery floor; its record says it was
                             // deferred (FIG-3543).
-                            lash_core_execution::TurnCancelDisposition::Defer => {
+                            lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
                                 let batch =
                                     admitted_batch_tx(tx, session_id, root, batch_id).await?;
                                 release_admitted_batch_tx(tx, session_id, root, batch_id).await?;
@@ -127,7 +127,7 @@ pub(super) async fn settle_commit_ingress_tx(
                                     ),
                                 );
                             }
-                            lash_core_execution::TurnCancelDisposition::Drop => {
+                            lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
                                 crate::queued_work::complete_admitted_batch_tx(
                                     tx, session_id, root, batch_id,
                                 )
@@ -147,7 +147,7 @@ pub(super) async fn settle_commit_ingress_tx(
     // admitted names a turn that is over: it is re-deferred, or dropped by
     // the cancellation's disposition, which governs host-authored input only.
     let disposition = cancellation.map_or(
-        lash_core_execution::TurnCancelDisposition::Defer,
+        lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer,
         |evidence| evidence.undelivered,
     );
     let sql = crate::turn_ingress::turn_ingress_sql();
@@ -170,14 +170,14 @@ pub(super) async fn settle_commit_ingress_tx(
         // ingress so the row stops naming a turn that is over, dropping is
         // the withdrawal this table already has.
         match disposition {
-            lash_core_execution::TurnCancelDisposition::Defer => {
+            lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
                 sqlx::query(sql.pending_inputs.defer_to_next_turn.sql())
                     .bind(session_id.as_str())
                     .bind(input.input_id.as_str())
                     .bind(deferred.as_str())
                     .bind(&deferred_ingress)
             }
-            lash_core_execution::TurnCancelDisposition::Drop => {
+            lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
                 sqlx::query(sql.pending_inputs.cancel.sql())
                     .bind(session_id.as_str())
                     .bind(input.input_id.as_str())

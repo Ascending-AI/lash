@@ -128,7 +128,7 @@ fn evidence(request_id: &str, mode: TurnCancelMode) -> TurnCancellationEvidence 
         request_id: request_id.to_string(),
         origin: None,
         reason: None,
-        undelivered: TurnCancelDisposition::Defer,
+        undelivered: TurnCancelUndeliveredInputPolicy::Defer,
         mode,
         honoured_after_step: None,
     }
@@ -222,7 +222,7 @@ fn an_escalated_after_step_request_stops_the_cell_at_its_next_checkpoint() {
             1 => engine.gate.resolve(
                 &control.cancel_key,
                 TurnGateTerminal::CancelRequested(TurnCancellationEvidence {
-                    undelivered: TurnCancelDisposition::Drop,
+                    undelivered: TurnCancelUndeliveredInputPolicy::Drop,
                     ..evidence("stop", TurnCancelMode::AfterStep)
                 }),
             ),

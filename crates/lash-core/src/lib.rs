@@ -334,7 +334,6 @@ pub mod facade_support {
     pub use crate::runtime::TurnCancelClosureAuthorizationOutcome;
     pub use crate::runtime::TurnCancelClosureProposal;
     pub use crate::runtime::TurnCancelClosureSettlement;
-    pub use crate::runtime::TurnCancelDisposition;
     pub use crate::runtime::TurnCancelInputOutcome;
     pub use crate::runtime::TurnCancelIntentSnapshot;
     pub use crate::runtime::TurnCancelMode;
@@ -342,6 +341,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnCancelReceipt;
     pub use crate::runtime::TurnCancelRequest;
     pub use crate::runtime::TurnCancelRequestRecord;
+    pub use crate::runtime::TurnCancelUndeliveredInputPolicy;
     pub use crate::runtime::TurnCancellationAuthority;
     pub use crate::runtime::TurnCancellationEvidence;
     pub use crate::runtime::TurnControlAttachment;
@@ -534,7 +534,7 @@ pub use attachments::{
 };
 pub use lash_core_execution::turn_outcome_from_tool_control;
 pub use lash_sansio::llm::types::{
-    AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,
+    AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
     ExecutionEvidenceMergeError, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
     LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
@@ -701,7 +701,7 @@ pub use runtime::{
     EffectOpenerError, EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal,
     ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding,
     GroupChildCancelWatch, GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
-    InputItem, InvalidStartKey, JournalReplay, LedgerUsageDisposition, Lifetime, LifetimeDecision,
+    InputItem, InvalidStartKey, JournalReplay, LedgerUsageOutcome, Lifetime, LifetimeDecision,
     LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
     LlmStreamRecord, LocalTurnStop, LoserPolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork,
@@ -715,9 +715,9 @@ pub use runtime::{
     ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
     ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectNodeSummary, ProcessEffectOmissions,
-    ProcessEffectOmittedCounts, ProcessEffectOutcome, ProcessEffectOutcomeClass,
-    ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
+    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectNodeReport, ProcessEffectOccurrence,
+    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcome,
+    ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError, ProcessEngine,
     ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
     ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
@@ -761,16 +761,16 @@ pub use runtime::{
     ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity, TurnActivityId,
     TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
     TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
-    TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
-    TurnCancelRequestRecord, TurnCancelWait, TurnCancellationAuthority, TurnContext,
+    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelGatePair,
+    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
+    TurnCancelUndeliveredInputPolicy, TurnCancelWait, TurnCancellationAuthority, TurnContext,
     TurnControlAttachment, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
     TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
     TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
     TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
     TurnInputState, TurnInputStateKind, TurnLaneAdmissionPolicy, UnreportedLedgerAttempt,
-    UsageDispositionError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
+    UsageOutcomeError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,
     WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry,
     WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
     artifact_store_plugin_error, effect_groups_unsupported, lifetime, mint_process_id,

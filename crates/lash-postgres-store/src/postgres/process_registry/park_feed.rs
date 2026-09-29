@@ -10,8 +10,8 @@
 //! appends nothing.
 
 use lash_core_execution::store::{
-    ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId, ParkReasonCode,
-    ParkSummary, ProcessParkKey, ProcessParkQuery,
+    ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId, ParkReasonCode, ParkReport,
+    ProcessParkKey, ProcessParkQuery,
 };
 
 use super::*;
@@ -159,12 +159,12 @@ pub(super) async fn process_park_feed(
 
 pub(super) async fn summarize_parked_processes(
     registry: &PostgresProcessRegistry,
-) -> Result<ParkSummary, PluginError> {
+) -> Result<ParkReport, PluginError> {
     let rows = sqlx::query(process_sql().process.summarize_parked.sql())
         .fetch_all(&registry.pool)
         .await
         .map_err(plugin_sqlx_error)?;
-    let mut summary = ParkSummary::default();
+    let mut summary = ParkReport::default();
     for row in rows {
         let code: String = row.get(0);
         let count: i64 = row.get(1);

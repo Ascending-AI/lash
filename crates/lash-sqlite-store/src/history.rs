@@ -755,16 +755,16 @@ fn usage_page(
             .map_err(sqlite_error)?;
         let disposition = match (reconciled_call_id, reconciled_ordinal) {
             (Some(call), Some(ordinal)) if holes.is_empty() => {
-                lash_core_execution::LedgerUsageDisposition::Reconciled {
+                lash_core_execution::LedgerUsageOutcome::Reconciled {
                     call_id: call,
                     attempt_ordinal: u32::try_from(ordinal)
                         .map_err(|_| corrupt("TokenLedgerEntry", "invalid reconciled ordinal"))?,
                 }
             }
             (None, None) if !holes.is_empty() => {
-                lash_core_execution::LedgerUsageDisposition::unreported(holes)
+                lash_core_execution::LedgerUsageOutcome::unreported(holes)
             }
-            (None, None) => lash_core_execution::LedgerUsageDisposition::Reported,
+            (None, None) => lash_core_execution::LedgerUsageOutcome::Reported,
             _ => {
                 return Err(corrupt(
                     "TokenLedgerEntry",

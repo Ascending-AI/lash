@@ -3,7 +3,7 @@
 //! rows cannot split request metadata from the payloads it reports.
 
 use lash_core_execution::{
-    PendingTurnInputDraft, StoreMaintenance, TurnCancelDisposition, TurnInput,
+    PendingTurnInputDraft, StoreMaintenance, TurnCancelUndeliveredInputPolicy, TurnInput,
     TurnInputCheckpointBoundary, TurnInputIngress, TurnInputStore,
     facade_support::{TurnAddress, TurnCancelRequest},
 };
@@ -91,7 +91,7 @@ async fn seed_cancelled_inputs(
         Some("receipt-test".to_string()),
     )
     .with_reason("deterministic vacuum race")
-    .undelivered(TurnCancelDisposition::Drop);
+    .undelivered(TurnCancelUndeliveredInputPolicy::Drop);
     store
         .record_turn_cancel_request(request)
         .await
@@ -166,13 +166,19 @@ async fn postgres_turn_cancel_receipt_survives_vacuum_when_configured() {
         .affected_inputs;
     assert_eq!(affected.len(), 2);
     assert_eq!(affected[0].input_id, first.input_id);
-    assert_eq!(affected[0].disposition, TurnCancelDisposition::Drop);
+    assert_eq!(
+        affected[0].disposition,
+        TurnCancelUndeliveredInputPolicy::Drop
+    );
     assert_eq!(
         serde_json::to_value(&affected[0].payload).expect("encode first returned payload"),
         serde_json::to_value(&first.input).expect("encode first submitted payload")
     );
     assert_eq!(affected[1].input_id, second.input_id);
-    assert_eq!(affected[1].disposition, TurnCancelDisposition::Defer);
+    assert_eq!(
+        affected[1].disposition,
+        TurnCancelUndeliveredInputPolicy::Defer
+    );
     assert_eq!(
         serde_json::to_value(&affected[1].payload).expect("encode second returned payload"),
         serde_json::to_value(&second.input).expect("encode second submitted payload")

@@ -374,7 +374,7 @@ pub fn record_unreported_attempts_shared(
     if attempts.is_empty() {
         return;
     }
-    let incoming = crate::LedgerUsageDisposition::unreported(attempts.iter().cloned());
+    let incoming = crate::LedgerUsageOutcome::unreported(attempts.iter().cloned());
     let mut ledger = token_ledger.lock_recover();
     if let Some(entry) = ledger.iter_mut().find(|entry| {
         entry.identity.is_none()
@@ -382,7 +382,7 @@ pub fn record_unreported_attempts_shared(
             && entry.model == model
             && matches!(
                 entry.usage_disposition,
-                crate::LedgerUsageDisposition::Unreported { .. }
+                crate::LedgerUsageOutcome::Unreported { .. }
             )
     }) {
         entry.entry.usage_disposition.absorb_saturating(&incoming);
@@ -411,7 +411,7 @@ pub fn record_reconciled_usage_shared(
         source: source.to_string(),
         model: model.to_string(),
         usage: usage.clone(),
-        usage_disposition: crate::LedgerUsageDisposition::Reconciled {
+        usage_disposition: crate::LedgerUsageOutcome::Reconciled {
             call_id: call_id.to_string(),
             attempt_ordinal,
         },

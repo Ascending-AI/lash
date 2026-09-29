@@ -58,7 +58,7 @@ impl TurnIngressSettlement {
     pub(super) fn into_ingress(
         self,
         root: crate::TurnId,
-        disposition: crate::TurnCancelDisposition,
+        disposition: crate::TurnCancelUndeliveredInputPolicy,
     ) -> IngressSettlement {
         let mut seen = std::collections::BTreeSet::new();
         let mut settlement = IngressSettlement::new(root);
@@ -99,8 +99,8 @@ impl TurnIngressSettlement {
                     continue;
                 }
                 match disposition {
-                    crate::TurnCancelDisposition::Defer => settlement.released.push(row),
-                    crate::TurnCancelDisposition::Drop => settlement.dropped.push(row),
+                    crate::TurnCancelUndeliveredInputPolicy::Defer => settlement.released.push(row),
+                    crate::TurnCancelUndeliveredInputPolicy::Drop => settlement.dropped.push(row),
                 }
             }
         }
@@ -137,7 +137,7 @@ mod tests {
         )
         .into_ingress(
             crate::TurnId::from("root"),
-            crate::TurnCancelDisposition::Defer,
+            crate::TurnCancelUndeliveredInputPolicy::Defer,
         );
         assert_eq!(
             settlement.rows(),

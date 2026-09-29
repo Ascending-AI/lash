@@ -111,14 +111,14 @@ pub(crate) use store::{
 };
 pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlement};
 pub(crate) use usage::{
-    LedgerUsageDisposition, SessionUsageTotals, TokenLedgerEntry, UnreportedLedgerAttempt,
+    LedgerUsageOutcome, SessionUsageTotals, TokenLedgerEntry, UnreportedLedgerAttempt,
 };
 
 pub(crate) use execution_state::{
     ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState, PluginOptions,
 };
 pub(crate) use lash_sansio::{
-    TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence, TurnCause,
+    TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnCause,
 };
 pub(crate) use plugin_state::PluginState;
 #[cfg(any(test, feature = "testing"))]

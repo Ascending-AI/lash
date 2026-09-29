@@ -727,7 +727,7 @@ fn law_direct_completion() -> crate::DirectCompletion {
                     cache_write_input_tokens: 0,
                     reasoning_output_tokens: 0,
                 }),
-                usage_disposition: crate::AttemptUsageDisposition::default(),
+                usage_disposition: crate::AttemptUsageOutcome::default(),
             }],
         },
     }
@@ -776,7 +776,7 @@ fn law_billed_completion() -> crate::DirectCompletion {
                     evidence: None,
                     generation_disposition: None,
                     usage: billed_usage(41, 7),
-                    usage_disposition: crate::AttemptUsageDisposition::default(),
+                    usage_disposition: crate::AttemptUsageOutcome::default(),
                 },
                 crate::AttemptRecord {
                     ordinal: 2,
@@ -788,7 +788,7 @@ fn law_billed_completion() -> crate::DirectCompletion {
                     evidence: None,
                     generation_disposition: None,
                     usage: billed_usage(11, 3),
-                    usage_disposition: crate::AttemptUsageDisposition::default(),
+                    usage_disposition: crate::AttemptUsageOutcome::default(),
                 },
             ],
         },

@@ -316,15 +316,15 @@ pub struct RemoteAttemptRecord {
     /// provider's usage arrived (ADR 0031). Absent means reported.
     #[serde(
         default,
-        skip_serializing_if = "RemoteAttemptUsageDisposition::is_reported"
+        skip_serializing_if = "RemoteAttemptUsageOutcome::is_reported"
     )]
-    pub usage_disposition: RemoteAttemptUsageDisposition,
+    pub usage_disposition: RemoteAttemptUsageOutcome,
 }
 
-/// Wire mirror of [`lash_core::AttemptUsageDisposition`].
+/// Wire mirror of [`lash_core::AttemptUsageOutcome`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum RemoteAttemptUsageDisposition {
+pub enum RemoteAttemptUsageOutcome {
     #[default]
     Reported,
     UnreportedByProvider,
@@ -332,7 +332,7 @@ pub enum RemoteAttemptUsageDisposition {
     UnreportedAfterFailure,
 }
 
-impl RemoteAttemptUsageDisposition {
+impl RemoteAttemptUsageOutcome {
     pub fn is_reported(&self) -> bool {
         matches!(self, Self::Reported)
     }
