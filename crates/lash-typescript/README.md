@@ -448,14 +448,13 @@ no probe that fires it fails that test.
   that could manufacture a lone surrogate are absent from the shipped
   surface.
 - Appending at exactly `array.length` is supported. An assignment that skips an
-  index would create holes the v1 dense-list representation cannot distinguish
-  from explicit `undefined`, so it rejects as `TS_SPARSE_ARRAY_UNSUPPORTED`.
-  An elision in an array literal — a hole anywhere, including a trailing one
-  as in `[1, , ]`; a single trailing comma is not an elision — creates the
-  same hole, so it rejects statically with the same code rather than silently
-  storing `undefined`. Negative and other non-index writes would create named
-  object properties and reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`;
-  neither path mutates an element.
+  index rejects as `TS_SPARSE_ARRAY_UNSUPPORTED`. Array literal elisions are
+  admitted: `[,2]`, `[0,,2]`, and `[1,,]` contain holes, distinct from stored
+  `undefined`. Holes count toward `length`; `in` and `hasOwnProperty` report
+  absent elements, `forEach` skips them, and `for...of` yields `undefined`.
+  Hole metadata survives session snapshots and process park/resume.
+  Negative and other non-index writes reject as
+  `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; neither refusal mutates an element.
 - A write that ECMA would answer by creating an own property the value model
   has no slot for rejects at runtime as `TS_EXOTIC_PROPERTY_UNSUPPORTED`;
   keep the value in a plain object beside it. The code covers two cases:
@@ -767,11 +766,10 @@ The shipped instance names are `at`, `concat`, `copyWithin`, `charAt`, `charCode
 `NaN` are accepted constants. Array callbacks run synchronously and sequentially inside
 the durable VM callback driver. `sort` is stable, mutates and returns its
 receiver; `toSorted`, `toReversed`, `toSpliced`, and `with` return fresh arrays.
-The array representation is dense: `arr.length = 0` is accepted, while writes
-that would create holes, and elisions in array literals, reject as
-`TS_SPARSE_ARRAY_UNSUPPORTED` instead of silently changing callback
-semantics. `push`, `pop`, `shift`, and `unshift`
-mutate the receiver in place with their ECMA return values — the new length for
+Array literal holes are tracked separately from stored `undefined` and
+retain their ECMA iteration semantics across restore. `arr.length = 0` is
+accepted; writes that create new holes reject as `TS_SPARSE_ARRAY_UNSUPPORTED`.
+`push`, `pop`, `shift`, and `unshift` mutate the receiver in place with their ECMA return values — the new length for
 `push`/`unshift`, the removed element or `undefined` for `pop`/`shift` — and
 compose with the callback methods, so accumulating into an array inside
 `forEach` is the ordinary form it is everywhere else.

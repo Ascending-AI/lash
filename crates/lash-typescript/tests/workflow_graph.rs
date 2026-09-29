@@ -2489,3 +2489,6 @@ fn effect_argument_ir_edit_renders_without_an_expression_text_field() {
 mod carrier_fix_round;
 #[path = "workflow_graph/goldens.rs"]
 mod goldens;
+
+#[path = "workflow_graph/adr_claims.rs"]
+mod adr_claims;

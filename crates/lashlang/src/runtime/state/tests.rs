@@ -731,6 +731,7 @@ fn canonical_heap_with(
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: None,
         heap: Some(CanonicalHeap {
+            list_holes: Vec::new(),
             reference_semantics: false,
             next_id,
             allocation_counter,
@@ -2061,5 +2062,90 @@ fn a_snapshot_round_trips_a_binding_cell_and_its_sharing() {
     assert_eq!(
         backed.heap.cell_value(&members[0]).expect("a cell"),
         Value::Number(3.0)
+    );
+}
+
+#[test]
+fn sparse_hole_wire_refuses_invalid_owners_and_indexes() {
+    let mut heap = Heap::default();
+    let Value::Ref(id) = heap
+        .allocate_list(vec![Value::Undefined, Value::Number(2.0)])
+        .expect("list")
+    else {
+        panic!("heap reference")
+    };
+    let Value::Ref(other) = heap.allocate_record(Record::new()).expect("record") else {
+        panic!("heap reference")
+    };
+    for rows in [
+        vec![(id, vec![])],
+        vec![(id, vec![0, 0])],
+        vec![(id, vec![1])],
+        vec![(id, vec![2])],
+        vec![(other, vec![0])],
+        vec![(id, vec![0]), (id, vec![0])],
+    ] {
+        assert!(
+            heap.clone().restore_list_holes(rows).is_err(),
+            "malformed hole metadata must refuse"
+        );
+    }
+    let revision = heap.revision(id);
+    heap.restore_list_holes(vec![(id, vec![0])])
+        .expect("valid hole");
+    assert!(heap.is_list_hole(id, 0));
+    assert_eq!(
+        heap.revision(id),
+        revision,
+        "restoration does not mutate the saved write stamp"
+    );
+    assert_eq!(heap.list_holes_to_wire(), vec![(id, vec![0])]);
+    let mut state = State::new();
+    state
+        .install_runtime(
+            [("a".to_string(), Value::Ref(id))].into_iter().collect(),
+            heap.clone(),
+        )
+        .expect("sparse root");
+    let parts = state
+        .durable_parts(
+            &DurableBaseline::default(),
+            lash_core_execution::FleetFormat::current(),
+        )
+        .expect("sparse capture");
+    let (mut restored, baseline) = State::from_durable_parts(
+        &parts.header,
+        parts.fragments.iter().map(|(name, fragment)| {
+            let DurableFragment::Changed(bytes) = fragment else {
+                panic!("initial capture writes every body")
+            };
+            (name.as_str(), bytes.as_slice())
+        }),
+        lash_core_execution::FleetFormat::current(),
+    )
+    .expect("sparse fragmented restore");
+    let (globals, mut restored_heap) = restored.take_runtime();
+    assert!(restored_heap.is_list_hole(id, 0));
+    restored_heap.clear_list_hole(id, 0);
+    restored
+        .install_runtime(globals, restored_heap)
+        .expect("filled hole root");
+    let updated = restored
+        .durable_parts(&baseline, lash_core_execution::FleetFormat::current())
+        .expect("incremental capture");
+    assert!(
+        matches!(updated.fragments["a"], DurableFragment::Changed(_)),
+        "a hole-only change invalidates its owner"
+    );
+    assert_ne!(
+        updated.header, parts.header,
+        "the changed hole table is persisted"
+    );
+    heap.clear_list_hole(id, 0);
+    assert!(!heap.is_list_hole(id, 0));
+    assert_ne!(
+        heap.revision(id),
+        revision,
+        "filling a hole changes the owner's fragment"
     );
 }

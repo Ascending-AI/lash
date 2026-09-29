@@ -192,12 +192,12 @@ const PROBES: &[Probe] = &[
     probe(
         12,
         "TS_SPARSE_ARRAY_UNSUPPORTED",
-        "const a = [1]; a[3] = 9; finish(a.length);",
+        "const a = [,2]; a[3] = 9; finish(a.length);",
     ),
     probe(
         12,
         "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED",
-        "const a: any = [1]; a[-1] = 9; finish(a.length);",
+        "const a: any = [0,,2]; a[-1] = 9; finish(a.length);",
     ),
     // 17. The closure boundary: a later cell's reference to a function an
     // earlier cell bound, by name, by `typeof`, and through `globalThis`.

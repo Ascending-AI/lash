@@ -811,3 +811,191 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
         // `LashlangHostIdentities`' own laws.
     });
 }
+
+#[test]
+fn ambient_effects_remain_unavailable_after_restore() {
+    block_on(async {
+        let (mut state, seeded) = execute_typescript_test_cell(
+            RlmExecutionState::for_engine("typescript"),
+            "const kept = { answer: 42 }; const sparse = [,2];",
+        )
+        .await;
+        assert!(seeded.error.is_none(), "{seeded:?}");
+        let snapshot = hydrate_snapshot(
+            state
+                .snapshot_execution_state(lash_core::FleetFormat::current())
+                .expect("snapshot components"),
+        );
+        for restore in [false, true] {
+            for code in [
+                "eval('kept.answer = 0');",
+                "new Function('return 0');",
+                "require('node:fs');",
+                "finish(process.env);",
+                "await fetch('https://example.invalid');",
+                "import fs from 'node:fs';",
+            ] {
+                let candidate = if restore {
+                    let mut candidate = RlmExecutionState::for_engine("typescript");
+                    candidate
+                        .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
+                        .expect("restore");
+                    candidate
+                } else {
+                    let (candidate, first) = execute_typescript_test_cell(
+                        RlmExecutionState::for_engine("typescript"),
+                        "const kept = { answer: 42 }; const sparse = [,2];",
+                    )
+                    .await;
+                    assert!(first.error.is_none());
+                    candidate
+                };
+                let (candidate, response) = execute_typescript_test_cell(candidate, code).await;
+                assert!(
+                    response.error.is_some(),
+                    "ambient capability admitted: {restore}/{code}"
+                );
+                if code.starts_with("eval(") {
+                    assert!(
+                        format!("{response:?}").contains("TS_EVAL_UNSUPPORTED"),
+                        "the eval boundary remains explicit: {response:?}"
+                    );
+                }
+                assert_eq!(response.terminal_finish, None);
+                assert!(
+                    response.observations.is_empty(),
+                    "rejected code emits nothing"
+                );
+                let (_, control) = execute_typescript_test_cell(
+                    candidate,
+                    "finish({ answer: kept.answer, hole: 0 in sparse });",
+                )
+                .await;
+                assert_eq!(
+                    control.terminal_finish,
+                    Some(serde_json::json!({"answer":42,"hole":false})),
+                    "{restore}/{code}: {control:?}"
+                );
+            }
+        }
+    });
+}
+
+fn widened_contract_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw("tool:widened", "widened", "Return a validated string", serde_json::json!({
+        "allOf": [
+            { "type":"object", "properties": {"text":{"type":"string","minLength":4}}, "required":["text"] },
+            { "type":"object", "properties": {"text":{}}, "additionalProperties":false }
+        ]
+    }), serde_json::json!({"type":"string"}))
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["bounded"], "say"))
+}
+
+struct WidenedContractProvider(Arc<AtomicUsize>);
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for WidenedContractProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![widened_contract_definition().manifest()]
+    }
+    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+        (id == &lash_core::ToolId::from("tool:widened"))
+            .then(|| widened_contract_definition().manifest())
+    }
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "widened" || name == "tool:widened")
+            .then(|| Arc::new(widened_contract_definition().contract()))
+    }
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        lash_core::ToolAttemptOutcome::done_without_intents(
+            lash_core::ToolOutcomeDone::from_output(lash_core::ToolCallOutput::success(
+                call.args["text"].clone(),
+            )),
+        )
+    }
+}
+
+#[test]
+fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
+    block_on(async {
+        let catalog =
+            lash_core::ToolCatalog::from_tool_definitions(vec![widened_contract_definition()]);
+        let environment = LashlangSurface::default()
+            .host_environment(&catalog)
+            .expect("bridge contract");
+        for (offset, arguments, expected, dispatches) in [
+            (0, "{text:42}", "refused", 0),
+            (1, "{text:'abc'}", "refused", 0),
+            (2, "{text:'valid', extra:1}", "refused", 0),
+            (3, "{text:'valid'}", "valid", 1),
+        ] {
+            let call = format!("await bounded.say({arguments})");
+            let graph = lash_typescript::workflow_graph::workflow_graph_from_source_with_facets(
+                &format!("const result = {call};"),
+                Some(&environment),
+            )
+            .expect("project");
+            assert!(
+                graph.source_identity.is_some(),
+                "inference admits even invalid runtime values"
+            );
+            let facets = graph
+                .nodes()
+                .next()
+                .expect("call node")
+                .type_facets
+                .as_ref()
+                .expect("facets");
+            assert!(
+                facets
+                    .expected_arguments
+                    .iter()
+                    .any(|slot| slot.slot.to_string() == "arg[0]"
+                        && slot.ty == lashlang::TypeExpr::Any),
+                "the multi-allOf schema widens: {facets:?}"
+            );
+            let calls = Arc::new(AtomicUsize::new(0));
+            let double = crate::testing::kernel_double(
+                SEED + 100 + offset,
+                lash_restate_test::ServerConfig::default(),
+            )
+            .await;
+            let handler = double
+                .open_handler(crate::testing::default_cell_scope())
+                .await
+                .expect("handler");
+            let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+                crate::testing::double_ports(&double, &handler),
+                Arc::new(WidenedContractProvider(Arc::clone(&calls))),
+                catalog.clone(),
+            );
+            let code = format!("try {{ finish({call}); }} catch (error) {{ finish('refused'); }}");
+            let response = execute_code_with_test_render(
+                &mut RlmExecutionState::for_engine("typescript"),
+                context,
+                ExecRequest { code },
+                crate::testing::memory_artifact_store().await,
+                LashlangSurface::default(),
+                None,
+                RlmProjectedBindings::default(),
+                RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::unbounded(),
+                crate::plugin::RlmChannel::Cell,
+            )
+            .await;
+            handler.close().await.expect("close");
+            assert_eq!(response.error, None, "{arguments}: {response:?}");
+            assert_eq!(
+                response.terminal_finish,
+                Some(serde_json::json!(expected)),
+                "{arguments}: {response:?}"
+            );
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                dispatches,
+                "{arguments}: invalid request must never reach provider execution"
+            );
+        }
+    });
+}

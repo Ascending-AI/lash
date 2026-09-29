@@ -596,6 +596,8 @@ mod continuation_serde {
         live_logical_bytes: u64,
         size_schedule_version: u32,
         objects: Vec<HeapEntryWire>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        list_holes: Vec<(HeapId, Vec<usize>)>,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -974,6 +976,7 @@ mod continuation_serde {
             live_logical_bytes: heap.live_logical_bytes(),
             size_schedule_version: heap.schedule_version(),
             objects,
+            list_holes: heap.list_holes_to_wire(),
         }
         .serialize(serializer)
     }
@@ -989,7 +992,7 @@ mod continuation_serde {
             .map(|entry| object_from_wire(entry.object).map(|object| (entry.id, object)))
             .collect::<Result<_, _>>()
             .map_err(serde::de::Error::custom)?;
-        let heap = Heap::from_wire(
+        let mut heap = Heap::from_wire(
             HeapRestoreWire {
                 next_id: wire.next_id,
                 allocation_counter: wire.allocation_counter,
@@ -1000,6 +1003,8 @@ mod continuation_serde {
             &[],
         )
         .map_err(serde::de::Error::custom)?;
+        heap.restore_list_holes(wire.list_holes)
+            .map_err(serde::de::Error::custom)?;
         Ok(VmHeapContinuation::new(heap))
     }
 

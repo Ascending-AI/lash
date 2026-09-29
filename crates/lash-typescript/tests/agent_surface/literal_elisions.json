@@ -1,0 +1,88 @@
+[
+  {
+    "literal": "[,2]",
+    "probe": "(function () { const each = []; a.forEach((v, i) => { each.push([i, v]); }); const of = []; for (const v of a) { of.push(v === undefined ? 'undefined' : v); } return { length: a.length, inside: [0 in a, 1 in a, 2 in a], own: [a.hasOwnProperty('0'), a.hasOwnProperty('1'), a.hasOwnProperty('2')], each, of }; })()",
+    "expected": {
+      "length": 2,
+      "inside": [
+        false,
+        true,
+        false
+      ],
+      "own": [
+        false,
+        true,
+        false
+      ],
+      "each": [
+        [
+          1,
+          2
+        ]
+      ],
+      "of": [
+        "undefined",
+        2
+      ]
+    }
+  },
+  {
+    "literal": "[0,,2]",
+    "probe": "(function () { const each = []; a.forEach((v, i) => { each.push([i, v]); }); const of = []; for (const v of a) { of.push(v === undefined ? 'undefined' : v); } return { length: a.length, inside: [0 in a, 1 in a, 2 in a], own: [a.hasOwnProperty('0'), a.hasOwnProperty('1'), a.hasOwnProperty('2')], each, of }; })()",
+    "expected": {
+      "length": 3,
+      "inside": [
+        true,
+        false,
+        true
+      ],
+      "own": [
+        true,
+        false,
+        true
+      ],
+      "each": [
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "of": [
+        0,
+        "undefined",
+        2
+      ]
+    }
+  },
+  {
+    "literal": "[1,,]",
+    "probe": "(function () { const each = []; a.forEach((v, i) => { each.push([i, v]); }); const of = []; for (const v of a) { of.push(v === undefined ? 'undefined' : v); } return { length: a.length, inside: [0 in a, 1 in a, 2 in a], own: [a.hasOwnProperty('0'), a.hasOwnProperty('1'), a.hasOwnProperty('2')], each, of }; })()",
+    "expected": {
+      "length": 2,
+      "inside": [
+        true,
+        false,
+        false
+      ],
+      "own": [
+        true,
+        false,
+        false
+      ],
+      "each": [
+        [
+          0,
+          1
+        ]
+      ],
+      "of": [
+        1,
+        "undefined"
+      ]
+    }
+  }
+]

@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod wire;
-use wire::CanonicalHeapObject;
 pub(crate) use wire::child_location;
+use wire::{CanonicalHeapObject, bindings_into_record};
 
 mod durable;
 pub use durable::{DurableBaseline, DurableFragment, DurableParts};
@@ -604,6 +604,8 @@ struct CanonicalHeap {
     size_schedule_version: u32,
     roots: Vec<CanonicalBinding>,
     objects: Vec<CanonicalHeapEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    list_holes: Vec<(HeapId, Vec<usize>)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -712,6 +714,7 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
             globals: None,
             heap: Some(CanonicalHeap {
                 reference_semantics,
+                list_holes: heap.list_holes_to_wire(),
                 next_id: heap.next_id,
                 allocation_counter: heap.allocations(),
                 live_logical_bytes: heap.live_logical_bytes(),
@@ -763,6 +766,7 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     size_schedule_version,
                     roots,
                     objects,
+                    list_holes,
                 } = heap_wire;
                 let runtime_globals = bindings_into_record(roots, "heap.roots", true)?;
                 let objects = objects
@@ -780,6 +784,8 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     &runtime_globals.values().cloned().collect::<Vec<_>>(),
                 )
                 .map_err(SnapshotDecodeError::InvalidEncoding)?;
+                heap.restore_list_holes(list_holes)
+                    .map_err(SnapshotDecodeError::InvalidEncoding)?;
                 let mut forest_roots = PersistedRoots::default();
                 forest_roots.durable_all(runtime_globals.iter());
                 let validation = if reference_semantics {
@@ -828,33 +834,6 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
         }?;
         snapshot.with_expired_functions(expired_functions)
     }
-}
-
-fn bindings_into_record(
-    bindings: Vec<CanonicalBinding>,
-    location: &str,
-    references_allowed: bool,
-) -> Result<Record, SnapshotDecodeError> {
-    let mut previous: Option<&str> = None;
-    let mut record = Record::new();
-    for binding in &bindings {
-        if previous.is_some_and(|prior| prior >= binding.name.as_str()) {
-            return Err(SnapshotDecodeError::NonCanonicalEncoding {
-                location: location.to_string(),
-                reason: "binding names must be strictly sorted and unique".to_string(),
-            });
-        }
-        previous = Some(binding.name.as_str());
-    }
-    for binding in bindings {
-        if !references_allowed {
-            binding
-                .value
-                .ensure_heapless(&child_location(location, &binding.name))?;
-        }
-        record.insert(binding.name, binding.value.into_runtime()?);
-    }
-    Ok(record)
 }
 
 #[derive(Clone, Copy)]
@@ -975,6 +954,7 @@ const HEAP_FIELDS: &[&str] = &[
     "size_schedule_version",
     "roots",
     "objects",
+    "list_holes",
 ];
 const BINDING_FIELDS: &[&str] = &["name", "value"];
 const HEAP_ENTRY_FIELDS: &[&str] = &["id", "object"];

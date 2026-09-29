@@ -697,3 +697,44 @@ fn the_ratchet_refuses_new_failures_unpromoted_passes_and_changed_refusals() {
         "a blessed new failure has no owner until a ticket takes it"
     );
 }
+
+#[test]
+fn census_probe_exemptions_have_boundary_witnesses() {
+    let exempt = data_lines("census", 5)
+        .into_iter()
+        .filter(|row| row[4].starts_with("probe-exempt:"))
+        .map(|row| (row[0].clone(), row[1].clone(), row[3].clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        exempt,
+        [(
+            "feature".into(),
+            "export-defer".into(),
+            "TS_IMPORT_EXPORT_UNSUPPORTED".into()
+        )],
+        "every exemption needs a parser-boundary witness here"
+    );
+    for source in [
+        "export defer * as ns from 'x';",
+        "export defer { x } from 'x';",
+    ] {
+        assert_eq!(
+            lash_typescript::validate(source)
+                .expect_err("pinned parser lacks deferred exports")
+                .code
+                .as_str(),
+            "TS_SYNTAX_ERROR",
+            "{source}"
+        );
+    }
+    for source in ["export * as ns from 'x';", "export { x } from 'x';"] {
+        assert_eq!(
+            lash_typescript::validate(source)
+                .expect_err("parsed export reaches dialect refusal")
+                .code
+                .as_str(),
+            "TS_IMPORT_EXPORT_UNSUPPORTED",
+            "{source}"
+        );
+    }
+}

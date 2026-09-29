@@ -252,7 +252,7 @@ fn semicolon_free_statement_sequences_do_not_accumulate_source_nesting() {
 }
 
 #[test]
-fn documented_source_nesting_limit_fits_the_two_mebibyte_stack_budget() {
+fn maximum_admitted_nesting_runs_on_two_mebibyte_stack() {
     std::thread::Builder::new()
         .name("typescript-source-nesting-budget".to_string())
         .stack_size(STACK_BUDGET_BYTES)
@@ -261,7 +261,12 @@ fn documented_source_nesting_limit_fits_the_two_mebibyte_stack_budget() {
             let blocks = DOCUMENTED_SOURCE_NESTING_LIMIT - parens - 1;
             // The blocks, grouping parentheses, and `finish(` call consume the
             // complete shared budget.
-            let program = lash_typescript::testing::compile(&stack_budget_source(blocks, parens))
+            let source = stack_budget_source(blocks, parens);
+            assert_eq!(
+                lash_typescript::measure_source_nesting_charge(&source),
+                DOCUMENTED_SOURCE_NESTING_LIMIT
+            );
+            let program = lash_typescript::testing::compile(&source)
                 .expect("documented source nesting limit compiles");
             let outcome =
                 futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))

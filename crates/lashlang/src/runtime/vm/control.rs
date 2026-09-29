@@ -1024,4 +1024,282 @@ mod tests {
         );
         assert!(passes[1] <= 4, "import passes: {passes:?}");
     }
+    #[test]
+    fn gc_retains_every_root_kind_at_interval_suspend_and_bound_failure() {
+        use crate::runtime::heap::HeapObject;
+        use crate::runtime::vm::exceptions::{FinallyCompletion, FinallyState};
+        use crate::runtime::vm::functions::{
+            ArrayLikeWalk, CallFrame, CallbackCompletion, CallbackDriver, ReturnTarget, SortState,
+        };
+
+        fn iterator(value: Value, place: &str) -> IterState {
+            IterState {
+                binding: 0,
+                restore: LoopRestore {
+                    previous: (place == "restore").then(|| value.clone()),
+                },
+                heapified: true,
+                cursor: match place {
+                    "values" => IterCursor::List {
+                        values: vec![value].into(),
+                        index: 0,
+                        collection: None,
+                    },
+                    "collection" => IterCursor::List {
+                        values: vec![].into(),
+                        index: 0,
+                        collection: Some(value),
+                    },
+                    "source" => IterCursor::Live {
+                        source: value,
+                        index: 0,
+                    },
+                    _ => IterCursor::Range {
+                        next: 0,
+                        end: 0,
+                        step: 1,
+                    },
+                },
+            }
+        }
+        let host = crate::testing::harness::EchoHost;
+        let chunk = test_chunk();
+        let kinds = [
+            "slot",
+            "global",
+            "active_slot",
+            "active_global",
+            "operand",
+            "last",
+            "pending",
+            "finally",
+            "iterator_restore",
+            "iterator_values",
+            "iterator_collection",
+            "iterator_source",
+            "frame_slot",
+            "frame_global",
+            "frame_iterator_restore",
+            "frame_iterator_values",
+            "frame_iterator_collection",
+            "frame_iterator_source",
+            "callback_function",
+            "callback_this",
+            "callback_calls",
+            "callback_results",
+            "callback_pending",
+            "callback_sorted",
+            "callback_current",
+            "callback_receiver",
+            "callback_walk",
+            "callback_reduce",
+            "coercion",
+        ];
+        for kind in kinds {
+            for boundary in ["interval", "suspend", "bound_failure"] {
+                let mut vm = holder_test_vm(&chunk, &host);
+                let child = vm
+                    .heap
+                    .allocate(HeapObject::List(vec![Value::Number(37.0)]))
+                    .expect("child");
+                let root = vm
+                    .heap
+                    .allocate(HeapObject::List(vec![child.clone()]))
+                    .expect("root");
+                let mut frame = CallFrame {
+                    return_ip: 0,
+                    function: None,
+                    operand_stack_base: 0,
+                    slots: vm.slots.clone(),
+                    iter_stack: vec![],
+                    return_target: ReturnTarget::Direct,
+                };
+                match kind {
+                    "slot" | "active_slot" => vm.slots.values[0] = Some(root.clone()),
+                    "global" | "active_global" => {
+                        vm.slots.extras.insert("extra".into(), root.clone());
+                    }
+                    "operand" => vm.stack.push(root.clone()),
+                    "last" => vm.last_value = Some(root.clone()),
+                    "pending" => {
+                        vm.pending_tools.insert(
+                            lash_sansio::handle::HandleId::tool(0, 0),
+                            Some(Value::List(
+                                vec![
+                                    Value::Number(0.0),
+                                    Value::Number(0.0),
+                                    Value::Null,
+                                    root.clone(),
+                                ]
+                                .into(),
+                            )),
+                        );
+                    }
+                    "finally" => vm.finally_stack.push(FinallyState {
+                        completion: FinallyCompletion::Throw {
+                            value: root.clone(),
+                            origin: None,
+                        },
+                        handler_depth: 0,
+                        frame_depth: 0,
+                        frame_function: None,
+                        stack_depth: 0,
+                    }),
+                    _ if kind.starts_with("iterator_") => vm.iter_stack.push(iterator(
+                        root.clone(),
+                        kind.strip_prefix("iterator_").expect("prefix"),
+                    )),
+                    "coercion" => {
+                        frame.return_target =
+                            ReturnTarget::Coercion(super::super::guest_coercion::CoercionDriver {
+                                object: root.clone(),
+                                hint: crate::runtime::heap::guest_coercion::PrimitiveHint::Default,
+                                next: 0,
+                            })
+                    }
+                    "frame_slot" => frame.slots.values[0] = Some(root.clone()),
+                    "frame_global" => {
+                        frame.slots.extras.insert("saved".into(), root.clone());
+                    }
+                    _ if kind.starts_with("frame_iterator_") => frame.iter_stack.push(iterator(
+                        root.clone(),
+                        kind.strip_prefix("frame_iterator_").expect("prefix"),
+                    )),
+                    _ => {
+                        let at = |place| {
+                            if kind == place {
+                                root.clone()
+                            } else {
+                                Value::Undefined
+                            }
+                        };
+                        let completion = if kind == "callback_results" {
+                            CallbackCompletion::Collect
+                        } else if kind == "callback_reduce" {
+                            CallbackCompletion::Reduce {
+                                accumulator: root.clone(),
+                            }
+                        } else {
+                            CallbackCompletion::Sort(SortState {
+                                pending: vec![at("callback_pending")],
+                                sorted: vec![at("callback_sorted")],
+                                current: at("callback_current"),
+                                probe: 0,
+                                lo: 0,
+                                hi: 0,
+                                undefined_count: 0,
+                                receiver: at("callback_receiver"),
+                                length: 0,
+                                in_place: true,
+                            })
+                        };
+                        frame.return_target = ReturnTarget::Callback(Box::new(CallbackDriver {
+                            function: at("callback_function"),
+                            this_arg: at("callback_this"),
+                            calls: vec![
+                                Value::Tuple(vec![at("callback_calls")].into()),
+                                Value::Tuple(vec![].into()),
+                            ],
+                            results: if kind == "callback_results" {
+                                vec![root.clone()]
+                            } else {
+                                vec![]
+                            },
+                            next_index: if kind == "callback_results" { 2 } else { 1 },
+                            completion,
+                            allow_effects: false,
+                            live_url_search_params: false,
+                            array_like: Some(ArrayLikeWalk {
+                                receiver: at("callback_walk"),
+                                next: 0,
+                                length: 0,
+                                descending: false,
+                                gated: true,
+                                omit_receiver: false,
+                            }),
+                        }));
+                    }
+                }
+                if kind.starts_with("frame_")
+                    || kind.starts_with("callback_")
+                    || kind.starts_with("active_")
+                    || kind == "coercion"
+                {
+                    vm.frames.push(frame);
+                    vm.active_function = Some(0);
+                }
+                let garbage = vm
+                    .heap
+                    .allocate(HeapObject::List(vec![Value::Number(99.0)]))
+                    .expect("garbage");
+                if boundary == "interval" {
+                    for _ in vm.heap.allocations()..1_024 {
+                        vm.heap
+                            .allocate(HeapObject::List(vec![]))
+                            .expect("interval allocation");
+                    }
+                    assert!(vm.heap.needs_collection());
+                    vm.heapify_vm_state().expect("interval collection");
+                    assert!(!vm.heap.needs_collection());
+                } else if boundary == "bound_failure" {
+                    let before = vm.heap.live_logical_bytes();
+                    vm.heap.set_limit(before);
+                    vm.heap.set_collect_every_allocation(true);
+                    vm.heap.begin_allocation_scope(vm.heap_roots());
+                    assert!(
+                        matches!(
+                            vm.heap.import_values(
+                                vec![Value::List(vec![Value::Number(100.0); 128].into())],
+                                1
+                            ),
+                            Err(RuntimeError::MemoryLimitExceeded { .. })
+                        ),
+                        "{kind}"
+                    );
+                    vm.heap.end_allocation_scope();
+                    assert!(
+                        vm.heap.live_logical_bytes() < before,
+                        "failed admission collects garbage without committing the new list"
+                    );
+                } else if kind == "coercion" {
+                    assert!(
+                        matches!(
+                            vm.suspend(),
+                            Err(super::super::ContinuationError::UnserializableValue { .. })
+                        ),
+                        "guest coercion frames cannot park"
+                    );
+                } else {
+                    let captured = vm.suspend().expect("capture roots");
+                    let bytes = serde_json::to_vec(&captured).expect("encode holders");
+                    let decoded: super::super::VmContinuation =
+                        serde_json::from_slice(&bytes).expect("decode holders");
+                    assert_eq!(
+                        decoded.heap.materialize(&root).expect("restored graph"),
+                        Value::List(vec![Value::List(vec![Value::Number(37.0)].into())].into()),
+                        "{kind}/{boundary}"
+                    );
+                    let mut restored_roots = Vec::new();
+                    super::super::visit_vm_roots(&decoded, &mut restored_roots);
+                    assert!(restored_roots.iter().any(|value| value == &root || matches!(value, Value::List(items) | Value::Tuple(items) if items.contains(&root))), "{kind}: continuation root walk");
+                }
+                for value in [&root, &child] {
+                    let Value::Ref(id) = value else {
+                        panic!("heap reference")
+                    };
+                    assert!(
+                        vm.heap.get(*id).is_ok(),
+                        "{kind}/{boundary}: live graph was swept"
+                    );
+                }
+                let Value::Ref(id) = garbage else {
+                    panic!("garbage reference")
+                };
+                assert!(
+                    vm.heap.get(id).is_err(),
+                    "{kind}/{boundary}: boundary must actually collect"
+                );
+            }
+        }
+    }
 }

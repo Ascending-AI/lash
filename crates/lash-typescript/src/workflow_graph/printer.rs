@@ -1048,6 +1048,12 @@ impl<'p> Printer<'p> {
         {
             return Ok(Some(format!("sleep({})", self.expression(duration)?)));
         }
+        if let Expr::BuiltinCall { name, args } = expression
+            && name.as_str() == "__typescript_pending_tool"
+            && let [call @ Expr::ReceiverCall { .. }] = args.as_slice()
+        {
+            return Ok(Some(self.expression(call)?));
+        }
         // `globalThis.name`, read live through the root-global read.
         if let Expr::BuiltinCall { name, args } = expression
             && name.as_str() == "__typescript_global_get"

@@ -97,6 +97,8 @@ struct CanonicalHeapCounters {
     allocation_counter: u64,
     live_logical_bytes: u64,
     size_schedule_version: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    list_holes: Vec<(HeapId, Vec<usize>)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -168,6 +170,11 @@ impl State {
                     allocation_counter: heap.allocations(),
                     live_logical_bytes: partition.live_logical_bytes,
                     size_schedule_version: heap.schedule_version(),
+                    list_holes: heap
+                        .list_holes_to_wire()
+                        .into_iter()
+                        .filter(|(id, _)| partition.owned.iter().any(|owned| owned.contains(id)))
+                        .collect(),
                 }),
             expired_functions: self.expired_functions.iter().cloned().collect(),
         };
@@ -275,6 +282,7 @@ impl State {
                 globals: None,
                 heap: Some(CanonicalHeap {
                     reference_semantics: counters.reference_semantics,
+                    list_holes: counters.list_holes,
                     next_id: counters.next_id,
                     allocation_counter: counters.allocation_counter,
                     live_logical_bytes: counters.live_logical_bytes,

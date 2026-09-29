@@ -4,7 +4,7 @@
 //
 // Serialized shapes (see examples/workflow-graph-roundtrip/src/contract.rs):
 //   node.data.availableVars     [{ name, type }]        (was names-only)
-//   node.data.expectedArgTypes  [{ slot, type }]        slot = "arg[0]", "arg[0].field", "arg[0][2]", "call[1].arg[0]"
+//   node.data.expectedArgTypes  [{ slot, type }]        slot = "arg[0]", 'arg[0]["field"]', "arg[0][2]", "call[1].arg[0]"
 //   node.data.diagnostics       [{ nodeId, kind, message, span? }]
 //   document.facetSchemaVersion number | undefined      (absent on older backends)
 //
@@ -213,16 +213,13 @@ export function expectedSlotType(node, slot) {
   return entry ? entry.type : null;
 }
 
-// The expected type for a call/effect record argument named `fieldName`. The
-// lens emits its slot as `arg[0].<field>` for the common single-call node and
-// `call[N].arg[M].<field>` when a node carries multiple receiver calls, so we
-// match the canonical single-call slot first, then any slot whose tail is the
-// field name.
+// Record fields use bracket slot addresses, including dotted field names.
 export function expectedArgFieldType(node, fieldName) {
   const entries = expectedArgTypes(node);
-  const exact = entries.find((a) => a.slot === `arg[0].${fieldName}`);
+  const suffix = `[${JSON.stringify(fieldName)}]`;
+  const exact = entries.find((entry) => entry.slot === `arg[0]${suffix}`);
   if (exact) return exact.type;
-  const tail = entries.find((a) => a.slot.endsWith(`.${fieldName}`));
+  const tail = entries.find((entry) => entry.slot.endsWith(suffix));
   return tail ? tail.type : null;
 }
 

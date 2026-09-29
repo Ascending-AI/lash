@@ -233,23 +233,23 @@ describe('expectedSlotType / expectedArgFieldType', () => {
     data: {
       expectedArgTypes: [
         { slot: 'arg[0]', type: '{ name: str, state: str | float | bool }' },
-        { slot: 'arg[0].name', type: 'str' },
-        { slot: 'arg[0].state', type: 'str | float | bool' },
+        { slot: 'arg[0]["name"]', type: 'str' },
+        { slot: 'arg[0]["state"]', type: 'str | float | bool' },
       ],
     },
   };
   const multi = {
     data: {
       expectedArgTypes: [
-        { slot: 'call[0].arg[0].pct', type: 'float' },
-        { slot: 'call[1].arg[0].text', type: 'str' },
+        { slot: 'call[0].arg[0]["pct"]', type: 'float' },
+        { slot: 'call[1].arg[0]["text"]', type: 'str' },
       ],
     },
   };
 
   it('resolves an exact slot path', () => {
     expect(expectedSlotType(node, 'arg[0]')).toBe('{ name: str, state: str | float | bool }');
-    expect(expectedSlotType(node, 'arg[0].name')).toBe('str');
+    expect(expectedSlotType(node, 'arg[0]["name"]')).toBe('str');
     expect(expectedSlotType(node, 'missing')).toBeNull();
   });
 

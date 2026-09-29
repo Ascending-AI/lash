@@ -108,11 +108,13 @@ pub(crate) fn host_surface_inventory(
     let data_types = surface
         .resources
         .named_data_types()
+        .filter(|(name, _)| !name.starts_with("__"))
         .map(|(_, data_type)| (data_type.name().to_string(), data_type.ty()))
         .collect();
     let constructors = surface
         .resources
         .value_constructors()
+        .filter(|(_, constructor)| !module_is_runtime_internal(&constructor.path))
         .map(|(_, constructor)| {
             let output = match &constructor.output_ty {
                 lashlang::TypeExpr::Ref(name) => surface
@@ -132,6 +134,7 @@ pub(crate) fn host_surface_inventory(
     let trigger_sources = surface
         .resources
         .trigger_sources()
+        .filter(|(source, _)| !source.starts_with("__"))
         .map(|(source_ty, binding)| (source_ty.to_string(), binding.event_type_name().to_string()))
         .collect();
     HostSurfaceInventory {
@@ -167,5 +170,75 @@ pub(crate) fn host_operation_description(module: &str, operation: &str) -> Optio
             "Tombstone the subscription. Supply subscription_key and expected_revision from the current receipt; mutations are revision-checked.",
         ),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod inventory_tests {
+    use super::*;
+    use lashlang::{
+        LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, NamedDataType, TypeExpr,
+    };
+
+    #[test]
+    fn reserved_namespace_is_hidden_from_every_prompt_inventory() {
+        let mut catalog = LashlangHostCatalog::new();
+        for namespace in ["visible", "__private", "__typescript_runtime"] {
+            catalog
+                .add_module_operation(
+                    [namespace],
+                    format!("{namespace}.Module"),
+                    "probe",
+                    format!("{namespace}.probe"),
+                    TypeExpr::Str,
+                    TypeExpr::Bool,
+                )
+                .expect("operation");
+            catalog
+                .add_named_data_type(
+                    NamedDataType::object(format!("{namespace}.Data"), vec![]).expect("data type"),
+                )
+                .expect("register data");
+            catalog
+                .add_value_constructor([namespace, "Make"], TypeExpr::Str, TypeExpr::Bool)
+                .expect("constructor");
+            catalog
+                .add_trigger_source_constructor(
+                    [namespace, "Tick"],
+                    TypeExpr::Str,
+                    NamedDataType::object(format!("{namespace}.Event"), vec![]).expect("event"),
+                )
+                .expect("trigger constructor");
+        }
+        let environment = LashlangHostEnvironment::new(catalog, LashlangAbilities::all());
+        let inventory = host_surface_inventory(&environment);
+        assert_eq!(
+            inventory
+                .operations
+                .iter()
+                .map(|row| row.alias.as_str())
+                .collect::<Vec<_>>(),
+            ["visible"]
+        );
+        assert_eq!(
+            inventory
+                .data_types
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["visible.Data", "visible.Event"]
+        );
+        assert_eq!(
+            inventory
+                .constructors
+                .iter()
+                .map(|row| row.path.as_str())
+                .collect::<Vec<_>>(),
+            ["visible.Make", "visible.Tick"]
+        );
+        assert_eq!(
+            inventory.trigger_sources,
+            [("visible.Tick".into(), "visible.Event".into())]
+        );
     }
 }

@@ -554,3 +554,30 @@ fn is_path_identifier(name: &str) -> bool {
     matches!(chars.next(), Some('_' | 'a'..='z' | 'A'..='Z'))
         && chars.all(|character| matches!(character, '_' | 'a'..='z' | 'A'..='Z' | '0'..='9'))
 }
+
+pub(super) fn bindings_into_record(
+    bindings: Vec<CanonicalBinding>,
+    location: &str,
+    references_allowed: bool,
+) -> Result<Record, SnapshotDecodeError> {
+    let mut previous: Option<&str> = None;
+    let mut record = Record::new();
+    for binding in &bindings {
+        if previous.is_some_and(|prior| prior >= binding.name.as_str()) {
+            return Err(SnapshotDecodeError::NonCanonicalEncoding {
+                location: location.to_string(),
+                reason: "binding names must be strictly sorted and unique".to_string(),
+            });
+        }
+        previous = Some(binding.name.as_str());
+    }
+    for binding in bindings {
+        if !references_allowed {
+            binding
+                .value
+                .ensure_heapless(&child_location(location, &binding.name))?;
+        }
+        record.insert(binding.name, binding.value.into_runtime()?);
+    }
+    Ok(record)
+}

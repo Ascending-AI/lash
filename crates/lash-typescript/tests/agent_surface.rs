@@ -67,7 +67,7 @@ fn process_environment_with(
     lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all())
 }
 
-fn finished(source: &str) -> Value {
+pub(super) fn finished(source: &str) -> Value {
     let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
         .expect("TypeScript should execute")
@@ -2523,3 +2523,6 @@ fn tool_handles_do_not_cross_cells() {
         "{problem}"
     );
 }
+
+#[path = "agent_surface/adr_claims.rs"]
+mod adr_claims;

@@ -590,3 +590,107 @@ async fn dynamic_settled_await_names_the_value_and_nested_path() {
         "{error}"
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn retained_ir_batch_preserves_order_and_catchable_repair() {
+    let host = AggregateBatchHost::default();
+    let compiled = aggregate_compile(aggregate_module(vec![
+        builders::assign("message", builders::string("not caught")),
+        builders::try_expr(
+            builders::await_expr(builders::record(vec![(
+                "nested",
+                builders::list(vec![
+                    op(
+                        "tools",
+                        "err",
+                        vec![("value", builders::string("written-first"))],
+                    ),
+                    op(
+                        "tools",
+                        "err",
+                        vec![("value", builders::string("settled-first"))],
+                    ),
+                ]),
+            )])),
+            Some(builders::catch(
+                "error",
+                builders::assign(
+                    "message",
+                    builders::field(builders::var("error"), "message"),
+                ),
+            )),
+            None,
+        ),
+        builders::assign(
+            "repaired",
+            builders::await_expr(builders::list(vec![op(
+                "tools",
+                "echo",
+                vec![("value", builders::string("fixed"))],
+            )])),
+        ),
+        builders::finish(builders::record(vec![
+            ("message", builders::var("message")),
+            ("repaired", builders::var("repaired")),
+        ])),
+    ]));
+    let ExecutionOutcome::Finished(value) = execute_compiled(&compiled, &mut State::new(), &host)
+        .await
+        .expect("catch then repair")
+    else {
+        panic!("finish")
+    };
+    let record = value.as_record().expect("record");
+    assert_eq!(
+        record.get("message"),
+        Some(&Value::String(
+            "`?` unwrapped failed module operation: boom err:written-first".into()
+        ))
+    );
+    assert_eq!(
+        host.batches(),
+        vec![
+            vec![
+                "err:written-first".to_string(),
+                "err:settled-first".to_string()
+            ],
+            vec!["echo:fixed".to_string()]
+        ]
+    );
+    assert_eq!(host.singles.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        record.get("repaired"),
+        Some(&crate::from_json(serde_json::json!(["fixed"])))
+    );
+
+    let compiled = aggregate_compile(aggregate_module(vec![
+        builders::assign(
+            "resolved",
+            op(
+                "tools",
+                "echo",
+                vec![(
+                    "value",
+                    builders::record(vec![("orders", builders::list(vec![builders::num(7.0)]))]),
+                )],
+            ),
+        ),
+        builders::try_expr(
+            builders::await_expr(builders::var("resolved")),
+            Some(builders::catch(
+                "error",
+                builders::finish(builders::field(builders::var("error"), "message")),
+            )),
+            None,
+        ),
+    ]));
+    let ExecutionOutcome::Finished(Value::String(message)) =
+        execute_compiled(&compiled, &mut State::new(), &host)
+            .await
+            .expect("resolved-await repair is catchable")
+    else {
+        panic!("catch finishes")
+    };
+    assert!(message.contains("number at `orders[0]`"), "{message}");
+    assert!(message.contains("already resolved"), "{message}");
+}

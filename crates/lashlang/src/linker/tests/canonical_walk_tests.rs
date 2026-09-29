@@ -682,3 +682,60 @@ fn try_keeps_its_compatible_any_binding_while_lowering_its_body() {
     LinkedModule::link(program, environment)
         .expect("a Bool-declared function with Try(String) remains accepted");
 }
+
+#[test]
+fn finally_completion_restores_each_lexical_scope() {
+    for completion in [
+        Expr::Null,
+        Expr::Return(Box::new(Expr::Number(1.0))),
+        Expr::Throw(Box::new(Expr::String("thrown".into()))),
+        Expr::Break,
+        Expr::Continue,
+    ] {
+        let program = builders::program(vec![
+            builders::assign("shadow", builders::string("outer")),
+            builders::for_in(
+                "shadow",
+                builders::list(vec![builders::num(1.0)]),
+                builders::block(vec![
+                    builders::try_expr(
+                        builders::block(vec![completion.clone()]),
+                        Some(builders::catch(
+                            "shadow",
+                            builders::block(vec![builders::print(builders::var("shadow"))]),
+                        )),
+                        Some(builders::block(vec![builders::print(builders::var(
+                            "shadow",
+                        ))])),
+                    ),
+                    builders::print(builders::var("shadow")),
+                ]),
+            ),
+            builders::print(builders::var("shadow")),
+        ]);
+        let analysis = analyze_workflow_program(&program, &full_host_environment());
+        // Paths are the canonical lowering paths, independent of facet
+        // enumeration order. The catch restores the loop's binding before
+        // finally, and the loop restores the outer binding at exit.
+        for (path, expected) in [
+            (vec![1, 1, 0, 1, 0], TypeExpr::Any),
+            (vec![1, 1, 0, 2, 0], TypeExpr::Int),
+            (vec![1, 1, 1], TypeExpr::Int),
+            (vec![2], TypeExpr::Str),
+        ] {
+            let facts = analysis
+                .facts_for(&AstPath::main(path.clone()))
+                .unwrap_or_else(|| panic!("missing {path:?} for {completion:?}"));
+            assert_eq!(
+                facts.available_variables.get("shadow"),
+                Some(&expected),
+                "{path:?} / {completion:?}"
+            );
+            assert!(
+                facts.diagnostics.is_empty(),
+                "{path:?}: {:?}",
+                facts.diagnostics
+            );
+        }
+    }
+}
