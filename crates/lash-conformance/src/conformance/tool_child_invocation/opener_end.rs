@@ -72,7 +72,7 @@ fn opener_scope(session_id: &crate::SessionId) -> crate::ExecutionScope {
 
 fn call(session_id: &crate::SessionId, name: &str, tool: &str) -> crate::ToolInvocation {
     crate::ToolInvocation::new(
-        format!("{session_id}-{name}"),
+        super::leaf_call_id(&format!("{session_id}-{name}")),
         crate::ToolId::from(tool),
         serde_json::json!({ "leaf": name }),
     )

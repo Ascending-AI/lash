@@ -314,7 +314,8 @@ pub struct StandardDriver {
 
 #[derive(Clone, Debug)]
 struct StandardToolCall {
-    call_id: String,
+    call_id: lash_core::ToolCallId,
+    provider_call_id: String,
     tool_name: String,
     input_json: String,
     replay: Option<ProviderReplayMeta>,
@@ -339,9 +340,13 @@ struct StandardResponse {
     parts: Vec<StandardResponsePart>,
 }
 
-fn collect_standard_response(llm_response: &LlmResponse) -> StandardResponse {
+fn collect_standard_response(
+    llm_response: &LlmResponse,
+    calls: &lash_core::sansio::ResponseToolCalls,
+) -> StandardResponse {
     let mut assistant_text = String::new();
     let mut parts = Vec::new();
+    let mut call_ids = calls.call_ids(llm_response).into_iter();
 
     for part in normalized_response_parts(llm_response) {
         match part {
@@ -367,16 +372,22 @@ fn collect_standard_response(llm_response: &LlmResponse) -> StandardResponse {
                 parts.push(StandardResponsePart::Reasoning { text, replay });
             }
             LlmOutputPart::ToolCall {
-                call_id,
+                call_id: provider_call_id,
                 tool_name,
                 input_json,
                 replay,
-            } => parts.push(StandardResponsePart::ToolCall(StandardToolCall {
-                call_id,
-                tool_name,
-                input_json,
-                replay,
-            })),
+            } => {
+                let Some(call_id) = call_ids.next() else {
+                    continue;
+                };
+                parts.push(StandardResponsePart::ToolCall(StandardToolCall {
+                    call_id,
+                    provider_call_id,
+                    tool_name,
+                    input_json,
+                    replay,
+                }));
+            }
         }
     }
 
@@ -390,7 +401,8 @@ fn collect_standard_response(llm_response: &LlmResponse) -> StandardResponse {
 /// raw argument text so a malformed call can be refused before dispatch
 /// without losing the original text.
 struct ReassembledToolCall {
-    call_id: String,
+    call_id: lash_core::ToolCallId,
+    provider_call_id: String,
     tool_name: String,
     input_json: String,
     args: Result<Value, String>,
@@ -432,6 +444,7 @@ fn reassemble_standard_response(
                     format!("{assistant_id}.p{}", message_parts.len()),
                     tool_call.input_json.clone(),
                     tool_call.call_id.clone(),
+                    tool_call.provider_call_id.clone(),
                     tool_call.tool_name.clone(),
                     tool_call.replay.clone(),
                 ));
@@ -439,6 +452,7 @@ fn reassemble_standard_response(
                     .map_err(|error| error.to_string());
                 calls.push(ReassembledToolCall {
                     call_id: tool_call.call_id,
+                    provider_call_id: tool_call.provider_call_id,
                     tool_name: tool_call.tool_name,
                     input_json: tool_call.input_json,
                     args,
@@ -459,7 +473,8 @@ fn reassemble_standard_response(
     reason = "the typed refusal is a crate-owned ToolCallOutput tree whose serde_json encoding cannot fail"
 )]
 fn refused_tool_call_completion(
-    call_id: String,
+    call_id: lash_core::ToolCallId,
+    provider_call_id: Option<String>,
     tool_name: String,
     args: Value,
     output: lash_core::ToolCallOutput,
@@ -467,7 +482,6 @@ fn refused_tool_call_completion(
 ) -> CompletedToolCall {
     let model_return = lash_core::facade_support::ModelToolReturn {
         attachment_notices: Vec::new(),
-        call_id: call_id.clone(),
         tool_name: tool_name.clone(),
         parts: vec![lash_core::facade_support::ModelToolReturnPart::Text {
             text: serde_json::to_string(&output).expect("typed refusal serializes"),
@@ -475,6 +489,7 @@ fn refused_tool_call_completion(
     };
     CompletedToolCall {
         call_id,
+        provider_call_id,
         tool_name,
         args,
         output,
@@ -498,9 +513,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         request: Arc<lash_core::LlmRequest>,
         _driver_state: Option<lash_core::ProtocolDriverState>,
         llm_response: LlmResponse,
+        calls: &lash_core::sansio::ResponseToolCalls,
         text_streamed: bool,
     ) -> Vec<DriverAction> {
-        let response = collect_standard_response(&llm_response);
+        let response = collect_standard_response(&llm_response, calls);
         let mut actions = Vec::new();
 
         if !text_streamed {
@@ -608,6 +624,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     );
                     refused.push(refused_tool_call_completion(
                         call.call_id,
+                        Some(call.provider_call_id),
                         call.tool_name,
                         Value::String(call.input_json),
                         output,
@@ -617,6 +634,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 Ok(args) => {
                     let call = PendingToolCall {
                         call_id: call.call_id,
+                        provider_call_id: Some(call.provider_call_id),
                         tool_name: call.tool_name,
                         args,
                         replay: call.replay,
@@ -645,6 +663,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                         );
                         refused.push(refused_tool_call_completion(
                             call.call_id,
+                            call.provider_call_id,
                             call.tool_name,
                             call.args,
                             output,
@@ -667,6 +686,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         refused.extend(expansion.refused.into_iter().map(|(call, output)| {
             refused_tool_call_completion(
                 call.call_id,
+                call.provider_call_id,
                 call.tool_name,
                 call.args,
                 output,
@@ -684,7 +704,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             }
             let mut parts: Vec<Part> = completed
                 .into_iter()
-                .map(|outcome| tool_result_part(outcome.model_return))
+                .map(|outcome| tool_result_part(outcome.call_id, outcome.model_return))
                 .collect();
             let message_id =
                 standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "refused_tools");
@@ -729,7 +749,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 });
             }
 
-            result_parts.push(tool_result_part(outcome.model_return));
+            result_parts.push(tool_result_part(outcome.call_id, outcome.model_return));
         }
 
         if !result_parts.is_empty() {
@@ -790,7 +810,10 @@ fn standard_message_id(turn_id: &TurnId, protocol_iteration: usize, purpose: &st
 /// and attachment blocks in the tool value's order, under the call's id.
 /// Empty text blocks carry nothing and are dropped; a call whose return is
 /// empty is still answered, so the transcript stays resume-safe.
-fn tool_result_part(model_return: lash_core::facade_support::ModelToolReturn) -> Part {
+fn tool_result_part(
+    call_id: lash_core::ToolCallId,
+    model_return: lash_core::facade_support::ModelToolReturn,
+) -> Part {
     let content = model_return
         .parts
         .into_iter()
@@ -801,12 +824,7 @@ fn tool_result_part(model_return: lash_core::facade_support::ModelToolReturn) ->
             )
         })
         .collect();
-    Part::tool_result(
-        String::new(),
-        content,
-        model_return.call_id,
-        model_return.tool_name,
-    )
+    Part::tool_result(String::new(), content, call_id, model_return.tool_name)
 }
 
 fn conversation_event(message: Message) -> SessionHistoryRecord {

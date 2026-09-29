@@ -31,18 +31,17 @@ fn process_leaf_request(
     cancellation: crate::TurnControlBindingId,
 ) -> crate::runtime::effect::ToolChildRequest {
     let mut request = crate::runtime::effect::ToolChildRequest::new(
-        crate::PreparedToolCall::from_parts(
-            call_id,
-            crate::ToolId::from(tool_id),
-            tool_name,
-            serde_json::json!({}),
-            None,
-            serde_json::Value::Null,
-        ),
-        admission,
-        crate::tool_dispatch::ToolAttemptEffectIdentity::Scalar {
-            parent: Some(parent.clone()),
+        crate::PreparedToolCall {
+            call_id: super::leaf_call_id(&call_id),
+            provider_call_id: None,
+            tool_id: crate::ToolId::from(tool_id),
+            tool_name: tool_name.into(),
+            args: serde_json::json!({}),
+            replay: None,
+            prepared_payload: serde_json::Value::Null,
         },
+        admission,
+        crate::tool_dispatch::ToolAttemptLineage::under(parent.clone()),
         crate::runtime::effect::ToolChildScope {
             opener: crate::EffectOpener::for_scope(&crate::AdmittedScope::process(
                 opener_ref.clone(),

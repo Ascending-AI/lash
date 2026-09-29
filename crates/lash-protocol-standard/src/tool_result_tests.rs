@@ -22,13 +22,15 @@ fn attachment_source(id: &str) -> AttachmentSource {
 fn tool_attachment_is_a_block_of_the_one_result() {
     let attachment = attachment_source("att-1");
     let output = ToolCallOutput::success_tool_value(ToolValue::Attachment(attachment.clone()));
-    let model_return =
-        ModelToolReturn::from_output("call-9".to_string(), "screenshot".to_string(), &output);
+    let model_return = ModelToolReturn::from_output("screenshot".to_string(), &output);
 
-    let part = tool_result_part(model_return);
+    let part = tool_result_part(lash_core::ToolCallId::fixture("call-9"), model_return);
 
     assert!(matches!(part.kind(), PartKind::ToolResult));
-    assert_eq!(part.tool_call_id(), Some("call-9"));
+    assert_eq!(
+        part.call_id(),
+        Some(&lash_core::ToolCallId::fixture("call-9"))
+    );
     assert_eq!(part.tool_name(), Some("screenshot"));
     assert_eq!(
         part.tool_result_content(),
@@ -44,10 +46,9 @@ fn tool_text_and_attachment_keep_their_order_inside_one_result() {
         ToolValue::Attachment(attachment.clone()),
         ToolValue::String("after".into()),
     ]));
-    let model_return =
-        ModelToolReturn::from_output("call-10".to_string(), "snap".to_string(), &output);
+    let model_return = ModelToolReturn::from_output("snap".to_string(), &output);
 
-    let part = tool_result_part(model_return);
+    let part = tool_result_part(lash_core::ToolCallId::fixture("call-snap"), model_return);
 
     // The array projection's compact JSON text sits around the
     // attachment, in position, inside the call's single result.
@@ -80,7 +81,6 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
     let notice = lash_sansio::AttachmentMaterializationNotice::no_provider_accepts(&attachment);
     let notice_placeholder = notice.model_placeholder();
     let mut noticed = ModelToolReturn::from_output(
-        "call-notice".to_string(),
         "shot".to_string(),
         &ToolCallOutput::success_tool_value(ToolValue::Attachment(attachment.clone())),
     );
@@ -91,7 +91,6 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
 
     let returns = [
         ModelToolReturn::from_output(
-            "call-array".to_string(),
             "shot".to_string(),
             &ToolCallOutput::success_tool_value(ToolValue::Array(vec![
                 ToolValue::String("before".into()),
@@ -100,36 +99,46 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
             ])),
         ),
         ModelToolReturn::from_output(
-            "call-object".to_string(),
             "shot".to_string(),
             &ToolCallOutput::success_tool_value(ToolValue::Object(object)),
         ),
         ModelToolReturn::from_output(
-            "call-empty".to_string(),
             "shot".to_string(),
             &ToolCallOutput::success_tool_value(ToolValue::String(String::new())),
         ),
-        ModelToolReturn::from_output(
-            "call-text".to_string(),
-            "shot".to_string(),
-            &ToolCallOutput::success("ok"),
-        ),
+        ModelToolReturn::from_output("shot".to_string(), &ToolCallOutput::success("ok")),
         noticed,
     ];
 
+    let labels = [
+        "call-array",
+        "call-object",
+        "call-empty",
+        "call-text",
+        "call-notice",
+    ];
     let calls = returns
         .iter()
-        .map(|model_return| {
+        .zip(labels)
+        .map(|(model_return, label)| {
             Part::tool_call(
                 String::new(),
                 "{}".to_string(),
-                model_return.call_id.clone(),
+                lash_core::ToolCallId::fixture(label),
+                label.to_string(),
                 model_return.tool_name.clone(),
                 None,
             )
         })
         .collect();
-    let results = returns.iter().cloned().map(tool_result_part).collect();
+    let results = returns
+        .iter()
+        .cloned()
+        .zip(labels)
+        .map(|(model_return, label)| {
+            tool_result_part(lash_core::ToolCallId::fixture(label), model_return)
+        })
+        .collect();
     let transcript = vec![
         Message {
             id: "m_calls".to_string(),

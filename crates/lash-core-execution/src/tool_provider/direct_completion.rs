@@ -4,7 +4,7 @@ use crate::plugin::{DirectCompletion, PluginError};
 #[derive(Clone)]
 pub struct ToolDirectCompletionClient<'run> {
     pub(super) session_id: SessionId,
-    pub(super) tool_call_id: Option<String>,
+    pub(super) call_id: lash_sansio::ToolCallId,
     pub(super) direct_completions: crate::DirectCompletionClient<'run>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
 }
@@ -22,12 +22,10 @@ impl ToolDirectCompletionClient<'_> {
         if request.session_id.is_none() {
             request.session_id = Some(self.session_id.clone());
         }
-        if request.caused_by.is_none()
-            && let Some(call_id) = self.tool_call_id.clone()
-        {
+        if request.caused_by.is_none() {
             request.caused_by = Some(crate::CausalRef::ToolCall {
                 session_id: self.session_id.clone(),
-                call_id,
+                call_id: self.call_id.clone(),
             });
         }
         self.direct_completions

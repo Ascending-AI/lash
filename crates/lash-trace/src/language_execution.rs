@@ -22,7 +22,7 @@ pub enum TraceLanguageExecutionPayload {
         label: String,
         occurrence: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
+        call_id: Option<lash_sansio::ToolCallId>,
     },
     /// The named occurrence has parked on an observed wait. Its `since` is
     /// the enclosing trace record timestamp, not a separately sampled clock.
@@ -55,7 +55,7 @@ pub enum TraceLanguageExecutionPayload {
         label: String,
         occurrence: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
+        call_id: Option<lash_sansio::ToolCallId>,
     },
     NodeFailed {
         node_id: String,
@@ -63,7 +63,7 @@ pub enum TraceLanguageExecutionPayload {
         label: String,
         occurrence: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
+        call_id: Option<lash_sansio::ToolCallId>,
         failure: TraceLanguageExecutionFailure,
     },
     BranchSelected {

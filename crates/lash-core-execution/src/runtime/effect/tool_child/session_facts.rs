@@ -157,7 +157,10 @@ impl ToolChildRebuildRefusal {
     /// never settled, so the engine runs it again, where its opener may be
     /// live.
     #[must_use]
-    pub fn into_error(self, call_id: &str) -> super::super::executor::RuntimeEffectControllerError {
+    pub fn into_error(
+        self,
+        call_id: &crate::ToolCallId,
+    ) -> super::super::executor::RuntimeEffectControllerError {
         super::super::executor::RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::PluginSessionManager,
             format!(

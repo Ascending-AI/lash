@@ -54,7 +54,7 @@ fn attempt_context(
     .expect("the test scope validates");
     lash_core::testing::ToolCallFixture::mock()
         .scoped_effect_controller(scoped)
-        .tool_call_id(Some("declaration-call".to_string()))
+        .call_id(lash_core::ToolCallId::fixture("declaration-call"))
         .enclosing_process_id(enclosing_process.map(lash_core::ProcessId::fixture))
 }
 

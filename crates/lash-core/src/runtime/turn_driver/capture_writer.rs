@@ -196,7 +196,7 @@ impl lash_core_execution::TurnToolCapture for TurnToolCaptureHost {
     async fn open_attempt(
         &self,
         invocation: &str,
-        call_id: &str,
+        call: &lash_core_execution::tool_dispatch::ToolCallIds,
         observer: Arc<dyn crate::engine::ObservationSink>,
     ) -> Result<
         Arc<dyn lash_core_execution::ToolAttemptCaptureWriter>,
@@ -211,11 +211,13 @@ impl lash_core_execution::TurnToolCapture for TurnToolCaptureHost {
         .await
         .map_err(capture_write_fault)?;
         writer.push(CaptureFrame::ToolExecutionStarted {
-            call_id: call_id.to_string(),
+            call_id: call.call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
         });
         writer.flush().await.map_err(capture_write_fault)?;
         Ok(Arc::new(ToolAttemptWriter {
             writer: futures_util::lock::Mutex::new(writer),
+            provider_call_id: call.provider_call_id.clone(),
             observer,
             cursor: std::sync::Mutex::new(crate::engine::ObservationCursor::new(
                 crate::engine::ReplayKey::new(format!("{invocation}:progress")),
@@ -228,6 +230,9 @@ impl lash_core_execution::TurnToolCapture for TurnToolCaptureHost {
 struct ToolAttemptWriter {
     /// One append at a time: a report waits for the one before it.
     writer: futures_util::lock::Mutex<CaptureWriter>,
+    /// The provider's correlation for the call, carried on every frame so a
+    /// reader can tell a streamed call's frames from a started one's.
+    provider_call_id: Option<String>,
     observer: Arc<dyn crate::engine::ObservationSink>,
     cursor: std::sync::Mutex<crate::engine::ObservationCursor>,
 }
@@ -245,13 +250,14 @@ fn progress_refused(error: StoreError) -> lash_core_execution::ProgressRefused {
 impl lash_core_execution::ToolProgressReporter for ToolAttemptWriter {
     async fn report(
         &self,
-        call_id: &str,
+        call_id: &lash_sansio::ToolCallId,
         chunk: lash_sansio::ToolOutputChunk,
     ) -> Result<(), lash_core_execution::ProgressRefused> {
         {
             let mut writer = self.writer.lock().await;
             writer.push(CaptureFrame::ToolOutputProgress {
-                call_id: call_id.to_string(),
+                call_id: call_id.clone(),
+                provider_call_id: self.provider_call_id.clone(),
                 chunk: chunk.clone(),
             });
             writer.flush().await.map_err(progress_refused)?;
@@ -262,7 +268,7 @@ impl lash_core_execution::ToolProgressReporter for ToolAttemptWriter {
             crate::engine::ObservedEvent::Activity {
                 correlation_id: Some(crate::TurnActivityId::new(format!("tool:{call_id}"))),
                 event: crate::TurnEvent::ToolOutputProgress {
-                    call_id: call_id.to_string(),
+                    call_id: call_id.clone(),
                     chunk,
                 },
             },
@@ -275,12 +281,13 @@ impl lash_core_execution::ToolProgressReporter for ToolAttemptWriter {
 impl lash_core_execution::ToolAttemptCaptureWriter for ToolAttemptWriter {
     async fn settled(
         &self,
-        call_id: &str,
+        call_id: &lash_sansio::ToolCallId,
         output: &crate::ToolCallOutput,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         let mut writer = self.writer.lock().await;
         writer.push(CaptureFrame::ToolSettled {
-            call_id: call_id.to_string(),
+            call_id: call_id.clone(),
+            provider_call_id: self.provider_call_id.clone(),
             output: output.clone(),
         });
         match writer.flush().await {

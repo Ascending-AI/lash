@@ -69,11 +69,14 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
         };
         // The attempt's capture is written outside the watched body, before
         // and after it (see `ToolAttemptTurnCapture`).
-        let turn_capture =
-            crate::tool_dispatch::ToolAttemptTurnCapture::open(dispatch.as_ref(), &call_id).await?;
+        let turn_capture = crate::tool_dispatch::ToolAttemptTurnCapture::open(
+            dispatch.as_ref(),
+            &crate::tool_dispatch::ToolCallIds::of(&call),
+        )
+        .await?;
         let body = Box::pin(crate::tool_dispatch::execute_prepared_tool_attempt_effect(
             dispatch.as_ref(),
-            call,
+            *call,
             execution_grant,
             attempt,
             max_attempts,

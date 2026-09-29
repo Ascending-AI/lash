@@ -96,7 +96,7 @@ fn tool_request(scope: &ExecutionScope) -> lash_core::runtime::effect::ToolChild
         lash_core::runtime::effect::ToolChildAdmission::Catalog {
             manifest: Box::new(definition.manifest()),
         },
-        lash_core::tool_dispatch::ToolAttemptEffectIdentity::Scalar { parent: None },
+        lash_core::tool_dispatch::ToolAttemptLineage::default(),
         lash_core::runtime::effect::ToolChildScope {
             opener: lash_core::EffectOpener::for_scope(&admitted)
                 .expect("a turn scope derives an opener"),

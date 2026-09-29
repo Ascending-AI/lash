@@ -200,6 +200,27 @@ impl EffectOpener {
         }
     }
 
+    /// The admission every tool call this opener issues is named under (ADR
+    /// 0117 §2): a turn or a queued drain roots its calls in its
+    /// [`identity_encoding`](Self::identity_encoding), a process in its
+    /// minted id. Calls are admitted in the default deployment namespace.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "an identity encoding starts with its kind tag, so it is never blank"
+    )]
+    pub fn tool_call_admission(&self) -> lash_sansio::ToolCallAdmission {
+        match self {
+            Self::Turn { .. } | Self::QueueDrain { .. } => {
+                lash_sansio::ToolCallAdmission::turn("", self.identity_encoding())
+                    .expect("an identity encoding is never blank")
+            }
+            Self::Process { process_id } => {
+                lash_sansio::ToolCallAdmission::process("", process_id.clone())
+            }
+        }
+    }
+
     /// The half-open range `[from, to)` that holds the
     /// [`identity_encoding`](Self::identity_encoding) of every turn opener of
     /// `session_id`, compared bytewise: a keyset range over an index of

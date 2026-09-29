@@ -5,16 +5,14 @@
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner), which must crash
 /// and redrive a turn, and the RLM protocol plugin factories.
 ///
-/// A law registered `held` states a contract that holds only once FIG-4080
-/// cuts every tool-derived identity over to the lash-minted call id: its
-/// failure is printed as the expected divergence and its pass fails the test,
-/// so the hold goes the moment the law holds.
+/// Every law reads the lash-minted `ToolCallId` an attempt sees through
+/// `AttemptContext::call_id()` (ADR 0117).
 #[macro_export]
 macro_rules! tool_call_identity_tests {
     ($(#[$attr:meta])* $fixture:block) => {
-        $crate::tool_call_identity_tests!(@held [$(#[$attr])*] $fixture;
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             repeated_provider_id_across_turns_is_distinct);
-        $crate::tool_call_identity_tests!(@held [$(#[$attr])*] $fixture;
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             same_scope_completion_collision);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             tool_identity_survives_unrecorded_effect_crash);
@@ -26,11 +24,11 @@ macro_rules! tool_call_identity_tests {
             refusals_and_parallel_completion_never_renumber_identity);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             code_cells_keep_identity_and_distinguish_fresh_calls);
-        $crate::tool_call_identity_tests!(@held [$(#[$attr])*] $fixture;
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             frames_keep_identity_and_distinguish_fresh_calls);
-        $crate::tool_call_identity_tests!(@held [$(#[$attr])*] $fixture;
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             compaction_keeps_identity_and_distinguishes_fresh_calls);
-        $crate::tool_call_identity_tests!(@held [$(#[$attr])*] $fixture;
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             retained_payload_drift_is_refused_before_effects);
     };
     (@law [$($attr:tt)*] $fixture:block; $law:ident) => {
@@ -46,22 +44,6 @@ macro_rules! tool_call_identity_tests {
             )
             .await
             .expect(concat!(stringify!($law), " finishes within its bound"));
-        }
-    };
-    (@held [$($attr:tt)*] $fixture:block; $law:ident) => {
-        $($attr)*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_guard, tier) = $fixture;
-            $crate::run_held_law(stringify!($law), "FIG-4080", async move {
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(240),
-                    $crate::registration_macro_support::$law(tier),
-                )
-                .await
-                .expect(concat!(stringify!($law), " finishes within its bound"));
-            })
-            .await;
         }
     };
 }

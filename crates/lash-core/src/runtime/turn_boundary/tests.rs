@@ -863,6 +863,7 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
         parts: shared_parts(vec![Part::tool_call(
             "a-tool.p0".to_string(),
             "{}".to_string(),
+            crate::ToolCallId::fixture("call-1"),
             "call-1".to_string(),
             "probe".to_string(),
             None,
@@ -1067,7 +1068,8 @@ async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs(
     .await
     .expect("put attachment bytes");
     let tool_calls = vec![crate::ToolCallRecord {
-        call_id: Some("replayed-exec-call".to_string()),
+        call_id: crate::ToolCallId::fixture("replayed-exec-call"),
+        provider_call_id: None,
         tool: "executor_state_only".to_string(),
         args: serde_json::json!({}),
         output: crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
@@ -1309,6 +1311,7 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
         parts: shared_parts(vec![Part::tool_call(
             format!("{message_id}.p0"),
             "{}".to_string(),
+            crate::ToolCallId::fixture(&call_id),
             call_id.to_string(),
             "shot".to_string(),
             None,
@@ -1321,7 +1324,7 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
         parts: shared_parts(vec![Part::tool_result(
             format!("{message_id}.p0"),
             content,
-            call_id.to_string(),
+            crate::ToolCallId::fixture(&call_id),
             "shot".to_string(),
         )]),
         origin: None,

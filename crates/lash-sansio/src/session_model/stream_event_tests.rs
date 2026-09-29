@@ -174,16 +174,18 @@ fn sample_events() -> Vec<(&'static str, SessionStreamEvent, serde_json::Value)>
             }),
         ),
         (
-            "tool_call (call_id present)",
+            "tool_call (provider correlation present)",
             SessionStreamEvent::ToolCall {
-                call_id: Some("call-1".to_string()),
+                call_id: crate::ToolCallId::fixture("call-1"),
+                provider_call_id: Some("call-1".to_string()),
                 name: "read_file".to_string(),
                 args: json!({ "path": "x" }),
                 output: ToolCallOutput::success("ok"),
             },
             json!({
                 "type": "tool_call",
-                "call_id": "call-1",
+                "call_id": crate::ToolCallId::fixture("call-1").as_str(),
+                "provider_call_id": "call-1",
                 "name": "read_file",
                 "args": { "path": "x" },
                 "output": {
@@ -209,14 +211,16 @@ fn sample_events() -> Vec<(&'static str, SessionStreamEvent, serde_json::Value)>
             }),
         ),
         (
-            "tool_call_start (call_id absent)",
+            "tool_call_start (provider correlation absent)",
             SessionStreamEvent::ToolCallStart {
-                call_id: None,
+                call_id: crate::ToolCallId::fixture("start"),
+                provider_call_id: None,
                 name: "read_file".to_string(),
                 args: json!({ "path": "x" }),
             },
             json!({
                 "type": "tool_call_start",
+                "call_id": crate::ToolCallId::fixture("start").as_str(),
                 "name": "read_file",
                 "args": { "path": "x" },
             }),

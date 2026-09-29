@@ -234,11 +234,7 @@ impl ToolProvider for LedgeredEffectTools {
 
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.executions.fetch_add(1, Ordering::SeqCst);
-        let call_id = call
-            .context
-            .tool_call_id()
-            .expect("an instrumented tool requires the durable call id")
-            .to_string();
+        let call_id = call.context.call_id().to_string();
         let effect = call.args["effect"].as_str().unwrap_or("effect").to_string();
         let mode = call.args["mode"].as_str().unwrap_or("ok");
 
@@ -313,8 +309,10 @@ fn ledger_hook(
                 ctx.result.as_done_output().map(|output| &output.outcome),
                 Some(crate::ToolCallOutcome::Success(_))
             );
-            observations.lock_recover().push((ctx.call_id.clone(), ok));
-            ledger.note_outcome(&ctx.call_id, ok);
+            observations
+                .lock_recover()
+                .push((ctx.call_id.to_string(), ok));
+            ledger.note_outcome(ctx.call_id.as_str(), ok);
             Ok(Vec::new())
         })
     })
@@ -343,7 +341,7 @@ async fn dispatch_ledger_call(
     args: serde_json::Value,
 ) -> ToolDispatchOutcome {
     let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
-        .tool_call_id(Some(call_id.to_string()));
+        .call_id(lash_core_execution::ToolCallId::fixture(&call_id));
     Box::pin(dispatch_tool_call_with_execution_context(
         context,
         "effect".to_string(),
@@ -376,15 +374,18 @@ async fn host_effect_ledger_hook_call_id_matches_the_executed_call_record() {
     let outcome = dispatch_ledger_call(&context, "call-1", json!({ "effect": "issue.open" })).await;
 
     assert!(outcome.record.output.is_success());
-    assert_eq!(outcome.record.call_id.as_deref(), Some("call-1"));
+    assert_eq!(
+        outcome.record.call_id,
+        lash_core_execution::ToolCallId::fixture("call-1")
+    );
     // The hook observation, the durable record, and the ledger row the
     // attempt wrote under `AttemptContext::tool_call_id` all name one id.
     assert_eq!(
         observations.lock_recover().as_slice(),
-        &[("call-1".to_string(), true)]
+        &[(ledger_key("call-1"), true)]
     );
     assert_eq!(
-        ledger.row("call-1"),
+        ledger.row(&ledger_key("call-1")),
         Some((1, Stage::Applied, Some(true))),
         "the attempt claimed and marked its row under the same call id"
     );
@@ -426,12 +427,15 @@ async fn host_effect_ledger_deduplicates_retried_attempts_on_the_call_id() {
         vec!["charge".to_string()],
         "the retried attempt must not double-apply the effect"
     );
-    assert_eq!(ledger.row("call-r"), Some((1, Stage::Applied, Some(true))));
+    assert_eq!(
+        ledger.row(&ledger_key("call-r")),
+        Some((1, Stage::Applied, Some(true)))
+    );
     // The hook observed both attempts under one call id — re-entry is the
     // documented shape, so observations deduplicate on it.
     assert_eq!(
         observations.lock_recover().as_slice(),
-        &[("call-r".to_string(), false), ("call-r".to_string(), true),]
+        &[(ledger_key("call-r"), false), (ledger_key("call-r"), true),]
     );
     drop(context);
     handler.close().await.expect("close the dispatch handler");
@@ -469,7 +473,10 @@ async fn host_effect_ledger_replay_reexecutes_neither_effect_nor_hook() {
 
     assert!(live.record.output.is_success());
     assert!(replayed.record.output.is_success());
-    assert_eq!(replayed.record.call_id.as_deref(), Some("call-replay"));
+    assert_eq!(
+        replayed.record.call_id,
+        lash_core_execution::ToolCallId::fixture("call-replay")
+    );
     assert_eq!(
         executions.load(Ordering::SeqCst),
         1,
@@ -517,7 +524,7 @@ async fn host_effect_ledger_reconciles_a_pending_row_against_the_world() {
 
     assert!(!outcome.record.output.is_success());
     assert_eq!(
-        ledger.row("call-crash"),
+        ledger.row(&ledger_key("call-crash")),
         Some((1, Stage::Pending, Some(false))),
         "a failed call leaves the pending row undecided"
     );
@@ -526,7 +533,7 @@ async fn host_effect_ledger_reconciles_a_pending_row_against_the_world() {
     // The host's restart pass reconciles the pending row against the world.
     assert_eq!(ledger.reconcile(&world), 1);
     assert_eq!(
-        ledger.row("call-crash"),
+        ledger.row(&ledger_key("call-crash")),
         Some((1, Stage::Applied, Some(false))),
         "the effect is on record as landed once the world confirms it"
     );
@@ -569,7 +576,9 @@ async fn host_effect_ledger_compensates_only_what_reconciliation_proves() {
 
     assert_eq!(ledger.reconcile(&world), 1);
     assert_eq!(
-        ledger.row("call-bad").map(|(_, stage, _)| stage),
+        ledger
+            .row(&ledger_key("call-bad"))
+            .map(|(_, stage, _)| stage),
         Some(Stage::NoEffect),
         "the failed call's effect never landed — nothing to undo"
     );
@@ -579,7 +588,9 @@ async fn host_effect_ledger_compensates_only_what_reconciliation_proves() {
     assert_eq!(world.reverted(), vec!["invite".to_string()]);
     assert!(world.applied().is_empty());
     assert_eq!(
-        ledger.row("call-ok").map(|(_, stage, _)| stage),
+        ledger
+            .row(&ledger_key("call-ok"))
+            .map(|(_, stage, _)| stage),
         Some(Stage::Compensated)
     );
     drop(context);
@@ -618,7 +629,10 @@ async fn host_effect_ledger_reverse_compensation_resumes_at_a_retained_point() {
     // Compensate everything at or after call-b's history point. A budget of
     // one models a pass that dies mid-compensation: call-c is undone, then
     // the pass stops.
-    let retained = ledger.row("call-b").map(|(seq, _, _)| seq).unwrap();
+    let retained = ledger
+        .row(&ledger_key("call-b"))
+        .map(|(seq, _, _)| seq)
+        .unwrap();
     assert_eq!(ledger.compensate_from(retained, &world, 1), 1);
     assert_eq!(world.reverted(), vec!["step.c".to_string()]);
     assert_eq!(
@@ -636,7 +650,7 @@ async fn host_effect_ledger_reverse_compensation_resumes_at_a_retained_point() {
     );
     assert_eq!(world.applied(), vec!["step.a".to_string()]);
     assert_eq!(
-        ledger.row("call-a").map(|(_, stage, _)| stage),
+        ledger.row(&ledger_key("call-a")).map(|(_, stage, _)| stage),
         Some(Stage::Applied),
         "the retained history point is not compensated"
     );
@@ -693,7 +707,10 @@ async fn host_effect_ledger_observes_a_settled_pending_call_under_its_call_id() 
     );
     let completed = execution
         .pending_completion_dispatch_outcome(
-            "pending-call",
+            &crate::tool_dispatch::ToolCallIds {
+                call_id: crate::ToolCallId::fixture("pending-call"),
+                provider_call_id: None,
+            },
             "test:pending-call",
             pending.tool_name,
             pending.args,
@@ -708,9 +725,14 @@ async fn host_effect_ledger_observes_a_settled_pending_call_under_its_call_id() 
     assert!(completed.record.output.is_success());
     assert_eq!(
         observations.lock_recover().as_slice(),
-        &[("pending-call".to_string(), true)],
+        &[(ledger_key("pending-call"), true)],
         "the settlement observation names the parked call's durable id"
     );
     drop(execution);
     handler.close().await.expect("close the dispatch handler");
+}
+
+/// The ledger key a tool keys its effects on: the call's own id.
+fn ledger_key(label: &str) -> String {
+    lash_core_execution::ToolCallId::fixture(label).to_string()
 }

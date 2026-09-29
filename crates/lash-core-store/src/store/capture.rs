@@ -92,15 +92,25 @@ pub enum CaptureFrame {
         call: ToolInputIdentity,
         parse_error: String,
     },
+    /// A tool attempt started for the call lash named `call_id`. The
+    /// streamed call it runs, if any, is the one `provider_call_id`
+    /// correlates: the parse frame carries the provider's correlation, the
+    /// execution frames lash's identity and that correlation both.
     ToolExecutionStarted {
-        call_id: String,
+        call_id: lash_sansio::ToolCallId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_call_id: Option<String>,
     },
     ToolOutputProgress {
-        call_id: String,
+        call_id: lash_sansio::ToolCallId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_call_id: Option<String>,
         chunk: ToolOutputChunk,
     },
     ToolSettled {
-        call_id: String,
+        call_id: lash_sansio::ToolCallId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_call_id: Option<String>,
         output: ToolCallOutput,
     },
 }

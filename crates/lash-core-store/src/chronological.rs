@@ -228,7 +228,7 @@ mod tests {
             parts: shared_parts(vec![Part::tool_result(
                 format!("{id}.p0"),
                 vec![lash_sansio::ModelToolReturnPart::text("tool result")],
-                call_id.to_string(),
+                lash_sansio::ToolCallId::fixture(call_id),
                 "tool".to_string(),
             )]),
             origin: None,

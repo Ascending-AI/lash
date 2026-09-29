@@ -184,8 +184,19 @@ pub struct CommittedMessage {
 /// A session read back through a fresh store handle.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct ReopenedSession {
+    /// Each committed assistant message, its tool calls under the provider's
+    /// correlation, as the wire carried them.
     pub assistant_messages: Vec<CommittedMessage>,
+    /// Each committed tool result, answering its call's provider
+    /// correlation: the result pairs with its call by `ToolCallId`, the way
+    /// an adapter answers the provider.
     pub tool_results: Vec<ToolResultContent>,
+    /// The `ToolCallId` lash named each committed call by, per assistant
+    /// message, in the order of that message's `tool_calls`.
+    pub call_ids: Vec<Vec<String>>,
+    /// The `ToolCallId` each committed tool result answers, in the order of
+    /// `tool_results`.
+    pub result_call_ids: Vec<String>,
     /// Summed usage of the provider-reported ledger rows.
     pub reported_ledger_total: UsageBuckets,
 }
@@ -517,7 +528,24 @@ pub async fn reopen_session(
     let ledger = serde_json::to_value(ledger_rows)
         .map_err(|err| format!("reopened `{session_id}` ledger does not encode: {err}"))?;
     let mut reopened = ReopenedSession::default();
-    for message in active_path_messages(&graph, session_id.as_str())? {
+    let messages = active_path_messages(&graph, session_id.as_str())?;
+    let provider_call_ids = messages
+        .iter()
+        .flat_map(|message| {
+            message
+                .get("parts")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+        })
+        .filter_map(|part| {
+            Some((
+                part.get("call_id")?.as_str()?.to_string(),
+                part.get("provider_call_id")?.as_str()?.to_string(),
+            ))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for message in messages {
         let parts = message
             .get("parts")
             .and_then(Value::as_array)
@@ -539,8 +567,12 @@ pub async fn reopen_session(
                 .map_err(|err| {
                     format!("reopened `{session_id}` tool result blocks do not decode: {err}")
                 })?;
+                reopened.result_call_ids.push(part_str(part, "call_id"));
                 reopened.tool_results.push(ToolResultContent {
-                    call_id: part_str(part, "tool_call_id"),
+                    call_id: provider_call_ids
+                        .get(&part_str(part, "call_id"))
+                        .cloned()
+                        .unwrap_or_default(),
                     tool_name: part_str(part, "tool_name"),
                     content: lash_sansio::tool_result_text(&blocks).into_owned(),
                 });
@@ -553,17 +585,22 @@ pub async fn reopen_session(
             text: String::new(),
             tool_calls: Vec::new(),
         };
+        let mut call_ids = Vec::new();
         for part in parts {
             match part.get("kind").and_then(Value::as_str) {
                 Some("Text" | "Prose") => committed.text.push_str(&part_str(part, "content")),
-                Some("ToolCall") => committed.tool_calls.push(ToolCallIdentity {
-                    call_id: part_str(part, "tool_call_id"),
-                    tool_name: part_str(part, "tool_name"),
-                }),
+                Some("ToolCall") => {
+                    committed.tool_calls.push(ToolCallIdentity {
+                        call_id: part_str(part, "provider_call_id"),
+                        tool_name: part_str(part, "tool_name"),
+                    });
+                    call_ids.push(part_str(part, "call_id"));
+                }
                 _ => {}
             }
         }
         reopened.assistant_messages.push(committed);
+        reopened.call_ids.push(call_ids);
     }
     for row in ledger.as_array().map(Vec::as_slice).unwrap_or_default() {
         if is_reported(row) {
@@ -996,6 +1033,8 @@ mod tests {
                 assistant_messages: vec![message("caf\u{e9} \u{0} \u{1f980}"), message("e\u{301}")],
                 tool_results: vec![tool_result("{\"payload\":\"\\u0000\"}")],
                 reported_ledger_total: usage((1 << 40) + i64::from(u32::MAX), 3),
+                call_ids: Vec::new(),
+                result_call_ids: Vec::new(),
             }),
         }
     }
@@ -1015,6 +1054,8 @@ mod tests {
                 assistant_messages: vec![message("done")],
                 tool_results: Vec::new(),
                 reported_ledger_total: usage(9, 4),
+                call_ids: Vec::new(),
+                result_call_ids: Vec::new(),
             }),
         }
     }

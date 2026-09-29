@@ -52,6 +52,33 @@ use tokio::sync::Notify;
 
 use crate::runtime::effect::ToolChildCompletionRouting;
 
+/// Every leaf label a law named a call by, by the `ToolCallId` it names.
+///
+/// A law names its leaves by readable labels (`{group}-call-0`) and hands
+/// each call the fixture id that label derives; a leaf body maps the id it
+/// sees back to the label its gates and observations are keyed by.
+static LEAF_LABELS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, String>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// The call id a law's leaf labelled `label` runs under.
+pub(crate) fn leaf_call_id(label: &str) -> lash_core::ToolCallId {
+    let call_id = lash_core::ToolCallId::fixture(label);
+    LEAF_LABELS
+        .lock_recover()
+        .insert(call_id.to_string(), label.to_string());
+    call_id
+}
+
+/// The label of the leaf running under `call_id`, or the id itself for a
+/// call no law labelled.
+pub(crate) fn leaf_label(call_id: &lash_core::ToolCallId) -> String {
+    LEAF_LABELS
+        .lock_recover()
+        .get(call_id.as_str())
+        .cloned()
+        .unwrap_or_else(|| call_id.to_string())
+}
+
 /// How long the law waits for a settlement that must arrive.
 const SETTLE_BUDGET: Duration = Duration::from_secs(30);
 
@@ -434,10 +461,7 @@ impl crate::ToolProvider for LawLeafProvider {
                 }
                 match context.completion_key() {
                     Ok(key) => {
-                        let call_id = context
-                            .tool_call_id()
-                            .unwrap_or("missing-call-id")
-                            .to_string();
+                        let call_id = leaf_label(context.call_id());
                         self.observation.park(&call_id, key);
                         crate::ToolAttemptOutcome::pending(crate::PendingCompletion::new())
                     }
@@ -494,10 +518,7 @@ impl crate::ToolProvider for LawLeafProvider {
                 )
             }
             name if name == LEAF_COMMIT.trim_start_matches("tool:") => {
-                let call_id = context
-                    .tool_call_id()
-                    .unwrap_or("missing-call-id")
-                    .to_string();
+                let call_id = leaf_label(context.call_id());
                 // The gate the law orders commits through: a held call id
                 // parks its body until the law releases it.
                 self.observation.await_released(&call_id).await;
@@ -524,10 +545,7 @@ impl crate::ToolProvider for LawLeafProvider {
                 )
             }
             name if name == LEAF_SPEND_COMMIT.trim_start_matches("tool:") => {
-                let call_id = context
-                    .tool_call_id()
-                    .unwrap_or("missing-call-id")
-                    .to_string();
+                let call_id = leaf_label(context.call_id());
                 if let Err(error) = context
                     .direct_completions()
                     .complete(
@@ -563,10 +581,7 @@ impl crate::ToolProvider for LawLeafProvider {
             // sinks the law watches — the process service, the event log and
             // the process-definition registry (FIG-3470).
             name if name == LEAF_FENCE.trim_start_matches("tool:") => {
-                let call_id = context
-                    .tool_call_id()
-                    .unwrap_or("missing-call-id")
-                    .to_string();
+                let call_id = leaf_label(context.call_id());
                 self.observation.await_released(&call_id).await;
                 crate::ToolAttemptOutcome::done(
                     crate::ToolOutcomeDone::ok(
@@ -1443,18 +1458,17 @@ fn leaf_request(
     };
     let admitted = crate::AdmittedScope::new(scope.clone());
     crate::runtime::effect::ToolChildRequest::new(
-        crate::PreparedToolCall::from_parts(
-            call_id,
-            crate::ToolId::from(tool_id),
-            tool_name,
-            serde_json::json!({}),
-            None,
-            serde_json::Value::Null,
-        ),
-        admission,
-        crate::tool_dispatch::ToolAttemptEffectIdentity::Scalar {
-            parent: Some(parent.clone()),
+        crate::PreparedToolCall {
+            call_id: leaf_call_id(&call_id),
+            provider_call_id: None,
+            tool_id: crate::ToolId::from(tool_id),
+            tool_name: tool_name.into(),
+            args: serde_json::json!({}),
+            replay: None,
+            prepared_payload: serde_json::Value::Null,
         },
+        admission,
+        crate::tool_dispatch::ToolAttemptLineage::under(parent.clone()),
         crate::runtime::effect::ToolChildScope {
             opener: crate::EffectOpener::for_scope(&admitted)
                 .expect("a turn scope derives an opener"),

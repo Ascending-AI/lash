@@ -143,14 +143,15 @@ fn intent_law_batch_parent(label: &str) -> crate::RuntimeInvocation {
 async fn run_fixed_intent_attempt(
     context: &ToolDispatchContext<'static>,
 ) -> Box<crate::tool_dispatch::ToolDispatchOutcome> {
-    let prepared = crate::PreparedToolCall::from_parts(
-        "fixed-intent-call",
-        "tool:fixed_intent_law",
-        "fixed_intent_law",
-        json!({"value": "drive"}),
-        None,
-        serde_json::Value::Null,
-    );
+    let prepared = crate::PreparedToolCall {
+        call_id: crate::ToolCallId::fixture("fixed-intent-call"),
+        provider_call_id: None,
+        tool_id: "tool:fixed_intent_law".into(),
+        tool_name: "fixed_intent_law".into(),
+        args: json!({"value": "drive"}),
+        replay: None,
+        prepared_payload: serde_json::Value::Null,
+    };
     let tool_context = tool_context_for_prepared(context, &prepared);
     match coordinate_prepared_tool_call_launch_with_execution_context(
         context,
@@ -595,7 +596,7 @@ async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect
     let reply = Box::pin(execution.call_command_tool(
         &crate::CommandReplayKey::new("fixed-intent-call"),
         crate::session::ToolInvocation::new(
-            "fixed-intent-call",
+            lash_core_execution::ToolCallId::fixture("fixed-intent-call"),
             crate::ToolId::from("tool:fixed_intent_law"),
             json!({"value": "drive"}),
         ),
@@ -666,7 +667,7 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
         Box::pin(execution.call_command_tool(
             &crate::CommandReplayKey::new("fixed-intent-call"),
             crate::session::ToolInvocation::new(
-                "fixed-intent-call",
+                lash_core_execution::ToolCallId::fixture("fixed-intent-call"),
                 crate::ToolId::from("tool:fixed_intent_law"),
                 json!({"value": "drive"}),
             ),
@@ -741,14 +742,15 @@ async fn retry_drains_only_the_final_attempts_intents() {
         Arc::clone(&registry),
         Arc::clone(&world.env_store),
     );
-    let prepared = crate::PreparedToolCall::from_parts(
-        "retry-intents-call",
-        definition.id().to_string(),
-        "retry_intents",
-        json!({"value": "drive"}),
-        None,
-        serde_json::Value::Null,
-    );
+    let prepared = crate::PreparedToolCall {
+        call_id: crate::ToolCallId::fixture("retry-intents-call"),
+        provider_call_id: None,
+        tool_id: definition.id().to_string().into(),
+        tool_name: "retry_intents".into(),
+        args: json!({"value": "drive"}),
+        replay: None,
+        prepared_payload: serde_json::Value::Null,
+    };
     let tool_context = tool_context_for_prepared(&context, &prepared);
     let launch = coordinate_prepared_tool_call_launch_with_execution_context(
         &context,
@@ -773,11 +775,11 @@ async fn retry_drains_only_the_final_attempts_intents() {
     handler.close().await.expect("close the dispatch handler");
 }
 #[tokio::test]
-async fn empty_v2_batch_without_a_recorded_call_id_is_a_noop() {
+async fn empty_v2_batch_is_a_noop() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let outcomes = execute_final_tool_intents(
         &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
-        None,
+        &crate::ToolCallId::fixture("empty-batch-call"),
         &crate::ToolIntents::default(),
         None,
     )

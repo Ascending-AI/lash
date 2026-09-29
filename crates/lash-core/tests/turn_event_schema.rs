@@ -291,7 +291,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 )),
                 success: false,
                 duration_ms: 5,
-                tool_call_ids: vec!["call-1".to_string()],
+                tool_call_ids: vec![lash_core::ToolCallId::fixture("call-1")],
                 graph_key: Some("effect:s:e".to_string()),
             },
             json!({
@@ -301,7 +301,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "error": { "kind": "program", "message": "boom" },
                 "success": false,
                 "duration_ms": 5,
-                "tool_call_ids": ["call-1"],
+                "tool_call_ids": [lash_core::ToolCallId::fixture("call-1").as_str()],
                 "graph_key": "effect:s:e",
             }),
         ),
@@ -328,14 +328,16 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_call_started (all options present)",
             TurnEvent::ToolCallStarted {
-                call_id: Some("call-1".to_string()),
+                call_id: lash_core::ToolCallId::fixture("call-1"),
+                provider_call_id: Some("provider-1".to_string()),
                 name: "read_file".to_string(),
                 args: json!({ "path": "x" }),
                 graph_key: Some("effect:s:e".to_string()),
             },
             json!({
                 "type": "tool_call_started",
-                "call_id": "call-1",
+                "call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
+                "provider_call_id": "provider-1",
                 "name": "read_file",
                 "args": { "path": "x" },
                 "graph_key": "effect:s:e",
@@ -344,13 +346,15 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_call_started (all options absent)",
             TurnEvent::ToolCallStarted {
-                call_id: None,
+                call_id: lash_core::ToolCallId::fixture("call-2"),
+                provider_call_id: None,
                 name: "read_file".to_string(),
                 args: json!({ "path": "x" }),
                 graph_key: None,
             },
             json!({
                 "type": "tool_call_started",
+                "call_id": lash_core::ToolCallId::fixture("call-2").as_str(),
                 "name": "read_file",
                 "args": { "path": "x" },
             }),
@@ -358,7 +362,8 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_call_completed (all options present, success)",
             TurnEvent::ToolCallCompleted {
-                call_id: Some("call-1".to_string()),
+                call_id: lash_core::ToolCallId::fixture("call-1"),
+                provider_call_id: Some("provider-1".to_string()),
                 name: "read_file".to_string(),
                 args: json!({ "path": "x" }),
                 output: ToolCallOutput::success("ok"),
@@ -367,7 +372,8 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             },
             json!({
                 "type": "tool_call_completed",
-                "call_id": "call-1",
+                "call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
+                "provider_call_id": "provider-1",
                 "name": "read_file",
                 "args": { "path": "x" },
                 "output": {
@@ -386,7 +392,8 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_call_completed (all options absent, failure vocabulary)",
             TurnEvent::ToolCallCompleted {
-                call_id: None,
+                call_id: lash_core::ToolCallId::fixture("call-2"),
+                provider_call_id: None,
                 name: "read_file".to_string(),
                 args: json!({ "path": "x" }),
                 output: ToolCallOutput::failure(ToolFailure::tool(
@@ -399,6 +406,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             },
             json!({
                 "type": "tool_call_completed",
+                "call_id": lash_core::ToolCallId::fixture("call-2").as_str(),
                 "name": "read_file",
                 "args": { "path": "x" },
                 "output": {
@@ -419,12 +427,12 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_intent_outcome",
             TurnEvent::ToolIntentOutcome {
-                call_id: "call-1".to_string(),
+                call_id: lash_core::ToolCallId::fixture("call-1"),
                 outcome: ToolIntentExecutionOutcome::Executed {
                     identity: ToolIntentIdentity {
                         session_id: SessionId::from("session-1"),
                         execution_scope_id: "turn-1".to_string(),
-                        tool_call_id: "call-1".to_string(),
+                        tool_call_id: lash_core::ToolCallId::fixture("call-1"),
                         intent_index: 0,
                         replay_key: "tool-intent:v1:blake3:literal".to_string(),
                         minting_emission_replay_key: None,
@@ -435,13 +443,13 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             },
             json!({
                 "type": "tool_intent_outcome",
-                "call_id": "call-1",
+                "call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
                 "outcome": {
                     "status": "executed",
                     "identity": {
                         "session_id": "session-1",
                         "execution_scope_id": "turn-1",
-                        "tool_call_id": "call-1",
+                        "tool_call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
                         "intent_index": 0,
                         "replay_key": "tool-intent:v1:blake3:literal",
                     },
@@ -560,14 +568,14 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_output_progress",
             TurnEvent::ToolOutputProgress {
-                call_id: "call-1".to_string(),
+                call_id: lash_core::ToolCallId::fixture("call-1"),
                 chunk: lash_sansio::ToolOutputChunk {
                     text: "line 1\n".to_string(),
                 },
             },
             json!({
                 "type": "tool_output_progress",
-                "call_id": "call-1",
+                "call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
                 "chunk": { "text": "line 1\n" },
             }),
         ),

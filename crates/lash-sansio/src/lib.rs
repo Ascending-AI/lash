@@ -115,10 +115,10 @@ pub use redacted::Redacted;
 pub use sansio::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExpandedRow,
-    ExpandedWrapper, LlmCallError, PendingToolCall, PendingWork, ProjectorContext,
-    ProtocolDriverHandle, Response, TURN_CHECKPOINT_SCHEMA_VERSION, ToolExpansionPlan, TurnCause,
-    TurnCheckpoint, TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig, TurnProtocol,
-    UnitTurnProtocol, render_turn_causes_prompt,
+    ExpandedWrapper, LlmCallError, ModelToolCalls, PendingToolCall, PendingWork, ProjectorContext,
+    ProtocolDriverHandle, Response, ResponseToolCalls, TURN_CHECKPOINT_SCHEMA_VERSION,
+    ToolExpansionPlan, TurnCause, TurnCheckpoint, TurnCheckpointRestoreError, TurnMachine,
+    TurnMachineConfig, TurnProtocol, UnitTurnProtocol, render_turn_causes_prompt,
 };
 pub use schema_contract::{
     OmissionNullPath, OmissionNullPathSegment, ProjectionMode, ProviderSchemaCapabilities,
@@ -152,8 +152,8 @@ pub use stopped_partial::{
     TOOL_OUTPUT_CAPTURE_MAX_BYTES, ToolExecutionState, ToolOutputCapture, ToolOutputChunk,
 };
 pub use tool_call_id::{
-    InvalidToolCallId, TOOL_CALL_ID_PREFIX, ToolCallId, ToolCallPosition, ToolCallRoot,
-    ToolCallRootError,
+    InvalidToolCallId, TOOL_CALL_ID_PREFIX, ToolCallAdmission, ToolCallId, ToolCallPosition,
+    ToolCallRoot, ToolCallRootError,
 };
 pub use tool_catalog::{
     ToolCatalog, ToolCatalogBuildError, ToolCatalogBuildInput, ToolCatalogContribution,

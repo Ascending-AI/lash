@@ -73,8 +73,12 @@ pub enum ToolViewBlock {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolCallRecord {
+    /// Lash's identity for the call (ADR 0117).
+    pub call_id: crate::ToolCallId,
+    /// The model provider's id for the call, when a model issued it:
+    /// correlation only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub call_id: Option<String>,
+    pub provider_call_id: Option<String>,
     pub tool: String,
     pub args: Value,
     pub output: ToolCallOutput,
@@ -114,7 +118,7 @@ pub struct ToolIntentIdentity {
     /// The enclosing execution-scope id: a turn id for turn scope and a
     /// process id for process scope.
     pub execution_scope_id: String,
-    pub tool_call_id: String,
+    pub tool_call_id: crate::ToolCallId,
     pub intent_index: u32,
     pub replay_key: String,
     /// Replay key of the durable invocation that minted this declaration,
@@ -130,7 +134,6 @@ pub enum ToolIntentRefusalReason {
     UnsupportedProtocolVersion {
         recorded: u16,
     },
-    MissingToolCallId,
     IntentIndexOverflow,
     CountBudgetExceeded {
         actual: usize,
@@ -171,7 +174,6 @@ impl ToolIntentRefusalReason {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::UnsupportedProtocolVersion { .. } => "unsupported_protocol_version",
-            Self::MissingToolCallId => "missing_tool_call_id",
             Self::IntentIndexOverflow => "intent_index_overflow",
             Self::CountBudgetExceeded { .. } => "count_budget_exceeded",
             Self::CanonicalByteBudgetExceeded { .. } => "canonical_byte_budget_exceeded",
@@ -1015,7 +1017,6 @@ impl AttachmentMaterializationNotice {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelToolReturn {
-    pub call_id: String,
     pub tool_name: String,
     pub parts: Vec<ModelToolReturnPart>,
     /// Admission-time warnings attached without changing the tool's success outcome.
@@ -1024,7 +1025,7 @@ pub struct ModelToolReturn {
 }
 
 impl ModelToolReturn {
-    pub fn from_output(call_id: String, tool_name: String, output: &ToolCallOutput) -> Self {
+    pub fn from_output(tool_name: String, output: &ToolCallOutput) -> Self {
         let parts = match &output.outcome {
             ToolCallOutcome::Success(value) => Self::parts_from_value(value),
             ToolCallOutcome::Failure(failure) => {
@@ -1053,7 +1054,6 @@ impl ModelToolReturn {
             }
         };
         Self {
-            call_id,
             tool_name,
             parts,
             attachment_notices: Vec::new(),
@@ -1116,9 +1116,8 @@ impl ModelToolReturn {
         }
     }
 
-    pub(crate) fn text(call_id: String, tool_name: String, content: impl Into<String>) -> Self {
+    pub(crate) fn text(tool_name: String, content: impl Into<String>) -> Self {
         Self {
-            call_id,
             tool_name,
             parts: vec![ModelToolReturnPart::text(content)],
             attachment_notices: Vec::new(),
@@ -1390,7 +1389,6 @@ mod tests {
 
         assert_eq!(
             ModelToolReturn::from_output(
-                "call".into(),
                 "tool".into(),
                 &ToolCallOutput::success_tool_value(value),
             )
@@ -1405,11 +1403,8 @@ mod tests {
 
     #[test]
     fn model_tool_return_skips_empty_notices_and_round_trips_typed_notice() {
-        let mut model_return = ModelToolReturn::from_output(
-            "call".to_string(),
-            "tool".to_string(),
-            &ToolCallOutput::success("ok"),
-        );
+        let mut model_return =
+            ModelToolReturn::from_output("tool".to_string(), &ToolCallOutput::success("ok"));
         let accepted = serde_json::to_value(&model_return).expect("serialize accepted return");
         assert!(accepted.get("attachment_notices").is_none());
 
@@ -1451,7 +1446,7 @@ mod tests {
         });
 
         assert_eq!(
-            ModelToolReturn::from_output("call".into(), "tool".into(), &output).parts,
+            ModelToolReturn::from_output("tool".into(), &output).parts,
             vec![
                 ModelToolReturnPart::text("[Tool execution failed]\nboom"),
                 ModelToolReturnPart::Attachment(attachment),

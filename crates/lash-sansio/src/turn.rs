@@ -11,6 +11,8 @@ use crate::turn_driver::TurnDriverPreamble;
 
 pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub session_id: SessionId,
+    /// Where the turn's model-issued tool calls are admitted.
+    pub model_tool_calls: crate::ModelToolCalls,
     pub agent_frame_id: String,
     pub turn_id: TurnId,
     pub autonomous: bool,
@@ -48,6 +50,7 @@ pub struct PreparedTurnMachine<M: TurnProtocol = UnitTurnProtocol> {
 pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMachine<M> {
     let machine = TurnMachine::new_shared_with_turn_causes(
         TurnMachineConfig {
+            model_tool_calls: input.model_tool_calls,
             protocol_driver: input.turn_driver_preamble.config.protocol.clone(),
             projector: input.turn_driver_preamble.config.projector.clone(),
             sync_execution_environment: input
@@ -128,6 +131,7 @@ mod tests {
             _request: Arc<crate::llm::types::LlmRequest>,
             _driver_state: Option<serde_json::Value>,
             _llm_response: crate::llm::types::LlmResponse,
+            _calls: &crate::ResponseToolCalls,
             _text_streamed: bool,
         ) -> Vec<DriverAction> {
             Vec::new()
@@ -183,6 +187,7 @@ mod tests {
         });
         let prepared = build_turn(SansIoTurnInput {
             session_id: SessionId::from("session".to_string()),
+            model_tool_calls: crate::ModelToolCalls::fixture(),
             agent_frame_id: "frame-test".to_string(),
             turn_id: TurnId::from("turn"),
             autonomous: false,

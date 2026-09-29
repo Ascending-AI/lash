@@ -39,14 +39,13 @@ mod tests {
     fn tool_registration(key: &str, marker: &str) -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(
             crate::ProcessInput::ToolCall {
-                call: crate::PreparedToolCall::from_parts(
-                    key,
-                    crate::ToolId::new("test-tool"),
-                    "test_tool",
-                    serde_json::json!({"marker": marker}),
-                    None,
-                    serde_json::Value::Null,
-                ),
+                call: crate::ProcessToolCall {
+                    tool_id: crate::ToolId::new("test-tool"),
+                    tool_name: "test_tool".into(),
+                    args: serde_json::json!({"marker": marker}),
+                    replay: None,
+                    prepared_payload: serde_json::Value::Null,
+                },
             },
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
@@ -378,10 +377,9 @@ mod tests {
             &crate::derive_tool_intent_identity(
                 &crate::SessionId::from("session"),
                 "runtime",
-                Some("crashed-start"),
+                &lash_core_execution::ToolCallId::fixture("crashed-start"),
                 0,
-            )
-            .expect("the crashed start's intent identity derives"),
+            ),
         );
         let registration = |marker: &str| {
             let mut registration = tool_registration("crashed-start", marker);

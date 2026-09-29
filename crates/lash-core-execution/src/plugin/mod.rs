@@ -924,7 +924,6 @@ mod tests {
             reg.tool_results().presentation_step(Arc::new(|input| {
                 Box::pin(async move {
                     Ok(crate::ModelToolReturn::from_output(
-                        input.context.call_id,
                         input.context.tool_name,
                         &input.context.output,
                     ))

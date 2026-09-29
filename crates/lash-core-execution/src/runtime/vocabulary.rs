@@ -309,7 +309,7 @@ pub enum TurnEvent {
     /// One chunk a running tool reported through its progress sink, published
     /// after the chunk was persisted to the turn's capture (ADR 0114 §2.2).
     ToolOutputProgress {
-        call_id: String,
+        call_id: crate::ToolCallId,
         chunk: lash_sansio::ToolOutputChunk,
     },
     /// A stopped turn's partial is durable: published after the commit that
@@ -336,13 +336,16 @@ pub enum TurnEvent {
         error: Option<crate::CellFailure>,
         success: bool,
         duration_ms: u64,
-        tool_call_ids: Vec<String>,
+        tool_call_ids: Vec<crate::ToolCallId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
     },
     ToolCallStarted {
+        /// Lash's identity for the call (ADR 0117).
+        call_id: crate::ToolCallId,
+        /// The model provider's id for the call, when a model issued it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
+        provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
         /// Graph key of the enclosing code block, when this tool call ran
@@ -351,8 +354,11 @@ pub enum TurnEvent {
         graph_key: Option<String>,
     },
     ToolCallCompleted {
+        /// Lash's identity for the call (ADR 0117).
+        call_id: crate::ToolCallId,
+        /// The model provider's id for the call, when a model issued it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
+        provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
         output: crate::ToolCallOutput,
@@ -363,7 +369,7 @@ pub enum TurnEvent {
         graph_key: Option<String>,
     },
     ToolIntentOutcome {
-        call_id: String,
+        call_id: crate::ToolCallId,
         outcome: crate::ToolIntentExecutionOutcome,
     },
     FinalValue {

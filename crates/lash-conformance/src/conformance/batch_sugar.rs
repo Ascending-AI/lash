@@ -45,7 +45,7 @@ struct Execution {
     tool: String,
     value: String,
     attempt: u32,
-    call_id: Option<String>,
+    call_id: crate::ToolCallId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -191,7 +191,7 @@ impl crate::ToolProvider for SugarTools {
             tool: call.name().to_string(),
             value: value.clone(),
             attempt: call.context.attempt_number(),
-            call_id: call.context.tool_call_id().map(str::to_string),
+            call_id: call.context.call_id().clone(),
         });
         if call.name() == "gate" {
             self.witness.gate(&value).await;
@@ -484,7 +484,7 @@ fn records(turn: &crate::AssembledTurn) -> Vec<crate::ToolCallRecord> {
 fn record<'a>(turn: &'a crate::AssembledTurn, call_id: &str) -> Vec<&'a crate::ToolCallRecord> {
     turn.tool_calls
         .iter()
-        .filter(|record| record.call_id.as_deref() == Some(call_id))
+        .filter(|record| record.provider_call_id.as_deref() == Some(call_id))
         .collect()
 }
 
@@ -506,16 +506,30 @@ fn rows(record: &crate::ToolCallRecord) -> Vec<(u64, String, bool)> {
         .unwrap_or_default()
 }
 
-/// Every tool result the transcript holds, as `(call id, tool, content)`.
+/// Every tool result the transcript holds, as `(provider call id, tool,
+/// content)`: a result answers the provider correlation of the call it pairs
+/// with by `ToolCallId`, and is empty when it pairs with none.
 fn transcript_results(turn: &crate::AssembledTurn) -> Vec<(String, String, String)> {
     let view = turn.state.read_view();
-    view.messages()
+    let parts = view
+        .messages()
         .iter()
         .flat_map(|message| message.parts.iter())
+        .collect::<Vec<_>>();
+    let provider = |call_id: Option<&crate::ToolCallId>| {
+        parts
+            .iter()
+            .find(|part| part.kind() == crate::PartKind::ToolCall && part.call_id() == call_id)
+            .and_then(|part| part.provider_call_id())
+            .unwrap_or_default()
+            .to_string()
+    };
+    parts
+        .iter()
         .filter(|part| part.kind() == crate::PartKind::ToolResult)
         .map(|part| {
             (
-                part.tool_call_id().unwrap_or_default().to_string(),
+                provider(part.call_id()),
                 part.tool_name().unwrap_or_default().to_string(),
                 part.content().into_owned(),
             )
@@ -533,7 +547,7 @@ fn transcript_calls(turn: &crate::AssembledTurn) -> Vec<(String, String, Option<
         .filter(|part| part.kind() == crate::PartKind::ToolCall)
         .map(|part| {
             (
-                part.tool_call_id().unwrap_or_default().to_string(),
+                part.provider_call_id().unwrap_or_default().to_string(),
                 part.tool_name().unwrap_or_default().to_string(),
                 part.tool_replay().and_then(|replay| replay.item_id.clone()),
             )
@@ -550,21 +564,26 @@ fn assert_finished(context: &str, turn: &crate::AssembledTurn) {
     );
 }
 
+/// A member is named under its wrapper and carries no provider correlation:
+/// every host record, transcript call and transcript result is a call the
+/// model issued.
 fn assert_no_member_is_a_call(context: &str, turn: &crate::AssembledTurn) {
     let members = records(turn)
         .into_iter()
-        .filter_map(|record| record.call_id)
+        .filter(|record| record.provider_call_id.is_none())
+        .map(|record| format!("record {}", record.call_id))
         .chain(
             transcript_results(turn)
                 .into_iter()
-                .map(|(call_id, _, _)| call_id),
+                .filter(|(call_id, _, _)| call_id.is_empty())
+                .map(|(_, tool, _)| format!("result of {tool}")),
         )
         .chain(
             transcript_calls(turn)
                 .into_iter()
-                .map(|(call_id, _, _)| call_id),
+                .filter(|(call_id, _, _)| call_id.is_empty())
+                .map(|(_, tool, _)| format!("call of {tool}")),
         )
-        .filter(|call_id| call_id.contains("/batch/"))
         .collect::<Vec<_>>();
     assert!(
         members.is_empty(),
@@ -740,7 +759,7 @@ pub async fn batch_admission_and_identity_contract(
             .filter(|record| record.tool == "echo" && record.args["value"] == value)
             .collect::<Vec<_>>();
         assert_eq!(calls.len(), 1, "{context}: `{value}` is recorded once");
-        calls[0].call_id.clone()
+        calls[0].provider_call_id.clone()
     });
     assert_eq!(
         same[0].as_deref(),
@@ -909,7 +928,7 @@ pub async fn batch_folds_to_one_transcript_call(
     );
     let reported = records(&turn)
         .into_iter()
-        .map(|record| (record.call_id.unwrap_or_default(), record.tool))
+        .map(|record| (record.provider_call_id.unwrap_or_default(), record.tool))
         .collect::<Vec<_>>();
     assert_eq!(
         reported, results,

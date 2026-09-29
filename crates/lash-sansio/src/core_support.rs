@@ -367,12 +367,12 @@ impl ToolCancellationCoreSupport for ToolCancellation {
 }
 
 pub trait ModelToolReturnCoreSupport {
-    fn text(call_id: String, tool_name: String, content: impl Into<String>) -> Self;
+    fn text(tool_name: String, content: impl Into<String>) -> Self;
 }
 
 impl ModelToolReturnCoreSupport for ModelToolReturn {
-    fn text(call_id: String, tool_name: String, content: impl Into<String>) -> Self {
-        ModelToolReturn::text(call_id, tool_name, content)
+    fn text(tool_name: String, content: impl Into<String>) -> Self {
+        ModelToolReturn::text(tool_name, content)
     }
 }
 

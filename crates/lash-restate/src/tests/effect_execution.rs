@@ -1654,11 +1654,11 @@ pub(super) fn durable_wait_index_is_keyed_by_scope_for_session_free_waits() {
     for (scope, wait) in [
         (
             process.clone(),
-            AwaitEventWaitIdentity::tool_completion("a"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("a")),
         ),
         (
             process.clone(),
-            AwaitEventWaitIdentity::tool_completion("b"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("b")),
         ),
     ] {
         let key = restate_await_event_key(&scope, wait).expect("mint");
@@ -1691,7 +1691,10 @@ pub(super) async fn scope_retirement_and_mint_consult_restate_rather_than_answer
         lash_core::RuntimeErrorCode::EngineAwaitEventSessionUpdate
     );
     let mint = host
-        .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("late"))
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("late")),
+        )
         .await
         .expect_err("a session-free mint reads the durable fence first");
     assert_eq!(

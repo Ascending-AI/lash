@@ -169,7 +169,9 @@ impl Roll {
     fn wait_key(&self, label: &str) -> AwaitEventKey {
         test_restate_await_event_key(
             &ExecutionScope::runtime_operation(label),
-            lash_core::AwaitEventWaitIdentity::tool_completion(label),
+            lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                label,
+            )),
         )
         .expect("a wait key")
     }

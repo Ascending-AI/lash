@@ -43,7 +43,7 @@ impl HistoryChecker for CompletionOwnership {
         for (key, registered) in &owners {
             let calls = registered
                 .iter()
-                .map(|(_, call)| (&call.session, &call.scope, &call.logical))
+                .map(|(_, call)| (&call.session, &call.scope, &call.identity))
                 .collect::<BTreeSet<_>>();
             if calls.len() > 1 {
                 violations.push(
@@ -54,7 +54,7 @@ impl HistoryChecker for CompletionOwnership {
                             calls.len(),
                             registered
                                 .iter()
-                                .map(|(_, call)| format!("{} at {}", call.identity, call.logical))
+                                .map(|(_, call)| format!("{} in {}", call.identity, call.scope))
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         ),

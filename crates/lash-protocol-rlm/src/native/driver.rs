@@ -102,10 +102,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         _request: Arc<lash_core::LlmRequest>,
         driver_state: Option<lash_core::ProtocolDriverState>,
         llm_response: LlmResponse,
+        calls: &lash_core::sansio::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         let mut actions = Vec::new();
-        let parts = super::tool::assistant_parts(normalized_response_parts(&llm_response));
+        let parts = super::tool::assistant_parts(
+            normalized_response_parts(&llm_response),
+            calls.call_ids(&llm_response),
+        );
         let fingerprint = native_reply_fingerprint(&parts);
         let prose = llm_response.full_text();
         let reasoning = parts
@@ -625,6 +629,7 @@ fn terminal_outcome_from_tool_result(record: &ToolCallRecord) -> Option<TurnOutc
 fn tool_call_event(record: ToolCallRecord) -> SessionStreamEvent {
     SessionStreamEvent::ToolCall {
         call_id: record.call_id,
+        provider_call_id: record.provider_call_id,
         name: record.tool,
         args: record.args,
         output: record.output,
@@ -676,6 +681,7 @@ fn executed_call_ledger(records: &[lash_core::ExecutedCall]) -> (Vec<RlmExecuted
 fn bounded_tool_call_record(record: &ToolCallRecord) -> ToolCallRecord {
     ToolCallRecord {
         call_id: record.call_id.clone(),
+        provider_call_id: record.provider_call_id.clone(),
         tool: record.tool.clone(),
         args: record.args.clone(),
         output: bounded_tool_call_output(&record.output),

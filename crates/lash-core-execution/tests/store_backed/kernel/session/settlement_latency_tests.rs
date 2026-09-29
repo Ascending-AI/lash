@@ -55,11 +55,10 @@ impl LeafSettledSignal {
     fn presentation_step(&self) -> crate::plugin::ToolPresentationStep {
         let signal = self.clone();
         Arc::new(move |input: crate::plugin::ToolPresentationInput| {
-            if input.context.call_id == signal.call_id {
+            if input.context.call_id == crate::ToolCallId::fixture(signal.call_id) {
                 signal.raised.send_replace(true);
             }
             let projected = crate::ModelToolReturn::text(
-                input.context.call_id,
                 input.context.tool_name,
                 input.context.output.value_for_projection().to_string(),
             );
@@ -393,7 +392,7 @@ async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batc
         .call_command_tool(
             &crate::CommandReplayKey::new("scalar"),
             crate::session::ToolInvocation::new(
-                "scalar",
+                lash_core_execution::ToolCallId::fixture("scalar"),
                 crate::ToolId::from("tool:granted_retry_probe"),
                 serde_json::json!({}),
             )
@@ -405,7 +404,7 @@ async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batc
     let batch = context
         .call_tool_batch(vec![
             ToolInvocation::new(
-                "batch",
+                lash_core_execution::ToolCallId::fixture("batch"),
                 crate::ToolId::from("tool:granted_retry_probe"),
                 serde_json::json!({}),
             )
@@ -447,12 +446,12 @@ async fn deferred_leaves_settle_in_completion_order_not_launch_order() {
     let replies = context
         .call_tool_batch(vec![
             ToolInvocation::new(
-                "slow",
+                lash_core_execution::ToolCallId::fixture("slow"),
                 crate::ToolId::from("tool:slow_fail"),
                 serde_json::json!({}),
             ),
             ToolInvocation::new(
-                "fast",
+                lash_core_execution::ToolCallId::fixture("fast"),
                 crate::ToolId::from("tool:fast_fail"),
                 serde_json::json!({}),
             ),
@@ -563,12 +562,12 @@ async fn drain_slot_handshake_batch() -> crate::session::ToolBatchReplies {
     let replies = context
         .call_tool_batch(vec![
             ToolInvocation::new(
-                "slow-sync",
+                lash_core_execution::ToolCallId::fixture("slow-sync"),
                 crate::ToolId::from(format!("tool:{SLOW_SYNCHRONOUS_PROBE}")),
                 serde_json::json!({}),
             ),
             ToolInvocation::new(
-                "fast",
+                lash_core_execution::ToolCallId::fixture("fast"),
                 crate::ToolId::from("tool:fast_fail"),
                 serde_json::json!({}),
             ),
@@ -606,12 +605,12 @@ async fn completion_order_follows_the_delays_in_both_directions() {
     let replies = context
         .call_tool_batch(vec![
             ToolInvocation::new(
-                "fast",
+                lash_core_execution::ToolCallId::fixture("fast"),
                 crate::ToolId::from("tool:fast_fail"),
                 serde_json::json!({}),
             ),
             ToolInvocation::new(
-                "slow",
+                lash_core_execution::ToolCallId::fixture("slow"),
                 crate::ToolId::from("tool:slow_fail"),
                 serde_json::json!({}),
             ),
@@ -813,12 +812,12 @@ async fn mixed_batch(
     });
 
     let tool_call = ToolInvocation::new(
-        "tool-leaf",
+        lash_core_execution::ToolCallId::fixture("tool-leaf"),
         crate::ToolId::from(format!("tool:{TOOL_LEAF}")),
         serde_json::json!({}),
     );
     let process_call = ToolInvocation::new(
-        "process-await-leaf",
+        lash_core_execution::ToolCallId::fixture("process-await-leaf"),
         crate::ToolId::from(format!("tool:{PROCESS_AWAIT_LEAF}")),
         serde_json::json!({}),
     );

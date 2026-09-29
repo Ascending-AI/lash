@@ -26,6 +26,7 @@ fn fresh_message_id() -> String {
 
 fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineConfig {
     TurnMachineConfig {
+        model_tool_calls: crate::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
         sync_execution_environment: false,
@@ -267,12 +268,12 @@ fn completed_tool(
     output: ToolCallOutput,
 ) -> CompletedToolCall {
     CompletedToolCall {
-        call_id: call_id.to_string(),
+        call_id: crate::ToolCallId::fixture(&call_id),
+        provider_call_id: None,
         tool_name: tool_name.to_string(),
         args,
         output,
         model_return: ModelToolReturn {
-            call_id: call_id.to_string(),
             tool_name: tool_name.to_string(),
             parts: vec![ModelToolReturnPart::text(format!("{tool_name} result"))],
             attachment_notices: Vec::new(),
@@ -317,15 +318,18 @@ fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
         panic!("reporting must precede accounting: {effects:?}");
     };
     assert_eq!(completed.len(), 1);
-    assert_eq!(completed[0].call_id, "call-refused");
+    assert_eq!(
+        completed[0].call_id,
+        crate::ToolCallId::fixture("call-refused")
+    );
     assert_eq!(completed[0].tool_name, "catalog.private");
     assert!(matches!(
         &effects[1],
         Effect::Emit(SessionStreamEvent::ToolCall {
-            call_id: Some(call_id),
+            call_id,
             name,
             ..
-        }) if call_id == "call-refused" && name == "catalog.private"
+        }) if *call_id == crate::ToolCallId::fixture("call-refused") && name == "catalog.private"
     ));
 }
 
@@ -345,6 +349,7 @@ impl ProtocolDriverHandle for ProseDriver {
         _request: Arc<LlmRequest>,
         _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
+        _calls: &crate::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         vec![
@@ -472,6 +477,7 @@ impl ProtocolDriverHandle for ExecDriver {
         _request: Arc<LlmRequest>,
         _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
+        _calls: &crate::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         Vec::new()
@@ -524,6 +530,7 @@ impl ProtocolDriverHandle for SyncThenAdvanceDriver {
         _request: Arc<LlmRequest>,
         _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
+        _calls: &crate::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         if ctx.protocol_iteration() == ctx.protocol_run_offset() {
@@ -573,6 +580,7 @@ impl ProtocolDriverHandle for CellEveryIterationDriver {
         _request: Arc<LlmRequest>,
         _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
+        _calls: &crate::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Exec {
@@ -769,6 +777,7 @@ impl ProtocolDriverHandle for NoProgressFeedbackAtBudgetDriver {
         _request: Arc<LlmRequest>,
         _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
+        _calls: &crate::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         vec![
@@ -873,18 +882,21 @@ impl ProtocolDriverHandle for ToolBatchDriver {
         _request: Arc<LlmRequest>,
         _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
+        _calls: &crate::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Tools {
             calls: vec![
                 PendingToolCall {
-                    call_id: "call-read".to_string(),
+                    call_id: crate::ToolCallId::fixture("call-read"),
+                    provider_call_id: None,
                     tool_name: "read_file".to_string(),
                     args: serde_json::json!({"path": "a.txt"}),
                     replay: None,
                 },
                 PendingToolCall {
-                    call_id: "call-search".to_string(),
+                    call_id: crate::ToolCallId::fixture("call-search"),
+                    provider_call_id: None,
                     tool_name: "search".to_string(),
                     args: serde_json::json!({"q": "needle"}),
                     replay: Some(ProviderReplayMeta {
@@ -1601,7 +1613,10 @@ fn checkpoint_preserves_parallel_tool_batch_before_any_result() {
         .expect("restored tool batch");
     assert_eq!(restored_tool_id, tool_id);
     assert_eq!(restored_calls.len(), 2);
-    assert_eq!(restored_calls[0].call_id, "call-read");
+    assert_eq!(
+        restored_calls[0].call_id,
+        crate::ToolCallId::fixture("call-read")
+    );
     assert_eq!(restored_calls[1].tool_name, "search");
     assert_eq!(
         restored_calls[1]

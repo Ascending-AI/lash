@@ -424,6 +424,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for CheckpointDriver {
         _request: Arc<lash_core::LlmRequest>,
         _driver_state: Option<lash_core::ProtocolDriverState>,
         _llm_response: LlmResponse,
+        _calls: &lash_sansio::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         vec![DriverAction::Finish(TurnOutcome::Finished(
@@ -463,6 +464,7 @@ fn checkpoint_config(
     protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>>,
 ) -> TurnMachineConfig {
     TurnMachineConfig {
+        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
         sync_execution_environment: false,
@@ -658,7 +660,10 @@ fn checkpoint_machine(
 fn checkpoint_tool_calls(protocol_iteration: usize) -> Vec<PendingToolCall> {
     (0..24)
         .map(|index| PendingToolCall {
-            call_id: format!("checkpoint-call-{protocol_iteration}-{index}"),
+            call_id: lash_sansio::ToolCallId::fixture(&format!(
+                "checkpoint-call-{protocol_iteration}-{index}"
+            )),
+            provider_call_id: None,
             tool_name: format!("checkpoint_parallel_tool_{}", index % 6),
             args: serde_json::json!({
                 "index": index,
@@ -694,13 +699,10 @@ fn completed_checkpoint_tool(index: usize, call: PendingToolCall) -> CompletedTo
     };
     CompletedToolCall {
         call_id: call.call_id.clone(),
+        provider_call_id: call.provider_call_id.clone(),
         tool_name: call.tool_name.clone(),
         args: call.args,
-        model_return: ModelToolReturn::from_output(
-            call.call_id.clone(),
-            call.tool_name.clone(),
-            &output,
-        ),
+        model_return: ModelToolReturn::from_output(call.tool_name.clone(), &output),
         output,
         intent_outcomes: Vec::new(),
         replay: call.replay,

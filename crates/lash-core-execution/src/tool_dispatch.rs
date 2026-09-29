@@ -18,14 +18,16 @@ pub use pending_resolver::{
 };
 
 pub use attempt_coordinator::{
-    GroupChildCoordination, ToolAttemptEffectIdentity, coordinate_tool_invocation,
+    GroupChildCoordination, ToolAttemptLineage, coordinate_tool_invocation,
 };
 pub(crate) use attempt_coordinator::{commit_group_child_boundary, group_child_cancelled};
 #[cfg(feature = "testing")]
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 #[cfg(not(feature = "testing"))]
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
-pub use context::{PendingToolDispatchOutcome, ToolDispatchOutcome, ToolPreparationOutcome};
+pub use context::{
+    PendingToolDispatchOutcome, ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
+};
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
 pub(crate) use execution::execute_prepared_tool_attempt_effect;

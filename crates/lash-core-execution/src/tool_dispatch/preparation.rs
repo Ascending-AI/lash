@@ -11,29 +11,46 @@ use crate::{
 #[cfg(any(test, feature = "testing"))]
 use super::context::ToolDispatchOutcome;
 use super::context::{
-    ToolDispatchContext, ToolPreparationOutcome, completed_preparation, runtime_failure,
+    ToolCallIds, ToolDispatchContext, ToolPreparationOutcome, completed_preparation,
+    runtime_failure,
 };
 use super::directives::apply_before_tool_directives;
 #[cfg(any(test, feature = "testing"))]
 use super::execution::dispatch_prepared_tool_call_with_execution_context;
 use super::retry::normalized_outcome;
 
+/// Dispatches one call on `tool_name` directly: a test's shortcut past the
+/// turn that would admit it, named `ToolCallId::fixture("dispatch")`.
 #[cfg(any(test, feature = "testing"))]
 pub async fn dispatch_tool_call(
     context: &ToolDispatchContext<'_>,
     tool_name: String,
     args: serde_json::Value,
 ) -> ToolDispatchOutcome {
-    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone())).build();
-    Box::pin(dispatch_tool_call_with_execution_context(
-        context,
+    let pending = crate::sansio::PendingToolCall {
+        call_id: crate::ToolCallId::fixture("dispatch"),
+        provider_call_id: None,
         tool_name,
         args,
-        tool_context,
-    ))
-    .await
+        replay: None,
+    };
+    match prepare_tool_call_with_context(context, pending).await {
+        ToolPreparationOutcome::Prepared(prepared) => {
+            let tool_context =
+                ToolContext::from_dispatch(Arc::new(context.clone()), &prepared).build();
+            Box::pin(dispatch_prepared_tool_call_with_execution_context(
+                context,
+                *prepared,
+                tool_context,
+            ))
+            .await
+        }
+        ToolPreparationOutcome::Completed(outcome) => *outcome,
+    }
 }
 
+/// Dispatches `tool_name` as the admitted call `tool_context` runs, under
+/// the dispatch state it carries.
 #[cfg(any(test, feature = "testing"))]
 pub async fn dispatch_tool_call_with_execution_context<'run>(
     context: &ToolDispatchContext<'run>,
@@ -42,21 +59,13 @@ pub async fn dispatch_tool_call_with_execution_context<'run>(
     tool_context: ToolContext<'run>,
 ) -> ToolDispatchOutcome {
     let pending = crate::sansio::PendingToolCall {
-        call_id: tool_context
-            .tool_call_id()
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| format!("tool:{}:{}", context.session_id, tool_name)),
+        call_id: tool_context.call_id().clone(),
+        provider_call_id: None,
         tool_name,
         args,
         replay: None,
     };
-    match prepare_tool_call_with_context(
-        context,
-        pending,
-        tool_context.tool_call_id().map(str::to_string),
-    )
-    .await
-    {
+    match prepare_tool_call_with_context(context, pending).await {
         ToolPreparationOutcome::Prepared(prepared) => {
             Box::pin(dispatch_prepared_tool_call_with_execution_context(
                 context,
@@ -72,13 +81,14 @@ pub async fn dispatch_tool_call_with_execution_context<'run>(
 pub async fn prepare_tool_call_with_context(
     context: &ToolDispatchContext<'_>,
     pending: crate::sansio::PendingToolCall,
-    tool_call_id: Option<String>,
 ) -> ToolPreparationOutcome {
     let tool_name = pending.tool_name.clone();
+    let ids = ToolCallIds::of_pending(&pending);
     let Some(definition) = resolve_callable_definition(context, &tool_name) else {
         return completed_preparation(
             normalized_outcome(
                 context,
+                &ids,
                 tool_name,
                 pending.args,
                 runtime_failure(
@@ -95,7 +105,6 @@ pub async fn prepare_tool_call_with_context(
         definition.manifest.clone(),
         Arc::clone(&definition.contract),
         pending,
-        tool_call_id,
         ProviderPreparation::Live(None),
     )
     .await
@@ -116,7 +125,6 @@ pub async fn prepare_granted_tool_call_with_context(
     context: &ToolDispatchContext<'_>,
     grant: &ToolExecutionGrant,
     mut pending: crate::sansio::PendingToolCall,
-    tool_call_id: Option<String>,
 ) -> ToolPreparationOutcome {
     pending.tool_name = grant.manifest().name.clone();
     prepare_authorized_tool_call_with_context(
@@ -124,7 +132,6 @@ pub async fn prepare_granted_tool_call_with_context(
         grant.manifest().clone(),
         Arc::new(grant.contract().clone()),
         pending,
-        tool_call_id,
         ProviderPreparation::Live(Some(grant)),
     )
     .await
@@ -143,7 +150,6 @@ pub async fn prepare_recorded_tool_call_with_context(
     context: &ToolDispatchContext<'_>,
     binding: &ToolExecutionGrant,
     mut pending: crate::sansio::PendingToolCall,
-    tool_call_id: Option<String>,
 ) -> ToolPreparationOutcome {
     pending.tool_name = binding.manifest().name.clone();
     let tool_id = &binding.manifest().id;
@@ -157,7 +163,6 @@ pub async fn prepare_recorded_tool_call_with_context(
         binding.manifest().clone(),
         Arc::new(binding.contract().clone()),
         pending,
-        tool_call_id,
         preparation,
     )
     .await
@@ -176,10 +181,10 @@ async fn prepare_authorized_tool_call_with_context(
     manifest: ToolManifest,
     contract: Arc<crate::ToolContract>,
     pending: crate::sansio::PendingToolCall,
-    tool_call_id: Option<String>,
     preparation: ProviderPreparation<'_>,
 ) -> ToolPreparationOutcome {
     let tool_name = manifest.name.clone();
+    let ids = ToolCallIds::of_pending(&pending);
     let mut pending = pending;
     let mut args = pending.args;
 
@@ -200,6 +205,7 @@ async fn prepare_authorized_tool_call_with_context(
             return completed_preparation(
                 normalized_outcome(
                     context,
+                    &ids,
                     tool_name,
                     args,
                     runtime_failure(
@@ -216,12 +222,15 @@ async fn prepare_authorized_tool_call_with_context(
     let applied = apply_before_tool_directives(context, args, directives).await;
     args = applied.args;
     if let Some(result) = applied.short_circuit {
-        return completed_preparation(normalized_outcome(context, tool_name, args, result).await);
+        return completed_preparation(
+            normalized_outcome(context, &ids, tool_name, args, result).await,
+        );
     }
     if let Err(err) = validate_tool_input(&contract, &args) {
         return completed_preparation(
             normalized_outcome(
                 context,
+                &ids,
                 tool_name,
                 args,
                 runtime_failure(ToolFailureClass::InvalidRequest, "invalid_tool_args", err),
@@ -247,7 +256,7 @@ async fn prepare_authorized_tool_call_with_context(
         context.session_id.clone(),
         Arc::clone(&context.sessions),
         context.turn_context.clone(),
-        tool_call_id,
+        pending.call_id.clone(),
         execution_binding,
     );
     let prepare_context = match grant {
@@ -261,12 +270,35 @@ async fn prepare_authorized_tool_call_with_context(
     };
     let prepared = context.tools.prepare_tool_call(prepare_call).await;
     match prepared {
+        Ok(prepared)
+            if prepared.call_id != ids.call_id
+                || prepared.provider_call_id != ids.provider_call_id =>
+        {
+            completed_preparation(
+                normalized_outcome(
+                    context,
+                    &ids,
+                    tool_name,
+                    args,
+                    runtime_failure(
+                        ToolFailureClass::Internal,
+                        "prepared_call_id_mismatch",
+                        format!(
+                            "Tool provider prepared call `{}` for admitted call `{}`: a call's identity is fixed at admission",
+                            prepared.call_id, ids.call_id
+                        ),
+                    ),
+                )
+                .await,
+            )
+        }
         Ok(prepared) if prepared.tool_id == manifest.id && prepared.tool_name == manifest.name => {
             ToolPreparationOutcome::Prepared(Box::new(prepared))
         }
         Ok(prepared) if prepared.tool_id != manifest.id => completed_preparation(
             normalized_outcome(
                 context,
+                &ids,
                 tool_name,
                 args,
                 runtime_failure(
@@ -283,6 +315,7 @@ async fn prepare_authorized_tool_call_with_context(
         Ok(prepared) => completed_preparation(
             normalized_outcome(
                 context,
+                &ids,
                 tool_name,
                 args,
                 runtime_failure(
@@ -297,7 +330,7 @@ async fn prepare_authorized_tool_call_with_context(
             .await,
         ),
         Err(result) => {
-            completed_preparation(normalized_outcome(context, tool_name, args, result).await)
+            completed_preparation(normalized_outcome(context,&ids, tool_name, args, result).await)
         }
     }
 }

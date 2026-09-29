@@ -52,12 +52,12 @@ impl RuntimeTurnDriver<'_> {
         let mut results = vec![None; call_count];
         let mut prepared_entries = Vec::new();
         for (index, call) in calls.into_iter().enumerate() {
-            let call_id = call.call_id.clone();
+            let ids = crate::tool_dispatch::ToolCallIds::of_pending(&call);
+            let call_id = ids.call_id.clone();
             let replay = call.replay.clone();
             // The turn-dispatched protocol path holds no invocation: key each
             // call's observation lanes on the iteration, its index within it
-            // and the call id, so a call id the model repeats across
-            // iterations or frames mints distinct observations (ADR 0105 §1).
+            // and its `ToolCallId` (ADR 0105 §1).
             let call_key = format!("{}:{index}:{call_id}", machine.protocol_iteration());
             // A call on a tool that drifted from the turn's recorded surface
             // is prepared under its recorded definition, so the child it
@@ -86,7 +86,7 @@ impl RuntimeTurnDriver<'_> {
                 crate::tool_dispatch::ToolPreparationOutcome::Completed(outcome) => {
                     let completed = prepare_context
                         .complete_undispatched_tool_call(
-                            call_id.clone(),
+                            ids,
                             admitted_tool_id,
                             replay,
                             *outcome,

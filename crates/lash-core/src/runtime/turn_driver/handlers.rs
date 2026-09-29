@@ -671,7 +671,7 @@ impl RuntimeTurnDriver<'_> {
                                 .calls
                                 .iter()
                                 .filter_map(|call| call.host_record.as_ref())
-                                .filter_map(|record| record.call_id.clone())
+                                .map(|record| record.call_id.clone())
                                 .collect(),
                             graph_key: graph_key.clone(),
                         },

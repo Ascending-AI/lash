@@ -326,7 +326,6 @@ impl RuntimeErrorCode {
             // the child request is refused admission.
             Self::RuntimeEffectToolChildRequestAdmission => Terminal,
             // the child request names an inconsistent call id.
-            Self::RuntimeEffectToolChildRequestCallId => Terminal,
             // the child request names an inconsistent opener.
             Self::RuntimeEffectToolChildRequestOpener => Terminal,
             // the child request version is unsupported.
@@ -351,8 +350,6 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectSleepCancelled => Redrivable,
             // the effect task died without reporting; nothing was recorded.
             Self::RuntimeEffectTaskJoin => Redrivable,
-            // the attempt names an inconsistent call id.
-            Self::RuntimeEffectToolAttemptCallId => Terminal,
             // the attempt capture version is unsupported.
             Self::RuntimeEffectToolAttemptCaptureVersion => Terminal,
             // the attempt index is inconsistent.
@@ -385,8 +382,6 @@ impl RuntimeErrorCode {
             Self::SessionToolRegistry => Terminal,
             // the same catalog resolves the same way.
             Self::ToolCatalogResolutionFailed => Terminal,
-            // the completion key names no call id.
-            Self::ToolCompletionKeyMissingCallId => Terminal,
             // the tool did not declare deferral.
             Self::ToolDeferralNotDeclared => Terminal,
             // the cancel watch failed transiently.

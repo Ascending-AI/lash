@@ -127,6 +127,7 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for EffectCo
         _request: Arc<lash_core::LlmRequest>,
         _driver_state: Option<lash_core::ProtocolDriverState>,
         _llm_response: LlmResponse,
+        _calls: &lash_core::sansio::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<lash_core::DriverAction> {
         Vec::new()

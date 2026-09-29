@@ -12,9 +12,9 @@
 //! over the tier's host and stores per execution, a scripted model and the
 //! probe tools below, which record the identity each attempt saw.
 //!
-//! What a law reads as "the identity" is `AttemptIdentity`, taken in one
-//! place (`AttemptIdentity::of`), so the cutover to a lash-minted call id
-//! (FIG-4080) changes one function and no law.
+//! What a law reads as "the identity" is `AttemptIdentity`: the lash-minted
+//! `ToolCallId` an attempt reads from `AttemptContext::call_id()` (ADR 0117),
+//! beside its attempt number.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -72,36 +72,12 @@ const DRIFTING: &str = "identity_drifting";
 
 /// The tool-facing identity one attempt saw.
 ///
-/// `call_id` is the key a tool author is told to key idempotency on.
-/// Until FIG-4080 it is the optional `tool_call_id()` accessor — the model
-/// provider's raw call id — and `replay_key` the optional
-/// `lash-tool:{session}:{call_id}:{tool}` key derived from it; FIG-4080 puts
-/// the lash-minted `ToolCallId` here and deletes both accessors.
+/// `call_id` is the key a tool author is told to key idempotency on: the
+/// `ToolCallId` lash minted for the call. `attempt` is separate from it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AttemptIdentity {
-    pub(crate) call_id: Option<String>,
-    pub(crate) replay_key: Option<String>,
+    pub(crate) call_id: lash_core::ToolCallId,
     pub(crate) attempt: u32,
-}
-
-impl AttemptIdentity {
-    /// The one place a law reads the identity lash hands an attempt.
-    fn of(context: &crate::AttemptContext<'_>) -> Self {
-        Self {
-            call_id: context.tool_call_id().map(str::to_owned),
-            replay_key: context.replay_key().map(str::to_owned),
-            attempt: context.attempt_number(),
-        }
-    }
-
-    /// The idempotency keys a tool author can key on: every one must differ
-    /// between two logical calls.
-    fn keys(&self) -> [(&'static str, Option<&str>); 2] {
-        [
-            ("tool_call_id", self.call_id.as_deref()),
-            ("replay_key", self.replay_key.as_deref()),
-        ]
-    }
 }
 
 /// One execution of a probe tool's body.
@@ -336,7 +312,10 @@ impl crate::ToolProvider for IdentityProbes {
             Ok(args) => args,
             Err(error) => return crate::ToolOutcome::err_fmt(error).into(),
         };
-        let identity = AttemptIdentity::of(call.context);
+        let identity = AttemptIdentity {
+            call_id: call.context.call_id().clone(),
+            attempt: call.context.attempt_number(),
+        };
         self.witness.started.lock_recover().push(args.label.clone());
         if call.name() == DEFERRED {
             return self.deferred(&call, args, identity).await;
@@ -673,7 +652,7 @@ impl World {
     }
 
     /// The session's store on the tier.
-    pub(crate) async fn store(&self) -> Arc<dyn crate::RuntimePersistence> {
+    pub(crate) async fn store(&self) -> Arc<dyn crate::RuntimeStore> {
         crate::conformance::law_session_store(self.tier.stores.as_ref(), &self.session_id).await
     }
 
@@ -695,7 +674,10 @@ impl World {
                 .with_session_id(&self.session_id)
                 .with_policy(policy)
                 .with_plugin_host(crate::facade_support::PluginHost::new(factories))
-                .with_store(self.store().await)
+                .with_store(crate::conformance::helpers::session_view(
+                    &self.store().await,
+                    self.session_id.clone(),
+                ))
                 .with_queued_work(Arc::new(crate::NoSessionWork::new()));
         if let Some(processes) = &self.processes {
             builder = builder
@@ -835,7 +817,7 @@ pub(crate) fn outputs(
         .iter()
         .map(|record| {
             (
-                record.call_id.clone(),
+                record.provider_call_id.clone(),
                 record.tool.clone(),
                 record.output.value_for_projection(),
             )
@@ -851,26 +833,4 @@ pub(crate) fn assert_finished(what: &str, turn: &crate::AssembledTurn) {
         turn.outcome,
         turn.errors
     );
-}
-
-/// Runs a law whose contract holds only once `ticket` lands: its failure is
-/// the expected divergence and is printed, and a pass fails, so the hold is
-/// removed the moment the law holds.
-pub async fn run_held_law(
-    law: &'static str,
-    ticket: &'static str,
-    body: impl std::future::Future<Output = ()> + Send,
-) {
-    let outcome = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(body)).await;
-    match outcome {
-        Ok(()) => panic!("{law} now holds: remove its hold on {ticket}"),
-        Err(panic) => {
-            let message = panic
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| panic.downcast_ref::<&str>().map(|text| (*text).to_string()))
-                .unwrap_or_else(|| "non-string panic".to_string());
-            eprintln!("HELD until {ticket}: {law}: {message}");
-        }
-    }
 }

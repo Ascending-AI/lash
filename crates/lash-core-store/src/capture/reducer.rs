@@ -42,12 +42,12 @@ pub enum CaptureReduceViolation {
     /// Progress or a settlement for a call whose execution never started.
     ToolFrameWithoutStart {
         sequence: u64,
-        call_id: String,
+        call_id: lash_sansio::ToolCallId,
     },
     /// Progress for a call that already settled.
     ToolFrameAfterSettle {
         sequence: u64,
-        call_id: String,
+        call_id: lash_sansio::ToolCallId,
     },
     /// The selected frames are not dense in sequence: `found` follows
     /// `after`.
@@ -163,8 +163,12 @@ struct Fold {
     entries: Vec<Entry>,
     blocks: HashMap<BlockKey, usize>,
     calls: HashMap<CallKey, usize>,
-    /// Parsed calls by their provider call id: where tool frames attach.
+    /// Parsed calls by their provider call id: where a started attempt
+    /// attaches.
     parsed: HashMap<String, usize>,
+    /// Started calls by lash's `ToolCallId`: where progress and settlement
+    /// frames attach.
+    executions: HashMap<lash_sansio::ToolCallId, usize>,
 }
 
 fn block_key_text(block: &StreamBlockIdentity) -> String {
@@ -257,8 +261,22 @@ impl Fold {
                     },
                 )
                 .map(|_| ()),
-            CaptureFrame::ToolExecutionStarted { call_id } => {
-                let Some(execution) = self.execution(call_id) else {
+            CaptureFrame::ToolExecutionStarted {
+                call_id,
+                provider_call_id,
+            } => {
+                // A call with no streamed parse — a language runtime's call,
+                // or one whose provider correlation the tail never saw — is
+                // not a partial item.
+                let Some(index) = provider_call_id
+                    .as_deref()
+                    .and_then(|provider_call_id| self.parsed.get(provider_call_id))
+                    .copied()
+                else {
+                    return Ok(());
+                };
+                self.executions.insert(call_id.clone(), index);
+                let Some(execution) = self.execution(call_id, None) else {
                     return Ok(());
                 };
                 match execution {
@@ -277,8 +295,12 @@ impl Fold {
                     }
                 }
             }
-            CaptureFrame::ToolOutputProgress { call_id, chunk } => {
-                let Some(execution) = self.execution(call_id) else {
+            CaptureFrame::ToolOutputProgress {
+                call_id,
+                provider_call_id,
+                chunk,
+            } => {
+                let Some(execution) = self.execution(call_id, provider_call_id.as_deref()) else {
                     return Ok(());
                 };
                 match execution {
@@ -300,8 +322,12 @@ impl Fold {
                     }
                 }
             }
-            CaptureFrame::ToolSettled { call_id, output } => {
-                let Some(execution) = self.execution(call_id) else {
+            CaptureFrame::ToolSettled {
+                call_id,
+                provider_call_id,
+                output,
+            } => {
+                let Some(execution) = self.execution(call_id, provider_call_id.as_deref()) else {
                     return Ok(());
                 };
                 match execution {
@@ -473,10 +499,18 @@ impl Fold {
         Ok(index)
     }
 
-    /// The execution state of the parsed call `call_id` names, or `None`
-    /// when the tail holds no such call.
-    fn execution(&mut self, call_id: &str) -> Option<&mut ToolExecutionState> {
-        let index = *self.parsed.get(call_id)?;
+    /// The execution state of the call `call_id` names: a started call, or
+    /// else the streamed call `provider_call_id` correlates, which has not
+    /// started. `None` when the tail holds no such call.
+    fn execution(
+        &mut self,
+        call_id: &lash_sansio::ToolCallId,
+        provider_call_id: Option<&str>,
+    ) -> Option<&mut ToolExecutionState> {
+        let index = match self.executions.get(call_id) {
+            Some(index) => *index,
+            None => *self.parsed.get(provider_call_id?)?,
+        };
         match self.entries.get_mut(index) {
             Some(Entry::Call(entry)) => Some(&mut entry.execution),
             _ => None,
@@ -957,14 +991,16 @@ mod tests {
             TOOL,
             1,
             CaptureFrame::ToolExecutionStarted {
-                call_id: "call-1".to_string(),
+                call_id: lash_sansio::ToolCallId::fixture("call-1"),
+                provider_call_id: Some("call-1".to_string()),
             },
         )
         .push(
             TOOL,
             1,
             CaptureFrame::ToolOutputProgress {
-                call_id: "call-1".to_string(),
+                call_id: lash_sansio::ToolCallId::fixture("call-1"),
+                provider_call_id: Some("call-1".to_string()),
                 chunk: ToolOutputChunk {
                     text: "one".to_string(),
                 },
@@ -974,7 +1010,8 @@ mod tests {
             TOOL,
             1,
             CaptureFrame::ToolOutputProgress {
-                call_id: "call-1".to_string(),
+                call_id: lash_sansio::ToolCallId::fixture("call-1"),
+                provider_call_id: Some("call-1".to_string()),
                 chunk: ToolOutputChunk {
                     text: "two".to_string(),
                 },
@@ -1014,7 +1051,8 @@ mod tests {
             TOOL,
             1,
             CaptureFrame::ToolExecutionStarted {
-                call_id: "call-1".to_string(),
+                call_id: lash_sansio::ToolCallId::fixture("call-1"),
+                provider_call_id: Some("call-1".to_string()),
             },
         );
         let running = reduce(&tape, 0, tape.last(), &[]).expect("reduce");
@@ -1034,7 +1072,8 @@ mod tests {
             TOOL,
             1,
             CaptureFrame::ToolSettled {
-                call_id: "call-1".to_string(),
+                call_id: lash_sansio::ToolCallId::fixture("call-1"),
+                provider_call_id: Some("call-1".to_string()),
                 output: output.clone(),
             },
         );
@@ -1057,7 +1096,8 @@ mod tests {
             TOOL,
             1,
             CaptureFrame::ToolSettled {
-                call_id: "earlier".to_string(),
+                call_id: lash_sansio::ToolCallId::fixture("earlier"),
+                provider_call_id: None,
                 output: ToolCallOutput::success(serde_json::json!(1)),
             },
         );
@@ -1254,7 +1294,8 @@ mod tests {
             TOOL,
             1,
             CaptureFrame::ToolSettled {
-                call_id: "call-1".to_string(),
+                call_id: lash_sansio::ToolCallId::fixture("call-1"),
+                provider_call_id: Some("call-1".to_string()),
                 output: ToolCallOutput::success(serde_json::json!(1)),
             },
         );
@@ -1262,7 +1303,7 @@ mod tests {
             reduce(&tape, 0, tape.last(), &[]),
             Err(CaptureReduceViolation::ToolFrameWithoutStart {
                 sequence: 3,
-                call_id: "call-1".to_string(),
+                call_id: lash_sansio::ToolCallId::fixture("call-1"),
             })
         );
 

@@ -1058,7 +1058,10 @@ pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_co
             "trace-replay-tool",
         ),
         RuntimeEffectCommand::ToolAttempt {
-            call: prepared_tool_call_with("trace-replay-call", "trace_replay_tool"),
+            call: Box::new(prepared_tool_call_with(
+                "trace-replay-call",
+                "trace_replay_tool",
+            )),
             execution_grant: None,
             attempt: 1,
             max_attempts: 1,
@@ -1941,33 +1944,36 @@ pub(super) fn llm_spec() -> lash_core::LlmRequestSpec {
 }
 
 pub(super) fn prepared_tool_call() -> lash_core::PreparedToolCall {
-    lash_core::PreparedToolCall::from_parts(
-        "call-1",
-        "tool:tool",
-        "tool",
-        serde_json::json!({}),
-        None,
-        serde_json::Value::Null,
-    )
+    lash_core::PreparedToolCall {
+        call_id: lash_core::ToolCallId::fixture("call-1"),
+        provider_call_id: None,
+        tool_id: "tool:tool".into(),
+        tool_name: "tool".into(),
+        args: serde_json::json!({}),
+        replay: None,
+        prepared_payload: serde_json::Value::Null,
+    }
 }
 
 pub(super) fn prepared_tool_call_with(
     call_id: &str,
     tool_name: &str,
 ) -> lash_core::PreparedToolCall {
-    lash_core::PreparedToolCall::from_parts(
-        call_id,
-        format!("tool:{tool_name}"),
-        tool_name,
-        serde_json::json!({ "call": call_id }),
-        None,
-        serde_json::Value::Null,
-    )
+    lash_core::PreparedToolCall {
+        call_id: lash_core::ToolCallId::fixture(&call_id),
+        provider_call_id: None,
+        tool_id: format!("tool:{tool_name}").into(),
+        tool_name: tool_name.into(),
+        args: serde_json::json!({ "call": call_id }),
+        replay: None,
+        prepared_payload: serde_json::Value::Null,
+    }
 }
 
 pub(super) fn completed_tool_record(call_id: &str, tool_name: &str) -> lash_core::ToolCallRecord {
     lash_core::ToolCallRecord {
-        call_id: Some(call_id.to_string()),
+        call_id: lash_core::ToolCallId::fixture(&call_id),
+        provider_call_id: None,
         tool: tool_name.to_string(),
         args: serde_json::json!({ "call": call_id }),
         output: lash_core::ToolCallOutput::success(serde_json::json!({ "call": call_id })),

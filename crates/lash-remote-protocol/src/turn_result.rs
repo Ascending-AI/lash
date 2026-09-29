@@ -165,7 +165,7 @@ pub enum RemoteCausalRef {
     },
     ToolCall {
         session_id: SessionId,
-        call_id: String,
+        call_id: lash_sansio::ToolCallId,
     },
     Process {
         process_id: ProcessId,
@@ -208,12 +208,9 @@ impl RemoteCausalRef {
                         message: format!("caused_by.address: {error}"),
                     })
             }
-            Self::ToolCall {
-                session_id,
-                call_id,
-            } => {
-                require_non_empty(type_name, "caused_by.session_id", session_id)?;
-                require_non_empty(type_name, "caused_by.call_id", call_id)
+            // A `ToolCallId` is well formed by construction.
+            Self::ToolCall { session_id, .. } => {
+                require_non_empty(type_name, "caused_by.session_id", session_id)
             }
             Self::Process { process_id } | Self::ProcessEvent { process_id, .. } => {
                 require_non_empty(type_name, "caused_by.process_id", process_id)
@@ -497,8 +494,9 @@ pub struct RemoteTurnExecutionMetrics {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteToolCallRecord {
+    pub call_id: lash_sansio::ToolCallId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub call_id: Option<String>,
+    pub provider_call_id: Option<String>,
     pub tool_name: String,
     #[serde(default)]
     pub args: serde_json::Value,
@@ -509,7 +507,7 @@ pub struct RemoteToolCallRecord {
 pub struct RemoteToolIntentIdentity {
     pub session_id: SessionId,
     pub execution_scope_id: String,
-    pub tool_call_id: String,
+    pub tool_call_id: lash_sansio::ToolCallId,
     pub intent_index: u32,
     pub replay_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -543,7 +541,6 @@ pub enum RemoteToolIntentRefusalReason {
     UnsupportedProtocolVersion {
         recorded: u16,
     },
-    MissingToolCallId,
     IntentIndexOverflow,
     CountBudgetExceeded {
         actual: usize,

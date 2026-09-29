@@ -566,17 +566,19 @@ async fn a_batch_child_with_no_live_turn_records_its_events_for_the_turn() {
         .iter()
         .filter_map(|activity| match &activity.event {
             lash::TurnEvent::ToolCallCompleted {
-                call_id,
                 name,
                 output,
+                provider_call_id,
                 ..
-            } => Some((name.clone(), call_id.clone(), output.is_success())),
+            } => Some((name.clone(), provider_call_id.clone(), output.is_success())),
             _ => None,
         })
         .collect();
+    // A batch member is lash's own call, a child of the wrapper's id: it
+    // carries no provider correlation of its own (ADR 0117 §3).
     assert_eq!(
         completed,
-        vec![(TOOL.to_owned(), Some("call-1/batch/0".to_owned()), true)],
+        vec![(TOOL.to_owned(), None, true)],
         "the batch's member completed on the turn's stream, as the step's slot"
     );
 }

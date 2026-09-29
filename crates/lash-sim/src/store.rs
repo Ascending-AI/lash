@@ -702,7 +702,7 @@ impl ModelStore {
                     },
                     "runtime_tool_output": tool_output,
                     "runtime_tool_record": {
-                        "call_id": event.boundary_id,
+                        "call_id": lash_core::ToolCallId::fixture(&event.boundary_id),
                         "tool": tool_name,
                         "args": {
                             "boundary_id": event.boundary_id,
@@ -944,17 +944,18 @@ impl ModelStore {
                 effect_id.clone(),
             ),
             lash_core::RuntimeEffectCommand::ToolAttempt {
-                call: lash_core::PreparedToolCall::from_parts(
-                    effect_id.clone(),
-                    lash_core::ToolId::from("tool:sim_opaque_effect"),
-                    "sim_opaque_effect",
-                    json!({
+                call: Box::new(lash_core::PreparedToolCall {
+                    call_id: lash_core::ToolCallId::fixture(&effect_id),
+                    provider_call_id: None,
+                    tool_id: lash_core::ToolId::from("tool:sim_opaque_effect"),
+                    tool_name: "sim_opaque_effect".into(),
+                    args: json!({
                         "durable_key": durable_key,
                         "session": event.actor_alias,
                     }),
-                    None,
-                    json!({"prepared_by": "lash-sim"}),
-                ),
+                    replay: None,
+                    prepared_payload: json!({"prepared_by": "lash-sim"}),
+                }),
                 execution_grant: None,
                 attempt: 1,
                 max_attempts: 1,
@@ -997,7 +998,7 @@ impl ModelStore {
                 "launch": {
                     "status": "done",
                     "record": {
-                        "call_id": effect_id,
+                        "call_id": lash_core::ToolCallId::fixture(&effect_id),
                         "tool": "sim_opaque_effect",
                         "args": null,
                         "output": lash_core::ToolCallOutput::success(result),

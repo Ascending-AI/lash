@@ -221,7 +221,9 @@ async fn exercise_host_arm(arm: &HostArm, second: &IssuanceSpy, foreign: &Issuan
         let cell = format!("({mode:?} × {})", arm.name);
         // One wait identity per cell: two deferring modes on one host must
         // not share a key, or the second cell would read the first's terminal.
-        let wait = AwaitEventWaitIdentity::tool_completion(format!("call-{}-{mode:?}", arm.name));
+        let wait = AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+            &format!("call-{}-{mode:?}", arm.name),
+        ));
         let issued_before = spy.issued().len();
         let answer = spy
             .prepare(&scope, wait.clone(), may_defer)

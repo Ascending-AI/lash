@@ -768,13 +768,15 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         graph_key: None,
     });
     let tool_started_event = to_event_value(lash::TurnEvent::ToolCallStarted {
-        call_id: Some("tool-call-1".to_string()),
+        call_id: lash::ToolCallId::fixture("tool-call-1"),
+        provider_call_id: None,
         name: "mcp__parallel__web_search_57jmhsdk2uvtc7o55qwq73sqyq".to_string(),
         args: serde_json::json!({ "query": "FIG-1350" }),
         graph_key: None,
     });
     let tool_completed_event = to_event_value(lash::TurnEvent::ToolCallCompleted {
-        call_id: Some("tool-call-1".to_string()),
+        call_id: lash::ToolCallId::fixture("tool-call-1"),
+        provider_call_id: None,
         name: "mcp__parallel__web_search_57jmhsdk2uvtc7o55qwq73sqyq".to_string(),
         args: serde_json::json!({ "query": "FIG-1350" }),
         output: lash::tools::ToolCallOutput::success(
@@ -783,38 +785,13 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         duration_ms: 4,
         graph_key: None,
     });
-    let no_id_tool_started_event = to_event_value(lash::TurnEvent::ToolCallStarted {
-        call_id: None,
-        name: "mcp__parallel__web_search_57jmhsdk2uvtc7o55qwq73sqyq".to_string(),
-        args: serde_json::json!({ "query": "FIG-1350 no id" }),
-        graph_key: None,
-    });
-    let no_id_tool_completed_event = to_event_value(lash::TurnEvent::ToolCallCompleted {
-        call_id: None,
-        name: "mcp__parallel__web_search_57jmhsdk2uvtc7o55qwq73sqyq".to_string(),
-        args: serde_json::json!({ "query": "FIG-1350 no id" }),
-        output: lash::tools::ToolCallOutput::success(
-            serde_json::json!({ "results": [{ "title": "no-id row" }] }),
-        ),
-        duration_ms: 5,
-        graph_key: None,
-    });
     let code_completed_event = to_event_value(lash::TurnEvent::CodeBlockCompleted {
         language: "typescript".to_string(),
         output: "completed".to_string(),
         error: None,
         success: true,
         duration_ms: 9,
-        tool_call_ids: vec!["tool-call-1".to_string()],
-        graph_key: None,
-    });
-    let no_id_code_completed_event = to_event_value(lash::TurnEvent::CodeBlockCompleted {
-        language: "typescript".to_string(),
-        output: "completed without call id".to_string(),
-        error: None,
-        success: true,
-        duration_ms: 10,
-        tool_call_ids: Vec::new(),
+        tool_call_ids: vec![lash::ToolCallId::fixture("tool-call-1")],
         graph_key: None,
     });
     let turn_events = serde_json::json!({
@@ -826,9 +803,6 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         "toolStarted": tool_started_event,
         "toolCompleted": tool_completed_event,
         "codeCompleted": code_completed_event,
-        "noIdToolStarted": no_id_tool_started_event,
-        "noIdToolCompleted": no_id_tool_completed_event,
-        "noIdCodeCompleted": no_id_code_completed_event,
     });
     let evidence_scenarios = Box::pin(provider_execution_evidence_scenarios()).await;
 

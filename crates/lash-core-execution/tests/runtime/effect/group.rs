@@ -41,7 +41,7 @@ mod effect_group_contract_tests {
                 turn_id: TurnId::from("turn"),
             },
             wait: lash_core_execution::AwaitEventWaitIdentity::ToolCompletion {
-                tool_call_id: "call".to_string(),
+                tool_call_id: lash_core_execution::ToolCallId::fixture("call"),
             },
             key_id: "key".to_string(),
             signature: "signature".to_string(),
@@ -66,14 +66,15 @@ mod effect_group_contract_tests {
     /// covered variant already proves the encoding. The corpus width is a
     /// belt-and-braces pin on future edits, not the argument.
     fn ungrouped_corpus() -> Vec<(&'static str, RuntimeEffectEnvelope)> {
-        let prepared = lash_core_execution::PreparedToolCall::from_parts(
-            "call",
-            "tool:test",
-            "test",
-            serde_json::json!({}),
-            None,
-            serde_json::Value::Null,
-        );
+        let prepared = lash_core_execution::PreparedToolCall {
+            call_id: lash_core_execution::ToolCallId::fixture("call"),
+            provider_call_id: None,
+            tool_id: "tool:test".into(),
+            tool_name: "test".into(),
+            args: serde_json::json!({}),
+            replay: None,
+            prepared_payload: serde_json::Value::Null,
+        };
         let commands: Vec<(&'static str, RuntimeEffectKind, RuntimeEffectCommand)> = vec![
             (
                 "sleep",
@@ -105,7 +106,7 @@ mod effect_group_contract_tests {
                 "tool_attempt",
                 RuntimeEffectKind::ToolAttempt,
                 RuntimeEffectCommand::ToolAttempt {
-                    call: prepared,
+                    call: Box::new(prepared),
                     execution_grant: None,
                     attempt: 1,
                     max_attempts: 1,
@@ -183,7 +184,7 @@ mod effect_group_contract_tests {
             ),
             (
                 "tool_attempt",
-                "14fe59d38589fe58cd66f4328251d301a8a556f886371c8544dcafe8b4cf867d",
+                "467efd0bda5bdbf7700c4b581501c7f296ceb0184035eb69bab979c6606f450c",
             ),
             (
                 "checkpoint",
@@ -191,11 +192,11 @@ mod effect_group_contract_tests {
             ),
             (
                 "await_event",
-                "2ed3e1075946e128ed12a118c3dbee71f8478d76e1c204b59fd78d314b97fc97",
+                "52750206854642766773ddcb1838e3582e5e6f086c7dcd289f5584bc56c9f11a",
             ),
             (
                 "peek_await_event",
-                "9a0613831bc619f17b187c670ef4343829bd3b6d54c7190fc8e2944b2fc35e35",
+                "3f59b829efacf2f2a6d14f0410100630d691e752e92faa641cc09883c852dec2",
             ),
         ];
         let corpus = ungrouped_corpus();

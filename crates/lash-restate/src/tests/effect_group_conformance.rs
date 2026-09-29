@@ -989,7 +989,9 @@ impl LiveConformanceHarness {
             .host
             .await_event_key(
                 &scope,
-                lash_core::AwaitEventWaitIdentity::tool_completion("unstarted-wait-child"),
+                lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                    "unstarted-wait-child",
+                )),
             )
             .await
             .expect("mint the wait child's key");
@@ -1143,7 +1145,9 @@ impl LiveConformanceHarness {
             .host
             .await_event_key(
                 &scope,
-                lash_core::AwaitEventWaitIdentity::tool_completion("admitting-wait-child"),
+                lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                    "admitting-wait-child",
+                )),
             )
             .await
             .expect("mint the admitting child's key");
@@ -1326,7 +1330,9 @@ impl LiveConformanceHarness {
         assert_eq!(refused.code.as_str(), "effect_scope_not_quiescent");
         host.await_event_key(
             &scope,
-            lash_core::AwaitEventWaitIdentity::tool_completion("still-open"),
+            lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "still-open",
+            )),
         )
         .await
         .expect("the refused retirement left the scope unfenced");
@@ -1349,7 +1355,9 @@ impl LiveConformanceHarness {
         let fenced = host
             .await_event_key(
                 &scope,
-                lash_core::AwaitEventWaitIdentity::tool_completion("after-retirement"),
+                lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                    "after-retirement",
+                )),
             )
             .await
             .expect_err("the retired scope mints nothing");
@@ -1471,7 +1479,9 @@ impl LiveConformanceHarness {
         let key = host
             .await_event_key(
                 &scope,
-                lash_core::AwaitEventWaitIdentity::tool_completion("active-wait"),
+                lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                    "active-wait",
+                )),
             )
             .await
             .expect("mint registration-first wait key");
@@ -1502,7 +1512,9 @@ impl LiveConformanceHarness {
         let retired_key = host
             .await_event_key(
                 &retired_scope,
-                lash_core::AwaitEventWaitIdentity::tool_completion("late-wait"),
+                lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                    "late-wait",
+                )),
             )
             .await
             .expect("mint retirement-first wait key");

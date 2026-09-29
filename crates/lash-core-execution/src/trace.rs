@@ -230,8 +230,7 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
         }
         TraceEvent::ToolCallStarted { call_id, .. }
         | TraceEvent::ToolCallCompleted { call_id, .. } => {
-            let self_id = call_id.as_deref().map(tool_node_id);
-            set_span(context, self_id, turn_node);
+            set_span(context, Some(tool_node_id(call_id.as_str())), turn_node);
         }
         TraceEvent::ProviderRequest { .. }
         | TraceEvent::ProviderReplayDropped { .. }
@@ -767,13 +766,15 @@ mod span_identity_tests {
         assign_span_identity(
             &mut context,
             &TraceEvent::ToolCallStarted {
-                call_id: Some("call_abc".to_string()),
+                call_id: crate::ToolCallId::fixture("call_abc"),
+                provider_call_id: Some("call_abc".to_string()),
                 name: "read_file".to_string(),
                 args: serde_json::json!({}),
                 issuing_node_id: None,
             },
         );
-        assert_eq!(context.graph_node_id.as_deref(), Some("tool:call_abc"));
+        let node = format!("tool:{}", crate::ToolCallId::fixture("call_abc"));
+        assert_eq!(context.graph_node_id.as_deref(), Some(node.as_str()));
         assert_eq!(
             context.parent_graph_node_id.as_deref(),
             Some("turn:sess:turn-1")
@@ -782,9 +783,9 @@ mod span_identity_tests {
         assert_eq!(
             causal_node_id(&crate::CausalRef::ToolCall {
                 session_id: crate::SessionId::from("sess"),
-                call_id: "call_abc".to_string(),
+                call_id: crate::ToolCallId::fixture("call_abc"),
             }),
-            "tool:call_abc"
+            node
         );
     }
 
@@ -915,25 +916,6 @@ mod span_identity_tests {
         assert_ne!(
             causal_node_id(&parent("subscription-a")),
             causal_node_id(&parent("subscription-b"))
-        );
-    }
-
-    #[test]
-    fn tool_call_without_id_has_no_self_node_but_still_nests() {
-        let mut context = turn_context();
-        assign_span_identity(
-            &mut context,
-            &TraceEvent::ToolCallStarted {
-                call_id: None,
-                name: "read_file".to_string(),
-                args: serde_json::json!({}),
-                issuing_node_id: None,
-            },
-        );
-        assert_eq!(context.graph_node_id, None);
-        assert_eq!(
-            context.parent_graph_node_id.as_deref(),
-            Some("turn:sess:turn-1")
         );
     }
 

@@ -471,8 +471,11 @@ pub enum SessionStreamEvent {
     },
     #[serde(rename = "tool_call")]
     ToolCall {
+        call_id: crate::ToolCallId,
+        /// The model provider's id for the call, when a model issued it:
+        /// correlation only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
+        provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
         output: crate::ToolCallOutput,
@@ -482,8 +485,10 @@ pub enum SessionStreamEvent {
     ToolCallsOmitted { summary: crate::OmittedToolCalls },
     #[serde(rename = "tool_call_start")]
     ToolCallStart {
+        call_id: crate::ToolCallId,
+        /// See [`SessionStreamEvent::ToolCall`].
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
+        provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
     },

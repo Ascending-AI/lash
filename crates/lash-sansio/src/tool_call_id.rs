@@ -109,6 +109,78 @@ impl<'a> ToolCallRoot<'a> {
     }
 }
 
+/// An admitted root and the deployment namespace it was admitted in: what
+/// every call admitted under one root shares, owned so it can travel with the
+/// work that admits the calls.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ToolCallAdmission {
+    namespace: String,
+    root: AdmittedRoot,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum AdmittedRoot {
+    Turn(String),
+    HostSubmission(String),
+    Process(ProcessId),
+}
+
+impl ToolCallAdmission {
+    /// The admission of one turn, by its admitted operation handle.
+    pub fn turn(
+        namespace: impl Into<String>,
+        handle: impl Into<String>,
+    ) -> Result<Self, ToolCallRootError> {
+        let handle = handle.into();
+        ToolCallRoot::handle(&handle)?;
+        Ok(Self {
+            namespace: namespace.into(),
+            root: AdmittedRoot::Turn(handle),
+        })
+    }
+
+    /// The admission of one host tool submission, by its admitted operation
+    /// handle. A redelivery presents the same handle.
+    pub fn host_submission(
+        namespace: impl Into<String>,
+        handle: impl Into<String>,
+    ) -> Result<Self, ToolCallRootError> {
+        let handle = handle.into();
+        ToolCallRoot::handle(&handle)?;
+        Ok(Self {
+            namespace: namespace.into(),
+            root: AdmittedRoot::HostSubmission(handle),
+        })
+    }
+
+    /// The admission of one process, by its minted id.
+    pub fn process(namespace: impl Into<String>, process_id: ProcessId) -> Self {
+        Self {
+            namespace: namespace.into(),
+            root: AdmittedRoot::Process(process_id),
+        }
+    }
+
+    /// The root this admission names.
+    pub fn root(&self) -> ToolCallRoot<'_> {
+        ToolCallRoot(match &self.root {
+            AdmittedRoot::Turn(handle) => RootKind::Turn(handle),
+            AdmittedRoot::HostSubmission(handle) => RootKind::HostSubmission(handle),
+            AdmittedRoot::Process(process_id) => RootKind::Process(process_id),
+        })
+    }
+
+    /// The deployment namespace the root was admitted in.
+    pub fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
+    /// The id of the call at `positions` under this admission.
+    pub fn call_id(&self, positions: &[ToolCallPosition<'_>]) -> ToolCallId {
+        ToolCallId::derive(&self.namespace, self.root(), positions)
+    }
+}
+
 /// One tagged position locating a call inside its admission root.
 ///
 /// The tag is part of the encoding, so the same number under two tags names
@@ -251,6 +323,18 @@ impl ToolCallId {
         &self.0
     }
 
+    /// A derived id standing for the call `label` in a test fixture: one id
+    /// per label, from a fixed fixture root. Production admits every call
+    /// under its own root instead.
+    #[doc(hidden)]
+    pub fn fixture(label: &str) -> Self {
+        Self::derive(
+            "",
+            ToolCallRoot(RootKind::Turn("fixture")),
+            &[ToolCallPosition::CodeCell(label)],
+        )
+    }
+
     fn digest_hex(&self) -> &str {
         &self.0[TOOL_CALL_ID_PREFIX.len()..]
     }
@@ -375,7 +459,7 @@ mod tests {
     #[test]
     fn domain_is_separate_from_every_other_lash_blake3_identity() {
         let id = ToolCallId::derive("", turn("call-1"), &[]);
-        let frame = FrameKey::from_call_site(&SessionId::from(""), "", "call-1");
+        let frame = FrameKey::from_call_site(&SessionId::from(""), "", &id);
         assert_ne!(id.digest_hex(), &frame.as_str()["frame-key/v2/".len()..]);
 
         let mut same_bytes_other_domain = Blake3DomainHasher::new("lash-intent/v2");

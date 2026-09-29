@@ -849,14 +849,15 @@ async fn single_provider_source_refuses_unknown_id_without_calling_the_provider(
         SessionId::from("registry-test"),
         Arc::new(crate::testing::MockSessionManager::default()),
         crate::TurnContext::default(),
-        Some("unknown-call".to_string()),
+        crate::ToolCallId::fixture("unknown-call"),
         json!({}),
     );
     let refusal = source
         .prepare_tool_call(crate::ToolPrepareCall {
             tool_id: tool_id("unadvertised"),
             pending: crate::sansio::PendingToolCall {
-                call_id: "unknown-call".to_string(),
+                call_id: crate::ToolCallId::fixture("unknown-call"),
+                provider_call_id: None,
                 tool_name: "unadvertised".to_string(),
                 args: json!({}),
                 replay: None,
@@ -893,7 +894,8 @@ async fn single_provider_source_refuses_unknown_id_without_calling_the_provider(
         .prepare_tool_call(crate::ToolPrepareCall {
             tool_id: tool_id("advertised"),
             pending: crate::sansio::PendingToolCall {
-                call_id: "advertised-call".to_string(),
+                call_id: crate::ToolCallId::fixture("advertised-call"),
+                provider_call_id: None,
                 tool_name: "advertised".to_string(),
                 args: json!({}),
                 replay: None,
@@ -1153,7 +1155,7 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
         SessionId::from("registry-test"),
         Arc::new(crate::testing::MockSessionManager::default()),
         crate::TurnContext::default(),
-        Some("grant-call".to_string()),
+        crate::ToolCallId::fixture("grant-call"),
         grant.execution_binding.clone(),
     )
     .with_granted_source_id(grant.source_id.clone());
@@ -1161,7 +1163,8 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
         .prepare_tool_call(crate::ToolPrepareCall {
             tool_id: grant.manifest().id.clone(),
             pending: crate::sansio::PendingToolCall {
-                call_id: "grant-call".to_string(),
+                call_id: crate::ToolCallId::fixture("grant-call"),
+                provider_call_id: None,
                 tool_name: grant.manifest().name.clone(),
                 args: json!({}),
                 replay: None,

@@ -274,6 +274,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         _request: Arc<lash_core::LlmRequest>,
         driver_state: Option<lash_core::ProtocolDriverState>,
         llm_response: LlmResponse,
+        _calls: &lash_core::sansio::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         let terminal_reason = llm_response.terminal_reason;
@@ -868,6 +869,7 @@ fn terminal_outcome_from_tool_result(record: &ToolCallRecord) -> Option<TurnOutc
 fn tool_call_event(record: ToolCallRecord) -> SessionStreamEvent {
     SessionStreamEvent::ToolCall {
         call_id: record.call_id,
+        provider_call_id: record.provider_call_id,
         name: record.tool,
         args: record.args,
         output: record.output,
@@ -919,6 +921,7 @@ fn executed_call_ledger(records: &[lash_core::ExecutedCall]) -> (Vec<RlmExecuted
 fn bounded_tool_call_record(record: &ToolCallRecord) -> ToolCallRecord {
     ToolCallRecord {
         call_id: record.call_id.clone(),
+        provider_call_id: record.provider_call_id.clone(),
         tool: record.tool.clone(),
         args: record.args.clone(),
         output: bounded_tool_call_output(&record.output),
@@ -1320,7 +1323,8 @@ mod tests {
 
     fn record(index: usize, output: ToolCallOutput) -> ToolCallRecord {
         ToolCallRecord {
-            call_id: Some(format!("call-{index}")),
+            call_id: lash_core::ToolCallId::fixture(&format!("call-{index}")),
+            provider_call_id: None,
             tool: "test_tool".to_string(),
             args: serde_json::json!({ "index": index }),
             output,

@@ -53,10 +53,10 @@ impl TriggerIntentCutoverReplay for TriggerIntentCutoverReplayImpl {
                         "trigger-intent-cutover-attempt",
                     ),
                     RuntimeEffectCommand::ToolAttempt {
-                        call: prepared_tool_call_with(
+                        call: Box::new(prepared_tool_call_with(
                             "trigger-intent-cutover-call",
                             "trigger_intent_cutover",
-                        ),
+                        )),
                         execution_grant: None,
                         attempt: 1,
                         max_attempts: 1,
@@ -109,7 +109,7 @@ impl TriggerIntentCutoverReplay for TriggerIntentCutoverReplayImpl {
             self.router.clone(),
             lash_core::ProcessEngineRegistry::new(),
             &SessionId::from(TRIGGER_INTENT_CUTOVER_SESSION),
-            "trigger-intent-cutover-call",
+            &lash_core::ToolCallId::fixture("trigger-intent-cutover-call"),
             &intents,
         )
         .await
@@ -272,7 +272,7 @@ async fn restate_double_refuses_foreign_register_trigger_authority_before_effect
             router,
             engines,
             &SessionId::from(TRIGGER_INTENT_CUTOVER_SESSION),
-            "foreign-trigger-call",
+            &lash_core::ToolCallId::fixture("foreign-trigger-call"),
             &lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::RegisterTrigger(Box::new(
                 registration,
             ))]),

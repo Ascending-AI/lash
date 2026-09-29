@@ -369,7 +369,7 @@ impl LashlangProcessExecutionTrace {
     pub(super) fn record_resource_call(
         &self,
         call_site: &lashlang::LashlangExecutionCallSite,
-        call_id: &str,
+        call_id: &lash_core::ToolCallId,
     ) {
         if self.sink.is_none() {
             return;
@@ -377,7 +377,7 @@ impl LashlangProcessExecutionTrace {
         let key = (call_site.site.node_id.clone(), call_site.occurrence);
         self.resource_call_ids
             .lock_recover()
-            .insert(key.clone(), call_id.to_string());
+            .insert(key.clone(), call_id.clone());
         if let Some(site) = self.pending_resource_starts.lock_recover().remove(&key) {
             self.emit(TraceLanguageExecution {
                 event_key: self.event_key(format!(
@@ -390,7 +390,7 @@ impl LashlangProcessExecutionTrace {
                     node_kind: site.node_kind,
                     label: site.label,
                     occurrence: call_site.occurrence,
-                    call_id: Some(call_id.to_string()),
+                    call_id: Some(call_id.clone()),
                 },
             });
         }
@@ -400,7 +400,7 @@ impl LashlangProcessExecutionTrace {
         &self,
         site: &lashlang::LashlangExecutionSite,
         occurrence: u64,
-    ) -> Option<String> {
+    ) -> Option<lash_core::ToolCallId> {
         if site.node_kind != lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND {
             return None;
         }

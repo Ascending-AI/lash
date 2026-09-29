@@ -91,7 +91,9 @@ where
     let key = make()
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(format!("{prefix}-parked-call")),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+                "{prefix}-parked-call"
+            ))),
         )
         .await
         .expect("host A mints parked-owner key");
@@ -183,7 +185,9 @@ where
     F: Fn() -> Arc<dyn EffectHost>,
 {
     let identities = [
-        AwaitEventWaitIdentity::tool_completion(format!("{prefix}-tool")),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+            "{prefix}-tool"
+        ))),
         AwaitEventWaitIdentity::process_signal(
             crate::ProcessId::fixture(&format!("{prefix}-process")),
             "ready",
@@ -282,7 +286,9 @@ where
         format!("{prefix}-stable-session"),
         format!("{prefix}-stable-turn"),
     );
-    let wait = AwaitEventWaitIdentity::tool_completion(format!("{prefix}-stable-call"));
+    let wait = AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+        "{prefix}-stable-call"
+    )));
     let first = make()
         .await_event_key(&scope, wait.clone())
         .await
@@ -309,7 +315,9 @@ where
     let key = make()
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(format!("{prefix}-auth-call")),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+                "{prefix}-auth-call"
+            ))),
         )
         .await
         .expect("auth key");
@@ -327,7 +335,9 @@ where
     );
     variants.push(scope);
     let mut wait = key.clone();
-    wait.wait = AwaitEventWaitIdentity::tool_completion(format!("{prefix}-other-call"));
+    wait.wait = AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+        "{prefix}-other-call"
+    )));
     variants.push(wait);
     let mut session = key.clone();
     session.scope = durable_turn_scope(
@@ -378,7 +388,9 @@ where
     let key = make()
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(format!("{prefix}-revoked-call")),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+                "{prefix}-revoked-call"
+            ))),
         )
         .await
         .expect("pre-revocation key");
@@ -401,7 +413,9 @@ where
     let mint_error = make()
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(format!("{prefix}-post-revoke-call")),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+                "{prefix}-post-revoke-call"
+            ))),
         )
         .await
         .expect_err("reopened host must reject mint after revocation");
@@ -424,7 +438,9 @@ where
     let key = make()
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(format!("{prefix}-retired-process-call")),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+                "{prefix}-retired-process-call"
+            ))),
         )
         .await
         .expect("pre-retirement key");
@@ -447,7 +463,9 @@ where
     let mint_error = make()
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(format!("{prefix}-post-retirement-call")),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+                "{prefix}-post-retirement-call"
+            ))),
         )
         .await
         .expect_err("reopened host must reject mint after retirement");
@@ -487,7 +505,9 @@ where
     let ordinary = make()
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(format!("{prefix}-sweep-call")),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+                "{prefix}-sweep-call"
+            ))),
         )
         .await
         .expect("ordinary key");

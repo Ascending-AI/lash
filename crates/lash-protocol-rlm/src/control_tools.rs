@@ -115,13 +115,10 @@ fn continue_as_switch_frame(
         .collect::<Vec<_>>();
     seed_keys.sort();
     let seed_count = seed_keys.len();
-    let tool_call_id = context
-        .tool_call_id()
-        .ok_or_else(|| "continue_as requires a stable tool call id".to_string())?;
     let frame_key = lash_core::FrameKey::from_call_site(
         &SessionId::from(context.session_id()),
         context.agent_frame_id(),
-        tool_call_id,
+        context.call_id(),
     );
     let initial_nodes = crate::rlm_seed_initial_nodes(seed);
 
@@ -421,7 +418,7 @@ mod tests {
             }),
         )
         .processes(processes)
-        .tool_call_id(Some(tool_call_id.to_string()))
+        .call_id(lash_core::ToolCallId::fixture(&tool_call_id))
         .agent_frame_id(lash_core::facade_support::frame_node_id(
             &SessionId::from("test-session"),
             "test-lineage",
@@ -567,11 +564,11 @@ mod tests {
 
         assert_eq!(
             frame_key(&first).as_str(),
-            "frame-key/v2/3e8253fc4debd4df1c869db9047cbee6f06b04134bd2973b32982fdd0e9da31b"
+            "frame-key/v2/c6886b0a0352c9234847f52e26bcdac8ff92eb18671563487c9bd63eeceeb829"
         );
         assert_eq!(
             frame_key(&redriven).as_str(),
-            "frame-key/v2/3e8253fc4debd4df1c869db9047cbee6f06b04134bd2973b32982fdd0e9da31b"
+            "frame-key/v2/c6886b0a0352c9234847f52e26bcdac8ff92eb18671563487c9bd63eeceeb829"
         );
     }
 
@@ -589,11 +586,11 @@ mod tests {
 
         assert_eq!(
             frame_key(&first).as_str(),
-            "frame-key/v2/46332d13f86b0049a14335168657bb1d963373af1fdb7b01f8bc20dee27564a7"
+            "frame-key/v2/eb9ea68cffc503f90f348a3b4e4834d4f00b2a9b2883349eea474bd6884bd182"
         );
         assert_eq!(
             frame_key(&second).as_str(),
-            "frame-key/v2/8b96ea0418d2cb1016b6aef3421642235241ff5de500fbd6088ba2b1db1bb260"
+            "frame-key/v2/cab0da7cef16c366ded2e1e4377e93e79782e46f926124e834037ac152bab400"
         );
     }
 

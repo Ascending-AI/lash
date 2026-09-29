@@ -1416,6 +1416,7 @@ fn assert_reasoning_rendered(parts: &[LlmOutputPart], dialect: &str, expected_re
             } => lash_sansio::session_model::Part::tool_call(
                 format!("matrix-assistant.p{index}"),
                 input_json.clone(),
+                lash_sansio::ToolCallId::fixture(call_id),
                 call_id.clone(),
                 tool_name.clone(),
                 replay.clone(),

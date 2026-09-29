@@ -1,13 +1,13 @@
-//! Tool-call identities are unique per logical call and stable across replay.
+//! Tool-call identities are stable across replay and unique across the
+//! deployment.
 //!
-//! Keyed on today's identity, [`CallIdentity`](super::CallIdentity): the
-//! call id the tool sees. Every run of one logical call — crash replays and
-//! reported-failure retries alike — sees one id, and two logical calls never
-//! share one: not among the tool's runs in a session, and not among the tool
-//! calls a session's committed transcript holds.
-//!
-//! FIG-4080 switches the identity to `lash_sansio::ToolCallId`; see the
-//! extension point on [`CallIdentity`](super::CallIdentity).
+//! Keyed on [`CallIdentity`](super::CallIdentity): the `ToolCallId` the tool
+//! sees (ADR 0117). Every run of one call — crash replays and
+//! reported-failure retries alike — sees one id, so the attempts run under an
+//! id count up from the first: an id whose runs begin past attempt 1 is a
+//! call whose earlier attempts ran under another id. Two calls never share
+//! one: no id is committed at two transcript positions, in one session or
+//! across every session of every store.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -15,11 +15,8 @@ use super::{CallIdentity, Fact, History, HistoryChecker, Violation};
 
 pub(super) struct ToolCallIdentity;
 
-/// One logical call: session, scope, engine address.
-type LogicalKey<'a> = (&'a str, &'a str, &'a str);
-
-/// One id at one attempt: session, scope, id, attempt number.
-type IdentityKey<'a> = (&'a str, &'a str, &'a CallIdentity, u32);
+/// One call's runs: session, scope, id.
+type RunKey<'a> = (&'a str, &'a str, &'a CallIdentity);
 
 const INVARIANT: &str = "tool-call-identity";
 
@@ -45,66 +42,30 @@ impl HistoryChecker for ToolCallIdentity {
 
     fn check(&self, history: &History) -> Vec<Violation> {
         let mut violations = Vec::new();
-        // Stable: one logical call, one id, on every run and registration.
-        let mut by_logical: BTreeMap<LogicalKey<'_>, Vec<(usize, &CallIdentity)>> = BTreeMap::new();
-        // Unique: one id, one logical call, per attempt.
-        let mut by_identity: BTreeMap<IdentityKey<'_>, Vec<(usize, &str)>> = BTreeMap::new();
+        // Stable: the attempts of one id count up from the first.
+        let mut attempts: BTreeMap<RunKey<'_>, Vec<(usize, u32)>> = BTreeMap::new();
         for record in &history.records {
-            let (call, attempt) = match &record.fact {
-                Fact::ToolExecuted { call, attempt, .. } => (call, Some(*attempt)),
-                Fact::CompletionRegistered { call, .. } => (call, None),
-                _ => continue,
+            let Fact::ToolExecuted { call, attempt, .. } = &record.fact else {
+                continue;
             };
-            if !call.logical.is_empty() {
-                by_logical
-                    .entry((&call.session, &call.scope, &call.logical))
-                    .or_default()
-                    .push((record.at, &call.identity));
-            }
-            if let Some(attempt) = attempt
-                && !call.identity.0.is_empty()
-                && !call.logical.is_empty()
-            {
-                by_identity
-                    .entry((&call.session, &call.scope, &call.identity, attempt))
-                    .or_default()
-                    .push((record.at, &call.logical));
-            }
+            attempts
+                .entry((&call.session, &call.scope, &call.identity))
+                .or_default()
+                .push((record.at, *attempt));
         }
-        for ((session, scope, logical), seen) in by_logical {
-            let identities = seen.iter().map(|(_, id)| *id).collect::<BTreeSet<_>>();
-            if identities.len() > 1 {
-                violations.push(
-                    Violation::new(
-                        INVARIANT,
-                        format!(
-                            "logical call {logical} in scope {scope} ran under {} ids: {}",
-                            identities.len(),
-                            identities
-                                .iter()
-                                .map(ToString::to_string)
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
-                    )
-                    .records(seen.iter().map(|(at, _)| *at))
-                    .session(session),
-                );
-            }
-        }
-        for ((session, scope, identity, attempt), seen) in by_identity {
-            let logicals = seen
+        for ((session, scope, identity), seen) in attempts {
+            let numbers = seen
                 .iter()
-                .map(|(_, logical)| *logical)
+                .map(|(_, attempt)| *attempt)
                 .collect::<BTreeSet<_>>();
-            if logicals.len() > 1 {
+            let expected = (1..=numbers.last().copied().unwrap_or(0)).collect::<BTreeSet<_>>();
+            if numbers != expected {
                 violations.push(
                     Violation::new(
                         INVARIANT,
                         format!(
-                            "id {identity} named {} logical calls in scope {scope} at attempt {attempt}: {}",
-                            logicals.len(),
-                            logicals.into_iter().collect::<Vec<_>>().join(", ")
+                            "id {identity} in scope {scope} ran attempts {numbers:?}: an earlier \
+                             attempt of the call ran under another id"
                         ),
                     )
                     .records(seen.iter().map(|(at, _)| *at))
@@ -112,34 +73,40 @@ impl HistoryChecker for ToolCallIdentity {
                 );
             }
         }
+        // Unique: one id, one committed position, deployment-wide.
+        let mut positions: BTreeMap<&str, Vec<(&str, &str, usize, usize)>> = BTreeMap::new();
         for store in &history.stores {
             for transcript in &store.transcripts {
-                let mut positions: BTreeMap<&str, Vec<(usize, usize)>> = BTreeMap::new();
                 for call in &transcript.calls {
-                    positions
-                        .entry(&call.call_id)
-                        .or_default()
-                        .push((call.message, call.index));
+                    positions.entry(&call.call_id).or_default().push((
+                        &store.label,
+                        &transcript.session,
+                        call.message,
+                        call.index,
+                    ));
                 }
-                for (call_id, at) in positions {
-                    if at.len() > 1 {
-                        violations.push(
-                            Violation::new(
-                                INVARIANT,
-                                format!(
-                                    "{}: session {} committed {} tool calls under one id {call_id}",
-                                    store.label,
-                                    transcript.session,
-                                    at.len()
-                                ),
-                            )
-                            .session(transcript.session.clone())
-                            .row(format!(
-                                "committed tool calls {call_id} at (assistant message, part) {at:?}"
-                            )),
-                        );
-                    }
-                }
+            }
+        }
+        for (call_id, at) in positions {
+            let distinct = at
+                .iter()
+                .map(|(_, session, message, index)| (*session, *message, *index))
+                .collect::<BTreeSet<_>>();
+            if distinct.len() > 1 {
+                violations.push(
+                    Violation::new(
+                        INVARIANT,
+                        format!(
+                            "{} committed tool calls share one id {call_id}",
+                            distinct.len()
+                        ),
+                    )
+                    .session(at[0].1.to_owned())
+                    .row(format!(
+                        "committed tool calls {call_id} at (store, session, assistant message, \
+                         part) {at:?}"
+                    )),
+                );
             }
         }
         violations

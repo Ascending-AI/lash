@@ -149,7 +149,7 @@ impl DeclaredStart {
     /// Validates the one start against the attempt that declares it.
     ///
     /// The start must name the declaring session, and the attempt must have
-    /// a prepared call id and a completion key: the key is what the launched
+    /// a completion key: the key is what the launched
     /// child's terminal resolves, so a tool that returns a declared start
     /// answers `attempt_may_defer` for it.
     pub fn new(
@@ -159,15 +159,10 @@ impl DeclaredStart {
         if start.session_id.as_str() != context.session_id() {
             return Err(DeclaredStartRefused::ForeignSession);
         }
-        if context.tool_call_id().is_none() {
-            return Err(DeclaredStartRefused::MissingCallId);
-        }
         if context.completion_key().is_err() {
             return Err(DeclaredStartRefused::CompletionUnavailable);
         }
-        let identity = context
-            .intent_identity(0)
-            .map_err(|_| DeclaredStartRefused::MissingCallId)?;
+        let identity = context.intent_identity(0);
         Ok(Self {
             start: Box::new(start),
             identity: Box::new(identity),
@@ -214,8 +209,6 @@ impl DeclaredStart {
 pub enum DeclaredStartRefused {
     #[error("a declared start must name the declaring session")]
     ForeignSession,
-    #[error("a declared start needs a prepared tool call id")]
-    MissingCallId,
     #[error("a declared start needs a completion key")]
     CompletionUnavailable,
 }
@@ -778,11 +771,10 @@ mod tests {
         let identity = crate::derive_tool_intent_identity_under(
             &crate::SessionId::from("parent"),
             "turn-1",
-            Some("call-1"),
+            &crate::ToolCallId::fixture("call-1"),
             0,
             None,
-        )
-        .expect("identity");
+        );
         crate::PendingResolver::DeclaredStart(
             serde_json::from_value(serde_json::json!({
                 "start": start,

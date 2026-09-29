@@ -253,7 +253,7 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
                 && message
                     .parts
                     .iter()
-                    .any(|part| part.tool_call_id() == Some("lookup-1"))
+                    .any(|part| part.provider_call_id() == Some("lookup-1"))
         })
         .expect("stored interleaved assistant message");
     assert_eq!(
@@ -921,7 +921,7 @@ finish("done");"#,
     assert_eq!(language, "typescript");
     assert!(*success);
     assert!(error.is_none());
-    assert_eq!(call_id.as_ref(), tool_call_ids.first());
+    assert_eq!(Some(call_id), tool_call_ids.first());
     assert_eq!(tool_call_ids.len(), 1);
     assert_eq!(completed_graph_key, started_graph_key);
     // Task 4: the RLM tool call carries the enclosing block's graph_key for
@@ -940,7 +940,7 @@ finish("done");"#,
         read_view.messages().iter().all(|message| message
             .parts
             .iter()
-            .all(|part| part.tool_call_id() != tool_call_ids.first().map(String::as_str))),
+            .all(|part| part.call_id() != tool_call_ids.first())),
         "live RLM tool calls should not be persisted as message history"
     );
     assert_eq!(
@@ -1033,9 +1033,8 @@ finish("done");"#,
     ));
     let events = events.snapshot().await;
 
-    // Every collected RLM tool record carries a call_id, so the code block's
-    // `tool_call_ids` aggregate (which filters `Some(call_id)`) cannot drop a
-    // call.
+    // Every collected RLM tool record carries its call id, so the code
+    // block's `tool_call_ids` aggregate lists each call.
     let completed_ids = events
         .iter()
         .filter_map(|event| match &event.event {
@@ -1044,10 +1043,6 @@ finish("done");"#,
         })
         .collect::<Vec<_>>();
     assert_eq!(completed_ids.len(), 2, "expected two tool completions");
-    assert!(
-        completed_ids.iter().all(Option::is_some),
-        "every collected RLM tool record must carry a call_id"
-    );
 
     let tool_call_ids = events
         .iter()
@@ -1057,7 +1052,7 @@ finish("done");"#,
         })
         .expect("code block completed");
     assert_eq!(tool_call_ids.len(), completed_ids.len());
-    for call_id in completed_ids.into_iter().flatten() {
+    for call_id in completed_ids {
         assert!(
             tool_call_ids.contains(&call_id),
             "code block aggregate must list collected tool call {call_id}"
@@ -1165,7 +1160,7 @@ finish("done");"#,
         })
         .expect("typed exec-code completion event");
     assert_eq!(tool_calls.len(), 1);
-    assert_eq!(tool_calls[0].call_id.as_deref(), Some(call_id));
+    assert_eq!(tool_calls[0].call_id.as_str(), call_id);
     assert_eq!(tool_calls[0].name, "app_lookup");
     assert_eq!(
         tool_calls[0].status,

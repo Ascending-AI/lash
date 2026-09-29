@@ -307,6 +307,7 @@ fn assembler_state_output_excludes_tool_call_payload() {
                     "m0.p1".to_string(),
                     "{\"tool_calls\":[{\"tool\":\"grep\",\"parameters\":{\"query\":\"x\"}}]}"
                         .to_string(),
+                    lash_core::ToolCallId::fixture("tc1"),
                     "tc1".to_string(),
                     "batch".to_string(),
                     None,
@@ -338,7 +339,8 @@ fn assembler_state_output_excludes_tool_call_payload() {
 fn assembler_derives_tool_failure_from_assembled_records() {
     let mut assembler = RecordedTurnAssembly::default();
     assembler.record(&SessionStreamEvent::ToolCall {
-        call_id: Some("tc1".to_string()),
+        call_id: lash_core::ToolCallId::fixture("tc1"),
+        provider_call_id: None,
         name: "x".to_string(),
         args: serde_json::json!({}),
         output: lash_core::ToolCallOutput::failure(lash_core::ToolFailure::tool(
@@ -394,7 +396,8 @@ fn assembler_records_code_execution_the_driver_notes() {
 fn assembler_treats_any_non_success_record_as_tool_failure() {
     let mut assembler = RecordedTurnAssembly::default();
     assembler.record(&SessionStreamEvent::ToolCall {
-        call_id: Some("tc-cancelled".to_string()),
+        call_id: lash_core::ToolCallId::fixture("tc-cancelled"),
+        provider_call_id: None,
         name: "x".to_string(),
         args: serde_json::json!({}),
         output: lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
@@ -422,7 +425,8 @@ fn assembler_classifies_failure_omitted_beyond_128_call_horizon() {
     let mut assembler = RecordedTurnAssembly::default();
     for index in 0..128 {
         assembler.record(&SessionStreamEvent::ToolCall {
-            call_id: Some(format!("call-{index}")),
+            call_id: lash_core::ToolCallId::fixture(&format!("call-{index}")),
+            provider_call_id: None,
             name: "successful_tool".to_string(),
             args: serde_json::json!({ "index": index }),
             output: lash_core::ToolCallOutput::success(serde_json::json!(index)),

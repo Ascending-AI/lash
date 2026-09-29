@@ -506,7 +506,7 @@ async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, Registrati
     let tool_key = host
         .await_event_key(
             &ExecutionScope::turn(&address_a.session_id, "tool-turn"),
-            AwaitEventWaitIdentity::tool_completion("tool-call"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("tool-call")),
         )
         .await
         .expect("tool key");

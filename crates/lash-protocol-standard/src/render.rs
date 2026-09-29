@@ -206,7 +206,7 @@ fn builtin_tool_output(
     params: &ToolRenderParams,
 ) -> Rendered<Vec<ModelToolReturnPart>> {
     if !matches!(output.outcome, ToolCallOutcome::Success(_)) {
-        let parts = ModelToolReturn::from_output(String::new(), String::new(), output).parts;
+        let parts = ModelToolReturn::from_output(String::new(), output).parts;
         return Rendered {
             body: parts,
             cuts: CutReport::default(),
@@ -566,7 +566,7 @@ mod tests {
     ) -> ToolResultProjectionContext {
         ToolResultProjectionContext {
             session_id: SessionId::from("test"),
-            call_id: "call".into(),
+            call_id: lash_core::ToolCallId::fixture("call"),
             tool_id: ToolId::new("tool:test"),
             tool_name: "display name".into(),
             render: Some(RecordedRender {
@@ -585,7 +585,7 @@ mod tests {
     }
 
     fn baseline(ctx: &ToolResultProjectionContext) -> ModelToolReturn {
-        ModelToolReturn::from_output(ctx.call_id.clone(), ctx.tool_name.clone(), &ctx.output)
+        ModelToolReturn::from_output(ctx.tool_name.clone(), &ctx.output)
     }
 
     #[test]

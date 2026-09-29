@@ -157,6 +157,7 @@ pub(super) const LASH_STREAM_SEQUENCE: &str = "lash.stream.sequence";
 pub(super) const LASH_STREAM_VISIBLE_CHARS: &str = "lash.stream.visible_chars";
 pub(super) const LASH_TOOL_ARGS_JSON: &str = "lash.tool.args_json";
 pub(super) const LASH_TOOL_CALL_ID: &str = "lash.tool.call_id";
+pub(super) const LASH_TOOL_PROVIDER_CALL_ID: &str = "lash.tool.provider_call_id";
 pub(super) const LASH_TOOL_DURATION_MS: &str = "lash.tool.duration_ms";
 pub(super) const LASH_TOOL_INPUT_JSON: &str = "lash.tool.input_json";
 pub(super) const LASH_TOOL_ISSUING_NODE_ID: &str = "lash.tool.issuing_node_id";

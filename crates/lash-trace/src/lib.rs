@@ -541,14 +541,22 @@ pub enum TraceEvent {
         event: TraceRuntimeStreamEvent,
     },
     ToolCallStarted {
-        call_id: Option<String>,
+        /// Lash's identity for the call (ADR 0117).
+        call_id: lash_sansio::ToolCallId,
+        /// The model provider's id for the call, when a model issued it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_call_id: Option<String>,
         name: String,
         args: Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         issuing_node_id: Option<String>,
     },
     ToolCallCompleted {
-        call_id: Option<String>,
+        /// Lash's identity for the call (ADR 0117).
+        call_id: lash_sansio::ToolCallId,
+        /// The model provider's id for the call, when a model issued it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_call_id: Option<String>,
         name: String,
         args: Value,
         output: TraceToolCallOutput,
@@ -1015,7 +1023,7 @@ pub enum TraceToolCallStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceExecToolCall {
-    pub call_id: Option<String>,
+    pub call_id: lash_sansio::ToolCallId,
     pub name: String,
     pub status: TraceToolCallStatus,
 }

@@ -129,8 +129,11 @@ pub(crate) fn expand(calls: Vec<PendingToolCall>, max_members: NonZeroUsize) -> 
                 tool: member.tool.clone(),
                 slot: index_u32(expansion.calls.len()),
             });
+            // A member is named under its wrapper by its original member
+            // index, counted before refusals (ADR 0117 §2).
             expansion.calls.push(PendingToolCall {
-                call_id: format!("{}/batch/{member_index}", call.call_id),
+                call_id: call.call_id.child(u64::from(member_index)),
+                provider_call_id: None,
                 tool_name: member.tool,
                 args: member.parameters,
                 replay: None,
@@ -139,6 +142,7 @@ pub(crate) fn expand(calls: Vec<PendingToolCall>, max_members: NonZeroUsize) -> 
         expansion.plan.wrappers.push(ExpandedWrapper {
             source_position,
             call_id: call.call_id,
+            provider_call_id: call.provider_call_id,
             tool_name: call.tool_name,
             args: call.args,
             replay: call.replay,
@@ -306,11 +310,11 @@ fn fold_wrapper(
     parts.extend(attachments);
     CompletedToolCall {
         call_id: wrapper.call_id.clone(),
+        provider_call_id: wrapper.provider_call_id.clone(),
         tool_name: wrapper.tool_name.clone(),
         args: wrapper.args.clone(),
         output: ToolCallOutput::success(serde_json::json!({ "results": rows })),
         model_return: ModelToolReturn {
-            call_id: wrapper.call_id.clone(),
             tool_name: wrapper.tool_name.clone(),
             parts,
             attachment_notices,

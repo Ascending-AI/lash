@@ -470,7 +470,8 @@ fn emit_started(context: &RuntimeExecutionContext<'_>, material: &str, sink: &Ob
         crate::engine::ObservedEvent::Activity {
             correlation_id: None,
             event: crate::TurnEvent::ToolCallStarted {
-                call_id: Some(material.to_string()),
+                call_id: crate::ToolCallId::fixture(&material),
+                provider_call_id: None,
                 name: "tool".to_string(),
                 args: serde_json::json!({}),
                 graph_key: None,

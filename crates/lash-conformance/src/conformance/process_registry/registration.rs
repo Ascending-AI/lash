@@ -35,10 +35,9 @@ pub async fn a_start_key_reports_created_then_existing_and_is_trusted(
         &crate::derive_tool_intent_identity(
             &crate::SessionId::from("start-key-disposition"),
             "start-key-disposition",
-            Some("call-1"),
+            &lash_core::ToolCallId::fixture("call-1"),
             0,
-        )
-        .expect("the start's intent identity derives"),
+        ),
     );
     let first = registry
         .register_process_reporting_disposition(

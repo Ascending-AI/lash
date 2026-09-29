@@ -458,6 +458,7 @@ mod tests {
                 } => durable_parts.push(Part::tool_call(
                     format!("{assistant_id}.p{}", durable_parts.len()),
                     input_json.clone(),
+                    lash_core::ToolCallId::fixture(&call_id),
                     call_id.clone(),
                     tool_name.clone(),
                     replay.clone(),

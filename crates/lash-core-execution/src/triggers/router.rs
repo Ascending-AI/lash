@@ -237,8 +237,7 @@ fn project_trigger_process_input(
 ) {
     match input {
         crate::ProcessInput::ToolCall { call } => {
-            let crate::PreparedToolCall {
-                call_id,
+            let crate::ProcessToolCall {
                 tool_id,
                 tool_name,
                 args,
@@ -246,7 +245,6 @@ fn project_trigger_process_input(
                 prepared_payload,
             } = call;
             identity.tag(1);
-            identity.string(call_id);
             identity.string(tool_id.as_str());
             identity.string(tool_name);
             project_process_payload_leaf(identity, args);

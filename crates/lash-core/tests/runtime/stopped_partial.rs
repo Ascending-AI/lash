@@ -372,7 +372,7 @@ async fn a_stop_mid_tool_seals_every_progress_chunk_the_host_saw() {
     let [record] = turn.tool_calls.as_slice() else {
         panic!("expected the one call, got {:?}", turn.tool_calls);
     };
-    assert_eq!(record.call_id.as_deref(), Some("call-1"));
+    assert_eq!(record.provider_call_id.as_deref(), Some("call-1"));
     assert!(
         matches!(
             record.output.outcome,

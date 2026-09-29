@@ -354,7 +354,8 @@ async fn fixtures() -> Fixtures {
 
 fn prepared_tool_call() -> lash_core::PreparedToolCall {
     lash_core::PreparedToolCall {
-        call_id: CALL_ID.to_string(),
+        call_id: lash_core::ToolCallId::fixture(CALL_ID),
+        provider_call_id: None,
         tool_id: lash_core::ToolId::from("tool:attempt_atomicity".to_string()),
         tool_name: "attempt_atomicity".to_string(),
         args: serde_json::json!({"value": CALL_ID}),
@@ -467,7 +468,7 @@ fn tool_context_with_provider<'run>(
         process_originator: None,
     });
     let call = lash_core::testing::ToolCallFixture::from_dispatch(Arc::clone(&dispatch))
-        .tool_call_id(Some(CALL_ID.to_string()))
+        .call_id(lash_core::ToolCallId::fixture(CALL_ID))
         .parent_invocation(Some(attempt_parent))
         .cancellation_token(Some(tokio_util::sync::CancellationToken::new()))
         .child_execution_trace_hook(Some(lash_core::ToolChildExecutionTraceHook::new(
@@ -524,7 +525,10 @@ impl lash_core::ToolProvider for PureLeafProbeProvider {
         assert_eq!(call.name(), "attempt_atomicity");
         // The sealed attempt projection a body receives.
         assert_eq!(call.context.session_id(), SESSION);
-        assert_eq!(call.context.tool_call_id(), Some(CALL_ID));
+        assert_eq!(
+            call.context.call_id(),
+            &lash_core::ToolCallId::fixture(CALL_ID)
+        );
         assert_eq!(call.context.execution_scope_id(), TURN);
         // The projection keeps the leaf-safe reads the legacy inventory
         // covered: cancellation observation and the sealed prepared payload
@@ -577,7 +581,7 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
             lash_core::RuntimeEffectEnvelope::new(
                 attempt_invocation(),
                 lash_core::RuntimeEffectCommand::ToolAttempt {
-                    call: prepared_tool_call(),
+                    call: Box::new(prepared_tool_call()),
                     execution_grant: None,
                     attempt: 1,
                     max_attempts: 1,
@@ -589,7 +593,8 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
                 Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
                     launch: Box::new(lash_core::ToolAttemptLaunch::Done {
                         record: Box::new(lash_core::ToolCallRecord {
-                            call_id: Some(CALL_ID.to_string()),
+                            call_id: lash_core::ToolCallId::fixture(CALL_ID),
+                            provider_call_id: None,
                             tool: "attempt_atomicity".to_string(),
                             args: serde_json::Value::Null,
                             output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
@@ -648,7 +653,7 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
             lash_core::RuntimeEffectEnvelope::new(
                 attempt_invocation(),
                 lash_core::RuntimeEffectCommand::ToolAttempt {
-                    call: prepared_tool_call(),
+                    call: Box::new(prepared_tool_call()),
                     execution_grant: None,
                     attempt: 1,
                     max_attempts: 1,
@@ -691,7 +696,8 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
                 Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
                     launch: Box::new(lash_core::ToolAttemptLaunch::Done {
                         record: Box::new(lash_core::ToolCallRecord {
-                            call_id: Some(CALL_ID.to_string()),
+                            call_id: lash_core::ToolCallId::fixture(CALL_ID),
+                            provider_call_id: None,
                             tool: "attempt_atomicity".to_string(),
                             args: serde_json::Value::Null,
                             output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
@@ -782,7 +788,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
             lash_core::RuntimeEffectEnvelope::new(
                 attempt_invocation(),
                 lash_core::RuntimeEffectCommand::ToolAttempt {
-                    call: prepared_tool_call(),
+                    call: Box::new(prepared_tool_call()),
                     execution_grant: None,
                     attempt: 1,
                     max_attempts: 1,
@@ -819,7 +825,8 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
                 Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
                     launch: Box::new(lash_core::ToolAttemptLaunch::Done {
                         record: Box::new(lash_core::ToolCallRecord {
-                            call_id: Some(CALL_ID.to_string()),
+                            call_id: lash_core::ToolCallId::fixture(CALL_ID),
+                            provider_call_id: None,
                             tool: "attempt_atomicity".to_string(),
                             args: serde_json::Value::Null,
                             output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
@@ -905,7 +912,7 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
         ]);
         let outcomes = lash_core::tool_dispatch::execute_final_tool_intents(
             &dispatch,
-            Some(CALL_ID),
+            &lash_core::ToolCallId::fixture(CALL_ID),
             &intents,
             None,
         )
@@ -913,10 +920,10 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
         .expect("execute intent batch");
         assert_eq!(outcomes.len(), 4, "one typed outcome per intent");
         let literal_ids = [
-            "tool-intent:v2:blake3:06404a7267c11e95e26c0911398d8e4881ae846fd7e962be54aec5aefa88ab74",
-            "tool-intent:v2:blake3:f6a0238ac5cd935c4e90ba7aea76793abbea968361e0d5df0fec1a576615d291",
-            "tool-intent:v2:blake3:4d9e09cb0742c6bd58ba1fc01b712b4b74bb762edad0e708fb18a19db960f888",
-            "tool-intent:v2:blake3:e93de6b5ba860968e4ab3c339cfe2f77f49aa384c4e6ede22853541e103e1ac4",
+            "tool-intent:v2:blake3:272e4e3c22008c4aff390c9b25429a355cce415dac84a254a399e0cf0ec628a1",
+            "tool-intent:v2:blake3:416d06856ee35512429c47dabf453d34aa1800a4620073d764291d3a59b4536f",
+            "tool-intent:v2:blake3:9200f8dc6746be4c2ae58b2c942d9cbfdaaa43f76e222d82eae17e2715cf129e",
+            "tool-intent:v2:blake3:a4386a925e26ef9042805543b6ff568675fdf3d7ddacf0d58f163b92fc60b2da",
         ];
         let actual_ids = outcomes
             .iter()
@@ -979,7 +986,7 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
         );
         let outcomes = lash_core::tool_dispatch::execute_final_tool_intents(
             &dispatch,
-            Some(CALL_ID),
+            &lash_core::ToolCallId::fixture(CALL_ID),
             &intents,
             None,
         )
@@ -1034,10 +1041,9 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
         let identity = lash_core::derive_tool_intent_identity(
             &SessionId::from(SESSION),
             TURN,
-            Some(CALL_ID),
+            &lash_core::ToolCallId::fixture(CALL_ID),
             9,
-        )
-        .expect("literal intent identity");
+        );
         let registry = fixtures_backend.process_registry();
         let registered = registry
             .register_process(
@@ -1155,7 +1161,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
 
         let first = lash_core::tool_dispatch::execute_final_tool_intents(
             &dispatch,
-            Some(CALL_ID),
+            &lash_core::ToolCallId::fixture(CALL_ID),
             &intents,
             None,
         )
@@ -1191,7 +1197,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
 
         let redriven = lash_core::tool_dispatch::execute_final_tool_intents(
             &dispatch,
-            Some(CALL_ID),
+            &lash_core::ToolCallId::fixture(CALL_ID),
             &intents,
             None,
         )
@@ -1432,7 +1438,7 @@ fn attempt_effect_envelope() -> lash_core::RuntimeEffectEnvelope {
     lash_core::RuntimeEffectEnvelope::new(
         attempt_invocation(),
         lash_core::RuntimeEffectCommand::ToolAttempt {
-            call: prepared_tool_call(),
+            call: Box::new(prepared_tool_call()),
             execution_grant: None,
             attempt: 1,
             max_attempts: 1,
@@ -1444,7 +1450,8 @@ fn attempt_done_outcome() -> lash_core::RuntimeEffectOutcome {
     lash_core::RuntimeEffectOutcome::ToolAttempt {
         launch: Box::new(lash_core::ToolAttemptLaunch::Done {
             record: Box::new(lash_core::ToolCallRecord {
-                call_id: Some(CALL_ID.to_string()),
+                call_id: lash_core::ToolCallId::fixture(CALL_ID),
+                provider_call_id: None,
                 tool: "attempt_atomicity".to_string(),
                 args: serde_json::Value::Null,
                 output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),

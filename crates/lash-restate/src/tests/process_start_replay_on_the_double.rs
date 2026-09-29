@@ -103,10 +103,9 @@ pub(super) async fn a_parent_replay_after_its_child_was_pruned_returns_the_recor
             &lash_core::derive_tool_intent_identity(
                 &lash_core::SessionId::from("session"),
                 "turn",
-                Some("spawn-child"),
+                &lash_core::ToolCallId::fixture("spawn-child"),
                 0,
-            )
-            .expect("the spawn's intent identity derives"),
+            ),
         )))
     };
     let crashing: lash_restate_test::HandlerAttempt = {

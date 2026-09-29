@@ -100,7 +100,7 @@ pub struct ParkSite<'a, 'scope> {
     /// The session the call runs in.
     pub session_id: &'a crate::SessionId,
     /// The call's id: the key material of its cancel obligation.
-    pub call_id: &'a str,
+    pub call_id: &'a lash_sansio::ToolCallId,
     /// The call's lineage: the start, the arming and the cancel obligation
     /// are journaled beneath it.
     pub scope: crate::ProcessOpScope<'scope>,
@@ -375,7 +375,8 @@ impl crate::tool_dispatch::PendingToolDispatchOutcome {
     ) -> crate::tool_dispatch::ToolDispatchOutcome {
         crate::tool_dispatch::ToolDispatchOutcome {
             record: crate::ToolCallRecord {
-                call_id: None,
+                call_id: self.call_id,
+                provider_call_id: self.provider_call_id,
                 tool: self.tool_name,
                 args: self.args,
                 output: crate::ToolCallOutput::failure(failure),

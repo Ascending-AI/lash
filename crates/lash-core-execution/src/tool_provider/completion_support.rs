@@ -5,10 +5,11 @@
 /// the whole point: one is the host's controller, the other is the provider's
 /// own missing declaration, and blaming the controller for the latter sends the
 /// integrator to the wrong file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AttemptCompletionSupport {
-    /// The coordinator reserved a key for a declared deferrer.
-    Available,
+    /// The coordinator reserved this key, derived from the call's id, for a
+    /// declared deferrer.
+    Available(crate::AwaitEventKey),
     /// The provider never declared
     /// [`ToolProvider::attempt_may_defer`](super::ToolProvider::attempt_may_defer)
     /// for this tool, so no key was reserved for it.
@@ -18,11 +19,12 @@ pub(crate) enum AttemptCompletionSupport {
 }
 
 impl AttemptCompletionSupport {
-    /// Refuse with the reason that actually applies, so the integrator lands in
-    /// the right file: their own provider declaration, or the host's controller.
-    pub(crate) fn ensure_available(self) -> Result<(), crate::RuntimeError> {
+    /// The reserved key, or the refusal that actually applies, so the
+    /// integrator lands in the right file: their own provider declaration, or
+    /// the host's controller.
+    pub(crate) fn key(&self) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
         match self {
-            Self::Available => Ok(()),
+            Self::Available(key) => Ok(key.clone()),
             Self::NotDeclared => Err(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::ToolDeferralNotDeclared,
                 "this tool did not declare deferred completion: implement ToolProvider::attempt_may_defer (or StaticToolExecute::attempt_may_defer) and return true for it, so the coordinator reserves a completion key before the attempt body runs",

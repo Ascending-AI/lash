@@ -27,7 +27,7 @@ impl LashlangProcessHost<'_> {
         receiver: lashlang::Value,
         args: Vec<lashlang::Value>,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
-        call_id: String,
+        call_id: lash_core::ToolCallId,
         journal_key: String,
     ) -> Result<PreparedResourceInvocation, ExecutionHostError> {
         let receiver = match &receiver {

@@ -130,32 +130,20 @@ pub(super) async fn empty_tool_call_identifiers_leave_no_row(
 ) {
     let cases = [
         (
-            "empty-call-id",
-            "",
-            "tool",
-            "process `keyless start` tool call must carry a call id",
-        ),
-        (
-            "whitespace-call-id",
-            "  ",
-            "tool",
-            "process `keyless start` tool call must carry a call id",
-        ),
-        (
             "empty-tool-name",
-            "call",
             "",
             "process `keyless start` tool call must carry a tool name",
         ),
         (
             "whitespace-tool-name",
-            "call",
             "\t",
             "process `keyless start` tool call must carry a tool name",
         ),
     ];
 
-    for (label, call_id, tool_name, expected) in cases {
+    // A process's tool call carries no call id of its own: the process's
+    // minted id names it when it runs (ADR 0117 §2).
+    for (label, tool_name, expected) in cases {
         let before = registry
             .list_processes(&ProcessListFilter::default())
             .await
@@ -163,14 +151,13 @@ pub(super) async fn empty_tool_call_identifiers_leave_no_row(
             .len();
         let registration = ProcessRegistration::new(
             ProcessInput::ToolCall {
-                call: crate::PreparedToolCall::from_parts(
-                    call_id,
-                    crate::ToolId::new("tool-id"),
-                    tool_name,
-                    serde_json::json!({}),
-                    None,
-                    serde_json::Value::Null,
-                ),
+                call: lash_core::ProcessToolCall {
+                    tool_id: crate::ToolId::new("tool-id"),
+                    tool_name: tool_name.into(),
+                    args: serde_json::json!({}),
+                    replay: None,
+                    prepared_payload: serde_json::Value::Null,
+                },
             },
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,

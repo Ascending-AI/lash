@@ -29,14 +29,15 @@ fn part_field_additions_trip_this_exhaustive_destructure() {
         super::Part::ToolCall {
             id: _,
             content: _,
-            tool_call_id: _,
+            call_id: _,
+            provider_call_id: _,
             tool_name: _,
             tool_replay: _,
         } => {}
         super::Part::ToolResult {
             id: _,
             content: _,
-            tool_call_id: _,
+            call_id: _,
             tool_name: _,
         } => {}
         super::Part::Reasoning {
@@ -167,6 +168,7 @@ fn replay_carrying_constructors_preserve_provider_metadata() {
     let tool_call = Part::tool_call(
         "m0.p0".to_string(),
         r#"{"path":"README.md"}"#.to_string(),
+        crate::ToolCallId::fixture("call-1"),
         "call-1".to_string(),
         "read_file".to_string(),
         Some(tool_replay.clone()),
@@ -298,6 +300,7 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
             parts: vec![Part::tool_call(
                 "m2.p0".to_string(),
                 r#"{"path":"README.md"}"#.to_string(),
+                crate::ToolCallId::fixture("tc1"),
                 "tc1".to_string(),
                 "read_file".to_string(),
                 None,
@@ -311,7 +314,7 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
             parts: vec![Part::tool_result(
                 "m3.p0".to_string(),
                 vec![crate::ModelToolReturnPart::text("ok")],
-                "tc1".to_string(),
+                crate::ToolCallId::fixture("tc1"),
                 "read_file".to_string(),
             )]
             .into(),
@@ -353,6 +356,7 @@ fn render_structured_prompt_preserves_empty_tool_results() {
             parts: vec![Part::tool_call(
                 "m0.p0".to_string(),
                 r#"{"question":"Pick one"}"#.to_string(),
+                crate::ToolCallId::fixture("ask_1"),
                 "ask_1".to_string(),
                 "ask".to_string(),
                 None,
@@ -366,7 +370,7 @@ fn render_structured_prompt_preserves_empty_tool_results() {
             parts: vec![Part::tool_result(
                 "m1.p0".to_string(),
                 Vec::new(),
-                "ask_1".to_string(),
+                crate::ToolCallId::fixture("ask_1"),
                 "ask".to_string(),
             )]
             .into(),
@@ -456,6 +460,7 @@ fn render_transcript_prompt_preserves_tool_name_for_assistant_tool_calls() {
             parts: vec![Part::tool_call(
                 "m1.p0".to_string(),
                 r#"{"timezone":"UTC"}"#.to_string(),
+                crate::ToolCallId::fixture("tc1"),
                 "tc1".to_string(),
                 "get_time".to_string(),
                 None,
@@ -494,6 +499,7 @@ fn prompt_resume_safety_accepts_completed_tool_history() {
             parts: vec![Part::tool_call(
                 "m0.p0".to_string(),
                 r#"{"path":"README.md"}"#.to_string(),
+                crate::ToolCallId::fixture("tc1"),
                 "tc1".to_string(),
                 "read_file".to_string(),
                 None,
@@ -507,7 +513,7 @@ fn prompt_resume_safety_accepts_completed_tool_history() {
             parts: vec![Part::tool_result(
                 "m1.p0".to_string(),
                 vec![crate::ModelToolReturnPart::text("ok")],
-                "tc1".to_string(),
+                crate::ToolCallId::fixture("tc1"),
                 "read_file".to_string(),
             )]
             .into(),
@@ -589,6 +595,7 @@ fn prompt_resume_safety_rejects_unmatched_tool_calls() {
         parts: vec![Part::tool_call(
             "m0.p0".to_string(),
             r#"{"path":"README.md"}"#.to_string(),
+            crate::ToolCallId::fixture("tc1"),
             "tc1".to_string(),
             "read_file".to_string(),
             None,
@@ -793,9 +800,29 @@ fn fig1123_only_committed_turn_inputs_start_genuine_user_segments() {
             }),
         },
         Message {
+            id: "call".to_string(),
+            role: MessageRole::Assistant,
+            parts: vec![Part::tool_call(
+                "call.p0".to_string(),
+                "{}".to_string(),
+                crate::ToolCallId::fixture("synthetic"),
+                "synthetic".to_string(),
+                "tool".to_string(),
+                None,
+            )]
+            .into(),
+            origin: None,
+        },
+        Message {
             id: "synthetic".to_string(),
             role: MessageRole::User,
-            parts: vec![part(PartKind::ToolResult, "synthetic")].into(),
+            parts: vec![Part::tool_result(
+                "synthetic.p0".to_string(),
+                vec![crate::ModelToolReturnPart::text("synthetic")],
+                crate::ToolCallId::fixture("synthetic"),
+                "tool".to_string(),
+            )]
+            .into(),
             origin: Some(MessageOrigin::Plugin {
                 plugin_id: "plugin".to_string(),
                 transient: false,
@@ -806,7 +833,7 @@ fn fig1123_only_committed_turn_inputs_start_genuine_user_segments() {
     let rendered = render_prompt(&messages);
 
     assert!(rendered.messages[0].starts_user_segment);
-    assert!(!rendered.messages[1].starts_user_segment);
+    assert!(!rendered.messages[2].starts_user_segment);
 }
 
 #[test]
@@ -893,6 +920,7 @@ fn part_serializes_to_the_flat_wire_shape() {
     let part = Part::tool_call(
         "m0.p0".to_string(),
         "{}".to_string(),
+        crate::ToolCallId::fixture("call-1"),
         "call-1".to_string(),
         "lookup".to_string(),
         None,
@@ -903,7 +931,8 @@ fn part_serializes_to_the_flat_wire_shape() {
             "kind": "ToolCall",
             "id": "m0.p0",
             "content": "{}",
-            "tool_call_id": "call-1",
+            "call_id": crate::ToolCallId::fixture("call-1").as_str(),
+            "provider_call_id": "call-1",
             "tool_name": "lookup",
         })
     );
@@ -929,7 +958,7 @@ fn every_kind_round_trips_through_the_flat_form() {
                 )),
                 crate::ModelToolReturnPart::text(",\"after\"]"),
             ],
-            "call-1".into(),
+            crate::ToolCallId::fixture("call-1"),
             "snap".into(),
         ),
         Part::code("m.p3".into(), "x = 1".into()),
@@ -939,6 +968,7 @@ fn every_kind_round_trips_through_the_flat_form() {
         Part::tool_call(
             "m.p7".into(),
             "{}".into(),
+            crate::ToolCallId::fixture("call-2"),
             "call-2".into(),
             "lookup".into(),
             Some(ProviderReplayMeta {
@@ -950,7 +980,7 @@ fn every_kind_round_trips_through_the_flat_form() {
         Part::tool_result(
             "m.p8".into(),
             vec![crate::ModelToolReturnPart::text("done")],
-            "call-2".into(),
+            crate::ToolCallId::fixture("call-2"),
             "lookup".into(),
         ),
         Part::reasoning(
@@ -973,12 +1003,15 @@ fn every_kind_round_trips_through_the_flat_form() {
 
 #[test]
 fn legacy_flat_json_pairs_rejected_when_the_kind_cannot_carry_the_field() {
-    // A Text part with a tool_call_id was representable in the old flat
+    // A Text part with a call id was representable in the old flat
     // struct; the enum reader refuses it with a typed error.
-    let bad = r#"{"id":"m.p0","kind":"Text","content":"x","tool_call_id":"call-1"}"#;
-    let err = serde_json::from_str::<Part>(bad).expect_err("invalid pairing must fail");
+    let bad = format!(
+        r#"{{"id":"m.p0","kind":"Text","content":"x","call_id":"{}"}}"#,
+        crate::ToolCallId::fixture("call-1")
+    );
+    let err = serde_json::from_str::<Part>(&bad).expect_err("invalid pairing must fail");
     assert!(
-        err.to_string().contains("tool_call_id"),
+        err.to_string().contains("call_id"),
         "typed error names the offending field: {err}"
     );
 
@@ -986,7 +1019,7 @@ fn legacy_flat_json_pairs_rejected_when_the_kind_cannot_carry_the_field() {
     let missing = r#"{"id":"m.p0","kind":"ToolResult","blocks":[]}"#;
     let err = serde_json::from_str::<Part>(missing).expect_err("missing call pair must fail");
     assert!(
-        err.to_string().contains("tool_call_id"),
+        err.to_string().contains("call_id"),
         "typed error names the missing field: {err}"
     );
 
@@ -1022,7 +1055,7 @@ fn tool_result_attachments_are_counted_and_distinctly_identified() {
             crate::ModelToolReturnPart::text("between"),
             crate::ModelToolReturnPart::Attachment(second.clone()),
         ],
-        "call-1".into(),
+        crate::ToolCallId::fixture("call-1"),
         "shot".into(),
     );
     assert_eq!(
@@ -1039,6 +1072,7 @@ fn tool_result_attachments_are_counted_and_distinctly_identified() {
             parts: vec![Part::tool_call(
                 "m0.p0".into(),
                 "{}".into(),
+                crate::ToolCallId::fixture("call-1"),
                 "call-1".into(),
                 "shot".into(),
                 None,

@@ -1437,7 +1437,9 @@ impl Fig1128DeadlineRedrive for Fig1128DeadlineRedriveImpl {
     ) -> HandlerResult<Json<Resolution>> {
         let key = test_restate_await_event_key(
             &ExecutionScope::runtime_operation("fig1128-deadline-redrive"),
-            AwaitEventWaitIdentity::tool_completion("fig1128-deadline"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "fig1128-deadline",
+            )),
         )
         .map_err(TerminalError::from_error)?;
         let deadline = self.clock.now() + Duration::from_secs(60);
@@ -1483,7 +1485,9 @@ impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
         let scope = durable_turn_scope("fig1126-revoked-session", "fig1126-revoked-turn");
         let key = test_restate_await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("fig1126-revoked-call"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "fig1126-revoked-call",
+            )),
         )
         .map_err(TerminalError::from_error)?;
         let outcome = RestateRuntimeEffectController::new_for_test(ctx)
@@ -1652,7 +1656,10 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
                         "fig1126-pending-tool",
                     ),
                     RuntimeEffectCommand::ToolAttempt {
-                        call: prepared_tool_call_with("fig1126-call", "fig1126_pending_tool"),
+                        call: Box::new(prepared_tool_call_with(
+                            "fig1126-call",
+                            "fig1126_pending_tool",
+                        )),
                         execution_grant: None,
                         attempt: 1,
                         max_attempts: 1,
@@ -1663,7 +1670,9 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
                     let key = controller
                         .await_event_key(
                             &pending_scope,
-                            AwaitEventWaitIdentity::tool_completion("fig1126-call"),
+                            AwaitEventWaitIdentity::tool_completion(
+                                lash_core::ToolCallId::fixture("fig1126-call"),
+                            ),
                         )
                         .await
                         .map_err(lash_core::RuntimeEffectControllerError::from)?;

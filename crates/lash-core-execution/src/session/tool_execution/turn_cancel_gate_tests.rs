@@ -129,12 +129,14 @@ fn turn_scope() -> crate::ExecutionScope {
 
 fn pending_tool() -> crate::tool_dispatch::PendingToolDispatchOutcome {
     crate::tool_dispatch::PendingToolDispatchOutcome {
+        call_id: crate::ToolCallId::fixture("call"),
+        provider_call_id: None,
         tool_name: "deferred".to_string(),
         args: serde_json::json!({}),
         key: crate::AwaitEventKey {
             scope: turn_scope(),
             wait: crate::AwaitEventWaitIdentity::ToolCompletion {
-                tool_call_id: "call".to_string(),
+                tool_call_id: crate::ToolCallId::fixture("call"),
             },
             key_id: "key".to_string(),
             signature: "signature".to_string(),
@@ -166,14 +168,7 @@ async fn deferred_tool_await_shape(
         context = context.without_turn_cancel_observation();
     }
     let outcome = context
-        .await_pending_tool_dispatch_outcome_with_suffix(
-            "call",
-            None,
-            "call:await".to_string(),
-            pending_tool(),
-            None,
-            None,
-        )
+        .await_pending_tool_dispatch_outcome(None, pending_tool(), None, None)
         .await
         .expect("the recorded wait settles");
     assert_eq!(outcome.record.tool, "deferred");
@@ -240,7 +235,7 @@ async fn scalar_retry_sleep_attaches_the_owning_turn_cancel_gate() {
     let reply = Box::pin(context.call_command_tool(
         &crate::CommandReplayKey::new("scalar-retry-call"),
         crate::session::ToolInvocation::new(
-            "scalar-retry-call",
+            crate::ToolCallId::fixture("scalar-retry-call"),
             definition.manifest.id,
             serde_json::json!({}),
         ),

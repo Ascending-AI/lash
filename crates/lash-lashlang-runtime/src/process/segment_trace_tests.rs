@@ -325,7 +325,10 @@ fn interrupted_resource_node_and_retried_occurrence_keep_distinct_trace_generati
         site: site.clone(),
         occurrence: 1,
     });
-    interrupted.record_resource_call(&call_site, "same-settled-effect-key");
+    interrupted.record_resource_call(
+        &call_site,
+        &lash_core::ToolCallId::fixture("same-settled-effect-key"),
+    );
     drop(interrupted); // A worker loss leaves the node started, without a terminal observation.
 
     let retried = trace_for_attempt(2);
@@ -333,7 +336,10 @@ fn interrupted_resource_node_and_retried_occurrence_keep_distinct_trace_generati
         site: site.clone(),
         occurrence: 1,
     });
-    retried.record_resource_call(&call_site, "same-settled-effect-key");
+    retried.record_resource_call(
+        &call_site,
+        &lash_core::ToolCallId::fixture("same-settled-effect-key"),
+    );
     retried.emit_observation(lashlang::LashlangExecutionObservation::NodeCompleted {
         site,
         occurrence: 1,
@@ -363,7 +369,7 @@ fn interrupted_resource_node_and_retried_occurrence_keep_distinct_trace_generati
                 occurrence: 1,
                 call_id: Some(call_id),
                 ..
-            } if call_id == "same-settled-effect-key"
+            } if *call_id == lash_core::ToolCallId::fixture("same-settled-effect-key")
         )));
     }
 }
@@ -409,7 +415,7 @@ fn untraced_completed_resource_calls_retain_no_correlation_state() {
                 site: site.clone(),
                 occurrence,
             },
-            &format!("call-{occurrence}"),
+            &lash_core::ToolCallId::fixture(&format!("call-{occurrence}")),
         );
         trace.emit_observation(lashlang::LashlangExecutionObservation::NodeCompleted {
             site,

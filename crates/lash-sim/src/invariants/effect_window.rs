@@ -47,15 +47,15 @@ impl HistoryChecker for EffectWindow {
                     attempt,
                     failed_attempts_before,
                 } => {
-                    // A call with no engine address is told apart by its id.
-                    let logical = if call.logical.is_empty() {
-                        call.identity.0.as_str()
-                    } else {
-                        call.logical.as_str()
-                    };
-                    runs.entry((&call.session, &call.scope, logical, *attempt))
-                        .or_default()
-                        .push((record.at, *failed_attempts_before));
+                    // A call is told apart by its `ToolCallId` (ADR 0117).
+                    runs.entry((
+                        &call.session,
+                        &call.scope,
+                        call.identity.0.as_str(),
+                        *attempt,
+                    ))
+                    .or_default()
+                    .push((record.at, *failed_attempts_before));
                 }
                 Fact::EffectRan {
                     effect,

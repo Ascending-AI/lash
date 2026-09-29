@@ -447,7 +447,7 @@ pub(super) async fn restate_controller_executes_atomic_effect_inside_run() {
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::ToolAttempt, "step"),
                 RuntimeEffectCommand::ToolAttempt {
-                    call: prepared_tool_call(),
+                    call: Box::new(prepared_tool_call()),
                     execution_grant: None,
                     attempt: 1,
                     max_attempts: 1,
@@ -477,7 +477,7 @@ pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_comman
     let envelope = RuntimeEffectEnvelope::new(
         runtime_invocation(RuntimeEffectKind::ToolAttempt, "tool-attempt"),
         RuntimeEffectCommand::ToolAttempt {
-            call,
+            call: Box::new(call),
             execution_grant: None,
             attempt: 1,
             max_attempts: 1,
@@ -525,7 +525,7 @@ pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_comman
     };
     assert!(matches!(
         &*launch,
-        lash_core::ToolAttemptLaunch::Done { record, .. } if record.call_id.as_deref() == Some("call-fast")
+        lash_core::ToolAttemptLaunch::Done { record, .. } if record.call_id == lash_core::ToolCallId::fixture("call-fast")
     ));
     assert_eq!(context.record_count(), 1);
     assert_eq!(context.runs().len(), 1);
@@ -547,7 +547,7 @@ pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_comman
     };
     assert!(matches!(
         &*launch,
-        lash_core::ToolAttemptLaunch::Done { record, .. } if record.call_id.as_deref() == Some("call-fast")
+        lash_core::ToolAttemptLaunch::Done { record, .. } if record.call_id == lash_core::ToolCallId::fixture("call-fast")
     ));
     assert_eq!(context.record_count(), 1);
     assert_eq!(context.runs().len(), 2);
@@ -810,7 +810,7 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
     let key = restate_await_event_key_for_authority(
         &authority,
         &durable_turn_scope("session", "turn"),
-        AwaitEventWaitIdentity::tool_completion("cancel-tool"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("cancel-tool")),
     )
     .expect("cancel wait key");
     let cancellation = tokio_util::sync::CancellationToken::new();

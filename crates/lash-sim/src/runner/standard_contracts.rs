@@ -272,14 +272,19 @@ impl StandardContractToolResult {
         }
     }
 
-    fn completed_call(&self, args: Value) -> lash_core::sansio::CompletedToolCall {
+    /// The result answering `call`, the pending call whose provider
+    /// correlation this scripted result names.
+    fn completed_call(
+        &self,
+        call: &lash_core::sansio::PendingToolCall,
+    ) -> lash_core::sansio::CompletedToolCall {
         lash_core::sansio::CompletedToolCall {
-            call_id: self.call_id.to_string(),
+            call_id: call.call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
             tool_name: self.tool_name.to_string(),
-            args,
+            args: call.args.clone(),
             output: self.output.clone(),
             model_return: lash_core::facade_support::ModelToolReturn {
-                call_id: self.call_id.to_string(),
                 tool_name: self.tool_name.to_string(),
                 parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
                     self.model_return_text,
@@ -328,8 +333,9 @@ impl StandardContractObserved {
                 }
                 lash_core::Effect::ToolCalls { calls, .. } => {
                     self.tool_calls.extend(calls.iter().map(|call| {
+                        // Scenario scripts name calls by the provider's ids.
                         json!({
-                            "call_id": call.call_id,
+                            "call_id": call.provider_call_id,
                             "tool_name": call.tool_name,
                             "args": call.args,
                         })
@@ -451,7 +457,8 @@ pub(super) fn run_standard_protocol_contract(
                 require(
                     calls.len() == results.len()
                         && calls.iter().zip(&results).all(|(call, result)| {
-                            call.call_id == result.call_id && call.tool_name == result.tool_name
+                            call.provider_call_id.as_deref() == Some(result.call_id)
+                                && call.tool_name == result.tool_name
                         }),
                     format!("{scenario_name} native tool-call shape changed"),
                 )?;
@@ -463,7 +470,7 @@ pub(super) fn run_standard_protocol_contract(
                     results: calls
                         .iter()
                         .zip(results)
-                        .map(|(call, result)| result.completed_call(call.args.clone()))
+                        .map(|(call, result)| result.completed_call(call))
                         .collect(),
                 });
             }

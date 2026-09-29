@@ -317,22 +317,19 @@ fn execute_benchmark_mail_send(
         .get("text")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
-    let Some(replay_key) = call.context.replay_key() else {
-        return done_without_intents(ToolOutcome::err_fmt(
-            "benchmark mail send requires a replay key",
-        ));
-    };
+    // The call's `ToolCallId` keys the send's idempotency (ADR 0117).
+    let call_id = call.context.call_id();
     let source_key = match empty_trigger_source_key(BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE) {
         Ok(source_key) => source_key,
         Err(err) => return done_without_intents(ToolOutcome::err_fmt(err.to_string())),
     };
-    let message_id = format!("{account}-{replay_key}");
+    let message_id = format!("{account}-{call_id}");
     let payload = serde_json::json!({
         "account": account,
         "title": title,
         "text": text,
     });
-    let idempotency_key = format!("{replay_key}:mail.received:{account}");
+    let idempotency_key = format!("{call_id}:mail.received:{account}");
     let _phase = call.context.named_phase("trigger.occurrence_to_delivery");
     let intent = lash_core::ToolIntent::EmitTrigger(lash_core::EmitTriggerIntent {
         session_id: SessionId::from(call.context.session_id()),

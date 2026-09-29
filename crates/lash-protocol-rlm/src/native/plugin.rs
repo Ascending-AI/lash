@@ -75,11 +75,9 @@ pub(super) fn register_native_plugin(
         move |ctx: lash_core::plugin::AssistantResponseHookContext| {
             let dialect = Arc::clone(&dialect);
             Box::pin(async move {
-                let parts = super::tool::assistant_parts(
-                    lash_core::facade_support::normalized_response_parts(&ctx.response),
-                );
+                let parts = lash_core::facade_support::normalized_response_parts(&ctx.response);
                 let events = if matches!(
-                    super::tool::normalize(&parts),
+                    super::tool::normalize_output(&parts),
                     super::tool::NativeAction::Execute { .. }
                 ) {
                     [

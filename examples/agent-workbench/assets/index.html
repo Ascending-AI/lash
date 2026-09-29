@@ -4508,24 +4508,8 @@
       }
     }
 
-    function stableToolMatchValue(value) {
-      if (Array.isArray(value)) return value.map(stableToolMatchValue);
-      if (value && typeof value === "object") {
-        return Object.fromEntries(
-          Object.keys(value).sort().map(key => [key, stableToolMatchValue(value[key])])
-        );
-      }
-      return value;
-    }
-
     function toolMatchKey(event) {
-      const callId = String(event?.call_id || "").trim();
-      if (callId) return `call:${callId}`;
-      return JSON.stringify({
-        name: event?.name || "",
-        args: stableToolMatchValue(event?.args || {}),
-        graph_key: event?.graph_key || null
-      });
+      return `call:${event.call_id}`;
     }
 
     function appendCompletedTool(event, turnId) {
@@ -4553,9 +4537,7 @@
       const linkedIds = new Set(event.tool_call_ids || []);
       const sameTurnTools = pendingTools.filter(tool => tool.observationTurnId === turnId);
       const sameTurnBlock = pendingCodeBlock?.turnId === turnId ? pendingCodeBlock : null;
-      const linkedTools = sameTurnTools.filter(tool => tool.event.call_id
-        ? linkedIds.has(tool.event.call_id)
-        : Boolean(sameTurnBlock));
+      const linkedTools = sameTurnTools.filter(tool => linkedIds.has(tool.event.call_id));
       const linkedToolSet = new Set(linkedTools);
       const unlinkedTools = sameTurnTools.filter(tool => !linkedToolSet.has(tool));
       const completedEvent = { ...event, code: event.code || sameTurnBlock?.event?.code || "" };

@@ -58,7 +58,7 @@ fn record_effect<M: TurnProtocol>(transcript: &mut Transcript, actor: &str, effe
                 transcript.record(
                     Entry::new(Kind::Tool, session(), "tool.call")
                         .attr(Attr::text("name", &call.tool_name))
-                        .attr(Attr::id("call", IdKind::Call, &call.call_id)),
+                        .attr(Attr::id("call", IdKind::Call, call.call_id.as_str())),
                 );
             }
         }
@@ -67,7 +67,7 @@ fn record_effect<M: TurnProtocol>(transcript: &mut Transcript, actor: &str, effe
                 transcript.record(
                     Entry::new(Kind::Tool, session(), "tool.report")
                         .attr(Attr::text("name", &call.tool_name))
-                        .attr(Attr::id("call", IdKind::Call, &call.call_id)),
+                        .attr(Attr::id("call", IdKind::Call, call.call_id.as_str())),
                 );
             }
         }
@@ -105,9 +105,7 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
             let mut entry = Entry::new(Kind::Tool, session(), "tool.result")
                 .attr(Attr::text("name", name))
                 .attr(Attr::debug_token("outcome", &output.status()));
-            if let Some(call_id) = call_id {
-                entry = entry.attr(Attr::id("call", IdKind::Call, call_id));
-            }
+            entry = entry.attr(Attr::id("call", IdKind::Call, call_id.as_str()));
             transcript.record(entry);
         }
         SessionStreamEvent::ToolCallsOmitted { summary } => {

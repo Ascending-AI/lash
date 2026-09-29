@@ -3,9 +3,11 @@ use std::sync::Arc;
 use crate::plugin::ToolResultHookContext;
 use crate::{PreparedToolCall, ToolContext, ToolFailureClass, ToolManifest, ToolOutcome};
 
+#[cfg(any(test, feature = "testing"))]
 use super::context::ToolDispatchOutcome;
 use super::context::{
-    PendingToolDispatchOutcome, ToolCallLaunch, ToolDispatchContext, launch_done, runtime_failure,
+    PendingToolDispatchOutcome, ToolCallIds, ToolCallLaunch, ToolDispatchContext, launch_done,
+    runtime_failure,
 };
 use super::directives::apply_after_tool_directives;
 use super::retry::{execute_leaf_tool_attempt, normalized_outcome};
@@ -133,6 +135,7 @@ pub(crate) async fn dispatch_prepared_tool_call_with_execution_context<'run>(
     prepared: PreparedToolCall,
     tool_context: ToolContext<'run>,
 ) -> ToolDispatchOutcome {
+    let ids = ToolCallIds::of(&prepared);
     let launch = coordinate_prepared_tool_call_launch_with_execution_context(
         context,
         prepared,
@@ -140,7 +143,7 @@ pub(crate) async fn dispatch_prepared_tool_call_with_execution_context<'run>(
         tool_context,
     )
     .await;
-    tool_call_launch_into_done_or_runtime_failure(context, launch).await
+    tool_call_launch_into_done_or_runtime_failure(context, &ids, launch).await
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -167,9 +170,7 @@ pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
         execution_grant,
         retry_policy,
         None,
-        super::ToolAttemptEffectIdentity::Scalar {
-            parent: context.parent_invocation.clone(),
-        },
+        super::ToolAttemptLineage::from_parent(context.parent_invocation.clone()),
         turn_cancel_wait.as_ref(),
         None,
         |completion_key| {
@@ -198,10 +199,12 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     tool_context: ToolContext<'run>,
 ) -> ToolCallLaunch {
     let args = prepared.args.clone();
+    let ids = ToolCallIds::of(&prepared);
     let Some(authority) = AttemptAuthority::resolve(context, &prepared.tool_id, grant) else {
         return launch_done(
             normalized_outcome(
                 context,
+                &ids,
                 prepared.tool_name.clone(),
                 args,
                 runtime_failure(
@@ -215,7 +218,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     };
     let tool_name = authority.manifest().name.clone();
     if let Err(failure) = authority.verify_prepared_identity(&prepared) {
-        return launch_done(normalized_outcome(context, tool_name, args, failure).await);
+        return launch_done(normalized_outcome(context, &ids, tool_name, args, failure).await);
     }
 
     let tool_context = authority.apply_execution_binding(
@@ -246,6 +249,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                     None => {
                         return launch_done(normalized_outcome(
                         context,
+                        &ids,
                         tool_name,
                         args,
                         runtime_failure(
@@ -259,11 +263,13 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                 Ok(pending) => pending,
                 Err(failure) => {
                     return launch_done(
-                        normalized_outcome(context, tool_name, args, failure).await,
+                        normalized_outcome(context, &ids, tool_name, args, failure).await,
                     );
                 }
             };
             return ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
+                call_id: ids.call_id,
+                provider_call_id: ids.provider_call_id,
                 tool_name,
                 args,
                 key,
@@ -285,7 +291,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     )
     .await;
 
-    let mut outcome = normalized_outcome(context, tool_name, args, result).await;
+    let mut outcome = normalized_outcome(context, &ids, tool_name, args, result).await;
     outcome.intents = intents;
     launch_done(outcome)
 }
@@ -302,10 +308,10 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
 pub struct ToolAttemptTurnCapture(Option<Arc<dyn crate::ToolAttemptCaptureWriter>>);
 
 impl ToolAttemptTurnCapture {
-    /// Opens the attempt's writer and persists that `call_id` started.
+    /// Opens the attempt's writer and persists that `call` started.
     pub async fn open(
         context: &ToolDispatchContext<'_>,
-        call_id: &str,
+        call: &super::ToolCallIds,
     ) -> Result<Self, crate::RuntimeEffectControllerError> {
         let invocation = context
             .parent_invocation
@@ -315,7 +321,7 @@ impl ToolAttemptTurnCapture {
             return Ok(Self(None));
         };
         let writer = capture
-            .open_attempt(invocation, call_id, Arc::clone(&context.observer))
+            .open_attempt(invocation, call, Arc::clone(&context.observer))
             .await?;
         Ok(Self(Some(writer)))
     }
@@ -328,7 +334,7 @@ impl ToolAttemptTurnCapture {
     /// chunks it reported, as a call whose outcome is unknown.
     pub async fn settle(
         self,
-        call_id: &str,
+        call_id: &lash_sansio::ToolCallId,
         outcome: &mut crate::ToolAttemptEffectOutcome,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         let Some(writer) = self.0 else {
@@ -364,7 +370,7 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
     mut tool_context: ToolContext<'run>,
     turn_capture: &ToolAttemptTurnCapture,
 ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
-    let call_id = prepared.call_id.clone();
+    let ids = ToolCallIds::of(&prepared);
     if let Some(capture) = turn_capture.0.as_ref() {
         tool_context.progress_reporter = Some(Arc::clone(capture) as _);
     }
@@ -382,7 +388,8 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
     let launch = match launch {
         ToolCallLaunch::Done(outcome) => {
             let mut record = outcome.record;
-            record.call_id = Some(call_id.clone());
+            record.call_id = ids.call_id;
+            record.provider_call_id = ids.provider_call_id;
             crate::ToolAttemptLaunch::Done {
                 record: Box::new(record),
                 intents: outcome.intents,
@@ -414,7 +421,7 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
 
 pub async fn finalize_tool_result_with_execution_context(
     context: &ToolDispatchContext<'_>,
-    call_id: &str,
+    call_id: &lash_sansio::ToolCallId,
     tool_name: &str,
     args: &serde_json::Value,
     result: ToolOutcome,
@@ -424,7 +431,7 @@ pub async fn finalize_tool_result_with_execution_context(
         .plugins
         .after_tool_call(ToolResultHookContext::new(
             context.session_id.clone(),
-            call_id.to_string(),
+            call_id.clone(),
             tool_name.to_string(),
             args.clone(),
             result.clone(),
@@ -446,6 +453,7 @@ pub async fn finalize_tool_result_with_execution_context(
 #[cfg(any(test, feature = "testing"))]
 async fn tool_call_launch_into_done_or_runtime_failure(
     context: &ToolDispatchContext<'_>,
+    ids: &ToolCallIds,
     launch: ToolCallLaunch,
 ) -> ToolDispatchOutcome {
     match launch {
@@ -453,6 +461,7 @@ async fn tool_call_launch_into_done_or_runtime_failure(
         ToolCallLaunch::Pending(pending) => {
             normalized_outcome(
                 context,
+                ids,
                 pending.tool_name,
                 pending.args,
                 runtime_failure(
@@ -466,6 +475,7 @@ async fn tool_call_launch_into_done_or_runtime_failure(
         ToolCallLaunch::ControllerAborted(error) => {
             normalized_outcome(
                 context,
+                ids,
                 "runtime_effect_controller".to_string(),
                 serde_json::Value::Null,
                 runtime_failure(

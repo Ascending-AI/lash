@@ -201,12 +201,14 @@ impl ToolProvider for DiscoveryRefusalTools {
     }
 }
 
-fn trace_lifecycle_count(entries: &[Value], call_id: &str, kind: &str) -> usize {
+/// The trace records of `kind` for the call the provider named
+/// `provider_call_id`.
+fn trace_lifecycle_count(entries: &[Value], provider_call_id: &str, kind: &str) -> usize {
     entries
         .iter()
         .filter(|entry| {
             entry.get("type").and_then(Value::as_str) == Some(kind)
-                && entry.get("call_id").and_then(Value::as_str) == Some(call_id)
+                && entry.get("provider_call_id").and_then(Value::as_str) == Some(provider_call_id)
         })
         .count()
 }
@@ -348,7 +350,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     let refused = turn
         .tool_calls
         .iter()
-        .find(|record| record.call_id.as_deref() == Some("refused-call"))
+        .find(|record| record.provider_call_id.as_deref() == Some("refused-call"))
         .expect("refused call is accounted");
     let lash_core::ToolCallOutcome::Failure(failure) = &refused.output.outcome else {
         panic!("refused call must remain a failure: {refused:?}");
@@ -382,14 +384,14 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
             .iter()
             .position(|entry| {
                 entry.get("type").and_then(Value::as_str) == Some("tool_call_started")
-                    && entry.get("call_id").and_then(Value::as_str) == Some(call_id)
+                    && entry.get("provider_call_id").and_then(Value::as_str) == Some(call_id)
             })
             .expect("start position");
         let completed = entries
             .iter()
             .position(|entry| {
                 entry.get("type").and_then(Value::as_str) == Some("tool_call_completed")
-                    && entry.get("call_id").and_then(Value::as_str) == Some(call_id)
+                    && entry.get("provider_call_id").and_then(Value::as_str) == Some(call_id)
             })
             .expect("completion position");
         assert!(started < completed, "ordered lifecycle for {call_id}");
@@ -400,18 +402,27 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     } else {
         vec!["refused-call"]
     } {
-        let expected_correlation = lash_core::TurnActivityId::new(format!("tool:{call_id}"));
+        let lash_call_id = activities
+            .iter()
+            .find_map(|activity| match &activity.event {
+                lash_core::TurnEvent::ToolCallStarted {
+                    call_id: lash_call_id,
+                    provider_call_id: Some(observed),
+                    ..
+                } if observed == call_id => Some(lash_call_id.clone()),
+                _ => None,
+            })
+            .expect("the call started");
+        let expected_correlation = lash_core::TurnActivityId::new(format!("tool:{lash_call_id}"));
         let lifecycle = activities
             .iter()
             .filter_map(|activity| match &activity.event {
                 lash_core::TurnEvent::ToolCallStarted {
-                    call_id: Some(observed),
-                    ..
-                } if observed == call_id => Some(("started", &activity.correlation_id)),
+                    call_id: observed, ..
+                } if *observed == lash_call_id => Some(("started", &activity.correlation_id)),
                 lash_core::TurnEvent::ToolCallCompleted {
-                    call_id: Some(observed),
-                    ..
-                } if observed == call_id => Some(("completed", &activity.correlation_id)),
+                    call_id: observed, ..
+                } if *observed == lash_call_id => Some(("completed", &activity.correlation_id)),
                 _ => None,
             })
             .collect::<Vec<_>>();

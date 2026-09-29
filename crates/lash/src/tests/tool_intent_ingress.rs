@@ -251,7 +251,12 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
             .with_payload_schema(lash_core::LashSchema::any()),
         }));
     let outcome = ingress
-        .submit(ingress.key("host-register-call", 0), register)
+        .submit(
+            ingress
+                .key("host-register-call", 0)
+                .expect("a host submission handle"),
+            register,
+        )
         .await;
     assert!(
         matches!(
@@ -273,7 +278,9 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
 
     let emitted = ingress
         .submit(
-            ingress.key("host-fire-call", 0),
+            ingress
+                .key("host-fire-call", 0)
+                .expect("a host submission handle"),
             trigger_intent(&SessionId::from(SESSION)),
         )
         .await;
@@ -362,7 +369,9 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     let (core, store, subscription, _) =
         ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("host-trigger-call", 0);
+    let key = ingress
+        .key("host-trigger-call", 0)
+        .expect("a host submission handle");
 
     let first = ingress
         .submit(key.clone(), trigger_intent(&SessionId::from(SESSION)))
@@ -508,7 +517,9 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
     assert_eq!(
         ingress
             .submit(
-                ingress.key("foreign-owner-register", 0),
+                ingress
+                    .key("foreign-owner-register", 0)
+                    .expect("a host submission handle"),
                 register(forged_owner.clone(), own_actor.clone()),
             )
             .await,
@@ -534,7 +545,9 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
         assert_eq!(
             ingress
                 .submit(
-                    ingress.key(format!("foreign-actor-register-{index}"), 0),
+                    ingress
+                        .key(format!("foreign-actor-register-{index}"), 0)
+                        .expect("a host submission handle"),
                     register(own_owner.clone(), forged_actor.clone()),
                 )
                 .await,
@@ -567,8 +580,12 @@ async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_e
     let (core, store, _subscription, _) =
         ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let first_key = ingress.key("host-trigger-call-a", 0);
-    let second_key = ingress.key("host-trigger-call-b", 0);
+    let first_key = ingress
+        .key("host-trigger-call-a", 0)
+        .expect("a host submission handle");
+    let second_key = ingress
+        .key("host-trigger-call-b", 0)
+        .expect("a host submission handle");
 
     let mut first_outcomes = Vec::new();
     for key in [&first_key, &second_key] {
@@ -649,7 +666,11 @@ async fn predecessor_host_trigger_key_is_refused_before_store_ingress() -> Resul
     let (core, store, _, _) =
         ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let mut predecessor = serde_json::to_value(ingress.key("predecessor-trigger-call", 0))?;
+    let mut predecessor = serde_json::to_value(
+        ingress
+            .key("predecessor-trigger-call", 0)
+            .expect("a host submission handle"),
+    )?;
     predecessor
         .as_object_mut()
         .expect("versioned ingress key")
@@ -1093,14 +1114,13 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
         session_id: SessionId::from(session_id.to_string()),
         declaration: lash_core::ProcessStartDeclaration::new(
             lash_core::ProcessInput::ToolCall {
-                call: lash_core::PreparedToolCall::from_parts(
-                    "ingress-env-call",
-                    "tool:ingress-env",
-                    "ingress_env",
-                    serde_json::Value::Null,
-                    None,
-                    serde_json::Value::Null,
-                ),
+                call: lash_core::ProcessToolCall {
+                    tool_id: "tool:ingress-env".into(),
+                    tool_name: "ingress_env".into(),
+                    args: serde_json::Value::Null,
+                    replay: None,
+                    prepared_payload: serde_json::Value::Null,
+                },
             },
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
@@ -1130,7 +1150,9 @@ fn cancel_intent_for_target(session_id: &SessionId, target: &ProcessId) -> lash_
 async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> Result<()> {
     let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("host-call", 0);
+    let key = ingress
+        .key("host-call", 0)
+        .expect("a host submission handle");
 
     let first = ingress
         .submit(
@@ -1188,7 +1210,9 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
 async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking() -> Result<()> {
     let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("kind-swap-start-emit", 0);
+    let key = ingress
+        .key("kind-swap-start-emit", 0)
+        .expect("a host submission handle");
 
     let first = ingress
         .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
@@ -1233,7 +1257,9 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
 async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -> Result<()> {
     let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("kind-swap-emit-cancel", 0);
+    let key = ingress
+        .key("kind-swap-emit-cancel", 0)
+        .expect("a host submission handle");
 
     let first = ingress
         .submit(
@@ -1296,7 +1322,9 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
     )
     .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("seeded-outside-protocol", 0);
+    let key = ingress
+        .key("seeded-outside-protocol", 0)
+        .expect("a host submission handle");
     controller
         .recorded
         .lock()
@@ -1339,10 +1367,18 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
 async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
     let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let foreign_session =
-        crate::tools::ToolIntentIngressKey::derive("foreign-session", SCOPE, "host-call", 0);
-    let foreign_turn =
-        crate::tools::ToolIntentIngressKey::derive(SESSION, "foreign-turn", "host-call", 0);
+    let foreign_session = crate::tools::ToolIntentIngressKey::derive(
+        "foreign-session",
+        SCOPE,
+        &lash_core::ToolCallId::fixture("host-call"),
+        0,
+    );
+    let foreign_turn = crate::tools::ToolIntentIngressKey::derive(
+        SESSION,
+        "foreign-turn",
+        &lash_core::ToolCallId::fixture("host-call"),
+        0,
+    );
 
     assert!(matches!(
         ingress
@@ -1385,7 +1421,7 @@ async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
     let mut malformed = serde_json::to_value(crate::tools::ToolIntentIngressKey::derive(
         SESSION,
         SCOPE,
-        "host-call",
+        &lash_core::ToolCallId::fixture("host-call"),
         0,
     ))?;
     malformed["replay_key"] = serde_json::json!("forged");
@@ -1413,7 +1449,12 @@ async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
 
 #[test]
 fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
-    let key = crate::tools::ToolIntentIngressKey::derive(SESSION, SCOPE, "compat-call", 7);
+    let key = crate::tools::ToolIntentIngressKey::derive(
+        SESSION,
+        SCOPE,
+        &lash_core::ToolCallId::fixture("compat-call"),
+        7,
+    );
     let key_value = serde_json::to_value(&key).expect("serialize ingress key");
     for field in [
         "session_id",
@@ -1447,7 +1488,7 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
 
     let admitted = crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome: lash_core::ToolIntentExecutionOutcome::ProtocolRefused {
-            refusal: lash_core::ToolIntentRefusalReason::MissingToolCallId,
+            refusal: lash_core::ToolIntentRefusalReason::IntentIndexOverflow,
         },
         replayed: false,
     };
@@ -1566,7 +1607,9 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     )
     .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("crash-redrive-call", 0);
+    let key = ingress
+        .key("crash-redrive-call", 0)
+        .expect("a host submission handle");
     let expected_admission = key.identity().replay_key.clone();
 
     let crashed_ingress = ingress.clone();
@@ -1668,7 +1711,9 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
     )
     .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("start-env-crash-redrive", 0);
+    let key = ingress
+        .key("start-env-crash-redrive", 0)
+        .expect("a host submission handle");
 
     let crashed_ingress = ingress.clone();
     let crashed_key = key.clone();
@@ -1736,7 +1781,9 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
     )
     .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("start-env-store-error", 0);
+    let key = ingress
+        .key("start-env-store-error", 0)
+        .expect("a host submission handle");
 
     let outcome = ingress
         .submit(
@@ -1981,7 +2028,9 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
     let (core, registry) = ingress_engine_core(memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
 
-    let unregistered_key = ingress.key("ingress-unregistered-engine", 0);
+    let unregistered_key = ingress
+        .key("ingress-unregistered-engine", 0)
+        .expect("a host submission handle");
     let refused = ingress
         .submit(
             unregistered_key,
@@ -2010,7 +2059,9 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
     );
 
     let payload = serde_json::json!({"program": "known"});
-    let admitted_key = ingress.key("ingress-registered-engine", 0);
+    let admitted_key = ingress
+        .key("ingress-registered-engine", 0)
+        .expect("a host submission handle");
     let admitted = ingress
         .submit(
             admitted_key,
@@ -2060,7 +2111,9 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
         SESSION,
         lash_core::ExecutionScope::turn(SESSION, "host-ingress-route"),
     )?;
-    let ingress_key = ingress.key("environment-sensitive-host", 0);
+    let ingress_key = ingress
+        .key("environment-sensitive-host", 0)
+        .expect("a host submission handle");
     let host_outcome = ingress
         .submit(
             ingress_key,
@@ -2100,7 +2153,7 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
         scoped,
         processes,
         &SessionId::from(SESSION),
-        "environment-sensitive-session",
+        &lash_core::ToolCallId::fixture("environment-sensitive-session"),
         &intents,
     )
     .await

@@ -1,4 +1,3 @@
-use crate::ProcessId;
 use crate::{
     PreparedToolCall, RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeInvocation,
     ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolOutcome, ToolRetryPolicy,
@@ -10,178 +9,89 @@ use super::{
     ToolTriggerEffectOutcome, mark_retry_exhausted, retry_after_ms,
 };
 
-/// Which family of replay keys and causal parent a tool call's attempts derive
-/// from.
+/// The invocation a tool call's attempts descend from: its lineage.
+///
+/// Every attempt and retry sleep of a call is keyed by the call's
+/// [`ToolCallId`](lash_sansio::ToolCallId) and the attempt number (ADR 0117
+/// §6): `{call_id}:attempt:{n}` and `{call_id}:attempt:{n}:sleep`, under the
+/// parent invocation when the call has one — a group's, a command's, a
+/// process body's — and under `tool:` when it has none. The call id is
+/// unique per logical call, so no second formula names an attempt.
 ///
 /// Serializable because a group child retains it: ADR 0099 §3 requires a tool
-/// child of an effect group to be reconstructible from the journal alone, and
-/// the attempt identity is how a recovered child re-derives the *same* replay
-/// key for the *same* attempt instead of issuing a fresh unrelated one (W2).
-/// It is carried whole rather than mirrored into a durable twin, because the
-/// twin and this type would be two spellings of one fact — see
-/// [`ToolChildRequest`](crate::runtime::effect::ToolChildRequest).
-///
-/// The parent invocation each arm carries is the dispatch context's
-/// `parent_invocation`, so this type is also a tool call's lineage.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ToolAttemptEffectIdentity {
-    Scalar {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent: Option<RuntimeInvocation>,
-    },
-    Batch {
-        parent: RuntimeInvocation,
-        replay_suffix: String,
-    },
-    /// One call a replayed language program issued as a command (FIG-3586):
-    /// `command` is the [`command_invocation`](crate::runtime::command_invocation)
-    /// at the command's replay key, and every attempt, retry sleep and
-    /// deferred-completion await of the call is a child of it —
-    /// `{command}:attempt:{n}`, `{command}:attempt:{n}:sleep`,
-    /// `{command}:await`. Neither the call id nor the tool name is key
-    /// material: two calls of one tool in one run are two commands.
-    Command { command: RuntimeInvocation },
-    Process {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent: Option<RuntimeInvocation>,
-        process_id: ProcessId,
-    },
+/// child of an effect group to be reconstructible from the journal alone.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ToolAttemptLineage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<RuntimeInvocation>,
 }
 
-impl ToolAttemptEffectIdentity {
-    #[expect(
-        clippy::expect_used,
-        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
-    )]
+impl ToolAttemptLineage {
+    /// Attempts under `parent`.
+    pub fn under(parent: RuntimeInvocation) -> Self {
+        Self {
+            parent: Some(parent),
+        }
+    }
+
+    /// Attempts under `parent`, or parentless.
+    pub fn from_parent(parent: Option<RuntimeInvocation>) -> Self {
+        Self { parent }
+    }
+
     fn attempt_invocation(
         &self,
         context: &ToolDispatchContext<'_>,
         call: &PreparedToolCall,
         attempt: u32,
     ) -> RuntimeEffectInvocation {
-        let suffix = match self {
-            Self::Scalar { .. } => format!("{}:attempt:{attempt}", call.call_id),
-            Self::Batch { replay_suffix, .. } => format!("{replay_suffix}:attempt:{attempt}"),
-            Self::Command { .. } => format!("attempt:{attempt}"),
-            Self::Process { process_id, .. } => {
-                format!(
-                    "process:{process_id}:tool:{}:attempt:{attempt}",
-                    call.tool_name
-                )
-            }
-        };
-        if let Some(parent) = self.parent() {
-            let fallback = if matches!(self, Self::Batch { .. }) {
-                "tool-batch"
-            } else {
-                "tool"
-            };
-            let parent_effect_id = parent.effect_id().unwrap_or(fallback);
-            return crate::runtime::causal::child_effect_invocation(
-                context.effect_controller.scoped().execution_scope(),
-                parent,
-                format!("{parent_effect_id}:{suffix}"),
-                suffix,
-            );
-        }
-
-        let effect_id = format!("tool:{suffix}");
-        RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(
-                context.effect_controller.scoped().execution_scope().clone(),
-                effect_id.clone(),
-            )
-            .expect("tool dispatch carries an admitted effect scope"),
-            context.parentless_attribution(),
-            effect_id.clone(),
-        )
+        self.invocation(context, format!("{}:attempt:{attempt}", call.call_id))
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
-    )]
     fn retry_sleep_invocation(
         &self,
         context: &ToolDispatchContext<'_>,
         call: &PreparedToolCall,
         attempt: u32,
     ) -> RuntimeEffectInvocation {
-        if let Self::Command { command } = self {
-            let suffix = format!("attempt:{attempt}:sleep");
-            let command_effect_id = command.effect_id().unwrap_or("command");
+        self.invocation(context, format!("{}:attempt:{attempt}:sleep", call.call_id))
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+    )]
+    fn invocation(
+        &self,
+        context: &ToolDispatchContext<'_>,
+        suffix: String,
+    ) -> RuntimeEffectInvocation {
+        let scoped = context.effect_controller.scoped();
+        let scope = scoped.execution_scope();
+        if let Some(parent) = &self.parent {
+            let parent_effect_id = parent.effect_id().unwrap_or("tool");
             return crate::runtime::causal::child_effect_invocation(
-                context.effect_controller.scoped().execution_scope(),
-                command,
-                format!("{command_effect_id}:{suffix}"),
-                suffix,
-            );
-        }
-        if let Self::Batch {
-            parent,
-            replay_suffix,
-        } = self
-        {
-            let suffix = format!("{replay_suffix}:attempt:{attempt}:sleep");
-            let parent_effect_id = parent.effect_id().unwrap_or("tool-batch");
-            return crate::runtime::causal::child_effect_invocation(
-                context.effect_controller.scoped().execution_scope(),
+                scope,
                 parent,
                 format!("{parent_effect_id}:{suffix}"),
                 suffix,
             );
         }
-        if let Some(parent) = self.parent() {
-            return crate::runtime::tool_retry_sleep_invocation(
-                context.effect_controller.scoped().execution_scope(),
-                parent,
-                &call.tool_name,
-                attempt,
-            );
-        }
-
-        let replay_base = match self {
-            Self::Process { process_id, .. } => {
-                format!("process:{process_id}:tool:{}", call.tool_name)
-            }
-            Self::Scalar { .. } => format!(
-                "lash-tool:{}:{}:{}",
-                context.session_id, call.call_id, call.tool_name
-            ),
-            Self::Batch { .. } | Self::Command { .. } => {
-                unreachable!("batch and command retry sleeps return above")
-            }
-        };
-        let effect_id = format!("{replay_base}:attempt:{attempt}:sleep");
+        let effect_id = format!("tool:{suffix}");
         RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(
-                context.effect_controller.scoped().execution_scope().clone(),
-                effect_id.clone(),
-            )
-            .expect("tool retry carries an admitted effect scope"),
+            crate::EffectAddress::new(scope.clone(), effect_id.clone())
+                .expect("tool dispatch carries an admitted effect scope"),
             context.parentless_attribution(),
-            effect_id.clone(),
+            effect_id,
         )
     }
 
-    /// The parent invocation this identity's attempts descend from.
+    /// The parent invocation this lineage's attempts descend from.
     ///
     /// Public because a tool child of an effect group reconstructs its lineage
-    /// out of its *recorded* identity and has no caller to ask (ADR 0099 §3):
-    /// every arm holds the parent, which is why the retained request carries no
-    /// separate lineage field.
+    /// out of its *recorded* request and has no caller to ask (ADR 0099 §3).
     pub fn parent_invocation(&self) -> Option<&RuntimeInvocation> {
-        self.parent()
-    }
-
-    fn parent(&self) -> Option<&RuntimeInvocation> {
-        match self {
-            Self::Scalar { parent } => parent.as_ref(),
-            Self::Process { parent, .. } => parent.as_ref(),
-            Self::Batch { parent, .. } => Some(parent),
-            Self::Command { command } => Some(command),
-        }
+        self.parent.as_ref()
     }
 }
 
@@ -244,7 +154,7 @@ pub async fn coordinate_tool_invocation<'run>(
     // group child running from its retained request. See
     // [`GroupChildCoordination`].
     group_child: Option<GroupChildCoordination>,
-    identity: ToolAttemptEffectIdentity,
+    lineage: ToolAttemptLineage,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
     child_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     mut local_executor: impl FnMut(Option<crate::AwaitEventKey>) -> RuntimeEffectLocalExecutor<'run>,
@@ -323,7 +233,7 @@ pub async fn coordinate_tool_invocation<'run>(
                 };
             }
         };
-        let invocation = identity.attempt_invocation(context, &call, attempt);
+        let invocation = lineage.attempt_invocation(context, &call, attempt);
         let outcome = context
             .effect_controller
             .scoped()
@@ -331,7 +241,7 @@ pub async fn coordinate_tool_invocation<'run>(
                 crate::RuntimeEffectEnvelope::new(
                     invocation.clone(),
                     crate::RuntimeEffectCommand::ToolAttempt {
-                        call: call.clone(),
+                        call: Box::new(call.clone()),
                         execution_grant: execution_grant.clone(),
                         attempt,
                         max_attempts,
@@ -401,6 +311,8 @@ pub async fn coordinate_tool_invocation<'run>(
             crate::ToolAttemptLaunch::Pending { key, pending } => {
                 return CoordinatedToolInvocation {
                     launch: ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
+                        call_id: call.call_id,
+                        provider_call_id: call.provider_call_id,
                         tool_name: call.tool_name,
                         args: call.args,
                         key: *key,
@@ -420,7 +332,8 @@ pub async fn coordinate_tool_invocation<'run>(
                 // but must not repair a malformed durable attempt before the
                 // intent executor has had a chance to refuse it.
                 let recorded_call_id = record.call_id.clone();
-                record.call_id = Some(call.call_id.clone());
+                record.call_id = call.call_id.clone();
+                record.provider_call_id = call.provider_call_id.clone();
                 let retry_after = retry_after_ms(
                     &ToolOutcome::from_output(record.output.clone()),
                     retry_policy,
@@ -438,7 +351,7 @@ pub async fn coordinate_tool_invocation<'run>(
                             TerminalAttemptSettlement {
                                 minting_emission: &invocation,
                                 child_trace_hook: child_trace_hook.as_ref(),
-                                recorded_call_id: recorded_call_id.as_deref(),
+                                recorded_call_id: &recorded_call_id,
                                 group_child,
                                 record,
                                 intents,
@@ -470,7 +383,7 @@ pub async fn coordinate_tool_invocation<'run>(
                             TerminalAttemptSettlement {
                                 minting_emission: &invocation,
                                 child_trace_hook: child_trace_hook.as_ref(),
-                                recorded_call_id: recorded_call_id.as_deref(),
+                                recorded_call_id: &recorded_call_id,
                                 group_child,
                                 record,
                                 intents,
@@ -489,7 +402,7 @@ pub async fn coordinate_tool_invocation<'run>(
                 if retry_after > 0
                     && let Err(err) = sleep_before_retry(
                         context,
-                        identity.retry_sleep_invocation(context, &call, attempt),
+                        lineage.retry_sleep_invocation(context, &call, attempt),
                         turn_cancel_wait,
                         retry_after,
                     )
@@ -557,7 +470,9 @@ async fn group_child_cancel_boundary(
 }
 
 /// The typed end of a group child whose cancel was decided while it ran.
-pub(crate) fn group_child_cancelled(call_id: &str) -> crate::RuntimeEffectControllerError {
+pub(crate) fn group_child_cancelled(
+    call_id: &lash_sansio::ToolCallId,
+) -> crate::RuntimeEffectControllerError {
     crate::RuntimeEffectControllerError::new(
         crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
         format!("tool child `{call_id}` was cancelled by its effect group"),
@@ -597,7 +512,7 @@ fn abandon_to_open_buffers(
 struct TerminalAttemptSettlement<'settlement> {
     minting_emission: &'settlement RuntimeEffectInvocation,
     child_trace_hook: Option<&'settlement crate::ToolChildExecutionTraceHook>,
-    recorded_call_id: Option<&'settlement str>,
+    recorded_call_id: &'settlement lash_sansio::ToolCallId,
     group_child: Option<GroupChildCoordination>,
     record: Box<ToolCallRecord>,
     intents: crate::ToolIntents,
@@ -613,7 +528,7 @@ struct TerminalAttemptSettlement<'settlement> {
 struct GroupChildDrainInput<'settlement> {
     record: &'settlement ToolCallRecord,
     intents: &'settlement crate::ToolIntents,
-    recorded_call_id: Option<&'settlement str>,
+    recorded_call_id: &'settlement lash_sansio::ToolCallId,
 }
 
 /// The owned decode of [`GroupChildDrainInput`]: what a re-driven attempt
@@ -623,7 +538,7 @@ struct GroupChildDrainInput<'settlement> {
 struct SealedGroupChildDrainInput {
     record: ToolCallRecord,
     intents: crate::ToolIntents,
-    recorded_call_id: Option<String>,
+    recorded_call_id: lash_sansio::ToolCallId,
 }
 
 async fn settle_terminal_attempt(
@@ -641,7 +556,7 @@ async fn settle_terminal_attempt(
         captures,
         triggers,
     } = settlement;
-    let mut recorded_call_id = recorded_call_id.map(str::to_string);
+    let mut recorded_call_id = recorded_call_id.clone();
     let controller = context.effect_controller.controller();
     let drain_admission = commit_group_child_boundary(
         context,
@@ -665,7 +580,7 @@ async fn settle_terminal_attempt(
     intent_context.observation_call_key = None;
     let intent_outcomes = super::execute_final_tool_intents(
         &intent_context,
-        recorded_call_id.as_deref(),
+        &recorded_call_id,
         &intents,
         child_trace_hook,
     )
@@ -705,7 +620,7 @@ pub(crate) async fn commit_group_child_boundary(
     group_child: Option<&GroupChildCoordination>,
     record: &mut ToolCallRecord,
     intents: &mut crate::ToolIntents,
-    recorded_call_id: &mut Option<String>,
+    recorded_call_id: &mut lash_sansio::ToolCallId,
 ) -> Result<Option<(String, u64)>, crate::RuntimeEffectControllerError> {
     let Some(address) = group_child.map(|child| &child.child) else {
         return Ok(None);
@@ -719,7 +634,7 @@ pub(crate) async fn commit_group_child_boundary(
     let drain_input = serde_json::to_string(&GroupChildDrainInput {
         record,
         intents,
-        recorded_call_id: recorded_call_id.as_deref(),
+        recorded_call_id,
     })
     .map_err(|error| {
         crate::RuntimeEffectControllerError::new(
@@ -1050,7 +965,8 @@ fn runtime_failure_outcome(
 ) -> ToolDispatchOutcome {
     ToolDispatchOutcome {
         record: ToolCallRecord {
-            call_id: Some(call.call_id.clone()),
+            call_id: call.call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
             tool: call.tool_name.clone(),
             args: call.args.clone(),
             output: ToolCallOutput::failure(ToolFailure::runtime(
@@ -1130,7 +1046,7 @@ mod projection_tests {
             identity: crate::ToolIntentIdentity {
                 session_id: SessionId::from("session"),
                 execution_scope_id: "turn".to_string(),
-                tool_call_id: "call".to_string(),
+                tool_call_id: crate::ToolCallId::fixture("call"),
                 intent_index,
                 replay_key: "replay".to_string(),
                 minting_emission_replay_key: None,
@@ -1256,7 +1172,7 @@ mod projection_tests {
                     identity: None,
                     intent_index: 1,
                     kind: crate::ToolIntentKind::StartProcess,
-                    refusal: crate::ToolIntentRefusalReason::MissingToolCallId,
+                    refusal: crate::ToolIntentRefusalReason::IntentIndexOverflow,
                 },
             ],
         );

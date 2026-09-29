@@ -170,14 +170,11 @@ pub struct Record {
     pub fact: Fact,
 }
 
-/// Today's identity of one tool call: the call id the tool saw.
-///
-/// EXTENSION POINT (FIG-4080): today this is the provider's call id, a
-/// string the provider may repeat. When lash hands every tool its sealed
-/// `lash_sansio::ToolCallId` (ADR 0117), this becomes that id — recorded from
-/// `AttemptContext::call_id()` in [`ToolObserver::executed`] and read from the
-/// transcript part's id — and [`tool_call_identity`] then proves uniqueness
-/// deployment-wide rather than per session.
+/// The identity of one tool call: the sealed `lash_sansio::ToolCallId` lash
+/// minted for it (ADR 0117), recorded from `AttemptContext::call_id()` in
+/// [`ToolObserver::executed`] and read from the committed transcript part.
+/// It is derived from the call's durable position, never from the provider,
+/// so [`tool_call_identity`] proves it unique deployment-wide.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct CallIdentity(pub String);
 
@@ -193,10 +190,6 @@ pub struct CallRef {
     pub session: String,
     /// The execution scope the call ran under.
     pub scope: String,
-    /// Where the call sits, independent of its id: the engine's effect
-    /// address of the call's attempt (its replay key), which crash replay
-    /// keeps and which differs between two calls.
-    pub logical: String,
     pub identity: CallIdentity,
 }
 
@@ -318,8 +311,7 @@ impl ToolObserver {
         CallRef {
             session: context.session_id().to_owned(),
             scope: context.execution_scope_id().to_owned(),
-            logical: context.replay_key().unwrap_or_default().to_owned(),
-            identity: CallIdentity(context.tool_call_id().unwrap_or_default().to_owned()),
+            identity: CallIdentity(context.call_id().to_string()),
         }
     }
 

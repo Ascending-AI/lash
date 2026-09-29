@@ -39,9 +39,13 @@ impl std::error::Error for FrameKeyError {}
 
 impl FrameKey {
     /// A redrive preserves all three inputs, while two distinct calls in the
-    /// same frame have distinct `tool_call_id` values.
-    pub fn from_call_site(session_id: &SessionId, frame_lineage: &str, tool_call_id: &str) -> Self {
-        Self::derive(0, [session_id, frame_lineage, tool_call_id])
+    /// same frame have distinct lash call ids (ADR 0117).
+    pub fn from_call_site(
+        session_id: &SessionId,
+        frame_lineage: &str,
+        tool_call_id: &crate::ToolCallId,
+    ) -> Self {
+        Self::derive(0, [session_id, frame_lineage, tool_call_id.as_str()])
     }
 
     /// Derives a frame key from explicit caller-owned naming material.
@@ -126,18 +130,30 @@ mod tests {
 
     #[test]
     fn call_site_derivation_is_stable_and_call_specific() {
-        let first = FrameKey::from_call_site(&SessionId::from("session"), "frame", "call-1");
+        let first = FrameKey::from_call_site(
+            &SessionId::from("session"),
+            "frame",
+            &crate::ToolCallId::fixture("call-1"),
+        );
         assert_eq!(
             first,
-            FrameKey::from_call_site(&SessionId::from("session"), "frame", "call-1")
+            FrameKey::from_call_site(
+                &SessionId::from("session"),
+                "frame",
+                &crate::ToolCallId::fixture("call-1")
+            )
         );
         assert_eq!(
             first.as_str(),
-            "frame-key/v2/4041d7061912b8be622d35c5c1cb10b2fe684e40395e2dd8c750c6feda56e58e"
+            "frame-key/v2/574275a71d540cb32814b287b29dd44180ff6d49dc621ceee1dc10892b7b1fc0"
         );
         assert_ne!(
             first,
-            FrameKey::from_call_site(&SessionId::from("session"), "frame", "call-2")
+            FrameKey::from_call_site(
+                &SessionId::from("session"),
+                "frame",
+                &crate::ToolCallId::fixture("call-2")
+            )
         );
     }
 
@@ -147,7 +163,11 @@ mod tests {
         assert!(FrameKey::is_derived(caller.as_str()));
         assert_ne!(
             caller,
-            FrameKey::from_call_site(&SessionId::from(""), "", "frame")
+            FrameKey::from_call_site(
+                &SessionId::from(""),
+                "",
+                &crate::ToolCallId::fixture("frame")
+            )
         );
     }
 

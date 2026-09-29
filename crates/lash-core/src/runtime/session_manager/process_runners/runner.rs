@@ -41,8 +41,8 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                 let output = Box::pin(
                     self.run_process_tool_call(ProcessToolCallRun {
                         lineage: registration.lineage(&process_id),
+                        call: call.admitted(&process_id),
                         process_id,
-                        call: call.clone(),
                         parent_invocation: execution_context.causal_invocation,
                         execution_write_authority: execution_context
                             .execution_write_authority

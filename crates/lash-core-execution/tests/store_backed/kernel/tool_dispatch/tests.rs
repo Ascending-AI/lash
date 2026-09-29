@@ -32,7 +32,7 @@ mod retry_turn_cancel_gate;
 
 use retry_effect_controllers::{FailingSleepEffectController, SleepRecordingEffectController};
 
-type AttemptObservation = (u32, u32, Option<String>);
+type AttemptObservation = (u32, u32, String);
 type SharedAttemptObservations = Arc<std::sync::Mutex<Vec<AttemptObservation>>>;
 
 fn test_tool(name: &str) -> crate::ToolDefinition {
@@ -455,10 +455,12 @@ impl ToolProvider for AttemptIntentTools {
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(call.context.session_id(), "session");
-        assert_eq!(call.context.tool_call_id(), Some("attempt-intents-call"));
+        assert_eq!(
+            call.context.call_id(),
+            &crate::ToolCallId::fixture("attempt-intents-call")
+        );
         assert_eq!(call.context.attempt_number(), 1);
         assert_eq!(call.context.max_attempts(), 1);
-        assert!(call.context.replay_key().is_some());
         assert!(call.context.cancellation_token().is_some());
         assert_eq!(call.context.prepared_payload(), &serde_json::Value::Null);
         assert_eq!(
@@ -1005,7 +1007,7 @@ impl ToolProvider for RetryProbeTools {
         self.observed_attempts.lock_recover().push((
             call.context.attempt_number(),
             call.context.max_attempts(),
-            call.context.replay_key().map(str::to_string),
+            call.context.call_id().to_string(),
         ));
         let attempt_index = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if self.cancel_on_first {
@@ -1458,7 +1460,9 @@ async fn retry_policy_stops_after_pending_launch() {
     assert_eq!(pending.tool_name, "pending_probe");
     assert_eq!(
         pending.key.wait,
-        crate::AwaitEventWaitIdentity::tool_completion("pending-call")
+        crate::AwaitEventWaitIdentity::tool_completion(lash_core_execution::ToolCallId::fixture(
+            "pending-call"
+        ))
     );
     drop(context);
     handler.close().await.expect("close the dispatch handler");
@@ -1509,7 +1513,10 @@ async fn retry_ladder_survives_a_later_pending_completion() {
     );
     let completed = execution
         .pending_completion_dispatch_outcome(
-            "pending-call",
+            &crate::tool_dispatch::ToolCallIds {
+                call_id: crate::ToolCallId::fixture("pending-call"),
+                provider_call_id: None,
+            },
             "test:pending-call",
             pending.tool_name,
             pending.args,
@@ -1695,19 +1702,13 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
         .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
         .with_execution_binding(json!({ "kind": "test", "route": "deferred" }));
     let pending = crate::sansio::PendingToolCall {
-        call_id: "grant-call".to_string(),
+        call_id: lash_core_execution::ToolCallId::fixture("grant-call"),
+        provider_call_id: None,
         tool_name: "host_only".to_string(),
         args: json!({ "value": "ok" }),
         replay: None,
     };
-    let prepared = match prepare_granted_tool_call_with_context(
-        &context,
-        &grant,
-        pending,
-        Some("grant-call".to_string()),
-    )
-    .await
-    {
+    let prepared = match prepare_granted_tool_call_with_context(&context, &grant, pending).await {
         ToolPreparationOutcome::Prepared(prepared) => *prepared,
         ToolPreparationOutcome::Completed(outcome) => {
             panic!("grant should prepare, got {:?}", outcome.record.output)
@@ -1864,14 +1865,15 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
         crate::testing::process_work_wiring_for_registry(registry),
     ));
 
-    let prepared = crate::PreparedToolCall::from_parts(
-        "attempt-intents-call",
-        definition.id().to_string(),
-        "attempt_intents",
-        json!({"value": "drive"}),
-        None,
-        serde_json::Value::Null,
-    );
+    let prepared = crate::PreparedToolCall {
+        call_id: crate::ToolCallId::fixture("attempt-intents-call"),
+        provider_call_id: None,
+        tool_id: definition.id().to_string().into(),
+        tool_name: "attempt_intents".into(),
+        args: json!({"value": "drive"}),
+        replay: None,
+        prepared_payload: serde_json::Value::Null,
+    };
     let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
         .prepared_call(&prepared)
         .cancellation_token(Some(tokio_util::sync::CancellationToken::new()));

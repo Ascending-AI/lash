@@ -260,7 +260,12 @@ impl StandardProtocolScenario {
                     assert_eq!(
                         calls
                             .iter()
-                            .map(|call| (call.call_id.as_str(), call.tool_name.as_str()))
+                            .map(|call| {
+                                (
+                                    call.provider_call_id.as_deref().unwrap_or_default(),
+                                    call.tool_name.as_str(),
+                                )
+                            })
                             .collect::<Vec<_>>(),
                         results
                             .iter()
@@ -279,7 +284,7 @@ impl StandardProtocolScenario {
                         results: calls
                             .iter()
                             .zip(results)
-                            .map(|(call, result)| result.completed_call(call.args.clone()))
+                            .map(|(call, result)| result.completed_call(call))
                             .collect(),
                     });
                 }
@@ -378,14 +383,14 @@ impl StandardToolResult {
         }
     }
 
-    fn completed_call(&self, args: serde_json::Value) -> sansio::CompletedToolCall {
+    fn completed_call(&self, call: &sansio::PendingToolCall) -> sansio::CompletedToolCall {
         sansio::CompletedToolCall {
-            call_id: self.call_id.to_string(),
+            call_id: call.call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
             tool_name: self.tool_name.to_string(),
-            args,
+            args: call.args.clone(),
             output: self.output.clone(),
             model_return: lash_core::facade_support::ModelToolReturn {
-                call_id: self.call_id.to_string(),
                 tool_name: self.tool_name.to_string(),
                 parts: std::iter::once(lash_core::facade_support::ModelToolReturnPart::text(
                     self.model_return_text,
@@ -524,12 +529,16 @@ impl StandardProtocolRun {
                         .push(format!("{:?}", request.messages));
                 }
                 Effect::ToolCalls { calls, .. } => {
-                    self.tool_calls
-                        .extend(calls.iter().map(|call| ExpectedToolCall {
-                            call_id: call.call_id.clone(),
+                    self.tool_calls.extend(calls.iter().map(|call| {
+                        ExpectedToolCall {
+                            call_id: call
+                                .provider_call_id
+                                .clone()
+                                .expect("a model-issued call carries its provider id"),
                             tool_name: call.tool_name.clone(),
                             args: call.args.clone(),
-                        }));
+                        }
+                    }));
                 }
                 Effect::Checkpoint { checkpoint, .. } => self.checkpoints.push(*checkpoint),
                 Effect::Emit(SessionStreamEvent::TextDelta { content, .. }) => {
@@ -551,6 +560,7 @@ fn standard_config() -> TurnMachineConfig {
     let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> =
         Arc::new(StandardDriver::default());
     TurnMachineConfig {
+        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
         sync_execution_environment: false,

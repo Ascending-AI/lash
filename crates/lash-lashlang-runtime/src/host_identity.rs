@@ -89,19 +89,34 @@ impl LashlangHostIdentities {
     /// The id of the call the program issued at `ordinal`: the tool call's
     /// id, and the reply id of an awaited handle.
     ///
-    /// The subagent spawn tool keys its child's start on this id (through its
-    /// recorded call), so it is what keeps a redriven spawn from starting a
-    /// second child: it moves only when the command's position in the run
-    /// moves.
-    pub fn call_id(&self, ordinal: u64) -> String {
-        format!("lashlang:v2:{}:{ordinal:010}", self.scope())
+    /// It is admitted under the opener's root (ADR 0117 §2): a cell's call at
+    /// `[code opener, cell, command]`, a process body's at
+    /// `[code opener, command]`, the segment never among them. The subagent
+    /// spawn tool keys its child's start on this id (through its recorded
+    /// call), so it is what keeps a redriven spawn from starting a second
+    /// child: it moves only when the command's position in the run moves.
+    pub fn call_id(&self, ordinal: u64) -> lash_core::ToolCallId {
+        self.derive(ordinal, None)
     }
 
     /// The id of the leaf at `leaf_index` — its first-appearance index in the
     /// aggregate as written, not the order it settled in — of the aggregate
     /// the program issued at `ordinal`.
-    pub fn child_call_id(&self, ordinal: u64, leaf_index: usize) -> String {
-        format!("{}:child:{leaf_index}", self.call_id(ordinal))
+    pub fn child_call_id(&self, ordinal: u64, leaf_index: usize) -> lash_core::ToolCallId {
+        self.derive(ordinal, Some(leaf_index as u64))
+    }
+
+    fn derive(&self, ordinal: u64, leaf_index: Option<u64>) -> lash_core::ToolCallId {
+        let opener = self.opener.identity_encoding();
+        let mut positions = vec![lash_core::ToolCallPosition::CodeOpener(&opener)];
+        if let Some(execution) = &self.execution {
+            positions.push(lash_core::ToolCallPosition::CodeCell(execution));
+        }
+        positions.push(lash_core::ToolCallPosition::CodeCommand(ordinal));
+        if let Some(leaf_index) = leaf_index {
+            positions.push(lash_core::ToolCallPosition::CodeAggregate(leaf_index));
+        }
+        self.opener.tool_call_admission().call_id(&positions)
     }
 
     /// The replay key of the run's one durable effect-omission record.
@@ -186,11 +201,6 @@ mod tests {
             second.child_call_id(0, 0),
             "two processes must not share a child identity"
         );
-        let id = process_id("worker-a");
-        assert!(
-            first.call_id(0).contains(id.as_str()),
-            "the minted id is bound, not merely mixed in"
-        );
     }
 
     /// A minted identity must carry neither reserved separator.
@@ -199,7 +209,7 @@ mod tests {
     /// `#` and `/`, so a minted one must carry neither.
     #[test]
     fn a_minted_identity_carries_no_reserved_separator() {
-        let minted = process_opener("worker").call_id(0);
+        let minted = process_opener("worker").call_id(0).to_string();
         assert!(!minted.contains('#'), "{minted}");
         assert!(!minted.contains('/'), "{minted}");
     }
@@ -371,10 +381,6 @@ mod tests {
             "the session id round-trips through the typed opener untouched"
         );
         let leaf = LashlangHostIdentities::cell(opener, "exec-code:1").call_id(0);
-        assert!(
-            leaf.contains("38:session:subagent:lashlang:turn:1:x:1:y"),
-            "the canonical encoding length-prefixes the session id, keeping its `:` bytes inside one component: {leaf}"
-        );
         assert_ne!(
             leaf,
             LashlangHostIdentities::cell(
@@ -416,12 +422,20 @@ mod tests {
         let cell =
             LashlangHostIdentities::cell(EffectOpener::turn("session-1", "turn-7"), "exec-code:1");
         assert_ne!(cell.call_id(0), cell.call_id(1));
-        assert!(
-            cell.call_id(7).ends_with(":0000000007"),
-            "{}",
-            cell.call_id(7)
+        assert_eq!(
+            cell.call_id(7),
+            lash_core::ToolCallId::derive(
+                "",
+                lash_core::ToolCallRoot::turn(&cell.opener().identity_encoding())
+                    .expect("a turn opener has a handle"),
+                &[
+                    lash_core::ToolCallPosition::CodeOpener(&cell.opener().identity_encoding()),
+                    lash_core::ToolCallPosition::CodeCell("exec-code:1"),
+                    lash_core::ToolCallPosition::CodeCommand(7),
+                ],
+            ),
+            "a cell's command is named under its turn root by opener, cell and ordinal"
         );
-        assert!(cell.call_id(7).starts_with("lashlang:v2:"));
         assert_eq!(
             cell.namespace().command(7).as_str(),
             "exec-code:1:lk2:0000000007"

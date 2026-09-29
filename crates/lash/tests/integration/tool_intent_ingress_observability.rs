@@ -108,12 +108,16 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
         .build()
         .expect("observability law runtime");
 
-    tracing::subscriber::with_default(subscriber, || {
+    let observable_call_id = tracing::subscriber::with_default(subscriber, || {
         runtime.block_on(async {
             let (core, process, other_process) = test_core().await?;
             let ingress =
                 core.tool_intents(SESSION, lash::runtime::ExecutionScope::turn(SESSION, SCOPE))?;
-            let key = ingress.key("observable", 0);
+            let key = ingress
+                .key("observable", 0)
+                .expect("a host submission handle");
+            // The submission's call id is the one its handle roots (ADR 0117).
+            let observable_call_id = key.identity().tool_call_id.to_string();
             assert!(matches!(
                 ingress
                     .submit(
@@ -140,7 +144,9 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
             assert!(matches!(
                 ingress
                     .submit(
-                        ingress.key("observable-refused", 0),
+                        ingress
+                            .key("observable-refused", 0)
+                            .expect("a host submission handle"),
                         cancel_intent_for(&SessionId::from("foreign"), &process)
                     )
                     .await,
@@ -148,7 +154,7 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
                     refusal: lash::tools::ToolIntentIngressRefusal::IntentSessionMismatch { .. }
                 }
             ));
-            Ok::<(), lash::EmbedError>(())
+            Ok::<String, lash::EmbedError>(observable_call_id)
         })
     })?;
 
@@ -159,11 +165,12 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
             .clone(),
     )
     .expect("tracing formatter emits UTF-8");
+    let observable_call_id = format!("tool_call_id={observable_call_id}");
     for field in [
         "tool_intent_ingress.submit",
         "session_id=intent-ingress-observability-session",
         "execution_scope_id=intent-ingress-observability-turn",
-        "tool_call_id=observable",
+        &observable_call_id,
         "intent_index=0",
         "replay_key=tool-intent:v2:blake3:",
         "decision=\"admitted\"",

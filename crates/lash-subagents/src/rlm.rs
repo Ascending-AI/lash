@@ -89,12 +89,10 @@ impl RlmSubagentToolsProvider {
             output_schema: output_schema.clone(),
             seed,
             parent_subagent: self.parent_subagent.as_ref(),
-            caused_by: context
-                .tool_call_id()
-                .map(|call_id| lash_core::CausalRef::ToolCall {
-                    session_id: parent_session_id.clone(),
-                    call_id: call_id.to_string(),
-                }),
+            caused_by: Some(lash_core::CausalRef::ToolCall {
+                session_id: parent_session_id.clone(),
+                call_id: context.call_id().clone(),
+            }),
         })
         .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?;
         // A `ParentFork` peer initializes from this spawn-time capture alone;
@@ -120,14 +118,7 @@ impl RlmSubagentToolsProvider {
             output_schema,
         })
         .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
-        Ok(PreparedToolCall::from_parts(
-            call.call_id,
-            tool_id.clone(),
-            call.tool_name,
-            call.args,
-            call.replay,
-            payload,
-        ))
+        Ok(PreparedToolCall::identity(tool_id.clone(), call).with_prepared_payload(payload))
     }
 
     /// A subagent spawn *is* a process that runs a child lash session. The

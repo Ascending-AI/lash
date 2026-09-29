@@ -18,9 +18,9 @@ async fn main() -> Result<()> {
     let session_id = SessionId::from(format!("cold-process-{nonce}-session"));
     let scope = ExecutionScope::turn(&session_id, format!("cold-process-{nonce}-turn"));
     let wait = match identity.as_str() {
-        "tool_completion" => {
-            AwaitEventWaitIdentity::tool_completion(format!("cold-process-{nonce}-call"))
-        }
+        "tool_completion" => AwaitEventWaitIdentity::tool_completion(
+            lash_core::ToolCallId::fixture(&format!("cold-process-{nonce}-call")),
+        ),
         "turn_cancel_gate" => AwaitEventWaitIdentity::TurnCancelGate,
         other => anyhow::bail!("unknown identity `{other}`"),
     };

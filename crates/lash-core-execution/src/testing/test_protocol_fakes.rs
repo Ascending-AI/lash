@@ -210,6 +210,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
         _request: Arc<lash_sansio::llm::types::LlmRequest>,
         _driver_state: Option<crate::ProtocolDriverState>,
         llm_response: LlmResponse,
+        calls: &crate::sansio::ResponseToolCalls,
         text_streamed: bool,
     ) -> Vec<DriverAction> {
         use crate::sansio::{CheckpointResumeAction, PendingToolCall};
@@ -218,8 +219,10 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
         use lash_sansio::session_model::make_error_event;
 
         let parts = crate::normalized_response_parts(&llm_response);
+        let mut call_ids = calls.call_ids(&llm_response).into_iter();
         let mut assistant_text = String::new();
         let mut tool_calls: Vec<(
+            crate::ToolCallId,
             String,
             String,
             String,
@@ -278,7 +281,10 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                     input_json,
                     replay,
                 } => {
-                    tool_calls.push((call_id, tool_name, input_json, replay));
+                    let Some(id) = call_ids.next() else {
+                        continue;
+                    };
+                    tool_calls.push((id, call_id, tool_name, input_json, replay));
                 }
             }
         }
@@ -338,19 +344,21 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                 None,
             ));
         }
-        let mut calls = Vec::new();
-        for (call_id, tool_name, input_json, replay) in tool_calls {
+        let mut pending_calls = Vec::new();
+        for (call_id, provider_call_id, tool_name, input_json, replay) in tool_calls {
             assistant_parts.push(Part::tool_call(
                 format!("{}.p{}", asst_id, assistant_parts.len()),
                 input_json.clone(),
                 call_id.clone(),
+                provider_call_id.clone(),
                 tool_name.clone(),
                 replay.clone(),
             ));
             let args = serde_json::from_str::<serde_json::Value>(&input_json)
                 .unwrap_or_else(|_| serde_json::json!({}));
-            calls.push(PendingToolCall {
+            pending_calls.push(PendingToolCall {
                 call_id,
+                provider_call_id: Some(provider_call_id),
                 tool_name,
                 args,
                 replay,
@@ -367,7 +375,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
             ]));
         }
         actions.push(DriverAction::Start(PendingWork::Tools {
-            calls,
+            calls: pending_calls,
             expansion: Default::default(),
         }));
         actions

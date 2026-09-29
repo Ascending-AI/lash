@@ -1312,7 +1312,7 @@
             "boundary_id": "session-001:tool:001",
             "session": "session-001"
           },
-          "call_id": "session-001:tool:001",
+          "call_id": "tc_27d0953f9d25207072f2bf2281c98586faba31857716d32694a730aef3bca0bf",
           "output": {
             "outcome": {
               "payload": {
@@ -4146,7 +4146,7 @@
         "runtime_effect": {
           "controller": "restate_runtime_effect_controller",
           "effect_id": "effect/sleep/session-001/001",
-          "envelope_hash": "2dc9553874ac5dc30dbf9f4e7d336c30b061f54f7ed4c7941099b5e3ea7e61e5",
+          "envelope_hash": "dab657c31e504faf39e7249a4d6132862648504b12a23de7299cdc33592c9247",
           "kind": "tool_attempt",
           "local_executor_called": true,
           "redrive_local_executor_called": false,
@@ -4405,7 +4405,7 @@
             },
             "record": {
               "args": null,
-              "call_id": "effect/sleep/session-001/001",
+              "call_id": "tc_ac5abdb67a1c28c8dc80fa3f1473114dc2c0b3f91da51cfb0e11ae2f1d9eeaa5",
               "output": {
                 "outcome": {
                   "payload": {
@@ -4581,7 +4581,7 @@
             "boundary_id": "session-001:tool:002",
             "session": "session-001"
           },
-          "call_id": "session-001:tool:002",
+          "call_id": "tc_7b30637caeae504370d1685f15609bc01bfcaed731f76898ce0c17e34164b0fd",
           "output": {
             "outcome": {
               "payload": {
@@ -6722,7 +6722,7 @@
         "runtime_effect": {
           "controller": "restate_runtime_effect_controller",
           "effect_id": "effect/sleep/session-001/002",
-          "envelope_hash": "fa4d5021e6430028bb933ce31ea9549628f47936d7e869094db5bfd9b12b1441",
+          "envelope_hash": "dfaa21a622418a9d5c8d438c85a0025499e0af7a96025ce3b6ea8e3fce04fe74",
           "kind": "tool_attempt",
           "local_executor_called": true,
           "redrive_local_executor_called": false,
@@ -6981,7 +6981,7 @@
             },
             "record": {
               "args": null,
-              "call_id": "effect/sleep/session-001/002",
+              "call_id": "tc_62ba3b69847a2fe13647143cfd3a92e53a9f176ca4edd94b7f2b48882a04dedb",
               "output": {
                 "outcome": {
                   "payload": {
@@ -8269,7 +8269,7 @@
         "runtime_effect": {
           "controller": "restate_runtime_effect_controller",
           "effect_id": "effect/sleep/session-003/001",
-          "envelope_hash": "0b5d6a6663257f840d8f929f5fb0fed2233a3a93143762b39c9fd0f25e530355",
+          "envelope_hash": "0cabd7f2ac284ece1d0dad153bcf9c92dffb45881651e0304529216c112f83ab",
           "kind": "tool_attempt",
           "local_executor_called": true,
           "redrive_local_executor_called": false,
@@ -8528,7 +8528,7 @@
             },
             "record": {
               "args": null,
-              "call_id": "effect/sleep/session-003/001",
+              "call_id": "tc_171a0c78679deef169cb927fe6b446c1dd938542d4bb14c97072bec7b3a90872",
               "output": {
                 "outcome": {
                   "payload": {
@@ -9522,7 +9522,7 @@
         "runtime_effect": {
           "controller": "restate_runtime_effect_controller",
           "effect_id": "effect/sleep/session-004/001",
-          "envelope_hash": "07a0b39487e55904cea694f42957ba242001e6c61638af43d5f583f2e7a1d972",
+          "envelope_hash": "326227fa7a963d2dedd174c627b987170b41a7261cb955e3645a4c4c38af4212",
           "kind": "tool_attempt",
           "local_executor_called": true,
           "redrive_local_executor_called": false,
@@ -9781,7 +9781,7 @@
             },
             "record": {
               "args": null,
-              "call_id": "effect/sleep/session-004/001",
+              "call_id": "tc_601d7940824402289949dd698b66200abf47342542c66f24ba8f72e8fd9ebac3",
               "output": {
                 "outcome": {
                   "payload": {
@@ -10475,7 +10475,7 @@
             "boundary_id": "session-004:tool:001",
             "session": "session-004"
           },
-          "call_id": "session-004:tool:001",
+          "call_id": "tc_09872226cf8d26e0b4679e746c7fd24718c2f75baab8345f2b21c8ae00a2cc3a",
           "output": {
             "outcome": {
               "payload": {

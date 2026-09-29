@@ -45,26 +45,16 @@ impl ToolIntentIngressKey {
     pub fn derive(
         session_id: impl AsRef<str>,
         execution_scope_id: impl AsRef<str>,
-        tool_call_id: impl AsRef<str>,
+        tool_call_id: &lash_core::ToolCallId,
         intent_index: u32,
     ) -> Self {
         let session_id = SessionId::from(session_id.as_ref());
-        let execution_scope_id = execution_scope_id.as_ref();
-        let tool_call_id = tool_call_id.as_ref();
         let identity = lash_core::derive_tool_intent_identity(
             &session_id,
-            execution_scope_id,
-            Some(tool_call_id),
-            intent_index as usize,
-        )
-        .unwrap_or_else(|_| lash_core::ToolIntentIdentity {
-            session_id: session_id.clone(),
-            execution_scope_id: execution_scope_id.to_string(),
-            tool_call_id: tool_call_id.to_string(),
+            execution_scope_id.as_ref(),
+            tool_call_id,
             intent_index,
-            replay_key: String::new(),
-            minting_emission_replay_key: None,
-        });
+        );
         Self {
             protocol_version: lash_core::TOOL_INTENT_PROTOCOL_V3,
             identity,
@@ -377,15 +367,31 @@ impl ToolIntentIngress {
         }
     }
 
-    /// Derive an idempotency key bound to this ingress's actual session and
-    /// execution scope.
-    pub fn key(&self, tool_call_id: impl AsRef<str>, intent_index: u32) -> ToolIntentIngressKey {
-        ToolIntentIngressKey::derive(
+    /// Derive the idempotency key of the intent at `intent_index` of one host
+    /// submission, bound to this ingress's actual session and execution
+    /// scope.
+    ///
+    /// `submission` is the submission's admitted operation handle: the call
+    /// the intents belong to is named under that host-submission root (ADR
+    /// 0117 §2), so a redelivery presenting the same handle names the same
+    /// call, and a new submission under a new handle a new one.
+    ///
+    /// # Errors
+    ///
+    /// A blank handle roots no call.
+    pub fn key(
+        &self,
+        submission: impl AsRef<str>,
+        intent_index: u32,
+    ) -> Result<ToolIntentIngressKey, lash_core::ToolCallRootError> {
+        let call_id =
+            lash_core::ToolCallAdmission::host_submission("", submission.as_ref())?.call_id(&[]);
+        Ok(ToolIntentIngressKey::derive(
             &self.session_id,
             self.scope.id(),
-            tool_call_id,
+            &call_id,
             intent_index,
-        )
+        ))
     }
 
     /// Submit one durable intent using first-writer-wins identity semantics.
@@ -560,17 +566,8 @@ impl ToolIntentIngress {
             });
         }
         let identity = key.identity();
-        let expected = Self::expected_identity(identity);
-        let expected_replay_key = expected
-            .as_ref()
-            .map(|identity| identity.replay_key.clone())
-            .unwrap_or_default();
-        if identity.tool_call_id.trim().is_empty()
-            || expected
-                .as_ref()
-                .map(|expected| expected.replay_key != identity.replay_key)
-                .unwrap_or(true)
-        {
+        let expected_replay_key = Self::expected_identity(identity).replay_key;
+        if expected_replay_key != identity.replay_key {
             return Some(ToolIntentIngressRefusal::MalformedKey {
                 expected_replay_key,
                 recorded_replay_key: identity.replay_key.clone(),
@@ -635,8 +632,8 @@ impl ToolIntentIngress {
     /// runtime-minted identity as forged (FIG-2994).
     fn expected_identity(
         identity: &lash_core::ToolIntentIdentity,
-    ) -> Option<lash_core::ToolIntentIdentity> {
-        lash_core::rederive_tool_intent_identity(identity).ok()
+    ) -> lash_core::ToolIntentIdentity {
+        lash_core::rederive_tool_intent_identity(identity)
     }
 
     async fn realize(

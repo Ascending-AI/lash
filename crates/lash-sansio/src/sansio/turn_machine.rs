@@ -362,7 +362,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     let accounting = completed
                         .iter()
                         .map(|outcome| SessionStreamEvent::ToolCall {
-                            call_id: Some(outcome.call_id.clone()),
+                            call_id: outcome.call_id.clone(),
+                            provider_call_id: outcome.provider_call_id.clone(),
                             name: outcome.tool_name.clone(),
                             args: outcome.args.clone(),
                             output: outcome.output.clone(),
@@ -434,11 +435,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     driver_state,
                 },
                 Response::LlmComplete {
+                    id,
                     result,
                     text_streamed,
-                    ..
                 },
-            ) => self.handle_llm_complete(request, driver_state, result, text_streamed)?,
+            ) => self.handle_llm_complete(id, request, driver_state, result, text_streamed)?,
             (PendingWork::Tools { expansion, .. }, Response::ToolResults { results, .. }) => {
                 self.handle_tool_results(&expansion, results);
             }
@@ -575,6 +576,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     fn handle_llm_complete(
         &mut self,
+        id: EffectId,
         request: Arc<LlmRequest>,
         driver_state: Option<M::DriverState>,
         result: Result<LlmResponse, LlmCallError>,
@@ -609,12 +611,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 }
                 let actions = {
                     let driver = Arc::clone(&self.config.protocol_driver);
+                    let calls = self
+                        .config
+                        .model_tool_calls
+                        .response(self.protocol_iteration, id);
                     let ctx = self.driver_context();
                     driver.handle_llm_success(
                         ctx,
                         request,
                         driver_state,
                         llm_response,
+                        &calls,
                         text_streamed,
                     )
                 };
@@ -832,7 +839,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
         };
         for outcome in &completed {
             self.emit(SessionStreamEvent::ToolCall {
-                call_id: Some(outcome.call_id.clone()),
+                call_id: outcome.call_id.clone(),
+                provider_call_id: outcome.provider_call_id.clone(),
                 name: outcome.tool_name.clone(),
                 args: outcome.args.clone(),
                 output: outcome.output.clone(),

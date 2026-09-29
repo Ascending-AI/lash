@@ -14,7 +14,7 @@ pub enum CausalRef {
     },
     ToolCall {
         session_id: SessionId,
-        call_id: String,
+        call_id: crate::ToolCallId,
     },
     Process {
         process_id: ProcessId,

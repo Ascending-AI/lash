@@ -88,12 +88,14 @@ impl RecordedTurnAssembly {
         match event {
             SessionStreamEvent::ToolCall {
                 call_id,
+                provider_call_id,
                 name,
                 args,
                 output,
             } => {
                 self.tool_calls.push(ToolCallRecord {
                     call_id: call_id.clone(),
+                    provider_call_id: provider_call_id.clone(),
                     tool: name.clone(),
                     args: args.clone(),
                     output: output.clone(),

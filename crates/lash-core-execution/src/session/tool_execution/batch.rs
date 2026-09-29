@@ -69,7 +69,8 @@ impl RuntimeExecutionContext<'_> {
         let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
             let outcome = ToolDispatchOutcome {
                 record: ToolCallRecord {
-                    call_id: Some(call.id.clone()),
+                    call_id: call.id.clone(),
+                    provider_call_id: None,
                     tool: call.tool_id.to_string(),
                     args: call.args,
                     output: ToolCallOutput::failure(ToolFailure::runtime(
@@ -108,6 +109,7 @@ impl RuntimeExecutionContext<'_> {
         };
         let pending = crate::sansio::PendingToolCall {
             call_id: call.id.clone(),
+            provider_call_id: None,
             tool_name: manifest.name.clone(),
             args: call.args,
             replay: None,
@@ -117,10 +119,7 @@ impl RuntimeExecutionContext<'_> {
         // for a batch opened under a parent effect is that effect's invocation
         // (ADR 0105 §1).
         let keyed_dispatch = self.dispatch.observation_keyed(&call_key);
-        match authorization
-            .prepare(&keyed_dispatch, pending, call.id.clone())
-            .await
-        {
+        match authorization.prepare(&keyed_dispatch, pending).await {
             ToolPreparationOutcome::Prepared(prepared) => {
                 ToolLeafPreparation::Prepared(Box::new(PreparedToolLeafEntry {
                     index,

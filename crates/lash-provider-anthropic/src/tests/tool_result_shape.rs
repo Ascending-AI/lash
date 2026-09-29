@@ -17,6 +17,7 @@ fn transcript(content: Vec<ModelToolReturnPart>) -> Vec<Message> {
             parts: shared_parts(vec![Part::tool_call(
                 "m1.p0".into(),
                 "{}".into(),
+                lash_core::ToolCallId::fixture("call_1"),
                 "call_1".into(),
                 "shot".into(),
                 None,
@@ -29,7 +30,7 @@ fn transcript(content: Vec<ModelToolReturnPart>) -> Vec<Message> {
             parts: shared_parts(vec![Part::tool_result(
                 "m2.p0".into(),
                 content,
-                "call_1".into(),
+                lash_core::ToolCallId::fixture("call_1"),
                 "shot".into(),
             )]),
             origin: None,

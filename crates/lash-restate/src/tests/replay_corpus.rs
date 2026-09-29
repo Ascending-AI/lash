@@ -145,7 +145,7 @@ async fn drive_scalar_lashlang_tool_attempt(
             "scalar-lashlang-tool-attempt",
         ),
         RuntimeEffectCommand::ToolAttempt {
-            call: prepared_tool_call_with(call_id, tool_name),
+            call: Box::new(prepared_tool_call_with(call_id, tool_name)),
             execution_grant: None,
             attempt: 1,
             max_attempts: 1,
@@ -182,7 +182,7 @@ async fn drive_scalar_lashlang_tool_attempt(
     assert!(matches!(
         *launch,
         lash_core::ToolAttemptLaunch::Done { ref record, .. }
-            if record.call_id.as_deref() == Some(call_id) && record.tool == tool_name
+            if record.call_id == lash_core::ToolCallId::fixture(call_id) && record.tool == tool_name
     ));
     assert_eq!(
         local_runs.load(Ordering::SeqCst),

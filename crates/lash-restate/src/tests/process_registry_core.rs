@@ -753,17 +753,24 @@ finish(await handle);
             .map(|(name, envelope)| (name, envelope.command.kind()))
             .collect::<Vec<_>>()
     );
+    // The recording lists effects by name, so the kinds compare as a set.
+    let mut appended_kinds = appended_envelopes
+        .iter()
+        .map(|(_, envelope)| format!("{:?}", envelope.command.kind()))
+        .collect::<Vec<_>>();
+    appended_kinds.sort();
+    let mut expected_kinds = [
+        RuntimeEffectKind::PresentToolResult,
+        RuntimeEffectKind::PresentToolResult,
+        RuntimeEffectKind::Checkpoint,
+        RuntimeEffectKind::LanguageRuntimeValue,
+    ]
+    .iter()
+    .map(|kind| format!("{kind:?}"))
+    .collect::<Vec<_>>();
+    expected_kinds.sort();
     assert_eq!(
-        appended_envelopes
-            .iter()
-            .map(|(_, envelope)| envelope.command.kind())
-            .collect::<Vec<_>>(),
-        vec![
-            RuntimeEffectKind::PresentToolResult,
-            RuntimeEffectKind::PresentToolResult,
-            RuntimeEffectKind::Checkpoint,
-            RuntimeEffectKind::LanguageRuntimeValue,
-        ],
+        appended_kinds, expected_kinds,
         "the replay prefix must consume every pre-crash journal entry and append only the uncommitted presentations, the checkpoint and the cell's seal"
     );
     let replayed_scalar = replayed_envelopes
@@ -1222,14 +1229,13 @@ pub(super) fn start_recovery_effect(
 ) -> RuntimeEffectEnvelope {
     let registration = ProcessRegistration::new(
         ProcessInput::ToolCall {
-            call: lash_core::PreparedToolCall::from_parts(
-                format!("{start_key}-call"),
-                "tool:recovery",
-                "recovery",
-                serde_json::Value::Null,
-                None,
-                serde_json::Value::Null,
-            ),
+            call: lash_core::ProcessToolCall {
+                tool_id: "tool:recovery".into(),
+                tool_name: "recovery".into(),
+                args: serde_json::Value::Null,
+                replay: None,
+                prepared_payload: serde_json::Value::Null,
+            },
         },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
@@ -1339,7 +1345,7 @@ fn attach_key(key_id: &str) -> lash_core::AwaitEventKey {
     lash_core::AwaitEventKey {
         scope: lash_core::ExecutionScope::turn("session", "turn"),
         wait: lash_core::AwaitEventWaitIdentity::ToolCompletion {
-            tool_call_id: format!("{key_id}-call"),
+            tool_call_id: lash_core::ToolCallId::fixture(&format!("{key_id}-call")),
         },
         key_id: key_id.to_string(),
         signature: format!("{key_id}-signature"),

@@ -723,6 +723,7 @@ fn rlm_contract_config_with_turn_options(
     > = Arc::new(lash_protocol_rlm::RlmDriver::default());
     Ok(lash_core::TurnMachineConfig {
         protocol_driver,
+        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         projector: Arc::new(lash_core::sansio::ChatContextProjector),
         sync_execution_environment: true,
         model: "rlm-contract".to_string(),
@@ -867,7 +868,8 @@ fn rlm_tool_call_record(
     output: lash_core::ToolCallOutput,
 ) -> lash_core::ToolCallRecord {
     lash_core::ToolCallRecord {
-        call_id: Some(call_id.to_string()),
+        call_id: lash_core::ToolCallId::fixture(&call_id.to_string()),
+        provider_call_id: None,
         tool: tool.to_string(),
         args,
         output,

@@ -5,8 +5,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AwaitEventWaitIdentity {
+    /// The completion of one tool call, named by its lash identity within
+    /// the wait's execution scope: two calls that share a provider id never
+    /// share a completion (ADR 0117 §6).
     ToolCompletion {
-        tool_call_id: String,
+        tool_call_id: lash_sansio::ToolCallId,
     },
     ProcessSignal {
         process_id: ProcessId,
@@ -27,10 +30,8 @@ pub enum AwaitEventWaitIdentity {
     TurnCancelEscalation,
 }
 impl AwaitEventWaitIdentity {
-    pub fn tool_completion(tool_call_id: impl Into<String>) -> Self {
-        Self::ToolCompletion {
-            tool_call_id: tool_call_id.into(),
-        }
+    pub fn tool_completion(tool_call_id: lash_sansio::ToolCallId) -> Self {
+        Self::ToolCompletion { tool_call_id }
     }
 
     pub fn process_signal(
@@ -47,7 +48,7 @@ impl AwaitEventWaitIdentity {
 
     pub fn validate(&self) -> Result<(), RuntimeError> {
         let invalid = match self {
-            Self::ToolCompletion { tool_call_id } => tool_call_id.trim().is_empty(),
+            Self::ToolCompletion { .. } => false,
             Self::ProcessSignal {
                 process_id,
                 signal_name,

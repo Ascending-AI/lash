@@ -10,10 +10,10 @@ mod tests {
         ProcessRegistryFaults, ProcessWorkObserver, WaitState,
     };
     use crate::{
-        InputItem, PluginOptions, PreparedToolCall, ProcessEventAppendRequest,
-        ProcessExecutionEnvRef, ProcessIdentity, ProcessObserverBy, ProcessProvenance,
-        ProcessRegistration, SessionCreateRequest, SessionScope, SessionStartPoint,
-        SubagentSessionContext, ToolFailureClass, TurnInput, WaitKind,
+        InputItem, PluginOptions, ProcessEventAppendRequest, ProcessExecutionEnvRef,
+        ProcessIdentity, ProcessObserverBy, ProcessProvenance, ProcessRegistration,
+        SessionCreateRequest, SessionScope, SessionStartPoint, SubagentSessionContext,
+        ToolFailureClass, TurnInput, WaitKind,
     };
     use crate::{ProcessId, ProcessRegistry, SessionId};
 
@@ -471,14 +471,13 @@ mod tests {
             (
                 "tool",
                 ProcessInput::ToolCall {
-                    call: PreparedToolCall::from_parts(
-                        "call-1",
-                        "tool:files.read",
-                        "files.read",
-                        json!({}),
-                        None,
-                        serde_json::Value::Null,
-                    ),
+                    call: crate::ProcessToolCall {
+                        tool_id: "tool:files.read".into(),
+                        tool_name: "files.read".into(),
+                        args: json!({}),
+                        replay: None,
+                        prepared_payload: serde_json::Value::Null,
+                    },
                 },
                 "tool",
                 "files.read",

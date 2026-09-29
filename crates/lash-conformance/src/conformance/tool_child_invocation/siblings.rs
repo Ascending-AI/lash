@@ -61,7 +61,9 @@ pub async fn timer_and_durable_wait_children_are_admitted_beside_a_tool_child(
         .controller()
         .await_event_key(
             &scope,
-            crate::AwaitEventWaitIdentity::tool_completion(format!("{prefix}-wait")),
+            crate::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                &format!("{prefix}-wait"),
+            )),
         )
         .await
         .expect("the wait child's key derives on the group's controller");

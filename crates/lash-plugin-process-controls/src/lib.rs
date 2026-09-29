@@ -578,7 +578,7 @@ mod tests {
             lash_core::AwaitEventKey {
                 scope: lash_core::ExecutionScope::turn("test-session", "test-turn"),
                 wait: lash_core::AwaitEventWaitIdentity::ToolCompletion {
-                    tool_call_id: "await-process-call".to_string(),
+                    tool_call_id: lash_core::ToolCallId::fixture("await-process-call"),
                 },
                 key_id: "await-process-key".to_string(),
                 signature: "await-process-signature".to_string(),

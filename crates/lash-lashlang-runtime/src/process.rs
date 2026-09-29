@@ -1167,7 +1167,7 @@ impl LashlangProcessHost<'_> {
                 .await
         };
         commands.finish(&in_flight)?;
-        protocol_tool_reply_to_lashlang_value(reply, &call_id, &self.cancellation)
+        protocol_tool_reply_to_lashlang_value(reply, call_id.as_str(), &self.cancellation)
     }
 
     async fn process_event(&self, event: lashlang::ProcessEvent) -> Result<(), ExecutionHostError> {
@@ -1536,7 +1536,7 @@ struct LashlangProcessExecutionTrace {
     process_name: String,
     attempt: u32,
     engine_execution_id: Option<String>,
-    resource_call_ids: Arc<std::sync::Mutex<BTreeMap<(String, u64), String>>>,
+    resource_call_ids: Arc<std::sync::Mutex<BTreeMap<(String, u64), lash_core::ToolCallId>>>,
     pending_resource_starts:
         Arc<std::sync::Mutex<BTreeMap<(String, u64), lashlang::LashlangExecutionSite>>>,
     active_nodes: Arc<std::sync::Mutex<ActiveProcessTraceNodes>>,

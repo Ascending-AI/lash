@@ -122,7 +122,9 @@ mod tests {
         for wait in [
             AwaitEventWaitIdentity::TurnCancelGate,
             AwaitEventWaitIdentity::TurnTerminal,
-            AwaitEventWaitIdentity::tool_completion("unsupported-call"),
+            AwaitEventWaitIdentity::tool_completion(lash_core_execution::ToolCallId::fixture(
+                "unsupported-call",
+            )),
         ] {
             let error = resolver
                 .await_event_key(&scope, wait)
@@ -170,7 +172,9 @@ mod tests {
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let host = double.lash_backend().effect_host();
         let scope = ExecutionScope::turn("session", "turn");
-        let wait = AwaitEventWaitIdentity::tool_completion("call");
+        let wait = AwaitEventWaitIdentity::tool_completion(
+            lash_core_execution::ToolCallId::fixture("call"),
+        );
 
         let first = host
             .await_event_key(&scope, wait.clone())
@@ -191,7 +195,12 @@ mod tests {
         let host = double.lash_backend().effect_host();
         let scope = ExecutionScope::turn("session-dupe", "turn-dupe");
         let key = host
-            .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call-dupe"))
+            .await_event_key(
+                &scope,
+                AwaitEventWaitIdentity::tool_completion(lash_core_execution::ToolCallId::fixture(
+                    "call-dupe",
+                )),
+            )
             .await
             .expect("key");
         let resolution = Resolution::Ok(serde_json::json!({"done": true}));

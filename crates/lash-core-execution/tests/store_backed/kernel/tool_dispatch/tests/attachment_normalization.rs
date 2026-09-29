@@ -364,7 +364,10 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
 
     let outcome = execution
         .pending_completion_dispatch_outcome(
-            "deferred-attachment-call",
+            &crate::tool_dispatch::ToolCallIds {
+                call_id: crate::ToolCallId::fixture("deferred-attachment-call"),
+                provider_call_id: None,
+            },
             "test:deferred-attachment-call",
             "deferred_attachment_probe".to_string(),
             json!({ "value": "valid" }),
@@ -382,9 +385,10 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
         "precondition: this is the deferred-completion attempt-recording exit"
     );
     assert_eq!(outcome.attempts[0].ordinal, 1);
-    assert!(
-        outcome.record.call_id.is_none(),
-        "the caller must retain responsibility for assigning the deferred call id"
+    assert_eq!(
+        outcome.record.call_id,
+        crate::ToolCallId::fixture("deferred-attachment-call"),
+        "the deferred completion is recorded under the parked call's id"
     );
     assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
         .await;

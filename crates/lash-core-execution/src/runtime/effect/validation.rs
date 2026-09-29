@@ -419,14 +419,15 @@ mod tests {
                 "tool-attempt:test",
             ),
             RuntimeEffectCommand::ToolAttempt {
-                call: crate::PreparedToolCall::from_parts(
-                    "validation-call",
-                    "tool:validation",
-                    "validation",
-                    input,
-                    None,
-                    serde_json::Value::Null,
-                ),
+                call: Box::new(crate::PreparedToolCall {
+                    call_id: crate::ToolCallId::fixture("validation-call"),
+                    provider_call_id: None,
+                    tool_id: "tool:validation".into(),
+                    tool_name: "validation".into(),
+                    args: input,
+                    replay: None,
+                    prepared_payload: serde_json::Value::Null,
+                }),
                 execution_grant: None,
                 attempt: 1,
                 max_attempts: 1,

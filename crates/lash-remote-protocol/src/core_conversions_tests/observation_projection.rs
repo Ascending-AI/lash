@@ -21,7 +21,8 @@ fn tool_call_completed_observation_projects_frame_switch_without_seed_bodies() {
             task: Some("continue safely".to_string()),
         });
     let activity = lash_core::TurnActivity::independent(lash_core::TurnEvent::ToolCallCompleted {
-        call_id: Some("call-frame-switch".to_string()),
+        call_id: lash_core::ToolCallId::fixture("call-frame-switch"),
+        provider_call_id: None,
         name: "continue_as".to_string(),
         args: serde_json::json!({}),
         output,

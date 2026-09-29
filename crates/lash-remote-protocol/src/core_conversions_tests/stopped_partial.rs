@@ -34,11 +34,11 @@ fn remote_activity_carries_tool_progress_and_the_stopped_partial_announcement() 
         (
             6,
             lash_core::TurnEvent::ToolOutputProgress {
-                call_id: "call-1".to_string(),
+                call_id: lash_core::ToolCallId::fixture("call-1"),
                 chunk: chunk.clone(),
             },
             RemoteTurnEvent::ToolOutputProgress {
-                call_id: "call-1".to_string(),
+                call_id: lash_core::ToolCallId::fixture("call-1"),
                 chunk,
             },
         ),
@@ -63,17 +63,4 @@ fn remote_activity_carries_tool_progress_and_the_stopped_partial_announcement() 
             remote
         );
     }
-
-    let blank = RemoteTurnActivity {
-        sequence: 8,
-        id: "activity-8".to_string(),
-        correlation_id: "correlation-8".to_string(),
-        event: RemoteTurnEvent::ToolOutputProgress {
-            call_id: " ".to_string(),
-            chunk: lash_sansio::ToolOutputChunk {
-                text: "chunk".to_string(),
-            },
-        },
-    };
-    assert!(blank.validate().is_err(), "a progress chunk names its call");
 }

@@ -140,7 +140,6 @@ async fn presentation_step_only_changes_model_observation() {
                 presentation_steps: vec![Arc::new(|input| {
                     Box::pin(async move {
                         Ok(lash_core::facade_support::ModelToolReturn::text(
-                            input.context.call_id,
                             input.context.tool_name,
                             "model projection",
                         ))
@@ -239,7 +238,10 @@ async fn presentation_step_only_changes_model_observation() {
         &[serde_json::json!({ "payload": "raw:sample" })]
     );
     assert_eq!(turn.tool_calls.len(), 1);
-    assert_eq!(turn.tool_calls[0].call_id.as_deref(), Some("tool-1"));
+    assert_eq!(
+        turn.tool_calls[0].provider_call_id.as_deref(),
+        Some("tool-1")
+    );
     assert_eq!(
         turn.tool_calls[0].output.value_for_projection(),
         serde_json::json!({ "payload": "raw:sample" })

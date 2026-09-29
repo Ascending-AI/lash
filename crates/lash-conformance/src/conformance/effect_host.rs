@@ -1079,7 +1079,8 @@ async fn effect_host_static_scope_preserves_metadata_when_available(host: Arc<dy
 )]
 async fn effect_host_await_event_key_is_stable(host: Arc<dyn EffectHost>) {
     let scope = durable_turn_scope("await-event-session-stable", "turn-stable");
-    let wait = AwaitEventWaitIdentity::tool_completion("call-stable");
+    let wait =
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-stable"));
 
     let first = host
         .await_event_key(&scope, wait.clone())
@@ -1102,7 +1103,7 @@ async fn effect_host_await_event_accepts_early_resolution(host: Arc<dyn EffectHo
     let key = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("call-early"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-early")),
         )
         .await
         .expect("await-event key");
@@ -1128,7 +1129,10 @@ async fn effect_host_await_event_accepts_early_resolution(host: Arc<dyn EffectHo
 async fn effect_host_await_event_duplicate_resolution_is_terminal(host: Arc<dyn EffectHost>) {
     let scope = durable_turn_scope("await-event-session-dupe", "turn-dupe");
     let key = host
-        .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call-dupe"))
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-dupe")),
+        )
         .await
         .expect("await-event key");
     let resolution = Resolution::Ok(serde_json::json!("first"));
@@ -1160,7 +1164,7 @@ async fn effect_host_await_event_cancel_and_timeout_are_terminal(host: Arc<dyn E
     let cancel_key = host
         .await_event_key(
             &cancel_scope,
-            AwaitEventWaitIdentity::tool_completion("call-cancel"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-cancel")),
         )
         .await
         .expect("cancel await-event key");
@@ -1184,7 +1188,7 @@ async fn effect_host_await_event_cancel_and_timeout_are_terminal(host: Arc<dyn E
     let timeout_key = host
         .await_event_key(
             &timeout_scope,
-            AwaitEventWaitIdentity::tool_completion("call-timeout"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-timeout")),
         )
         .await
         .expect("timeout await-event key");
@@ -1208,7 +1212,7 @@ async fn effect_host_await_event_revokes_session_scope(host: Arc<dyn EffectHost>
     let key = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("call-revoke"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-revoke")),
         )
         .await
         .expect("await-event key");
@@ -1248,7 +1252,9 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
     let scope = ExecutionScope::process(process_id.clone());
     host.await_event_key(
         &scope,
-        AwaitEventWaitIdentity::tool_completion("call-before-prune"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+            "call-before-prune",
+        )),
     )
     .await
     .expect("the first incarnation mints");
@@ -1258,7 +1264,9 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
     let fenced = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("call-while-fenced"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "call-while-fenced",
+            )),
         )
         .await
         .expect_err("a pruned process id mints nothing until it is registered again");
@@ -1270,7 +1278,9 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
     let key = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("call-after-reregistration"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "call-after-reregistration",
+            )),
         )
         .await
         .expect("the re-registered incarnation mints");
@@ -1325,7 +1335,10 @@ pub async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
     let suffix = uuid::Uuid::new_v4().simple();
     let scope = ExecutionScope::runtime_operation(format!("await-event-live-wait-{suffix}"));
     let key = host
-        .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call-live"))
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-live")),
+        )
         .await
         .expect("the operation mints");
     let waiter_host = Arc::clone(&host);
@@ -1426,7 +1439,7 @@ pub async fn effect_host_registered_wait_rejects_quiescent_retirement(
     let fenced = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("call-after"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-after")),
         )
         .await
         .expect_err("the retired scope mints nothing");
@@ -1517,7 +1530,7 @@ pub(crate) async fn effect_host_when_quiescent_waits_for_executing_effects(
     assert_eq!(refused.code.as_str(), "effect_scope_not_quiescent");
     host.await_event_key(
         &scope,
-        AwaitEventWaitIdentity::tool_completion("still-open"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("still-open")),
     )
     .await
     .expect("the refused retirement left the scope unfenced");
@@ -1539,7 +1552,9 @@ pub(crate) async fn effect_host_when_quiescent_waits_for_executing_effects(
     let fenced = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("after-retirement"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "after-retirement",
+            )),
         )
         .await
         .expect_err("the retired scope mints nothing");
@@ -1561,14 +1576,16 @@ async fn effect_host_await_event_retires_non_session_scopes(host: Arc<dyn Effect
     let retired_key = host
         .await_event_key(
             &retired_scope,
-            AwaitEventWaitIdentity::tool_completion("call-retired"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-retired")),
         )
         .await
         .expect("runtime-operation key");
     let survivor_key = host
         .await_event_key(
             &survivor_scope,
-            AwaitEventWaitIdentity::tool_completion("call-survivor"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "call-survivor",
+            )),
         )
         .await
         .expect("process key");
@@ -1608,7 +1625,9 @@ async fn effect_host_await_event_retires_non_session_scopes(host: Arc<dyn Effect
     let mint_err = host
         .await_event_key(
             &retired_scope,
-            AwaitEventWaitIdentity::tool_completion("call-after-retirement"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "call-after-retirement",
+            )),
         )
         .await
         .expect_err("a retired scope mints nothing");
@@ -1659,7 +1678,9 @@ async fn effect_host_await_event_session_cancel_resolves_outstanding_waits(
     let key = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("call-cancel-waits"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "call-cancel-waits",
+            )),
         )
         .await
         .expect("await-event key");
@@ -1713,7 +1734,9 @@ async fn effect_host_await_event_session_cancel_resolves_outstanding_waits(
     let later_key = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("call-after-cancel"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "call-after-cancel",
+            )),
         )
         .await
         .expect("post-cancel await-event key");
@@ -1740,7 +1763,7 @@ async fn effect_host_await_event_rejects_tampered_keys(host: Arc<dyn EffectHost>
     let mut key = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("call-tamper"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-tamper")),
         )
         .await
         .expect("await-event key");
@@ -1880,14 +1903,15 @@ fn replay_conformance_tool_attempt_envelope(
             effect_id,
         ),
         RuntimeEffectCommand::ToolAttempt {
-            call: crate::PreparedToolCall::from_parts(
-                call_id,
-                crate::ToolId::from(format!("tool:{tool_name}")),
-                tool_name,
-                serde_json::json!({ "call": call_id }),
-                None,
-                serde_json::json!({ "prepared": effect_id }),
-            ),
+            call: Box::new(crate::PreparedToolCall {
+                call_id: lash_core::ToolCallId::fixture(&call_id),
+                provider_call_id: None,
+                tool_id: crate::ToolId::from(format!("tool:{tool_name}")),
+                tool_name: tool_name.into(),
+                args: serde_json::json!({ "call": call_id }),
+                replay: None,
+                prepared_payload: serde_json::json!({ "prepared": effect_id }),
+            }),
             execution_grant: None,
             attempt: 1,
             max_attempts: 1,
@@ -2059,7 +2083,8 @@ fn replay_conformance_tool_attempt_outcome(
     RuntimeEffectOutcome::ToolAttempt {
         launch: Box::new(crate::ToolAttemptLaunch::Done {
             record: Box::new(crate::ToolCallRecord {
-                call_id: Some(call_id.to_string()),
+                call_id: lash_core::ToolCallId::fixture(&call_id.to_string()),
+                provider_call_id: None,
                 tool: tool_name.to_string(),
                 args: serde_json::json!({ "call": call_id }),
                 output: crate::ToolCallOutput::success(serde_json::json!({
@@ -2101,7 +2126,10 @@ fn assert_replay_conformance_tool_attempt_marker(
     let crate::ToolAttemptLaunch::Done { record, .. } = *launch else {
         panic!("expected completed tool-attempt launch");
     };
-    assert_eq!(record.call_id.as_deref(), Some(expected_call_id));
+    assert_eq!(
+        record.call_id,
+        lash_core::ToolCallId::fixture(expected_call_id)
+    );
     assert_eq!(record.tool, expected_tool_name);
     assert_eq!(
         record.output.value_for_projection(),

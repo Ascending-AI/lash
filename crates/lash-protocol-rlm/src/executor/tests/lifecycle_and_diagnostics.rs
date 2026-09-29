@@ -1384,14 +1384,13 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         // What the pair asserts is unchanged: the two sides are still equal,
         // which is the trace-sink independence this test exists for; only the
         // derivation both sides share moved.
+        // Re-pinned by FIG-4080: the call id is the `ToolCallId` the cell's
+        // admission derives for issue ordinal 0 (ADR 0117 §2).
         assert_eq!(
-            without_trace.call_id.as_deref(),
-            Some("lashlang:v2:turn:12:test-session:6:turn-7:11:exec-code:3:0000000000")
+            without_trace.call_id.as_str(),
+            "tc_714c3372ac3c8a6cf222ffeacd7f00c7a853cde7f72ae3a392bc558043b7f34d"
         );
-        assert_eq!(
-            with_trace.call_id.as_deref(),
-            Some("lashlang:v2:turn:12:test-session:6:turn-7:11:exec-code:3:0000000000")
-        );
+        assert_eq!(with_trace.call_id, without_trace.call_id);
 
         let without_trace_key = match without_trace.output.control {
             Some(lash_core::ToolControl::SwitchAgentFrame { frame_key, .. }) => frame_key,
@@ -1403,11 +1402,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/05a11b1c96c2a1640f723be1e954ccbfae4fc629742d2feaeda2378b011c4007"
+            "frame-key/v2/f091a7415a8f61330c53a4d67429e6eb35dfafa71901d387dfb676850ae02b10"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/05a11b1c96c2a1640f723be1e954ccbfae4fc629742d2feaeda2378b011c4007"
+            "frame-key/v2/f091a7415a8f61330c53a4d67429e6eb35dfafa71901d387dfb676850ae02b10"
         );
     });
 }

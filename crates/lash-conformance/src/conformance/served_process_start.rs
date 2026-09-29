@@ -375,33 +375,36 @@ async fn start_marker_key(
         .join(":");
     let probe_key = crate::StartKey::parse(crate::DERIVED_START_KEYS, &probe_key_text)
         .unwrap_or_else(|error| panic!("the marker's start key parses: {error}"));
-    // A cell's leaf call id is `lashlang:v2:{opener}:{len}:{execution}:{ordinal}`
-    // (`LashlangHostIdentities::call_id`), and the cell's execution key leads
-    // the marker's replay key: find the execution and ordinal the probe's key
-    // was derived from, then re-derive both under the real session. The start
-    // is the call's declared one, keyed by its intent identity, which the
-    // call's first attempt minted (ADR 0116 §3).
+    // A cell's leaf call id is its `ToolCallId` under the turn's root at
+    // `[code opener, cell, command]` (`LashlangHostIdentities::call_id`, ADR
+    // 0117 §2), and the cell's execution key leads the marker's replay key:
+    // find the execution and ordinal the probe's key was derived from, then
+    // re-derive both under the real session. The start is the call's declared
+    // one, keyed by its intent identity, which the call's first attempt minted
+    // (ADR 0116 §3).
     let call_id = |session: &SessionId, execution: &str, ordinal: u64| {
         let opener = crate::EffectOpener::turn(session.clone(), turn_id.clone());
-        format!(
-            "lashlang:v2:{}:{}:{execution}:{ordinal:010}",
-            opener.identity_encoding(),
-            execution.len()
-        )
+        let encoding = opener.identity_encoding();
+        opener.tool_call_admission().call_id(&[
+            lash_core::ToolCallPosition::CodeOpener(&encoding),
+            lash_core::ToolCallPosition::CodeCell(execution),
+            lash_core::ToolCallPosition::CodeCommand(ordinal),
+        ])
     };
     let call_key = marker[..key_at]
         .strip_suffix(":process:start:")
         .unwrap_or_else(|| panic!("the marker names the call's start: {marker}"));
-    let start_key = |session: &SessionId, call_id: String, call_key: &str| {
+    // The first attempt is keyed under the call's command by its call id.
+    let start_key = |session: &SessionId, call_id: lash_core::ToolCallId, call_key: &str| {
+        let minting = format!("{call_key}:{call_id}:attempt:1");
         let identity = crate::rederive_tool_intent_identity(&crate::ToolIntentIdentity {
             session_id: session.clone(),
             execution_scope_id: turn_id.as_str().to_string(),
             tool_call_id: call_id,
             intent_index: 0,
             replay_key: String::new(),
-            minting_emission_replay_key: Some(format!("{call_key}:attempt:1")),
-        })
-        .expect("a declared start's intent identity derives");
+            minting_emission_replay_key: Some(minting),
+        });
         crate::StartKey::for_tool_intent(crate::DERIVED_START_KEYS, &identity)
     };
     let segments = call_key.split(':').collect::<Vec<_>>();

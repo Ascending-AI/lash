@@ -354,7 +354,7 @@ fn tool_attempt(key: &str, call_id: &str) -> RuntimeEffectEnvelope {
             key,
         ),
         RuntimeEffectCommand::ToolAttempt {
-            call: prepared_tool_call_with(call_id, "determinism_tool"),
+            call: Box::new(prepared_tool_call_with(call_id, "determinism_tool")),
             execution_grant: None,
             attempt: 1,
             max_attempts: 1,

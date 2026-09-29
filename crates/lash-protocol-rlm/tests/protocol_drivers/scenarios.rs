@@ -637,7 +637,8 @@ fn rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_
                 operation: "tools.read_file".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Ok,
                 host_record: Some(lash_core::ToolCallRecord {
-                    call_id: Some("rlm-call-1".to_string()),
+                    call_id: lash_core::ToolCallId::fixture("rlm-call-1"),
+                    provider_call_id: None,
                     tool: "read_file".to_string(),
                     args: serde_json::json!({"path": "foo"}),
                     output: lash_core::ToolCallOutput::success(serde_json::json!("contents")),
@@ -679,7 +680,8 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
                 operation: "tools.custom_frame_switch".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Ok,
                 host_record: Some(lash_core::ToolCallRecord {
-                    call_id: Some("custom-call-1".to_string()),
+                    call_id: lash_core::ToolCallId::fixture("custom-call-1"),
+                    provider_call_id: None,
                     tool: "custom_frame_switch".to_string(),
                     args: serde_json::json!({}),
                     output: lash_core::ToolCallOutput::success(serde_json::json!({"ok": true}))
@@ -732,7 +734,8 @@ fn rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error() {
                 operation: "tools.custom_fail".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Ok,
                 host_record: Some(lash_core::ToolCallRecord {
-                    call_id: Some("custom-call-1".to_string()),
+                    call_id: lash_core::ToolCallId::fixture("custom-call-1"),
+                    provider_call_id: None,
                     tool: "custom_fail".to_string(),
                     args: serde_json::json!({}),
                     output: lash_core::ToolCallOutput::success(serde_json::json!({"ok": true}))

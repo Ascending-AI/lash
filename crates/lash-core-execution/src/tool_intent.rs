@@ -1,6 +1,6 @@
 use crate::ProcessId;
 use crate::SessionId;
-use crate::{ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason};
+use crate::{ToolIntentIdentity, ToolIntentKind};
 use serde::{Deserialize, Serialize};
 
 /// The only intent-to-command protocol understood by this build.
@@ -372,9 +372,9 @@ const TOOL_INTENT_IDENTITY_FAMILY_VERSION: u8 = 2;
 pub fn derive_tool_intent_identity(
     session_id: &SessionId,
     execution_scope_id: &str,
-    tool_call_id: Option<&str>,
-    intent_index: usize,
-) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
+    tool_call_id: &crate::ToolCallId,
+    intent_index: u32,
+) -> ToolIntentIdentity {
     derive_tool_intent_identity_inner(
         session_id,
         execution_scope_id,
@@ -386,19 +386,21 @@ pub fn derive_tool_intent_identity(
 
 /// The one derivation every runtime-side declaration site uses.
 ///
-/// A declaration minted under a durable invocation binds that invocation's
-/// replay key; one minted outside any invocation binds nothing. Both the
-/// attempt's own `AttemptContext::intent_identity` and the intent executor's
-/// realization pass their parent invocation here, so the identity an attempt
-/// reports and the identity the executor realizes under cannot be derived by
-/// two rules (FIG-2994).
+/// An intent is named by the call that declared it and its index among the
+/// call's intents (ADR 0117 §6). A declaration minted under a durable
+/// invocation also binds that invocation's replay key, the final-emission
+/// attribution that fences it; one minted outside any invocation binds
+/// nothing. Both the attempt's own `AttemptContext::intent_identity` and the
+/// intent executor's realization pass their parent invocation here, so the
+/// identity an attempt reports and the identity the executor realizes under
+/// cannot be derived by two rules (FIG-2994).
 pub fn derive_tool_intent_identity_under(
     session_id: &SessionId,
     execution_scope_id: &str,
-    tool_call_id: Option<&str>,
-    intent_index: usize,
+    tool_call_id: &crate::ToolCallId,
+    intent_index: u32,
     parent_invocation: Option<&crate::RuntimeInvocation>,
-) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
+) -> ToolIntentIdentity {
     derive_tool_intent_identity_inner(
         session_id,
         execution_scope_id,
@@ -411,21 +413,17 @@ pub fn derive_tool_intent_identity_under(
 fn derive_tool_intent_identity_inner(
     session_id: &SessionId,
     execution_scope_id: &str,
-    tool_call_id: Option<&str>,
-    intent_index: usize,
+    tool_call_id: &crate::ToolCallId,
+    intent_index: u32,
     minting_emission_replay_key: Option<&str>,
-) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
-    let tool_call_id = tool_call_id.ok_or(ToolIntentRefusalReason::MissingToolCallId)?;
-    let intent_index =
-        u32::try_from(intent_index).map_err(|_| ToolIntentRefusalReason::IntentIndexOverflow)?;
-
+) -> ToolIntentIdentity {
     let mut encoder = crate::stable_identity::IdentityEncoder::new(
         "lash.tool-intent",
         TOOL_INTENT_IDENTITY_FAMILY_VERSION,
     );
     encoder.string(session_id);
     encoder.string(execution_scope_id);
-    encoder.string(tool_call_id);
+    encoder.string(tool_call_id.as_str());
     encoder.u32(intent_index);
     encoder.optional(minting_emission_replay_key, |encoder, replay_key| {
         encoder.string(replay_key)
@@ -435,14 +433,14 @@ fn derive_tool_intent_identity_inner(
         TOOL_INTENT_IDENTITY_FAMILY_VERSION,
         &encoder.finish(),
     );
-    Ok(ToolIntentIdentity {
+    ToolIntentIdentity {
         session_id: SessionId::from(session_id.to_string()),
         execution_scope_id: execution_scope_id.to_string(),
-        tool_call_id: tool_call_id.to_string(),
+        tool_call_id: tool_call_id.clone(),
         intent_index,
         replay_key,
         minting_emission_replay_key: minting_emission_replay_key.map(str::to_string),
-    })
+    }
 }
 
 /// Re-derive an identity from its own durable fields.
@@ -450,14 +448,12 @@ fn derive_tool_intent_identity_inner(
 /// The v2 replay key hashes the minting-emission replay key, so the record
 /// retains that input; a record whose `replay_key` does not equal the
 /// re-derived one carries a forged or corrupted identity.
-pub fn rederive_tool_intent_identity(
-    identity: &ToolIntentIdentity,
-) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
+pub fn rederive_tool_intent_identity(identity: &ToolIntentIdentity) -> ToolIntentIdentity {
     derive_tool_intent_identity_inner(
         &identity.session_id,
         &identity.execution_scope_id,
-        Some(&identity.tool_call_id),
-        identity.intent_index as usize,
+        &identity.tool_call_id,
+        identity.intent_index,
         identity.minting_emission_replay_key.as_deref(),
     )
 }
@@ -466,7 +462,7 @@ pub(crate) fn derive_legacy_tool_intent_v1_replay_key(identity: &ToolIntentIdent
     let mut encoder = crate::stable_identity::IdentityEncoder::new("lash.tool-intent", 1);
     encoder.string(&identity.session_id);
     encoder.string(&identity.execution_scope_id);
-    encoder.string(&identity.tool_call_id);
+    encoder.string(identity.tool_call_id.as_str());
     encoder.u32(identity.intent_index);
     crate::stable_identity::rendered_hash("tool-intent", 1, &encoder.finish())
 }
@@ -690,18 +686,17 @@ mod tests {
         let identity = derive_tool_intent_identity(
             &SessionId::from("session-fig1292"),
             "turn-7",
-            Some("call-3"),
+            &crate::ToolCallId::fixture("call-3"),
             2,
-        )
-        .expect("identity");
+        );
         assert_eq!(
             identity,
             ToolIntentIdentity {
                 session_id: SessionId::from("session-fig1292"),
                 execution_scope_id: "turn-7".to_string(),
-                tool_call_id: "call-3".to_string(),
+                tool_call_id: crate::ToolCallId::fixture("call-3"),
                 intent_index: 2,
-                replay_key: "tool-intent:v2:blake3:11066b1512aa6d126c635d3b3dde273ad9e3dfeeea7ae985894652309c7da31c".to_string(),
+                replay_key: "tool-intent:v2:blake3:14b5e52d354ed5bcc8493de4bc6842c1c102eb6fe0378fcab341522b8d0fb75f".to_string(),
                 minting_emission_replay_key: None,
             }
         );
@@ -709,22 +704,21 @@ mod tests {
 
     #[test]
     fn emitted_intent_identity_is_scoped_by_the_minting_replay_key() {
+        let call = crate::ToolCallId::fixture("call");
         let first = derive_tool_intent_identity_inner(
             &SessionId::from("session"),
             "process",
-            Some("call"),
+            &call,
             0,
             Some("turn:7:child:0:call:attempt:1"),
-        )
-        .expect("first emission identity");
+        );
         let second = derive_tool_intent_identity_inner(
             &SessionId::from("session"),
             "process",
-            Some("call"),
+            &call,
             0,
             Some("turn:8:child:0:call:attempt:1"),
-        )
-        .expect("second emission identity");
+        );
 
         assert!(first.replay_key.starts_with("tool-intent:v2:blake3:"));
         assert!(second.replay_key.starts_with("tool-intent:v2:blake3:"));
@@ -732,24 +726,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_call_id_is_a_typed_refusal() {
-        assert_eq!(
-            derive_tool_intent_identity(&SessionId::from("session"), "turn", None, 0),
-            Err(ToolIntentRefusalReason::MissingToolCallId)
-        );
-    }
-
-    #[test]
     fn intent_identity_is_distinct_across_turn_and_process_execution_scopes() {
-        let turn_7 =
-            derive_tool_intent_identity(&SessionId::from("session"), "turn-7", Some("call"), 0)
-                .expect("turn 7 identity");
-        let turn_8 =
-            derive_tool_intent_identity(&SessionId::from("session"), "turn-8", Some("call"), 0)
-                .expect("turn 8 identity");
+        let call = crate::ToolCallId::fixture("call");
+        let turn_7 = derive_tool_intent_identity(&SessionId::from("session"), "turn-7", &call, 0);
+        let turn_8 = derive_tool_intent_identity(&SessionId::from("session"), "turn-8", &call, 0);
         let process =
-            derive_tool_intent_identity(&SessionId::from("session"), "process-7", Some("call"), 0)
-                .expect("process identity");
+            derive_tool_intent_identity(&SessionId::from("session"), "process-7", &call, 0);
         assert_eq!(turn_7.execution_scope_id, "turn-7");
         assert_eq!(turn_8.execution_scope_id, "turn-8");
         assert_eq!(process.execution_scope_id, "process-7");
@@ -801,15 +783,13 @@ mod tests {
         )
     }
 
-    fn derive_from(
-        inputs: &(String, String, String, u32, Option<String>),
-    ) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
+    fn derive_from(inputs: &(String, String, String, u32, Option<String>)) -> ToolIntentIdentity {
         let (session_id, execution_scope_id, tool_call_id, intent_index, minting) = inputs;
         derive_tool_intent_identity_inner(
             &SessionId::from(session_id.clone()),
             execution_scope_id,
-            Some(tool_call_id),
-            *intent_index as usize,
+            &crate::ToolCallId::fixture(tool_call_id),
+            *intent_index,
             minting.as_deref(),
         )
     }
@@ -829,8 +809,8 @@ mod tests {
             left in identity_inputs(),
             right in identity_inputs(),
         ) {
-            let derived_left = derive_from(&left).expect("left identity");
-            let derived_right = derive_from(&right).expect("right identity");
+            let derived_left = derive_from(&left);
+            let derived_right = derive_from(&right);
             proptest::prop_assert_eq!(
                 left == right,
                 derived_left.replay_key == derived_right.replay_key,
@@ -851,8 +831,8 @@ mod tests {
         /// FIG-2994.
         #[test]
         fn rederiving_a_tool_intent_identity_reproduces_it(inputs in identity_inputs()) {
-            let derived = derive_from(&inputs).expect("identity");
-            let rederived = rederive_tool_intent_identity(&derived).expect("re-derived identity");
+            let derived = derive_from(&inputs);
+            let rederived = rederive_tool_intent_identity(&derived);
             proptest::prop_assert_eq!(&derived, &rederived);
             proptest::prop_assert_eq!(
                 crate::StartKey::for_tool_intent(
@@ -868,35 +848,6 @@ mod tests {
     }
 
     #[test]
-    fn a_tool_intent_index_past_the_encoded_width_is_refused() {
-        // The encoder writes the index as a u32. An index that does not fit has
-        // to be refused rather than truncated: a truncated index collides with
-        // a real one, and the collision is a second intent realizing as the
-        // first. Pinned against `u32::MAX` itself so the boundary is exact.
-        let too_wide = u32::MAX as usize + 1;
-        assert!(matches!(
-            derive_tool_intent_identity_inner(
-                &SessionId::from("session"),
-                "scope",
-                Some("call"),
-                too_wide,
-                None
-            ),
-            Err(ToolIntentRefusalReason::IntentIndexOverflow)
-        ));
-        assert!(
-            derive_tool_intent_identity_inner(
-                &SessionId::from("session"),
-                "scope",
-                Some("call"),
-                u32::MAX as usize,
-                None
-            )
-            .is_ok()
-        );
-    }
-
-    #[test]
     fn a_forged_field_does_not_survive_re_derivation() {
         // The fence documented on `rederive_tool_intent_identity`: a record
         // whose `replay_key` does not equal the re-derived one carries a forged
@@ -906,15 +857,12 @@ mod tests {
         let honest = derive_tool_intent_identity_inner(
             &SessionId::from("session"),
             "scope",
-            Some("call"),
+            &crate::ToolCallId::fixture("call"),
             1,
             Some("minted"),
-        )
-        .expect("honest identity");
+        );
         assert_eq!(
-            rederive_tool_intent_identity(&honest)
-                .expect("fixpoint")
-                .replay_key,
+            rederive_tool_intent_identity(&honest).replay_key,
             honest.replay_key
         );
 
@@ -936,7 +884,7 @@ mod tests {
             (
                 "tool_call_id",
                 ToolIntentIdentity {
-                    tool_call_id: "other".to_string(),
+                    tool_call_id: crate::ToolCallId::fixture("other"),
                     ..honest.clone()
                 },
             ),
@@ -963,7 +911,7 @@ mod tests {
             ),
         ];
         for (field, forged) in forgeries {
-            let rederived = rederive_tool_intent_identity(&forged).expect("re-derive forged");
+            let rederived = rederive_tool_intent_identity(&forged);
             assert_ne!(
                 rederived.replay_key, forged.replay_key,
                 "a forged `{field}` must not re-derive to the key the record carries"

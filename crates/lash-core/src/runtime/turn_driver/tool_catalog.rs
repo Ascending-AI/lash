@@ -60,7 +60,7 @@ impl PreparedExecutionEnvironment {
 impl RuntimeTurnDriver<'_> {
     #[expect(
         clippy::expect_used,
-        reason = "an admitted turn has a committed active agent frame"
+        reason = "an admitted turn has a committed active agent frame and an opener scope"
     )]
     pub(super) async fn prepare_turn_machine(
         &mut self,
@@ -90,6 +90,14 @@ impl RuntimeTurnDriver<'_> {
         // that is host configuration, independent of the tools.
         self.mark_phase_begin(RuntimeTurnPhase::PromptBuild);
         let turn_driver_preamble = self.session.protocol_driver_preamble();
+        // ADR 0117: the model's calls are named under the admitted scope's
+        // root, continued by this physical turn.
+        let model_tool_calls = lash_sansio::ModelToolCalls::new(
+            crate::EffectOpener::for_scope(self.scoped_effect_controller.admitted_scope())
+                .expect("a turn runs under an opener scope")
+                .tool_call_admission(),
+            self.turn_index as u64,
+        );
         let prepared = crate::build_turn(crate::SansIoTurnInput {
             session_id: self.session_id.clone(),
             agent_frame_id: self
@@ -121,6 +129,7 @@ impl RuntimeTurnDriver<'_> {
             generation: session_policy.generation.clone(),
             emit_llm_trace: false,
             termination: self.protocol_turn_options.clone(),
+            model_tool_calls,
         });
         self.policy = session_policy;
         self.mark_phase_end(RuntimeTurnPhase::PromptBuild);

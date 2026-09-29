@@ -19,6 +19,7 @@ fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
     let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> =
         Arc::new(StandardDriver::default());
     TurnMachineConfig {
+        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
         sync_execution_environment: false,
@@ -119,11 +120,11 @@ fn completed_call(
 ) -> sansio::CompletedToolCall {
     sansio::CompletedToolCall {
         call_id: call.call_id.clone(),
+        provider_call_id: call.provider_call_id.clone(),
         tool_name: call.tool_name.clone(),
         args: call.args.clone(),
         output,
         model_return: lash_core::facade_support::ModelToolReturn {
-            call_id: call.call_id.clone(),
             tool_name: call.tool_name.clone(),
             parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
                 "result",
@@ -256,25 +257,41 @@ fn reported_tool_calls(effects: &[Effect]) -> Vec<(Option<String>, String)> {
     effects
         .iter()
         .filter_map(|effect| match effect {
-            Effect::Emit(SessionStreamEvent::ToolCall { call_id, name, .. }) => {
-                Some((call_id.clone(), name.clone()))
-            }
+            Effect::Emit(SessionStreamEvent::ToolCall {
+                provider_call_id,
+                name,
+                ..
+            }) => Some((provider_call_id.clone(), name.clone())),
             _ => None,
         })
         .collect()
 }
 
+/// Each appended result, named by the provider id of the call it answers.
 fn appended_tool_results(machine: &TurnMachine) -> Vec<(String, String)> {
-    machine
-        .messages()
+    let messages = machine.messages();
+    let parts = messages
         .iter()
         .flat_map(|message| message.parts.iter())
+        .collect::<Vec<_>>();
+    let provider_ids = parts
+        .iter()
+        .filter_map(|part| {
+            Some((
+                part.call_id()?.clone(),
+                part.provider_call_id()?.to_string(),
+            ))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    parts
+        .iter()
         .filter(|part| part.kind() == PartKind::ToolResult)
         .map(|part| {
             (
-                part.tool_call_id()
-                    .expect("a result names its call")
-                    .to_string(),
+                provider_ids
+                    .get(part.call_id().expect("a result names its call"))
+                    .expect("a result answers a committed call")
+                    .clone(),
                 part.tool_name()
                     .expect("a result names its tool")
                     .to_string(),
@@ -303,15 +320,22 @@ fn batch_folds_to_one_transcript_call() {
         ],
     );
     let (id, calls, expansion) = tool_work(&effects);
+    assert_eq!(expansion.wrappers.len(), 1);
+    // A member is lash's call, the wrapper id's child by original index; it
+    // carries no provider correlation (ADR 0117).
+    let wrapper = &expansion.wrappers[0].call_id;
     assert_eq!(
         calls
             .iter()
-            .map(|call| call.call_id.as_str())
+            .map(|call| (call.call_id.clone(), call.provider_call_id.as_deref()))
             .collect::<Vec<_>>(),
-        vec!["native", "wrapper/batch/0", "wrapper/batch/2"],
+        vec![
+            (calls[0].call_id.clone(), Some("native")),
+            (wrapper.child(0), None),
+            (wrapper.child(2), None),
+        ],
         "the wrapper's admitted members join the native call in one tool work"
     );
-    assert_eq!(expansion.wrappers.len(), 1);
 
     machine.handle_response(Response::ToolResults {
         id,
@@ -344,7 +368,9 @@ fn batch_folds_to_one_transcript_call() {
         .filter(|part| part.kind() == PartKind::ToolCall)
         .map(|part| {
             (
-                part.tool_call_id().expect("a call has an id").to_string(),
+                part.provider_call_id()
+                    .expect("a model call keeps its provider id")
+                    .to_string(),
                 part.tool_replay().cloned(),
             )
         })
@@ -419,7 +445,7 @@ fn an_oversized_batch_is_refused_whole_and_starts_nothing() {
         })
         .expect("the wrapper is reported refused");
     assert_eq!(refused.len(), 1);
-    assert_eq!(refused[0].call_id, "wrapper");
+    assert_eq!(refused[0].provider_call_id.as_deref(), Some("wrapper"));
     assert!(!refused[0].output.is_success());
 }
 
@@ -443,7 +469,12 @@ fn a_disabled_batch_is_an_ordinary_tool_call() {
     assert_eq!(
         calls
             .iter()
-            .map(|call| (call.call_id.as_str(), call.tool_name.as_str()))
+            .map(|call| {
+                (
+                    call.provider_call_id.as_deref().unwrap_or_default(),
+                    call.tool_name.as_str(),
+                )
+            })
             .collect::<Vec<_>>(),
         vec![("wrapper", "batch")],
         "the call goes to the host as named, where preparation refuses an unknown tool"

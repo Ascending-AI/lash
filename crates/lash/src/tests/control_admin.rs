@@ -1591,10 +1591,9 @@ async fn a_host_rail_refuses_a_derived_family_start_key() -> Result<()> {
         &lash_core::derive_tool_intent_identity(
             &SessionId::from("model-session"),
             "turn-1",
-            Some("call-1"),
+            &lash_core::ToolCallId::fixture("call-1"),
             0,
-        )
-        .expect("the intent identity derives"),
+        ),
     );
     let mut wire = serde_json::to_value(external_host_start(serde_json::Value::Null))
         .expect("encode the request");

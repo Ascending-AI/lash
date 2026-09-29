@@ -9,7 +9,7 @@ async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_prot
     for recorded in [0, 1, 2, 4] {
         let outcomes = execute_final_tool_intents(
             &context,
-            Some("empty-version-call"),
+            &crate::ToolCallId::fixture("empty-version-call"),
             &crate::ToolIntents {
                 protocol_version: recorded,
                 intents: Vec::new(),

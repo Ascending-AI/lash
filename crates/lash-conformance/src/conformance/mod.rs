@@ -196,7 +196,7 @@ pub use tool_access_persistence::*;
 pub use tool_batch_crash_redrive::*;
 pub use tool_batch_parallelism::*;
 pub use tool_batch_scaling::*;
-pub use tool_call_identity::{ToolCallIdentityTier, run_held_law};
+pub use tool_call_identity::ToolCallIdentityTier;
 pub use tool_child_drift::*;
 pub use tool_child_invocation::*;
 pub use tool_child_turn_cancel::*;

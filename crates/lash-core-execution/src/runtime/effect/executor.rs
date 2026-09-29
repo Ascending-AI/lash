@@ -196,7 +196,7 @@ pub(super) struct LocalDirectEffectRunner {
 /// of a scalar call's attempt.
 struct LocalToolAttemptEffectRunner<'run> {
     context: crate::RuntimeExecutionContext<'run>,
-    child_trace_hooks: BTreeMap<String, crate::ToolChildExecutionTraceHook>,
+    child_trace_hooks: BTreeMap<crate::ToolCallId, crate::ToolChildExecutionTraceHook>,
     completion_key: Option<crate::AwaitEventKey>,
 }
 
@@ -841,7 +841,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
 
     pub(crate) fn tool_attempt(
         context: crate::RuntimeExecutionContext<'run>,
-        child_trace_hooks: BTreeMap<String, crate::ToolChildExecutionTraceHook>,
+        child_trace_hooks: BTreeMap<crate::ToolCallId, crate::ToolChildExecutionTraceHook>,
         completion_key: Option<crate::AwaitEventKey>,
     ) -> Self {
         let replay_trace = context.replay_validation_trace();
@@ -881,8 +881,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         process: crate::ProcessToolCallWiring,
         completion_key: Option<crate::AwaitEventKey>,
     ) -> Self {
-        let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch))
-            .prepared_call(call)
+        let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch), call)
             .cancellation_token(Some(cancellation))
             .inside_process(process)
             .build();
@@ -1366,7 +1365,7 @@ impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
             } => {
                 let child_execution_trace_hook = self.child_trace_hooks.get(&call.call_id).cloned();
                 let outcome = Box::pin(self.context.execute_prepared_tool_attempt_effect(
-                    call,
+                    *call,
                     execution_grant,
                     attempt,
                     max_attempts,

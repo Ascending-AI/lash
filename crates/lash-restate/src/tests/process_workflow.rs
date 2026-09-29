@@ -535,14 +535,13 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
     // process-engine registry for it.
     let registration = ProcessRegistration::new(
         ProcessInput::ToolCall {
-            call: lash_core::PreparedToolCall::from_parts(
-                "smoke-call",
-                "tool:smoke",
-                "smoke",
-                serde_json::Value::Null,
-                None,
-                serde_json::Value::Null,
-            ),
+            call: lash_core::ProcessToolCall {
+                tool_id: "tool:smoke".into(),
+                tool_name: "smoke".into(),
+                args: serde_json::Value::Null,
+                replay: None,
+                prepared_payload: serde_json::Value::Null,
+            },
         },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
@@ -1361,14 +1360,13 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     let env_ref = persist_recovery_env_ref().await;
     let registration = ProcessRegistration::new(
         ProcessInput::ToolCall {
-            call: lash_core::PreparedToolCall::from_parts(
-                "recover-call",
-                "tool:recovery_echo",
-                "recovery_echo",
-                serde_json::json!({ "line": "wake-after-rebuild" }),
-                None,
-                serde_json::Value::Null,
-            ),
+            call: lash_core::ProcessToolCall {
+                tool_id: "tool:recovery_echo".into(),
+                tool_name: "recovery_echo".into(),
+                args: serde_json::json!({ "line": "wake-after-rebuild" }),
+                replay: None,
+                prepared_payload: serde_json::Value::Null,
+            },
         },
         lash_core::ProcessProvenance::session(creator_scope.clone()),
         lash_core::Lifetime::Detached,

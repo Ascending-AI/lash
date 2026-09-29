@@ -546,6 +546,7 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
     > = Arc::new(lash_protocol_standard::StandardDriver::default());
     lash_core::TurnMachineConfig {
         protocol_driver,
+        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         projector: Arc::new(lash_core::sansio::ChatContextProjector),
         sync_execution_environment: false,
         model: "standard-max-turn-contract".to_string(),

@@ -127,7 +127,7 @@ pub async fn validate_recorded_authorities(
 
 pub async fn await_process_handle(
     context: &crate::RuntimeExecutionContext<'_>,
-    call_id: String,
+    call_id: crate::ToolCallId,
     handle: serde_json::Value,
 ) -> crate::session::ToolInvocationReply {
     context.await_process_handle(call_id, handle).await
@@ -135,7 +135,7 @@ pub async fn await_process_handle(
 
 pub async fn signal_process_handle(
     context: &crate::RuntimeExecutionContext<'_>,
-    call_id: String,
+    call_id: crate::ToolCallId,
     handle: serde_json::Value,
     signal_name: String,
     payload: serde_json::Value,
@@ -147,7 +147,7 @@ pub async fn signal_process_handle(
 
 pub async fn cancel_process_handle(
     context: &crate::RuntimeExecutionContext<'_>,
-    call_id: String,
+    call_id: crate::ToolCallId,
     handle: serde_json::Value,
 ) -> crate::session::ToolInvocationReply {
     context.cancel_process_handle(call_id, handle).await
@@ -174,12 +174,12 @@ pub async fn await_process_with_cancellation(
 pub fn emit_tool_call_started(
     context: &crate::RuntimeExecutionContext<'_>,
     call_key: &str,
-    call_id: &str,
+    ids: &crate::tool_dispatch::ToolCallIds,
     name: &str,
     args: serde_json::Value,
     activity_id: crate::TurnActivityId,
 ) {
-    context.emit_tool_call_started(call_key, call_id, name, args, activity_id);
+    context.emit_tool_call_started(call_key, ids, name, args, activity_id);
 }
 
 /// The turn's cancellation-escalation await-event key, so a test can peek or

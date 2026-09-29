@@ -232,9 +232,10 @@ async fn answer(answers: &mut tokio::sync::mpsc::UnboundedReceiver<Answer>) -> A
 
 /// The replay key of the probe's first attempt in `session_id`'s turn, found
 /// by running the same turn to completion in a same-length probe session and
-/// reading the replay keys the tier journaled for it: keys spell the session
-/// id, so the probe's key names the real one once its session id is
-/// substituted.
+/// reading the replay keys the tier journaled for it. The cell's key spells
+/// the session id, so the probe's names the real cell once its session id is
+/// substituted; the attempt is keyed by the call's `ToolCallId`, which the
+/// real cell's admission derives afresh (ADR 0117).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -272,9 +273,23 @@ async fn first_attempt_key(
         .await
         .expect("the tier reads the replay keys it journaled")
         .into_iter()
-        .find(|key| key.ends_with(":lk2:0000000000:attempt:1"))
+        .find_map(|key| {
+            let (cell, attempt) = key.split_once(":lk2:0000000000:")?;
+            let call_id = attempt.strip_suffix(":attempt:1")?;
+            lash_core::ToolCallId::parse(call_id).ok()?;
+            Some(cell.replace(probe_session.as_str(), session_id.as_str()))
+        })
+        .map(|cell| {
+            let opener = crate::EffectOpener::turn(session_id.clone(), turn_id.clone());
+            let encoding = opener.identity_encoding();
+            let call_id = opener.tool_call_admission().call_id(&[
+                lash_core::ToolCallPosition::CodeOpener(&encoding),
+                lash_core::ToolCallPosition::CodeCell(&cell),
+                lash_core::ToolCallPosition::CodeCommand(0),
+            ]);
+            format!("{cell}:lk2:0000000000:{call_id}:attempt:1")
+        })
         .expect("the probe's cell journaled its tool attempt")
-        .replace(probe_session.as_str(), session_id.as_str())
 }
 
 /// Law: a redriven cell completes from its journal when the drifted tool's
@@ -317,7 +332,13 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
         let store = crate::conformance::law_session_store(world.stores.as_ref(), &session_id).await;
         let cut = if recorded {
             crate::JournalCut {
-                replay_key: attempt_key.replace(":lk2:0000000000:attempt:1", ":lk2:~seal"),
+                replay_key: format!(
+                    "{}:lk2:~seal",
+                    attempt_key
+                        .split_once(":lk2:")
+                        .expect("an attempt key under its cell")
+                        .0
+                ),
                 at: crate::JournalCutPoint::BeforeEffect,
             }
         } else {

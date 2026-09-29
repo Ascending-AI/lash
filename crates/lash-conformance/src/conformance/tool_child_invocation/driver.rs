@@ -178,13 +178,6 @@ pub async fn tool_children_run_through_the_invocation_driver(
                 settlement,
             }) => {
                 settlement.validate().expect("the settlement validates");
-                // The resolved return was recorded at the child's
-                // presentation boundary: its call id is the leaf's own.
-                assert_eq!(
-                    settlement.model_return.call_id,
-                    format!("{group_key}-call-{}", group_settlement.position),
-                    "the recorded return answers the child's own call id"
-                );
                 ((**outcome).clone(), (**settlement).clone())
             }
             other => panic!(

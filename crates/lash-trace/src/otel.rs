@@ -880,17 +880,24 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
         }
         TraceEvent::ToolCallStarted {
             call_id,
+            provider_call_id,
             name,
             args,
             issuing_node_id,
         } => {
-            push_opt(&mut attrs, attr::LASH_TOOL_CALL_ID, call_id);
+            attrs.push(KeyValue::new(attr::LASH_TOOL_CALL_ID, call_id.to_string()));
+            push_opt(
+                &mut attrs,
+                attr::LASH_TOOL_PROVIDER_CALL_ID,
+                provider_call_id,
+            );
             push_opt(&mut attrs, attr::LASH_TOOL_ISSUING_NODE_ID, issuing_node_id);
             attrs.push(KeyValue::new(attr::LASH_TOOL_NAME, name.clone()));
             push_payload_json(&mut attrs, options, attr::LASH_TOOL_ARGS_JSON, args);
         }
         TraceEvent::ToolCallCompleted {
             call_id,
+            provider_call_id,
             name,
             args,
             output,
@@ -898,7 +905,12 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             issuing_node_id,
             attempts,
         } => {
-            push_opt(&mut attrs, attr::LASH_TOOL_CALL_ID, call_id);
+            attrs.push(KeyValue::new(attr::LASH_TOOL_CALL_ID, call_id.to_string()));
+            push_opt(
+                &mut attrs,
+                attr::LASH_TOOL_PROVIDER_CALL_ID,
+                provider_call_id,
+            );
             push_opt(&mut attrs, attr::LASH_TOOL_ISSUING_NODE_ID, issuing_node_id);
             attrs.push(KeyValue::new(attr::LASH_TOOL_NAME, name.clone()));
             attrs.push(KeyValue::new(attr::LASH_TOOL_SUCCESS, output.is_success()));
@@ -1194,14 +1206,8 @@ fn llm_key(context: &TraceContext) -> Option<String> {
 
 fn tool_key(event: &TraceEvent) -> Option<String> {
     match event {
-        TraceEvent::ToolCallStarted {
-            call_id: Some(call_id),
-            ..
-        }
-        | TraceEvent::ToolCallCompleted {
-            call_id: Some(call_id),
-            ..
-        } => Some(tool_node_id(call_id)),
+        TraceEvent::ToolCallStarted { call_id, .. }
+        | TraceEvent::ToolCallCompleted { call_id, .. } => Some(tool_node_id(call_id.as_str())),
         _ => None,
     }
 }

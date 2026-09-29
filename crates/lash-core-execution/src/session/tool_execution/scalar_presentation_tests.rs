@@ -172,7 +172,7 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
             Box::pin(context.execute_command_tool(
                 &crate::CommandReplayKey::new("present-1"),
                 crate::session::ToolInvocation::new(
-                    "present-1",
+                    crate::ToolCallId::fixture("present-1"),
                     tool_id,
                     serde_json::json!({"value": "sample"}),
                 ),
@@ -232,7 +232,8 @@ async fn presentation_uses_the_admitted_id_when_the_display_name_is_not_in_the_c
     .into_runtime();
     let outcome = crate::tool_dispatch::ToolDispatchOutcome {
         record: crate::ToolCallRecord {
-            call_id: Some("drifted-call".to_string()),
+            call_id: crate::ToolCallId::fixture("drifted-call"),
+            provider_call_id: None,
             tool: "display_name".to_string(),
             args: serde_json::json!({}),
             output: crate::ToolCallOutput::success(serde_json::json!({"answer": 42})),
@@ -245,7 +246,10 @@ async fn presentation_uses_the_admitted_id_when_the_display_name_is_not_in_the_c
     };
     context
         .complete_tool_call(
-            "drifted-call".to_string(),
+            crate::tool_dispatch::ToolCallIds {
+                call_id: crate::ToolCallId::fixture("drifted-call"),
+                provider_call_id: None,
+            },
             crate::ToolId::new("admitted:fixture"),
             None,
             outcome,
@@ -336,12 +340,16 @@ async fn a_fast_and_a_slow_run_present_under_one_replay_identity() {
         .into_runtime();
         context
             .complete_tool_call(
-                "timed-call".to_string(),
+                crate::tool_dispatch::ToolCallIds {
+                    call_id: crate::ToolCallId::fixture("timed-call"),
+                    provider_call_id: None,
+                },
                 crate::ToolId::new("timed"),
                 None,
                 crate::tool_dispatch::ToolDispatchOutcome {
                     record: crate::ToolCallRecord {
-                        call_id: Some("timed-call".to_string()),
+                        call_id: crate::ToolCallId::fixture("timed-call"),
+                        provider_call_id: None,
                         tool: "timed".to_string(),
                         args: serde_json::json!({}),
                         output: crate::ToolCallOutput::success(serde_json::json!("timed")),
@@ -360,10 +368,11 @@ async fn a_fast_and_a_slow_run_present_under_one_replay_identity() {
     }
     let hashes = recorder.hashes.lock_recover().clone();
     assert_eq!(hashes.len(), 2, "one presentation per run: {hashes:?}");
+    let presentation = format!("{}:present", crate::ToolCallId::fixture("timed-call"));
     assert!(
         hashes
             .iter()
-            .all(|(effect_id, _)| effect_id.ends_with("timed-call:present")),
+            .all(|(effect_id, _)| effect_id.ends_with(&presentation)),
         "both effects are the call's presentation: {hashes:?}"
     );
     assert_eq!(
@@ -460,7 +469,7 @@ async fn a_cell_call_whose_presentation_diverged_stops_the_run() {
     let executed = Box::pin(context.execute_command_tool(
         &crate::CommandReplayKey::new("diverged-1"),
         crate::session::ToolInvocation::new(
-            "diverged-1",
+            crate::ToolCallId::fixture("diverged-1"),
             definition.manifest.id.clone(),
             serde_json::json!({"value": "sample"}),
         ),

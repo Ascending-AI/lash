@@ -20,10 +20,9 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
     let _ = attempt.attachments();
     let _ = attempt.prepared_payload();
     let _ = attempt.tool_execution_binding();
-    let _ = attempt.tool_call_id();
+    let _ = attempt.call_id();
     let _ = attempt.attempt_number();
     let _ = attempt.max_attempts();
-    let _ = attempt.replay_key();
     let _ = attempt.process_execution_env_spec();
     let _ = attempt.inherited_process_execution_env_ref();
     let _ = attempt.process_spawn_provenance();

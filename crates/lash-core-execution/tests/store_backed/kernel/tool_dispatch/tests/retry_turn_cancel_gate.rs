@@ -81,7 +81,7 @@ impl crate::RuntimeEffectController for RetrySleepShapeRecorder {
 }
 
 async fn retry_sleep_shape(
-    identity: ToolAttemptEffectIdentity,
+    identity: ToolAttemptLineage,
     turn_cancel_wait: crate::runtime::TurnCancelWait,
     execution_scope: crate::ExecutionScope,
     ambient_session_id: &str,
@@ -119,7 +119,8 @@ async fn retry_sleep_shape(
     let call = crate::PreparedToolCall::identity(
         manifest.id,
         crate::sansio::PendingToolCall {
-            call_id: "retry-call".to_string(),
+            call_id: lash_core_execution::ToolCallId::fixture("retry-call"),
+            provider_call_id: None,
             tool_name: "retry_probe".to_string(),
             args: json!({ "value": "ok" }),
             replay: None,
@@ -161,10 +162,7 @@ async fn retry_sleep_shape(
 #[tokio::test]
 async fn retry_sleep_inside_a_process_body_attaches_no_turn_cancel_gate() {
     let shape = Box::pin(retry_sleep_shape(
-        ToolAttemptEffectIdentity::Process {
-            parent: None,
-            process_id: crate::ProcessId::fixture("process-1"),
-        },
+        ToolAttemptLineage::default(),
         crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
         crate::ExecutionScope::process(crate::ProcessId::fixture("process-1")),
         "ambient-session-a",
@@ -181,7 +179,7 @@ async fn retry_sleep_inside_a_process_body_attaches_no_turn_cancel_gate() {
 #[tokio::test]
 async fn retry_sleep_under_a_turn_keeps_the_turn_cancel_gate() {
     let shape = Box::pin(retry_sleep_shape(
-        ToolAttemptEffectIdentity::Scalar { parent: None },
+        ToolAttemptLineage::default(),
         crate::runtime::TurnCancelWait::observing(
             tokio_util::sync::CancellationToken::new(),
             crate::ExecutionScope::turn("session", "turn"),
@@ -211,10 +209,7 @@ async fn retry_sleep_under_a_turn_keeps_the_turn_cancel_gate() {
 async fn parentless_process_retry_identity_is_stable_across_ambient_sessions() {
     let observe = |ambient_session_id| {
         Box::pin(retry_sleep_shape(
-            ToolAttemptEffectIdentity::Process {
-                parent: None,
-                process_id: crate::ProcessId::fixture("stable-process"),
-            },
+            ToolAttemptLineage::default(),
             crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
             crate::ExecutionScope::process(crate::ProcessId::fixture("stable-process")),
             ambient_session_id,
@@ -227,8 +222,8 @@ async fn parentless_process_retry_identity_is_stable_across_ambient_sessions() {
     assert_eq!(
         first.invocation.replay_key(),
         format!(
-            "process:{}:tool:retry_probe:attempt:1:sleep",
-            crate::ProcessId::fixture("stable-process")
+            "tool:{}:attempt:1:sleep",
+            lash_core_execution::ToolCallId::fixture("retry-call")
         )
     );
     assert!(first.invocation.attribution.is_none());

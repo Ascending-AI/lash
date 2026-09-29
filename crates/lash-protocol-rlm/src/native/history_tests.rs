@@ -22,6 +22,7 @@ fn pair(step: RlmTrajectoryEntry) -> Vec<SessionHistoryRecord> {
     let parts = vec![Part::tool_call(
         "p0".to_string(),
         r#"{"code":"finish 1"}"#.to_string(),
+        lash_core::ToolCallId::fixture(&step.id),
         step.id.clone(),
         "execute_code".to_string(),
         Some(lash_core::llm::types::ProviderReplayMeta {

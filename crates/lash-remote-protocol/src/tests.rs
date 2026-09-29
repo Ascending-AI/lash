@@ -418,7 +418,8 @@ fn remote_turn_result_json_round_trips() {
         usage: RemoteTurnUsageReport::default(),
         execution: RemoteTurnExecutionMetrics::default(),
         tool_calls: vec![RemoteToolCallRecord {
-            call_id: Some("call".to_string()),
+            call_id: lash_core::ToolCallId::fixture("call"),
+            provider_call_id: None,
             tool_name: "demo".to_string(),
             args: serde_json::json!({"x": 1}),
             outcome: RemoteToolCallOutcome::Success(serde_json::json!({"ok": true})),

@@ -126,7 +126,7 @@ fn node_failure_requires_typed_provenance_and_preserves_recorded_retry() {
         node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
         label: "read".to_owned(),
         occurrence: 1,
-        call_id: Some("effect-1".to_owned()),
+        call_id: Some(lash_sansio::ToolCallId::fixture("effect-1")),
         failure: lash_trace::TraceLanguageExecutionFailure::Effect {
             class: lash_sansio::ToolFailureClass::PermissionDenied,
             code: "approval_denied".to_owned(),
@@ -509,13 +509,15 @@ fn event_samples() -> Vec<TraceEvent> {
             },
         },
         TraceEvent::ToolCallStarted {
-            call_id: Some("call-1".to_string()),
+            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
             name: "read_file".to_string(),
             args: json!({ "path": "README.md" }),
             issuing_node_id: None,
         },
         TraceEvent::ToolCallCompleted {
-            call_id: Some("call-1".to_string()),
+            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
             name: "read_file".to_string(),
             args: json!({ "path": "README.md" }),
             output: TraceToolCallOutput {
@@ -1456,7 +1458,8 @@ fn standard_compaction_events_pin_decision_payloads() {
 #[test]
 fn tool_call_started_full_shape() {
     let event = TraceEvent::ToolCallStarted {
-        call_id: Some("call-1".to_string()),
+        call_id: lash_sansio::ToolCallId::fixture("call-1"),
+        provider_call_id: Some("provider-call-1".to_string()),
         name: "read_file".to_string(),
         args: json!({ "path": "README.md" }),
         issuing_node_id: None,
@@ -1465,7 +1468,8 @@ fn tool_call_started_full_shape() {
         serde_json::to_value(&event).unwrap(),
         json!({
             "type": "tool_call_started",
-            "call_id": "call-1",
+            "call_id": lash_sansio::ToolCallId::fixture("call-1").as_str(),
+            "provider_call_id": "provider-call-1",
             "name": "read_file",
             "args": { "path": "README.md" },
         })
@@ -1485,7 +1489,8 @@ fn tool_call_completed_pins_outcome_vocabulary() {
     for (outcome, status) in cases {
         let payload = outcome.clone();
         let event = TraceEvent::ToolCallCompleted {
-            call_id: Some("call-1".to_string()),
+            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
             name: "read_file".to_string(),
             args: json!({ "path": "x" }),
             output: TraceToolCallOutput {
@@ -1616,7 +1621,8 @@ fn retry_attempts_are_optional_additive_event_fields() {
         },
     ]);
     let event = TraceEvent::ToolCallCompleted {
-        call_id: Some("call-1".to_string()),
+        call_id: lash_sansio::ToolCallId::fixture("call-1"),
+        provider_call_id: None,
         name: "retry_probe".to_string(),
         args: json!({}),
         output: TraceToolCallOutput {
@@ -1666,7 +1672,7 @@ fn typed_exec_code_completed_full_shape() {
     assert_eq!(
         json["tool_calls"],
         json!([{
-            "call_id": "call-1",
+            "call_id": lash_sansio::ToolCallId::fixture("call-1").as_str(),
             "name": "read_file",
             "status": "success",
         }])
@@ -1808,7 +1814,7 @@ fn language_execution_all_payload_variants_round_trip() {
             node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
             label: "read_file".to_string(),
             occurrence: 1,
-            call_id: Some("call-1".to_string()),
+            call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
         },
         TraceLanguageExecutionPayload::NodeWaiting {
             node_id: "n1".to_string(),
@@ -1837,14 +1843,14 @@ fn language_execution_all_payload_variants_round_trip() {
             node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
             label: "read_file".to_string(),
             occurrence: 1,
-            call_id: Some("call-1".to_string()),
+            call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
         },
         TraceLanguageExecutionPayload::NodeFailed {
             node_id: "n1".to_string(),
             node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
             label: "read_file".to_string(),
             occurrence: 1,
-            call_id: Some("call-1".to_string()),
+            call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
             failure: lash_trace::TraceLanguageExecutionFailure::Effect {
                 class: lash_sansio::ToolFailureClass::Io,
                 code: "read_failed".to_string(),
@@ -1943,7 +1949,7 @@ fn exec_code_completed_event() -> TraceEvent {
         error: None,
         terminal_finish: None,
         tool_calls: vec![TraceExecToolCall {
-            call_id: Some("call-1".to_string()),
+            call_id: lash_sansio::ToolCallId::fixture("call-1"),
             name: "read_file".to_string(),
             status: TraceToolCallStatus::Success,
         }],
@@ -1962,7 +1968,8 @@ fn jsonl_round_trip_preserves_records() {
         TraceRecord::new(
             TraceContext::default().for_session("root"),
             TraceEvent::ToolCallStarted {
-                call_id: Some("call-1".to_string()),
+                call_id: lash_sansio::ToolCallId::fixture("call-1"),
+                provider_call_id: None,
                 name: "read_file".to_string(),
                 args: json!({ "path": "README.md" }),
                 issuing_node_id: None,
@@ -2008,7 +2015,10 @@ fn jsonl_round_trip_preserves_records() {
     let value: serde_json::Value =
         serde_json::from_str(diagnostic_line).expect("parse diagnostic line");
     let tool_call = &value["tool_calls"][0];
-    assert_eq!(tool_call["call_id"], "call-1");
+    assert_eq!(
+        tool_call["call_id"],
+        lash_sansio::ToolCallId::fixture("call-1").as_str()
+    );
     assert_eq!(tool_call["name"], "read_file");
     assert_eq!(tool_call["status"], "success");
 }
@@ -2176,7 +2186,7 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             node_kind: lash_sansio::ExecutionNodeKind::Call,
             label: "notify()".to_string(),
             occurrence: 1,
-            call_id: Some("call-1".to_string()),
+            call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
         },
         TraceLanguageExecutionPayload::NodeWaiting {
             node_id: "then".to_string(),
@@ -2212,7 +2222,7 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             node_kind: lash_sansio::ExecutionNodeKind::Call,
             label: "notify()".to_string(),
             occurrence: 1,
-            call_id: Some("call-1".to_string()),
+            call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
             failure: lash_trace::TraceLanguageExecutionFailure::Runtime {
                 code: "boom".to_string(),
                 message: "notify failed".to_string(),

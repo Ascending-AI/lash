@@ -1450,7 +1450,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
             "child-tool-call",
             child(Some(crate::CausalRef::ToolCall {
                 session_id: SessionId::from("cause-session"),
-                call_id: "cause-call".to_string(),
+                call_id: lash_core::ToolCallId::fixture("cause-call"),
             })),
         ),
         (

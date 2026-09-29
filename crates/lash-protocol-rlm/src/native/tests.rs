@@ -34,6 +34,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
             writer_formats: lash_core::build_newest_writer_formats(),
         });
     TurnMachineConfig {
+        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: preamble.config.protocol,
         projector: preamble.config.projector,
         sync_execution_environment: false,

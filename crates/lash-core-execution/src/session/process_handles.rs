@@ -57,13 +57,14 @@ impl RuntimeExecutionContext<'_> {
     }
 
     fn recorded_process_reply(
-        call_id: String,
+        call_id: crate::ToolCallId,
         tool: impl Into<String>,
         args: serde_json::Value,
         output: ToolCallOutput,
     ) -> ToolInvocationReply {
         let record = ToolCallRecord {
-            call_id: Some(call_id),
+            call_id,
+            provider_call_id: None,
             tool: tool.into(),
             args,
             output: output.clone(),
@@ -72,7 +73,7 @@ impl RuntimeExecutionContext<'_> {
     }
 
     fn recorded_process_error(
-        call_id: String,
+        call_id: crate::ToolCallId,
         tool: &'static str,
         args: serde_json::Value,
         message: impl Into<String>,
@@ -83,7 +84,7 @@ impl RuntimeExecutionContext<'_> {
 
     pub(crate) async fn await_process_handle(
         &self,
-        call_id: String,
+        call_id: crate::ToolCallId,
         handle: serde_json::Value,
     ) -> ToolInvocationReply {
         let args = json!({ "handle": handle.clone() });
@@ -111,20 +112,23 @@ impl RuntimeExecutionContext<'_> {
             }
             Err(err) => ToolInvocationReply::error(json!(err.to_string())).output,
         };
-        let mut outcome = crate::tool_dispatch::normalized_outcome(
+        let outcome = crate::tool_dispatch::normalized_outcome(
             self.dispatch.as_ref(),
+            &crate::tool_dispatch::ToolCallIds {
+                call_id,
+                provider_call_id: None,
+            },
             "await_process".to_string(),
             args,
             ToolOutcome::from_output(output),
         )
         .await;
-        outcome.record.call_id = Some(call_id);
         ToolInvocationReply::from_output(outcome.record.output.clone()).with_record(outcome.record)
     }
 
     pub(crate) async fn signal_process_handle(
         &self,
-        call_id: String,
+        call_id: crate::ToolCallId,
         handle: serde_json::Value,
         signal_name: String,
         payload: serde_json::Value,
@@ -168,7 +172,7 @@ impl RuntimeExecutionContext<'_> {
 
     pub(crate) async fn cancel_process_handle(
         &self,
-        call_id: String,
+        call_id: crate::ToolCallId,
         handle: serde_json::Value,
     ) -> ToolInvocationReply {
         let args = json!({ "handle": handle.clone() });

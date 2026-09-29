@@ -7,12 +7,17 @@ use super::*;
 /// Starts one step of three slots, the last two expanded from one wrapper,
 /// and folds each wrapper's slots into one call named after it.
 struct ExpandingDriver {
-    handed_back: std::sync::Mutex<Vec<String>>,
+    handed_back: std::sync::Mutex<Vec<crate::ToolCallId>>,
 }
 
-fn slot_call(call_id: &str, tool_name: &str) -> PendingToolCall {
+fn tc(label: &str) -> crate::ToolCallId {
+    crate::ToolCallId::fixture(label)
+}
+
+fn slot_call(call_id: crate::ToolCallId, tool_name: &str) -> PendingToolCall {
     PendingToolCall {
-        call_id: call_id.to_string(),
+        call_id,
+        provider_call_id: None,
         tool_name: tool_name.to_string(),
         args: serde_json::json!({}),
         replay: None,
@@ -23,7 +28,8 @@ fn plan() -> ToolExpansionPlan {
     ToolExpansionPlan {
         wrappers: vec![ExpandedWrapper {
             source_position: 1,
-            call_id: "wrapper".to_string(),
+            call_id: tc("wrapper"),
+            provider_call_id: Some("provider-wrapper-call".to_string()),
             tool_name: "batch".to_string(),
             args: serde_json::json!({"tool_calls": []}),
             replay: Some(ProviderReplayMeta {
@@ -65,13 +71,14 @@ impl ProtocolDriverHandle for ExpandingDriver {
         _request: Arc<LlmRequest>,
         _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
+        _calls: &ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Tools {
             calls: vec![
-                slot_call("native", "list"),
-                slot_call("wrapper/batch/0", "read"),
-                slot_call("wrapper/batch/2", "search"),
+                slot_call(tc("native"), "list"),
+                slot_call(tc("wrapper").child(0), "read"),
+                slot_call(tc("wrapper").child(2), "search"),
             ],
             expansion: plan(),
         })]
@@ -86,7 +93,7 @@ impl ProtocolDriverHandle for ExpandingDriver {
         let mut completed = completed.into_iter();
         let native = completed.next().expect("the native slot");
         let members = completed
-            .map(|member| member.call_id)
+            .map(|member| member.call_id.to_string())
             .collect::<Vec<_>>()
             .join(",");
         vec![
@@ -121,21 +128,18 @@ impl ProtocolDriverHandle for ExpandingDriver {
 }
 
 fn completion(
-    call_id: &str,
+    call_id: &crate::ToolCallId,
     tool_name: &str,
     value: serde_json::Value,
     replay: Option<ProviderReplayMeta>,
 ) -> CompletedToolCall {
     let output = ToolCallOutput::success(value);
     CompletedToolCall {
-        call_id: call_id.to_string(),
+        call_id: call_id.clone(),
+        provider_call_id: None,
         tool_name: tool_name.to_string(),
         args: serde_json::json!({}),
-        model_return: crate::ModelToolReturn::from_output(
-            call_id.to_string(),
-            tool_name.to_string(),
-            &output,
-        ),
+        model_return: crate::ModelToolReturn::from_output(tool_name.to_string(), &output),
         output,
         intent_outcomes: Vec::new(),
         replay,
@@ -197,18 +201,18 @@ fn the_machine_folds_expanded_slots_before_emitting_or_handing_back() {
     let reported = effects
         .iter()
         .filter_map(|effect| match effect {
-            Effect::Emit(SessionStreamEvent::ToolCall { call_id, .. }) => call_id.clone(),
+            Effect::Emit(SessionStreamEvent::ToolCall { call_id, .. }) => Some(call_id.clone()),
             _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(
         reported,
-        vec!["native".to_string(), "wrapper".to_string()],
+        vec![tc("native"), tc("wrapper")],
         "only folded calls reach the stream; no member call is reported"
     );
     assert_eq!(
         *driver.handed_back.lock().expect("test mutex"),
-        vec!["native".to_string(), "wrapper".to_string()],
+        vec![tc("native"), tc("wrapper")],
         "the driver's handle_tool_results sees the folded calls"
     );
 }

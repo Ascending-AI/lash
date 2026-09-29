@@ -140,7 +140,8 @@ impl From<lash_core::Part> for RemotePart {
                 .tool_result_content()
                 .map(|blocks| blocks.iter().cloned().map(Into::into).collect()),
             attachment: value.attachment().cloned().map(Into::into),
-            tool_call_id: value.tool_call_id().map(str::to_string),
+            call_id: value.call_id().cloned(),
+            provider_call_id: value.provider_call_id().map(str::to_string),
             tool_name: value.tool_name().map(str::to_string),
             tool_replay: value.tool_replay().cloned().map(Into::into),
             reasoning_meta: value.reasoning_meta().cloned().map(Into::into),

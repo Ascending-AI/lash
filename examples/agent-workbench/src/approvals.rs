@@ -400,7 +400,9 @@ mod tests {
         let path = directory.path().join("approvals.db");
         let key = lash::AwaitEventKey {
             scope: lash::runtime::ExecutionScope::turn("approval-session", "turn-1"),
-            wait: lash::AwaitEventWaitIdentity::tool_completion("tool-call-1"),
+            wait: lash::AwaitEventWaitIdentity::tool_completion(lash::ToolCallId::fixture(
+                "tool-call-1",
+            )),
             key_id: "approval-key-1".to_string(),
             signature: "test-signature".to_string(),
         };

@@ -162,7 +162,9 @@ pub(super) fn append_pair(messages: &mut Vec<LlmMessage>, parts: &[Part], output
     for part in parts {
         match part.kind() {
             PartKind::ToolCall => {
-                let Some(call_id) = part.tool_call_id() else {
+                // The repair exchange answers the provider under the call's
+                // own correlation.
+                let Some(call_id) = part.provider_call_id() else {
                     continue;
                 };
                 // Duplicate ids are rejected by normalization. Preserve every original

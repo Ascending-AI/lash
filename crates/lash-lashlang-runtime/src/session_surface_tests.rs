@@ -451,7 +451,6 @@ async fn fig3463_a_crashed_segment_replays_its_journaled_effect_under_one_attemp
         call_ids.iter().all(|call_id| *call_id == call_ids[0]),
         "the replay must reuse the journaled effect key: {call_ids:?}"
     );
-    assert!(!call_ids[0].contains(":attempt:"));
     assert!(
         graphs
             .iter()
@@ -567,12 +566,12 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
                 })
             })
             .expect("failed process graph");
-        let (call_id, failure) = graph
+        let failure = graph
             .history
             .iter()
             .find_map(|record| match &record.event.payload {
                 lash_trace::TraceLanguageExecutionPayload::NodeFailed {
-                    call_id: Some(call_id),
+                    call_id: Some(_),
                     failure:
                         lash_trace::TraceLanguageExecutionFailure::Effect {
                             replay_key,
@@ -583,7 +582,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
                             ..
                         },
                     ..
-                } => Some((call_id, (replay_key, class, code, source, retry))),
+                } => Some((replay_key, class, code, source, retry)),
                 _ => None,
             })
             .unwrap_or_else(|| {
@@ -596,12 +595,12 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
                         .collect::<Vec<_>>()
                 )
             });
-        // The leaf's call id and its recorded replay key name the same issue
-        // ordinal: the key under the body's `lk2` namespace (FIG-3586).
-        assert_eq!(
-            call_id.replacen(":0000000000", ":lk2:0000000000", 1),
-            *failure.0,
-            "leaf owns the recorded replay key"
+        // The leaf's recorded replay key names its issue ordinal under the
+        // body's `lk2` namespace (FIG-3586).
+        assert!(
+            failure.0.contains(":lk2:0000000000"),
+            "leaf owns the recorded replay key: {}",
+            failure.0
         );
         assert_eq!(*failure.1, lash_core::ToolFailureClass::PermissionDenied);
         assert_eq!(failure.2, "approval_denied");

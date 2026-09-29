@@ -637,7 +637,9 @@ where
     );
     host.await_event_key(
         &live_scope,
-        crate::AwaitEventWaitIdentity::tool_completion(format!("{prefix}-still-mints")),
+        crate::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+            "{prefix}-still-mints"
+        ))),
     )
     .await
     .expect("a refused retirement fences nothing: the scope still mints");
@@ -1096,7 +1098,9 @@ pub async fn a_proxied_controller_serves_all_three_group_methods<F: Fn() -> Host
         .controller()
         .await_event_key(
             &root_scope,
-            AwaitEventWaitIdentity::tool_completion(format!("{prefix}-proxied-root")),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
+                "{prefix}-proxied-root"
+            ))),
         )
         .await
         .expect("the root wait key derives on the scoped controller");
@@ -1382,7 +1386,7 @@ pub async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(
     assert_eq!(refused.code.as_str(), "effect_scope_not_quiescent");
     host.await_event_key(
         &scope,
-        AwaitEventWaitIdentity::tool_completion("still-open"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("still-open")),
     )
     .await
     .expect("the refused retirement left the scope unfenced");
@@ -1404,7 +1408,9 @@ pub async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(
     let fenced = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("after-retirement"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "after-retirement",
+            )),
         )
         .await
         .expect_err("the retired scope mints nothing");
@@ -1458,7 +1464,9 @@ pub async fn a_closed_group_with_a_draining_loser_is_not_quiescent<F: Fn() -> Ho
     assert_eq!(refused.code.as_str(), "effect_scope_not_quiescent");
     host.await_event_key(
         &scope,
-        AwaitEventWaitIdentity::tool_completion("still-open-after-close"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+            "still-open-after-close",
+        )),
     )
     .await
     .expect("the refused retirement left the scope unfenced");
@@ -1491,7 +1499,9 @@ pub async fn a_closed_group_with_a_draining_loser_is_not_quiescent<F: Fn() -> Ho
     let fenced = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("after-retirement"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "after-retirement",
+            )),
         )
         .await
         .expect_err("the retired scope mints nothing");

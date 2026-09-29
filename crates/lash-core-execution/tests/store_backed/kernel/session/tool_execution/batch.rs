@@ -131,7 +131,7 @@ mod tests {
             .call_command_tool(
                 &crate::CommandReplayKey::new("scalar-granted"),
                 ToolInvocation::new(
-                    "scalar-granted",
+                    lash_core_execution::ToolCallId::fixture("scalar-granted"),
                     crate::ToolId::from("tool:granted_leaf_probe"),
                     serde_json::json!({}),
                 )
@@ -172,7 +172,7 @@ mod tests {
         let replies = context
             .call_tool_batch(vec![
                 ToolInvocation::new(
-                    "batch-granted",
+                    lash_core_execution::ToolCallId::fixture("batch-granted"),
                     crate::ToolId::from("tool:granted_leaf_probe"),
                     serde_json::json!({}),
                 )
@@ -203,15 +203,15 @@ mod tests {
         ) -> Result<(), lash_trace::TraceSinkError> {
             let entry = match &record.event {
                 lash_trace::TraceEvent::ToolCallStarted {
-                    call_id: Some(call_id),
+                    call_id,
                     issuing_node_id,
                     ..
-                } => Some((call_id.clone(), "started", issuing_node_id.clone())),
+                } => Some((call_id.to_string(), "started", issuing_node_id.clone())),
                 lash_trace::TraceEvent::ToolCallCompleted {
-                    call_id: Some(call_id),
+                    call_id,
                     issuing_node_id,
                     ..
-                } => Some((call_id.clone(), "completed", issuing_node_id.clone())),
+                } => Some((call_id.to_string(), "completed", issuing_node_id.clone())),
                 _ => None,
             };
             if let Some(entry) = entry {
@@ -240,19 +240,19 @@ mod tests {
         context
             .call_tool_batch(vec![
                 ToolInvocation::new(
-                    "missing-call-a",
+                    lash_core_execution::ToolCallId::fixture("missing-call-a"),
                     crate::ToolId::from("tool:missing-a"),
                     serde_json::json!({}),
                 )
                 .with_issuing_language_node_id("node-a"),
                 ToolInvocation::new(
-                    "missing-call-b",
+                    lash_core_execution::ToolCallId::fixture("missing-call-b"),
                     crate::ToolId::from("tool:missing-b"),
                     serde_json::json!({}),
                 )
                 .with_issuing_language_node_id("node-b"),
                 ToolInvocation::new(
-                    "invalid-prepared",
+                    lash_core_execution::ToolCallId::fixture("invalid-prepared"),
                     crate::ToolId::from("tool:batch_failure"),
                     serde_json::Value::Null,
                 )
@@ -269,6 +269,7 @@ mod tests {
             ("missing-call-b", "node-b"),
             ("invalid-prepared", "node-invalid"),
         ] {
+            let call_id = lash_core_execution::ToolCallId::fixture(call_id);
             let started = turn_rx.recv().await.expect("tool start activity");
             let completed = turn_rx.recv().await.expect("tool completion activity");
             let correlation_id = crate::TurnActivityId::new(format!("tool:{call_id}"));
@@ -277,23 +278,23 @@ mod tests {
             assert!(matches!(
                 started.event,
                 crate::TurnEvent::ToolCallStarted {
-                    call_id: Some(ref observed),
+                    call_id: ref observed,
                     ..
-                } if observed == call_id
+                } if *observed == call_id
             ));
             assert!(matches!(
                 completed.event,
                 crate::TurnEvent::ToolCallCompleted {
-                    call_id: Some(ref observed),
+                    call_id: ref observed,
                     ..
-                } if observed == call_id
+                } if *observed == call_id
             ));
             let trace_lifecycle = trace_sink
                 .lifecycle
                 .lock_recover()
                 .iter()
                 .filter_map(|(observed, event, issuing_node_id)| {
-                    (observed == call_id).then_some((*event, issuing_node_id.clone()))
+                    (*observed == call_id.to_string()).then_some((*event, issuing_node_id.clone()))
                 })
                 .collect::<Vec<_>>();
             assert_eq!(
@@ -330,10 +331,11 @@ mod tests {
             assert!(matches!(
                 stream_event,
                 crate::SessionStreamEvent::ToolCallStart {
-                    call_id: Some(ref call_id),
+                    ref call_id,
                     ref name,
                     ref args,
-                } if call_id == "start-order"
+                    ..
+                } if *call_id == lash_core_execution::ToolCallId::fixture("start-order")
                     && name == "granted_leaf_probe"
                     && args == &serde_json::json!({ "probe": true })
             ));
@@ -344,11 +346,11 @@ mod tests {
             assert!(matches!(
                 record.event,
                 lash_trace::TraceEvent::ToolCallStarted {
-                    call_id: Some(ref call_id),
+                    ref call_id,
                     ref name,
                     ref args,
                     ..
-                } if call_id == "start-order"
+                } if *call_id == lash_core_execution::ToolCallId::fixture("start-order")
                     && name == "granted_leaf_probe"
                     && args == &serde_json::json!({ "probe": true })
             ));
@@ -395,7 +397,10 @@ mod tests {
         crate::emit_tool_call_started(
             &context,
             "test:start-order",
-            "start-order",
+            &crate::tool_dispatch::ToolCallIds {
+                call_id: lash_core_execution::ToolCallId::fixture("start-order"),
+                provider_call_id: None,
+            },
             "granted_leaf_probe",
             serde_json::json!({ "probe": true }),
             crate::TurnActivityId::new("tool:start-order"),
@@ -409,11 +414,12 @@ mod tests {
         assert!(matches!(
             activity.event,
             crate::TurnEvent::ToolCallStarted {
-                call_id: Some(ref call_id),
+                ref call_id,
                 ref name,
                 ref args,
                 graph_key: None,
-            } if call_id == "start-order"
+                ..
+            } if *call_id == lash_core_execution::ToolCallId::fixture("start-order")
                 && name == "granted_leaf_probe"
                 && args == &serde_json::json!({ "probe": true })
         ));
@@ -595,7 +601,7 @@ mod tests {
         );
         let replies = context
             .call_tool_batch(vec![ToolInvocation::new(
-                "call",
+                lash_core_execution::ToolCallId::fixture("call"),
                 crate::ToolId::from("tool:batch_failure"),
                 serde_json::json!({}),
             )])

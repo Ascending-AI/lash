@@ -251,12 +251,14 @@ async fn runner_side_deferred_await_inside_a_process_body_attaches_no_turn_cance
     let key = crate::AwaitEventKey {
         scope: crate::ExecutionScope::process(crate::ProcessId::fixture("process-1")),
         wait: crate::AwaitEventWaitIdentity::ToolCompletion {
-            tool_call_id: "call-1".to_string(),
+            tool_call_id: crate::ToolCallId::fixture("call-1"),
         },
         key_id: "key-1".to_string(),
         signature: "signature-1".to_string(),
     };
     let pending = crate::tool_dispatch::PendingToolDispatchOutcome {
+        call_id: crate::ToolCallId::fixture("deferred"),
+        provider_call_id: None,
         tool_name: "deferred".to_string(),
         args: serde_json::json!({}),
         key,
@@ -327,7 +329,8 @@ async fn process_runner_deferred_await_uses_the_owning_process_execution_trio() 
     let call = crate::PreparedToolCall::identity(
         definition.manifest.id.clone(),
         crate::sansio::PendingToolCall {
-            call_id: "process-witness-call".to_string(),
+            call_id: crate::ToolCallId::fixture("process-witness-call"),
+            provider_call_id: None,
             tool_name: definition.name().to_string(),
             args: serde_json::json!({}),
             replay: None,
@@ -397,7 +400,8 @@ async fn run_retrying_host_process_tool(
     let call = crate::PreparedToolCall::identity(
         definition.manifest.id.clone(),
         crate::sansio::PendingToolCall {
-            call_id: "process-attribution-call".to_string(),
+            call_id: crate::ToolCallId::fixture("process-attribution-call"),
+            provider_call_id: None,
             tool_name: definition.name().to_string(),
             args: serde_json::json!({}),
             replay: None,

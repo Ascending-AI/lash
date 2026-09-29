@@ -39,18 +39,13 @@ pub(super) fn only(world: &World, label: &str) -> Execution {
         .unwrap_or_else(|| unreachable!())
 }
 
-/// Every execution of one logical call saw one never-missing call id.
-pub(super) fn assert_one_identity(label: &str, executions: &[Execution]) -> String {
+/// Every execution of one logical call saw one call id.
+pub(super) fn assert_one_identity(label: &str, executions: &[Execution]) -> lash_core::ToolCallId {
     assert!(!executions.is_empty(), "`{label}` ran");
-    let first = executions[0]
-        .identity
-        .call_id
-        .clone()
-        .unwrap_or_else(|| panic!("`{label}`'s attempt carries a call id: {executions:?}"));
+    let first = executions[0].identity.call_id.clone();
     for execution in executions {
         assert_eq!(
-            execution.identity.call_id.as_deref(),
-            Some(first.as_str()),
+            execution.identity.call_id, first,
             "every re-run of `{label}` sees the call id its first run saw: {executions:?}"
         );
     }
@@ -62,22 +57,11 @@ fn answered_label(output: &serde_json::Value) -> Option<&str> {
     output.get("label").and_then(serde_json::Value::as_str)
 }
 
-/// The keys two logical calls saw must all be present and all differ.
+/// The idempotency key two logical calls saw must differ.
 pub(super) fn assert_distinct_keys(what: &str, one: &AttemptIdentity, other: &AttemptIdentity) {
-    let mut collisions = Vec::new();
-    for ((name, one), (_, other)) in one.keys().into_iter().zip(other.keys()) {
-        assert!(
-            one.is_some() && other.is_some(),
-            "{what}: `{name}` is never missing ({one:?}, {other:?})"
-        );
-        if one == other {
-            collisions.push(format!("{name} = {one:?}"));
-        }
-    }
-    assert!(
-        collisions.is_empty(),
-        "{what}: two logical calls share their idempotency keys: {}",
-        collisions.join("; ")
+    assert_ne!(
+        one.call_id, other.call_id,
+        "{what}: two logical calls share their idempotency key"
     );
 }
 
@@ -186,7 +170,7 @@ pub async fn tool_identity_survives_unrecorded_effect_crash(tier: ToolCallIdenti
             text("the effect settled"),
         ],
     );
-    let assembled = match first_attempt_key(&tier, "unrecorded-effect-crash", "call_effect").await {
+    let assembled = match first_attempt_key(&tier, &world, &turn, "call_effect").await {
         Some(key) => {
             let (report, reported) = tokio::sync::mpsc::unbounded_channel();
             let attempt = world.attempt(&turn, report);
@@ -195,10 +179,7 @@ pub async fn tool_identity_survives_unrecorded_effect_crash(tier: ToolCallIdenti
                 .run_cut_then_redriven_turn(
                     world.admitted(&turn),
                     crate::JournalCut {
-                        replay_key: key.replace(
-                            &format!("{}-probe", world.session_id),
-                            world.session_id.as_str(),
-                        ),
+                        replay_key: key,
                         at: crate::JournalCutPoint::BeforeResult,
                     },
                     Arc::clone(&attempt),
@@ -232,19 +213,32 @@ pub async fn tool_identity_survives_unrecorded_effect_crash(tier: ToolCallIdenti
     );
 }
 
-/// The replay key of the first attempt of the call `call_id` in a probe run
-/// of a one-call turn, in the sibling session `{law}-probe`, or `None` when
+/// The replay key `world`'s run of `target` will journal for the first
+/// attempt of its one call, the provider's `provider_call_id`, or `None` when
 /// the tier cannot read the keys it journaled.
+///
+/// A probe run of the same script in the sibling session `{session}-probe`
+/// journals the key under its own session. The call's `ToolCallId` is rooted
+/// in its session's turn (ADR 0117 §2), so the key is carried over by
+/// locating the probe call's positions under the probe's root and naming the
+/// same positions under `world`'s.
 async fn first_attempt_key(
     tier: &ToolCallIdentityTier,
-    law: &str,
-    call_id: &str,
+    world: &World,
+    target: &super::ScriptedTurn,
+    provider_call_id: &str,
 ) -> Option<String> {
+    let law = world
+        .session_id
+        .as_str()
+        .strip_prefix(&format!("{}-", tier.prefix))
+        .unwrap_or(world.session_id.as_str())
+        .to_string();
     let probe = World::new(tier, &format!("{law}-probe"));
     let turn = probe.turn(
         "turn",
         vec![
-            calls(&[(call_id, PROBE, ProbeArgs::label("probe"))]),
+            calls(&[(provider_call_id, PROBE, ProbeArgs::label("probe"))]),
             text("the probe settled"),
         ],
     );
@@ -256,13 +250,55 @@ async fn first_attempt_key(
             &turn.turn_id,
         ))
         .await?;
-    let attempt = format!("{call_id}:attempt:1");
-    Some(
-        keys.iter()
-            .find(|key| key.ends_with(&attempt))
-            .cloned()
-            .unwrap_or_else(|| panic!("the probe journaled `{attempt}`: {keys:#?}")),
+    let probe_id = only(&probe, "probe").identity.call_id;
+    let attempt = format!("{probe_id}:attempt:1");
+    let key = keys
+        .iter()
+        .find(|key| key.ends_with(&attempt))
+        .cloned()
+        .unwrap_or_else(|| panic!("the probe journaled `{attempt}`: {keys:#?}"));
+    let admission = |session: &lash_sansio::SessionId, turn: &super::ScriptedTurn| {
+        lash_core::EffectOpener::turn(session.clone(), turn.turn_id.clone()).tool_call_admission()
+    };
+    let target_id = same_position(
+        &admission(&probe.session_id, &turn),
+        &probe_id,
+        &admission(&world.session_id, target),
     )
+    .unwrap_or_else(|| panic!("the probe call `{probe_id}` is a first-response model call"));
+    Some(
+        // The turn ids spell their session's id, so the session swap carries
+        // them over too.
+        key.replace(probe_id.as_str(), target_id.as_str())
+            .replace(probe.session_id.as_str(), world.session_id.as_str()),
+    )
+}
+
+/// The id at `under` of the model call `id` names under `from`: its
+/// positions — continuation, iteration, response effect ordinal and content
+/// index — found by trying the small positions a one-call turn reaches.
+fn same_position(
+    from: &lash_core::ToolCallAdmission,
+    id: &lash_core::ToolCallId,
+    under: &lash_core::ToolCallAdmission,
+) -> Option<lash_core::ToolCallId> {
+    use lash_core::ToolCallPosition::{ContentIndex, Continuation, EffectOrdinal, Iteration};
+    for continuation in 0..8 {
+        for iteration in 0..4 {
+            for ordinal in 0..32 {
+                let positions = [
+                    Continuation(continuation),
+                    Iteration(iteration),
+                    EffectOrdinal(ordinal),
+                    ContentIndex(0),
+                ];
+                if &from.call_id(&positions) == id {
+                    return Some(under.call_id(&positions));
+                }
+            }
+        }
+    }
+    None
 }
 
 async fn last_report(
@@ -522,8 +558,7 @@ pub async fn refusals_and_parallel_completion_never_renumber_identity(tier: Tool
     let quick = only(&world, "quick");
     let held = assert_one_identity("held", &world.witness.of("held"));
     assert_ne!(
-        quick.identity.call_id.as_deref(),
-        Some(held.as_str()),
+        quick.identity.call_id, held,
         "two probes of one step have distinct call ids"
     );
     let settled = outputs(&assembled);

@@ -140,7 +140,9 @@ finish(result);
         assert_eq!(already_resolved, duplicate);
         let unknown_key = lash::AwaitEventKey {
             scope: lash::runtime::ExecutionScope::turn("approval-approve", "approval-approve-turn"),
-            wait: lash::AwaitEventWaitIdentity::tool_completion("unknown-tool-call"),
+            wait: lash::AwaitEventWaitIdentity::tool_completion(lash::ToolCallId::fixture(
+                "unknown-tool-call",
+            )),
             key_id: "unknown-key".to_string(),
             signature: "unknown-signature".to_string(),
         };

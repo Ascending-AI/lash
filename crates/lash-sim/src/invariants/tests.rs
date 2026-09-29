@@ -109,10 +109,6 @@ fn the_clean_history_keeps_every_invariant_and_gives_each_facts() {
     }
     let (_, call, _, _) = tool_run(&history);
     assert!(!call.identity.0.is_empty(), "the tool saw its call id");
-    assert!(
-        !call.logical.is_empty(),
-        "the tool saw its replay key: {call:?}"
-    );
 }
 
 /// FIG-4073's shape: a second deferred call in the same scope registers the
@@ -129,7 +125,6 @@ fn two_calls_sharing_a_completion_key_break_completion_ownership() {
         })
         .expect("the fixture registered a completion");
     let (_, mut call, _, _) = tool_run(&history);
-    call.logical.push_str(":second-call");
     call.identity = CallIdentity("call-2".to_owned());
     history.push(Fact::CompletionRegistered { key, call });
     let report = assert_caught(&history, "completion-ownership");
@@ -277,19 +272,8 @@ fn a_replay_under_another_id_or_a_reused_id_breaks_tool_call_identity() {
     call.identity = CallIdentity("replayed-under-a-new-id".to_owned());
     history.push(Fact::ToolExecuted {
         call,
-        attempt,
+        attempt: attempt + 1,
         failed_attempts_before: failed_attempts_before + 1,
-    });
-    assert_caught(&history, "tool-call-identity");
-
-    // Two logical calls run under one id.
-    let mut history = clean();
-    let (_, mut call, attempt, failed_attempts_before) = tool_run(&history);
-    call.logical.push_str(":another-position");
-    history.push(Fact::ToolExecuted {
-        call,
-        attempt,
-        failed_attempts_before,
     });
     assert_caught(&history, "tool-call-identity");
 

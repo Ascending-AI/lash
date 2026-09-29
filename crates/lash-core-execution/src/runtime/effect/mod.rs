@@ -110,8 +110,7 @@ mod tests {
     fn process_effect_envelope_round_trips_prepared_tool_call() {
         let registration = crate::ProcessRegistration::new(
             crate::ProcessInput::ToolCall {
-                call: crate::PreparedToolCall {
-                    call_id: "call-123".to_string(),
+                call: crate::ProcessToolCall {
                     tool_id: crate::ToolId::from("tool:echo"),
                     tool_name: "echo".to_string(),
                     args: serde_json::json!({"value": "hi"}),
@@ -165,7 +164,6 @@ mod tests {
         let crate::ProcessInput::ToolCall { call } = registration.input.as_ref() else {
             panic!("wrong process input");
         };
-        assert_eq!(call.call_id, "call-123");
         assert_eq!(call.tool_name, "echo");
         assert_eq!(call.args, serde_json::json!({"value": "hi"}));
         assert_eq!(
@@ -176,7 +174,8 @@ mod tests {
 
     fn prepared_tool_call(call_id: &str, tool_name: &str) -> crate::PreparedToolCall {
         crate::PreparedToolCall {
-            call_id: call_id.to_string(),
+            call_id: crate::ToolCallId::fixture(&call_id),
+            provider_call_id: None,
             tool_id: crate::ToolId::from(format!("tool:{tool_name}")),
             tool_name: tool_name.to_string(),
             args: serde_json::json!({"value": call_id}),
@@ -185,10 +184,10 @@ mod tests {
         }
     }
 
-    /// A group child's attempt envelopes hash from its replay suffix, so the
-    /// suffix a prepared batch derives is identity material (ADR 0099 §3).
+    /// A prepared batch keeps its calls in source order, each under its own
+    /// call id: a member's attempts derive from that id alone (ADR 0117 §6).
     #[test]
-    fn prepared_tool_batch_derives_positional_child_replay_suffixes() {
+    fn prepared_tool_batch_keeps_source_order() {
         let batch = crate::PreparedToolBatch::new(
             "batch-123",
             vec![
@@ -198,9 +197,13 @@ mod tests {
         );
         assert_eq!(batch.batch_id, "batch-123");
         assert_eq!(batch.calls.len(), 2);
-        assert_eq!(batch.calls[0].call.call_id, "call-1");
-        assert_eq!(batch.calls[0].replay_suffix, "child:0:call-1");
-        assert_eq!(batch.calls[1].call.call_id, "call-2");
-        assert_eq!(batch.calls[1].replay_suffix, "child:1:call-2");
+        assert_eq!(
+            batch.calls[0].call.call_id,
+            crate::ToolCallId::fixture("call-1")
+        );
+        assert_eq!(
+            batch.calls[1].call.call_id,
+            crate::ToolCallId::fixture("call-2")
+        );
     }
 }

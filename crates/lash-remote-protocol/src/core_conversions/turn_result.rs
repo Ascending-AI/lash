@@ -203,7 +203,6 @@ impl From<lash_core::ToolIntentRefusalReason> for RemoteToolIntentRefusalReason 
             Core::UnsupportedProtocolVersion { recorded } => {
                 Self::UnsupportedProtocolVersion { recorded }
             }
-            Core::MissingToolCallId => Self::MissingToolCallId,
             Core::IntentIndexOverflow => Self::IntentIndexOverflow,
             Core::CountBudgetExceeded { actual, maximum } => {
                 Self::CountBudgetExceeded { actual, maximum }
@@ -271,12 +270,14 @@ impl From<lash_core::ToolCallRecord> for RemoteToolCallRecord {
     fn from(value: lash_core::ToolCallRecord) -> Self {
         let lash_core::ToolCallRecord {
             call_id,
+            provider_call_id,
             tool,
             args,
             output,
         } = value;
         Self {
             call_id,
+            provider_call_id,
             tool_name: tool,
             args,
             outcome: output.into(),

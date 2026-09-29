@@ -179,6 +179,9 @@ pub use lash_core::{
     BindingId, CapabilityRef, ContractRef, DefinitionRef, RunDefinition, RunOverrides,
     RunShapeError, RunSpec, SlotId,
 };
+/// Lash's identity for one tool call (ADR 0117): what a tool keys its
+/// idempotency on, through [`tools::AttemptContext::call_id`].
+pub use lash_core::{InvalidToolCallId, ToolCallId, ToolCallRootError};
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
 pub use lash_sansio::{
     CaptureBase, CaptureCoverage, CompleteToolCall, CutState, FragmentState,
@@ -284,7 +287,7 @@ pub mod tools {
     pub use lash_core::{
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
         CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement,
-        PendingCompletion, PendingResolver, PreparedToolCall, SignalProcessIntent,
+        PendingCompletion, PendingResolver, PreparedToolCall, ProcessToolCall, SignalProcessIntent,
         StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
         TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, TimeoutBehavior,
         ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,

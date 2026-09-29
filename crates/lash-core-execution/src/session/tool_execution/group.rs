@@ -41,10 +41,9 @@ use crate::runtime::effect::{
 pub(crate) struct PreparedToolChildLeaf {
     /// This leaf's index in the caller's input vector.
     pub input_index: usize,
-    /// The prepared call plus its byte-identical `child:{index}:{call_id}`
-    /// replay suffix, produced by [`crate::PreparedToolBatch::new_with_grants`];
-    /// the suffix is attempt-identity material, so it is part of every attempt
-    /// envelope's hash (ADR 0099 §3).
+    /// The prepared call, produced by
+    /// [`crate::PreparedToolBatch::new_with_grants`]. Its `ToolCallId` keys
+    /// every attempt the child makes (ADR 0117 §6).
     pub call: crate::PreparedToolBatchCall,
     /// The authority the child was admitted under, pinned at formation so a
     /// reopen never re-reads the live catalog.
@@ -291,23 +290,32 @@ impl RuntimeExecutionContext<'_> {
                 )
             })?;
 
+        // Each child's request is bound to its identity before anything of
+        // the group is journaled (ADR 0117 §7).
+        let mut retained_payloads = Vec::with_capacity(children.len());
+        for child in children {
+            retained_payloads.push(match child.tool() {
+                Some(leaf) => Some(self.bind_retained_request(leaf).await?),
+                None => None,
+            });
+        }
+
         // Live trace/activity is the opener's (ToolSettlement plan rule 3):
         // started events are emitted here, at formation, exactly as the batch
         // path emitted them at each child's dispatch. Each lane keys on the
         // child's own invocation replay key — `{group}:child:{position}`,
-        // minted below — so children whose model-given call ids repeat still
-        // mint distinct observations (ADR 0105 §1).
+        // minted below (ADR 0105 §1).
         for (position, leaf) in children.iter().enumerate() {
             let Some(leaf) = leaf.tool() else {
                 continue;
             };
-            let call_id = leaf.call.call.call_id.clone();
+            let ids = crate::tool_dispatch::ToolCallIds::of(&leaf.call.call);
             self.emit_tool_call_started(
                 &format!("{group_key}:child:{position}"),
-                &call_id,
+                &ids,
                 &leaf.call.call.tool_name,
                 leaf.call.call.args.clone(),
-                tool_activity_id(&call_id),
+                tool_activity_id(&ids.call_id),
             );
         }
 
@@ -343,6 +351,10 @@ impl RuntimeExecutionContext<'_> {
                 }
             };
             let call_id = leaf.call.call.call_id.clone();
+            let mut call = leaf.call.call.clone();
+            if let Some(Some(retained)) = retained_payloads.get(position) {
+                call.prepared_payload = retained.clone();
+            }
             let completion_routing = self
                 .tool_child_completion_routing(
                     controller,
@@ -353,12 +365,11 @@ impl RuntimeExecutionContext<'_> {
                 )
                 .await?;
             let mut request = ToolChildRequest::new(
-                leaf.call.call.clone(),
+                call,
                 leaf.admission.clone(),
-                crate::tool_dispatch::ToolAttemptEffectIdentity::Batch {
-                    parent: group_invocation.clone().into_runtime_invocation(),
-                    replay_suffix: leaf.call.replay_suffix.clone(),
-                },
+                crate::tool_dispatch::ToolAttemptLineage::under(
+                    group_invocation.clone().into_runtime_invocation(),
+                ),
                 ToolChildScope {
                     opener: opener.clone(),
                     admitted_scope: admitted.clone(),
@@ -405,6 +416,57 @@ impl RuntimeExecutionContext<'_> {
             .inspect_err(|_| self.release_group_work(&group_key))
     }
 
+    /// Binds `leaf`'s request to its call's identity (ADR 0117 §7) and
+    /// returns the prepared payload the call runs with.
+    ///
+    /// The first formation journals, under `{call_id}:request`, the digest of
+    /// the call's canonical tool, arguments and authority together with the
+    /// payload its prepare phase sealed. Every later formation — a replay of
+    /// the opener, a redrive — runs the call from that retained payload,
+    /// whatever a fresh prepare sealed, so no effect runs with a payload other
+    /// than the one sealed at admission. A request whose tool, arguments or
+    /// authority differ under the same id is refused before any effect,
+    /// through the binding-drift refusal a drifted tool meets (ADR 0116
+    /// §2.2), so the turn parks; the id is never reminted to fit.
+    async fn bind_retained_request(
+        &self,
+        leaf: &PreparedToolChildLeaf,
+    ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError> {
+        let call = &leaf.call.call;
+        let digest = retained_request_digest(call, &leaf.admission);
+        let live = serde_json::json!({
+            "digest": digest,
+            "prepared_payload": call.prepared_payload,
+        });
+        let recorded = self
+            .journaled_language_value_with(
+                format!("{}:request", call.call_id),
+                RETAINED_REQUEST_OPERATION.to_string(),
+                move || Ok(live),
+            )
+            .await?;
+        if recorded.get("digest").and_then(serde_json::Value::as_str) == Some(digest.as_str()) {
+            return Ok(recorded
+                .get("prepared_payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null));
+        }
+        let provider = call
+            .provider_call_id
+            .as_deref()
+            .map(|provider_call_id| format!("provider call `{provider_call_id}`, "))
+            .unwrap_or_default();
+        Err(crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::LashlangCellBindingDrift,
+            format!(
+                "tool call `{}` ({provider}tool `{}`) was recorded with a different tool, \
+                 arguments or authority than this redrive formed; its journal binds the call \
+                 to the recorded request, so nothing was dispatched",
+                call.call_id, call.tool_id,
+            ),
+        ))
+    }
+
     /// Records one leaf's completion routing from the same two admission facts
     /// the attempt coordinator consults: whether the tool may defer, and what
     /// the controller can issue for a completion key.
@@ -414,7 +476,7 @@ impl RuntimeExecutionContext<'_> {
         scope: &crate::ExecutionScope,
         tool_id: &crate::ToolId,
         grant: Option<&crate::ToolExecutionGrant>,
-        call_id: &str,
+        call_id: &crate::ToolCallId,
     ) -> Result<ToolChildCompletionRouting, crate::RuntimeEffectControllerError> {
         if !self.dispatch.attempt_may_defer(tool_id, grant) {
             return Ok(ToolChildCompletionRouting::Inline);
@@ -422,7 +484,7 @@ impl RuntimeExecutionContext<'_> {
         match controller
             .prepare_completion_key(
                 scope,
-                crate::AwaitEventWaitIdentity::tool_completion(call_id),
+                crate::AwaitEventWaitIdentity::tool_completion(call_id.clone()),
                 true,
             )
             .await
@@ -735,7 +797,7 @@ impl RuntimeExecutionContext<'_> {
                 Ok(key) => key,
                 Err(error) => {
                     tracing::warn!(
-                        call_id,
+                        call_id = call_id.as_str(),
                         error = %error,
                         "an abandoned call's completion key could not be derived"
                     );
@@ -867,7 +929,8 @@ impl RuntimeExecutionContext<'_> {
             }
         }
         let record = ToolCallRecord {
-            call_id: Some(call_id.clone()),
+            call_id: call_id.clone(),
+            provider_call_id: leaf.call.call.provider_call_id.clone(),
             tool: outcome.record.tool.clone(),
             args: outcome.record.args.clone(),
             output: outcome.record.output.clone(),
@@ -876,6 +939,7 @@ impl RuntimeExecutionContext<'_> {
         Ok(CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 call_id,
+                provider_call_id: leaf.call.call.provider_call_id.clone(),
                 tool_name: outcome.record.tool,
                 args: outcome.record.args,
                 output: outcome.record.output,
@@ -973,13 +1037,14 @@ impl RuntimeExecutionContext<'_> {
 /// as a `CompletedProtocolToolCall`.
 fn cancelled_group_leaf(leaf: &PreparedToolChildLeaf) -> CompletedProtocolToolCall {
     let completed = cancelled_completed_tool_call(
-        leaf.call.call.call_id.clone(),
+        crate::tool_dispatch::ToolCallIds::of(&leaf.call.call),
         leaf.call.call.tool_name.clone(),
         leaf.call.call.args.clone(),
         leaf.call.call.replay.clone(),
     );
     let record = ToolCallRecord {
-        call_id: Some(completed.call_id.clone()),
+        call_id: completed.call_id.clone(),
+        provider_call_id: completed.provider_call_id.clone(),
         tool: completed.tool_name.clone(),
         args: completed.args.clone(),
         output: completed.output.clone(),
@@ -1001,7 +1066,7 @@ impl RuntimeExecutionContext<'_> {
     fn emit_recorded_child_stream(
         &self,
         call_key: &str,
-        call_id: &str,
+        call_id: &crate::ToolCallId,
         record: &crate::ToolCallRecord,
         stream: &crate::runtime::effect::RecordedChildStream,
     ) {
@@ -1009,7 +1074,7 @@ impl RuntimeExecutionContext<'_> {
         let (events, undecodable) = stream.decode(&record);
         if undecodable > 0 {
             tracing::warn!(
-                call_id,
+                call_id = call_id.as_str(),
                 undecodable,
                 "a tool child's recorded stream held events this build cannot decode; \
                  they are skipped"
@@ -1086,7 +1151,7 @@ mod tests {
     fn the_group_key_carries_the_batch_id_once() {
         let calls = |id: &str| {
             vec![ToolInvocation::new(
-                id,
+                crate::ToolCallId::fixture(id),
                 crate::ToolId::from("tool:one"),
                 serde_json::json!({}),
             )]
@@ -1112,4 +1177,38 @@ mod tests {
         );
         assert_eq!(first.matches(second_id.as_str()).count(), 0);
     }
+}
+
+/// The operation a retained-request binding journals under (ADR 0117 §7).
+const RETAINED_REQUEST_OPERATION: &str = "tool-call-request";
+
+/// The digest a call's retained request is bound to: its identity, canonical
+/// tool, arguments and authority (ADR 0117 §7). The prepared payload is
+/// retained beside it and served, not compared.
+fn retained_request_digest(
+    call: &crate::PreparedToolCall,
+    admission: &ToolChildAdmission,
+) -> String {
+    let mut identity = crate::stable_identity::IdentityEncoder::new("lash.tool-call-request", 1);
+    identity.string(call.call_id.as_str());
+    identity.string(call.tool_id.as_str());
+    identity.string(&call.tool_name);
+    identity.bytes(&crate::identity_json::payload_leaf(&call.args));
+    match admission {
+        ToolChildAdmission::Catalog { manifest } => {
+            identity.tag(0);
+            identity.string(manifest.id.as_str());
+        }
+        ToolChildAdmission::Granted { grant } => {
+            identity.tag(1);
+            identity.string(grant.manifest.id.as_str());
+            identity.optional(grant.source_id.as_deref(), |identity, source_id| {
+                identity.string(source_id);
+            });
+            identity.bytes(&crate::identity_json::payload_leaf(
+                &grant.execution_binding,
+            ));
+        }
+    }
+    crate::stable_identity::rendered_hash("tool-call-request", 1, &identity.finish())
 }

@@ -411,17 +411,14 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
             assert_eq!(message, "approval was denied");
             assert_eq!(*source, lash_core::ToolFailureSource::Policy);
             assert_eq!(*retry, lash_core::ToolRetryStatus::Never);
-            // The node's call id and the recorded effect's key name the same
-            // issue ordinal (FIG-3586): the key under the cell's `lk2`
-            // namespace, the call id under the cell's `lashlang:v2:` scope.
-            let (_, ordinal) = replay_key
-                .split_once(":lk2:")
-                .unwrap_or_else(|| panic!("an issue-ordinal key: {replay_key}"));
-            let call_id = failed.0.as_deref().expect("a failed node names its call");
+            // The recorded effect's key names the issue ordinal under the
+            // cell's `lk2` namespace (FIG-3586); the node names its call by
+            // the `ToolCallId` derived from that ordinal (ADR 0117).
             assert!(
-                call_id.starts_with("lashlang:v2:") && call_id.ends_with(&format!(":{ordinal}")),
-                "{call_id} names the ordinal of {replay_key}"
+                replay_key.contains(":lk2:"),
+                "an issue-ordinal key: {replay_key}"
             );
+            assert!(failed.0.is_some(), "a failed node names its call");
             assert!(
                 !replay_key.contains(":attempt:"),
                 "telemetry attempt entered effect identity"
@@ -798,7 +795,7 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
             .calls
             .iter()
             .filter_map(|call| call.host_record.as_ref())
-            .filter_map(|record| record.call_id.clone())
+            .map(|record| record.call_id.clone())
             .collect::<Vec<_>>();
         assert_eq!(call_ids.len(), 4, "four leaves ran: {call_ids:?}");
         let distinct = call_ids.iter().collect::<std::collections::BTreeSet<_>>();
@@ -809,30 +806,8 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
         );
 
         // Each aggregate is one command with its own issue ordinal, and each
-        // leaf is keyed under it by its position in the aggregate: nothing
-        // about the shared call site reaches the identity (FIG-3586).
-        let first_pass = call_ids
-            .iter()
-            .filter(|id| id.ends_with(":child:0"))
-            .count();
-        let second_pass = call_ids
-            .iter()
-            .filter(|id| id.ends_with(":child:1"))
-            .count();
-        assert_eq!(
-            (first_pass, second_pass),
-            (2, 2),
-            "two leaf positions, reached twice: {call_ids:?}"
-        );
-        for ordinal in 0..=1 {
-            assert_eq!(
-                call_ids
-                    .iter()
-                    .filter(|id| id.contains(&format!(":{ordinal:010}:child:")))
-                    .count(),
-                2,
-                "each aggregate is one command whose two leaves share its ordinal: {call_ids:?}"
-            );
-        }
+        // leaf's id is derived from that ordinal and its position in the
+        // aggregate (FIG-3586, ADR 0117): the derivation is pinned by
+        // `LashlangHostIdentities`' own laws.
     });
 }

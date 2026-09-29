@@ -50,7 +50,7 @@ fn promise_key_preimage(scope: &ExecutionScope, wait: &AwaitEventWaitIdentity) -
     match wait {
         AwaitEventWaitIdentity::ToolCompletion { tool_call_id } => {
             identity.tag(1);
-            identity.string(tool_call_id);
+            identity.string(tool_call_id.as_str());
         }
         AwaitEventWaitIdentity::ProcessSignal {
             process_id,
@@ -127,11 +127,11 @@ mod tests {
         let vectors = [
             (
                 ExecutionScope::turn("ab", "c"),
-                AwaitEventWaitIdentity::tool_completion("x:y"),
+                AwaitEventWaitIdentity::tool_completion(lash_sansio::ToolCallId::fixture("x:y")),
             ),
             (
                 ExecutionScope::turn("a", "bc"),
-                AwaitEventWaitIdentity::tool_completion("x:y"),
+                AwaitEventWaitIdentity::tool_completion(lash_sansio::ToolCallId::fixture("x:y")),
             ),
             (
                 ExecutionScope::process(lash_sansio::ProcessId::fixture("zero")),
@@ -167,12 +167,12 @@ mod tests {
             .collect::<Vec<_>>();
         let expected = [
             (
-                "6c6173682d737461626c652d6964656e74697479020300000000000000106c6173682e61776169742d6576656e740100000000000000026162000000000000000163010000000000000003783a79",
-                "await-event:v3:blake3:cee3d89d676d2859d8b67b277b3b1c27909488e242ec0aa3b58645f77e553f2d",
+                "6c6173682d737461626c652d6964656e74697479020300000000000000106c6173682e61776169742d6576656e74010000000000000002616200000000000000016301000000000000004374635f61303964393132656639303638393066323434643833346665383639656362353666633061363833393930623037343038343535346634663463646634366638",
+                "await-event:v3:blake3:5eb5501356a7018068f6f8ba6cb1b4f510e44a71701a462e36d0e6675c1e6285",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479020300000000000000106c6173682e61776169742d6576656e740100000000000000016100000000000000026263010000000000000003783a79",
-                "await-event:v3:blake3:d7e95d92b4200240106ef9948b49c44bfd235084fb18aefcf5fae75ec8860823",
+                "6c6173682d737461626c652d6964656e74697479020300000000000000106c6173682e61776169742d6576656e74010000000000000001610000000000000002626301000000000000004374635f61303964393132656639303638393066323434643833346665383639656362353666633061363833393930623037343038343535346634663463646634366638",
+                "await-event:v3:blake3:4908b563d81a7e63b03556a1c39024946a0e54e48b4a69f38721300902890a68",
             ),
             (
                 "6c6173682d737461626c652d6964656e74697479020300000000000000106c6173682e61776169742d6576656e74020000000000000022705f3639633135363366643637353732373762383036653938663666376262663762020000000000000022705f3639633135363366643637353732373762383036653938663666376262663762000000000000000572656164790000000000000001",
@@ -208,22 +208,24 @@ mod tests {
     #[test]
     fn key_derivation_is_the_stable_public_hash() {
         let scope = ExecutionScope::turn("session", "turn");
-        let wait = AwaitEventWaitIdentity::tool_completion("call");
+        let wait =
+            AwaitEventWaitIdentity::tool_completion(lash_sansio::ToolCallId::fixture("call"));
 
         assert_eq!(
             derive_key_id(&scope, &wait).expect("derive key id"),
-            "await-event:v3:blake3:b4d17e9cb7a75ae9f9cf27eca46edbcedbba85169c3e9af1f846527b7927ee9e"
+            "await-event:v3:blake3:682389333e0eb5acb2f3b43cf7d51cf2ab82f559e2a684281b31146107b1057e"
         );
     }
 
     #[test]
     fn promise_key_family_version_is_explicit_and_stable() {
         let scope = ExecutionScope::turn("session", "turn");
-        let wait = AwaitEventWaitIdentity::tool_completion("call");
+        let wait =
+            AwaitEventWaitIdentity::tool_completion(lash_sansio::ToolCallId::fixture("call"));
 
         assert_eq!(
             derive_key_id(&scope, &wait).expect("derive versioned key"),
-            "await-event:v3:blake3:b4d17e9cb7a75ae9f9cf27eca46edbcedbba85169c3e9af1f846527b7927ee9e"
+            "await-event:v3:blake3:682389333e0eb5acb2f3b43cf7d51cf2ab82f559e2a684281b31146107b1057e"
         );
     }
 }

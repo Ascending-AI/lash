@@ -533,7 +533,10 @@ async fn assert_standard_tool_lifecycle(
         TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
     ));
     assert_eq!(turn.tool_calls.len(), 1, "one accounting record per call");
-    assert_eq!(turn.tool_calls[0].call_id.as_deref(), Some(call_id));
+    assert_eq!(
+        turn.tool_calls[0].provider_call_id.as_deref(),
+        Some(call_id)
+    );
     assert_eq!(turn.tool_calls[0].tool, tool_name);
     assert_eq!(turn.tool_calls[0].output.is_success(), expected_success);
 
@@ -560,7 +563,7 @@ async fn assert_standard_tool_lifecycle(
         "expected exactly one ToolCallCompleted trace: {entries:?}"
     );
     assert_eq!(
-        started[0].get("call_id").and_then(|v| v.as_str()),
+        started[0].get("provider_call_id").and_then(|v| v.as_str()),
         Some(call_id)
     );
     assert_eq!(
@@ -571,14 +574,20 @@ async fn assert_standard_tool_lifecycle(
         .iter()
         .position(|entry| {
             entry.get("type").and_then(|value| value.as_str()) == Some("tool_call_started")
-                && entry.get("call_id").and_then(|value| value.as_str()) == Some(call_id)
+                && entry
+                    .get("provider_call_id")
+                    .and_then(|value| value.as_str())
+                    == Some(call_id)
         })
         .expect("started position");
     let completed_position = entries
         .iter()
         .position(|entry| {
             entry.get("type").and_then(|value| value.as_str()) == Some("tool_call_completed")
-                && entry.get("call_id").and_then(|value| value.as_str()) == Some(call_id)
+                && entry
+                    .get("provider_call_id")
+                    .and_then(|value| value.as_str())
+                    == Some(call_id)
         })
         .expect("completed position");
     assert!(
@@ -591,11 +600,11 @@ async fn assert_standard_tool_lifecycle(
         .iter()
         .filter_map(|activity| match &activity.event {
             lash_core::TurnEvent::ToolCallStarted {
-                call_id: Some(observed),
+                provider_call_id: Some(observed),
                 ..
             } if observed == call_id => Some("started"),
             lash_core::TurnEvent::ToolCallCompleted {
-                call_id: Some(observed),
+                provider_call_id: Some(observed),
                 ..
             } if observed == call_id => Some("completed"),
             _ => None,
@@ -606,15 +615,26 @@ async fn assert_standard_tool_lifecycle(
         ["started", "completed"],
         "exactly one ordered activity pair keyed by {call_id}: {activities:?}"
     );
-    let expected_correlation = lash_core::TurnActivityId::new(format!("tool:{call_id}"));
+    let lash_call_id = activities
+        .iter()
+        .find_map(|activity| match &activity.event {
+            lash_core::TurnEvent::ToolCallStarted {
+                call_id: lash_call_id,
+                provider_call_id: Some(observed),
+                ..
+            } if observed == call_id => Some(lash_call_id.clone()),
+            _ => None,
+        })
+        .expect("the started activity names lash's call id");
+    let expected_correlation = lash_core::TurnActivityId::new(format!("tool:{lash_call_id}"));
     assert!(
         activities
             .iter()
             .filter(|activity| {
                 matches!(
                     &activity.event,
-                    lash_core::TurnEvent::ToolCallStarted { call_id: Some(observed), .. }
-                        | lash_core::TurnEvent::ToolCallCompleted { call_id: Some(observed), .. }
+                    lash_core::TurnEvent::ToolCallStarted { provider_call_id: Some(observed), .. }
+                        | lash_core::TurnEvent::ToolCallCompleted { provider_call_id: Some(observed), .. }
                         if observed == call_id
                 )
             })
@@ -622,8 +642,8 @@ async fn assert_standard_tool_lifecycle(
         "tool activity correlation remains keyed by call id: {activities:?}"
     );
     // Span identity is stamped from session/turn context so the tool nests
-    // under its turn as `tool:<call_id>`.
-    let expected_graph_node_id = format!("tool:{call_id}");
+    // under its turn as `tool:<lash call id>`.
+    let expected_graph_node_id = format!("tool:{lash_call_id}");
     assert_eq!(
         completed[0]
             .get("context")
@@ -815,7 +835,10 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
     handler.close().await.expect("close the turn's handler");
 
     assert_eq!(turn.tool_calls.len(), 1);
-    assert_eq!(turn.tool_calls[0].call_id.as_deref(), Some(call_id));
+    assert_eq!(
+        turn.tool_calls[0].provider_call_id.as_deref(),
+        Some(call_id)
+    );
     let entries = lash_trace::parse_jsonl_records::<serde_json::Value>(
         &std::fs::read_to_string(&trace_path).expect("read pending trace"),
     )
@@ -825,7 +848,10 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
             .iter()
             .filter(|entry| {
                 entry.get("type").and_then(serde_json::Value::as_str) == Some("tool_call_completed")
-                    && entry.get("call_id").and_then(serde_json::Value::as_str) == Some(call_id)
+                    && entry
+                        .get("provider_call_id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(call_id)
             })
             .count(),
         1,
@@ -837,7 +863,7 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
         .filter(|activity| {
             matches!(
                 &activity.event,
-                lash_core::TurnEvent::ToolCallCompleted { call_id: Some(observed), .. }
+                lash_core::TurnEvent::ToolCallCompleted { provider_call_id: Some(observed), .. }
                     if observed == call_id
             )
         })
@@ -849,7 +875,7 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
     );
     assert_eq!(
         completions[0].correlation_id,
-        lash_core::TurnActivityId::new(format!("tool:{call_id}"))
+        lash_core::TurnActivityId::new(format!("tool:{}", turn.tool_calls[0].call_id))
     );
 
     let _ = std::fs::remove_file(trace_path);

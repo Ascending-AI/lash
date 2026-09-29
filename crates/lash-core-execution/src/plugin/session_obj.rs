@@ -697,11 +697,8 @@ impl PluginSession {
     > {
         use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
 
-        let mut model_return = crate::ModelToolReturn::from_output(
-            ctx.call_id.clone(),
-            ctx.tool_name.clone(),
-            &ctx.output,
-        );
+        let mut model_return =
+            crate::ModelToolReturn::from_output(ctx.tool_name.clone(), &ctx.output);
         if let Some(presenter) = &self.contributions.presentation_presenter {
             model_return = (presenter.hook)(ToolPresentationInput {
                 previous: model_return,
@@ -718,11 +715,7 @@ impl PluginSession {
             };
             model_return = match (registered.hook)(input).await {
                 Ok(next) => next,
-                Err(err) => crate::ModelToolReturn::text(
-                    ctx.call_id.clone(),
-                    ctx.tool_name.clone(),
-                    err.to_string(),
-                ),
+                Err(err) => crate::ModelToolReturn::text(ctx.tool_name.clone(), err.to_string()),
             };
         }
         crate::session::tool_execution::surface_attachment_materialization_notices(
@@ -1179,7 +1172,6 @@ mod attachment_notice_order_tests {
         let step: super::super::ToolPresentationStep = Arc::new(|input| {
             Box::pin(async move {
                 Ok(crate::ModelToolReturn::text(
-                    input.context.call_id,
                     input.context.tool_name,
                     "replacement".to_string(),
                 ))
@@ -1204,8 +1196,7 @@ mod attachment_notice_order_tests {
         let output = crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
             crate::AttachmentSource::stored(reference),
         ));
-        let baseline =
-            crate::ModelToolReturn::from_output("call".to_string(), "fixture".to_string(), &output);
+        let baseline = crate::ModelToolReturn::from_output("fixture".to_string(), &output);
         let settlement = Arc::new(crate::runtime::effect::ToolSettlement {
             version: crate::runtime::effect::TOOL_SETTLEMENT_VERSION,
             intent_outcomes: Vec::new(),
@@ -1220,7 +1211,7 @@ mod attachment_notice_order_tests {
             .present_tool_result(
                 super::super::ToolResultProjectionContext {
                     session_id: "notice-order-session".into(),
-                    call_id: "call".into(),
+                    call_id: crate::ToolCallId::fixture("call"),
                     tool_id: crate::ToolId::new("fixture:id"),
                     tool_name: "fixture".into(),
                     render: None,

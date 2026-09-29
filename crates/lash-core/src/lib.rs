@@ -532,8 +532,9 @@ pub mod sansio {
     pub use lash_sansio::sansio::{
         ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
         ContextProjector, EffectId, ExecutionEnvironmentSync, ExpandedRow, ExpandedWrapper,
-        LlmCallError, PendingToolCall, PendingWork, ProjectorTurnInputs, ProtocolDriverHandle,
-        Response, ToolExpansionPlan, TurnCause, TurnMachine, render_turn_causes_prompt,
+        LlmCallError, ModelToolCalls, PendingToolCall, PendingWork, ProjectorTurnInputs,
+        ProtocolDriverHandle, Response, ResponseToolCalls, ToolExpansionPlan, TurnCause,
+        TurnMachine, render_turn_causes_prompt,
     };
 }
 
@@ -625,6 +626,11 @@ pub use lash_core_execution::{
 pub use lash_sansio::{
     BuildNewestWriterFormats, WriterFormats, build_newest_writer_formats, driver_writer_version,
 };
+pub use lash_sansio::{
+    InvalidToolCallId, ToolCallAdmission, ToolCallId, ToolCallPosition, ToolCallRoot,
+    ToolCallRootError,
+};
+
 pub use lash_sansio::{
     FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
 };
@@ -849,8 +855,9 @@ pub use tool_intent::{
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, PreparedToolBatch,
-    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolChildExecutionTraceHook,
-    ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    PreparedToolBatchCall, PreparedToolCall, ProcessToolCall, ToolCall,
+    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
+    ToolPrepareContext, ToolProvider,
 };
 #[doc(hidden)]
 pub mod core_internal {

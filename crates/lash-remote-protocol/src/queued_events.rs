@@ -63,7 +63,9 @@ pub struct RemotePart {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment: Option<RemotePartAttachment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
+    pub call_id: Option<lash_sansio::ToolCallId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

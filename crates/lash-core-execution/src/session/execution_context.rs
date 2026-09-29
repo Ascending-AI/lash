@@ -207,6 +207,7 @@ impl RuntimeExecutionTracing {
         self.emit(
             lash_trace::TraceEvent::ToolCallCompleted {
                 call_id: record.call_id.clone(),
+                provider_call_id: record.provider_call_id.clone(),
                 name: record.tool.clone(),
                 args: record.args.clone(),
                 output: crate::trace::trace_tool_call_output(&record.output),
@@ -765,14 +766,15 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// No-op when the host installed no trace sink.
     pub(super) fn emit_tool_call_started_trace(
         &self,
-        call_id: &str,
+        ids: &crate::tool_dispatch::ToolCallIds,
         name: &str,
         args: &serde_json::Value,
     ) {
         if let Some(tracing) = self.tracing.as_ref() {
             tracing.emit(
                 lash_trace::TraceEvent::ToolCallStarted {
-                    call_id: Some(call_id.to_string()),
+                    call_id: ids.call_id.clone(),
+                    provider_call_id: ids.provider_call_id.clone(),
                     name: name.to_string(),
                     args: args.clone(),
                     issuing_node_id: self.issuing_language_node_id.as_deref().map(str::to_string),

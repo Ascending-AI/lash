@@ -633,9 +633,20 @@ impl ToolCallFixture<'static> {
 impl<'run> ToolCallFixture<'run> {
     /// The call a runtime dispatch context would run: its sessions, processes,
     /// controller, catalog and parent invocation are the dispatch's.
+    /// The call is named `ToolCallId::fixture("tool-call-fixture")` until
+    /// [`Self::call_id`] or [`Self::prepared_call`] names it.
     pub fn from_dispatch(dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>) -> Self {
+        let call = crate::PreparedToolCall {
+            call_id: crate::ToolCallId::fixture("tool-call-fixture"),
+            provider_call_id: None,
+            tool_id: crate::ToolId::new("fixture"),
+            tool_name: "fixture".to_string(),
+            args: serde_json::Value::Null,
+            replay: None,
+            prepared_payload: serde_json::Value::Null,
+        };
         Self {
-            context: crate::tool_provider::ToolContext::from_dispatch(dispatch).build(),
+            context: crate::tool_provider::ToolContext::from_dispatch(dispatch, &call).build(),
         }
     }
 
@@ -650,14 +661,14 @@ impl<'run> ToolCallFixture<'run> {
     }
 
     /// Names the call; a declaring body derives its intent identity from it.
-    pub fn tool_call_id(mut self, tool_call_id: impl Into<Option<String>>) -> Self {
-        self.context.tool_call_id = tool_call_id.into();
+    pub fn call_id(mut self, call_id: crate::ToolCallId) -> Self {
+        self.context.call_id = call_id;
         self
     }
 
     /// Binds the call id and prepared payload of `call`.
     pub fn prepared_call(mut self, call: &crate::PreparedToolCall) -> Self {
-        self.context.tool_call_id = Some(call.call_id.clone());
+        self.context.call_id = call.call_id.clone();
         self.context.prepared_payload = call.prepared_payload.clone();
         self
     }
@@ -742,7 +753,6 @@ impl<'run> ToolCallFixture<'run> {
         crate::AttemptContext::from_tool_context(
             &self.context,
             execution_scope_id.into(),
-            None,
             crate::tool_provider::AttemptCompletionSupport::NotDeclared,
         )
     }
@@ -759,8 +769,7 @@ impl<'run> ToolCallFixture<'run> {
         crate::AttemptContext::from_tool_context(
             &self.context,
             "test-turn".to_string(),
-            Some(key),
-            crate::tool_provider::AttemptCompletionSupport::Available,
+            crate::tool_provider::AttemptCompletionSupport::Available(key),
         )
     }
 }
@@ -831,7 +840,6 @@ impl<'run> crate::AttemptContext<'run> {
         Self::from_tool_context(
             &context,
             execution_scope_id.into(),
-            None,
             crate::tool_provider::AttemptCompletionSupport::NotDeclared,
         )
     }
@@ -1363,8 +1371,7 @@ pub async fn coordinate_tool_provider_with_services(
                 std::time::Instant::now(),
             ))),
     );
-    let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch))
-        .prepared_call(&call)
+    let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch), &call)
         .cancellation_token(Some(tokio_util::sync::CancellationToken::new()))
         .build();
     let turn_cancel_wait = dispatch.effect_controller.scoped().turn_cancel_wait(
@@ -1379,10 +1386,7 @@ pub async fn coordinate_tool_provider_with_services(
         None,
         crate::ToolRetryPolicy::Never,
         None,
-        crate::tool_dispatch::ToolAttemptEffectIdentity::Batch {
-            parent: parent_invocation,
-            replay_suffix: call.call_id.clone(),
-        },
+        crate::tool_dispatch::ToolAttemptLineage::under(parent_invocation),
         &turn_cancel_wait,
         None,
         |completion_key| {
@@ -1398,11 +1402,8 @@ pub async fn coordinate_tool_provider_with_services(
         return Err("the literal differential provider unexpectedly deferred".to_string());
     };
     let outcome = *outcome;
-    let baseline = crate::ModelToolReturn::from_output(
-        call.call_id.clone(),
-        outcome.record.tool.clone(),
-        &outcome.record.output,
-    );
+    let baseline =
+        crate::ModelToolReturn::from_output(outcome.record.tool.clone(), &outcome.record.output);
     let settlement = crate::runtime::effect::ToolSettlement::from_dispatch(&outcome, baseline);
     let mut model_return = dispatch
         .plugins
@@ -1450,6 +1451,7 @@ pub async fn coordinate_tool_provider_with_services(
     Ok((
         crate::sansio::CompletedToolCall {
             call_id: call.call_id,
+            provider_call_id: call.provider_call_id,
             tool_name: outcome.record.tool,
             args: outcome.record.args,
             output: outcome.record.output,
@@ -1467,7 +1469,7 @@ pub async fn execute_tool_intents_with_services(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     processes: Arc<dyn crate::ProcessService>,
     session_id: &SessionId,
-    tool_call_id: &str,
+    tool_call_id: &crate::ToolCallId,
     intents: &crate::ToolIntents,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
     execute_tool_intents_with_services_and_hook(
@@ -1491,7 +1493,7 @@ pub async fn execute_tool_intents_with_services_and_trigger_router(
     trigger_router: crate::TriggerRouter,
     process_engines: crate::ProcessEngineRegistry,
     session_id: &SessionId,
-    tool_call_id: &str,
+    tool_call_id: &crate::ToolCallId,
     intents: &crate::ToolIntents,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
     execute_tool_intents_with_services_and_hook_and_trigger_router(
@@ -1512,7 +1514,7 @@ pub async fn execute_tool_intents_with_services_and_hook(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     processes: Arc<dyn crate::ProcessService>,
     session_id: &SessionId,
-    tool_call_id: &str,
+    tool_call_id: &crate::ToolCallId,
     intents: &crate::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
@@ -1535,7 +1537,7 @@ async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
     // registrations commit (ADR 0113 §3.4).
     triggers: Option<(crate::TriggerRouter, crate::ProcessEngineRegistry)>,
     session_id: &SessionId,
-    tool_call_id: &str,
+    tool_call_id: &crate::ToolCallId,
     intents: &crate::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
@@ -1562,7 +1564,7 @@ async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
     let dispatch = build_atomic_tool_dispatch(builder);
     crate::tool_dispatch::execute_final_tool_intents(
         dispatch.as_ref(),
-        Some(tool_call_id),
+        tool_call_id,
         intents,
         child_trace_hook,
     )

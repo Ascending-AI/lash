@@ -148,6 +148,6 @@ async fn after_step_cancel_at_the_step_boundary_commits_the_pinned_bytes() {
     assert_commit_pins(
         "after-step cancel",
         &commits,
-        &["b6b61111a96a0e7e074e03998463a1819c54ef6f0e6dd57ee05a0e5939b2c8d4"],
+        &["467e54af24e3349a94af2a8d0f75c622d4a282b355450b674e40c9e32b3f2791"],
     );
 }

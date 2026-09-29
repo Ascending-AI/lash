@@ -50,6 +50,7 @@ pub(crate) fn test_config_with_protocol_turn_options(
     let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> =
         Arc::new(RlmDriver::default());
     TurnMachineConfig {
+        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
         sync_execution_environment: true,

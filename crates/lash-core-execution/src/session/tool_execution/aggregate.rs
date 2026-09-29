@@ -183,14 +183,10 @@ impl RuntimeExecutionContext<'_> {
         children.extend(
             self.tool_child_leaves(&batch_id, entries)
                 .into_iter()
-                .map(|mut leaf| {
-                    // A leaf is keyed by its first-appearance index under the
-                    // aggregate's command, never by its call id or its position
-                    // among the prepared tool calls.
-                    leaf.call.replay_suffix =
-                        crate::CommandReplayKey::child_suffix(leaf.input_index);
-                    (leaf.input_index, PreparedGroupChild::Tool(Box::new(leaf)))
-                }),
+                // A leaf's attempts key under its `ToolCallId`, which the
+                // language runtime derived from the leaf's first-appearance
+                // index under the aggregate's command.
+                .map(|leaf| (leaf.input_index, PreparedGroupChild::Tool(Box::new(leaf)))),
         );
         // Group positions follow leaf order, so a replay admits every child at
         // the position it had.

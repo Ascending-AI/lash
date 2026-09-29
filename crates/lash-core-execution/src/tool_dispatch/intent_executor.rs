@@ -6,7 +6,7 @@ use super::ToolDispatchContext;
 
 pub async fn execute_final_tool_intents(
     context: &ToolDispatchContext<'_>,
-    tool_call_id: Option<&str>,
+    tool_call_id: &lash_sansio::ToolCallId,
     intents: &crate::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
@@ -14,7 +14,7 @@ pub async fn execute_final_tool_intents(
     if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V3 {
         return Ok(Vec::new());
     }
-    if let Some(refusal) = admit_batch(&context.session_id, tool_call_id, intents) {
+    if let Some(refusal) = admit_batch(&context.session_id, intents) {
         return Ok(refuse_all(
             context,
             &execution_scope_id,
@@ -221,16 +221,12 @@ pub(crate) fn declared_start_fault(
 
 fn admit_batch(
     session_id: &SessionId,
-    tool_call_id: Option<&str>,
     intents: &crate::ToolIntents,
 ) -> Option<crate::ToolIntentRefusalReason> {
     if intents.protocol_version != crate::TOOL_INTENT_PROTOCOL_V3 {
         return Some(crate::ToolIntentRefusalReason::UnsupportedProtocolVersion {
             recorded: intents.protocol_version,
         });
-    }
-    if tool_call_id.is_none() {
-        return Some(crate::ToolIntentRefusalReason::MissingToolCallId);
     }
     if intents.intents.len() > crate::TOOL_INTENT_MAX_COUNT {
         return Some(crate::ToolIntentRefusalReason::CountBudgetExceeded {
@@ -273,7 +269,7 @@ fn admit_batch(
 fn refuse_all(
     context: &ToolDispatchContext<'_>,
     execution_scope_id: &str,
-    tool_call_id: Option<&str>,
+    tool_call_id: &lash_sansio::ToolCallId,
     intents: &crate::ToolIntents,
     refusal: crate::ToolIntentRefusalReason,
 ) -> Vec<crate::ToolIntentExecutionOutcome> {
@@ -283,7 +279,7 @@ fn refuse_all(
             "tool_intent.execute",
             session_id = %context.session_id,
             execution_scope_id,
-            tool_call_id = tool_call_id.unwrap_or("<missing>"),
+            tool_call_id = %tool_call_id,
             intent_index = tracing::field::Empty,
             intent_kind = "<batch>",
             replay_key = "<unavailable>",
@@ -308,7 +304,7 @@ fn refuse_all(
                 "tool_intent.execute",
                 session_id = %context.session_id,
                 execution_scope_id,
-                tool_call_id = tool_call_id.unwrap_or("<missing>"),
+                tool_call_id = %tool_call_id,
                 intent_index = index,
                 intent_kind = intent.kind().as_str(),
                 replay_key = identity.as_ref().map_or("<unavailable>", |identity| identity.replay_key.as_str()),
@@ -322,16 +318,18 @@ fn refuse_all(
 fn derive_identity(
     context: &ToolDispatchContext<'_>,
     execution_scope_id: &str,
-    tool_call_id: Option<&str>,
+    tool_call_id: &lash_sansio::ToolCallId,
     intent_index: usize,
 ) -> Result<crate::ToolIntentIdentity, crate::ToolIntentRefusalReason> {
-    crate::derive_tool_intent_identity_under(
+    let intent_index = u32::try_from(intent_index)
+        .map_err(|_| crate::ToolIntentRefusalReason::IntentIndexOverflow)?;
+    Ok(crate::derive_tool_intent_identity_under(
         &context.session_id,
         execution_scope_id,
         tool_call_id,
         intent_index,
         context.parent_invocation.as_ref(),
-    )
+    ))
 }
 
 fn refused(
@@ -886,7 +884,7 @@ mod tests {
                 )],
             };
             assert_eq!(
-                admit_batch(&SessionId::from("session"), Some("call"), &intents),
+                admit_batch(&SessionId::from("session"), &intents),
                 Some(crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded })
             );
         }
@@ -905,7 +903,7 @@ mod tests {
                 .collect(),
         );
         assert_eq!(
-            admit_batch(&SessionId::from("session"), Some("call"), &intents),
+            admit_batch(&SessionId::from("session"), &intents),
             Some(crate::ToolIntentRefusalReason::CountBudgetExceeded {
                 actual: 33,
                 maximum: 32,
@@ -926,7 +924,7 @@ mod tests {
                 .collect(),
         );
         assert_eq!(
-            admit_batch(&SessionId::from("session"), Some("call"), &intents),
+            admit_batch(&SessionId::from("session"), &intents),
             Some(crate::ToolIntentRefusalReason::PerKindBudgetExceeded {
                 kind: crate::ToolIntentKind::SignalProcess,
                 actual: 17,
@@ -942,7 +940,7 @@ mod tests {
             serde_json::json!({"payload": "x".repeat(crate::TOOL_INTENT_MAX_CANONICAL_BYTES)}),
         )]);
         assert!(matches!(
-            admit_batch(&SessionId::from("session"), Some("call"), &intents),
+            admit_batch(&SessionId::from("session"), &intents),
             Some(
                 crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
                     maximum: crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
@@ -962,7 +960,7 @@ mod tests {
             ),
         ]);
         assert_eq!(
-            admit_batch(&SessionId::from("session"), Some("call"), &intents),
+            admit_batch(&SessionId::from("session"), &intents),
             Some(crate::ToolIntentRefusalReason::SessionMismatch {
                 expected: "session".to_string(),
                 recorded: "other-session".to_string(),
@@ -976,7 +974,7 @@ mod tests {
             identity: crate::ToolIntentIdentity {
                 session_id: SessionId::from("session"),
                 execution_scope_id: "turn".to_string(),
-                tool_call_id: "call".to_string(),
+                tool_call_id: crate::ToolCallId::fixture("call"),
                 intent_index: 4,
                 replay_key: "tool-intent-v1-literal".to_string(),
                 minting_emission_replay_key: None,

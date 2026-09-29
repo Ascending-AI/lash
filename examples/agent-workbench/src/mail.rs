@@ -111,7 +111,7 @@ pub(crate) struct AccountSummary {
 #[derive(Clone, Default)]
 pub(crate) struct MailWorld {
     inner: Arc<RwLock<Vec<Account>>>,
-    sent_by_replay_key: Arc<Mutex<BTreeMap<String, DeliveredMail>>>,
+    sent_by_call_id: Arc<Mutex<BTreeMap<String, DeliveredMail>>>,
 }
 
 impl MailWorld {
@@ -151,7 +151,7 @@ impl MailWorld {
 
     pub(crate) fn clear(&self) {
         self.inner.write_recover().clear();
-        self.sent_by_replay_key.lock_recover().clear();
+        self.sent_by_call_id.lock_recover().clear();
     }
 
     pub(crate) fn remove_account(&self, slug: &str) -> Result<(), String> {
@@ -224,16 +224,16 @@ impl MailWorld {
     /// according to that store's retention policy.
     fn op_send_once(
         &self,
-        replay_key: &str,
+        call_id: &str,
         slug: &str,
         args: &Value,
     ) -> Result<DeliveredMail, String> {
-        let mut sent = self.sent_by_replay_key.lock_recover();
-        if let Some(delivered) = sent.get(replay_key) {
+        let mut sent = self.sent_by_call_id.lock_recover();
+        if let Some(delivered) = sent.get(call_id) {
             return Ok(delivered.clone());
         }
         let delivered = self.op_send(slug, args)?;
-        sent.insert(replay_key.to_string(), delivered.clone());
+        sent.insert(call_id.to_string(), delivered.clone());
         Ok(delivered)
     }
 
@@ -243,19 +243,19 @@ impl MailWorld {
     /// the intent executor emits after that outcome commits.
     pub(crate) fn send_with_trigger(
         &self,
-        replay_key: &str,
+        call_id: &str,
         session_id: &SessionId,
         slug: &str,
         args: &Value,
     ) -> Result<(Value, ToolIntent), String> {
-        let delivered = self.op_send_once(replay_key, slug, args)?;
+        let delivered = self.op_send_once(call_id, slug, args)?;
         let payload = serde_json::to_value(&delivered.delivery).map_err(|err| err.to_string())?;
         let source_key =
             empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE).map_err(|err| err.to_string())?;
         // Both halves of this key are stable under redrive: the tool-call
         // replay key and the memoized message id. The trigger store therefore
         // ingests one occurrence however often the declaration is re-executed.
-        let idempotency_key = format!("{replay_key}:mail.received:{}", delivered.message.id);
+        let idempotency_key = format!("{call_id}:mail.received:{}", delivered.message.id);
         let intent = ToolIntent::EmitTrigger(EmitTriggerIntent {
             session_id: SessionId::from(session_id.to_string()),
             request: TriggerOccurrenceRequest::new(
@@ -478,11 +478,10 @@ impl ToolProvider for MockMailProvider {
                 Err(message) => ToolOutcome::err_fmt(message).into(),
             };
         }
-        let Some(replay_key) = call.context.replay_key() else {
-            return ToolOutcome::err_fmt("mail send requires a replay key").into();
-        };
+        // The call's `ToolCallId` is its idempotency key: the same across a
+        // crash replay and a reported-failure retry.
         match self.world.send_with_trigger(
-            replay_key,
+            call.context.call_id().as_str(),
             &SessionId::from(call.context.session_id()),
             &slug,
             call.args,
@@ -547,44 +546,6 @@ mod tests {
             .op_delete("work", &json!({ "id": id }))
             .expect("delete");
         assert_eq!(world.account_summaries()[0].total, 0);
-    }
-
-    /// The route that made the partial effect possible is gone. `send` used to
-    /// run on the legacy signature, which commits the row and then emits, so a
-    /// failure in between left a durable delivery whose `mail.received`
-    /// occurrence never happened and whose concierge never ran. The single
-    /// execution route pairs the row with its declaration; a call without a
-    /// replay key refuses instead of committing half.
-    #[tokio::test]
-    async fn send_without_a_replay_key_refuses_before_committing() {
-        let world = MailWorld::new();
-        world.add_account("Work").expect("add work");
-        let provider = MockMailProvider::new(world.clone());
-        let args = json!({ "title": "Contract", "text": "Please review." });
-        let manifest = provider
-            .resolve_manifest("inbox__work__send")
-            .expect("work send manifest resolves");
-
-        let refused = provider
-            .execute(ToolCall::new(
-                &manifest,
-                &args,
-                &lash::testing::mock_attempt_context(),
-            ))
-            .await;
-        let ToolAttemptOutcome::Done { result, .. } = refused else {
-            panic!("a refused send still settles inline")
-        };
-        let message = serde_json::to_string(&result.into_output()).expect("serialize the refusal");
-        assert!(
-            message.contains("requires a replay key"),
-            "send without a replay key must refuse rather than commit the row: {message}"
-        );
-        assert_eq!(
-            world.inbox("work").expect("work inbox").len(),
-            0,
-            "a refused send commits nothing"
-        );
     }
 
     #[test]

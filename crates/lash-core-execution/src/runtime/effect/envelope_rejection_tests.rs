@@ -32,19 +32,20 @@ fn process_transfer_v1_identity_golden() {
 }
 
 fn prepared_call(call_id: &str) -> crate::PreparedToolCall {
-    crate::PreparedToolCall::from_parts(
-        call_id,
-        "tool:test",
-        "test",
-        serde_json::json!({}),
-        None,
-        serde_json::Value::Null,
-    )
+    crate::PreparedToolCall {
+        call_id: crate::ToolCallId::fixture(&call_id),
+        provider_call_id: None,
+        tool_id: "tool:test".into(),
+        tool_name: "test".into(),
+        args: serde_json::json!({}),
+        replay: None,
+        prepared_payload: serde_json::Value::Null,
+    }
 }
 
 fn attempt(call_id: &str, attempt: u32, max_attempts: u32) -> RuntimeEffectCommand {
     RuntimeEffectCommand::ToolAttempt {
-        call: prepared_call(call_id),
+        call: Box::new(prepared_call(call_id)),
         execution_grant: None,
         attempt,
         max_attempts,
@@ -138,15 +139,6 @@ fn session_node_identity_is_structural_and_missing_identity_is_refused() {
         "subject": {"type": "session_node", "node_id": "node"}
     });
     assert!(serde_json::from_value::<RuntimeInvocation>(missing).is_err());
-}
-
-#[test]
-fn rejects_empty_tool_attempt_call_id() {
-    assert_rejected(
-        invocation(RuntimeEffectKind::ToolAttempt),
-        attempt(" ", 1, 1),
-        "runtime_effect_tool_attempt_call_id",
-    );
 }
 
 #[test]

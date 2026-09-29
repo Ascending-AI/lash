@@ -282,18 +282,12 @@ fn validate_effect_command(
     command: &RuntimeEffectCommand,
 ) -> Result<(), RuntimeEffectControllerError> {
     if let RuntimeEffectCommand::ToolAttempt {
-        call,
+        call: _,
         execution_grant: _,
         attempt,
         max_attempts,
     } = command
     {
-        if call.call_id.trim().is_empty() {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectToolAttemptCallId,
-                "runtime effect tool attempt requires a non-empty call id",
-            ));
-        }
         if *attempt == 0 || *max_attempts == 0 || *attempt > *max_attempts {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectToolAttemptIndex,
@@ -302,14 +296,6 @@ fn validate_effect_command(
                 ),
             ));
         }
-    }
-    if let RuntimeEffectCommand::PresentToolResult { call_id, .. } = command
-        && call_id.trim().is_empty()
-    {
-        return Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectToolAttemptCallId,
-            "runtime effect tool presentation requires a non-empty call id",
-        ));
     }
     if let RuntimeEffectCommand::ToolInvocation { request } = command {
         request.validate()?;
@@ -367,7 +353,7 @@ pub enum RuntimeEffectCommand {
         usage_source: String,
     },
     ToolAttempt {
-        call: crate::PreparedToolCall,
+        call: Box<crate::PreparedToolCall>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         execution_grant: Option<Box<crate::ToolExecutionGrant>>,
         attempt: u32,
@@ -408,7 +394,7 @@ pub enum RuntimeEffectCommand {
     /// live duration from the local executor, and the outcome they fold to is
     /// what replay serves.
     PresentToolResult {
-        call_id: String,
+        call_id: crate::ToolCallId,
         tool_id: crate::ToolId,
         tool_name: String,
         render: Option<crate::RecordedRender>,
@@ -911,7 +897,7 @@ pub struct CheckpointAdmittedSet {
 /// §3.4): the process cancel a cancelled or timed-out wait owes is journaled
 /// beneath `{call id}:cancel-work` under the call's lineage, so every redrive
 /// re-issues the same command.
-pub fn tool_cancel_work_replay_suffix(call_id: &str) -> String {
+pub fn tool_cancel_work_replay_suffix(call_id: &crate::ToolCallId) -> String {
     format!("{call_id}:cancel-work")
 }
 

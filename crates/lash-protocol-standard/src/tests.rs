@@ -97,10 +97,14 @@ fn mixed_response_sequences_reassemble_in_arrival_order() {
                 expected.push((kind, marker));
             }
 
-            let response = collect_standard_response(&LlmResponse {
-                parts: input,
-                ..LlmResponse::default()
-            });
+            let response = collect_standard_response(
+                &LlmResponse {
+                    parts: input,
+                    ..LlmResponse::default()
+                },
+                &lash_core::sansio::ModelToolCalls::fixture()
+                    .response(0, lash_core::sansio::EffectId(0)),
+            );
             let (actual, calls) = reassemble_standard_response("assistant", response.parts);
 
             assert_eq!(actual.len(), expected.len(), "sequence {encoded} len {len}");

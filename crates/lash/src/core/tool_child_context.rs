@@ -158,7 +158,7 @@ impl ToolChildContextSource for CoreToolChildContextSource {
         // gets the session's own.
         if let lash_core::EffectOpener::Turn { session_id, .. } = &request.scope.opener
             && let Some(turn_id) = request
-                .attempt_identity
+                .lineage
                 .parent_invocation()
                 .and_then(|parent| parent.attribution.turn_id.clone())
             && let Some(root) = request.scope.admitted_scope.scope().logical_root()

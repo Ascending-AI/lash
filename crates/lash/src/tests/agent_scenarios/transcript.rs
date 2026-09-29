@@ -131,27 +131,19 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &SessionId) -> Optio
             entry
         }
         lash_core::TurnEvent::ToolCallStarted { call_id, name, .. } => {
-            let mut entry =
-                Entry::new(Kind::Tool, actor(), "tool.start").attr(Attr::text("name", name));
-            if let Some(call_id) = call_id {
-                entry = entry.attr(Attr::id("call", IdKind::Call, call_id));
-            }
-            entry
+            Entry::new(Kind::Tool, actor(), "tool.start")
+                .attr(Attr::text("name", name))
+                .attr(Attr::id("call", IdKind::Call, call_id.as_str()))
         }
         lash_core::TurnEvent::ToolCallCompleted {
             call_id,
             name,
             output,
             ..
-        } => {
-            let mut entry = Entry::new(Kind::Tool, actor(), "tool.result")
-                .attr(Attr::text("name", name))
-                .attr(Attr::debug_token("outcome", &output.status()));
-            if let Some(call_id) = call_id {
-                entry = entry.attr(Attr::id("call", IdKind::Call, call_id));
-            }
-            entry
-        }
+        } => Entry::new(Kind::Tool, actor(), "tool.result")
+            .attr(Attr::text("name", name))
+            .attr(Attr::debug_token("outcome", &output.status()))
+            .attr(Attr::id("call", IdKind::Call, call_id.as_str())),
         lash_core::TurnEvent::ToolIntentOutcome { call_id, outcome } => {
             let status = match outcome {
                 lash_core::ToolIntentExecutionOutcome::Executed { .. } => "executed",
@@ -159,7 +151,7 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &SessionId) -> Optio
                 lash_core::ToolIntentExecutionOutcome::ProtocolRefused { .. } => "protocol_refused",
             };
             Entry::new(Kind::Tool, actor(), "tool.intent")
-                .attr(Attr::id("call", IdKind::Call, call_id))
+                .attr(Attr::id("call", IdKind::Call, call_id.as_str()))
                 .attr(Attr::text(
                     "kind",
                     outcome.kind().map_or("batch", |kind| kind.as_str()),

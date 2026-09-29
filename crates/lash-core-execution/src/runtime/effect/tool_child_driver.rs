@@ -897,7 +897,7 @@ pub(crate) fn rebind_child_dispatch<'run>(
         child.process_originator = None;
     }
     // Lineage is recorded, not the opener's current one.
-    child.parent_invocation = request.attempt_identity.parent_invocation().cloned();
+    child.parent_invocation = request.lineage.parent_invocation().cloned();
     // Observation keying is likewise call-scoped: the child's own call sites
     // install their keys, so the opener's is cleared here (Fresh).
     child.observation_call_key = None;
@@ -926,10 +926,10 @@ pub(crate) fn rebind_child_dispatch<'run>(
         &execution_env_spec,
         crate::runtime::RuntimeEffectControllerHandle::borrowed(controller),
         request
-            .attempt_identity
+            .lineage
             .parent_invocation()
             .and_then(|parent| parent.attribution.turn_id.clone()),
-        request.attempt_identity.parent_invocation().cloned(),
+        request.lineage.parent_invocation().cloned(),
         usage_ledger.clone(),
     )?;
     Ok(child)
@@ -1088,7 +1088,7 @@ async fn run_tool_child<'run>(
     let served_only =
         admitted_tool_drift(live.dispatch().as_ref(), request)?.map(|drift| {
             Arc::new(crate::CommandJournalGuard::open().served_only(
-                crate::ServedOnlyRange::every_key(drift.refusal(&request.call.call_id)),
+                crate::ServedOnlyRange::every_key(drift.refusal(&request.call)),
             ))
         });
     let controller = match &served_only {
@@ -1312,7 +1312,7 @@ async fn drive(
         request.admission.grant().cloned().map(Box::new),
         request.admission.retry_policy(),
         Some(group_child.clone()),
-        request.attempt_identity.clone(),
+        request.lineage.clone(),
         &turn_cancel_wait,
         None::<ToolChildExecutionTraceHook>,
         move |completion_key| {
@@ -1370,10 +1370,9 @@ fn child_tool_context<'run>(
     request: &ToolChildRequest,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
 ) -> crate::ToolContext<'run> {
-    let mut builder = crate::ToolContext::from_dispatch(Arc::clone(dispatch))
-        .prepared_call(&request.call)
+    let mut builder = crate::ToolContext::from_dispatch(Arc::clone(dispatch), &request.call)
         .cancellation_token(Some(turn_cancel_wait.cancellation().clone()))
-        .parent_invocation(request.attempt_identity.parent_invocation().cloned());
+        .parent_invocation(request.lineage.parent_invocation().cloned());
     if let Some(process_id) = request.enclosing_process.as_ref() {
         builder = builder.enclosing_process(Some(process_id.clone()));
     }
@@ -1409,7 +1408,7 @@ fn child_turn_cancel_scope(
     let scoped = dispatch.effect_controller.scoped();
     let admitted = scoped.execution_scope();
     let physical_turn = request
-        .attempt_identity
+        .lineage
         .parent_invocation()
         .and_then(|parent| parent.attribution.turn_id.as_ref());
     match (admitted, physical_turn) {
@@ -1431,7 +1430,7 @@ async fn await_child_completion(
 ) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
     await_journaled_tool_completion(
         dispatch,
-        request.attempt_identity.parent_invocation(),
+        request.lineage.parent_invocation(),
         &request.call.call_id,
         pending,
         turn_cancel_wait,
@@ -1453,7 +1452,7 @@ async fn await_child_completion(
 async fn await_journaled_tool_completion(
     dispatch: &ToolDispatchContext<'_>,
     parent_invocation: Option<&crate::RuntimeInvocation>,
-    call_id: &str,
+    call_id: &crate::ToolCallId,
     pending: crate::tool_dispatch::PendingToolDispatchOutcome,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
 ) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
@@ -1538,7 +1537,10 @@ async fn await_journaled_tool_completion(
     let settle_dispatch = dispatch.observation_keyed(settle_key);
     let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
         &settle_dispatch,
-        call_id,
+        &crate::tool_dispatch::ToolCallIds {
+            call_id: pending.call_id.clone(),
+            provider_call_id: pending.provider_call_id.clone(),
+        },
         pending.tool_name,
         pending.args,
         resolution,
@@ -1573,7 +1575,7 @@ async fn await_journaled_tool_completion(
 fn journaled_await_invocation(
     dispatch: &ToolDispatchContext<'_>,
     parent: &crate::RuntimeInvocation,
-    call_id: &str,
+    call_id: &crate::ToolCallId,
 ) -> crate::RuntimeEffectInvocation {
     let suffix = format!("{call_id}:await");
     let parent_effect_id = parent.effect_id().unwrap_or("tool").to_string();
@@ -1594,7 +1596,8 @@ fn unarmed_child_outcome(
 ) -> ToolDispatchOutcome {
     ToolDispatchOutcome {
         record: crate::ToolCallRecord {
-            call_id: None,
+            call_id: pending.call_id,
+            provider_call_id: pending.provider_call_id,
             tool: pending.tool_name,
             args: pending.args,
             output: crate::ToolCallOutput::failure(failure),
@@ -1615,7 +1618,8 @@ fn failed_child_outcome(
 ) -> ToolDispatchOutcome {
     ToolDispatchOutcome {
         record: crate::ToolCallRecord {
-            call_id: None,
+            call_id: pending.call_id,
+            provider_call_id: pending.provider_call_id,
             tool: pending.tool_name,
             args: pending.args,
             output: crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
@@ -1652,11 +1656,8 @@ async fn resolve_model_return(
     intent_outcomes: &[crate::ToolIntentExecutionOutcome],
     duration_ms: u64,
 ) -> Result<crate::ModelToolReturn, RuntimeEffectControllerError> {
-    let baseline = crate::ModelToolReturn::from_output(
-        request.call.call_id.clone(),
-        outcome.record.tool.clone(),
-        &outcome.record.output,
-    );
+    let baseline =
+        crate::ModelToolReturn::from_output(outcome.record.tool.clone(), &outcome.record.output);
     let settlement = Arc::new(ToolSettlement::from_dispatch(outcome, baseline));
     // The child's presentation boundary is a journaled `PresentToolResult`
     // effect under the child's own bound controller, so the folded return is

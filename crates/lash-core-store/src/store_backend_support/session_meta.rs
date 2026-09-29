@@ -61,7 +61,7 @@ impl CausalColumns {
             }) => {
                 columns.kind = Some("tool_call".to_string());
                 columns.session_id = Some(session_id.clone());
-                columns.call_id = Some(call_id.clone());
+                columns.call_id = Some(call_id.to_string());
             }
             Some(CausalRef::Process { process_id }) => {
                 columns.kind = Some("process".to_string());
@@ -201,7 +201,12 @@ impl CausalColumns {
             }
             "tool_call" => CausalRef::ToolCall {
                 session_id: codec.required(self.session_id, "caused_by_session_id")?,
-                call_id: codec.required(self.call_id, "caused_by_call_id")?,
+                call_id: {
+                    let call_id = codec.required(self.call_id, "caused_by_call_id")?;
+                    lash_sansio::ToolCallId::parse(&call_id).map_err(|error| {
+                        codec.corrupt(format!("invalid caused_by_call_id: {error}"))
+                    })?
+                },
             },
             "process" => CausalRef::Process {
                 process_id: codec.required(self.process_id, "caused_by_process_id")?,

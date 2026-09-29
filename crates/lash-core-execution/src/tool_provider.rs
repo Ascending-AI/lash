@@ -142,7 +142,7 @@ pub struct AttemptContext<'run> {
     parent_invocation: Option<Box<crate::RuntimeInvocation>>,
     prepared_payload: serde_json::Value,
     tool_execution_binding: serde_json::Value,
-    tool_call_id: Option<String>,
+    call_id: lash_sansio::ToolCallId,
     attempt_number: u32,
     max_attempts: u32,
     /// The provenance a child this body declares inherits when the attempt is
@@ -155,10 +155,8 @@ pub struct AttemptContext<'run> {
     /// owner, so a declaration carrying it publishes nothing at realization.
     /// `None` outside a process execution, where the spec must be published.
     inherited_process_execution_env_ref: Option<crate::ProcessExecutionEnvRef>,
-    replay_key: Option<String>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
-    completion_key: Option<crate::AwaitEventKey>,
-    completion_support: AttemptCompletionSupport,
+    completion: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     tool_execution_route: ToolExecutionRoute,
     /// Where this attempt's progress chunks are persisted (ADR 0114 §2.2);
@@ -175,7 +173,7 @@ impl<'run> AttemptContext<'run> {
     pub fn progress(&self) -> ToolProgressSink {
         ToolProgressSink {
             reporter: self.progress_reporter.clone(),
-            call_id: self.tool_call_id.clone(),
+            call_id: self.call_id.clone(),
         }
     }
 
@@ -202,8 +200,7 @@ impl<'run> AttemptContext<'run> {
     pub(crate) fn from_tool_context(
         context: &ToolContext<'run>,
         execution_scope_id: String,
-        completion_key: Option<crate::AwaitEventKey>,
-        completion_support: AttemptCompletionSupport,
+        completion: AttemptCompletionSupport,
     ) -> Self {
         let phase_probe = context
             .runtime_execution_context
@@ -229,7 +226,7 @@ impl<'run> AttemptContext<'run> {
             parent_invocation: context.parent_invocation.clone().map(Box::new),
             prepared_payload: context.prepared_payload.clone(),
             tool_execution_binding: context.tool_execution_binding.clone(),
-            tool_call_id: context.tool_call_id.clone(),
+            call_id: context.call_id.clone(),
             attempt_number: context.attempt_number,
             max_attempts: context.max_attempts,
             process_spawn_provenance: context
@@ -241,10 +238,8 @@ impl<'run> AttemptContext<'run> {
                 .runtime_execution_context
                 .as_ref()
                 .and_then(|runtime| runtime.inherited_process_execution_env_ref()),
-            replay_key: context.replay_key.clone(),
             execution_env_spec: context.execution_env_spec.clone(),
-            completion_key,
-            completion_support,
+            completion,
             phase_probe,
             tool_execution_route: context.tool_execution_route.clone(),
             progress_reporter: context.progress_reporter.clone(),
@@ -308,7 +303,7 @@ impl<'run> AttemptContext<'run> {
     pub fn direct_completions(&self) -> ToolDirectCompletionClient<'run> {
         ToolDirectCompletionClient {
             session_id: self.session_id.clone(),
-            tool_call_id: self.tool_call_id.clone(),
+            call_id: self.call_id.clone(),
             direct_completions: self.direct_completions.clone(),
             parent_invocation: self.parent_invocation.as_deref().cloned(),
         }
@@ -321,9 +316,19 @@ impl<'run> AttemptContext<'run> {
     pub fn tool_execution_binding(&self) -> &serde_json::Value {
         &self.tool_execution_binding
     }
-    /// Integrator class 3 stable provider call id used to derive intent identities.
-    pub fn tool_call_id(&self) -> Option<&str> {
-        self.tool_call_id.as_deref()
+    /// Lash's identity for this logical call (ADR 0117): the key a tool
+    /// keys its idempotency on.
+    ///
+    /// Tools are at-least-once: a crash between a tool's effect and the
+    /// durable record of its outcome runs the call again, and a reported
+    /// failure is retried. Every run of one logical call — a crash replay, a
+    /// retry after a reported failure — sees this same id; every other call
+    /// sees a different one, even when the model's provider repeats its own
+    /// call id. A service the tool calls deduplicates on it. A tool that
+    /// wants a fresh key per attempt combines it with
+    /// [`attempt_number`](Self::attempt_number) itself.
+    pub fn call_id(&self) -> &lash_sansio::ToolCallId {
+        &self.call_id
     }
     /// Integrator class 3 one-based retry attempt number.
     pub fn attempt_number(&self) -> u32 {
@@ -346,10 +351,6 @@ impl<'run> AttemptContext<'run> {
     /// own originator.
     pub fn process_spawn_provenance(&self) -> Option<&crate::ProcessSpawnProvenance> {
         self.process_spawn_provenance.as_ref()
-    }
-    /// Integrator class 3 durable attempt replay key when supplied by the host.
-    pub fn replay_key(&self) -> Option<&str> {
-        self.replay_key.as_deref()
     }
     /// This accessor is part of ADR 0051's protocol and process-engine
     /// implementor class: a leaf [`ToolProvider`] declaring `StartProcess`
@@ -377,25 +378,24 @@ impl<'run> AttemptContext<'run> {
     pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
         crate::runtime::RuntimeNamedPhase::begin(self.phase_probe.clone(), phase)
     }
-    /// Integrator class 3 durable completion key or typed host-capability refusal.
+    /// The durable key this call's deferred completion resolves, derived
+    /// from its [`call_id`](Self::call_id) within its execution scope.
+    ///
+    /// # Errors
+    ///
+    /// A typed refusal when the capability is missing: the tool did not
+    /// declare that its attempt may defer, or the host's controller issues
+    /// no durable await-event keys.
     pub fn completion_key(&self) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-        self.completion_support.ensure_available()?;
-        self.completion_key.clone().ok_or_else(|| {
-            crate::RuntimeError::new(
-                crate::RuntimeErrorCode::ToolCompletionKeyMissingCallId,
-                "completion keys require a prepared tool call id",
-            )
-        })
+        self.completion.key()
     }
-    /// Integrator class 3 canonical identity for one declared intent index.
-    pub fn intent_identity(
-        &self,
-        intent_index: usize,
-    ) -> Result<crate::ToolIntentIdentity, crate::ToolIntentRefusalReason> {
+    /// The identity of the intent this attempt declares at `intent_index`,
+    /// derived from its [`call_id`](Self::call_id).
+    pub fn intent_identity(&self, intent_index: u32) -> crate::ToolIntentIdentity {
         crate::derive_tool_intent_identity_under(
             &self.session_id,
             &self.execution_scope_id,
-            self.tool_call_id.as_deref(),
+            &self.call_id,
             intent_index,
             self.parent_invocation.as_deref(),
         )
@@ -452,11 +452,10 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) prepared_payload: serde_json::Value,
     pub(crate) tool_execution_binding: serde_json::Value,
     tool_execution_route: ToolExecutionRoute,
-    /// The id of the in-flight tool call that is invoking this tool.
-    pub(crate) tool_call_id: Option<String>,
+    /// The identity of the admitted call this context runs.
+    pub(crate) call_id: lash_sansio::ToolCallId,
     pub(crate) attempt_number: u32,
     pub(crate) max_attempts: u32,
-    pub(crate) replay_key: Option<String>,
     pub(crate) completion: ToolCompletionState,
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
@@ -474,7 +473,7 @@ pub trait ToolProgressReporter: Send + Sync {
     /// Persist and then publish one chunk of call `call_id`'s output.
     async fn report(
         &self,
-        call_id: &str,
+        call_id: &lash_sansio::ToolCallId,
         chunk: lash_sansio::ToolOutputChunk,
     ) -> Result<(), ProgressRefused>;
 }
@@ -485,7 +484,7 @@ pub trait ToolProgressReporter: Send + Sync {
 #[derive(Clone)]
 pub struct ToolProgressSink {
     reporter: Option<Arc<dyn ToolProgressReporter>>,
-    call_id: Option<String>,
+    call_id: lash_sansio::ToolCallId,
 }
 
 impl ToolProgressSink {
@@ -494,9 +493,9 @@ impl ToolProgressSink {
     /// backpressure. After the fence it returns [`ProgressRefused::Fenced`],
     /// and the tool should stop.
     pub async fn report(&self, chunk: lash_sansio::ToolOutputChunk) -> Result<(), ProgressRefused> {
-        match (&self.reporter, &self.call_id) {
-            (Some(reporter), Some(call_id)) => reporter.report(call_id, chunk).await,
-            _ => Ok(()),
+        match &self.reporter {
+            Some(reporter) => reporter.report(&self.call_id, chunk).await,
+            None => Ok(()),
         }
     }
 }
@@ -521,7 +520,7 @@ pub trait ToolAttemptCaptureWriter: ToolProgressReporter {
     /// retried, and a refusal ends the step typed.
     async fn settled(
         &self,
-        call_id: &str,
+        call_id: &lash_sansio::ToolCallId,
         output: &crate::ToolCallOutput,
     ) -> Result<(), crate::RuntimeEffectControllerError>;
 
@@ -535,13 +534,14 @@ pub trait ToolAttemptCaptureWriter: ToolProgressReporter {
 #[async_trait::async_trait]
 pub trait TurnToolCapture: Send + Sync {
     /// Open the writer of one tool attempt, keyed by its invocation's
-    /// replay key, and persist that the attempt started for `call_id`. Each
-    /// persisted progress chunk publishes on `observer`: the stream of the
-    /// dispatch the attempt runs under.
+    /// replay key, and persist that the attempt started for `call`: its
+    /// `ToolCallId`, and the provider correlation that pairs it with the
+    /// streamed call it runs. Each persisted progress chunk publishes on
+    /// `observer`: the stream of the dispatch the attempt runs under.
     async fn open_attempt(
         &self,
         invocation: &str,
-        call_id: &str,
+        call: &crate::tool_dispatch::ToolCallIds,
         observer: Arc<dyn crate::engine::ObservationSink>,
     ) -> Result<Arc<dyn ToolAttemptCaptureWriter>, crate::RuntimeEffectControllerError>;
 }
@@ -663,7 +663,7 @@ pub(crate) struct ToolContextBuilder<'run> {
     prepared_payload: serde_json::Value,
     tool_execution_binding: serde_json::Value,
     tool_execution_route: ToolExecutionRoute,
-    tool_call_id: Option<String>,
+    call_id: lash_sansio::ToolCallId,
     completion: ToolCompletionState,
     parent_invocation: Option<crate::RuntimeInvocation>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
@@ -672,8 +672,10 @@ pub(crate) struct ToolContextBuilder<'run> {
 }
 
 impl<'run> ToolContextBuilder<'run> {
+    /// The context of the admitted `call`, dispatched under `dispatch`.
     pub(crate) fn from_dispatch(
         dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
+        call: &PreparedToolCall,
     ) -> Self {
         Self {
             session_id: dispatch.session_id.clone(),
@@ -690,10 +692,10 @@ impl<'run> ToolContextBuilder<'run> {
             process_events: None,
             attachment_store: Arc::clone(&dispatch.attachment_store),
             direct_completions: dispatch.direct_completions.clone(),
-            prepared_payload: serde_json::Value::Null,
+            prepared_payload: call.prepared_payload.clone(),
             tool_execution_binding: serde_json::Value::Null,
             tool_execution_route: ToolExecutionRoute::Catalog,
-            tool_call_id: None,
+            call_id: call.call_id.clone(),
             completion: ToolCompletionState::default(),
             parent_invocation: dispatch.parent_invocation.clone(),
             execution_env_spec: dispatch.execution_env_spec.clone(),
@@ -702,8 +704,10 @@ impl<'run> ToolContextBuilder<'run> {
         }
     }
 
+    /// Runs the test builder's context as the admitted `call`.
+    #[cfg(test)]
     pub(crate) fn prepared_call(mut self, call: &PreparedToolCall) -> Self {
-        self.tool_call_id = Some(call.call_id.clone());
+        self.call_id = call.call_id.clone();
         self.prepared_payload = call.prepared_payload.clone();
         self
     }
@@ -798,10 +802,9 @@ impl<'run> ToolContextBuilder<'run> {
             prepared_payload: self.prepared_payload,
             tool_execution_binding: self.tool_execution_binding,
             tool_execution_route: self.tool_execution_route,
-            tool_call_id: self.tool_call_id,
+            call_id: self.call_id,
             attempt_number: 1,
             max_attempts: 1,
-            replay_key: None,
             completion: self.completion,
             parent_invocation: self.parent_invocation,
             execution_env_spec: self.execution_env_spec,
@@ -860,10 +863,9 @@ impl<'run> ToolContext<'run> {
             prepared_payload: self.prepared_payload.clone(),
             tool_execution_binding: self.tool_execution_binding.clone(),
             tool_execution_route: self.tool_execution_route.clone(),
-            tool_call_id: self.tool_call_id.clone(),
+            call_id: self.call_id.clone(),
             attempt_number: self.attempt_number,
             max_attempts: self.max_attempts,
-            replay_key: self.replay_key.clone(),
             completion: self.completion.clone(),
             parent_invocation: self.parent_invocation.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
@@ -910,7 +912,7 @@ impl<'run> ToolContext<'run> {
             prepared_payload: serde_json::Value::Null,
             tool_execution_binding: serde_json::Value::Null,
             tool_execution_route: ToolExecutionRoute::Catalog,
-            tool_call_id: None,
+            call_id: lash_sansio::ToolCallId::fixture("tool-context"),
             completion: ToolCompletionState::default(),
             parent_invocation: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
@@ -924,12 +926,14 @@ impl<'run> ToolContext<'run> {
 
     pub fn from_dispatch(
         dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
+        call: &PreparedToolCall,
     ) -> ToolContextBuilder<'run> {
-        ToolContextBuilder::from_dispatch(dispatch)
+        ToolContextBuilder::from_dispatch(dispatch, call)
     }
 
     /// Exposes session id to protocol and process-engine implementors while preparing or executing
     /// an authorized tool call.
+    #[cfg(any(test, feature = "testing"))]
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
@@ -957,14 +961,15 @@ impl<'run> ToolContext<'run> {
 
     /// Exposes the process this call executes inside to protocol and process-engine
     /// implementors while preparing or executing an authorized tool call.
+    #[cfg(any(test, feature = "testing"))]
     pub fn enclosing_process(&self) -> Option<&ProcessId> {
         self.enclosing_process.as_ref()
     }
 
-    /// Exposes tool call id to protocol and process-engine implementors while preparing or
-    /// executing an authorized tool call.
-    pub fn tool_call_id(&self) -> Option<&str> {
-        self.tool_call_id.as_deref()
+    /// The identity of the admitted call this context runs.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn call_id(&self) -> &lash_sansio::ToolCallId {
+        &self.call_id
     }
 
     /// Lends the call the stop of the recorded step body it runs in (ADR 0105
@@ -1016,18 +1021,9 @@ impl<'run> ToolContext<'run> {
         self
     }
 
-    pub(crate) fn with_retry_context(
-        mut self,
-        tool_name: &str,
-        attempt_number: u32,
-        max_attempts: u32,
-    ) -> Self {
+    pub(crate) fn with_attempt(mut self, attempt_number: u32, max_attempts: u32) -> Self {
         self.attempt_number = attempt_number.max(1);
         self.max_attempts = max_attempts.max(1);
-        self.replay_key = self
-            .tool_call_id
-            .as_ref()
-            .map(|call_id| format!("lash-tool:{}:{call_id}:{tool_name}", self.session_id));
         self
     }
 
@@ -1061,15 +1057,18 @@ impl<'run> ToolContext<'run> {
 
 /// Runtime-prepared executable tool call.
 ///
-/// The raw model/provider identity remains visible, but any argument rewrites
-/// and provider-owned context projections are frozen before the call crosses a
-/// runtime effect or process boundary.
+/// `call_id` is the call's admitted identity (ADR 0117): the prepare phase
+/// cannot change it. The provider's own id stays beside it as correlation,
+/// and any argument rewrites and provider-owned context projections are
+/// frozen before the call crosses a runtime effect or process boundary.
 // `PartialEq` but not `Eq`: `args` and `prepared_payload` are `serde_json::Value`.
 // Comparison exists so a retained tool-child request can prove it round-tripped
 // its input unchanged (ADR 0099 §3).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PreparedToolCall {
-    pub call_id: String,
+    pub call_id: lash_sansio::ToolCallId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_id: Option<String>,
     pub tool_id: ToolId,
     pub tool_name: String,
     pub args: serde_json::Value,
@@ -1085,6 +1084,7 @@ impl PreparedToolCall {
     pub fn identity(tool_id: ToolId, call: crate::sansio::PendingToolCall) -> Self {
         Self {
             call_id: call.call_id,
+            provider_call_id: call.provider_call_id,
             tool_id,
             tool_name: call.tool_name,
             args: call.args,
@@ -1093,36 +1093,52 @@ impl PreparedToolCall {
         }
     }
 
-    /// Reconstructs a fully prepared call for protocol and process-engine implementors crossing an
-    /// effect or process boundary, preserving the supplied replay metadata and prepared payload.
-    pub fn from_parts(
-        call_id: impl Into<String>,
-        tool_id: impl Into<ToolId>,
-        tool_name: impl Into<String>,
-        args: serde_json::Value,
-        replay: Option<ProviderReplayMeta>,
-        prepared_payload: serde_json::Value,
-    ) -> Self {
-        Self {
-            call_id: call_id.into(),
-            tool_id: tool_id.into(),
-            tool_name: tool_name.into(),
-            args,
-            replay,
-            prepared_payload,
+    /// Seals `payload` as the call's prepared payload.
+    #[must_use]
+    pub fn with_prepared_payload(mut self, payload: serde_json::Value) -> Self {
+        self.prepared_payload = payload;
+        self
+    }
+}
+
+/// The tool call a `ProcessInput::ToolCall` process runs, as its registrant
+/// supplies it: everything a [`PreparedToolCall`] carries but its identity.
+/// The process's minted id names the call when the process runs it (ADR 0117
+/// §2), so every trigger delivery of one registration, each a process of its
+/// own, runs a call of its own.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProcessToolCall {
+    pub tool_id: ToolId,
+    pub tool_name: String,
+    pub args: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<ProviderReplayMeta>,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub prepared_payload: serde_json::Value,
+}
+
+impl ProcessToolCall {
+    /// The call as the process `process_id` admits it, named by its root.
+    pub fn admitted(&self, process_id: &ProcessId) -> PreparedToolCall {
+        PreparedToolCall {
+            call_id: crate::EffectOpener::process(process_id.clone())
+                .tool_call_admission()
+                .call_id(&[]),
+            provider_call_id: None,
+            tool_id: self.tool_id.clone(),
+            tool_name: self.tool_name.clone(),
+            args: self.args.clone(),
+            replay: self.replay.clone(),
+            prepared_payload: self.prepared_payload.clone(),
         }
     }
 }
 
-/// One ordered child inside a runtime-prepared tool batch.
-///
-/// The call itself carries the executable provider payload. `replay_suffix`
-/// is the deterministic suffix used for child effects such as retry sleeps or
-/// pending completion awaits when the batch is the durable parent.
+/// One ordered child inside a runtime-prepared tool batch. Its attempts are
+/// keyed by the call's own id, under the batch's group.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PreparedToolBatchCall {
     pub call: PreparedToolCall,
-    pub replay_suffix: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_grant: Option<Box<ToolExecutionGrant>>,
 }
@@ -1141,34 +1157,26 @@ impl PreparedToolBatch {
     /// Freezes source-order prepared calls for protocol and process-engine implementors; execution
     /// may be concurrent, but launch and completion projection retain this order.
     pub fn new(batch_id: impl Into<crate::BatchId>, calls: Vec<PreparedToolCall>) -> Self {
-        let batch_id = batch_id.into();
-        let calls = calls
-            .into_iter()
-            .enumerate()
-            .map(|(index, call)| PreparedToolBatchCall {
-                replay_suffix: format!("child:{index}:{}", call.call_id),
-                call,
-                execution_grant: None,
-            })
-            .collect();
-        Self { batch_id, calls }
+        Self::new_with_grants(
+            batch_id,
+            calls.into_iter().map(|call| (call, None)).collect(),
+        )
     }
 
     pub(crate) fn new_with_grants(
         batch_id: impl Into<crate::BatchId>,
         calls: Vec<(PreparedToolCall, Option<ToolExecutionGrant>)>,
     ) -> Self {
-        let batch_id = batch_id.into();
-        let calls = calls
-            .into_iter()
-            .enumerate()
-            .map(|(index, (call, execution_grant))| PreparedToolBatchCall {
-                replay_suffix: format!("child:{index}:{}", call.call_id),
-                call,
-                execution_grant: execution_grant.map(Box::new),
-            })
-            .collect();
-        Self { batch_id, calls }
+        Self {
+            batch_id: batch_id.into(),
+            calls: calls
+                .into_iter()
+                .map(|(call, execution_grant)| PreparedToolBatchCall {
+                    call,
+                    execution_grant: execution_grant.map(Box::new),
+                })
+                .collect(),
+        }
     }
 }
 
@@ -1238,7 +1246,7 @@ pub struct ToolPrepareContext {
     session_id: SessionId,
     sessions: Arc<dyn SessionStateService>,
     turn_context: crate::TurnContext,
-    tool_call_id: Option<String>,
+    call_id: lash_sansio::ToolCallId,
     tool_execution_binding: serde_json::Value,
     tool_execution_route: ToolExecutionRoute,
 }
@@ -1248,14 +1256,14 @@ impl ToolPrepareContext {
         session_id: SessionId,
         sessions: Arc<dyn SessionStateService>,
         turn_context: crate::TurnContext,
-        tool_call_id: Option<String>,
+        call_id: lash_sansio::ToolCallId,
         tool_execution_binding: serde_json::Value,
     ) -> Self {
         Self {
             session_id,
             sessions,
             turn_context,
-            tool_call_id,
+            call_id,
             tool_execution_binding,
             tool_execution_route: ToolExecutionRoute::Catalog,
         }
@@ -1274,8 +1282,9 @@ impl ToolPrepareContext {
         &self.session_id
     }
 
-    pub fn tool_call_id(&self) -> Option<&str> {
-        self.tool_call_id.as_deref()
+    /// The admitted identity of the call being prepared.
+    pub fn call_id(&self) -> &lash_sansio::ToolCallId {
+        &self.call_id
     }
 
     pub fn tool_execution_binding(&self) -> &serde_json::Value {
@@ -1402,14 +1411,15 @@ mod tests {
     #[test]
     fn tool_context_builder_carries_call_payload_and_cancellation_state() {
         let cancellation = tokio_util::sync::CancellationToken::new();
-        let prepared = PreparedToolCall::from_parts(
-            "call-1",
-            "tool:demo_tool",
-            "demo_tool",
-            serde_json::json!({ "input": true }),
-            None,
-            serde_json::json!({ "prepared": true }),
-        );
+        let prepared = PreparedToolCall {
+            call_id: crate::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
+            tool_id: "tool:demo_tool".into(),
+            tool_name: "demo_tool".into(),
+            args: serde_json::json!({ "input": true }),
+            replay: None,
+            prepared_payload: serde_json::json!({ "prepared": true }),
+        };
 
         let context = ToolContext::builder(
             SessionId::from("session-1"),
@@ -1431,7 +1441,7 @@ mod tests {
         .build();
 
         assert_eq!(context.session_id(), "session-1");
-        assert_eq!(context.tool_call_id(), Some("call-1"));
+        assert_eq!(context.call_id(), &crate::ToolCallId::fixture("call-1"));
         assert_eq!(
             context.prepared_payload,
             serde_json::json!({ "prepared": true })

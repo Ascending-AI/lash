@@ -32,10 +32,8 @@ pub(crate) async fn await_batch_siblings_journaled(
     call_id: &str,
     batch_width: u64,
 ) -> Result<()> {
-    let (_, own_position) = call_id
-        .rsplit_once(":child:")
-        .with_context(|| format!("batch member call id `{call_id}` names its child position"))?;
-    let own_attempt = format!(":child:{own_position}:attempt:");
+    // A member's attempts journal under its own `ToolCallId` (ADR 0117 §4).
+    let own_attempt = format!("{call_id}:attempt:");
     let siblings =
         usize::try_from(batch_width.saturating_sub(1)).context("a batch width fits in usize")?;
     let admin = lash_restate::RestateAdminClient::new(restate_admin_url());

@@ -478,6 +478,7 @@ fn standard_next_request_messages(parts: &[LlmOutputPart]) -> Vec<LlmMessage> {
             } => history_parts.push(Part::tool_call(
                 format!("{assistant_id}.p{}", history_parts.len()),
                 input_json.clone(),
+                lash_sansio::ToolCallId::fixture(call_id),
                 call_id.clone(),
                 tool_name.clone(),
                 replay.clone(),

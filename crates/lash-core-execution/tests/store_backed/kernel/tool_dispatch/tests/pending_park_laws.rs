@@ -47,12 +47,13 @@ async fn failed_park_announcement_fails_the_call_instead_of_parking() {
 }
 
 pub(super) fn pending_prepared_call() -> crate::PreparedToolCall {
-    crate::PreparedToolCall::from_parts(
-        "pending-call",
-        "tool:pending_probe",
-        "pending_probe",
-        json!({ "value": "runtime perf benchmark ok" }),
-        None,
-        serde_json::Value::Null,
-    )
+    crate::PreparedToolCall {
+        call_id: crate::ToolCallId::fixture("pending-call"),
+        provider_call_id: None,
+        tool_id: "tool:pending_probe".into(),
+        tool_name: "pending_probe".into(),
+        args: json!({ "value": "runtime perf benchmark ok" }),
+        replay: None,
+        prepared_payload: serde_json::Value::Null,
+    }
 }

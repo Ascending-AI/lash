@@ -97,7 +97,7 @@ fn trigger() -> ToolTriggerEffectOutcome {
 }
 
 fn model_return() -> crate::ModelToolReturn {
-    crate::ModelToolReturn::text("call".to_string(), "tool".to_string(), "ok")
+    crate::ModelToolReturn::text("tool".to_string(), "ok")
 }
 
 fn settlement() -> ToolSettlement {
@@ -190,7 +190,7 @@ fn a_settlement_round_trips_and_refuses_an_unknown_field() {
             identity: None,
             intent_index: 0,
             kind: crate::ToolIntentKind::StartProcess,
-            refusal: crate::ToolIntentRefusalReason::MissingToolCallId,
+            refusal: crate::ToolIntentRefusalReason::IntentIndexOverflow,
         }],
         possession: vec![crate::process_id_for_test("process:indexer")],
         triggers: vec![trigger()],

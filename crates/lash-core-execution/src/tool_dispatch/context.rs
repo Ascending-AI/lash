@@ -531,6 +531,10 @@ pub struct ToolDispatchOutcome {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PendingToolDispatchOutcome {
+    /// The parked call's identity.
+    pub call_id: lash_sansio::ToolCallId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_id: Option<String>,
     pub tool_name: String,
     pub args: serde_json::Value,
     pub key: crate::AwaitEventKey,
@@ -562,13 +566,40 @@ pub enum ToolPreparationOutcome {
 pub(super) fn completed_preparation(outcome: ToolDispatchOutcome) -> ToolPreparationOutcome {
     ToolPreparationOutcome::Completed(Box::new(outcome))
 }
+/// The two ids every record of one call carries: lash's identity for the
+/// call and, when a model issued it, the provider's correlation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolCallIds {
+    pub call_id: lash_sansio::ToolCallId,
+    /// Protocol correlation only: never key material.
+    pub provider_call_id: Option<String>,
+}
+
+impl ToolCallIds {
+    pub fn of(call: &PreparedToolCall) -> Self {
+        Self {
+            call_id: call.call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
+        }
+    }
+
+    pub fn of_pending(call: &crate::sansio::PendingToolCall) -> Self {
+        Self {
+            call_id: call.call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
+        }
+    }
+}
+
 pub(super) fn outcome(
+    ids: &ToolCallIds,
     tool_name: String,
     args: serde_json::Value,
     result: super::retry::NormalizedToolOutput,
 ) -> ToolDispatchOutcome {
     let record = ToolCallRecord {
-        call_id: None,
+        call_id: ids.call_id.clone(),
+        provider_call_id: ids.provider_call_id.clone(),
         tool: tool_name,
         args,
         output: result.into_output(),

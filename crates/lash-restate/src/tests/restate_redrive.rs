@@ -105,7 +105,7 @@ async fn fig3460_scope_index_calls_carry_their_replay_key_header() {
 async fn fig1128_deadline_wire_typed_refusal_and_no_deadline_shape() {
     let key = restate_await_event_key(
         &durable_turn_scope("fig1128-wire-session", "fig1128-wire-turn"),
-        AwaitEventWaitIdentity::tool_completion("fig1128-wire"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("fig1128-wire")),
     )
     .expect("derive durable-wait key");
     let no_deadline = crate::durable_wait::restate_durable_wait_request(
@@ -168,7 +168,7 @@ pub(super) async fn fig1128_await_event_resolver_journals_deadline_at_production
     let context = Arc::new(ReplayableRecordingContext::default());
     let key = test_restate_await_event_key(
         &durable_turn_scope("fig1128-resolver-session", "fig1128-resolver-turn"),
-        AwaitEventWaitIdentity::tool_completion("fig1128-resolver"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("fig1128-resolver")),
     )
     .expect("derive resolver wait key");
     let resolution = Resolution::Ok(serde_json::json!({ "resolver": "stable" }));

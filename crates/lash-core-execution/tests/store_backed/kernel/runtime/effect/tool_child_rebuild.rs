@@ -9,7 +9,7 @@ mod tests {
 
     use crate::runtime::effect::*;
     use crate::runtime::{ToolChildAdmission, ToolChildCompletionRouting, ToolChildScope};
-    use crate::tool_dispatch::{ToolAttemptEffectIdentity, ToolDispatchContext};
+    use crate::tool_dispatch::{ToolAttemptLineage, ToolDispatchContext};
     use crate::{
         EffectHost, ExecutionScope, FrameNodeId, PreparedToolCall, ProcessExecutionEnvSpec,
         RuntimeEffectCommand, SessionId, StoreSet, ToolId, ToolManifest, ToolRetryPolicy,
@@ -209,18 +209,19 @@ mod tests {
             )
             .expect("a scope-derived binding id");
             let mut request = ToolChildRequest::new(
-                PreparedToolCall::from_parts(
-                    "call-1",
-                    ToolId::from(TOOL),
-                    TOOL,
-                    serde_json::json!({}),
-                    None,
-                    serde_json::Value::Null,
-                ),
+                PreparedToolCall {
+                    call_id: lash_core_execution::ToolCallId::fixture("call-1"),
+                    provider_call_id: None,
+                    tool_id: ToolId::from(TOOL),
+                    tool_name: TOOL.into(),
+                    args: serde_json::json!({}),
+                    replay: None,
+                    prepared_payload: serde_json::Value::Null,
+                },
                 ToolChildAdmission::Catalog {
                     manifest: Box::new(manifest(retry_policy)),
                 },
-                ToolAttemptEffectIdentity::Scalar { parent: None },
+                ToolAttemptLineage::default(),
                 ToolChildScope {
                     opener: crate::EffectOpener::turn(SESSION, TURN),
                     admitted_scope: crate::AdmittedScope::turn(SESSION, TURN),

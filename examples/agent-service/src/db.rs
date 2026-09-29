@@ -979,7 +979,8 @@ mod tests {
         db.insert_tool_call(
             &chat.id,
             TurnEvent::ToolCallCompleted {
-                call_id: Some("move-1".to_string()),
+                call_id: lash::ToolCallId::fixture("move-1"),
+                provider_call_id: None,
                 name: "play_move".to_string(),
                 args: json!({ "cell": 4 }),
                 output: lash::tools::ToolCallOutput::success(json!({
@@ -1202,7 +1203,8 @@ mod tests {
         db.insert_tool_call(
             &source.id,
             TurnEvent::ToolCallCompleted {
-                call_id: Some("move-1".to_string()),
+                call_id: lash::ToolCallId::fixture("move-1"),
+                provider_call_id: None,
                 name: "play_move".to_string(),
                 args: json!({ "cell": 4 }),
                 output: lash::tools::ToolCallOutput::success(json!({ "accepted": true })),
@@ -1219,7 +1221,7 @@ mod tests {
                 error: None,
                 success: true,
                 duration_ms: 1,
-                tool_call_ids: vec!["move-1".to_string()],
+                tool_call_ids: vec![lash::ToolCallId::fixture("move-1")],
                 graph_key: None,
             },
             Some("fn main() {}".to_string()),
@@ -1249,7 +1251,7 @@ mod tests {
         assert_eq!(branch_code_block.payload(), source_code_block.payload());
         assert_eq!(
             branch_code_block.payload().expect("code block payload")["tool_call_ids"],
-            json!(["move-1"])
+            json!([lash::ToolCallId::fixture("move-1").as_str()])
         );
     }
 

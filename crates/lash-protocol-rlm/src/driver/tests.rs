@@ -179,6 +179,7 @@ pub(super) fn projection_test_config(
     max_context_tokens: Option<usize>,
 ) -> lash_core::TurnMachineConfig {
     lash_core::TurnMachineConfig {
+        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: Arc::new(crate::protocol::RlmDriver::default()),
         projector: Arc::new(lash_core::sansio::ChatContextProjector),
         sync_execution_environment: true,

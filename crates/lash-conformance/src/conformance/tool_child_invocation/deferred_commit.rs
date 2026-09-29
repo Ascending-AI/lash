@@ -85,7 +85,7 @@ fn gated_factory(
     let step: crate::plugin::ToolPresentationStep =
         Arc::new(move |input: crate::plugin::ToolPresentationInput| {
             let gate = Arc::clone(&presentation);
-            let held = input.context.call_id == gate.call_id;
+            let held = super::leaf_label(&input.context.call_id) == gate.call_id;
             let previous = input.previous;
             Box::pin(async move {
                 if held {
@@ -97,7 +97,8 @@ fn gated_factory(
     let hook: crate::plugin::AfterToolCallHook =
         Arc::new(move |context: crate::plugin::ToolResultHookContext| {
             let gate = Arc::clone(&after_tool);
-            let held = context.call_id == gate.call_id && context.result.as_done_output().is_some();
+            let held = super::leaf_label(&context.call_id) == gate.call_id
+                && context.result.as_done_output().is_some();
             Box::pin(async move {
                 if held {
                     gate.hold().await;

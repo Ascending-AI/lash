@@ -164,7 +164,7 @@ async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
     .await;
     context.effect_controller = RuntimeEffectControllerHandle::shared(recorder.clone());
     let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
-        .tool_call_id("call-1".to_string());
+        .call_id(crate::ToolCallId::fixture("call-1"));
 
     let outcome = dispatch_tool_call_with_execution_context(
         &context,
@@ -178,15 +178,12 @@ async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
     {
         let sleeps = recorder.sleeps.lock_recover();
         assert_eq!(sleeps.len(), 1);
-        assert!(
-            sleeps[0]
-                .effect_id()
-                .is_some_and(|effect_id| effect_id.ends_with(":retry_probe:attempt:1:sleep"))
+        let sleep_key = format!(
+            "tool:{}:attempt:1:sleep",
+            crate::ToolCallId::fixture("call-1")
         );
-        assert_eq!(
-            sleeps[0].replay_key(),
-            Some("lash-tool:session:call-1:retry_probe:attempt:1:sleep")
-        );
+        assert_eq!(sleeps[0].effect_id(), Some(sleep_key.as_str()));
+        assert_eq!(sleeps[0].replay_key(), Some(sleep_key.as_str()));
     }
     drop(context);
     handler.close().await.expect("close the dispatch handler");
@@ -212,7 +209,7 @@ async fn retry_sleep_controller_rejection_aborts_as_controller_error() {
     context.effect_controller =
         RuntimeEffectControllerHandle::shared(Arc::new(FailingSleepEffectController));
     let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
-        .tool_call_id("call-1".to_string());
+        .call_id(crate::ToolCallId::fixture("call-1"));
 
     let outcome = dispatch_tool_call_with_execution_context(
         &context,
@@ -307,7 +304,7 @@ async fn retry_context_has_stable_replay_key_across_attempts() {
     )
     .await;
     let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
-        .tool_call_id("call-1".to_string());
+        .call_id(crate::ToolCallId::fixture("call-1"));
     let outcome = dispatch_tool_call_with_execution_context(
         &context,
         "retry_probe".to_string(),
@@ -332,17 +329,14 @@ async fn retry_context_has_stable_replay_key_across_attempts() {
             .map(|(_, _, key)| key.clone())
             .collect::<Vec<_>>();
         assert!(keys.iter().all(|key| key == &keys[0]));
-        assert_eq!(
-            keys[0].as_deref(),
-            Some("lash-tool:session:call-1:retry_probe")
-        );
+        assert_eq!(keys[0], crate::ToolCallId::fixture("call-1").to_string());
     }
     drop(context);
     handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
-async fn idempotent_retry_policy_uses_journaled_attempts_without_provider_replay_key() {
+async fn idempotent_retry_policy_keys_every_attempt_on_one_call_id() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -365,10 +359,11 @@ async fn idempotent_retry_policy_uses_journaled_attempts_without_provider_replay
     assert_eq!(attempts.load(Ordering::SeqCst), 3);
     {
         let observed = observed.lock_recover();
+        assert_eq!(observed.len(), 3);
         assert!(
-            observed
-                .iter()
-                .all(|(_, max_attempts, replay_key)| *max_attempts == 3 && replay_key.is_none())
+            observed.iter().all(|(_, max_attempts, call_id)| {
+                *max_attempts == 3 && *call_id == observed[0].2
+            })
         );
     }
     handler.close().await.expect("close the dispatch handler");

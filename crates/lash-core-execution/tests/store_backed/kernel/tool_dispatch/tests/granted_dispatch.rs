@@ -147,14 +147,15 @@ fn grant_prepared_call(tool_name: &str) -> crate::PreparedToolCall {
 }
 
 fn grant_prepared_call_with_id(tool_id: &str, tool_name: &str) -> crate::PreparedToolCall {
-    crate::PreparedToolCall::from_parts(
-        "grant-call",
-        tool_id,
-        tool_name,
-        json!({ "value": "ok" }),
-        None,
-        serde_json::Value::Null,
-    )
+    crate::PreparedToolCall {
+        call_id: crate::ToolCallId::fixture("grant-call"),
+        provider_call_id: None,
+        tool_id: tool_id.into(),
+        tool_name: tool_name.into(),
+        args: json!({ "value": "ok" }),
+        replay: None,
+        prepared_payload: serde_json::Value::Null,
+    }
 }
 
 /// A granted attempt parks exactly like a catalog attempt: the completion key
@@ -192,7 +193,9 @@ async fn granted_pending_park_returns_a_pending_launch_under_the_grant_binding()
     assert_eq!(pending.tool_name, "grant_probe");
     assert_eq!(
         pending.key.wait,
-        crate::AwaitEventWaitIdentity::tool_completion("grant-call")
+        crate::AwaitEventWaitIdentity::tool_completion(lash_core_execution::ToolCallId::fixture(
+            "grant-call"
+        ))
     );
     assert_eq!(
         *observed_execution_bindings.lock_recover(),

@@ -12,9 +12,17 @@ impl TurnProtocol for UnitTurnProtocol {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 pub struct EffectId(pub u64);
 
+/// One admitted tool call, before dispatch.
+///
+/// `call_id` is lash's identity for the call (ADR 0117), derived when the
+/// call was admitted; every tool-derived key comes from it. The provider's
+/// own id, when a model issued the call, is correlation only: the protocol
+/// echoes it back so the provider pairs the result with its call.
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct PendingToolCall {
-    pub call_id: String,
+    pub call_id: crate::ToolCallId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_id: Option<String>,
     pub tool_name: String,
     pub args: Value,
     /// Opaque provider replay state carried through for the next request.
@@ -23,7 +31,10 @@ pub struct PendingToolCall {
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct CompletedToolCall {
-    pub call_id: String,
+    pub call_id: crate::ToolCallId,
+    /// See [`PendingToolCall::provider_call_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_id: Option<String>,
     pub tool_name: String,
     pub args: Value,
     pub output: ToolCallOutput,
@@ -58,8 +69,11 @@ impl ToolExpansionPlan {
 pub struct ExpandedWrapper {
     /// Position of the wrapper call among the response's dispatched calls.
     pub source_position: u32,
+    /// The wrapper call's identity; each member's is its `child`.
+    pub call_id: crate::ToolCallId,
     /// The provider's call id and replay metadata, kept for the transcript.
-    pub call_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_id: Option<String>,
     pub tool_name: String,
     pub args: Value,
     pub replay: Option<ProviderReplayMeta>,
@@ -785,12 +799,17 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_, M>) -> Vec<DriverAction<M>>;
     /// Answer the [`PendingWork::Llm`] the driver started, handing back its
     /// `request` and `driver_state`.
+    ///
+    /// `calls` names every tool call the response carries: a driver admits a
+    /// call under `calls.id(content_index)`, the call's position in the
+    /// response, counted before anything is refused (ADR 0117 §2).
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_, M>,
         request: Arc<LlmRequest>,
         driver_state: Option<M::DriverState>,
         llm_response: LlmResponse,
+        calls: &ResponseToolCalls,
         text_streamed: bool,
     ) -> Vec<DriverAction<M>>;
     /// Fold the step's per-slot results back into one result per call of the
@@ -824,8 +843,88 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
     ) -> Vec<DriverAction<M>>;
 }
 
+/// Where a turn's model-issued tool calls are admitted: the turn's admitted
+/// root and its physical continuation (ADR 0117 §2). The host fixes it when
+/// it builds the turn's machine; the machine adds the protocol iteration and
+/// the model response's effect ordinal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelToolCalls {
+    admission: crate::ToolCallAdmission,
+    continuation: u64,
+}
+
+impl ModelToolCalls {
+    pub fn new(admission: crate::ToolCallAdmission, continuation: u64) -> Self {
+        Self {
+            admission,
+            continuation,
+        }
+    }
+
+    /// The admission of a fixture turn, for machines built by tests.
+    #[doc(hidden)]
+    pub fn fixture() -> Self {
+        Self {
+            admission: crate::ToolCallAdmission::process(
+                "",
+                crate::ProcessId::fixture("model-tool-calls"),
+            ),
+            continuation: 0,
+        }
+    }
+
+    /// The calls of the model response answering effect `response` in
+    /// `protocol_iteration`.
+    pub fn response(&self, protocol_iteration: usize, response: EffectId) -> ResponseToolCalls {
+        ResponseToolCalls {
+            calls: self.clone(),
+            protocol_iteration: protocol_iteration as u64,
+            effect_ordinal: response.0,
+        }
+    }
+}
+
+/// The tool calls of one recorded model response: each is named by its
+/// position in the response, so replaying the recorded response names the
+/// same calls, and a later response repeating a provider id names new ones.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResponseToolCalls {
+    calls: ModelToolCalls,
+    protocol_iteration: u64,
+    effect_ordinal: u64,
+}
+
+impl ResponseToolCalls {
+    /// The id of the call at `content_index`, its full original index among
+    /// the response's parts.
+    pub fn id(&self, content_index: usize) -> crate::ToolCallId {
+        self.calls.admission.call_id(&[
+            crate::ToolCallPosition::Continuation(self.calls.continuation),
+            crate::ToolCallPosition::Iteration(self.protocol_iteration),
+            crate::ToolCallPosition::EffectOrdinal(self.effect_ordinal),
+            crate::ToolCallPosition::ContentIndex(content_index as u64),
+        ])
+    }
+
+    /// The ids of `response`'s tool-call parts, in order, each named by its
+    /// full original content index. Visible-part projection
+    /// ([`crate::normalized_response_parts`]) drops only text, so the `n`th
+    /// visible call is the `n`th id here.
+    pub fn call_ids(&self, response: &crate::llm::types::LlmResponse) -> Vec<crate::ToolCallId> {
+        response
+            .parts
+            .iter()
+            .enumerate()
+            .filter(|(_, part)| matches!(part, crate::llm::types::LlmOutputPart::ToolCall { .. }))
+            .map(|(content_index, _)| self.id(content_index))
+            .collect()
+    }
+}
+
 /// Configuration for a `TurnMachine` instance.
 pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
+    /// Where this turn's model-issued tool calls are admitted.
+    pub model_tool_calls: ModelToolCalls,
     pub protocol_driver: Arc<dyn ProtocolDriverHandle<M>>,
     pub projector: Arc<dyn ContextProjector<M>>,
     pub sync_execution_environment: bool,

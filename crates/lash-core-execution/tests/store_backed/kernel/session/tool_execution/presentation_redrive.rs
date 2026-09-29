@@ -35,7 +35,8 @@ fn turn_context<'run>(
 fn settled() -> crate::tool_dispatch::ToolDispatchOutcome {
     crate::tool_dispatch::ToolDispatchOutcome {
         record: crate::ToolCallRecord {
-            call_id: Some(CALL_ID.to_string()),
+            call_id: lash_core_execution::ToolCallId::fixture(&CALL_ID.to_string()),
+            provider_call_id: None,
             tool: "slow".to_string(),
             args: json!({}),
             output: crate::ToolCallOutput::success(json!({ "slow": "result" })),
@@ -66,7 +67,10 @@ async fn a_redriven_call_replays_its_presentation_whatever_its_duration() {
             Box::pin(async move {
                 let live = turn_context(&backend, scoped)
                     .complete_tool_call(
-                        CALL_ID.to_string(),
+                        lash_core_execution::tool_dispatch::ToolCallIds {
+                            call_id: lash_core_execution::ToolCallId::fixture(CALL_ID),
+                            provider_call_id: None,
+                        },
                         crate::ToolId::new("timed"),
                         None,
                         settled(),
@@ -92,7 +96,10 @@ async fn a_redriven_call_replays_its_presentation_whatever_its_duration() {
             Box::pin(async move {
                 let redriven = turn_context(&backend, scoped)
                     .complete_tool_call(
-                        CALL_ID.to_string(),
+                        lash_core_execution::tool_dispatch::ToolCallIds {
+                            call_id: lash_core_execution::ToolCallId::fixture(CALL_ID),
+                            provider_call_id: None,
+                        },
                         crate::ToolId::new("timed"),
                         None,
                         settled(),

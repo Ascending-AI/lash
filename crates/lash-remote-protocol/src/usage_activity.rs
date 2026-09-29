@@ -98,9 +98,6 @@ impl RemoteTurnActivity {
                 }
             }
             RemoteTurnEvent::ModelCallRecorded { record } => validate_llm_call_record(record)?,
-            RemoteTurnEvent::ToolOutputProgress { call_id, .. } => {
-                require_non_empty("RemoteTurnEvent::ToolOutputProgress", "call_id", call_id)?;
-            }
             RemoteTurnEvent::StoppedPartialAvailable { summary } => {
                 let context = "RemoteTurnEvent::StoppedPartialAvailable";
                 require_non_empty(context, "session_id", &summary.id.session_id)?;
@@ -181,21 +178,26 @@ pub enum RemoteTurnEvent {
         error: Option<RemoteCellFailure>,
         success: bool,
         duration_ms: u64,
-        tool_call_ids: Vec<String>,
+        tool_call_ids: Vec<lash_sansio::ToolCallId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
     },
+    /// A tool call started. `call_id` is lash's identity for the call;
+    /// `provider_call_id` is the model provider's correlation, when a model
+    /// issued the call.
     ToolCallStarted {
+        call_id: lash_sansio::ToolCallId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
+        provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
     },
     ToolCallCompleted {
+        call_id: lash_sansio::ToolCallId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
+        provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
         output: serde_json::Value,
@@ -204,7 +206,7 @@ pub enum RemoteTurnEvent {
         graph_key: Option<String>,
     },
     ToolIntentOutcome {
-        call_id: String,
+        call_id: lash_sansio::ToolCallId,
         outcome: crate::RemoteToolIntentExecutionOutcome,
     },
     FinalValue {
@@ -247,7 +249,7 @@ pub enum RemoteTurnEvent {
     /// One progress chunk a running tool reported, published once it was
     /// persisted to its turn's capture (ADR 0114 §2.2).
     ToolOutputProgress {
-        call_id: String,
+        call_id: lash_sansio::ToolCallId,
         chunk: lash_sansio::ToolOutputChunk,
     },
     /// A stopped turn's partial is durable (ADR 0114 §5.2). It holds identity

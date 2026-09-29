@@ -21,9 +21,8 @@ pub(crate) fn resolve_retry_policy(
         .unwrap_or(ToolRetryPolicy::Never)
 }
 
-/// The retry context is stamped with the authority's manifest name, so a
-/// granted attempt reports the granted tool the same way a catalog attempt
-/// reports its catalog member.
+/// Runs one attempt of `prepared` with its attempt number stamped on the
+/// context; the call keeps its id across every attempt.
 pub(super) async fn execute_leaf_tool_attempt<'run>(
     context: &ToolDispatchContext<'run>,
     authority: &AttemptAuthority<'_>,
@@ -32,12 +31,11 @@ pub(super) async fn execute_leaf_tool_attempt<'run>(
     attempt: u32,
     max_attempts: u32,
 ) -> crate::ToolAttemptOutcome {
-    let tool_name = authority.manifest().name.as_str();
     execute_once_with_authority(
         context,
         authority,
         prepared,
-        tool_context.with_retry_context(tool_name, attempt, max_attempts),
+        tool_context.with_attempt(attempt, max_attempts),
     )
     .await
 }
@@ -108,23 +106,21 @@ async fn build_attempt_context<'run>(
     grant: Option<&crate::ToolExecutionGrant>,
 ) -> Result<crate::AttemptContext<'run>, ToolOutcome> {
     let scoped = tool_context.effect_controller.scoped();
-    let completion_key = tool_context.completion.load();
     // The key is reserved before the body runs, and only for a declared
     // deferrer on a controller that can route await events across process
     // loss. Report which of the two is missing rather than blaming the
     // controller for a provider that never declared the capability.
-    let completion_support = if completion_key.is_some() {
-        crate::tool_provider::AttemptCompletionSupport::Available
-    } else if !context.attempt_may_defer(&prepared.tool_id, grant) {
-        crate::tool_provider::AttemptCompletionSupport::NotDeclared
-    } else {
-        crate::tool_provider::AttemptCompletionSupport::ControllerUnsupported
+    let completion = match tool_context.completion.load() {
+        Some(key) => crate::tool_provider::AttemptCompletionSupport::Available(key),
+        None if !context.attempt_may_defer(&prepared.tool_id, grant) => {
+            crate::tool_provider::AttemptCompletionSupport::NotDeclared
+        }
+        None => crate::tool_provider::AttemptCompletionSupport::ControllerUnsupported,
     };
     Ok(crate::AttemptContext::from_tool_context(
         tool_context,
         scoped.scope_id().to_string(),
-        completion_key,
-        completion_support,
+        completion,
     ))
 }
 
@@ -156,6 +152,7 @@ impl NormalizedToolOutput {
 
 pub(crate) async fn normalized_outcome(
     context: &ToolDispatchContext<'_>,
+    ids: &super::context::ToolCallIds,
     tool_name: String,
     args: serde_json::Value,
     result: ToolOutcome,
@@ -164,7 +161,7 @@ pub(crate) async fn normalized_outcome(
         context, &tool_name, result,
     ))
     .await;
-    super::context::outcome(tool_name, args, output)
+    super::context::outcome(ids, tool_name, args, output)
 }
 
 async fn normalize_tool_result_attachments(
@@ -273,7 +270,7 @@ pub(crate) fn mark_retry_exhausted(result: ToolOutcome, attempts: u32) -> ToolOu
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn settle_completed_pending_tool_call(
     context: &ToolDispatchContext<'_>,
-    call_id: &str,
+    ids: &super::context::ToolCallIds,
     tool_name: String,
     args: serde_json::Value,
     resolution: crate::Resolution,
@@ -284,14 +281,14 @@ pub(crate) async fn settle_completed_pending_tool_call(
     let output = crate::tool_result::tool_output_from_completion_resolution(resolution, resolver);
     let result = super::finalize_tool_result_with_execution_context(
         context,
-        call_id,
+        &ids.call_id,
         &tool_name,
         &args,
         ToolOutcome::from_output(output),
         duration_ms,
     )
     .await;
-    let mut outcome = normalized_outcome(context, tool_name, args, result).await;
+    let mut outcome = normalized_outcome(context, ids, tool_name, args, result).await;
     let mut attempts = attempts;
     attempts.push(crate::trace::trace_tool_attempt(
         attempts

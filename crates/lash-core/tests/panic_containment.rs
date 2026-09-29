@@ -545,10 +545,12 @@ impl ProtocolDriverHandle<HostTurnProtocol> for MinimalProtocolDriver {
         _request: Arc<lash_core::LlmRequest>,
         _driver_state: Option<lash_core::ProtocolDriverState>,
         response: LlmResponse,
+        response_calls: &lash_core::sansio::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         let mut text = String::new();
         let mut calls = Vec::new();
+        let mut call_ids = response_calls.call_ids(&response).into_iter();
         for part in response.parts {
             match part {
                 LlmOutputPart::Text { text: part, .. } => text.push_str(&part),
@@ -559,7 +561,8 @@ impl ProtocolDriverHandle<HostTurnProtocol> for MinimalProtocolDriver {
                     input_json,
                     replay,
                 } => calls.push(PendingToolCall {
-                    call_id,
+                    call_id: call_ids.next().expect("each tool call part has an id"),
+                    provider_call_id: Some(call_id),
                     tool_name,
                     args: serde_json::from_str(&input_json).expect("tool input"),
                     replay,

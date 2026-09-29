@@ -68,7 +68,7 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
         ),
         (
             RuntimeEffectCommand::ToolAttempt {
-                call: prepared_tool_call(),
+                call: Box::new(prepared_tool_call()),
                 execution_grant: None,
                 attempt: 1,
                 max_attempts: 1,
@@ -1072,10 +1072,10 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                         "tool-intent-corpus-attempt",
                     ),
                     RuntimeEffectCommand::ToolAttempt {
-                        call: prepared_tool_call_with(
+                        call: Box::new(prepared_tool_call_with(
                             "tool-intent-corpus-call",
                             "tool_intent_corpus",
-                        ),
+                        )),
                         execution_grant: None,
                         attempt: 1,
                         max_attempts: 1,
@@ -1135,7 +1135,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                 Arc::clone(&self.process_env_store),
             ),
             &SessionId::from(TOOL_INTENT_CORPUS_SESSION),
-            "tool-intent-corpus-call",
+            &lash_core::ToolCallId::fixture("tool-intent-corpus-call"),
             &intents,
         )
         .await

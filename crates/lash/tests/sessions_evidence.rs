@@ -400,13 +400,6 @@ fn drain_area_witnesses() {
             lash::runtime::RuntimeErrorCode::RuntimeEffectTaskJoin
         )
     });
-    // W0120: lash::runtime::RuntimeErrorCode::RuntimeEffectToolAttemptCallId [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::RuntimeEffectToolAttemptCallId
-        )
-    });
     // W0121: lash::runtime::RuntimeErrorCode::RuntimeEffectToolAttemptIndex [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
@@ -647,13 +640,6 @@ fn drain_area_witnesses() {
         matches!(
             value,
             lash::runtime::RuntimeErrorCode::QueuedWorkRowExceedsContextWindow
-        )
-    });
-    // W0189: lash::runtime::RuntimeErrorCode::ToolCompletionKeyMissingCallId [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::ToolCompletionKeyMissingCallId
         )
     });
     // W0190: lash::runtime::RuntimeErrorCode::ToolDeferralNotDeclared [variant]
@@ -1450,7 +1436,7 @@ fn drain_area_witnesses() {
         let _ = &value.id;
     });
     // W0454: lash::tools::ToolInvocation::new [function]
-    let _ = lash::tools::ToolInvocation::new(String::new(), todo!(), todo!());
+    let _ = lash::tools::ToolInvocation::new(todo!(), todo!(), todo!());
     // W0455: lash::tools::ToolInvocation::tool_id [field]
     field_witness(|value: &lash::tools::ToolInvocation| {
         let _ = &value.tool_id;

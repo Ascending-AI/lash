@@ -67,7 +67,9 @@ async fn completion_key_preparation_issues_nothing_when_deferral_is_impossible()
     let preparation = probe
         .prepare_completion_key(
             &ExecutionScope::turn("completion-key-session", "completion-key-turn"),
-            AwaitEventWaitIdentity::tool_completion("completion-key-call"),
+            AwaitEventWaitIdentity::tool_completion(crate::ToolCallId::fixture(
+                "completion-key-call",
+            )),
             false,
         )
         .await

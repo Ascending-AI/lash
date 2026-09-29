@@ -122,14 +122,7 @@ pub async fn execute_register_trigger_tool_call(
         Ok(draft) => draft,
         Err(error) => return refuse(error.to_string()),
     };
-    let identity = match context.intent_identity(0) {
-        Ok(identity) => identity,
-        Err(reason) => {
-            return refuse(format!(
-                "register_trigger cannot declare an intent: {reason:?}"
-            ));
-        }
-    };
+    let identity = context.intent_identity(0);
     ToolAttemptOutcome::done(
         ToolOutcomeDone::ok(lash_sansio::handle::trigger_register_slot_json(
             identity.intent_index,

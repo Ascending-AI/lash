@@ -112,7 +112,9 @@ async fn a_host_layer_sees_a_groups_timer_and_wait_children_under_its_opener() {
         .controller()
         .await_event_key(
             &scope,
-            lash_core::AwaitEventWaitIdentity::tool_completion("layered-wait"),
+            lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "layered-wait",
+            )),
         )
         .await
         .expect("mint the wait child's key");

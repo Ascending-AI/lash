@@ -481,8 +481,9 @@ pub mod sansio {
     pub use lash_sansio::sansio::{
         ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
         ContextProjector, EffectId, ExecutionEnvironmentSync, ExpandedRow, ExpandedWrapper,
-        LlmCallError, PendingToolCall, PendingWork, ProjectorTurnInputs, ProtocolDriverHandle,
-        Response, ToolExpansionPlan, TurnCause, TurnMachine, render_turn_causes_prompt,
+        LlmCallError, ModelToolCalls, PendingToolCall, PendingWork, ProjectorTurnInputs,
+        ProtocolDriverHandle, Response, ResponseToolCalls, ToolExpansionPlan, TurnCause,
+        TurnMachine, render_turn_causes_prompt,
     };
 }
 
@@ -682,6 +683,11 @@ pub type TurnMachine = lash_sansio::TurnMachine<HostTurnProtocol>;
 /// Protocol-engine implementors construct this configuration at their boundary.
 pub type TurnMachineConfig = lash_sansio::TurnMachineConfig<HostTurnProtocol>;
 pub use lash_sansio::{FailureCode, TurnFailureCode, TurnFailureKind};
+pub use lash_sansio::{
+    InvalidToolCallId, ToolCallAdmission, ToolCallId, ToolCallPosition, ToolCallRoot,
+    ToolCallRootError,
+};
+
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
 pub use lash_trace::{
@@ -889,9 +895,10 @@ pub use tool_provider::ProcessToolCallWiring;
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, PreparedToolBatch,
-    PreparedToolBatchCall, PreparedToolCall, ProgressRefused, ToolAttemptCaptureWriter, ToolCall,
-    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
-    ToolPrepareContext, ToolProgressReporter, ToolProgressSink, ToolProvider, TurnToolCapture,
+    PreparedToolBatchCall, PreparedToolCall, ProcessToolCall, ProgressRefused,
+    ToolAttemptCaptureWriter, ToolCall, ToolChildExecutionTraceHook, ToolChildProcessStarted,
+    ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProgressReporter,
+    ToolProgressSink, ToolProvider, TurnToolCapture,
 };
 
 pub(crate) use lash_core_store::process_identity::StartKeyDerivation;

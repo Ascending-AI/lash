@@ -6,7 +6,7 @@ mod tests {
 
     use crate::runtime::effect::*;
     use crate::runtime::{ToolChildAdmission, ToolChildCompletionRouting, ToolChildScope};
-    use crate::tool_dispatch::{ToolAttemptEffectIdentity, ToolDispatchContext};
+    use crate::tool_dispatch::{ToolAttemptLineage, ToolDispatchContext};
     use crate::{
         EffectHost, ExecutionScope, FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef,
         ProcessExecutionEnvSpec, RuntimeEffectCommand, ScopedEffectController, SessionId, StoreSet,
@@ -62,20 +62,21 @@ mod tests {
     /// disagrees with [`lent`]'s, so a rebind that dropped a line shows up as the
     /// opener's value surviving.
     fn request() -> ToolChildRequest {
-        request_with_identity(ToolAttemptEffectIdentity::Scalar {
-            parent: Some(invocation("recorded-parent")),
-        })
+        request_with_identity(ToolAttemptLineage::from_parent(Some(invocation(
+            "recorded-parent",
+        ))))
     }
-    fn request_with_identity(identity: ToolAttemptEffectIdentity) -> ToolChildRequest {
+    fn request_with_identity(identity: ToolAttemptLineage) -> ToolChildRequest {
         ToolChildRequest::new(
-            PreparedToolCall::from_parts(
-                "call-1",
-                ToolId::from("search"),
-                "search",
-                serde_json::json!({ "q": "lash" }),
-                None,
-                serde_json::Value::Null,
-            ),
+            PreparedToolCall {
+                call_id: lash_core_execution::ToolCallId::fixture("call-1"),
+                provider_call_id: None,
+                tool_id: ToolId::from("search"),
+                tool_name: "search".into(),
+                args: serde_json::json!({ "q": "lash" }),
+                replay: None,
+                prepared_payload: serde_json::Value::Null,
+            },
             ToolChildAdmission::Catalog {
                 manifest: Box::new(manifest("search")),
             },

@@ -325,7 +325,7 @@ fn push_causal_ref(
         } => {
             identity.tag(2);
             identity.string(session_id);
-            identity.string(call_id);
+            identity.string(call_id.as_str());
         }
         crate::CausalRef::Process { process_id } => {
             identity.tag(3);
@@ -520,7 +520,10 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
         let lash_sansio::PartAttachment { source } = attachment;
         push_attachment_source(identity, source)
     });
-    identity.optional(part.tool_call_id(), |identity, value| {
+    identity.optional(part.call_id(), |identity, value| {
+        identity.string(value.as_str())
+    });
+    identity.optional(part.provider_call_id(), |identity, value| {
         identity.string(value)
     });
     identity.optional(part.tool_name(), |identity, value| identity.string(value));
@@ -861,7 +864,8 @@ mod append_request_identity_tests {
                         "parts": [
                             {
                                 "id": "p0", "kind": "ToolCall", "content": "tool-call",
-                                "tool_call_id": "call-id",
+                                "call_id": "tc_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                "provider_call_id": "call-id",
                                 "tool_name": "tool-name",
                                 "tool_replay": {"item_id": "item-id", "opaque": "opaque"}
                             },
@@ -898,7 +902,7 @@ mod append_request_identity_tests {
                                     }},
                                     {"type": "text", "text": "after"}
                                 ],
-                                "tool_call_id": "call-id", "tool_name": "tool-name"
+                                "call_id": "tc_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "tool_name": "tool-name"
                             },
                             {
                                 "id": "p8", "kind": "Reasoning", "content": "reasoning",
@@ -966,7 +970,7 @@ mod append_request_identity_tests {
             },
             crate::CausalRef::ToolCall {
                 session_id: SessionId::from("s"),
-                call_id: "c".to_string(),
+                call_id: lash_sansio::ToolCallId::fixture("c"),
             },
             crate::CausalRef::Process {
                 process_id: crate::process_id_for_test("p"),
@@ -1068,7 +1072,8 @@ mod append_request_identity_tests {
                         "id": "p0",
                         "kind": "ToolCall",
                         "content": "tool",
-                        "tool_call_id": "call-id",
+                        "call_id": "tc_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                        "provider_call_id": "call-id",
                         "tool_name": "tool-name",
                         "tool_replay": {
                             "item_id": "tool-item",

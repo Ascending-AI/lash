@@ -264,14 +264,7 @@ pub async fn execute_process_start_tool_call(
         Ok(payload) => payload,
         Err(message) => return refuse(message),
     };
-    let identity = match context.intent_identity(0) {
-        Ok(identity) => identity,
-        Err(reason) => {
-            return refuse(format!(
-                "start_process cannot declare an intent: {reason:?}"
-            ));
-        }
-    };
+    let identity = context.intent_identity(0);
     // The lifetime is the host's policy resolved against this attempt's
     // admitted start context, never the model's choice, and the declaration
     // journals the decision so realization never re-runs the policy

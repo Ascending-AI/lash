@@ -13,7 +13,7 @@ use lash_sansio::sync::MutexExt;
 
 use super::*;
 use crate::runtime::{ToolChildAdmission, ToolChildCompletionRouting, ToolChildScope};
-use crate::tool_dispatch::ToolAttemptEffectIdentity;
+use crate::tool_dispatch::ToolAttemptLineage;
 use crate::{
     ExecutionScope, FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
     SessionId, ToolId, ToolManifest, ToolRetryPolicy,
@@ -69,21 +69,22 @@ fn invocation(effect_id: &str) -> crate::RuntimeInvocation {
 /// disagrees with [`lent`]'s, so a rebind that dropped a line shows up as the
 /// opener's value surviving.
 pub(super) fn request() -> ToolChildRequest {
-    request_with_identity(ToolAttemptEffectIdentity::Scalar {
-        parent: Some(invocation("recorded-parent")),
-    })
+    request_with_identity(ToolAttemptLineage::from_parent(Some(invocation(
+        "recorded-parent",
+    ))))
 }
 
-fn request_with_identity(identity: ToolAttemptEffectIdentity) -> ToolChildRequest {
+fn request_with_identity(identity: ToolAttemptLineage) -> ToolChildRequest {
     ToolChildRequest::new(
-        PreparedToolCall::from_parts(
-            "call-1",
-            ToolId::from("search"),
-            "search",
-            serde_json::json!({ "q": "lash" }),
-            None,
-            serde_json::Value::Null,
-        ),
+        PreparedToolCall {
+            call_id: crate::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
+            tool_id: ToolId::from("search"),
+            tool_name: "search".into(),
+            args: serde_json::json!({ "q": "lash" }),
+            replay: None,
+            prepared_payload: serde_json::Value::Null,
+        },
         ToolChildAdmission::Catalog {
             manifest: Box::new(manifest("search")),
         },
@@ -667,8 +668,8 @@ async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
     // A recorded parent that carries the child's turn, so the rebound
     // client's attribution observably comes from the journal and not from
     // the opener's minted `opener-turn`.
-    let request = request_with_identity(ToolAttemptEffectIdentity::Scalar {
-        parent: Some(crate::RuntimeInvocation::effect(
+    let request = request_with_identity(ToolAttemptLineage::from_parent(Some(
+        crate::RuntimeInvocation::effect(
             crate::EffectAddress::new(
                 ExecutionScope::turn("child-session", "turn"),
                 "recorded-parent",
@@ -676,8 +677,8 @@ async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
             .expect("a valid effect address"),
             crate::RuntimeAttribution::for_turn("child-session", "child-turn", 0, 0),
             "recorded-parent",
-        )),
-    });
+        ),
+    )));
     let usage_ledger = ToolUsageLedger::new();
     let child = rebind_child_dispatch(&lent, &request, child_controller(), spec(3), &usage_ledger)
         .expect("the probe service binds to the recorded authority");
@@ -997,7 +998,8 @@ async fn a_refused_presentation_refuses_the_child_rather_than_settling_as_its_re
     let dispatch = rebound(&request);
     let outcome = ToolDispatchOutcome {
         record: crate::ToolCallRecord {
-            call_id: Some(request.call.call_id.clone()),
+            call_id: request.call.call_id.clone(),
+            provider_call_id: None,
             tool: "tool".to_string(),
             args: serde_json::json!({}),
             output: crate::ToolCallOutput::success(serde_json::json!("settled")),

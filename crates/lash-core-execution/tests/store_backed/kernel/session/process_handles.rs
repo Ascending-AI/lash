@@ -184,9 +184,12 @@ mod tests {
         );
         assert!(attachment_backend.list().await.unwrap().is_empty());
         let handle = RuntimeExecutionContext::process_handle_json(&process.id.clone());
-        let reply =
-            crate::await_process_handle(&context, "await-external-attachment".to_string(), handle)
-                .await;
+        let reply = crate::await_process_handle(
+            &context,
+            lash_core_execution::ToolCallId::fixture("await-external-attachment"),
+            handle,
+        )
+        .await;
         (reply, persistence, attachment_backend, policy)
     }
 
@@ -194,7 +197,10 @@ mod tests {
         let (reply, persistence, attachment_backend, policy) =
             await_external_process_attachment(source.clone()).await;
         let record = reply.record.expect("external process await is recorded");
-        assert_eq!(record.call_id.as_deref(), Some("await-external-attachment"));
+        assert_eq!(
+            record.call_id,
+            lash_core_execution::ToolCallId::fixture("await-external-attachment")
+        );
         assert_eq!(record.tool, "await_process");
         let crate::ToolCallOutcome::Failure(failure) = record.output.outcome else {
             panic!("denied external process attachment must replace the recorded result");
@@ -269,14 +275,15 @@ mod tests {
             call: ToolPrepareCall<'_>,
         ) -> Result<PreparedToolCall, ToolOutcome> {
             self.prepares.fetch_add(1, Ordering::SeqCst);
-            Ok(PreparedToolCall::from_parts(
-                call.pending.call_id,
-                call.tool_id,
-                call.pending.tool_name,
-                call.pending.args,
-                call.pending.replay,
-                serde_json::json!({ "prepared": true }),
-            ))
+            Ok(PreparedToolCall {
+                call_id: call.pending.call_id.clone(),
+                provider_call_id: None,
+                tool_id: call.tool_id,
+                tool_name: call.pending.tool_name.into(),
+                args: call.pending.args,
+                replay: call.pending.replay,
+                prepared_payload: serde_json::json!({ "prepared": true }),
+            })
         }
 
         async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -378,7 +385,7 @@ mod tests {
         );
         let signalled = crate::signal_process_handle(
             &context,
-            "signal-1".to_string(),
+            lash_core_execution::ToolCallId::fixture("signal-1"),
             handle,
             "ready".to_string(),
             json!({ "kind": "ping" }),
@@ -391,7 +398,10 @@ mod tests {
             signalled.output.value_for_projection()
         );
         let record = signalled.record.expect("signal record");
-        assert_eq!(record.call_id.as_deref(), Some("signal-1"));
+        assert_eq!(
+            record.call_id,
+            lash_core_execution::ToolCallId::fixture("signal-1")
+        );
         assert_eq!(record.tool, "signal_process");
         let events = registry
             .full_event_window(&target_process.id, 0)
@@ -495,20 +505,26 @@ mod tests {
 
         let mut messages = BTreeMap::new();
         for (shape, handle) in unreadable {
-            let awaited =
-                crate::await_process_handle(&context, format!("await-{shape}"), handle.clone())
-                    .await;
+            let awaited = crate::await_process_handle(
+                &context,
+                lash_core_execution::ToolCallId::fixture(&format!("await-{shape}")),
+                handle.clone(),
+            )
+            .await;
             let signalled = crate::signal_process_handle(
                 &context,
-                format!("signal-{shape}"),
+                lash_core_execution::ToolCallId::fixture(&format!("signal-{shape}")),
                 handle.clone(),
                 "ready".to_string(),
                 serde_json::Value::Null,
             )
             .await;
-            let cancelled =
-                crate::cancel_process_handle(&context, format!("cancel-{shape}"), handle.clone())
-                    .await;
+            let cancelled = crate::cancel_process_handle(
+                &context,
+                lash_core_execution::ToolCallId::fixture(&format!("cancel-{shape}")),
+                handle.clone(),
+            )
+            .await;
 
             let parse_refusal = awaited.output.value_for_projection();
             for (operation, reply) in [
@@ -531,8 +547,8 @@ mod tests {
                     .as_ref()
                     .unwrap_or_else(|| panic!("{operation} must record its refusal of {shape}"));
                 assert_eq!(
-                    record.call_id.as_deref(),
-                    Some(format!("{operation}-{shape}").as_str()),
+                    record.call_id,
+                    lash_core_execution::ToolCallId::fixture(&format!("{operation}-{shape}")),
                     "{operation} must record the caller's call id for {shape}"
                 );
                 assert_eq!(
@@ -642,13 +658,13 @@ mod tests {
 
         let awaited = crate::await_process_handle(
             &context,
-            "await-hidden-process".to_string(),
+            lash_core_execution::ToolCallId::fixture("await-hidden-process"),
             handle.clone(),
         )
         .await;
         let signalled = crate::signal_process_handle(
             &context,
-            "signal-hidden-process".to_string(),
+            lash_core_execution::ToolCallId::fixture("signal-hidden-process"),
             handle.clone(),
             "ready".to_string(),
             serde_json::Value::Null,
@@ -656,7 +672,7 @@ mod tests {
         .await;
         let cancelled = crate::cancel_process_handle(
             &context,
-            "cancel-hidden-process".to_string(),
+            lash_core_execution::ToolCallId::fixture("cancel-hidden-process"),
             handle.clone(),
         )
         .await;
@@ -685,18 +701,19 @@ mod tests {
             );
         }
         assert_eq!(
-            awaited
-                .record
-                .as_ref()
-                .and_then(|record| record.call_id.as_deref()),
-            Some("await-hidden-process")
+            awaited.record.as_ref().map(|record| record.call_id.clone()),
+            Some(lash_core_execution::ToolCallId::fixture(
+                "await-hidden-process"
+            )),
         );
         assert_eq!(
             cancelled
                 .record
                 .as_ref()
-                .and_then(|record| record.call_id.as_deref()),
-            Some("cancel-hidden-process")
+                .map(|record| record.call_id.clone()),
+            Some(lash_core_execution::ToolCallId::fixture(
+                "cancel-hidden-process"
+            )),
         );
 
         let mut local_ids = BTreeMap::new();
@@ -739,7 +756,7 @@ mod tests {
         };
         let local_signal = crate::signal_process_handle(
             &context,
-            "signal-local".to_string(),
+            lash_core_execution::ToolCallId::fixture("signal-local"),
             local_handle(&local_ids["local-signal"]),
             "ready".to_string(),
             serde_json::Value::Null,
@@ -747,13 +764,13 @@ mod tests {
         .await;
         let local_cancel = crate::cancel_process_handle(
             &context,
-            "cancel-local".to_string(),
+            lash_core_execution::ToolCallId::fixture("cancel-local"),
             local_handle(&local_ids["local-cancel"]),
         )
         .await;
         let local_await = crate::await_process_handle(
             &context,
-            "await-local".to_string(),
+            lash_core_execution::ToolCallId::fixture("await-local"),
             local_handle(&local_ids["local-await"]),
         )
         .await;
@@ -801,7 +818,7 @@ mod tests {
             serde_json::to_vec(&retained).expect("serialize retained terminal process");
         let terminal_signal = crate::signal_process_handle(
             &context,
-            "signal-terminal-process".to_string(),
+            lash_core_execution::ToolCallId::fixture("signal-terminal-process"),
             handle.clone(),
             "ready".to_string(),
             serde_json::Value::Null,
@@ -843,7 +860,7 @@ mod tests {
         ));
         let pruned_await = crate::await_process_handle(
             &context,
-            "await-pruned-process".to_string(),
+            lash_core_execution::ToolCallId::fixture("await-pruned-process"),
             handle.clone(),
         )
         .await;
@@ -867,7 +884,7 @@ mod tests {
 
         let pruned_cancel = crate::cancel_process_handle(
             &context,
-            "cancel-pruned-process".to_string(),
+            lash_core_execution::ToolCallId::fixture("cancel-pruned-process"),
             handle.clone(),
         )
         .await;
@@ -881,7 +898,7 @@ mod tests {
         );
         let pruned_signal = crate::signal_process_handle(
             &context,
-            "signal-pruned-process".to_string(),
+            lash_core_execution::ToolCallId::fixture("signal-pruned-process"),
             handle,
             "ready".to_string(),
             serde_json::Value::Null,
@@ -1009,7 +1026,7 @@ mod tests {
         );
         let before = crate::await_process_handle(
             &context,
-            "await-before-realization".to_string(),
+            lash_core_execution::ToolCallId::fixture("await-before-realization"),
             realized_handle.clone(),
         )
         .await;
@@ -1027,19 +1044,23 @@ mod tests {
         let identity = crate::ToolIntentIdentity {
             session_id: SessionId::from("session"),
             execution_scope_id: "session".to_string(),
-            tool_call_id: "start-child".to_string(),
+            tool_call_id: lash_core_execution::ToolCallId::fixture("start-child"),
             intent_index: 0,
             replay_key: child.to_string(),
             minting_emission_replay_key: None,
         };
         context
             .complete_tool_call(
-                "start-child".to_string(),
+                lash_core_execution::tool_dispatch::ToolCallIds {
+                    call_id: lash_core_execution::ToolCallId::fixture("start-child"),
+                    provider_call_id: None,
+                },
                 crate::ToolId::new("start_process"),
                 None,
                 crate::tool_dispatch::ToolDispatchOutcome {
                     record: crate::ToolCallRecord {
-                        call_id: Some("start-child".to_string()),
+                        call_id: lash_core_execution::ToolCallId::fixture("start-child"),
+                        provider_call_id: None,
                         tool: "start_process".to_string(),
                         args: json!({}),
                         output: crate::ToolCallOutput::success(realized_handle.clone()),
@@ -1066,7 +1087,7 @@ mod tests {
         );
         let awaited = crate::await_process_handle(
             &context,
-            "await-after-realization".to_string(),
+            lash_core_execution::ToolCallId::fixture("await-after-realization"),
             realized_handle,
         )
         .await;

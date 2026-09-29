@@ -808,7 +808,8 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
                 operation: "tools.attachment_tool".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Ok,
                 host_record: Some(lash_core::ToolCallRecord {
-                    call_id: Some("replayed-call".to_string()),
+                    call_id: lash_core::ToolCallId::fixture("replayed-call"),
+                    provider_call_id: None,
                     tool: "attachment_tool".to_string(),
                     args: serde_json::json!({}),
                     output: lash_core::ToolCallOutput::success_tool_value(
@@ -845,7 +846,10 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
             _ => None,
         })
         .expect("replayed exec response emits its tool-call accounting event");
-    assert_eq!(replayed_tool_call.0.as_deref(), Some("replayed-call"));
+    assert_eq!(
+        *replayed_tool_call.0,
+        lash_core::ToolCallId::fixture("replayed-call")
+    );
     assert_eq!(replayed_tool_call.1, "attachment_tool");
     assert_eq!(
         replayed_tool_call.2.attachments()[0]
@@ -1157,7 +1161,8 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                     operation: "module.ok".to_string(),
                     outcome: lash_core::ExecutedCallOutcome::Ok,
                     host_record: Some(lash_core::ToolCallRecord {
-                        call_id: Some("fanout-ok".to_string()),
+                        call_id: lash_core::ToolCallId::fixture("fanout-ok"),
+                        provider_call_id: None,
                         tool: "ok".to_string(),
                         args: serde_json::json!({}),
                         output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
@@ -1167,7 +1172,8 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                     operation: "module.fail".to_string(),
                     outcome: lash_core::ExecutedCallOutcome::Err,
                     host_record: Some(lash_core::ToolCallRecord {
-                        call_id: Some("fanout-fail".to_string()),
+                        call_id: lash_core::ToolCallId::fixture("fanout-fail"),
+                        provider_call_id: None,
                         tool: "fail".to_string(),
                         args: serde_json::json!({}),
                         output: lash_core::ToolCallOutput::failure(lash_core::ToolFailure::tool(
@@ -1181,7 +1187,8 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                     operation: "module.stop".to_string(),
                     outcome: lash_core::ExecutedCallOutcome::Err,
                     host_record: Some(lash_core::ToolCallRecord {
-                        call_id: Some("fanout-cancel".to_string()),
+                        call_id: lash_core::ToolCallId::fixture("fanout-cancel"),
+                        provider_call_id: None,
                         tool: "stop".to_string(),
                         args: serde_json::json!({}),
                         output: lash_core::ToolCallOutput::cancelled(
@@ -1206,18 +1213,22 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                 name,
                 args,
                 output,
+                ..
             }) => Some((call_id, name, args, output)),
             _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(emitted.len(), 3);
-    assert_eq!(emitted[0].0.as_deref(), Some("fanout-ok"));
+    assert_eq!(*emitted[0].0, lash_core::ToolCallId::fixture("fanout-ok"));
     assert_eq!(emitted[0].1, "ok");
     assert_eq!(emitted[0].2, &serde_json::json!({}));
     assert!(emitted[0].3.is_success());
-    assert_eq!(emitted[1].0.as_deref(), Some("fanout-fail"));
+    assert_eq!(*emitted[1].0, lash_core::ToolCallId::fixture("fanout-fail"));
     assert!(!emitted[1].3.is_success());
-    assert_eq!(emitted[2].0.as_deref(), Some("fanout-cancel"));
+    assert_eq!(
+        *emitted[2].0,
+        lash_core::ToolCallId::fixture("fanout-cancel")
+    );
     assert!(!emitted[2].3.is_success());
 
     let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());

@@ -93,7 +93,7 @@ impl From<&str> for SessionScopeId {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProcessInput {
     ToolCall {
-        call: crate::PreparedToolCall,
+        call: crate::ProcessToolCall,
     },
     Engine {
         kind: String,

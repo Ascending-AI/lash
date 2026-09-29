@@ -1,6 +1,6 @@
 mod tests {
     use lash_core_execution::runtime::effect::*;
-    use lash_core_execution::tool_dispatch::ToolAttemptEffectIdentity;
+    use lash_core_execution::tool_dispatch::ToolAttemptLineage;
     use lash_core_execution::{
         FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessId, SessionId,
         ToolExecutionGrant, ToolManifest, ToolRetryPolicy,
@@ -26,14 +26,15 @@ mod tests {
     }
 
     fn call(tool_id: &str) -> PreparedToolCall {
-        PreparedToolCall::from_parts(
-            "call-1",
-            ToolId::from(tool_id),
-            "search",
-            serde_json::json!({ "q": "lash" }),
-            None,
-            serde_json::Value::Null,
-        )
+        PreparedToolCall {
+            call_id: lash_core_execution::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
+            tool_id: ToolId::from(tool_id),
+            tool_name: "search".into(),
+            args: serde_json::json!({ "q": "lash" }),
+            replay: None,
+            prepared_payload: serde_json::Value::Null,
+        }
     }
 
     fn scope() -> ToolChildScope {
@@ -64,7 +65,7 @@ mod tests {
             ToolChildAdmission::Catalog {
                 manifest: Box::new(tool),
             },
-            ToolAttemptEffectIdentity::Scalar { parent: None },
+            ToolAttemptLineage::default(),
             scope(),
             authority(),
             env(),
@@ -152,19 +153,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn an_empty_call_id_is_refused() {
-        let mut blank = request();
-        blank.call.call_id = "   ".to_string();
-        assert_eq!(
-            blank
-                .validate()
-                .expect_err("a blank call id is refused")
-                .code,
-            lash_core_execution::RuntimeErrorCode::RuntimeEffectToolChildRequestCallId
-        );
-    }
-
     /// The admitted authority and the call it authorizes are one fact. A request
     /// pinning tool A's manifest against a call to tool B would let a recovered
     /// child run tool B under tool A's retry policy and argument projection.
@@ -193,7 +181,7 @@ mod tests {
             ToolChildAdmission::Catalog {
                 manifest: Box::new(tool),
             },
-            ToolAttemptEffectIdentity::Scalar { parent: None },
+            ToolAttemptLineage::default(),
             scope(),
             authority(),
             env(),
@@ -449,22 +437,10 @@ mod tests {
             "parent-effect",
         );
         let mut request = request();
-        request.attempt_identity = ToolAttemptEffectIdentity::Batch {
-            parent: parent.clone(),
-            replay_suffix: "leaf-2".to_string(),
-        };
+        request.lineage = ToolAttemptLineage::under(parent.clone());
         let decoded: ToolChildRequest =
             serde_json::from_str(&serde_json::to_string(&request).expect("serializes"))
                 .expect("decodes");
-        match decoded.attempt_identity {
-            ToolAttemptEffectIdentity::Batch {
-                parent: decoded_parent,
-                replay_suffix,
-            } => {
-                assert_eq!(decoded_parent, parent);
-                assert_eq!(replay_suffix, "leaf-2");
-            }
-            other => panic!("the batch identity must survive, got {other:?}"),
-        }
+        assert_eq!(decoded.lineage.parent_invocation(), Some(&parent));
     }
 }

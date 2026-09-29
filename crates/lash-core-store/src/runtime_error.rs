@@ -366,13 +366,11 @@ pub enum RuntimeErrorCode {
     RuntimeEffectReplayRequired,
     RuntimeEffectSleepCancelled,
     RuntimeEffectTaskJoin,
-    RuntimeEffectToolAttemptCallId,
     RuntimeEffectToolAttemptCaptureVersion,
     RuntimeEffectToolAttemptIndex,
     RuntimeEffectToolChildCancellationAuthority,
     RuntimeEffectToolChildCompletionRouting,
     RuntimeEffectToolChildRequestAdmission,
-    RuntimeEffectToolChildRequestCallId,
     RuntimeEffectToolChildRequestOpener,
     RuntimeEffectToolChildRequestVersion,
     RuntimeEffectToolSettlementVersion,
@@ -393,7 +391,6 @@ pub enum RuntimeErrorCode {
     SessionToolRegistry,
     /// Process-local; repaired by restart, not by same-process retry.
     ToolCatalogResolutionFailed,
-    ToolCompletionKeyMissingCallId,
     ToolDeferralNotDeclared,
     TransientCancelWatch,
     TransientCaptureWrite,
@@ -700,7 +697,6 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectReplayRequired => "runtime_effect_replay_required",
             Self::RuntimeEffectSleepCancelled => "runtime_effect_sleep_cancelled",
             Self::RuntimeEffectTaskJoin => "runtime_effect_task_join",
-            Self::RuntimeEffectToolAttemptCallId => "runtime_effect_tool_attempt_call_id",
             Self::RuntimeEffectToolAttemptCaptureVersion => {
                 "runtime_effect_tool_attempt_capture_version"
             }
@@ -713,9 +709,6 @@ impl RuntimeErrorCode {
             }
             Self::RuntimeEffectToolChildRequestAdmission => {
                 "runtime_effect_tool_child_request_admission"
-            }
-            Self::RuntimeEffectToolChildRequestCallId => {
-                "runtime_effect_tool_child_request_call_id"
             }
             Self::RuntimeEffectToolChildRequestOpener => "runtime_effect_tool_child_request_opener",
             Self::RuntimeEffectToolChildRequestVersion => {
@@ -735,7 +728,6 @@ impl RuntimeErrorCode {
             Self::SessionHeadRefresh => "session_head_refresh",
             Self::SessionToolRegistry => "session_tool_registry",
             Self::ToolCatalogResolutionFailed => "tool_catalog_resolution_failed",
-            Self::ToolCompletionKeyMissingCallId => "tool_completion_key_missing_call_id",
             Self::ToolDeferralNotDeclared => "tool_deferral_not_declared",
             Self::TransientCancelWatch => "transient_cancel_watch",
             Self::TransientCaptureWrite => "transient_capture_write",
@@ -922,7 +914,6 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectToolChildCancellationAuthority,
         Self::RuntimeEffectToolChildCompletionRouting,
         Self::RuntimeEffectToolChildRequestAdmission,
-        Self::RuntimeEffectToolChildRequestCallId,
         Self::RuntimeEffectToolChildRequestOpener,
         Self::RuntimeEffectToolChildRequestVersion,
         Self::RuntimeEffectInvocationSubject,
@@ -935,7 +926,6 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectReplayRequired,
         Self::RuntimeEffectSleepCancelled,
         Self::RuntimeEffectTaskJoin,
-        Self::RuntimeEffectToolAttemptCallId,
         Self::RuntimeEffectToolAttemptCaptureVersion,
         Self::RuntimeEffectToolAttemptIndex,
         Self::RuntimeEffectToolSettlementVersion,
@@ -952,7 +942,6 @@ impl RuntimeErrorCode {
         Self::SessionHeadRefresh,
         Self::SessionToolRegistry,
         Self::ToolCatalogResolutionFailed,
-        Self::ToolCompletionKeyMissingCallId,
         Self::ToolDeferralNotDeclared,
         Self::TransientCancelWatch,
         Self::TransientCaptureWrite,
@@ -1136,7 +1125,6 @@ impl RuntimeErrorCode {
             "runtime_effect_replay_required" => Self::RuntimeEffectReplayRequired,
             "runtime_effect_sleep_cancelled" => Self::RuntimeEffectSleepCancelled,
             "runtime_effect_task_join" => Self::RuntimeEffectTaskJoin,
-            "runtime_effect_tool_attempt_call_id" => Self::RuntimeEffectToolAttemptCallId,
             "runtime_effect_tool_attempt_capture_version" => {
                 Self::RuntimeEffectToolAttemptCaptureVersion
             }
@@ -1149,9 +1137,6 @@ impl RuntimeErrorCode {
             }
             "runtime_effect_tool_child_request_admission" => {
                 Self::RuntimeEffectToolChildRequestAdmission
-            }
-            "runtime_effect_tool_child_request_call_id" => {
-                Self::RuntimeEffectToolChildRequestCallId
             }
             "runtime_effect_tool_child_request_opener" => Self::RuntimeEffectToolChildRequestOpener,
             "runtime_effect_tool_child_request_version" => {
@@ -1171,7 +1156,6 @@ impl RuntimeErrorCode {
             "session_head_refresh" => Self::SessionHeadRefresh,
             "session_tool_registry" => Self::SessionToolRegistry,
             "tool_catalog_resolution_failed" => Self::ToolCatalogResolutionFailed,
-            "tool_completion_key_missing_call_id" => Self::ToolCompletionKeyMissingCallId,
             "tool_deferral_not_declared" => Self::ToolDeferralNotDeclared,
             "transient_cancel_watch" => Self::TransientCancelWatch,
             "transient_capture_write" => Self::TransientCaptureWrite,

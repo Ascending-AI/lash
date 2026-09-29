@@ -43,7 +43,28 @@ pub(super) fn normalize(parts: &[Part]) -> NativeAction {
     let calls = parts
         .iter()
         .filter(|p| p.kind() == PartKind::ToolCall)
+        .map(|call| (call.tool_name(), call.content().to_string()))
         .collect::<Vec<_>>();
+    normalize_calls(&calls)
+}
+
+/// [`normalize`] over a response's output parts, before they are named.
+pub(super) fn normalize_output(parts: &[LlmOutputPart]) -> NativeAction {
+    let calls = parts
+        .iter()
+        .filter_map(|part| match part {
+            LlmOutputPart::ToolCall {
+                tool_name,
+                input_json,
+                ..
+            } => Some((Some(tool_name.as_str()), input_json.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    normalize_calls(&calls)
+}
+
+fn normalize_calls(calls: &[(Option<&str>, String)]) -> NativeAction {
     let malformed = |decision, copy: &str| NativeAction::Malformed {
         decision,
         repair_copy: copy.to_string(),
@@ -54,16 +75,16 @@ pub(super) fn normalize(parts: &[Part]) -> NativeAction {
             "No code executed: only one execute_code call is allowed per response. Combine the work into one program.",
         );
     }
-    let Some(call) = calls.first() else {
+    let Some((tool_name, content)) = calls.first() else {
         return NativeAction::ProseOnly;
     };
-    if call.tool_name() != Some(NATIVE_EXECUTE_TOOL_NAME) {
+    if *tool_name != Some(NATIVE_EXECUTE_TOOL_NAME) {
         return malformed(
             "retry_unknown_tool",
             "No code executed: unknown tool. Call execute_code; invoke host operations and finish inside code.",
         );
     }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&call.content()) else {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
         return malformed(
             "retry_invalid_arguments",
             "No code executed: arguments must be valid JSON with exactly one string property, code.",
@@ -96,24 +117,39 @@ pub(super) fn normalize(parts: &[Part]) -> NativeAction {
     }
 }
 
-pub(super) fn assistant_parts(parts: Vec<LlmOutputPart>) -> Vec<Part> {
+/// The response's parts as transcript parts, its `n`th tool call named
+/// `call_ids[n]` (the response's own positions, ADR 0117 §2).
+pub(super) fn assistant_parts(
+    parts: Vec<LlmOutputPart>,
+    call_ids: Vec<lash_core::ToolCallId>,
+) -> Vec<Part> {
+    let mut call_ids = call_ids.into_iter();
     parts
         .into_iter()
         .enumerate()
-        .map(|(index, part)| {
+        .filter_map(|(index, part)| {
             let id = format!("native.p{index}");
             match part {
                 LlmOutputPart::Text {
                     text,
                     response_meta,
-                } => Part::prose(id, text, response_meta),
-                LlmOutputPart::Reasoning { text, replay } => Part::reasoning(id, text, replay),
+                } => Some(Part::prose(id, text, response_meta)),
+                LlmOutputPart::Reasoning { text, replay } => {
+                    Some(Part::reasoning(id, text, replay))
+                }
                 LlmOutputPart::ToolCall {
                     call_id,
                     tool_name,
                     input_json,
                     replay,
-                } => Part::tool_call(id, input_json, call_id, tool_name, replay),
+                } => Some(Part::tool_call(
+                    id,
+                    input_json,
+                    call_ids.next()?,
+                    call_id,
+                    tool_name,
+                    replay,
+                )),
             }
         })
         .collect()

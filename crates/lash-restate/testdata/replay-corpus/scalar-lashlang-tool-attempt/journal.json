@@ -1,12 +1,12 @@
 {
   "scenario": "scalar-lashlang-tool-attempt",
-  "recorded_at_git_sha": "a62fa789369c3a3a411ea44c297935e6c3209da4",
+  "recorded_at_git_sha": "3ca3392558e128dbbe96c9b683a1d36e7c4dd04f",
   "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
   "records": {
     "lash:session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt": {
       "envelope": {
-        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session\",\"turn_id\":\"turn\"},\"replay_key\":\"session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt\"},\"effect_id\":\"scalar-lashlang-tool-attempt\",\"attribution\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"tool_attempt\",\"call\":{\"call_id\":\"replay-scalar-call\",\"tool_id\":\"tool:replay_scalar_counter\",\"tool_name\":\"replay_scalar_counter\",\"args\":{\"call\":\"replay-scalar-call\"}},\"attempt\":1,\"max_attempts\":1}}",
-        "hash": "79ed6f3cc3a9ddfe30de64e29c4a0660ec96bad320dcc35f4d826196e7430f2c"
+        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session\",\"turn_id\":\"turn\"},\"replay_key\":\"session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt\"},\"effect_id\":\"scalar-lashlang-tool-attempt\",\"attribution\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"tool_attempt\",\"call\":{\"call_id\":\"tc_7e2a5c0150edab4b541cc68f1ee8533d820e6c728412935281c82692987477d8\",\"tool_id\":\"tool:replay_scalar_counter\",\"tool_name\":\"replay_scalar_counter\",\"args\":{\"call\":\"replay-scalar-call\"}},\"attempt\":1,\"max_attempts\":1}}",
+        "hash": "f7ad7d3f10f56d7c41279ad7aa6b2f1ffd9407b8ad742ab53c9f65ddd458361a"
       },
       "outcome": {
         "Ok": {
@@ -14,7 +14,7 @@
           "launch": {
             "status": "done",
             "record": {
-              "call_id": "replay-scalar-call",
+              "call_id": "tc_7e2a5c0150edab4b541cc68f1ee8533d820e6c728412935281c82692987477d8",
               "tool": "replay_scalar_counter",
               "args": {
                 "call": "replay-scalar-call"

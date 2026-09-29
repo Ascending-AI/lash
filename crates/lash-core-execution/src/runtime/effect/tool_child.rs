@@ -54,13 +54,10 @@
 //! thing to disagree at a crash boundary — the same reasoning that keeps a
 //! position column off the child table (ADR 0065).
 //!
-//! **Lineage is carried once**, inside
-//! [`attempt_identity`](ToolChildRequest::attempt_identity). Every arm of
-//! [`ToolAttemptEffectIdentity`] holds the parent `RuntimeInvocation`, and that
-//! parent *is* the dispatch context's `parent_invocation` at every construction
-//! site in tree (`tool_dispatch/execution.rs` passes
-//! `context.parent_invocation.clone()` into `Scalar` directly), so a separate
-//! lineage field would be that same value spelled twice.
+//! **Lineage is carried once**, in [`lineage`](ToolChildRequest::lineage):
+//! the parent `RuntimeInvocation` the child's attempts descend from. The
+//! child's identity is its call's [`ToolCallId`](crate::ToolCallId), which
+//! every attempt and retry key derives from (ADR 0117 §6).
 //!
 //! # What is deployment wiring, not a recorded fact
 //!
@@ -97,7 +94,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::tool_dispatch::ToolAttemptEffectIdentity;
+use crate::tool_dispatch::ToolAttemptLineage;
 use crate::{
     AdmittedScope, EffectOpener, FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessId,
     SessionId, ToolExecutionGrant, ToolManifest, ToolRetryPolicy, TurnControlBindingId,
@@ -349,7 +346,7 @@ impl ToolChildScope {
 /// |---|---|---|
 /// | [`call`](Self::call) | group formation (FIG-3397), from the prepared batch call | the handler-level driver (FIG-2266), as the call to execute |
 /// | [`admission`](Self::admission) | group formation, from the grant or the admitted catalog manifest | the driver, for authority, retry policy and argument projection, without the live catalog |
-/// | [`attempt_identity`](Self::attempt_identity) | group formation, as the identity the leaf's attempts derive from | the driver, to derive each attempt's replay key and causal parent |
+/// | [`lineage`](Self::lineage) | group formation, as the parent the leaf's attempts descend from | the driver, as each attempt's causal parent |
 /// | [`scope`](Self::scope) | group formation, as the opener, claim scope, session and frame | recovery (FIG-3396 §1) validates the opener; the driver reconstructs the admitted controller and its session-scoped services |
 /// | [`enclosing_process`](Self::enclosing_process) | group formation, when the opener is a process, as a `ProcessId` | the driver, to set the call's enclosing process incarnation |
 /// | [`cancellation_authority`](Self::cancellation_authority) | group formation, from the opener's turn-control binding | the cooperative cancel path (FIG-2266) and the cancel disposition (FIG-3409) |
@@ -379,10 +376,8 @@ pub struct ToolChildRequest {
     pub call: PreparedToolCall,
     /// The authority the child was admitted under.
     pub admission: ToolChildAdmission,
-    /// The identity this child's attempts derive their replay keys and causal
-    /// parent from. Carries the parent invocation, so it is also the request's
-    /// lineage.
-    pub attempt_identity: ToolAttemptEffectIdentity,
+    /// The parent invocation this child's attempts descend from.
+    pub lineage: ToolAttemptLineage,
     /// Where this child runs and whose work it is.
     pub scope: ToolChildScope,
     /// The process **incarnation** this call executes inside, when the opener
@@ -468,7 +463,7 @@ impl ToolChildRequest {
     pub fn new(
         call: PreparedToolCall,
         admission: ToolChildAdmission,
-        attempt_identity: ToolAttemptEffectIdentity,
+        lineage: ToolAttemptLineage,
         scope: ToolChildScope,
         cancellation_authority: TurnControlBindingId,
         execution_env: ProcessExecutionEnvRef,
@@ -479,7 +474,7 @@ impl ToolChildRequest {
             version: TOOL_CHILD_REQUEST_VERSION,
             call,
             admission,
-            attempt_identity,
+            lineage,
             scope,
             enclosing_process: None,
             cancellation_authority,
@@ -516,12 +511,6 @@ impl ToolChildRequest {
                      be read completely is refused rather than run under partial authority",
                     self.version
                 ),
-            ));
-        }
-        if self.call.call_id.trim().is_empty() {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectToolChildRequestCallId,
-                "retained tool-child request requires a non-empty call id",
             ));
         }
         self.scope.validate()?;

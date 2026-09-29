@@ -1024,14 +1024,13 @@ pub(super) fn counting_tool_registration(
 ) -> ProcessRegistration {
     ProcessRegistration::new(
         ProcessInput::ToolCall {
-            call: lash_core::PreparedToolCall::from_parts(
-                format!("{label}-call"),
-                "tool:recovery_count",
-                "recovery_count",
-                serde_json::json!({ "line": label }),
-                None,
-                serde_json::Value::Null,
-            ),
+            call: lash_core::ProcessToolCall {
+                tool_id: "tool:recovery_count".into(),
+                tool_name: "recovery_count".into(),
+                args: serde_json::json!({ "line": label }),
+                replay: None,
+                prepared_payload: serde_json::Value::Null,
+            },
         },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,

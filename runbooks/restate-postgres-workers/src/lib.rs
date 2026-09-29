@@ -943,7 +943,7 @@ impl E2eTools {
             &workflow_id,
             &self.worker_id,
             call.name(),
-            call.context.tool_call_id(),
+            Some(call.context.call_id().as_str()),
             call.args.to_owned(),
             result.clone(),
         )
@@ -970,14 +970,14 @@ impl E2eTools {
             Ok(key) => key,
             Err(err) => return ToolOutcome::err_fmt(err),
         };
-        let call_id = call.context.tool_call_id().map(ToOwned::to_owned);
+        let call_id = call.context.call_id().to_string();
         let args = call.args.to_owned();
         let _ = record_tool_event(
             &self.pool,
             &workflow_id,
             &self.worker_id,
             call.name(),
-            call_id.as_deref(),
+            Some(call_id.as_str()),
             args.clone(),
             serde_json::json!({
                 "pending": true,
@@ -1004,7 +1004,7 @@ impl E2eTools {
                 &workflow_id,
                 &worker_id,
                 "async_lookup.resolve",
-                call_id.as_deref(),
+                Some(call_id.as_str()),
                 args,
                 serde_json::json!({
                     "resolved": true,
@@ -1052,7 +1052,7 @@ impl E2eTools {
             &workflow_id,
             &self.worker_id,
             call.name(),
-            call.context.tool_call_id(),
+            Some(call.context.call_id().as_str()),
             call.args.to_owned(),
             result.clone(),
         )
@@ -1086,7 +1086,7 @@ impl E2eTools {
             attempt_id: &attempt_id,
             logical_key: &logical_key,
             parent_workflow_id: workflow_id,
-            call_id: call.context.tool_call_id().unwrap_or_default(),
+            call_id: call.context.call_id().as_str(),
             worker_id: &self.worker_id,
             request: &request,
         };
@@ -1109,7 +1109,7 @@ impl E2eTools {
                 .context("a lose_after_commit call names its batch_width")?;
             batch_journal::await_batch_siblings_journaled(
                 workflow_id,
-                call.context.tool_call_id().unwrap_or_default(),
+                call.context.call_id().as_str(),
                 batch_width,
             )
             .await?;
@@ -1201,7 +1201,7 @@ impl E2eTools {
             &workflow_id,
             &self.worker_id,
             call.name(),
-            call.context.tool_call_id(),
+            Some(call.context.call_id().as_str()),
             call.args.to_owned(),
             result_json,
         )
@@ -1221,7 +1221,7 @@ impl E2eTools {
             &workflow_id,
             &self.worker_id,
             call.name(),
-            call.context.tool_call_id(),
+            Some(call.context.call_id().as_str()),
             call.args.to_owned(),
             result.clone(),
         )
@@ -1291,7 +1291,7 @@ impl E2eTools {
             &workflow_id,
             &self.worker_id,
             call.name(),
-            call.context.tool_call_id(),
+            Some(call.context.call_id().as_str()),
             call.args.to_owned(),
             started,
         )
@@ -1328,7 +1328,7 @@ impl E2eTools {
         {
             return ToolOutcome::err_fmt(err);
         }
-        let call_id = call.context.tool_call_id().map(ToOwned::to_owned);
+        let call_id = call.context.call_id().to_string();
         let args = call.args.to_owned();
         let key_json = serde_json::to_value(&key).unwrap_or(serde_json::Value::Null);
         let _ = record_tool_event(
@@ -1336,7 +1336,7 @@ impl E2eTools {
             &workflow_id,
             &self.worker_id,
             "durable_input_request.opened",
-            call_id.as_deref(),
+            Some(call_id.as_str()),
             args.clone(),
             serde_json::json!({
                 "opened": opened,
@@ -1360,10 +1360,7 @@ impl E2eTools {
                 "request_id": opened["request_id"].clone(),
                 "await_key_id": key.key_id,
             }),
-            format!(
-                "tool:{}:input-request-opened",
-                call_id.as_deref().unwrap_or("unknown")
-            ),
+            format!("tool:{}:input-request-opened", call_id),
         );
         if args
             .get("attach_after_resolution")

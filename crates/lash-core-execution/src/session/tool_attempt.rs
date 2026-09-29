@@ -39,9 +39,11 @@ impl RuntimeExecutionContext<'_> {
         // The attempt's capture is written outside the watched body, before
         // and after it (see `ToolAttemptTurnCapture`).
         let call_id = prepared.call_id.clone();
-        let turn_capture =
-            crate::tool_dispatch::ToolAttemptTurnCapture::open(attempt_dispatch.as_ref(), &call_id)
-                .await?;
+        let turn_capture = crate::tool_dispatch::ToolAttemptTurnCapture::open(
+            attempt_dispatch.as_ref(),
+            &crate::tool_dispatch::ToolCallIds::of(&prepared),
+        )
+        .await?;
         // The attempt is a recorded step its engine cannot select away: its
         // body watches the turn's gate itself and gets the stop as its token,
         // so the recorded outcome says whether the stop won (FIG-3672 P9).
@@ -81,9 +83,8 @@ impl RuntimeExecutionContext<'_> {
         turn_capture: &crate::tool_dispatch::ToolAttemptTurnCapture,
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
         let mut tool_context =
-            crate::ToolContext::from_dispatch(std::sync::Arc::clone(&attempt_dispatch))
+            crate::ToolContext::from_dispatch(std::sync::Arc::clone(&attempt_dispatch), &prepared)
                 .runtime_execution_context(attempt_context.clone())
-                .prepared_call(&prepared)
                 .cancellation_token(stop)
                 .enclosing_process(self.process_id().cloned())
                 .parent_invocation(Some(attempt_invocation))

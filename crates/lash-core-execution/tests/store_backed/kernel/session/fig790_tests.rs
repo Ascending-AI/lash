@@ -581,7 +581,7 @@ async fn deleted_session_process_await_latches_typed_enclosing_effect_abort() {
 
     let reply = crate::await_process_handle(
         &context,
-        "await-deleted-session-process".to_string(),
+        lash_core_execution::ToolCallId::fixture("await-deleted-session-process"),
         RuntimeExecutionContext::process_handle_json(&crate::ProcessId::fixture("fig790-process")),
     )
     .await;

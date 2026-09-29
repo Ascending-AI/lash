@@ -394,18 +394,42 @@ fn text_response(text: String) -> crate::LlmResponse {
     }
 }
 
-/// The intent outcomes a turn reported, by call id.
+/// The intent outcomes a turn reported, by the provider call id of the call
+/// that reported each: an outcome names its call by `ToolCallId`, and the
+/// call's start pairs that id with the provider's correlation.
 #[derive(Default)]
-struct IntentOutcomes(std::sync::Mutex<Vec<(String, crate::ToolIntentExecutionOutcome)>>);
+struct IntentOutcomes(std::sync::Mutex<IntentOutcomeLog>);
+
+#[derive(Default)]
+struct IntentOutcomeLog {
+    provider_ids: std::collections::HashMap<crate::ToolCallId, String>,
+    outcomes: Vec<(String, crate::ToolIntentExecutionOutcome)>,
+}
 
 #[async_trait::async_trait]
 impl crate::TurnActivitySink for IntentOutcomes {
     async fn emit(&self, activity: crate::TurnActivity) {
-        if let crate::TurnEvent::ToolIntentOutcome { call_id, outcome } = activity.event {
-            self.0
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push((call_id, outcome));
+        let mut log = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match activity.event {
+            crate::TurnEvent::ToolCallStarted {
+                call_id,
+                provider_call_id: Some(provider_call_id),
+                ..
+            } => {
+                log.provider_ids.insert(call_id, provider_call_id);
+            }
+            crate::TurnEvent::ToolIntentOutcome { call_id, outcome } => {
+                let provider_call_id = log
+                    .provider_ids
+                    .get(&call_id)
+                    .cloned()
+                    .unwrap_or_else(|| call_id.to_string());
+                log.outcomes.push((provider_call_id, outcome));
+            }
+            _ => {}
         }
     }
 }
@@ -805,6 +829,7 @@ impl World {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .outcomes
             .clone()
     }
 }

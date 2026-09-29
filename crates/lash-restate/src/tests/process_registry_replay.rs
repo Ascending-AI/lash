@@ -1920,7 +1920,10 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
                     format!("matrix-effect-{ordinal}"),
                 ),
                 RuntimeEffectCommand::ToolAttempt {
-                    call: prepared_tool_call_with(&format!("matrix-call-{ordinal}"), "matrix_tool"),
+                    call: Box::new(prepared_tool_call_with(
+                        &format!("matrix-call-{ordinal}"),
+                        "matrix_tool",
+                    )),
                     execution_grant: None,
                     attempt: 1,
                     max_attempts: 1,

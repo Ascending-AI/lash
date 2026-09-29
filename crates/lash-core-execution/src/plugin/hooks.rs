@@ -285,13 +285,13 @@ impl ToolCallHookContext {
 pub struct ToolResultHookContext {
     pub session_id: SessionId,
     /// The durable identity of the prepared call this observation belongs to:
-    /// the same value the attempt body saw as [`crate::AttemptContext::tool_call_id`]
+    /// the same value the attempt body saw as [`crate::AttemptContext::call_id`]
     /// and the executed-call record carries as [`crate::ToolCallRecord::call_id`].
     /// A host correlating this observation with its own records — an effect
     /// ledger, an audit trail — keys on this rather than on tool name or args.
     /// It is a correlator, not a receipt: retry and reinspection invoke the
     /// hook more than once for one call, so observations deduplicate on it.
-    pub call_id: String,
+    pub call_id: crate::ToolCallId,
     pub tool_name: String,
     pub args: serde_json::Value,
     pub result: ToolOutcome,
@@ -304,7 +304,7 @@ impl ToolResultHookContext {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         session_id: SessionId,
-        call_id: String,
+        call_id: crate::ToolCallId,
         tool_name: String,
         args: serde_json::Value,
         result: ToolOutcome,
@@ -342,7 +342,7 @@ impl ToolResultHookContext {
 #[derive(Clone)]
 pub struct ToolResultProjectionContext {
     pub session_id: SessionId,
-    pub call_id: String,
+    pub call_id: crate::ToolCallId,
     pub tool_id: crate::ToolId,
     pub tool_name: String,
     pub render: Option<crate::RecordedRender>,

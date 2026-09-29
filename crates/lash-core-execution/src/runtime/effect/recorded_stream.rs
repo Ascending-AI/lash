@@ -482,7 +482,8 @@ mod tests {
         builder.push_activity(&crate::TurnActivity::new(
             crate::TurnActivityId::new("tool:call-1"),
             crate::TurnEvent::ToolCallCompleted {
-                call_id: Some("call-1".to_string()),
+                call_id: crate::ToolCallId::fixture("nested"),
+                provider_call_id: None,
                 name: "leaf".to_string(),
                 args: serde_json::json!({}),
                 output: output.clone(),

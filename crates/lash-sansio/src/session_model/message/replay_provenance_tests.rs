@@ -44,6 +44,7 @@ fn replay_request_from_reopened_message(
             Part::tool_call(
                 "assistant-1.p1".to_string(),
                 "{}".to_string(),
+                crate::ToolCallId::fixture("call-1"),
                 "call-1".to_string(),
                 "lookup".to_string(),
                 Some(tool),

@@ -111,23 +111,23 @@ pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
     let calls = |session: &crate::SessionId| {
         vec![
             crate::ToolInvocation::new(
-                format!("{session}-plain"),
+                super::leaf_call_id(&format!("{session}-plain")),
                 crate::ToolId::from(LEAF_PLAIN),
                 serde_json::json!({ "leaf": "plain" }),
             ),
             crate::ToolInvocation::new(
-                format!("{session}-granted"),
+                super::leaf_call_id(&format!("{session}-granted")),
                 crate::ToolId::from(LEAF_GRANTED),
                 serde_json::json!({ "leaf": "granted" }),
             )
             .with_execution_grant(leaf_grant()),
             crate::ToolInvocation::new(
-                format!("{session}-fail"),
+                super::leaf_call_id(&format!("{session}-fail")),
                 crate::ToolId::from(LEAF_FAIL),
                 serde_json::json!({ "leaf": "fail" }),
             ),
             crate::ToolInvocation::new(
-                format!("{session}-absent"),
+                super::leaf_call_id(&format!("{session}-absent")),
                 crate::ToolId::from(LEAF_ABSENT),
                 serde_json::json!({ "leaf": "absent" }),
             ),
@@ -147,8 +147,8 @@ pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
             .as_ref()
             .unwrap_or_else(|| panic!("reply {index} carries its call record"));
         assert_eq!(
-            record.call_id.as_deref(),
-            Some(format!("{session}-{suffix}").as_str()),
+            super::leaf_label(&record.call_id),
+            format!("{session}-{suffix}"),
             "reply {index} is the reply to input {index}"
         );
     }

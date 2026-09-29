@@ -373,7 +373,8 @@ mod tests {
     fn standard_records_actual_tool_arguments_instead_of_code() {
         let fields = execution_fields(
             &[activity(TurnEvent::ToolCallStarted {
-                call_id: Some("call".into()),
+                call_id: lash::ToolCallId::fixture("call"),
+                provider_call_id: Some("call".into()),
                 name: "kv_get".into(),
                 args: serde_json::json!({"key":"project"}),
                 graph_key: None,

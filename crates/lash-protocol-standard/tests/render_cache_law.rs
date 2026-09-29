@@ -390,7 +390,8 @@ fn stable_bytes(messages: &[lash_sansio::llm::types::LlmMessage]) -> Vec<u8> {
 fn replay_presentation_outcome() -> lash_core::tool_dispatch::ToolDispatchOutcome {
     lash_core::tool_dispatch::ToolDispatchOutcome {
         record: lash_core::ToolCallRecord {
-            call_id: Some("replay-fixture".into()),
+            call_id: lash_core::ToolCallId::fixture("replay-fixture"),
+            provider_call_id: None,
             tool: "fixture".into(),
             args: serde_json::json!({}),
             output: ToolCallOutput::success(serde_json::json!("long value ".repeat(2000))),
@@ -518,7 +519,10 @@ fn journaled_standard_presentation_replays_without_render_or_retention_io() {
                                 .into_runtime();
                         let completed = context
                             .complete_tool_call(
-                                "replay-fixture".into(),
+                                lash_core::tool_dispatch::ToolCallIds {
+                                    call_id: lash_core::ToolCallId::fixture("replay-fixture"),
+                                    provider_call_id: None,
+                                },
                                 ToolId::new("law:fixture"),
                                 None,
                                 replay_presentation_outcome(),

@@ -21,7 +21,7 @@ pub(super) async fn admit(
     .bind(&submission.identity.replay_key)
     .bind(submission.identity.session_id.as_str())
     .bind(&submission.identity.execution_scope_id)
-    .bind(&submission.identity.tool_call_id)
+    .bind(submission.identity.tool_call_id.as_str())
     .bind(i64::from(submission.identity.intent_index))
     .bind(submission.kind.as_str())
     .bind(&submission.payload_hash)

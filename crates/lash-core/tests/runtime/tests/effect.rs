@@ -686,7 +686,9 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
     let tool = &attempt_records[0];
     assert_eq!(tool.turn_id.as_deref(), Some("scoped-retry-sleep"));
     assert!(tool.replay_key.contains("scoped-retry-sleep"));
-    assert!(tool.replay_key.contains("child:0:retry-call-1:attempt:1"));
+    // An attempt is keyed by lash's call id and its number (ADR 0117).
+    let call_id = &turn.tool_calls[0].call_id;
+    assert!(tool.replay_key.contains(&format!("{call_id}:attempt:1")));
     assert_eq!(recorder.count_kind(RuntimeEffectKind::Sleep), 1);
     assert!(
         recorder
@@ -772,16 +774,21 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
         .map(|record| record.replay_key)
         .collect::<Vec<_>>();
     assert_eq!(tool_keys.len(), 2);
-    assert!(
-        tool_keys
+    // Each leaf's attempt is keyed by its own call id (ADR 0117).
+    for provider_call_id in ["call-1", "call-2"] {
+        let call_id = &turn
+            .tool_calls
             .iter()
-            .any(|key| key.contains("child:0:call-1:attempt:1"))
-    );
-    assert!(
-        tool_keys
-            .iter()
-            .any(|key| key.contains("child:1:call-2:attempt:1"))
-    );
+            .find(|call| call.provider_call_id.as_deref() == Some(provider_call_id))
+            .expect("the leaf is recorded")
+            .call_id;
+        assert!(
+            tool_keys
+                .iter()
+                .any(|key| key.contains(&format!("{call_id}:attempt:1"))),
+            "{provider_call_id}'s attempt is keyed by its call id: {tool_keys:?}"
+        );
+    }
     // No single envelope names both calls now: each leaf is its own
     // `ToolInvocation` group child (FIG-3397).
     assert!(
@@ -983,7 +990,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     let mut request = lash_core::facade_support::DirectRequest::text("mock-model", "summarize");
     let caused_by = CausalRef::ToolCall {
         session_id: SessionId::from("root"),
-        call_id: "originating-tool-call".to_string(),
+        call_id: lash_core::ToolCallId::fixture("originating-tool-call"),
     };
     request.caused_by = Some(caused_by.clone());
     let completion = direct

@@ -58,6 +58,9 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
     // derived from its owner and operation so the effect that runs the
     // command knows its subscription revision before it commits (ADR 0113).
     "lash.trigger-incarnation",
+    // FIG-4080: the request a tool call's identity is bound to when the call
+    // is recorded (ADR 0117 §7).
+    "lash.tool-call-request",
 ];
 
 /// Grandfathered families whose preimages omit the framing header (ADR 0097).

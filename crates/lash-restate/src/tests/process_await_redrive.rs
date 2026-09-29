@@ -808,9 +808,11 @@ pub(super) async fn a_turn_stop_over_an_ended_process_reads_its_terminal_without
 #[test]
 pub(super) fn restate_session_cancel_sweep_excludes_turn_control_addresses() {
     let scope = durable_turn_scope("session", "turn");
-    let durable_wait =
-        restate_await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("tool-wait"))
-            .expect("durable wait key");
+    let durable_wait = restate_await_event_key(
+        &scope,
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("tool-wait")),
+    )
+    .expect("durable wait key");
     let cancel_gate = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
         .expect("turn-cancel key");
     let terminal = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnTerminal)
@@ -910,7 +912,9 @@ impl Fig1631AwaitEventGate for Fig1631AwaitEventGateImpl {
         let scope = durable_turn_scope(FIG1631_AWAIT_SESSION, "turn");
         let key = test_restate_await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("fig1631-await-call"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "fig1631-await-call",
+            )),
         )
         .map_err(TerminalError::from_error)?;
         let outcome = RestateRuntimeEffectController::new_for_test(ctx)
@@ -1609,7 +1613,9 @@ pub(super) async fn durable_wait_workflow_rejects_an_inconsistent_key_preimage_b
     let scope = durable_turn_scope("fig2065-forged-session", "fig2065-forged-turn");
     let mut key = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
         .expect("derive FIG-2065 turn-control key");
-    key.wait = AwaitEventWaitIdentity::tool_completion("fig2065-forged-tool-completion");
+    key.wait = AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+        "fig2065-forged-tool-completion",
+    ));
     let address = RestateDurableWaitAddress::for_key(&key);
     assert_eq!(
         address.classification,
@@ -1650,7 +1656,9 @@ pub(super) async fn durable_wait_index_rejects_an_inconsistent_key_preimage_befo
     let scope = durable_turn_scope("fig2005-forged-session", "fig2005-forged-turn");
     let mut key = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
         .expect("derive FIG-2005 turn-control key");
-    key.wait = AwaitEventWaitIdentity::tool_completion("fig2005-forged-tool-completion");
+    key.wait = AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+        "fig2005-forged-tool-completion",
+    ));
     let address = RestateDurableWaitAddress::for_key(&key);
     assert_eq!(
         address.classification,
@@ -1707,7 +1715,9 @@ pub(super) async fn pre_stamp_wait_registry_state_refuses_typed_before_any_write
     let object_key = "fig3814-session";
     let key = restate_await_event_key(
         &durable_turn_scope(object_key, "fig3814-turn"), // gitleaks:allow -- synthetic workflow/turn identity fixture
-        AwaitEventWaitIdentity::tool_completion("fig3814-tool-wait"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+            "fig3814-tool-wait",
+        )),
     )
     .expect("derive FIG-3814 wait key");
 
@@ -1960,7 +1970,9 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     let object_key = "fig1943-session";
     let key = restate_await_event_key(
         &durable_turn_scope(object_key, "fig1943-turn"), // gitleaks:allow -- synthetic workflow/turn identity fixture
-        AwaitEventWaitIdentity::tool_completion("fig1943-tool-wait"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+            "fig1943-tool-wait",
+        )),
     )
     .expect("derive FIG-1943 tool-wait key");
     let mut state = BTreeMap::new();
@@ -2230,10 +2242,9 @@ pub(super) fn restate_effect_name_uses_lash_replay_key() {
     let identity = lash_core::derive_tool_intent_identity(
         &lash_sansio::SessionId::from("session"),
         "turn",
-        Some("call"),
+        &lash_core::ToolCallId::fixture("call"),
         0,
-    )
-    .expect("derive tool-intent identity");
+    );
     let invocation = lash_core::RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(
             durable_turn_scope("session", "turn"),

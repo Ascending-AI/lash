@@ -38,7 +38,7 @@ fn runtime_replay_round_trip_retains_minting_emission_key() {
             lash_core::ToolIntentIdentity {
                 session_id: SessionId::from("session"),
                 execution_scope_id: "turn".to_string(),
-                tool_call_id: "call".to_string(),
+                tool_call_id: lash_core::ToolCallId::fixture("call"),
                 intent_index: 0,
                 replay_key: "intent:derived".to_string(),
                 minting_emission_replay_key: Some("emission:minting".to_string()),
@@ -1093,7 +1093,8 @@ fn remote_turn_result_maps_core_semantics() {
         },
         llm_calls: vec![call_record.clone()],
         tool_calls: vec![lash_core::ToolCallRecord {
-            call_id: Some("exec-call".to_string()),
+            call_id: lash_core::ToolCallId::fixture("exec-call"),
+            provider_call_id: None,
             tool: "lookup".to_string(),
             args: serde_json::json!({ "key": "value" }),
             output: lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true })),
@@ -1114,7 +1115,7 @@ fn remote_turn_result_maps_core_semantics() {
         identity: RemoteToolIntentIdentity {
             session_id: SessionId::from("session"),
             execution_scope_id: "turn".to_string(),
-            tool_call_id: "exec-call".to_string(),
+            tool_call_id: lash_core::ToolCallId::fixture("exec-call"),
             intent_index: 0,
             replay_key: "intent-replay-key".to_string(),
             minting_emission_replay_key: None,
@@ -1133,7 +1134,7 @@ fn remote_turn_result_maps_core_semantics() {
                 id: "intent-activity".to_string(),
                 correlation_id: "intent-correlation".to_string(),
                 event: RemoteTurnEvent::ToolIntentOutcome {
-                    call_id: "exec-call".to_string(),
+                    call_id: lash_core::ToolCallId::fixture("exec-call"),
                     outcome: intent_outcome.clone(),
                 },
             },
@@ -1146,7 +1147,10 @@ fn remote_turn_result_maps_core_semantics() {
     assert_eq!(remote.execution.started_at_ms, 1_700_000_000_000);
     assert_eq!(remote.execution.duration_ms, 42);
     assert_eq!(remote.tool_calls.len(), 1);
-    assert_eq!(remote.tool_calls[0].call_id.as_deref(), Some("exec-call"));
+    assert_eq!(
+        remote.tool_calls[0].call_id,
+        lash_core::ToolCallId::fixture("exec-call")
+    );
     assert_eq!(remote.tool_calls[0].tool_name, "lookup");
     assert_eq!(remote.llm_calls[0].call_id, "llm-call-1");
     let evidence = remote.llm_calls[0].attempts[0]
@@ -1419,7 +1423,8 @@ fn remote_activity_preserves_semantic_fields() {
     let activity = lash_core::TurnActivity::new(
         lash_core::TurnActivityId::new("corr"),
         lash_core::TurnEvent::ToolCallCompleted {
-            call_id: Some("call".to_string()),
+            call_id: lash_core::ToolCallId::fixture("call"),
+            provider_call_id: None,
             name: "demo".to_string(),
             args: serde_json::json!({ "a": 1 }),
             output,
@@ -1436,7 +1441,7 @@ fn remote_activity_preserves_semantic_fields() {
             duration_ms,
             ..
         } => {
-            assert_eq!(call_id.as_deref(), Some("call"));
+            assert_eq!(call_id, lash_core::ToolCallId::fixture("call"));
             assert_eq!(args, serde_json::json!({ "a": 1 }));
             assert_eq!(duration_ms, 42);
         }
@@ -1477,7 +1482,7 @@ fn journaled_process_lifecycle_kinds_keep_their_sequence_on_the_wire() {
 #[test]
 fn remote_activity_preserves_typed_tool_intent_refusal_payload() {
     let activity = lash_core::TurnActivity::independent(lash_core::TurnEvent::ToolIntentOutcome {
-        call_id: "call-1".to_string(),
+        call_id: lash_core::ToolCallId::fixture("call-1"),
         outcome: lash_core::ToolIntentExecutionOutcome::Refused {
             identity: None,
             intent_index: 0,
@@ -1490,7 +1495,7 @@ fn remote_activity_preserves_typed_tool_intent_refusal_payload() {
     assert_eq!(
         remote.event,
         RemoteTurnEvent::ToolIntentOutcome {
-            call_id: "call-1".to_string(),
+            call_id: lash_core::ToolCallId::fixture("call-1"),
             outcome: RemoteToolIntentExecutionOutcome::Refused {
                 identity: None,
                 intent_index: 0,
@@ -2442,7 +2447,8 @@ fn decode_remote_json_surfaces_typed_invalid_envelope_error() {
 fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
     let output = lash_core::ToolCallOutput::success(serde_json::json!({ "result": "hello" }));
     let event = lash_core::TurnEvent::ToolCallCompleted {
-        call_id: Some("call-1".to_string()),
+        call_id: lash_core::ToolCallId::fixture("call-1"),
+        provider_call_id: None,
         name: "test_tool".to_string(),
         args: serde_json::json!({ "arg": 1 }),
         output,
@@ -2458,8 +2464,10 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
             output,
             duration_ms,
             graph_key,
+            provider_call_id,
         } => {
-            assert_eq!(call_id.as_deref(), Some("call-1"));
+            assert_eq!(call_id, lash_core::ToolCallId::fixture("call-1"));
+            assert_eq!(provider_call_id, None);
             assert_eq!(name, "test_tool");
             assert_eq!(args, serde_json::json!({ "arg": 1 }));
             assert_eq!(output["outcome"]["status"], "success");

@@ -164,7 +164,7 @@ fn assembled_facts(turn: &AssembledTurn) -> serde_json::Value {
         .iter()
         .map(|record| {
             serde_json::json!({
-                "call_id": record.call_id,
+                "provider_call_id": record.provider_call_id,
                 "tool": record.tool,
                 "args": record.args,
                 "output": record.output,
@@ -207,7 +207,7 @@ async fn tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "tool turn",
         &pinned,
-        &["2f972706d96f848a5bb5c7cd6da29202f75bee564baa5ac63d3d30d5d99d6de2"],
+        &["dcfebc51a7436133b87f685d747671bb8e3f9afd7ed9ffc26de2dd42302b6eef"],
         r#"{
             "assistant_output": "done",
             "errors": [],
@@ -233,7 +233,7 @@ async fn tool_turn_commits_the_pinned_bytes() {
                     "args": {
                         "value": "alpha"
                     },
-                    "call_id": "pin-call-1",
+                    "provider_call_id": "pin-call-1",
                     "output": {
                         "outcome": {
                             "payload": {
@@ -281,7 +281,7 @@ async fn parallel_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "parallel tool turn",
         &pinned,
-        &["b20590969988f73d7e1112ed28d0d8b832e9d07beee934bed63f54737a587a00"],
+        &["6fea9043dd0c73c32bdca8b1922d9896cb03ebe000acc1a90ff713c7ad23b444"],
         r#"{
             "assistant_output": "all three echoed",
             "errors": [],
@@ -307,7 +307,7 @@ async fn parallel_tool_turn_commits_the_pinned_bytes() {
                     "args": {
                         "value": "beta"
                     },
-                    "call_id": "pin-parallel-0",
+                    "provider_call_id": "pin-parallel-0",
                     "output": {
                         "outcome": {
                             "payload": {
@@ -325,7 +325,7 @@ async fn parallel_tool_turn_commits_the_pinned_bytes() {
                     "args": {
                         "value": "gamma"
                     },
-                    "call_id": "pin-parallel-1",
+                    "provider_call_id": "pin-parallel-1",
                     "output": {
                         "outcome": {
                             "payload": {
@@ -343,7 +343,7 @@ async fn parallel_tool_turn_commits_the_pinned_bytes() {
                     "args": {
                         "value": "delta"
                     },
-                    "call_id": "pin-parallel-2",
+                    "provider_call_id": "pin-parallel-2",
                     "output": {
                         "outcome": {
                             "payload": {
@@ -478,7 +478,7 @@ async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled mid tool",
         &pinned,
-        &["c3af249e67c7fa72221496076f027e7639a4958d7c679374de58f247402984a0"],
+        &["6b1ac972335f7fda2a83c84d45a6f76083320c66012d1855e943dbd899a05e48"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -504,7 +504,7 @@ async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
             "tool_calls": [
                 {
                     "args": {},
-                    "call_id": "pin-slow-call",
+                    "provider_call_id": "pin-slow-call",
                     "output": {
                         "outcome": {
                             "payload": {
@@ -634,7 +634,7 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
     crate::runtime_support::commit_pins::assert_commit_pins(
         "blocked host",
         &store.runtime_commits(),
-        &["b20590969988f73d7e1112ed28d0d8b832e9d07beee934bed63f54737a587a00"],
+        &["6fea9043dd0c73c32bdca8b1922d9896cb03ebe000acc1a90ff713c7ad23b444"],
     );
     assert!(host.received().is_empty(), "the host has taken nothing yet");
 
@@ -676,7 +676,9 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
     let tool_calls = sessions
         .iter()
         .filter_map(|event| match event {
-            SessionStreamEvent::ToolCall { call_id, .. } => call_id.clone(),
+            SessionStreamEvent::ToolCall {
+                provider_call_id, ..
+            } => provider_call_id.clone(),
             _ => None,
         })
         .collect::<Vec<_>>();

@@ -1373,7 +1373,8 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
         .emit(test_activity(
             "tool-1",
             TurnEvent::ToolCallCompleted {
-                call_id: Some("call-1".to_string()),
+                call_id: crate::ToolCallId::fixture("call-1"),
+                provider_call_id: None,
                 name: "app_lookup".to_string(),
                 args: serde_json::json!({}),
                 output: lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true })),
@@ -1391,7 +1392,7 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
                 error: None,
                 success: true,
                 duration_ms: 4,
-                tool_call_ids: vec!["call-1".to_string()],
+                tool_call_ids: vec![lash_core::ToolCallId::fixture("call-1")],
                 graph_key: None,
             },
         ))

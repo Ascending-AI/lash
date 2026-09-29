@@ -120,14 +120,15 @@ impl ToolProvider for TestTools {
             ));
         }
         let prepared_payload = json!({ "label": self.label });
-        Ok(lash::tools::PreparedToolCall::from_parts(
-            call.pending.call_id,
-            call.tool_id,
-            call.pending.tool_name,
-            call.pending.args,
-            call.pending.replay,
+        Ok(lash::tools::PreparedToolCall {
+            call_id: call.pending.call_id,
+            provider_call_id: call.pending.provider_call_id,
+            tool_id: call.tool_id,
+            tool_name: call.pending.tool_name.into(),
+            args: call.pending.args,
+            replay: call.pending.replay,
             prepared_payload,
-        ))
+        })
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {

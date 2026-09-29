@@ -852,9 +852,8 @@ finish({ recovered: true });
         .count();
     let suspended_before_resolution = !turn.is_finished() && completed_before_resolution == 0;
     let await_tool_call_id_present = match &key.wait {
-        lash_core::AwaitEventWaitIdentity::ToolCompletion { tool_call_id } => {
-            !tool_call_id.is_empty()
-        }
+        // A `ToolCallId` is well formed by construction.
+        lash_core::AwaitEventWaitIdentity::ToolCompletion { .. } => true,
         other => {
             return Err(FixedScriptRunnerError::Assertion(format!(
                 "durable input used non-tool-completion await key `{other:?}`"

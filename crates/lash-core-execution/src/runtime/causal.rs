@@ -521,7 +521,7 @@ fn project_direct_causal_ref(
         } => {
             identity.tag(3);
             identity.string(session_id);
-            identity.string(call_id);
+            identity.string(call_id.as_str());
         }
         CausalRef::Process { process_id } => {
             identity.tag(4);
@@ -633,7 +633,7 @@ pub fn causal_replay_discriminator(caused_by: &CausalRef) -> String {
         CausalRef::ToolCall {
             session_id,
             call_id,
-        } => format!("cause:3:{}:{}:", field(session_id), field(call_id)),
+        } => format!("cause:3:{}:{}:", field(session_id), field(call_id.as_str())),
         CausalRef::Process { process_id } => format!("cause:4:{}:", field(process_id)),
         CausalRef::ProcessEvent {
             process_id,
@@ -759,9 +759,9 @@ mod tests {
             (
                 CausalRef::ToolCall {
                     session_id: SessionId::from("s"),
-                    call_id: "c".to_string(),
+                    call_id: crate::ToolCallId::fixture("c"),
                 },
-                "direct-discriminator:v3:blake3:f731dff92e6119ed6f49dad112351e389440d6f591fa2ace2fd3972241110949",
+                "direct-discriminator:v3:blake3:5eacc6971ae377333486f1358c05eb74d677fe1d4a891b3cd25bf7ecadcb2483",
             ),
             (
                 CausalRef::Process {

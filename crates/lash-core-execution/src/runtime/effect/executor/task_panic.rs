@@ -2,7 +2,7 @@ use super::{RuntimeEffectControllerError, RuntimeEffectOutcome};
 
 pub(super) fn map_effect_task_join(
     err: tokio::task::JoinError,
-    panic_call: Option<crate::PreparedToolCall>,
+    panic_call: Option<Box<crate::PreparedToolCall>>,
 ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
     if !err.is_panic() {
         return Err(RuntimeEffectControllerError::new(
@@ -17,7 +17,8 @@ pub(super) fn map_effect_task_join(
         Some(call) => Ok(RuntimeEffectOutcome::ToolAttempt {
             launch: Box::new(crate::ToolAttemptLaunch::Done {
                 record: Box::new(crate::ToolCallRecord {
-                    call_id: Some(call.call_id),
+                    call_id: call.call_id,
+                    provider_call_id: call.provider_call_id,
                     tool: call.tool_name,
                     args: call.args,
                     output: crate::ToolCallOutput::failure(crate::ToolFailure::runtime(

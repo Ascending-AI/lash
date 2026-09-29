@@ -30,9 +30,9 @@ use crate::{LlmCallId, ProcessId};
 /// (ADR 0099 §6).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum SettlementSource {
-    /// A scalar or batch tool call the opener admitted live; its invocation
-    /// identity is the replay key.
-    Invocation { call_id: String, replay_key: String },
+    /// A scalar or batch tool call the opener admitted live, named by its
+    /// lash-minted identity.
+    Invocation { call_id: crate::ToolCallId },
     /// Rank `rank` of durable effect group `group_key`, settled by child
     /// `child_replay_key`.
     GroupRank {

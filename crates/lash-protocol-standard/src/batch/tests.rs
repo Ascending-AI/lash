@@ -10,11 +10,29 @@ fn max(members: usize) -> NonZeroUsize {
 
 fn call(call_id: &str, tool_name: &str, args: Value) -> PendingToolCall {
     PendingToolCall {
-        call_id: call_id.to_string(),
+        call_id: lash_core::ToolCallId::fixture(call_id),
+        provider_call_id: Some(call_id.to_string()),
         tool_name: tool_name.to_string(),
         args,
         replay: None,
     }
+}
+
+/// The fixture label of `id`: a model call's own label, or a batch member's
+/// `{wrapper}/batch/{index}`, the member id being the wrapper id's child.
+fn label(id: &lash_core::ToolCallId) -> &'static str {
+    for base in ["native-a", "native-b", "n", "w", "w1", "w2", "over", "at"] {
+        let wrapper = lash_core::ToolCallId::fixture(base);
+        if *id == wrapper {
+            return base;
+        }
+        for index in 0..=64 {
+            if *id == wrapper.child(index) {
+                return Box::leak(format!("{base}/batch/{index}").into_boxed_str());
+            }
+        }
+    }
+    panic!("an unlabelled call id: {id}")
 }
 
 fn wrapper(call_id: &str, members: &[&str]) -> PendingToolCall {
@@ -43,13 +61,10 @@ fn wrapper(call_id: &str, members: &[&str]) -> PendingToolCall {
 fn answered(slot: &PendingToolCall, output: ToolCallOutput) -> CompletedToolCall {
     CompletedToolCall {
         call_id: slot.call_id.clone(),
+        provider_call_id: slot.provider_call_id.clone(),
         tool_name: slot.tool_name.clone(),
         args: slot.args.clone(),
-        model_return: ModelToolReturn::from_output(
-            slot.call_id.clone(),
-            slot.tool_name.clone(),
-            &output,
-        ),
+        model_return: ModelToolReturn::from_output(slot.tool_name.clone(), &output),
         output,
         intent_outcomes: Vec::new(),
         replay: slot.replay.clone(),
@@ -59,7 +74,7 @@ fn answered(slot: &PendingToolCall, output: ToolCallOutput) -> CompletedToolCall
 fn succeeded(slot: &PendingToolCall) -> CompletedToolCall {
     answered(
         slot,
-        ToolCallOutput::success(serde_json::json!({ "from": slot.call_id })),
+        ToolCallOutput::success(serde_json::json!({ "from": label(&slot.call_id) })),
     )
 }
 
@@ -104,7 +119,7 @@ fn members_take_consecutive_slots_at_their_wrappers_position() {
     let slots = expansion
         .calls
         .iter()
-        .map(|slot| (slot.call_id.as_str(), slot.tool_name.as_str()))
+        .map(|slot| (label(&slot.call_id), slot.tool_name.as_str()))
         .collect::<Vec<_>>();
     assert_eq!(
         slots,
@@ -186,7 +201,7 @@ fn a_wrapper_over_its_maximum_is_refused_whole() {
         max(64),
     );
     assert_eq!(expansion.refused.len(), 1);
-    assert_eq!(expansion.refused[0].0.call_id, "over");
+    assert_eq!(label(&expansion.refused[0].0.call_id), "over");
     assert!(!expansion.refused[0].1.is_success());
     assert_eq!(
         expansion.calls.len(),
@@ -248,7 +263,7 @@ fn the_fold_answers_one_call_per_response_call_in_response_order() {
         .calls
         .iter()
         .map(|slot| {
-            if slot.call_id == "w/batch/2" {
+            if label(&slot.call_id) == "w/batch/2" {
                 answered(
                     slot,
                     ToolCallOutput::failure(ToolFailure::runtime(
@@ -265,7 +280,7 @@ fn the_fold_answers_one_call_per_response_call_in_response_order() {
     let folded = fold(&expansion.plan, completed);
     let ids = folded
         .iter()
-        .map(|call| call.call_id.as_str())
+        .map(|call| label(&call.call_id))
         .collect::<Vec<_>>();
     assert_eq!(ids, vec!["native-a", "w", "native-b"]);
 
@@ -307,7 +322,7 @@ fn the_fold_answers_one_call_per_response_call_in_response_order() {
         serde_json::json!({ "from": "w/batch/0" }),
         "a member's JSON presentation is embedded as JSON"
     );
-    assert_eq!(wrapper.model_return.call_id, "w");
+    assert_eq!(wrapper.provider_call_id.as_deref(), Some("w"));
 }
 
 #[test]

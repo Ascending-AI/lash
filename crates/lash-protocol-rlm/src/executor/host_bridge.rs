@@ -178,7 +178,7 @@ impl<'run> HostBridge<'run> {
         ordinal: u64,
         call_site: &lashlang::LashlangExecutionCallSite,
         leaf_index: Option<usize>,
-    ) -> Result<String, ExecutionHostError> {
+    ) -> Result<lash_core::ToolCallId, ExecutionHostError> {
         // The id is the issue ordinal under the cell's scope (FIG-3586); the
         // call site only correlates it with the node on the trace.
         let identities = self.cell()?.identities();
@@ -236,7 +236,7 @@ impl<'run> HostBridge<'run> {
     /// the issuing node for traces, and the child-execution trace hook.
     fn tool_invocation(
         &self,
-        call_id: String,
+        call_id: lash_core::ToolCallId,
         host_operation: &str,
         payload: Value,
         call_site: Option<&lashlang::LashlangExecutionCallSite>,
@@ -271,7 +271,7 @@ pub(super) struct LashlangExecutionTrace {
     language: &'static str,
     base_context: TraceContext,
     identity: TraceLanguageExecutionIdentity,
-    resource_call_ids: std::sync::Arc<Mutex<BTreeMap<(String, u64), String>>>,
+    resource_call_ids: std::sync::Arc<Mutex<BTreeMap<(String, u64), lash_core::ToolCallId>>>,
     pending_resource_starts:
         std::sync::Arc<Mutex<BTreeMap<(String, u64), lashlang::LashlangExecutionSite>>>,
     active_nodes: std::sync::Arc<Mutex<BTreeSet<(String, lash_sansio::ExecutionNodeKind, u64)>>>,
@@ -450,11 +450,15 @@ impl LashlangExecutionTrace {
         });
     }
 
-    fn record_resource_call(&self, call_site: &lashlang::LashlangExecutionCallSite, call_id: &str) {
+    fn record_resource_call(
+        &self,
+        call_site: &lashlang::LashlangExecutionCallSite,
+        call_id: &lash_core::ToolCallId,
+    ) {
         let key = (call_site.site.node_id.clone(), call_site.occurrence);
         self.resource_call_ids
             .lock_recover()
-            .insert(key.clone(), call_id.to_string());
+            .insert(key.clone(), call_id.clone());
         if let Some(site) = self.pending_resource_starts.lock_recover().remove(&key) {
             self.emit(TraceLanguageExecution {
                 event_key: self.event_key(format!(
@@ -467,7 +471,7 @@ impl LashlangExecutionTrace {
                     node_kind: site.node_kind,
                     label: site.label,
                     occurrence: call_site.occurrence,
-                    call_id: Some(call_id.to_string()),
+                    call_id: Some(call_id.clone()),
                 },
             });
         }
@@ -477,7 +481,7 @@ impl LashlangExecutionTrace {
         &self,
         site: &lashlang::LashlangExecutionSite,
         occurrence: u64,
-    ) -> Option<String> {
+    ) -> Option<lash_core::ToolCallId> {
         if site.node_kind != lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND {
             return None;
         }
@@ -886,7 +890,7 @@ impl HostBridge<'_> {
             command_ctx.await_tool_handle(call_id.clone(), handle).await
         };
         commands.finish(&in_flight)?;
-        self.consume_recorded_reply(index, "await_handle", reply, &call_id)
+        self.consume_recorded_reply(index, "await_handle", reply, call_id.as_str())
     }
 
     async fn print(&self, value: FlowValue) -> Result<(), ExecutionHostError> {

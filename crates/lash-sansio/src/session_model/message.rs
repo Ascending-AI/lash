@@ -1,4 +1,5 @@
 use crate::ProcessId;
+use crate::ToolCallId;
 use crate::TurnId;
 use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay,
@@ -190,24 +191,28 @@ pub enum Part {
         content: String,
         response_meta: Option<ResponseTextMeta>,
     },
-    /// A tool invocation request. `tool_call_id` and `tool_name` are the
-    /// provider-side call id and the tool's registered name;
-    /// `tool_replay` carries the provider replay token so adapters can
-    /// re-emit the call verbatim on the next turn.
+    /// A tool invocation request. `call_id` is lash's identity for the
+    /// call (ADR 0117); `provider_call_id` is the provider's correlation,
+    /// which the adapter re-emits and nothing else reads. `tool_name` is the
+    /// tool's registered name; `tool_replay` carries the provider replay
+    /// token so adapters can re-emit the call verbatim on the next turn.
     ToolCall {
         id: String,
         content: String,
-        tool_call_id: String,
+        call_id: ToolCallId,
+        provider_call_id: String,
         tool_name: String,
         tool_replay: Option<ProviderReplayMeta>,
     },
     /// The one result answering a tool call: its text and attachment
     /// blocks in the order the tool's value produced them. A call is
-    /// answered by exactly one result part, whatever its value holds.
+    /// answered by exactly one result part, whatever its value holds. It
+    /// pairs with its call by `call_id`; an adapter answers the provider
+    /// with the paired call's correlation.
     ToolResult {
         id: String,
         content: Vec<ModelToolReturnPart>,
-        tool_call_id: String,
+        call_id: ToolCallId,
         tool_name: String,
     },
     /// Chain-of-thought / reasoning item captured from providers that
@@ -261,7 +266,9 @@ struct FlatPart {
     #[serde(default)]
     attachment: Option<PartAttachment>,
     #[serde(default)]
-    tool_call_id: Option<String>,
+    call_id: Option<ToolCallId>,
+    #[serde(default)]
+    provider_call_id: Option<String>,
     #[serde(default)]
     tool_name: Option<String>,
     #[serde(default)]
@@ -285,9 +292,14 @@ impl FlatPart {
                 self.kind == Attachment,
             ),
             (
-                "tool_call_id",
-                self.tool_call_id.is_some(),
+                "call_id",
+                self.call_id.is_some(),
                 matches!(self.kind, ToolCall | ToolResult),
+            ),
+            (
+                "provider_call_id",
+                self.provider_call_id.is_some(),
+                self.kind == ToolCall,
             ),
             (
                 "tool_name",
@@ -326,9 +338,9 @@ impl FlatPart {
             kind: self.kind,
             field,
         };
-        let tool_pair = |call_id: Option<String>, name: Option<String>| match (call_id, name) {
+        let tool_pair = |call_id: Option<ToolCallId>, name: Option<String>| match (call_id, name) {
             (Some(call_id), Some(name)) => Ok((call_id, name)),
-            (None, _) => Err(missing("missing:tool_call_id")),
+            (None, _) => Err(missing("missing:call_id")),
             (_, None) => Err(missing("missing:tool_name")),
         };
         let text = |content: Option<String>| content.ok_or_else(|| missing("missing:content"));
@@ -361,21 +373,24 @@ impl FlatPart {
                 response_meta: self.response_meta,
             },
             PartKind::ToolCall => {
-                let (tool_call_id, tool_name) = tool_pair(self.tool_call_id, self.tool_name)?;
+                let (call_id, tool_name) = tool_pair(self.call_id, self.tool_name)?;
                 Part::ToolCall {
                     id: self.id,
                     content: text(self.content)?,
-                    tool_call_id,
+                    call_id,
+                    provider_call_id: self
+                        .provider_call_id
+                        .ok_or_else(|| missing("missing:provider_call_id"))?,
                     tool_name,
                     tool_replay: self.tool_replay,
                 }
             }
             PartKind::ToolResult => {
-                let (tool_call_id, tool_name) = tool_pair(self.tool_call_id, self.tool_name)?;
+                let (call_id, tool_name) = tool_pair(self.call_id, self.tool_name)?;
                 Part::ToolResult {
                     id: self.id,
                     content: self.blocks.ok_or_else(|| missing("missing:blocks"))?,
-                    tool_call_id,
+                    call_id,
                     tool_name,
                 }
             }
@@ -403,7 +418,9 @@ struct FlatPartRef<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     attachment: Option<&'a PartAttachment>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_call_id: Option<&'a str>,
+    call_id: Option<&'a ToolCallId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_call_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_name: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -422,7 +439,8 @@ impl serde::Serialize for Part {
             content: self.text_content(),
             blocks: self.tool_result_content(),
             attachment: self.attachment(),
-            tool_call_id: self.tool_call_id(),
+            call_id: self.call_id(),
+            provider_call_id: self.provider_call_id(),
             tool_name: self.tool_name(),
             tool_replay: self.tool_replay(),
             reasoning_meta: self.reasoning_meta(),
@@ -491,14 +509,15 @@ impl Part {
             PartKind::ToolCall => Self::ToolCall {
                 id,
                 content,
-                tool_call_id: String::new(),
+                call_id: ToolCallId::fixture("base"),
+                provider_call_id: String::new(),
                 tool_name: String::new(),
                 tool_replay: None,
             },
             PartKind::ToolResult => Self::ToolResult {
                 id,
                 content: vec![ModelToolReturnPart::text(content)],
-                tool_call_id: String::new(),
+                call_id: ToolCallId::fixture("base"),
                 tool_name: String::new(),
             },
             PartKind::Reasoning => Self::Reasoning {
@@ -685,19 +704,29 @@ impl Part {
         }
     }
 
-    /// The provider-side call id this part's call issues or result
-    /// answers; `Some` for tool calls and tool results.
-    pub fn tool_call_id(&self) -> Option<&str> {
+    /// Lash's identity for the call this part issues or answers; `Some` for
+    /// tool calls and tool results.
+    pub fn call_id(&self) -> Option<&ToolCallId> {
         match self {
-            Self::ToolCall { tool_call_id, .. } | Self::ToolResult { tool_call_id, .. } => {
-                Some(tool_call_id)
-            }
+            Self::ToolCall { call_id, .. } | Self::ToolResult { call_id, .. } => Some(call_id),
+            _ => None,
+        }
+    }
+
+    /// The provider's correlation for a tool call; `Some` only for tool-call
+    /// parts. A result carries none: it answers its call by
+    /// [`Part::call_id`].
+    pub fn provider_call_id(&self) -> Option<&str> {
+        match self {
+            Self::ToolCall {
+                provider_call_id, ..
+            } => Some(provider_call_id),
             _ => None,
         }
     }
 
     /// The invoked tool's registered name; `Some` for the same parts as
-    /// [`Part::tool_call_id`].
+    /// [`Part::call_id`].
     pub fn tool_name(&self) -> Option<&str> {
         match self {
             Self::ToolCall { tool_name, .. } | Self::ToolResult { tool_name, .. } => {
@@ -779,31 +808,33 @@ impl Part {
     pub fn tool_call(
         id: String,
         content: String,
-        tool_call_id: String,
+        call_id: ToolCallId,
+        provider_call_id: String,
         tool_name: String,
         tool_replay: Option<ProviderReplayMeta>,
     ) -> Self {
         Self::ToolCall {
             id,
             content,
-            tool_call_id,
+            call_id,
+            provider_call_id,
             tool_name,
             tool_replay,
         }
     }
 
-    /// The one result answering `tool_call_id`, carrying the tool's text and
+    /// The one result answering `call_id`, carrying the tool's text and
     /// attachment blocks in order.
     pub fn tool_result(
         id: String,
         content: Vec<ModelToolReturnPart>,
-        tool_call_id: String,
+        call_id: ToolCallId,
         tool_name: String,
     ) -> Self {
         Self::ToolResult {
             id,
             content,
-            tool_call_id,
+            call_id,
             tool_name,
         }
     }
@@ -1259,11 +1290,7 @@ pub fn messages_are_prompt_resume_safe<'a>(
                     if !matches!(message.role, MessageRole::Assistant) {
                         return false;
                     }
-                    let Some(call_id) = part
-                        .tool_call_id()
-                        .map(str::trim)
-                        .filter(|call_id| !call_id.is_empty())
-                    else {
+                    let Some(call_id) = part.call_id() else {
                         return false;
                     };
                     if !seen_tool_calls.insert(call_id) {
@@ -1274,11 +1301,7 @@ pub fn messages_are_prompt_resume_safe<'a>(
                     if !matches!(message.role, MessageRole::User) {
                         return false;
                     }
-                    let Some(call_id) = part
-                        .tool_call_id()
-                        .map(str::trim)
-                        .filter(|call_id| !call_id.is_empty())
-                    else {
+                    let Some(call_id) = part.call_id() else {
                         return false;
                     };
                     if !seen_tool_calls.contains(call_id) {
@@ -1388,6 +1411,13 @@ fn render_structured_prompt(msgs: &[Message]) -> RenderedPrompt {
 }
 
 fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
+    // Outbound, a result answers the provider with the correlation of the
+    // call it pairs with by `ToolCallId`.
+    let provider_call_ids = msgs
+        .iter()
+        .flat_map(|msg| msg.parts.iter())
+        .filter_map(|part| Some((part.call_id()?, part.provider_call_id()?)))
+        .collect::<std::collections::HashMap<_, _>>();
     for msg in msgs {
         let mut blocks: Vec<LlmContentBlock> = Vec::new();
         for part in msg.parts.iter() {
@@ -1405,7 +1435,7 @@ fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
                     });
                 }
                 PartKind::ToolCall => {
-                    let call_id = part.tool_call_id().unwrap_or_default().to_string();
+                    let call_id = part.provider_call_id().unwrap_or_default().to_string();
                     let tool_name = part.tool_name().unwrap_or_default().to_string();
                     blocks.push(LlmContentBlock::ToolCall {
                         call_id,
@@ -1415,7 +1445,17 @@ fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
                     });
                 }
                 PartKind::ToolResult => {
-                    let call_id = part.tool_call_id().unwrap_or_default().to_string();
+                    // A result whose call the window no longer holds has no
+                    // provider correlation to answer with; it is not
+                    // resume-safe (`messages_are_prompt_resume_safe`) and is
+                    // left out rather than answered under an invented id.
+                    let Some(call_id) = part
+                        .call_id()
+                        .and_then(|call_id| provider_call_ids.get(call_id))
+                    else {
+                        continue;
+                    };
+                    let call_id = (*call_id).to_string();
                     blocks.push(LlmContentBlock::ToolResult {
                         call_id,
                         content: part.tool_result_content().unwrap_or_default().to_vec(),

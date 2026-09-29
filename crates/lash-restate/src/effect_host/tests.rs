@@ -122,7 +122,7 @@ fn session_administrative_read_rejects_non_session_scope_aliases() {
         let alias = SessionId::from(durable_wait_index_key_for_scope(&scope));
         let key = restate_await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion("alias-wait"),
+            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("alias-wait")),
         )
         .expect("derive non-session wait key");
 

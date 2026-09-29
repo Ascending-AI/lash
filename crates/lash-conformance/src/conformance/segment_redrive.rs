@@ -205,7 +205,11 @@ impl Scenario {
     }
 
     fn call_id(&self, effect: &str) -> String {
-        format!("{}-{effect}-call", self.process_id)
+        self.tool_call_id(effect).to_string()
+    }
+
+    fn tool_call_id(&self, effect: &str) -> lash_core::ToolCallId {
+        lash_core::ToolCallId::fixture(&format!("{}-{effect}-call", self.process_id))
     }
 
     fn invocation(&self, effect: &str) -> RuntimeEffectInvocation {
@@ -219,18 +223,19 @@ impl Scenario {
     }
 
     fn tool_envelope(&self, effect: &str) -> RuntimeEffectEnvelope {
-        let call_id = self.call_id(effect);
+        let call_id = self.tool_call_id(effect);
         RuntimeEffectEnvelope::new(
             self.invocation(effect),
             RuntimeEffectCommand::ToolAttempt {
-                call: crate::PreparedToolCall::from_parts(
-                    call_id.clone(),
-                    crate::ToolId::from("tool:segment_redrive_effect"),
-                    "segment_redrive_effect",
-                    serde_json::json!({ "call": call_id }),
-                    None,
-                    serde_json::json!({ "prepared": effect }),
-                ),
+                call: Box::new(crate::PreparedToolCall {
+                    call_id: call_id.clone(),
+                    provider_call_id: None,
+                    tool_id: crate::ToolId::from("tool:segment_redrive_effect"),
+                    tool_name: "segment_redrive_effect".into(),
+                    args: serde_json::json!({ "call": call_id.as_str() }),
+                    replay: None,
+                    prepared_payload: serde_json::json!({ "prepared": effect }),
+                }),
                 execution_grant: None,
                 attempt: 1,
                 max_attempts: 1,
@@ -266,14 +271,13 @@ impl Scenario {
             // A tool-call child: lash executes it, and no engine tier needs a
             // process-engine registry to start it.
             crate::ProcessInput::ToolCall {
-                call: crate::PreparedToolCall::from_parts(
-                    "segment-redrive-child",
-                    "tool:segment_redrive_child",
-                    "segment_redrive_child",
-                    serde_json::json!({ "law": "segment-redrive" }),
-                    None,
-                    serde_json::Value::Null,
-                ),
+                call: lash_core::ProcessToolCall {
+                    tool_id: crate::ToolId::new("tool:segment_redrive_child"),
+                    tool_name: "segment_redrive_child".into(),
+                    args: serde_json::json!({ "law": "segment-redrive" }),
+                    replay: None,
+                    prepared_payload: serde_json::Value::Null,
+                },
             },
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
@@ -328,7 +332,7 @@ impl Scenario {
                 panic!("the tool executor runs a tool attempt: {envelope:?}");
             };
             let run = Run {
-                call_id: call.call_id.clone(),
+                call_id: call.call_id.to_string(),
                 replay_key: envelope.invocation.replay_key().to_owned(),
             };
             let ordinal = probe.ran(effect, run.clone());
@@ -339,7 +343,8 @@ impl Scenario {
             Ok(RuntimeEffectOutcome::ToolAttempt {
                 launch: Box::new(crate::ToolAttemptLaunch::Done {
                     record: Box::new(crate::ToolCallRecord {
-                        call_id: Some(run.call_id.clone()),
+                        call_id: call.call_id.clone(),
+                        provider_call_id: None,
                         tool: "segment_redrive_effect".to_string(),
                         args: serde_json::json!({ "call": run.call_id }),
                         output: crate::ToolCallOutput::success(serde_json::json!({
@@ -394,11 +399,15 @@ impl Scenario {
             let scenario = scenario.clone();
             Box::pin(async move {
                 let scope = scoped.execution_scope().clone();
-                if let ExecutionScope::Process { process_id } = &scope {
-                    scenario.saw_child(process_id);
-                }
-                let call_id = scope.id().to_owned();
-                let replay_key = format!("segment-redrive:{call_id}:child-body");
+                let ExecutionScope::Process { process_id } = &scope else {
+                    panic!("the child body runs under its process: {scope:?}");
+                };
+                scenario.saw_child(process_id);
+                // The process's own tool call, named by its minted id.
+                let call_id = crate::EffectOpener::process(process_id.clone())
+                    .tool_call_admission()
+                    .call_id(&[]);
+                let replay_key = format!("segment-redrive:{}:child-body", scope.id());
                 let envelope = RuntimeEffectEnvelope::new(
                     RuntimeEffectInvocation::new(
                         EffectAddress::new(scope, replay_key.clone())
@@ -407,14 +416,15 @@ impl Scenario {
                         CHILD,
                     ),
                     RuntimeEffectCommand::ToolAttempt {
-                        call: crate::PreparedToolCall::from_parts(
-                            call_id.clone(),
-                            crate::ToolId::from("tool:segment_redrive_effect"),
-                            "segment_redrive_effect",
-                            serde_json::json!({ "call": call_id }),
-                            None,
-                            serde_json::json!({ "prepared": CHILD }),
-                        ),
+                        call: Box::new(crate::PreparedToolCall {
+                            call_id: call_id.clone(),
+                            provider_call_id: None,
+                            tool_id: crate::ToolId::from("tool:segment_redrive_effect"),
+                            tool_name: "segment_redrive_effect".into(),
+                            args: serde_json::json!({ "call": call_id.as_str() }),
+                            replay: None,
+                            prepared_payload: serde_json::json!({ "prepared": CHILD }),
+                        }),
                         execution_grant: None,
                         attempt: 1,
                         max_attempts: 1,
@@ -782,8 +792,11 @@ async fn run_scenario(
                         .child_id()
                         .unwrap_or_else(|| panic!("{name}: the child's id was seen"));
                     assert!(
-                        runs.iter()
-                            .all(|run| run.call_id == ExecutionScope::process(&child_id).id()),
+                        runs.iter().all(|run| run.call_id
+                            == crate::EffectOpener::process(child_id.clone())
+                                .tool_call_admission()
+                                .call_id(&[])
+                                .as_str()),
                         "{name}: the child ran as the process the start named: {runs:?}"
                     );
                     assert_eq!(

@@ -125,14 +125,16 @@ async fn tool_call(
     ObservationCursor::new(ReplayKey::new(format!("turn/tool/{index}"))).observe(
         &observer,
         ObservedEvent::Session(SessionStreamEvent::ToolCallStart {
-            call_id: Some(format!("call-{index}")),
+            call_id: crate::ToolCallId::fixture(&format!("call-{index}")),
+            provider_call_id: None,
             name: name.to_string(),
             args: serde_json::json!({ "value": name }),
         }),
     );
     tokio::time::sleep(Duration::from_millis(((TOOLS.len() - index) * 3) as u64)).await;
     vec![SessionStreamEvent::ToolCall {
-        call_id: Some(format!("call-{index}")),
+        call_id: crate::ToolCallId::fixture(&format!("call-{index}")),
+        provider_call_id: None,
         name: name.to_string(),
         args: serde_json::json!({ "value": name }),
         output: ToolCallOutput::success(serde_json::json!({ "echo": name })),

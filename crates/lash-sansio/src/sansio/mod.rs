@@ -40,9 +40,9 @@ mod turn_protocol;
 pub use turn_protocol::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExecutionEnvironmentSync,
-    ExpandedRow, ExpandedWrapper, LlmCallError, LogEvent, PendingToolCall, PendingWork,
-    ProjectorContext, ProjectorTurnInputs, ProtocolDriverHandle, Response, ToolExpansionPlan,
-    TurnCause, TurnMachineConfig, render_turn_causes_prompt,
+    ExpandedRow, ExpandedWrapper, LlmCallError, LogEvent, ModelToolCalls, PendingToolCall,
+    PendingWork, ProjectorContext, ProjectorTurnInputs, ProtocolDriverHandle, Response,
+    ResponseToolCalls, ToolExpansionPlan, TurnCause, TurnMachineConfig, render_turn_causes_prompt,
 };
 mod machine_state;
 use machine_state::{EffectDeliveryStatus, MachineState};

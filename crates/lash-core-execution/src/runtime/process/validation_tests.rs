@@ -364,38 +364,17 @@ fn a_core_named_override_remains_a_valid_registration() {
 }
 
 #[test]
-fn tool_call_registration_refuses_empty_call_id_or_tool_name() {
-    for (call_id, tool_name, expected) in [
-        (
-            "",
-            "tool",
-            "process `keyless start` tool call must carry a call id",
-        ),
-        (
-            "  ",
-            "tool",
-            "process `keyless start` tool call must carry a call id",
-        ),
-        (
-            "call",
-            "",
-            "process `keyless start` tool call must carry a tool name",
-        ),
-        (
-            "call",
-            "\t",
-            "process `keyless start` tool call must carry a tool name",
-        ),
-    ] {
+fn tool_call_registration_refuses_an_empty_tool_name() {
+    for tool_name in ["", "\t"] {
+        let expected = "process `keyless start` tool call must carry a tool name";
         let registration = registration_for_input(ProcessInput::ToolCall {
-            call: crate::PreparedToolCall::from_parts(
-                call_id,
-                crate::ToolId::new("tool-id"),
-                tool_name,
-                serde_json::json!({}),
-                None,
-                serde_json::Value::Null,
-            ),
+            call: crate::ProcessToolCall {
+                tool_id: crate::ToolId::new("tool-id"),
+                tool_name: tool_name.into(),
+                args: serde_json::json!({}),
+                replay: None,
+                prepared_payload: serde_json::Value::Null,
+            },
         });
         match validate_process_registration(&registration) {
             Err(crate::PluginError::Session(message)) => assert_eq!(message, expected),

@@ -129,13 +129,19 @@ impl ToolSurfaceDrift {
     /// The refusal a call on the drifted tool meets when the journal does not
     /// hold its result. It is the binding-drift refusal a code cell's drifted
     /// binding meets (FIG-3587), so the turn parks the same way.
-    pub fn refusal(&self, call_id: &str) -> crate::RuntimeEffectControllerError {
+    pub fn refusal(&self, call: &crate::PreparedToolCall) -> crate::RuntimeEffectControllerError {
+        let provider = call
+            .provider_call_id
+            .as_deref()
+            .map(|provider_call_id| format!("provider call `{provider_call_id}`, "))
+            .unwrap_or_default();
         crate::RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::LashlangCellBindingDrift,
             format!(
-                "tool call `{call_id}` (tool `{}`) names a tool {} the live tool registry since \
-                 the turn's tool surface was recorded; its journal serves only recorded \
+                "tool call `{}` ({provider}tool `{}`) names a tool {} the live tool registry \
+                 since the turn's tool surface was recorded; its journal serves only recorded \
                  results, and this call would reach the tool live, so nothing was dispatched",
+                call.call_id,
                 self.recorded.manifest.id,
                 self.kind.describe(),
             ),
@@ -1348,14 +1354,15 @@ mod tool_catalog_cache_tests {
             session_id,
             Arc::new(crate::testing::MockSessionManager::default()),
             crate::TurnContext::default(),
-            Some("reassigned-call".to_string()),
+            crate::ToolCallId::fixture("reassigned-call"),
             serde_json::json!({}),
         );
         old.tools()
             .prepare_tool_call(crate::ToolPrepareCall {
                 tool_id: crate::ToolId::from("tool:reassigned"),
                 pending: crate::sansio::PendingToolCall {
-                    call_id: "reassigned-call".to_string(),
+                    call_id: crate::ToolCallId::fixture("reassigned-call"),
+                    provider_call_id: None,
                     tool_name: "reassigned".to_string(),
                     args: serde_json::json!({ "route_a": "old" }),
                     replay: None,
@@ -1401,7 +1408,8 @@ mod tool_catalog_cache_tests {
             .prepare_tool_call(crate::ToolPrepareCall {
                 tool_id: crate::ToolId::from("tool:reassigned"),
                 pending: crate::sansio::PendingToolCall {
-                    call_id: "fresh-reassigned-call".to_string(),
+                    call_id: crate::ToolCallId::fixture("fresh-reassigned-call"),
+                    provider_call_id: None,
                     tool_name: "reassigned".to_string(),
                     args: serde_json::json!({ "route_b": "fresh" }),
                     replay: None,

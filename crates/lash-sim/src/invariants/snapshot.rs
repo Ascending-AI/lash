@@ -478,17 +478,27 @@ impl StoreSnapshot {
             };
             for (message, committed) in reopened.assistant_messages.iter().enumerate() {
                 for (index, call) in committed.tool_calls.iter().enumerate() {
+                    let call_id = reopened
+                        .call_ids
+                        .get(message)
+                        .and_then(|ids| ids.get(index))
+                        .cloned()
+                        .unwrap_or_default();
                     transcript.calls.push(TranscriptCall {
                         message,
                         index,
-                        call_id: call.call_id.clone(),
+                        call_id,
                         tool: call.tool_name.clone(),
                     });
                 }
             }
-            for result in &reopened.tool_results {
+            for (index, result) in reopened.tool_results.iter().enumerate() {
                 transcript.results.push(TranscriptResult {
-                    call_id: result.call_id.clone(),
+                    call_id: reopened
+                        .result_call_ids
+                        .get(index)
+                        .cloned()
+                        .unwrap_or_default(),
                     tool: result.tool_name.clone(),
                     digest: super::result_digest(&result.content),
                 });

@@ -85,7 +85,8 @@ fn tool_completion_serializes_typed_failure_output() {
     let record = TraceRecord::new(
         TraceContext::default().for_session("root"),
         TraceEvent::ToolCallCompleted {
-            call_id: Some("call-1".to_string()),
+            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
             name: "read_file".to_string(),
             args: serde_json::json!({"path": "missing"}),
             output: TraceToolCallOutput {
@@ -122,7 +123,8 @@ fn tool_completion_serializes_typed_failure_output() {
 fn event_is_failed_identifies_all_failure_outcomes() {
     fn tool_completed(outcome: TraceToolCallOutcome) -> TraceEvent {
         TraceEvent::ToolCallCompleted {
-            call_id: None,
+            call_id: lash_sansio::ToolCallId::fixture("none"),
+            provider_call_id: None,
             name: "tool".to_string(),
             args: Value::Null,
             output: TraceToolCallOutput {

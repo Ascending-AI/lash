@@ -88,14 +88,13 @@ fn settlement() -> ToolSettlement {
         )],
         usage: vec![delta(0, "call-a", 1, 41)],
         stream: crate::runtime::effect::RecordedChildStream::default(),
-        model_return: crate::ModelToolReturn::text("call".to_string(), "tool".to_string(), "ok"),
+        model_return: crate::ModelToolReturn::text("tool".to_string(), "ok"),
     }
 }
 
 fn source() -> SettlementSource {
     SettlementSource::Invocation {
-        call_id: "call-1".to_string(),
-        replay_key: "replay-1".to_string(),
+        call_id: crate::ToolCallId::fixture("call-1"),
     }
 }
 

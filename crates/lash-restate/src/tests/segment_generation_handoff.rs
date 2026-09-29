@@ -514,7 +514,9 @@ impl Roll {
     async fn arm_attach(&self, process_id: &ProcessId) -> String {
         let key = test_restate_await_event_key(
             &ExecutionScope::process(process_id.clone()),
-            lash_core::AwaitEventWaitIdentity::tool_completion("handoff-attach"),
+            lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "handoff-attach",
+            )),
         )
         .expect("an attach wait key");
         let workflow_key = crate::process_attach::process_attach_workflow_key(&key);

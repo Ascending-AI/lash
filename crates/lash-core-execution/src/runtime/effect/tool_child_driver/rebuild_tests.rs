@@ -263,14 +263,16 @@ fn every_unrecorded_source_is_a_typed_rebuild_refusal() {
     ];
     for refusal in host_refusals {
         assert_eq!(
-            refusal.into_error("call-1").turn_failure_cause(),
+            refusal
+                .into_error(&crate::ToolCallId::fixture("call-1"))
+                .turn_failure_cause(),
             crate::TurnFailureCause::LiveFault,
             "{refusal}: a refused child is retried, never settled"
         );
     }
     for (sources, refusal) in cases {
         assert_eq!(sources.rebuild_refusal(), Some(refusal));
-        let error = refusal.into_error("call-1");
+        let error = refusal.into_error(&crate::ToolCallId::fixture("call-1"));
         assert_eq!(error.code, crate::RuntimeErrorCode::PluginSessionManager);
         assert_eq!(
             error.turn_failure_cause(),

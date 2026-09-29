@@ -252,7 +252,10 @@ impl PossessionWorld {
             .step_with(&session, &possessed, async |context| {
                 context
                     .complete_tool_call(
-                        call_id.clone(),
+                        lash_core::tool_dispatch::ToolCallIds {
+                            call_id: lash_core::ToolCallId::fixture(&call_id),
+                            provider_call_id: None,
+                        },
                         lash_core::ToolId::new("sim-tool"),
                         None,
                         outcome,
@@ -288,7 +291,7 @@ impl PossessionWorld {
                 identity: Some(identity),
                 intent_index,
                 kind: ToolIntentKind::StartProcess,
-                refusal: ToolIntentRefusalReason::MissingToolCallId,
+                refusal: ToolIntentRefusalReason::IntentIndexOverflow,
             }],
         );
         let (session, possessed) = {
@@ -299,7 +302,10 @@ impl PossessionWorld {
             .step_with(&session, &possessed, async |context| {
                 context
                     .complete_tool_call(
-                        call_id.clone(),
+                        lash_core::tool_dispatch::ToolCallIds {
+                            call_id: lash_core::ToolCallId::fixture(&call_id),
+                            provider_call_id: None,
+                        },
                         lash_core::ToolId::new("sim-tool"),
                         None,
                         outcome,
@@ -334,14 +340,17 @@ impl PossessionWorld {
             &call_id,
             serde_json::json!({"refused": true}),
             vec![ToolIntentExecutionOutcome::ProtocolRefused {
-                refusal: ToolIntentRefusalReason::MissingToolCallId,
+                refusal: ToolIntentRefusalReason::IntentIndexOverflow,
             }],
         );
         let (possessed, presented) = self
             .step_with(&session, &possessed, async |context| {
                 context
                     .complete_tool_call(
-                        call_id.clone(),
+                        lash_core::tool_dispatch::ToolCallIds {
+                            call_id: lash_core::ToolCallId::fixture(&call_id),
+                            provider_call_id: None,
+                        },
                         lash_core::ToolId::new("sim-tool"),
                         None,
                         outcome,
@@ -394,7 +403,10 @@ impl PossessionWorld {
             .step_with(&session, &possessed, async |context| {
                 context
                     .complete_tool_call(
-                        call_id.clone(),
+                        lash_core::tool_dispatch::ToolCallIds {
+                            call_id: lash_core::ToolCallId::fixture(&call_id),
+                            provider_call_id: None,
+                        },
                         lash_core::ToolId::new("sim-tool"),
                         None,
                         outcome,
@@ -588,7 +600,7 @@ impl Opener {
         let identity = ToolIntentIdentity {
             session_id: self.session.clone(),
             execution_scope_id: format!("turn-{}", self.session),
-            tool_call_id: call_id.clone(),
+            tool_call_id: lash_core::ToolCallId::fixture(&call_id),
             intent_index: self.next_intent,
             replay_key: format!("{}-{}", self.session, child),
             minting_emission_replay_key: None,
@@ -604,7 +616,8 @@ fn settled_outcome(
 ) -> ToolDispatchOutcome {
     ToolDispatchOutcome {
         record: ToolCallRecord {
-            call_id: Some(call_id.to_string()),
+            call_id: lash_core::ToolCallId::fixture(&call_id),
+            provider_call_id: None,
             tool: "sim-tool".to_string(),
             args: serde_json::Value::Null,
             output: ToolCallOutput::success(output),

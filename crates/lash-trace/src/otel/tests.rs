@@ -104,7 +104,7 @@ fn correlation_fields_are_exported_as_otel_attributes() {
                     node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
                     label: "tool".to_string(),
                     occurrence: 1,
-                    call_id: Some("call-1".to_string()),
+                    call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
                 },
             },
         },
@@ -132,13 +132,15 @@ fn correlation_fields_are_exported_as_otel_attributes() {
 
     for event in [
         TraceEvent::ToolCallStarted {
-            call_id: Some("call-1".to_string()),
+            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
             name: "search".to_string(),
             args: serde_json::json!({}),
             issuing_node_id: Some("node-1".to_string()),
         },
         TraceEvent::ToolCallCompleted {
-            call_id: Some("call-1".to_string()),
+            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
             name: "search".to_string(),
             args: serde_json::json!({}),
             output: crate::TraceToolCallOutput {
@@ -189,7 +191,7 @@ fn node_failure_provenance_is_exported_as_typed_attributes() {
                         node_kind: "resource_operation".into(),
                         label: "read".into(),
                         occurrence: 1,
-                        call_id: Some("effect-1".into()),
+                        call_id: Some(lash_sansio::ToolCallId::fixture("effect-1")),
                         failure,
                     },
                 },

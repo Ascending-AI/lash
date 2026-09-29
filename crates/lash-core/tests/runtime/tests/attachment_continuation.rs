@@ -524,6 +524,18 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
                 && part.content() == "turn two input"),
         "turn 2's input is committed"
     );
+    // A committed call keeps its provider id; its result pairs with it by
+    // lash's own id (ADR 0117).
+    let call_id_of = |provider_call_id: &str| {
+        parts
+            .iter()
+            .find(|part| part.provider_call_id() == Some(provider_call_id))
+            .and_then(|part| part.call_id())
+            .cloned()
+            .unwrap_or_else(|| panic!("the call {provider_call_id} is committed"))
+    };
+    let turn_two_call = call_id_of("turn-two-call");
+    let turn_one_call = call_id_of("turn-one-call");
     for kind in [
         lash_core::PartKind::ToolCall,
         lash_core::PartKind::ToolResult,
@@ -531,7 +543,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
         assert_eq!(
             parts
                 .iter()
-                .filter(|part| part.kind() == kind && part.tool_call_id() == Some("turn-two-call"))
+                .filter(|part| part.kind() == kind && part.call_id() == Some(&turn_two_call))
                 .count(),
             1,
             "turn 2's executed call commits exactly one {kind:?}"
@@ -540,8 +552,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
     let turn_one_result = parts
         .iter()
         .find(|part| {
-            part.kind() == lash_core::PartKind::ToolResult
-                && part.tool_call_id() == Some("turn-one-call")
+            part.kind() == lash_core::PartKind::ToolResult && part.call_id() == Some(&turn_one_call)
         })
         .expect("turn 1's result is committed");
     let blocks = turn_one_result

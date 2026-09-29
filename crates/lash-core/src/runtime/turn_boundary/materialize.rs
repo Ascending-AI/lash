@@ -149,7 +149,8 @@ mod tests {
         };
         state.session_graph = crate::SessionGraph::from_active_read_state(&[message]);
         let tool_calls = vec![crate::ToolCallRecord {
-            call_id: Some("call-1".to_string()),
+            call_id: crate::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
             tool: "make_attachment".to_string(),
             args: serde_json::json!({}),
             output: crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
