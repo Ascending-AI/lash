@@ -1430,6 +1430,9 @@ jobs:
       - name: Check substrate boundary
         run: bash scripts/check-substrate-boundary.sh
 
+      - name: Check history readers
+        run: bash scripts/check-history-readers.sh
+
       - name: Check workflow graph model
         run: bash scripts/check-workflow-graph-model.sh
 
