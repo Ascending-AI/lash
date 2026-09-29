@@ -1,12 +1,12 @@
 <script>
-  import { getContext } from 'svelte';
+  import { getContext, onDestroy } from 'svelte';
 
   // The canonical-source pane.
   // In Simplified it is a read-only peek at "what am I building".
   // In Power it is an editable code panel: edits are debounced and handed to `onProject`
   // (text→graph); the parent adopts the returned document and feeds back the new canonical
   // `source`, closing the loop.
-  let { source = '', version, dirty, onProject } = $props();
+  let { source = '', version, dirty, documentEpoch = 0, onProject } = $props();
 
   const mode = getContext('mode');
 
@@ -16,34 +16,70 @@
   let error = $state(null);
   let unsupported = $state(false);
   let timer = null;
+  let inputRevision = 0;
+  let live = true;
+  let observedEpoch = null;
+  let localEdits = $state(false);
 
-  // Keep the editor mirrored to the canonical source whenever the graph changes
-  // underneath us — but never clobber text the user is actively typing.
+  onDestroy(() => {
+    live = false;
+    clearTimeout(timer);
+  });
+
   $effect(() => {
+    const epoch = documentEpoch;
     const incoming = source;
-    if (!focused) text = incoming;
+    if (observedEpoch !== epoch) {
+      observedEpoch = epoch;
+      inputRevision += 1;
+      clearTimeout(timer);
+      projecting = false;
+      error = null;
+      unsupported = false;
+      localEdits = false;
+      text = incoming;
+    } else if (!focused && !localEdits) {
+      text = incoming;
+    }
   });
 
   const editable = $derived(mode.power && !!onProject && !unsupported);
 
-  async function project(next) {
-    if (!onProject) return;
-    projecting = true;
-    const result = await onProject(next);
+  async function project(next, request) {
+    if (!onProject || !request.isCurrent()) return;
+    let result;
+    try {
+      result = await onProject(next, request);
+    } catch (err) {
+      result = { ok: false, error: { message: err?.message ?? String(err) } };
+    }
+    if (!request.isCurrent()) return;
     projecting = false;
     if (result?.unsupported) {
       unsupported = true;
       error = null;
       return;
     }
+    if (result?.ok) localEdits = false;
     error = result?.ok ? null : (result?.error?.message ?? 'could not parse source');
   }
 
   function onInput(event) {
     text = event.currentTarget.value;
+    localEdits = true;
+    projecting = true;
+    error = null;
     clearTimeout(timer);
     const next = text;
-    timer = setTimeout(() => project(next), 500);
+    const epoch = documentEpoch;
+    const revision = ++inputRevision;
+    // Capture ownership before debounce so a new keystroke already fences old work.
+    const request = {
+      epoch,
+      revision,
+      isCurrent: () => live && documentEpoch === epoch && inputRevision === revision,
+    };
+    timer = setTimeout(() => project(next, request), 500);
   }
 </script>
 

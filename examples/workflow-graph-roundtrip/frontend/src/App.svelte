@@ -61,6 +61,7 @@
 
   let draftDoc = $state(null);
   let canonicalSource = $state('');
+  let documentEpoch = $state(0);
   let savedVersion = $state(0);
   // The saved version's admitted definition: the artifact a run executes and
   // the only one whose events the overlay shows.
@@ -108,6 +109,7 @@
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
+    documentEpoch += 1;
     history.commit(draftDoc);
   }
 
@@ -117,6 +119,7 @@
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
+    documentEpoch += 1;
     history.commit(draftDoc);
     rebuild();
   }
@@ -126,6 +129,7 @@
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
+    documentEpoch += 1;
     history.commit(draftDoc);
     rebuild();
   }
@@ -135,6 +139,7 @@
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
+    documentEpoch += 1;
     history.commit(draftDoc);
     rebuild();
   }
@@ -148,6 +153,7 @@
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
+    documentEpoch += 1;
     history.commit(draftDoc);
     rebuild(id ? new Set([id]) : null);
   }
@@ -159,6 +165,7 @@
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
+    documentEpoch += 1;
     history.commit(draftDoc);
     rebuild();
   }
@@ -168,6 +175,7 @@
       dirty = true;
       saveOk = null;
       clearFacetDiagnostics(draftDoc);
+      documentEpoch += 1;
       history.commit(draftDoc);
       rebuild(new Set([id]));
     }
@@ -181,6 +189,7 @@
       dirty = true;
       saveOk = null;
       clearFacetDiagnostics(draftDoc);
+      documentEpoch += 1;
       history.commit(draftDoc);
       rebuild(new Set([id]));
     }
@@ -196,6 +205,7 @@
   }
 
   async function loadInitial() {
+    documentEpoch += 1;
     loading = true;
     loadError = null;
     try {
@@ -226,6 +236,7 @@
 
   async function onSelect(id) {
     if (switching || id === selectedId) return;
+    documentEpoch += 1;
     switching = true;
     saveError = null;
     saveOk = null;
@@ -268,6 +279,7 @@
   // workflow switch, but not on a Save that left the graph shape unchanged (the
   // migrated positions keep every node in place, so a re-fit would just jump).
   function adoptDocument(doc, keepSelection = null, { refit = true } = {}) {
+    documentEpoch += 1;
     draftDoc = structuredClone($state.snapshot(doc));
     canonicalSource = doc.source;
     savedVersion = doc.version;
@@ -291,8 +303,10 @@
     rebuild();
   }
 
-  async function handleProject(text) {
+  async function handleProject(text, request) {
+    if (request.epoch !== documentEpoch || !request.isCurrent()) return;
     const result = await projectSource(text);
+    if (request.epoch !== documentEpoch || !request.isCurrent()) return;
     if (result.ok) adoptProjected(result.document);
     return result;
   }
@@ -332,7 +346,9 @@
   // --- Undo / redo -----------------------------------------------------------
   function applySnapshot(doc) {
     if (!doc) return;
+    documentEpoch += 1;
     draftDoc = doc;
+    canonicalSource = doc.source;
     dirty = history.index > 0;
     saveOk = null;
     rebuild();
@@ -405,6 +421,7 @@
       dirty = true;
       saveOk = null;
       clearFacetDiagnostics(draftDoc);
+      documentEpoch += 1;
       history.commit(draftDoc);
       rebuild();
     }
@@ -662,6 +679,7 @@
           source={canonicalSource}
           version={savedVersion}
           {dirty}
+          {documentEpoch}
           onProject={projectSupported ? handleProject : undefined}
         />
       {/if}

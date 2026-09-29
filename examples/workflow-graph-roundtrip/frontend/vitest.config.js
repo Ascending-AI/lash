@@ -1,9 +1,9 @@
 import { defineConfig } from 'vitest/config';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
 
-// Standalone Vitest config (kept separate from vite.config.js so the unit tests
-// run without the Svelte plugin or a dev server — they cover the pure field /
-// operation helpers only, and must run fully offline).
 export default defineConfig({
+  plugins: [svelte()],
+  resolve: { conditions: ['browser'] },
   test: {
     environment: 'node',
     include: ['src/**/*.test.js'],
