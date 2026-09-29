@@ -609,6 +609,21 @@ constant_path = "crates/lash-core-store/src/store/state_version.rs"
 reason = "lower bound of the admission window for the registered CURRENT_SESSION_STATE_VERSION, not a format of its own"
 
 [[unregistered]]
+constant = "BASE_SCHEMA_VERSION"
+constant_path = "crates/lash-sqlite-store/src/schema.rs"
+reason = "the shipped value of the registered SCHEMA_VERSION, which Phase A's synthetic-next build raises by one; not a format of its own"
+
+[[unregistered]]
+constant = "BASE_PROCESS_SCHEMA_VERSION"
+constant_path = "crates/lash-sqlite-store/src/schema.rs"
+reason = "the shipped value of the registered PROCESS_SCHEMA_VERSION, which Phase A's synthetic-next build raises by one; not a format of its own"
+
+[[unregistered]]
+constant = "BASE_TRIGGER_SCHEMA_VERSION"
+constant_path = "crates/lash-sqlite-store/src/schema.rs"
+reason = "the shipped value of the registered TRIGGER_SCHEMA_VERSION, which Phase A's synthetic-next build raises by one; not a format of its own"
+
+[[unregistered]]
 constant = "MIN_SUPPORTED_SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 reason = "lower bound of the admission window for the registered SCHEMA_VERSION, not a format of its own"
