@@ -94,6 +94,8 @@ DROP TABLE IF EXISTS lash_process_change_clock CASCADE;
 
 DROP TABLE IF EXISTS lash_processes CASCADE;
 
+DROP TABLE IF EXISTS lash_abandoned_consumer_holds CASCADE;
+
 DROP TABLE IF EXISTS lash_process_park_clock CASCADE;
 
 DROP TABLE IF EXISTS lash_process_park_events CASCADE;
