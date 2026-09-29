@@ -1470,7 +1470,7 @@ impl ResponsesStreamState {
             if tool_call.call_id.is_empty() {
                 tool_call.call_id = uuid::Uuid::new_v4().to_string();
             }
-            if tool_call.input_json.is_empty() {
+            if tool_call.input_json.is_empty() && !tool_call.tool_name.is_empty() {
                 tool_call.input_json = "{}".to_string();
             }
             tool_call.clone()
