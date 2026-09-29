@@ -51,7 +51,6 @@ fn facade_compile_time_contracts() {
     let t = trybuild::TestCases::new();
 
     register_facade_contracts(&t);
-    register_attachment_gc_contract(&t);
     register_store_seam_contracts(&t);
     register_rlm_config_builder_contracts(&t);
 }
@@ -72,8 +71,6 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/process_start_requires_scope.rs");
     t.compile_fail("tests/ui/process_scope_requires_admission.rs");
     t.compile_fail("tests/ui/queue_operations_left_lash_session.rs");
-    t.compile_fail("tests/ui/session_store_factory_requires_by_id_lookup.rs");
-    t.compile_fail("tests/ui/session_store_factory_requires_unsettled_turn_count.rs");
     t.compile_fail("tests/ui/tool_state_generation_is_sealed.rs");
     t.compile_fail("tests/ui/orchestrating_tool_def_requires_unsafe.rs");
     t.compile_fail("tests/ui/orchestrating_tool_def_unsafe_is_auditable.rs");
@@ -90,6 +87,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/attempt_context_has_no_child_trace_emission.rs");
     t.compile_fail("tests/ui/granted_attempt_context_is_not_constructible.rs");
     t.compile_fail("tests/ui/session_read_view_has_no_mutations.rs");
+    t.compile_fail("tests/ui/session_catalog_requires_lookup.rs");
     t.compile_fail("tests/ui/pending_attempt_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/pending_announcement_requires_a_replay_key.rs");
     t.compile_fail("tests/ui/after_turn_cannot_abort.rs");
@@ -110,10 +108,6 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
         t.compile_fail("tests/ui/linked_module_has_one_carrier.rs");
         t.compile_fail("tests/ui/module_artifact_cannot_be_assembled.rs");
     }
-}
-
-fn register_attachment_gc_contract(t: &trybuild::TestCases) {
-    t.compile_fail("tests/ui/attachment_gc_requires_explicit_root_set.rs");
 }
 
 /// The class-1 store seams carry no silent defaults: an implementor that never
