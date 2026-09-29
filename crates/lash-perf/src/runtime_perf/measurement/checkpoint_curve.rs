@@ -168,6 +168,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             root.join("sessions"),
             root.join("processes.db").as_path(),
         )
+        .await?
     };
     let points = checkpoint_curve_points(config);
     let run_id = uuid::Uuid::new_v4();
@@ -188,12 +189,10 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             point.axis.name(),
             point.target
         ));
-        let store = store_factory
-            .create_store(&runtime_perf_session_create_request(&session_id))
+        store_factory
+            .admit_session(&runtime_perf_session_create_request(&session_id))
             .await?;
-        store
-            .admit_and_bind_session(&lash_core::SessionBinding::root(session_id.clone()))
-            .await?;
+        let store: Arc<dyn lash_core::RuntimeStore> = store_factory.clone();
         let artifacts_backend =
             lash_conformance::recording_backend_over(Arc::new(artifacts.clone()));
         let mut fixture = lash_protocol_rlm::RlmCheckpointPerfFixture::new(
@@ -307,10 +306,16 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             fixture.fixture.acknowledge_capture();
             let (loaded_state, load_phase) =
                 measure_runtime_perf_async_phase("checkpoint_curve.load", async {
-                    let loaded_state =
-                        lash::persistence::load_persisted_session_state(fixture.store.as_ref())
-                            .await?
-                            .ok_or_else(|| anyhow::anyhow!("{prefix} commit was not loadable"))?;
+                    let loaded_state = lash::persistence::load_session_window_state(
+                        &lash::persistence::SessionStore::new(
+                            fixture.store.clone(),
+                            fixture.runtime_state.session_id.clone(),
+                        )?,
+                        lash::persistence::WindowSelector::Current,
+                    )
+                    .await?
+                    .map(|loaded| loaded.state)
+                    .ok_or_else(|| anyhow::anyhow!("{prefix} commit was not loadable"))?;
                     let execution_state = loaded_state
                         .execution_state_hydration()?
                         .ok_or_else(|| anyhow::anyhow!("{prefix} load omitted execution state"))?;

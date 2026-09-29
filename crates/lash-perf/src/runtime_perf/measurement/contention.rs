@@ -219,12 +219,13 @@ mod contention_tests {
             .await
             .expect("open a SQLite memory store set")
             .session_store_factory();
-        let store = factory
-            .create_store(&runtime_perf_session_create_request(&SessionId::from(
+        factory
+            .admit_session(&runtime_perf_session_create_request(&SessionId::from(
                 session_id,
             )))
             .await
             .expect("create synthetic contention store");
+        let store: Arc<dyn lash_core::RuntimeStore> = factory;
         let mut first_state = RuntimeSessionState {
             session_id: SessionId::from(session_id),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -286,9 +287,10 @@ mod contention_tests {
             "retry",
             CancellationToken::new(),
             |_, _| async {
-                let mut fresh = lash_core::store::load_persisted_session_state(store.as_ref())
-                    .await?
-                    .expect("session remains durable");
+                let mut fresh =
+                    load_runtime_perf_session_state(&store, &SessionId::from(session_id))
+                        .await?
+                        .expect("session remains durable");
                 fresh.policy.provider_id = "gate-bypass-completer".to_string();
                 let retry_commit = RuntimeCommit::persisted_state_with_operation_for_testing(
                     &fresh,
@@ -766,7 +768,7 @@ struct DurableContentionSamples {
 }
 
 async fn settle_durable_contention_root(
-    store: &(dyn lash_core::RuntimeStore + '_),
+    store: &Arc<dyn lash_core::RuntimeStore>,
     fence: &lash_core::store::DriveFence,
     root: &lash_core::TurnId,
     admission: &lash_core::store::RootAdmission,
@@ -792,7 +794,7 @@ async fn settle_durable_contention_root(
             }
             let mut cas_retry_after = Duration::from_millis(1);
             for _ in 0..256 {
-                let state = lash_core::store::load_persisted_session_state(store)
+                let state = load_runtime_perf_session_state(store, &session_id)
                     .await?
                     .ok_or_else(|| {
                         anyhow::anyhow!("durable contention session state disappeared")
@@ -977,7 +979,7 @@ async fn run_durable_contention_worker(
         }
 
         settle_durable_contention_root(
-            store.as_ref(),
+            &store,
             &session_fence,
             &root,
             &admission,
@@ -1036,7 +1038,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
 
     let seed_before_alloc = allocator_stats();
     let seed_started = Instant::now();
-    if lash_core::store::load_persisted_session_state(store.as_ref())
+    if load_runtime_perf_session_state(&store, &session_id)
         .await?
         .is_none()
     {

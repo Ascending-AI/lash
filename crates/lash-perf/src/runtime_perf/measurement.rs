@@ -17,12 +17,13 @@ use lash_core::sansio::{
 use lash_core::store::{AdmittedHead, GraphAppend, RootStore as _};
 use lash_core::{
     AttachmentIntent, DeploymentStore, DriverAction, DriverContextView, Effect, ExecResponse,
-    IngressStore, LiveReplayOutcome, LiveReplayStore, LiveReplaySubscribeOutcome, Message,
-    MessageRole, Part, ProtocolTurnOptions, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
-    SessionObservationEventPayload, SessionRevision, TokenUsage, ToolCallOutput, ToolCancellation,
-    ToolFailure, ToolFailureClass, TurnInput, TurnMachine, TurnMachineConfig,
-    facade_support::ModelToolReturn, facade_support::Response, facade_support::TurnFinish,
-    facade_support::TurnOutcome, facade_support::shared_parts,
+    LiveReplayOutcome, LiveReplayStore, LiveReplaySubscribeOutcome, Message, MessageRole, Part,
+    ProtocolTurnOptions, QueuedWorkStore, RuntimeCommit, RuntimeSessionState, SessionCatalogStore,
+    SessionCommitStore, SessionHistoryStore, SessionObservationEventPayload, SessionRevision,
+    TokenUsage, ToolCallOutput, ToolCancellation, ToolFailure, ToolFailureClass, TurnInput,
+    TurnInputStore, TurnMachine, TurnMachineConfig, facade_support::ModelToolReturn,
+    facade_support::Response, facade_support::TurnFinish, facade_support::TurnOutcome,
+    facade_support::shared_parts,
 };
 use lash_sansio::sync::MutexExt;
 use serde::Serialize;
@@ -46,6 +47,19 @@ use super::harness::{
 use super::prompt::benchmark_prompt;
 use super::scenarios::RuntimePerfScenario;
 use super::store::{RuntimePerfStore, RuntimePerfStoreTiming};
+
+async fn load_runtime_perf_session_state(
+    store: &Arc<dyn lash_core::RuntimeStore>,
+    session_id: &lash_sansio::SessionId,
+) -> Result<Option<RuntimeSessionState>, lash_core::StoreError> {
+    let view = lash_core::SessionStore::new(store.clone(), session_id.clone())?;
+    Ok(lash_core::store::load_session_window_state(
+        &view,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await?
+    .map(|loaded| loaded.state))
+}
 
 async fn seal_perf_drive(
     store: &(impl lash_core::RuntimeStore + ?Sized),

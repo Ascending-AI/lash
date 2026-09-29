@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
+use lash_core::SessionCatalogStore as _;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 
@@ -513,16 +514,16 @@ async fn run_lane(
                 .map_err(anyhow::Error::from)?,
         ),
     };
-    // The poller's read path is the observer's, never the session's own:
-    // `open_existing_store_by_id` binds the catalog's non-creating
-    // acquisition seam, so this is a reader store beside the live writer —
-    // one connection whose keyed reads serve every sample's poller.
+    // The observer uses a non-creating catalog lookup and keyed reads beside
+    // the live writer; it does not acquire execution authority.
     let factory = topology.observer.backend().session_store_factory();
-    let poll_store = factory
-        .open_existing_store_by_id(&session_id)
-        .await
-        .map_err(|error| anyhow::anyhow!("resolve the observer store for `{session_id}`: {error}"))?
-        .with_context(|| format!("the observer catalog has no store for `{session_id}`"))?;
+    if !matches!(
+        factory.lookup_session(&session_id).await?,
+        lash_core::SessionLookup::Live(_)
+    ) {
+        anyhow::bail!("the observer catalog has no store for `{session_id}`");
+    }
+    let poll_store: Arc<dyn lash::persistence::RuntimeStore> = factory;
     let hold = holds.map(|registry| registry.lane(&session_id));
     let ctx = SampleCtx {
         spec,
@@ -1085,7 +1086,9 @@ mod tests {
 
     #[async_trait::async_trait]
     impl lash::persistence::RuntimeStoreDecorator for PollProbeStore {
-        fn inner(&self) -> &(dyn lash::persistence::RuntimeStore + '_) {
+        type Inner = dyn lash::persistence::RuntimeStore;
+
+        fn inner(&self) -> &Self::Inner {
             self.inner.as_ref()
         }
 
@@ -1148,9 +1151,9 @@ mod tests {
         let stores = lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("open the in-memory store set");
-        let inner = stores
-            .session_store_factory()
-            .create_store(&lash_core::SessionStoreCreateRequest {
+        let factory = stores.session_store_factory();
+        factory
+            .admit_session(&lash_core::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
@@ -1159,6 +1162,7 @@ mod tests {
             })
             .await
             .expect("create the probe's inner store");
+        let inner: Arc<dyn lash::persistence::RuntimeStore> = factory;
         let probe = Arc::new(PollProbeStore::over(inner, &session_id, &input_id, &root));
         let store: Arc<dyn lash::persistence::RuntimeStore> = probe.clone();
 

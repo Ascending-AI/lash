@@ -875,7 +875,7 @@ async fn runtime_perf_commit_state(
         ))
     };
     store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id))
+        .admit_session(&runtime_perf_session_create_request(session_id))
         .await?;
     Ok(state)
 }

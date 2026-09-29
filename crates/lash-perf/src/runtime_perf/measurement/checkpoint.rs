@@ -137,8 +137,8 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             };
             let store = memory_perf_store(&runtime_state.session_id).await?;
             store
-                .admit_and_bind_session(&lash_core::SessionBinding::root(
-                    runtime_state.session_id.clone(),
+                .admit_session(&runtime_perf_session_create_request(
+                    &runtime_state.session_id,
                 ))
                 .await?;
             Ok((fixture, store, runtime_state))

@@ -73,7 +73,9 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             let memory_stores = memory_stores().await?;
             let memory_factory = memory_stores.session_store_factory();
             let sqlite_root = make_temp_bench_dir("lash-runtime-perf-store-hardening")?;
-            let sqlite_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&sqlite_root);
+            let sqlite_factory = lash_sqlite_store::SqliteStoreSet::open(&sqlite_root)
+                .await?
+                .session_store_factory();
             let postgres = lash_postgres_store::PostgresStorage::connect_with(
                 postgres_database.url(),
                 lash_postgres_store::PostgresStoreConfig {
@@ -88,15 +90,18 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             let memory_session_id = SessionId::from(format!("perf-hardening-memory-{run_id}"));
             let sqlite_session_id = SessionId::from(format!("perf-hardening-sqlite-{run_id}"));
             let postgres_session_id = SessionId::from(format!("perf-hardening-postgres-{run_id}"));
-            let memory_store = memory_factory
-                .create_store(&runtime_perf_session_create_request(&memory_session_id))
+            memory_factory
+                .admit_session(&runtime_perf_session_create_request(&memory_session_id))
                 .await?;
-            let sqlite_store = sqlite_factory
-                .create_store(&runtime_perf_session_create_request(&sqlite_session_id))
+            sqlite_factory
+                .admit_session(&runtime_perf_session_create_request(&sqlite_session_id))
                 .await?;
-            let postgres_store = postgres_factory
-                .create_store(&runtime_perf_session_create_request(&postgres_session_id))
+            postgres_factory
+                .admit_session(&runtime_perf_session_create_request(&postgres_session_id))
                 .await?;
+            let memory_store: Arc<dyn lash_core::RuntimeStore> = memory_factory;
+            let sqlite_store: Arc<dyn lash_core::RuntimeStore> = sqlite_factory;
+            let postgres_store: Arc<dyn lash_core::RuntimeStore> = Arc::new(postgres_factory);
 
             let memory_registry: Arc<dyn lash_core::ProcessRegistry> =
                 memory_stores.process_registry();
@@ -530,16 +535,18 @@ async fn load_store_hardening_state(
     store: &Arc<dyn lash_core::RuntimeStore>,
     session_id: &SessionId,
 ) -> anyhow::Result<RuntimeSessionState> {
-    Ok(
-        lash::persistence::load_persisted_session_state(store.as_ref())
-            .await?
-            .unwrap_or_else(|| RuntimeSessionState {
-                session_id: SessionId::from(session_id.to_string()),
-                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                    lash_core::TurnBudget::Unbounded,
-                ))
-            }),
+    Ok(lash::persistence::load_session_window_state(
+        &lash::persistence::SessionStore::new(store.clone(), session_id.clone())?,
+        lash::persistence::WindowSelector::Current,
     )
+    .await?
+    .map(|loaded| loaded.state)
+    .unwrap_or_else(|| RuntimeSessionState {
+        session_id: SessionId::from(session_id.to_string()),
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    }))
 }
 
 pub(super) fn runtime_perf_session_create_request(

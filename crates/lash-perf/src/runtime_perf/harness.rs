@@ -10,6 +10,7 @@ use lash::{
     provider::{ProviderHandle, ProviderOptions, ProviderReliability},
     runtime::SessionSnapshot,
 };
+use lash_core::SessionCatalogStore as _;
 use lash_core::SessionHistoryRecord;
 use lash_llm_tools::LlmToolsPluginFactory;
 use lash_provider_openai::OpenAiCompatibleProvider;
@@ -1111,21 +1112,19 @@ fn benchmark_field(name: &str, ty: lash::rlm::TypeExpr) -> lash::rlm::TypeField 
     }
 }
 
-pub(crate) fn durable_sqlite_session_store_factory_without_commit_measurement(
+pub(crate) async fn durable_sqlite_session_store_factory_without_commit_measurement(
     sessions_root: PathBuf,
-    process_registry_path: &std::path::Path,
-) -> (
+    _process_registry_path: &std::path::Path,
+) -> anyhow::Result<(
     Arc<dyn lash_core::DeploymentStore>,
     Arc<RuntimePerfStoreMetrics>,
-) {
-    let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
-            sessions_root,
-            process_registry_path,
-        ),
-    ));
+)> {
+    let sqlite = lash_sqlite_store::SqliteStoreSet::open(&sessions_root).await?;
+    let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(
+        sqlite.session_store_factory(),
+    );
     let metrics = factory.metrics();
-    (Arc::new(factory), metrics)
+    Ok((Arc::new(factory), metrics))
 }
 
 pub(crate) fn durable_postgres_session_store_factory_without_commit_measurement(
@@ -1184,15 +1183,15 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let session = core.open_session(session_id.clone()).await?;
     let persistence = if wiring.session_store_handle {
-        Some(
-            store_factory
-                .open_existing_store_by_id(&session_id)
-                .await
-                .map_err(anyhow::Error::msg)?
-                .ok_or_else(|| {
-                    anyhow::anyhow!("runtime perf SQLite session store was not created")
-                })?,
-        )
+        match store_factory.lookup_session(&session_id).await? {
+            lash_core::SessionLookup::Live(_) => {
+                let store: Arc<dyn lash::persistence::RuntimeStore> = store_factory.clone();
+                Some(store)
+            }
+            lash_core::SessionLookup::Absent | lash_core::SessionLookup::Deleted => {
+                anyhow::bail!("runtime perf SQLite session store was not created")
+            }
+        }
     } else {
         None
     };

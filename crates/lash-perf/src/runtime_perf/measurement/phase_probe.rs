@@ -449,9 +449,17 @@ async fn run_once_inner(
             let load_before_alloc = allocator_stats();
             let load_before_memory = process_memory_sample();
             let load_started = Instant::now();
-            let state = lash::persistence::load_persisted_session_state(store.as_ref())
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("store_reopen expected persisted session state"))?;
+            let history_store: Arc<dyn lash::persistence::RuntimeStore> = store.clone();
+            let state = lash::persistence::load_session_window_state(
+                &lash::persistence::SessionStore::new(
+                    history_store,
+                    runtime.session().session_id(),
+                )?,
+                lash::persistence::WindowSelector::Current,
+            )
+            .await?
+            .map(|loaded| loaded.state)
+            .ok_or_else(|| anyhow::anyhow!("store_reopen expected persisted session state"))?;
             extra_phase_profile.insert(
                 "store_reopen.persisted_load".to_string(),
                 RuntimePerfPhaseRunResult {
