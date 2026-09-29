@@ -97,7 +97,8 @@ With no shims, and with shapes changed in place under the version freeze
   every event, protocol and host mirror of them, including the host reads
   and the workbench panel;
 - the lost-root seal and its announcement;
-- the capture store errors, `StoreError::is_transient` and
+- the capture store errors (with their arms in `StoreError::is_transient`,
+  which attachment retries still use) and
   `RuntimeErrorCode::TransientCaptureWrite`;
 - the observer's discard of lagging deltas on a cancellation.
 

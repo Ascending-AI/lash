@@ -237,9 +237,9 @@ fn a_cancellation_keeps_every_lagging_delta_merged() {
 
 #[test]
 fn a_cancellation_keeps_an_alternating_block_backlog_whole() {
-    // An activity-only host: blocks that alternate never merge, so the
-    // backlog grows past the budget one delta at a time.
-    let (observer, mut observations) = TurnObserver::with_quiet_lanes(true, false);
+    // Blocks that alternate never merge, so the backlog grows past the
+    // budget one delta at a time on both lanes.
+    let (observer, mut observations) = TurnObserver::unread();
     let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
     for index in 0..LAG_BUDGET {
         marker(&observer, &mut cursor, &index.to_string());
@@ -249,17 +249,15 @@ fn a_cancellation_keeps_an_alternating_block_backlog_whole() {
         let block = if index % 2 == 0 { "A" } else { "B" };
         let text = format!("<{index}>");
         delta(&observer, &mut cursor, false, block, &text);
+        expected.push(row("session_text", block, &text));
         expected.push(row("turn_text", block, &text));
     }
     stopped_cancelled(&observer, &mut cursor);
     let rows = drain(&mut observations);
 
-    assert_eq!(rows[LAG_BUDGET..LAG_BUDGET + 30].to_vec(), expected);
-    assert_eq!(
-        rows.len(),
-        LAG_BUDGET + 30,
-        "the outcome rides the session lane"
-    );
+    assert_eq!(rows.len(), LAG_BUDGET + 61, "{:?}", &rows[LAG_BUDGET..]);
+    assert_eq!(rows[LAG_BUDGET..LAG_BUDGET + 60].to_vec(), expected);
+    assert!(rows[LAG_BUDGET + 60].2.contains("Cancelled"));
 }
 
 #[test]
