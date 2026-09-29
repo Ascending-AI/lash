@@ -1464,7 +1464,9 @@ may quote content the transcript also holds: the call, with the
 synthesized result the transcript keeps, and prose streamed before it in
 that iteration. And if a turn continues after such a checkpoint, because a
 tool cancelled itself, its next checkpoint advances the base and drops the
-held frames. An `AfterStep` stop still seals an empty partial.
+held frames. Until that checkpoint, a stop in the continued iteration seals
+the held iteration with it, so its partial also quotes the iteration
+before. An `AfterStep` stop still seals an empty partial.
 
 **Unstreamed response blocks are captured (§3.1).** When a response
 streamed no text, the driver publishes its text and reasoning blocks from
@@ -1510,3 +1512,68 @@ the engine only reports.
 `recovered_after_process_loss = true` and `AcknowledgedPrefix` coverage on
 both backends, whatever the turn's own capture row recorded. Before, it
 took both from that row, so a lost root read as complete and unrecovered.
+
+## Integration amendment
+
+Added 2026-09-29, when the branch merged onto `main` (FIG-433). Where it
+changes a section or amendment above, this text rules.
+
+**Both activities have remote forms (§2.2, §5.2).** A remote host follows a
+session through its observation stream, which projects each turn activity
+to a `RemoteTurnEvent`. That projection refused the two activities this
+record adds, so a remote stream failed on every stopped turn.
+`RemoteTurnEvent` now carries `ToolOutputProgress { call_id, chunk }` and
+`StoppedPartialAvailable { summary }`, reusing the `lash-sansio` types.
+Under ADR 0115 §4 a new event kind is additive within the negotiated
+version. The Lane G amendment's "no remote form yet" is withdrawn.
+
+**A refused root seals too (§1.3, §4.4).** `main` added
+`RootTerminalCause::Refused` (FIG-4018): the root's run ended with a typed
+refusal and no turn commit. Its terminal write seals like the other
+uncommitted terminals, with `Other { RuntimeFailure }` and
+`recovered_after_process_loss = false`. A partial the stopped turn already
+sealed is reused and commits with the terminal.
+
+**A later root can adopt a physical turn (§3.2).** An owed follow-on's
+recovery runs as a root of its own, `follow-on:<turn>#<n>`, on a fresh
+journal, and drives the physical turn a lost root staged (FIG-3946). The
+turn's capture row is keyed by session and turn, so the adopting root's
+first open or seal rebinds it. The earlier root's frames and writers are
+deleted, the base restarts at zero, and the turn reads recovered. The lost
+execution's staging never enters the adopting root's partial.
+
+**The seal is drive-fenced (§4.3).** `SealTurnCapture` carries the drive
+fence of the execution that seals, and the store checks it as it checks
+the commit's (ADR 0105 §9). A successor may raise the drive epoch mid-turn,
+which makes the stale execution's commit fail `StaleDriveFence`. That
+execution's seal fails the same way, so it cannot leave a seal that blocks
+the later drive of the same root. Root-terminal writes seal with no fence,
+inside their own transaction.
+
+**Capture-write retries (§4.1).** The runtime retries every refused capture
+write, not only transient faults, so a deterministic refusal hangs the
+turn. FIG-4069 limits the retry to transient faults.
+
+**Frozen versions (§3.5).** The four capture tables change the stored
+shapes in place: SQLite stays at schema version 99 and PostgreSQL at DDL
+revision 141, as the version freeze requires. A catalog without the tables
+is refused and recreated.
+
+**The PostgreSQL head commit pays one round trip for capture.** Clearing
+the committing turn's frames, writers and counters and reading its sealed
+partial run as one data-modifying `WITH`. The pinned head commit gains that
+one round trip, and only a stopped turn's commit adds a second, to mark its
+partial committed. The capture tables name their `CHECK` constraints, so
+the open-time check of an expanded catalog reads them as declared.
+
+**Adapter law (§2.1).** Where an adapter decodes a closed call strictly,
+`Part(ToolCall).input_json` may be its normalized encoding, provided it
+parses to the same value as `ToolInputEnd::raw_arguments`. The capture
+keeps the raw text the provider streamed.
+
+**The PostgreSQL leg of §6.7** is FIG-4065. `stopped_partial_recovery__test`
+runs on the Restate double's SQLite store only.
+
+**The terminal's record-and-hold half** is `hold_terminal_sequence`
+(§4.3). It records the sequence on the recorded assembly and holds it on the
+observer; the commit releases it, and a failed commit abandons it.
