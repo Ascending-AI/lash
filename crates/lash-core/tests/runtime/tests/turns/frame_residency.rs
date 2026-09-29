@@ -303,3 +303,77 @@ pub(super) async fn continue_as_starts_a_frame_without_a_reload() {
     assert_new_frame_resident_without_reload(&runtime, &store, &old_frame, window_loads_before)
         .await;
 }
+
+/// 14.4: a turn admitted in F1 whose own commit switches to F2 through
+/// `continue_as` reads back, at its admission base, F1's window: anchored at
+/// F1, with F1's config and no pending follow-on, and node for node the
+/// resident graph the turn was admitted on.
+#[tokio::test(flavor = "multi_thread")]
+pub(super) async fn the_admitted_window_of_a_frame_switching_turn_is_its_admission_frame() {
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
+    let mut factories = lash_core::testing::test_standard_protocol_factories();
+    factories.push(Arc::new(StaticPluginFactory::new(
+        "frame-residency-continue-as",
+        lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(ContinueAsTool)),
+    )));
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        factories,
+        Arc::new(EmptyTools),
+        mock_provider(vec![
+            text_call("first answer"),
+            tool_call("continue-call", "continue_elsewhere"),
+            text_call("finished in the new frame"),
+        ]),
+        test_host_config(&backend),
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
+    )
+    .await;
+    drive_text_turn(&mut runtime, &double, "admitted-first", "first request").await;
+    let admitted_frame = runtime
+        .state()
+        .current_frame_node_id
+        .clone()
+        .expect("the first frame");
+    let admitted_graph = serde_json::to_value(&runtime.state().session_graph.nodes)
+        .expect("encode the admitted resident graph");
+    let admitted_head = durable_window(store.clone(), SESSION).await;
+    let base = lash_core::store::SessionHeadRef {
+        generation: 0,
+        revision: admitted_head.head_revision,
+        leaf: admitted_head.window.leaf_node_id.clone(),
+        checkpoint: admitted_head.checkpoint_ref.clone(),
+    };
+
+    drive_text_turn(
+        &mut runtime,
+        &double,
+        "admitted-continue",
+        "continue in a new frame",
+    )
+    .await;
+    assert_ne!(
+        runtime.state().current_frame_node_id.as_ref(),
+        Some(&admitted_frame),
+        "the turn's own commit switched frames"
+    );
+
+    let read = session_view(store.clone(), SESSION)
+        .load_session_window(lash_core::store::WindowSelector::Admitted(base))
+        .await
+        .expect("read the admitted window")
+        .expect("the admission base is retained");
+    let anchor = read
+        .window
+        .anchor()
+        .expect("an admitted window is anchored");
+    assert_eq!(anchor.frame_node_id, admitted_frame, "anchored at F1");
+    assert_eq!(read.config, admitted_head.config, "F1's config");
+    assert!(read.pending_follow_on.is_none(), "no pending follow-on");
+    assert_eq!(
+        serde_json::to_value(&read.window.nodes).expect("encode the admitted window"),
+        admitted_graph,
+        "the admitted window is the resident graph the turn was admitted on"
+    );
+}
