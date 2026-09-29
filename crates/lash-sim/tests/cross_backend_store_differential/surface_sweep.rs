@@ -46,11 +46,20 @@ pub(super) struct SurfaceScratch {
     /// The claim this backend's run took on the close intent's obligation:
     /// the engine-half writes compare it (ADR 0109).
     pub(super) intent_claim: Option<lash_core::store::ClaimToken>,
+    pub(super) capture_first: Option<lash_core::store::CaptureWriterLease>,
 }
 
 /// One fallible store-trait method, driven as a compared differential step.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SurfaceMethod {
+    CaptureOpen {
+        successor: bool,
+    },
+    CaptureAppend,
+    CaptureResetInherited,
+    CaptureAdvanceBase,
+    CaptureSeal,
+    CaptureRead,
     LoadSession,
     ListPendingTurnInputs,
     ListTurnInputApplications,
@@ -186,6 +195,13 @@ pub(super) enum SurfaceMethod {
 impl SurfaceMethod {
     pub(super) fn label(self) -> &'static str {
         match self {
+            Self::CaptureOpen { successor: false } => "surface:open_capture_writer",
+            Self::CaptureOpen { successor: true } => "surface:open_capture_successor",
+            Self::CaptureAppend => "surface:append_capture_batch",
+            Self::CaptureResetInherited => "surface:persist_attempt_reset",
+            Self::CaptureAdvanceBase => "surface:advance_capture_base",
+            Self::CaptureSeal => "surface:seal_turn_capture",
+            Self::CaptureRead => "surface:read_stopped_partial",
             Self::LoadSession => "surface:load_session",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
             Self::ListTurnInputApplications => "surface:list_turn_input_applications",
@@ -468,6 +484,13 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
                 usage: false,
                 adopt_attachment: false,
             },
+            surface(SurfaceMethod::CaptureOpen { successor: false }),
+            surface(SurfaceMethod::CaptureAppend),
+            surface(SurfaceMethod::CaptureOpen { successor: true }),
+            surface(SurfaceMethod::CaptureResetInherited),
+            surface(SurfaceMethod::CaptureAdvanceBase),
+            surface(SurfaceMethod::CaptureSeal),
+            surface(SurfaceMethod::CaptureRead),
             StoreOperation::EnqueueNextTurnInput,
             StoreOperation::EnqueueClaimableQueuedWork,
             StoreOperation::AcquireSessionLease {
@@ -831,6 +854,112 @@ impl BackendRunner {
                 )
             });
         let answer = match method {
+            SurfaceMethod::CaptureOpen { successor } => {
+                let lease = store
+                    .open_capture_writer(&lash_core::store::OpenCaptureWriter {
+                        turn: lash_core::facade_support::TurnAddress::new(
+                            session_id.clone(),
+                            "surface-capture-turn",
+                        ),
+                        root: "surface-capture-turn".into(),
+                        invocation: lash_core::store::CaptureInvocationKey("surface-llm".into()),
+                    })
+                    .await?;
+                if !successor {
+                    self.surface.capture_first = Some(lease.clone());
+                }
+                format!(
+                    "epoch={} inherited={}",
+                    lease.attempt_epoch,
+                    lease.inherited.len()
+                )
+            }
+            SurfaceMethod::CaptureAppend => {
+                let lease = self
+                    .surface
+                    .capture_first
+                    .as_ref()
+                    .expect("capture first lease");
+                let block = lash_sansio::llm::types::StreamBlockIdentity::new("message", 0);
+                let ack = store
+                    .append_capture_batch(&lash_core::store::CaptureBatch {
+                        lease: lease.lease_ref(),
+                        batch_ordinal: 0,
+                        frames: vec![
+                            lash_core::store::CaptureFrame::TextStart {
+                                block: block.clone(),
+                            },
+                            lash_core::store::CaptureFrame::TextDelta {
+                                block: block.clone(),
+                                text: "surface".into(),
+                            },
+                            lash_core::store::CaptureFrame::TextEnd {
+                                block,
+                                text: "surface".into(),
+                            },
+                        ],
+                    })
+                    .await?;
+                format!("first={} last={}", ack.first_sequence, ack.last_sequence)
+            }
+            SurfaceMethod::CaptureResetInherited => {
+                let lease = self
+                    .surface
+                    .capture_first
+                    .as_ref()
+                    .expect("capture first lease");
+                let resumed = store
+                    .persist_attempt_reset(&lash_core::store::CaptureAttemptReset {
+                        lease: lease.lease_ref(),
+                    })
+                    .await?;
+                format!(
+                    "epoch={} inherited={}",
+                    resumed.attempt_epoch,
+                    resumed.inherited.len()
+                )
+            }
+            SurfaceMethod::CaptureAdvanceBase => {
+                store
+                    .advance_capture_base(&lash_core::store::CaptureBaseAdvance {
+                        turn: lash_core::facade_support::TurnAddress::new(
+                            session_id.clone(),
+                            "surface-capture-turn",
+                        ),
+                        to: lash_sansio::CaptureBase(1),
+                    })
+                    .await?;
+                "advanced".to_string()
+            }
+            SurfaceMethod::CaptureSeal => {
+                let partial = store
+                    .seal_turn_capture(&lash_core::store::SealTurnCapture {
+                        turn: lash_core::facade_support::TurnAddress::new(
+                            session_id.clone(),
+                            "surface-capture-turn",
+                        ),
+                        root: "surface-capture-turn".into(),
+                        reason: lash_sansio::StopReason::UserCancel,
+                        recorded_watermark: None,
+                    })
+                    .await?
+                    .into_partial();
+                format!(
+                    "through={} items={} recovered={}",
+                    partial.id.sealed_through,
+                    partial.items.len(),
+                    partial.recovered_after_process_loss
+                )
+            }
+            SurfaceMethod::CaptureRead => {
+                let read = store
+                    .read_stopped_partial(&lash_core::store::StoppedPartialReadRequest {
+                        session_id: session_id.clone(),
+                        turn: "surface-capture-turn".into(),
+                    })
+                    .await?;
+                format!("{read:?}")
+            }
             SurfaceMethod::LoadSession => {
                 format!("present={}", store.load_session().await?.is_some())
             }

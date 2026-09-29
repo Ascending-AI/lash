@@ -12,6 +12,7 @@
 
 /// Trait sources that define the gated surface.
 const SESSION_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/store/mod.rs");
+const CAPTURE_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/store/capture.rs");
 const ATTACHMENT_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/attachments.rs");
 const ATTACHMENT_MANIFEST_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/attachment_manifest.rs");
@@ -317,6 +318,14 @@ fn store_trait_surface_is_fully_gated() {
                 (true, Some(_)) => stale_exclusions.push(format!("{trait_name}::{method}")),
                 (false, None) => missing.push(format!("{trait_name}::{method}")),
             }
+        }
+    }
+
+    for method in fallible_trait_methods(CAPTURE_STORE_SOURCE, "TurnCaptureStore") {
+        if harness_drives(&sources, &method) {
+            covered += 1;
+        } else {
+            missing.push(format!("TurnCaptureStore::{method}"));
         }
     }
 
