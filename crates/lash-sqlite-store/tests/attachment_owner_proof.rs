@@ -1,4 +1,4 @@
-use lash_sqlite_store::{SqliteSessionStoreFactory, SqliteStore, StoreOptions};
+use lash_sqlite_store::{SqliteStore, StoreOptions};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use tracing::instrument::WithSubscriber;
@@ -30,14 +30,14 @@ impl<S: tracing::Subscriber> Layer<S> for Warnings {
 
 lash_conformance::attachment_owner_degraded_tests!({
     let dir = tempfile::tempdir().unwrap();
-    let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
-        as Arc<dyn lash_core_execution::SessionStoreFactory>;
+    let catalog = Arc::new(SqliteStore::open(dir.path()).await.unwrap())
+        as Arc<dyn lash_core_execution::DeploymentStore>;
     let attachments = Arc::new(
         lash_core_execution::facade_support::FileAttachmentSqliteStore::new(
             dir.path().join("attachments"),
         ),
     ) as Arc<dyn lash_core_execution::AttachmentStore>;
-    (dir, factory, attachments)
+    (dir, catalog, attachments)
 });
 
 #[tokio::test]
@@ -47,46 +47,36 @@ async fn attachment_constructors_warn_exactly_once_with_fields() {
         "SqliteStore::open_with_clock",
         "SqliteStore::open_with_options",
         "SqliteStore::open_with_options_and_clock",
-        "SqliteSessionStoreFactory::new",
-        "SqliteSessionStoreFactory::with_options",
     ] {
         let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("store.db");
         let warnings = Warnings::default();
         let subscriber = tracing_subscriber::registry().with(warnings.clone());
         async {
             let clock = Arc::new(lash_core_execution::facade_support::SystemClock);
             match path {
                 "SqliteStore::open" => {
-                    SqliteStore::open_file_for_testing(&db).await.unwrap();
+                    SqliteStore::open(dir.path()).await.unwrap();
                 }
                 "SqliteStore::open_with_clock" => {
-                    SqliteStore::open_file_with_clock_for_testing(&db, clock)
+                    SqliteStore::open_with_clock(dir.path(), clock)
                         .await
                         .unwrap();
                 }
                 "SqliteStore::open_with_options" => {
-                    SqliteStore::open_file_with_options_for_testing(&db, StoreOptions::default())
+                    SqliteStore::open_with_options(dir.path(), StoreOptions::default())
                         .await
                         .unwrap();
                 }
                 "SqliteStore::open_with_options_and_clock" => {
-                    SqliteStore::open_file_with_options_and_clock_for_testing(
-                        &db,
+                    SqliteStore::open_with_options_and_clock(
+                        dir.path(),
                         StoreOptions::default(),
                         clock,
                     )
                     .await
                     .unwrap();
                 }
-                _ => {
-                    let factory = if path == "SqliteSessionStoreFactory::new" {
-                        SqliteSessionStoreFactory::new(dir.path())
-                    } else {
-                        SqliteSessionStoreFactory::with_options(dir.path(), StoreOptions::default())
-                    };
-                    drop(factory);
-                }
+                _ => unreachable!("the constructor list is exhaustive"),
             }
         }
         .with_subscriber(subscriber)

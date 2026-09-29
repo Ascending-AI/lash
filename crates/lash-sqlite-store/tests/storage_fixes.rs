@@ -25,10 +25,10 @@ use lash_core_execution::store::RootStore as _;
 use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt;
 use lash_core_execution::{
     AttachmentRootSet, IngressStore, LeaseOwnerIdentity, PluginState, RuntimeCommit,
-    RuntimeInvocation, RuntimeSessionState, SessionCommitStore, SessionStoreFactory, StoreError,
+    RuntimeInvocation, RuntimeSessionState, SessionCatalogStore, SessionCommitStore, StoreError,
     ToolState,
 };
-use lash_sqlite_store::{SqliteSessionStoreFactory, SqliteStore};
+use lash_sqlite_store::SqliteStore;
 
 fn unique_db_path(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -526,9 +526,11 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
 }
 
 #[tokio::test]
-async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
+async fn unwired_sqlite_catalog_keeps_process_owned_intents_immortal() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
+    let store = SqliteStore::open(&dir.path().join("sessions"))
+        .await
+        .expect("open catalog");
     let request = lash_core_execution::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -536,7 +538,7 @@ async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
         relation: lash_core_execution::SessionRelation::default(),
         policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
-    let store = factory.create_store(&request).await.expect("create store");
+    store.admit_session(&request).await.expect("admit session");
     let attachment_id = lash_core_execution::AttachmentId::parse("unwired-process-attachment")
         .expect("valid attachment id");
     let intent = lash_core_execution::AttachmentIntent {
@@ -560,44 +562,11 @@ async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
         .await
         .expect("stamp process-owned upload");
 
-    let refs = factory
+    let refs = store
         .live_attachment_refs(u64::MAX)
         .await
         .expect("unwired GC root scan");
     assert!(refs.contains(&attachment_id));
-}
-
-#[tokio::test]
-async fn sqlite_registry_validation_fails_gc_not_session_open() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let sessions = dir.path().join("sessions");
-    let foreign_path = dir.path().join("foreign.db");
-    SqliteStore::open_file_for_testing(&foreign_path)
-        .await
-        .expect("create non-registry Lash database");
-    let factory = SqliteSessionStoreFactory::new_with_process_registry(&sessions, &foreign_path);
-    let request = lash_core_execution::SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from("validation-boundary"),
-        relation: lash_core_execution::SessionRelation::default(),
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
-    };
-
-    factory
-        .create_store(&request)
-        .await
-        .expect("ordinary session open must not probe process registry");
-    let error = factory
-        .live_attachment_refs(0)
-        .await
-        .expect_err("GC must reject a foreign process registry");
-    assert!(
-        error
-            .to_string()
-            .contains("configured database is not a Lash process registry"),
-        "unexpected GC validation error: {error}"
-    );
 }
 
 #[tokio::test]

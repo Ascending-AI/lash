@@ -244,6 +244,7 @@ impl SqliteStore {
         })
     }
 
+    #[cfg(test)]
     pub(crate) async fn open_readonly(core: &DatabaseLocation) -> tokio_rusqlite::Result<Self> {
         // Read-only projections cannot reconcile intents or run a reclamation sweep.
         let conn = SqliteConnection::open_readonly(core.target()).await?;

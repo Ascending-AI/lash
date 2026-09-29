@@ -25,6 +25,7 @@ fn one_process_module(process_name: &str, param: &str) -> lashlang::Program {
 
 use lash_core_execution::{
     ProcessLifecycle as _, ProcessObserverRegistry as _, ProcessRegistrar as _,
+    SessionCatalogStore as _,
 };
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
@@ -41,8 +42,14 @@ fn public_session_schema_version_tracks_the_internal_schema_version() {
 
 lash_conformance::tool_access_persistence_tests!({
     let dir = tempfile::tempdir().expect("tool-access SQLite tempdir");
-    let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()));
-    (dir, factory)
+    let stores = SqliteStoreSet::open(dir.path())
+        .await
+        .expect("open tool-access catalog");
+    let catalog = stores.open_store().await.expect("open tool-access store");
+    (
+        (dir, stores),
+        catalog as Arc<dyn lash_core_execution::store::ConformanceDeployment>,
+    )
 });
 
 #[test]
@@ -274,8 +281,8 @@ fn count_session_list_statement(event: rusqlite::trace::TraceEvent<'_>) {
     }
 }
 
-async fn traced_session_list(factory: &SqliteSessionStoreFactory) -> (Vec<SessionSummary>, usize) {
-    let conn = SqliteConnection::open_readonly(factory.core.target())
+async fn traced_session_list(store: &SqliteStore) -> (Vec<SessionSummary>, usize) {
+    let conn = SqliteConnection::open_readonly(store.location.target())
         .await
         .expect("open session catalog for statement tracing");
     SESSION_LIST_STATEMENT_COUNT.store(0, Ordering::Relaxed);
@@ -300,7 +307,7 @@ async fn traced_session_list(factory: &SqliteSessionStoreFactory) -> (Vec<Sessio
 #[tokio::test]
 async fn session_listing_statement_count_is_session_count_invariant() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let factory = SqliteSessionStoreFactory::new(dir.path());
+    let store = SqliteStore::open(dir.path()).await.expect("open catalog");
     let mut expected_relations = BTreeMap::new();
 
     for index in 0..8 {
@@ -313,8 +320,8 @@ async fn session_listing_statement_count_is_session_count_invariant() {
                 source_node_id: format!("source-node-{index}").into(),
             }
         };
-        factory
-            .create_store(&SessionStoreCreateRequest {
+        store
+            .admit_session(&SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: if index == 0 {
                     Vec::new()
@@ -336,13 +343,13 @@ async fn session_listing_statement_count_is_session_count_invariant() {
         expected_relations.insert(session_id, relation);
 
         if index == 0 {
-            let (single, statement_count) = traced_session_list(&factory).await;
+            let (single, statement_count) = traced_session_list(&store).await;
             assert_eq!(single.len(), 1);
             assert_eq!(statement_count, 1);
         }
     }
 
-    let (many, statement_count) = traced_session_list(&factory).await;
+    let (many, statement_count) = traced_session_list(&store).await;
     assert_eq!(statement_count, 1);
     assert_eq!(many.len(), expected_relations.len());
     for summary in many {
@@ -564,19 +571,14 @@ async fn real_locked_catalog_surfaces_typed_contention() {
 }
 
 #[tokio::test]
-async fn live_attachment_refs_reads_the_factory_catalog() {
+async fn live_attachment_refs_reads_the_catalog() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path().join("sessions");
     std::fs::create_dir_all(&root).expect("mkdir sessions");
-    let factory = SqliteSessionStoreFactory::new(&root);
-
-    let catalog = root.join(crate::SqliteDatabase::DurableCore.file_name());
+    let store = SqliteStore::open(&root).await.expect("open catalog");
     let attachment_id =
         lash_core_execution::AttachmentId::parse("a".repeat(64)).expect("valid attachment id");
     {
-        let store = SqliteStore::open_file_for_testing(&catalog)
-            .await
-            .expect("open catalog");
         let intent = lash_core_execution::AttachmentIntent {
             attachment_id: attachment_id.clone(),
             session_id: SessionId::from("sess-1"),
@@ -603,7 +605,7 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
         .expect("commit ref");
     }
 
-    let refs = lash_core_execution::AttachmentRootSet::live_attachment_refs(&factory, 0)
+    let refs = lash_core_execution::AttachmentRootSet::live_attachment_refs(&store, 0)
         .await
         .expect("root discovery");
     assert!(
@@ -618,183 +620,24 @@ async fn live_attachment_refs_aborts_on_unreadable_catalog() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path().join("sessions");
     std::fs::create_dir_all(&root).expect("mkdir sessions");
-    let factory = SqliteSessionStoreFactory::new(&root);
-
     std::fs::write(
         root.join(crate::SqliteDatabase::DurableCore.file_name()),
         b"corrupt not-a-db",
     )
     .expect("write corrupt");
 
-    let result = lash_core_execution::AttachmentRootSet::live_attachment_refs(&factory, 0).await;
+    let result = SqliteStore::open(&root).await;
     assert!(
         result.is_err(),
-        "an unreadable durable-core catalog must abort discovery, got {result:?}"
+        "an unreadable durable-core catalog must refuse open"
     );
 }
 
 #[tokio::test]
-async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let live_root = dir.path().join("live-sessions");
-    let live_factory = SqliteSessionStoreFactory::new(&live_root);
-    let request = SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from("live-attachment"),
-        relation: lash_core_execution::SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
-    };
-    let store = live_factory
-        .create_store(&request)
-        .await
-        .expect("create live session store");
-    let backend =
-        lash_core_execution::attachments::FileAttachmentSqliteStore::new(dir.path().join("blobs"));
-    let attachment = lash_core_execution::AttachmentSqliteStore::put(
-        &backend,
-        b"sqlite-live-committed-blob".to_vec(),
-        lash_sansio::AttachmentCreateMeta::new(
-            lash_sansio::MediaType::parse("application/octet-stream").expect("media type"),
-            None,
-            Some("live".to_string()),
-        ),
-    )
-    .await
-    .expect("put shared backend blob");
-    let live_intent = lash_core_execution::AttachmentIntent {
-        attachment_id: attachment.id.clone(),
-        session_id: request.session_id.clone(),
-        canonical_uri: format!("lash-attachment://blake3/{}", attachment.id),
-        intent_at_epoch_ms: 1,
-        owner: None,
-    };
-    let lash_core_execution::AttachmentWriteFence::Granted(live_permit) =
-        lash_core_execution::AttachmentManifest::begin_attachment_write(
-            &*store,
-            live_intent.clone(),
-        )
-        .await
-        .expect("begin live attachment write")
-    else {
-        panic!("a free digest must grant its writer");
-    };
-    lash_core_execution::AttachmentManifest::complete_attachment_write(
-        &*store,
-        &live_intent,
-        live_permit,
-    )
-    .await
-    .expect("stamp live attachment upload");
-    lash_core_execution::AttachmentManifest::commit_refs(
-        &*store,
-        &request.session_id,
-        std::slice::from_ref(&attachment.id),
-    )
-    .await
-    .expect("commit live attachment ref");
-
-    let missing_factory = SqliteSessionStoreFactory::new(dir.path().join("wrong-sessions"));
-    let result = lash_core_execution::attachments::reclaim_unreferenced_attachments(
-        &missing_factory,
-        &backend,
-        lash_core_execution::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: lash_core_execution::EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
-    )
-    .await;
-
-    assert!(
-        matches!(
-            &result,
-            Err(failure)
-                if matches!(
-                    &failure.stop,
-                    lash_core_execution::MaintenanceStop::Failed(
-                        lash_core_execution::AttachmentStoreError::RootSetEnumerationFailed { .. }
-                    )
-                )
-        ),
-        "a missing catalog must abort GC even when delete-all is authorized: {result:?}"
-    );
-    lash_core_execution::AttachmentSqliteStore::get(&backend, &attachment.id)
-        .await
-        .expect("live committed blob survives the refused sweep");
-}
-
-#[tokio::test]
-async fn attachment_gc_allows_an_operator_reset_with_an_empty_backend() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
-    let request = SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from("reset-empty-attachment-gc"),
-        relation: lash_core_execution::SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
-    };
-    let store = factory
-        .create_store(&request)
-        .await
-        .expect("initialize factory catalog");
-    drop(store);
-    std::fs::remove_file(
-        dir.path()
-            .join("sessions")
-            .join(crate::SqliteDatabase::DurableCore.file_name()),
-    )
-    .expect("remove catalog for operator reset");
-    let backend =
-        lash_core_execution::attachments::FileAttachmentSqliteStore::new(dir.path().join("blobs"));
-
-    let result = lash_core_execution::attachments::reclaim_unreferenced_attachments(
-        &factory,
-        &backend,
-        lash_core_execution::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: lash_core_execution::EmptyRootSetPolicy::Refuse,
-        },
-    )
-    .await;
-
-    let report = result.expect("an empty reset deployment has nothing to protect");
-    assert_eq!(report.scanned_blob_count, 0);
-    assert_eq!(report.reclaimed_count, 0);
-    assert!(
-        report
-            .root_enumeration_failure
-            .as_deref()
-            .is_some_and(|failure| failure.contains("durable-core catalog")),
-        "the returned report must distinguish enumeration failure: {report:?}"
-    );
-}
-
-#[tokio::test]
-async fn targeted_attachment_ref_probe_aborts_when_the_factory_catalog_is_missing() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let factory = SqliteSessionStoreFactory::new(dir.path().join("missing-sessions"));
-    let attachment_id =
-        lash_core_execution::AttachmentId::parse("b".repeat(64)).expect("valid attachment id");
-
-    let result = lash_core_execution::AttachmentRootSet::has_live_attachment_ref(
-        &factory,
-        &attachment_id,
-        0,
-    )
-    .await;
-
-    assert!(
-        result.is_err(),
-        "a missing catalog must abort the targeted root probe: {result:?}"
-    );
-}
-
-#[tokio::test]
-async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
+async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path().join("sessions");
-    let factory = SqliteSessionStoreFactory::new(&root);
+    let store = SqliteStore::open(&root).await.expect("open catalog");
     let request = SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -803,12 +646,12 @@ async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
         policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
 
-    let store = factory
-        .create_store(&request)
+    store
+        .admit_session(&request)
         .await
         .expect("create requested session");
-    drop(store);
-    let raw = rusqlite::Connection::open(factory.catalog_uri()).expect("open raw catalog");
+    let raw = rusqlite::Connection::open(root.join(crate::SqliteDatabase::DurableCore.file_name()))
+        .expect("open raw catalog");
     // `ck_session_meta_relation_kind` forbids this row on any ordinary write.
     // The refusal below is still the contract for a catalog that carries one
     // anyway — restored from a pre-CHECK dump, or ALTERed by a host.
@@ -824,7 +667,7 @@ async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
         .expect("restore CHECK enforcement");
     drop(raw);
 
-    let result = factory.open_existing_store(&request).await;
+    let result = store.lookup_session(&request.session_id).await;
     assert!(
         result.is_err(),
         "unreadable requested session metadata must not look absent"

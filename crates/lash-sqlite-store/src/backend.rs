@@ -425,6 +425,7 @@ impl std::fmt::Debug for SqliteStoreSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_core_execution::SessionCatalogStore as _;
 
     fn catalog_table_count(uri: &str) -> i64 {
         rusqlite::Connection::open(uri)
@@ -447,30 +448,28 @@ mod tests {
             .await
             .expect("open the memory stores");
         let uri = stores.database_uri(SqliteDatabase::DurableCore);
-        let factory = stores.session_store_factory();
+        let store = stores.open_store().await.expect("open catalog");
         let request = lash_core_execution::testing::store_fixtures::session_store_request(
             &lash_core_execution::SessionId::from("memory-lifetime"),
             "memory-lifetime",
             lash_core_execution::SessionRelation::Root,
         );
-        drop(
-            lash_core_execution::SessionStoreFactory::create_store(factory.as_ref(), &request)
-                .await
-                .expect("create a session"),
-        );
-        let reopened = lash_core_execution::SessionStoreFactory::open_existing_store(
-            stores
-                .reopen()
-                .await
-                .expect("reopen")
-                .session_store_factory()
-                .as_ref(),
-            &request,
-        )
-        .await
-        .expect("reopen the session");
+        lash_core_execution::SessionCatalogStore::admit_session(store.as_ref(), &request)
+            .await
+            .expect("create a session");
+        drop(store);
+        let reopened = stores
+            .reopen()
+            .await
+            .expect("reopen")
+            .open_store()
+            .await
+            .expect("open catalog")
+            .lookup_session(&request.session_id)
+            .await
+            .expect("look up the session");
         assert!(
-            reopened.is_some(),
+            matches!(reopened, lash_core_execution::SessionLookup::Live(_)),
             "a session written through one handle is read through a fresh one"
         );
         drop(reopened);

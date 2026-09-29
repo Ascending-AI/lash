@@ -76,18 +76,11 @@ fn missing_anchor(
     session: &SessionId,
     node: &str,
 ) -> Result<StoreError, StoreError> {
-    let tombstoned: Option<i64> = conn
-        .query_row(
-            "SELECT tombstoned FROM graph_nodes WHERE node_id=?1",
-            params![node],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(sqlite_error)?;
+    let tombstoned = visible_header(conn, session, node)?.is_some_and(|row| row.tombstoned);
     Ok(StoreError::HistoryAnchorUnavailable {
         session_id: session.clone(),
         node_id: node.into(),
-        reason: if tombstoned == Some(1) {
+        reason: if tombstoned {
             AnchorUnavailable::Tombstoned
         } else {
             AnchorUnavailable::NotReadable
