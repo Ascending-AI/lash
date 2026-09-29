@@ -51,6 +51,135 @@ async fn hub_subscribe_then_notify_wakes_and_gc_drops_empty_entry() {
         .expect("sender remains open");
 
     drop(rx);
-    hub.notify(&crate::process_id_for_test("proc"));
     assert_eq!(hub.tracked_processes(), 0);
+}
+
+#[test]
+fn hub_drop_removes_entry_without_notification() {
+    let hub = ProcessChangeHub::new();
+    let subscription = hub.subscribe(&crate::process_id_for_test("unmodified"));
+    assert_eq!(hub.tracked_processes(), 1);
+    drop(subscription);
+    assert_eq!(hub.tracked_processes(), 0);
+}
+
+#[test]
+fn hub_multiple_subscriptions_and_clones_release_only_last() {
+    let hub = ProcessChangeHub::new();
+    let process_id = crate::process_id_for_test("shared");
+    let subscription = hub.subscribe(&process_id);
+    let mut cloned = subscription.clone();
+    let mut another = hub.subscribe(&process_id);
+    drop(subscription);
+    assert_eq!(hub.tracked_processes(), 1);
+    hub.notify(&process_id);
+    assert!(cloned.has_changed().expect("clone stays attached"));
+    assert!(
+        another
+            .has_changed()
+            .expect("second subscriber stays attached")
+    );
+    cloned.mark_unchanged();
+    another.mark_unchanged();
+    drop(another);
+    assert_eq!(hub.tracked_processes(), 1);
+    hub.notify(&process_id);
+    assert!(
+        cloned
+            .has_changed()
+            .expect("last subscriber stays attached")
+    );
+    drop(cloned);
+    assert_eq!(hub.tracked_processes(), 0);
+}
+
+#[test]
+fn hub_distinct_processes_track_only_live_subscriptions() {
+    let hub = ProcessChangeHub::new();
+    let live = (0..4)
+        .map(|index| hub.subscribe(&crate::process_id_for_test(&format!("live-{index}"))))
+        .collect::<Vec<_>>();
+    for index in 0..128 {
+        let process_id = crate::process_id_for_test(&format!("finished-{index}"));
+        let subscription = hub.subscribe(&process_id);
+        assert_eq!(hub.tracked_processes(), live.len() + 1);
+        if index % 2 == 0 {
+            hub.notify(&process_id);
+        }
+        drop(subscription);
+        assert_eq!(hub.tracked_processes(), live.len());
+    }
+    drop(live);
+    assert_eq!(hub.tracked_processes(), 0);
+}
+
+#[test]
+fn hub_subscribe_drop_notify_interleavings_preserve_final_wake() {
+    let hub = ProcessChangeHub::new();
+    let process_id = crate::process_id_for_test("reused");
+    for drop_before_subscribe in [true, false] {
+        for notify_before_drop in [true, false] {
+            let old = hub.subscribe(&process_id);
+            if notify_before_drop {
+                hub.notify(&process_id);
+            }
+            let mut fresh = if drop_before_subscribe {
+                drop(old);
+                assert_eq!(hub.tracked_processes(), 0);
+                hub.subscribe(&process_id)
+            } else {
+                let fresh = hub.subscribe(&process_id);
+                drop(old);
+                fresh
+            };
+            fresh.mark_unchanged();
+            hub.notify(&process_id);
+            assert!(fresh.has_changed().expect("fresh channel remains attached"));
+            assert_eq!(hub.tracked_processes(), 1);
+            drop(fresh);
+            assert_eq!(hub.tracked_processes(), 0);
+        }
+    }
+}
+
+#[test]
+fn hub_concurrent_unsubscribe_and_subscribe_preserve_final_wake() {
+    let hub = ProcessChangeHub::new();
+    let process_id = crate::process_id_for_test("racing");
+    for _ in 0..64 {
+        let old = hub.subscribe(&process_id);
+        let start = std::sync::Barrier::new(3);
+        let (ready, subscribed) = std::sync::mpsc::channel();
+        let fresh = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                start.wait();
+                drop(old);
+            });
+            let fresh = scope.spawn(|| {
+                start.wait();
+                let subscription = hub.subscribe(&process_id);
+                ready.send(()).expect("notify thread is waiting");
+                subscription
+            });
+            start.wait();
+            subscribed.recv().expect("fresh subscription is registered");
+            hub.notify(&process_id);
+            fresh.join().expect("subscriber thread")
+        });
+        assert!(fresh.has_changed().expect("final wake stays observable"));
+        assert_eq!(hub.tracked_processes(), 1);
+        drop(fresh);
+        assert_eq!(hub.tracked_processes(), 0);
+    }
+}
+
+#[tokio::test]
+async fn hub_subscription_can_outlive_hub() {
+    let hub = ProcessChangeHub::new();
+    let subscription = hub.subscribe(&crate::process_id_for_test("orphan"));
+    drop(hub);
+    let mut cloned = subscription.clone();
+    assert!(cloned.changed().await.is_err(), "the hub owned the sender");
+    drop(subscription);
+    drop(cloned);
 }

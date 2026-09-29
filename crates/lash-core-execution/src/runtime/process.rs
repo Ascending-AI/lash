@@ -29,8 +29,8 @@ mod validation;
 mod wake;
 
 pub use awaiter::{
-    ProcessChangeHub, ProcessEventSink, ProcessEventSinkRegistration, WatchedRegistry,
-    watch_process_registry, watch_process_registry_with_sink,
+    ProcessChangeHub, ProcessChangeSubscription, ProcessEventSink, ProcessEventSinkRegistration,
+    WatchedRegistry, watch_process_registry, watch_process_registry_with_sink,
 };
 pub use definition::{
     InvalidProcessDefinitionId, ProcessDefinition, ProcessDefinitionDraft,

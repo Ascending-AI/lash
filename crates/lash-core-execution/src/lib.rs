@@ -267,7 +267,6 @@ pub mod facade_support {
     pub use crate::runtime::ObservedWorkItem;
     pub use crate::runtime::ObservedWorkItemState;
     pub use crate::runtime::OutputState;
-    pub use crate::runtime::ProcessChangeHub;
     pub use crate::runtime::ProcessEngineProcessContext;
     pub use crate::runtime::ProcessEngineRegistry;
     pub use crate::runtime::ProcessEventAppendPlan;
@@ -351,6 +350,7 @@ pub mod facade_support {
     pub use crate::runtime::refuse_unhonored_group_membership;
     pub use crate::runtime::registry_transitions;
     pub use crate::runtime::turn_control_binding_id_for_scope;
+    pub use crate::runtime::{ProcessChangeHub, ProcessChangeSubscription};
     pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use lash_core_store::turn_input_vocabulary::facade_ops::TurnContextFacadeOps;

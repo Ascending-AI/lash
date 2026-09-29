@@ -95,13 +95,13 @@ impl ProcessRegistryAwaiter {
     {
         let mut backoff = self.work_cadence.poll_initial;
         if let Some(hub) = self.hub.as_ref() {
-            let mut rx = hub.subscribe(process_id);
+            let mut subscription = hub.subscribe(process_id);
             loop {
                 if let Some(item) = check().await? {
                     return Ok(item);
                 }
                 tokio::select! {
-                    changed = rx.changed() => {
+                    changed = subscription.changed() => {
                         match changed {
                             Ok(()) => backoff = self.work_cadence.poll_initial,
                             Err(_) => break,

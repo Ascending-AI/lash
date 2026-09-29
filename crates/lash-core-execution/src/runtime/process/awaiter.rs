@@ -15,7 +15,7 @@ mod change_hub;
 #[path = "awaiter/event_sink.rs"]
 mod event_sink;
 mod registry_support;
-pub use change_hub::ProcessChangeHub;
+pub use change_hub::{ProcessChangeHub, ProcessChangeSubscription};
 pub use event_sink::ProcessEventSink;
 
 /// [`ProcessRegistry`] decorator: publishes in-process change ticks on every

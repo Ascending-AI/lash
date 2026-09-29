@@ -250,6 +250,7 @@ pub use observation::{
     SessionQueueEventKind, SessionResume, SessionRevision, WeakRuntimeHandle,
 };
 pub use observation_publisher::{ObservationSource, drive_with_observations};
+pub use process::ProcessChangeSubscription;
 #[cfg(any(test, feature = "testing"))]
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;

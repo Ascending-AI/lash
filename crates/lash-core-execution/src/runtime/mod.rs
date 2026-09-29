@@ -88,6 +88,7 @@ pub use host::{
     EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeControlConfig, RuntimeDurabilityConfig,
     RuntimeHostConfig, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
 };
+pub use process::ProcessChangeSubscription;
 #[cfg(any(test, feature = "testing"))]
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;

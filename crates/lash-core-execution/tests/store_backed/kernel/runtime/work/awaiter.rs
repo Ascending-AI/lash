@@ -178,10 +178,10 @@ mod tests {
 
         // Subscribe after the mutations above so only post-subscription bumps
         // are observable.
-        let mut terminal_rx = hub.subscribe(&proc_terminal_record.id);
-        let mut live_rx = hub.subscribe(&proc_live_record.id);
-        terminal_rx.mark_unchanged();
-        live_rx.mark_unchanged();
+        let mut terminal_subscription = hub.subscribe(&proc_terminal_record.id);
+        let mut live_subscription = hub.subscribe(&proc_live_record.id);
+        terminal_subscription.mark_unchanged();
+        live_subscription.mark_unchanged();
 
         let report = registry
             .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
@@ -190,11 +190,13 @@ mod tests {
         assert_eq!(report.pruned_processes, 1, "the terminal process pruned");
 
         assert!(
-            !terminal_rx.has_changed().expect("terminal sender open"),
+            !terminal_subscription
+                .has_changed()
+                .expect("terminal sender open"),
             "prune must not bump the pruned process's hub entry"
         );
         assert!(
-            !live_rx.has_changed().expect("live sender open"),
+            !live_subscription.has_changed().expect("live sender open"),
             "prune must not bump surviving processes' hub entries"
         );
     }
@@ -327,6 +329,123 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn watched_terminal_wait_releases_registration_on_completion() {
+        let raw = memory_registry().await;
+        let record = raw
+            .register_process(registration())
+            .await
+            .expect("register");
+        let faults = Arc::new(ProcessRegistryFaults::new(Arc::clone(&raw)));
+        faults.set_process_read_pinned(Some(record.clone()));
+        let (registry, hub) = watched_parts(watch_process_registry(faults.clone()));
+        let awaiter = ProcessRegistryAwaiter::new(registry.clone(), hub.clone());
+        let mut waiting = Box::pin(awaiter.await_terminal(&record.id));
+        let mut another = Box::pin(awaiter.await_terminal(&record.id));
+        assert!(futures_util::poll!(&mut waiting).is_pending());
+        assert!(futures_util::poll!(&mut another).is_pending());
+        assert_eq!(hub.tracked_processes(), 1);
+
+        registry
+            .complete_process(
+                &record.id,
+                success(serde_json::json!("done")),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete");
+        faults.set_process_read_pinned(None);
+        assert_eq!(
+            hub.tracked_processes(),
+            1,
+            "the waiter still owns its lease"
+        );
+        let output = waiting.await.expect("await terminal");
+        assert_eq!(output, success(serde_json::json!("done")));
+        assert_eq!(
+            hub.tracked_processes(),
+            1,
+            "the second waiter still owns its lease"
+        );
+        assert_eq!(another.await.expect("second await terminal"), output);
+        assert_eq!(hub.tracked_processes(), 0);
+    }
+
+    #[tokio::test]
+    async fn watched_cancelled_wait_releases_registration() {
+        let raw = memory_registry().await;
+        let record = raw
+            .register_process(registration())
+            .await
+            .expect("register");
+        let faults = Arc::new(ProcessRegistryFaults::new(raw));
+        faults.set_process_read_pinned(Some(record.clone()));
+        let (registry, hub) = watched_parts(watch_process_registry(faults));
+        let awaiter = ProcessRegistryAwaiter::new(registry, hub.clone());
+        let mut waiting = Box::pin(awaiter.await_terminal(&record.id));
+        assert!(futures_util::poll!(&mut waiting).is_pending());
+        assert_eq!(hub.tracked_processes(), 1);
+        drop(waiting);
+        assert_eq!(hub.tracked_processes(), 0);
+    }
+
+    #[tokio::test]
+    async fn watched_failed_point_read_releases_registration() {
+        let raw = memory_registry().await;
+        let record = raw
+            .register_process(registration())
+            .await
+            .expect("register");
+        let faults = Arc::new(ProcessRegistryFaults::new(raw));
+        faults.set_process_read_pinned(Some(record.clone()));
+        faults.set_process_read_error_after(
+            1,
+            PluginError::Session("subscribed point read failed".to_string()),
+        );
+        let (registry, hub) = watched_parts(watch_process_registry(faults.clone()));
+        let error = ProcessRegistryAwaiter::new(registry, hub.clone())
+            .await_terminal(&record.id)
+            .await
+            .expect_err("the read after subscription must fail");
+        assert!(
+            matches!(error, PluginError::Session(ref message) if message == "subscribed point read failed")
+        );
+        assert_eq!(faults.process_point_reads(), 2);
+        assert_eq!(hub.tracked_processes(), 0);
+    }
+
+    #[tokio::test]
+    async fn watched_event_wait_releases_registration_on_delivery() {
+        let (registry, hub) = watched_parts(watch_process_registry(memory_registry().await));
+        let record = registry
+            .register_process(registration_with_events(&["producer.ready"]))
+            .await
+            .expect("register");
+        let awaiter = ProcessRegistryAwaiter::new(registry.clone(), hub.clone());
+        let mut waiting = Box::pin(awaiter.await_event(&record.id, "producer.ready", 0));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                assert!(futures_util::poll!(&mut waiting).is_pending());
+                if hub.tracked_processes() == 1 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("event wait subscribes");
+        let appended = registry
+            .append_event(
+                &record.id,
+                ProcessEventAppendRequest::new("producer.ready", serde_json::json!({})),
+            )
+            .await
+            .expect("append");
+        let event = waiting.await.expect("await event");
+        assert_eq!(event.sequence, appended.event.sequence);
+        assert_eq!(hub.tracked_processes(), 0);
+    }
+
+    #[tokio::test]
     async fn watched_registry_bumps_on_mutations() {
         let raw = memory_registry().await;
         let (registry, hub) = watched_parts(watch_process_registry(raw));
@@ -336,7 +455,7 @@ mod tests {
             .expect("register");
         // A minted id exists only once registered, so the subscription starts
         // after it and witnesses the mutations that follow.
-        let mut rx = hub.subscribe(&proc_record.id);
+        let mut subscription = hub.subscribe(&proc_record.id);
 
         registry
             .append_event(
@@ -355,7 +474,7 @@ mod tests {
             )
             .await
             .expect("append");
-        tokio::time::timeout(Duration::from_millis(100), rx.changed())
+        tokio::time::timeout(Duration::from_millis(100), subscription.changed())
             .await
             .expect("append bump")
             .expect("sender remains open");
@@ -605,7 +724,7 @@ mod tests {
             .expect("register");
         // A minted id exists only once registered, so the subscription starts
         // after it and witnesses the mutations that follow.
-        let mut rx = hub.subscribe(&proc_record.id);
+        let mut subscription = hub.subscribe(&proc_record.id);
         registry
             .append_event(
                 &proc_record.id,
@@ -613,7 +732,7 @@ mod tests {
             )
             .await
             .expect("append");
-        tokio::time::timeout(Duration::from_millis(100), rx.changed())
+        tokio::time::timeout(Duration::from_millis(100), subscription.changed())
             .await
             .expect("append bump with a sink installed")
             .expect("sender remains open");
