@@ -1,5 +1,13 @@
 # 0114: A stopped turn's partial output is sealed durably and returned to the host
 
+> **Superseded (2026-09-29, FIG-4113)** by
+> [ADR 0122](0122-a-stopped-turns-uncommitted-tail-lives-only-on-the-live-stream.md).
+> Lash keeps no durable record of a stopped turn's uncommitted output: the
+> capture store, the writers, the seal, the progress sink, the provider
+> tool-input events and the partial with its host reads are deleted, and the
+> live stream is the contract. The publish-after-commit order of §4.3 step 5
+> still holds, without the partial's announcement.
+
 ## Status
 
 Accepted 2026-09-29 (FIG-433). It pins the contract that four implementation

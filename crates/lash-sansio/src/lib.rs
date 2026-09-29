@@ -19,7 +19,6 @@ pub mod schema_contract;
 pub mod session;
 pub mod session_model;
 mod standard_batch;
-pub mod stopped_partial;
 pub mod sync;
 mod tool_call_id;
 pub mod tool_catalog;
@@ -144,13 +143,6 @@ pub use session_model::{
     default_prompt_template, messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
 };
 pub use standard_batch::BatchResultRow;
-pub use stopped_partial::{
-    CaptureBase, CaptureCoverage, CompleteToolCall, CutState, FragmentState,
-    InterruptedToolOutcome, OtherStopCause, PartialItem, PartialItemId, PartialItemKey,
-    ResubmissionEligibility, RunningTool, SelectionReason, StopReason, StoppedPartial,
-    StoppedPartialDigest, StoppedPartialDigestMismatch, StoppedPartialId, StoppedPartialSummary,
-    TOOL_OUTPUT_CAPTURE_MAX_BYTES, ToolExecutionState, ToolOutputCapture, ToolOutputChunk,
-};
 pub use tool_call_id::{
     InvalidToolCallId, TOOL_CALL_ID_PREFIX, ToolCallAdmission, ToolCallId, ToolCallPosition,
     ToolCallRoot, ToolCallRootError,

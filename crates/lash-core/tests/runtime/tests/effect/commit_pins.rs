@@ -15,8 +15,8 @@
 //! digest; every other committed byte is unchanged.
 //!
 //! The two cancelled pins were re-pinned for ADR 0114 (FIG-433): a stopped
-//! turn's commit now names its sealed partial in `stopped_partial`. Removing
-//! that field from the masked commit reproduces each old digest.
+//! turn's commit named its sealed partial in a new field. Removing that field
+//! from the masked commit reproduced each old digest.
 //!
 //! The two cancelled pins were re-pinned for ADR 0116 (FIG-4054): `batch` is
 //! protocol sugar, so the test protocol registers no `batch` tool and the
@@ -24,8 +24,8 @@
 //! code-cell pin, whose protocol never registered `batch`, is unchanged.
 //!
 //! The two cancelled pins were re-pinned for ADR 0122 (FIG-4113): lash keeps
-//! no stopped partial, so a stopped turn's commit no longer carries
-//! `stopped_partial`. Removing that field from each ADR 0116 pin's masked
+//! no partial of a stopped turn, so its commit no longer carries the
+//! sealed-partial field. Removing that field from each ADR 0116 pin's masked
 //! commit reproduces the new digest; the code-cell pin is unchanged.
 
 use super::*;

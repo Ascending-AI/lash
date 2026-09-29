@@ -1,6 +1,5 @@
 //! A group child's tool attempt: a recorded step whose body races the
-//! child's cancel fact, with the attempt's capture written before and after
-//! that watched body (ADR 0114 §2.2, FIG-4071).
+//! child's cancel fact.
 
 use super::*;
 

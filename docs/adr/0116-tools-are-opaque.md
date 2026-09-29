@@ -212,13 +212,12 @@ consumes:
   usage attribution and no nested journal entry (ADR 0042);
 - the declaration inputs: `start_cx`, `process_spawn_provenance`,
   `process_execution_env_spec`, `intent_identity`, `completion_key`;
-- `named_phase`, the attempt-attributed fault-probe phase;
-- **`progress()`**, ADR 0114's tool-output progress sink. It is append-only
-  output capture, fenced and persisted before publication (ADR 0114 §2.2,
-  §4.1), not workflow control. It lives on `AttemptContext`, because
-  `ToolContext` stops being nameable outside the crate (§1.5). ADR 0114's
-  lane R is moving it there on `fig-433/stopped-partials`. That seam is
-  named in §10.
+- `named_phase`, the attempt-attributed fault-probe phase.
+
+Amended 2026-09-29 (FIG-4113,
+[ADR 0122](0122-a-stopped-turns-uncommitted-tail-lives-only-on-the-live-stream.md)):
+ADR 0114's `progress()` sink is deleted with the capture it wrote to. A tool's
+output reaches the host only with its completed call.
 
 `DeferredToolResolver` and `link_with_deferred_resolution`
 (`crates/lash-lashlang-runtime/src/deferred.rs:1-15,82-111`) are link-time,
@@ -1168,8 +1167,9 @@ PostgreSQL process registries, `envelope.rs`'s seal and cancel-work keys).
   `fig-433/stopped-partials` SOFT.
 
 **D — deletion cutover.** Owns: `crates/lash-core-execution/src/tool_provider/**`
-(except ADR 0114's `progress` region of `tool_provider.rs`, §10.4, and the
-`enqueue_wake_delivery` region of `process_events.rs`);
+(except ADR 0114's `progress` region of `tool_provider.rs`, §10.4, since
+deleted by ADR 0122, and the `enqueue_wake_delivery` region of
+`process_events.rs`);
 `crates/lash-core-execution/src/tool_registry/**`;
 `crates/lash-core-execution/src/plugin/{registry.rs,registrar.rs,runtime_impl.rs}`;
 `crates/lash-core-execution/src/tool_dispatch.rs`;
@@ -1210,7 +1210,7 @@ Regions: §10.4.
   0114's lane R owns `tool_provider.rs` and puts `progress()` on
   `AttemptContext`. D makes `ToolContext` crate-private and keeps its
   `progress_reporter` field and `ToolProgressSink`; whichever lands second
-  rebases. `fig-4031/referrers` SOFT: ADR 0113's lane R owns `control.rs` and
+  rebases. (ADR 0122 has since deleted both.) `fig-4031/referrers` SOFT: ADR 0113's lane R owns `control.rs` and
   `layered_host.rs`; D removes only the independent-work region. Its
   `tool_child_driver/tests.rs` edits are carried as a region.
   `fig-1628/cutover` SOFT: its branch touches `tool_provider.rs`,
@@ -1248,7 +1248,7 @@ arc writes only the regions in §10.4.
 
 | Shared file | Owner | FIG-3562 lane and region |
 |---|---|---|
-| `crates/lash-core-execution/src/tool_provider.rs` | ADR 0114 lane R | D: everything except the `progress` accessor, `progress_reporter`, `ToolProgressReporter`, `ToolProgressSink` and `ProgressRefused`, which are 0114's |
+| `crates/lash-core-execution/src/tool_provider.rs` | ADR 0114 lane R | D: everything except the `progress` accessor, `progress_reporter`, `ToolProgressReporter`, `ToolProgressSink` and `ProgressRefused`, which were 0114's and are deleted by ADR 0122 (FIG-4113) |
 | `crates/lash-core-execution/src/tool_provider/process_events.rs` | ADR 0112 runtime | D: remove `ToolProcessEventClient`; `enqueue_wake_delivery` is untouched |
 | `crates/lash-core-execution/src/session/tool_execution.rs` | ADR 0114 lane R | D: the orchestrating and internal branches and the activation filter |
 | `crates/lash-core-execution/src/session/tool_execution/batch.rs` | ADR 0114 lane R | D: prose naming body callers |

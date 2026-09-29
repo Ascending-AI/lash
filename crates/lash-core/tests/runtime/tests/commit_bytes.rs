@@ -25,9 +25,9 @@
 //! digest; every other committed byte is unchanged.
 //!
 //! The three stopped-turn pins (both cancellations and the provider failure)
-//! were re-pinned for ADR 0114 (FIG-433): a stopped turn's commit now names
-//! its sealed partial in `stopped_partial`. Removing that field from the
-//! masked commit reproduces each old digest.
+//! were re-pinned for ADR 0114 (FIG-433): a stopped turn's commit named its
+//! sealed partial in a new field. Removing that field from the masked commit
+//! reproduced each old digest.
 //!
 //! Every pin was re-pinned for ADR 0116 (FIG-4054): `batch` is protocol
 //! sugar, so the test protocol registers no `batch` tool and the committed
@@ -35,8 +35,8 @@
 //! the only difference.
 //!
 //! The three stopped-turn pins were re-pinned for ADR 0122 (FIG-4113): lash
-//! keeps no stopped partial, so a stopped turn's commit no longer carries
-//! `stopped_partial`. Removing that field from each ADR 0116 pin's masked
+//! keeps no partial of a stopped turn, so its commit no longer carries the
+//! sealed-partial field. Removing that field from each ADR 0116 pin's masked
 //! commit reproduces the new digest; every other committed byte is unchanged.
 //!
 //! The digest is over the commit's serialized form with the values that differ

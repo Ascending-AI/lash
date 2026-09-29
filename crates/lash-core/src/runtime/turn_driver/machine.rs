@@ -130,7 +130,7 @@ impl RuntimeTurnDriver<'_> {
                     }
                     // A machine that finished writes its `Error` right before
                     // the stopped outcome: it is the stop's terminal too, and
-                    // publishes after the commit (ADR 0114 §4.3).
+                    // publishes after the commit (ADR 0122).
                     if machine.is_done() && matches!(event, SessionStreamEvent::Error { .. }) {
                         event_tx.hold_terminal();
                     }
