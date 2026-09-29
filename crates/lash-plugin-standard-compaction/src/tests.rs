@@ -736,8 +736,7 @@ async fn standard_compactor_returns_summary_seed_for_new_frame() {
         text_message("u2", MessageRole::User, "latest request"),
     ];
     let mut changed_state = state.clone();
-    changed_state
-        .replace_active_read_state(&changed_messages);
+    changed_state.replace_active_read_state(&changed_messages);
     let (changed_snapshot, changed_prompt_text) =
         prepare_compaction_request(&changed_state, changed_messages, Some(instructions))
             .expect("prepare changed-state compaction request");

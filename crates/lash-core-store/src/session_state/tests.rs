@@ -940,7 +940,11 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
     state.mark_node_ids_persisted(durable);
-    assert_eq!(state.session_graph.nodes.len(), 3, "nothing retires in one frame");
+    assert_eq!(
+        state.session_graph.nodes.len(),
+        3,
+        "nothing retires in one frame"
+    );
 
     let opened = open_agent_frame_in_state_with_clock(
         &mut state,
@@ -957,7 +961,11 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
         "the pending frame already owns the projection"
     );
     state.append_active_conversation_messages(&[projection_text("b1")]);
-    assert_eq!(state.session_graph.nodes.len(), 5, "pending nodes stay resident");
+    assert_eq!(
+        state.session_graph.nodes.len(),
+        5,
+        "pending nodes stay resident"
+    );
 
     let new_frame = state.current_frame_node_id.clone().expect("new frame");
     let committed = state

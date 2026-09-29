@@ -61,10 +61,6 @@ enum CurrentSnapshot {
 }
 
 impl CurrentSnapshot {
-    #[expect(
-        clippy::expect_used,
-        reason = "a turn-scoped read model resolves in its source session graph"
-    )]
     fn to_runtime_state(&self) -> RuntimeSessionState {
         match self {
             Self::Owned(snapshot) => snapshot.clone(),
@@ -226,10 +222,6 @@ impl CurrentSessionCapability {
         }
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "turn-scoped state is normalized before service creation"
-    )]
     fn new(
         runtime: &LashRuntime,
         plugins: Arc<crate::PluginSession>,

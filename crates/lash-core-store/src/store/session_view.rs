@@ -63,7 +63,7 @@ impl SessionStore {
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
         self.check_request(&commit)?;
-        commit_runtime_state_verified(self.store.as_ref(), commit).await
+        Box::pin(commit_runtime_state_verified(self.store.as_ref(), commit)).await
     }
 
     fn check_request(&self, request: &(impl CarriesSession + ?Sized)) -> Result<(), StoreError> {

@@ -39,7 +39,7 @@ async fn bind_state_to_store(
     state: &mut RuntimeSessionState,
     relation: crate::SessionRelation,
 ) -> Result<(), SessionError> {
-    if store.session_id() != &state.session_id {
+    if *store.session_id() != state.session_id {
         return Err(SessionError::Store {
             context: format!("failed to bind session `{}` to its store", state.session_id),
             source: crate::StoreError::ForeignSessionRequest {

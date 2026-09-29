@@ -516,7 +516,7 @@ impl LashRuntime {
         let mut reloaded_tool_restore = None;
         let reload_result: Result<(), (ResidentReloadStage, RuntimeError)> = async {
             if let Some(store) = store.as_ref() {
-                crate::store::refresh_session_window(&store, &mut durable_state)
+                crate::store::refresh_session_window(store, &mut durable_state)
                     .await
                     .map_err(|err| {
                         (

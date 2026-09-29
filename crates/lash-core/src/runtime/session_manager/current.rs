@@ -31,7 +31,7 @@ impl CurrentSessionCapability {
     ) -> Result<RuntimeSessionState, crate::PluginError> {
         let mut state = self.snapshot.to_runtime_state();
         if let Some(store) = &self.store {
-            crate::store::refresh_session_window(&store, &mut state)
+            crate::store::refresh_session_window(store, &mut state)
                 .await
                 .map_err(|err| {
                     crate::PluginError::Session(format!(
