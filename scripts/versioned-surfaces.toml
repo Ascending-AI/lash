@@ -635,21 +635,6 @@ constant_path = "crates/lash-sqlite-store/src/lib.rs"
 reason = "public alias of the registered SQLite schema::SCHEMA_VERSION"
 
 [[unregistered]]
-constant = "SELECT_USER_VERSION"
-constant_path = "crates/lash-sqlite-store/src/connection_sql.rs"
-reason = "SQL text that reads a store stamp, not a version"
-
-[[unregistered]]
-constant = "SELECT_PROCESS_REGISTRY_USER_VERSION"
-constant_path = "crates/lash-sqlite-store/src/connection_sql.rs"
-reason = "SQL text that reads a store stamp, not a version"
-
-[[unregistered]]
-constant = "SELECT_COMPONENT_VERSION"
-constant_path = "crates/lash-postgres-store/src/postgres/schema.rs"
-reason = "SQL text that reads a store stamp, not a version"
-
-[[unregistered]]
 constant = "LASH_TRACE_SCHEMA_VERSION"
 constant_path = "crates/lash-trace/src/otel/attribute_keys.rs"
 reason = "OpenTelemetry attribute key name, not a version"
