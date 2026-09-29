@@ -83,7 +83,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                                 .execution_scope()
                                 .logical_root()
                                 .unwrap_or_else(|| self.turn_id.clone()),
-                            Arc::new(event_tx.clone()),
                         ));
                     capture
                 });

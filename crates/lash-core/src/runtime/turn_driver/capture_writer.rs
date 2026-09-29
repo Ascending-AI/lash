@@ -164,8 +164,6 @@ pub(in crate::runtime) struct TurnToolCaptureHost {
     store: Arc<dyn crate::RuntimePersistence>,
     turn: crate::TurnAddress,
     root: crate::TurnId,
-    /// Where persisted progress chunks publish.
-    observer: Arc<dyn crate::engine::ObservationSink>,
 }
 
 impl TurnToolCaptureHost {
@@ -173,15 +171,22 @@ impl TurnToolCaptureHost {
         store: Arc<dyn crate::RuntimePersistence>,
         turn: crate::TurnAddress,
         root: crate::TurnId,
-        observer: Arc<dyn crate::engine::ObservationSink>,
     ) -> Self {
-        Self {
-            store,
-            turn,
-            root,
-            observer,
-        }
+        Self { store, turn, root }
     }
+}
+
+/// The capture of physical turn `turn` under logical root `root`, over
+/// `store`, for a tool attempt whose dispatch no live turn lent: a group
+/// child the deployment rebuilt (ADR 0114, Lane G amendment). Its writer
+/// fences the epochs an earlier worker left and inherits their prefix, as
+/// every capture writer does (§3.2).
+pub fn deployment_turn_tool_capture(
+    store: Arc<dyn crate::RuntimePersistence>,
+    turn: crate::TurnAddress,
+    root: crate::TurnId,
+) -> Arc<dyn lash_core_execution::TurnToolCapture> {
+    Arc::new(TurnToolCaptureHost::new(store, turn, root))
 }
 
 #[async_trait::async_trait]
@@ -190,6 +195,7 @@ impl lash_core_execution::TurnToolCapture for TurnToolCaptureHost {
         &self,
         invocation: &str,
         call_id: &str,
+        observer: Arc<dyn crate::engine::ObservationSink>,
     ) -> Result<
         Arc<dyn lash_core_execution::ToolAttemptCaptureWriter>,
         crate::RuntimeEffectControllerError,
@@ -208,7 +214,7 @@ impl lash_core_execution::TurnToolCapture for TurnToolCaptureHost {
         writer.flush().await.map_err(capture_write_fault)?;
         Ok(Arc::new(ToolAttemptWriter {
             writer: futures_util::lock::Mutex::new(writer),
-            observer: Arc::clone(&self.observer),
+            observer,
             cursor: std::sync::Mutex::new(crate::engine::ObservationCursor::new(
                 crate::engine::ReplayKey::new(format!("{invocation}:progress")),
             )),

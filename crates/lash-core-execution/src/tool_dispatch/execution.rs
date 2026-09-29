@@ -469,9 +469,11 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
             .as_ref()
             .and_then(crate::RuntimeInvocation::replay_key),
     ) {
-        (Some(capture), Some(invocation)) => {
-            Some(capture.open_attempt(invocation, &call_id).await?)
-        }
+        (Some(capture), Some(invocation)) => Some(
+            capture
+                .open_attempt(invocation, &call_id, Arc::clone(&context.observer))
+                .await?,
+        ),
         _ => None,
     };
     if let Some(capture) = turn_capture.as_ref() {

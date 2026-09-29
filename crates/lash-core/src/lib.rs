@@ -124,7 +124,9 @@ pub mod facade_support {
         ToolChildRequest, ToolChildSessionFacts, UnrecordedSessionSources,
         opener_for_execution_scope, scope_status,
     };
-    pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION};
+    pub use crate::runtime::{
+        DurableSessionOps, EMPTY_HEAD_REVISION, deployment_turn_tool_capture,
+    };
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
     /// projection with different parent or attribution precedence.

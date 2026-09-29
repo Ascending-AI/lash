@@ -523,11 +523,14 @@ pub trait ToolAttemptCaptureWriter: ToolProgressReporter {
 #[async_trait::async_trait]
 pub trait TurnToolCapture: Send + Sync {
     /// Open the writer of one tool attempt, keyed by its invocation's
-    /// replay key, and persist that the attempt started for `call_id`.
+    /// replay key, and persist that the attempt started for `call_id`. Each
+    /// persisted progress chunk publishes on `observer`: the stream of the
+    /// dispatch the attempt runs under.
     async fn open_attempt(
         &self,
         invocation: &str,
         call_id: &str,
+        observer: Arc<dyn crate::engine::ObservationSink>,
     ) -> Result<Arc<dyn ToolAttemptCaptureWriter>, crate::RuntimeEffectControllerError>;
 }
 

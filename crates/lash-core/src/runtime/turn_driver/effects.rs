@@ -339,7 +339,11 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &TurnObserver,
     ) -> Result<crate::CheckpointDelivery, RuntimeEffectControllerError> {
         let invocation = self.turn_effect_invocation(machine, id, RuntimeEffectKind::Checkpoint)?;
-        self.capture_base = self.capture_base.saturating_add(1);
+        // The base the body advances to, unless it keeps the tail; a replay
+        // counts the same, since the hold is decided from recorded facts.
+        if !self.holds_capture_tail() {
+            self.capture_base = self.capture_base.saturating_add(1);
+        }
         let (result, claims) = self
             .execute_typed_turn_effect(
                 machine,
@@ -351,6 +355,8 @@ impl RuntimeTurnDriver<'_> {
                 RuntimeEffectOutcome::into_checkpoint,
             )
             .await?;
+        // The hold belongs to the iteration this checkpoint closed.
+        self.interrupted_calls = false;
         let crate::runtime::effect::CheckpointClaimSet {
             queued_work_claims,
             turn_input_claim,
