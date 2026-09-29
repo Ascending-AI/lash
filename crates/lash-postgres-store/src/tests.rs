@@ -11,8 +11,9 @@
 
 use super::*;
 use lash_core_execution::store::RootStore as _;
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt as _;
+use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
 use lash_core_execution::{LeaseOwnerIdentity, TurnId};
+use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{Layer, Registry};
 
@@ -24,11 +25,11 @@ async fn persisted_record_decode_store(
         "persisted-record-decode-{label}:{}",
         uuid::Uuid::new_v4()
     ));
-    let store = storage.session_store(session_id.as_str());
+    let store = storage.store();
     store
-        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
-            session_id.as_str(),
-        ))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&session_id),
+        )
         .await
         .expect("admit persisted-record decode session");
     let state = lash_core_execution::RuntimeSessionState {
@@ -68,7 +69,7 @@ async fn postgres_persisted_record_decode_classification_head_when_configured() 
         1
     );
     let head_error = head_store
-        .load_session_head_meta()
+        .load_session_head_meta(&head_session_id)
         .await
         .expect_err("malformed head JSON must refuse");
     assert!(
@@ -187,9 +188,13 @@ async fn seed_failure_evidence_session(
         .await
         .expect("connect receipt-refusal storage");
 
-    let store = storage.session_store(session_id);
+    let store = storage.store();
     store
-        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(session_id))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&SessionId::from(
+                session_id,
+            )),
+        )
         .await
         .expect("bind receipt-refusal session");
     let state = lash_core_execution::RuntimeSessionState {
@@ -246,10 +251,14 @@ async fn turn_failure_reopen_refuses_one_corrupt_evidence_receipt() {
         seed_failure_evidence_session(SESSION_ID, r#"{"failure_evidence":"#).await;
 
     let error = storage
-        .session_store(SESSION_ID)
-        .load_session()
+        .store()
+        .load_failure_evidence_page(
+            &SessionId::from(SESSION_ID),
+            None,
+            std::num::NonZeroU32::new(100).expect("nonzero page limit"),
+        )
         .await
-        .expect_err("a corrupt evidence receipt must refuse the whole load");
+        .expect_err("a corrupt evidence receipt must refuse the page");
     assert!(
         matches!(
             &error,
@@ -273,10 +282,14 @@ async fn turn_failure_reopen_refuses_a_preversioned_receipt() {
         seed_failure_evidence_session(SESSION_ID, r#"{"failure_evidence":[{}]}"#).await;
 
     let error = storage
-        .session_store(SESSION_ID)
-        .load_session()
+        .store()
+        .load_failure_evidence_page(
+            &SessionId::from(SESSION_ID),
+            None,
+            std::num::NonZeroU32::new(100).expect("nonzero page limit"),
+        )
         .await
-        .expect_err("an unversioned receipt must refuse the whole load");
+        .expect_err("an unversioned receipt must refuse the page");
     assert!(
         matches!(
             &error,
@@ -301,10 +314,14 @@ async fn turn_failure_reopen_refuses_a_newer_receipt_version() {
     let (storage, _database_lock) = seed_failure_evidence_session(SESSION_ID, &bad_json).await;
 
     let error = storage
-        .session_store(SESSION_ID)
-        .load_session()
+        .store()
+        .load_failure_evidence_page(
+            &SessionId::from(SESSION_ID),
+            None,
+            std::num::NonZeroU32::new(100).expect("nonzero page limit"),
+        )
         .await
-        .expect_err("a newer receipt version must refuse the whole load");
+        .expect_err("a newer receipt version must refuse the page");
     assert!(
         matches!(
             &error,
@@ -384,13 +401,19 @@ async fn direct_session_store_defers_missing_identity_validation() {
         .execute(storage.pool())
         .await
         .expect("reset direct-constructor test tables");
-    let store = storage.session_store("missing");
+    let missing = SessionId::from("missing");
+    let store = storage.store();
 
-    assert!(matches!(store.load_session_head_meta().await, Ok(None)));
-    assert!(matches!(store.load_session_meta().await, Ok(None)));
+    assert!(matches!(
+        store.load_session_head_meta(&missing).await,
+        Ok(None)
+    ));
+    assert!(matches!(store.load_session_meta(&missing).await, Ok(None)));
     assert_eq!(
         store
-            .admit_and_bind_session(&lash_core_execution::SessionBinding::root("missing"))
+            .admit_session(
+                &lash_core_execution::testing::store_fixtures::root_session_request(&missing)
+            )
             .await
             .expect("admit missing direct-constructor session"),
         lash_core_execution::SessionAdmission::Created
@@ -1322,7 +1345,7 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
         "the refusal must name the root the locked read observed, which only the verdict can see"
     );
     let head_revision = store
-        .load_session_head_meta()
+        .load_session_head_meta(&state.session_id)
         .await
         .expect("read the head after the refusal")
         .expect("the head exists")

@@ -199,12 +199,19 @@ impl SessionHistoryStore for PostgresStore {
         let window = if let Some(leaf) = leaf {
             let leaf_row = readable_row(&mut tx, session_id, leaf.as_str())
                 .await?
-                .ok_or_else(|| corrupt("SessionGraph", format!("leaf `{leaf}` is not readable")))?;
+                .ok_or_else(|| {
+                    if admitted {
+                        StoreError::TurnBaseNotRetained { revision }
+                    } else {
+                        corrupt("SessionGraph", format!("leaf `{leaf}` is not readable"))
+                    }
+                })?;
             if leaf_row.get::<bool, _>("tombstoned") {
-                return Err(corrupt(
-                    "SessionGraph",
-                    format!("leaf `{leaf}` is tombstoned"),
-                ));
+                return Err(if admitted {
+                    StoreError::TurnBaseNotRetained { revision }
+                } else {
+                    corrupt("SessionGraph", format!("leaf `{leaf}` is tombstoned"))
+                });
             }
             let leaf_generation: i64 = leaf_row.get("generation");
             let frame_id: String = leaf_row.get("frame_node_id");
@@ -332,6 +339,15 @@ impl SessionHistoryStore for PostgresStore {
             }
             graph
         } else {
+            if !admitted && meta.current_frame_node_id.is_some() {
+                return Err(StoreError::CurrentFrameNodeMismatch {
+                    claimed: meta
+                        .current_frame_node_id
+                        .as_ref()
+                        .map(|frame| frame.as_str().to_owned()),
+                    derived: None,
+                });
+            }
             lash_core_execution::SessionGraph::default()
         };
         let usage = load_usage_totals_tx(self, &mut tx, session_id).await?;
