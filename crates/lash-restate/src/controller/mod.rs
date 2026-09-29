@@ -1248,7 +1248,7 @@ where
             RestateEffectExecution::DirectProcess {
                 invocation,
                 command,
-            } => execute_restate_process_command(
+            } => match execute_restate_process_command(
                 &self.context,
                 &self.namespace,
                 &self.authority_id,
@@ -1274,7 +1274,10 @@ where
                 },
             )
             .await
-            .map(|result| RuntimeEffectOutcome::Process { result }),
+            {
+                Ok(result) => Ok(RuntimeEffectOutcome::Process { result }),
+                Err(error) => Err(self.group_child_process_failure(error).await),
+            },
             RestateEffectExecution::DurableProcessCommand {
                 invocation,
                 command,
@@ -1285,26 +1288,31 @@ where
                         command: command.clone(),
                     },
                 );
-                self.record_eager_effect(
-                    &envelope,
-                    Box::pin(async move {
-                        execute_restate_process_command(
-                            &self.context,
-                            &self.namespace,
-                            &self.authority_id,
-                            self.build_generation.as_ref(),
-                            self.options.process_cancel,
-                            &invocation,
-                            *command,
-                            local_executor,
-                            |_| {},
-                            |_, _| {},
-                        )
-                        .await
-                        .map(|result| RuntimeEffectOutcome::Process { result })
-                    }),
-                )
-                .await
+                let recorded = self
+                    .record_eager_effect(
+                        &envelope,
+                        Box::pin(async move {
+                            execute_restate_process_command(
+                                &self.context,
+                                &self.namespace,
+                                &self.authority_id,
+                                self.build_generation.as_ref(),
+                                self.options.process_cancel,
+                                &invocation,
+                                *command,
+                                local_executor,
+                                |_| {},
+                                |_, _| {},
+                            )
+                            .await
+                            .map(|result| RuntimeEffectOutcome::Process { result })
+                        }),
+                    )
+                    .await;
+                match recorded {
+                    Err(error) => Err(self.group_child_process_failure(error).await),
+                    recorded => recorded,
+                }
             }
             RestateEffectExecution::DirectLocal { envelope } => {
                 local_executor.execute(envelope).await

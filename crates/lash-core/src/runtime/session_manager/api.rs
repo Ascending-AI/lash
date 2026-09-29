@@ -325,6 +325,17 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
+    async fn abandon_consumer_hold(
+        &self,
+        key: &str,
+        owner: &crate::ScopeId,
+    ) -> Result<Vec<ProcessId>, crate::PluginError> {
+        match self.services.current.host.process_registry() {
+            Some(registry) => registry.abandon_consumer_hold(key, owner).await,
+            None => Ok(Vec::new()),
+        }
+    }
+
     async fn release_consumer_hold(
         &self,
         process_id: &ProcessId,

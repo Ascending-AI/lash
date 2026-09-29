@@ -53,6 +53,35 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_integration_test(
+    name = "declared_start__test",
+    crate_features = [],
+    crate_name = "declared_start",
+    crate_root = "tests/declared_start.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-subagents", "declared_start", "//crates/lash-subagents:declared_start__test"),
+    extra_compile_data = [],
+    library = ":lash-subagents",
+    library_crate_name = "lash_subagents",
+    manifest_dir = "crates/lash-subagents",
+    package_name = "lash-internal-subagents",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    budget = test_batch_budget("//crates/lash-subagents:test_batch"),
+    jobs = 2,
+    tests = [
+        ":declared_start__test",
+        ":lash-subagents__unit_test",
+    ],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

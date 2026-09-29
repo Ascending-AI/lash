@@ -19,6 +19,12 @@
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
 version 141
+table lash_abandoned_consumer_holds
+  column abandoned_at_ms bigint not-null
+  column hold_key text not-null
+  column owner_scope_id text not-null
+  column owner_scope_kind text not-null
+  primary-key (hold_key)
 table lash_artifact_cleanup_obligations
   column cleanup_json text not-null
   column obligation_attempts integer not-null default
@@ -271,6 +277,7 @@ table lash_process_wake_deliveries
 table lash_processes
   column cancel_requested_at_ms bigint nullable
   column change_seq bigint not-null
+  column consumer_hold_cancels boolean nullable
   column consumer_hold_key text nullable
   column consumer_hold_scope_id text nullable
   column consumer_hold_scope_kind text nullable

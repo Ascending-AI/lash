@@ -283,6 +283,23 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                 });
             }
         }
+        // A start whose consuming call was abandoned is refused: the call's
+        // opener already drained what the hold owed (ADR 0116 §3.4). The
+        // hold's lock orders this read against the abandonment's mark.
+        if let Some(hold) = consumer_hold.as_ref() {
+            parent_end::lock_consumer_hold_tx(&mut tx, &hold.key).await?;
+            let abandoned: bool = sqlx::query_scalar(process_sql().abandoned_hold.exists.sql())
+                .bind(hold.key.as_str())
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
+            if abandoned {
+                return Err(lash_core_execution::runtime::abandoned_consumer_refusal(
+                    registration.start_key.as_ref(),
+                    &hold.key,
+                ));
+            }
+        }
         // Minted only once the start is admitted, so no refusal names an id
         // that was never registered.
         let process_id = self.process_id_mint.mint();
@@ -325,6 +342,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             .bind(consumer_hold.as_ref().map(|hold| hold.key.clone()))
             .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))
             .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_id()))
+            .bind(consumer_hold.as_ref().map(|hold| hold.cancels))
             .execute(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -1112,6 +1130,36 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
             .await
             .map(drop)
             .map_err(plugin_sqlx_error)
+    }
+
+    async fn abandon_consumer_hold(
+        &self,
+        key: &str,
+        owner: &lash_core_execution::ScopeId,
+    ) -> Result<Vec<ProcessId>, PluginError> {
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        parent_end::lock_consumer_hold_tx(&mut tx, key).await?;
+        sqlx::query(process_sql().abandoned_hold.mark.sql())
+            .bind(key)
+            .bind(owner.storage_kind())
+            .bind(owner.storage_id())
+            .bind(self.clock.timestamp_ms() as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        let ids: Vec<String> = sqlx::query_scalar(process_sql().process.select_owed_cancels.sql())
+            .bind(key)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        ids.iter()
+            .map(|id| {
+                ProcessId::parse(id).map_err(|error| {
+                    PluginError::Session(format!("a held process row names an invalid id: {error}"))
+                })
+            })
+            .collect()
     }
 }
 impl lash_core_execution::ProcessClockRebind for PostgresProcessRegistry {

@@ -3,6 +3,7 @@
 use lash_sansio::ProcessId;
 mod caller_departure;
 mod cancellation;
+mod consumer_holds;
 mod event_count;
 mod event_paging;
 mod event_replay;
@@ -594,6 +595,12 @@ pub async fn a_terminal_write_arms_its_publication_once(registry: Arc<dyn Proces
 /// on its own: the write, its fence, its scoping and its settlement.
 pub async fn a_turn_scope_ends_through_its_recorded_ledger_row(registry: Arc<dyn ProcessRegistry>) {
     turn_parent_end::a_turn_scope_ends_through_its_recorded_ledger_row(registry).await;
+}
+
+/// A consumer hold's abandonment returns what its call owes a cancel and
+/// refuses every later start under the hold (ADR 0116 §3.4).
+pub async fn an_abandoned_consumer_hold_fences_registration(registry: Arc<dyn ProcessRegistry>) {
+    consumer_holds::an_abandoned_consumer_hold_fences_registration(registry).await;
 }
 
 /// Two scopes whose components render to one stored id under the retired

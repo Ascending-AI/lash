@@ -120,11 +120,11 @@ pub use start_staging::{
 pub use testing::*;
 pub use validation::{
     ProcessEventAppendPlan, ProcessRegistrationRefusal, ProcessStartPlan, ProcessTransition,
-    ProcessTransitionPlan, allocate_process_event_sequence, apply_process_event_projection,
-    apply_process_status_projection, check_retained_start, fold_process_record,
-    prepare_process_event_append, prepare_process_registration, prepare_process_start,
-    prepare_process_transition, process_park_transitions, require_event_replay,
-    validate_generic_process_event_append,
+    ProcessTransitionPlan, abandoned_consumer_refusal, allocate_process_event_sequence,
+    apply_process_event_projection, apply_process_status_projection, check_retained_start,
+    fold_process_record, prepare_process_event_append, prepare_process_registration,
+    prepare_process_start, prepare_process_transition, process_park_transitions,
+    require_event_replay, validate_generic_process_event_append,
 };
 
 pub fn current_epoch_ms() -> u64 {

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 49,
-  "cargo_target_count": 184,
+  "cargo_target_count": 185,
   "feature_lane_units": [
     {
       "features": [
@@ -18992,7 +18992,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 245,
+  "generated_label_count": 246,
   "packages": [
     {
       "declared_features": [
@@ -21221,6 +21221,7 @@
       "dependencies": [
         "async-trait",
         "jsonschema",
+        "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-core-worker",
         "lash-internal-lashlang-runtime",
@@ -21251,11 +21252,20 @@
           "kind": "unit-test",
           "label": "//crates/lash-subagents:lash-subagents__unit_test",
           "tags": []
+        },
+        {
+          "cargo": "declared_start",
+          "kind": "test",
+          "label": "//crates/lash-subagents:declared_start__test",
+          "tags": []
         }
       ],
       "test_batch": {
-        "label": null,
-        "members": []
+        "label": "//crates/lash-subagents:test_batch",
+        "members": [
+          "//crates/lash-subagents:declared_start__test",
+          "//crates/lash-subagents:lash-subagents__unit_test"
+        ]
       }
     },
     {

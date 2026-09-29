@@ -2721,6 +2721,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "jsonschema",
+ "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-worker",
  "lash-internal-lashlang-runtime",

@@ -82,6 +82,17 @@ where
         }
     }
 
+    /// The fence's refusal of an admission under a cancel-decided child.
+    fn cancel_decided(replay_key: &str) -> RuntimeEffectControllerError {
+        RuntimeEffectControllerError::new(
+            lash_core::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
+            format!(
+                "the group child that minted replay key `{replay_key}` is cancel-decided; \
+                 ADR 0099 §4 forbids a new semantic admission under it"
+            ),
+        )
+    }
+
     fn record_error(operation: &str, error: TerminalError) -> RuntimeEffectControllerError {
         RuntimeEffectControllerError::from(RuntimeError::new(
             lash_core::RuntimeErrorCode::EngineEffectController,
@@ -303,18 +314,19 @@ where
                     },
                 )
                 .await
-                .map_err(|error| Self::record_error("admit_semantic", error))?
-            {
+                .map_err(|error| {
+                    // The engine's cancellation of the child's invocation,
+                    // which the index requests once it decided the child's
+                    // cancel, is that decided cancel (FIG-3904).
+                    if error.code() == 409 {
+                        Self::cancel_decided(&binding.child.replay_key)
+                    } else {
+                        Self::record_error("admit_semantic", error)
+                    }
+                })? {
                 crate::effect_group::EffectGroupAdmitSemanticResponse::Admitted => {}
                 crate::effect_group::EffectGroupAdmitSemanticResponse::CancelDecided => {
-                    return Err(RuntimeEffectControllerError::new(
-                        lash_core::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
-                        format!(
-                            "the group child that minted replay key `{}` is cancel-decided; \
-                             ADR 0099 §4 forbids a new semantic admission under it",
-                            binding.child.replay_key
-                        ),
-                    ));
+                    return Err(Self::cancel_decided(&binding.child.replay_key));
                 }
                 crate::effect_group::EffectGroupAdmitSemanticResponse::UnknownChild
                 | crate::effect_group::EffectGroupAdmitSemanticResponse::UnknownGroup => {

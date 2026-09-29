@@ -186,9 +186,11 @@ pub(crate) async fn realize_declared_start(
 }
 
 /// A declared start's error the call cannot settle as its result: a replay
-/// divergence, a cancel decided before the launch, or a live fault left
-/// unrecorded, which the engine's redelivery retries (ADR 0116 §3.2 rule 7).
-/// Every other error is the start's typed refusal.
+/// divergence, a cancel decided before the launch or during it, or a live
+/// fault, which the engine's redelivery retries (ADR 0116 §3.2 rule 7). Every
+/// other error is the start's typed refusal — among them a terminal
+/// controller error such as a closed scope's `ParentEnded`, which a retry
+/// would only meet again.
 pub(crate) fn declared_start_fault(
     error: &crate::PluginError,
 ) -> Option<crate::RuntimeEffectControllerError> {
@@ -196,7 +198,8 @@ pub(crate) fn declared_start_fault(
         crate::PluginError::RuntimeEffectController(error)
             if error.code.is_replay_mismatch()
                 || error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided
-                || !error.journaled =>
+                || error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled
+                || error.turn_failure_cause() != crate::TurnFailureCause::Outcome =>
         {
             Some(error.clone())
         }

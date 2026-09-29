@@ -109,6 +109,7 @@ pub const TABLES: &[&str] = &[
     attachment::condemnation::TABLE,
     attachment::manifest::TABLE,
     draining_generations::TABLE,
+    process::abandoned_consumer_holds::TABLE,
     process::change_clock::TABLE,
     process::definitions::TABLE,
     process::events::TABLE,

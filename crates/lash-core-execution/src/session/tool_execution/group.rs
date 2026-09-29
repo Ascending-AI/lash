@@ -524,6 +524,7 @@ impl RuntimeExecutionContext<'_> {
                 Err(error)
                     if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled =>
                 {
+                    let mut abandoned = Vec::new();
                     for (position, child) in children.iter().enumerate() {
                         if settled[position].is_none()
                             && let PreparedGroupChild::Tool(leaf) = child
@@ -532,6 +533,7 @@ impl RuntimeExecutionContext<'_> {
                                 cancelled_group_leaf(leaf),
                             )));
                             settlement_positions.push(position);
+                            abandoned.push(position);
                         }
                     }
                     // Incorporate the consumed prefix before abandoning the
@@ -552,6 +554,7 @@ impl RuntimeExecutionContext<'_> {
                         handle.children(),
                         handle.consumed(),
                     )?;
+                    let group_key = handle.group_key().to_string();
                     if let Err(error) = controller
                         .close_effect_group(handle, LoserPolicy::Cancel)
                         .await
@@ -561,6 +564,8 @@ impl RuntimeExecutionContext<'_> {
                             "closing a cancelled tool-child group failed; the close is retryable"
                         );
                     }
+                    self.discharge_abandoned_children(&group_key, children, &abandoned)
+                        .await?;
                     // The close has decided every undecided child; only now
                     // does the recorded cancellation reach the children's
                     // cooperative stop, as the group's cancel always did.
@@ -692,6 +697,112 @@ impl RuntimeExecutionContext<'_> {
         })
     }
 
+    /// Drains the cancel obligation of each call this opener's cancel
+    /// abandoned (ADR 0116 §3.4). A cancelled child's own invocation may never
+    /// reach its park site's discharge, so the opener cancels, from its own
+    /// journal, whatever process the call's consumer hold says it owes a
+    /// cancel. The call's completion key names the hold: it is derived from
+    /// the scope and the call id alone. Abandoning the hold reads what it
+    /// owes and refuses any start still racing to register under it; the
+    /// answer is recorded, so a replay issues the same cancels after the first
+    /// execution's releases emptied the hold.
+    async fn discharge_abandoned_children(
+        &self,
+        group_key: &str,
+        children: &[PreparedGroupChild],
+        abandoned: &[usize],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        let controller = self.dispatch.effect_controller.controller();
+        let execution_scope = self
+            .dispatch
+            .effect_controller
+            .scoped()
+            .execution_scope()
+            .clone();
+        for &position in abandoned {
+            let Some(PreparedGroupChild::Tool(leaf)) = children.get(position) else {
+                continue;
+            };
+            let call_id = &leaf.call.call.call_id;
+            let key = match controller
+                .await_event_key(
+                    &execution_scope,
+                    crate::AwaitEventWaitIdentity::tool_completion(call_id.clone()),
+                )
+                .await
+            {
+                Ok(key) => key,
+                Err(error) => {
+                    tracing::warn!(
+                        call_id,
+                        error = %error,
+                        "an abandoned call's completion key could not be derived"
+                    );
+                    continue;
+                }
+            };
+            let effect_id = format!("{group_key}:child:{position}");
+            let owed = match crate::tool_dispatch::consumer_hold_owner(&self.process_scope(None)) {
+                Some(owner) => self.recorded_owed_cancels(&effect_id, &key, owner).await?,
+                None => Vec::new(),
+            };
+            let parent = crate::RuntimeInvocation::effect(
+                crate::EffectAddress::new(execution_scope.clone(), effect_id.clone())?,
+                self.dispatch.parentless_attribution(),
+                effect_id,
+            );
+            let site = crate::tool_dispatch::ParkSite {
+                processes: self.dispatch.processes.as_ref(),
+                session_id: &self.dispatch.session_id,
+                call_id,
+                scope: self.process_scope(Some(parent)),
+                child_trace_hook: None,
+            };
+            crate::tool_dispatch::discharge_abandoned_call(&site, &key, &owed).await?;
+        }
+        Ok(())
+    }
+
+    /// The processes `key`'s hold owes a cancel, as the first execution read
+    /// them: journaled under the abandoned child's effect, and served back on
+    /// every replay. Reading them abandons the hold, owned by `owner`, which
+    /// refuses any later start under it. An abandonment that fails records
+    /// none, leaving the hold to the owning scope's close.
+    async fn recorded_owed_cancels(
+        &self,
+        child_effect: &str,
+        key: &crate::AwaitEventKey,
+        owner: crate::ScopeId,
+    ) -> Result<Vec<crate::ProcessId>, crate::RuntimeEffectControllerError> {
+        let processes = Arc::clone(&self.dispatch.processes);
+        let key_id = key.key_id.clone();
+        let recorded = self
+            .journaled_deferred_resolution_with(
+                format!("{child_effect}:owed-cancels"),
+                "declared-start-owed-cancels".to_string(),
+                move || async move {
+                    let owed = processes
+                        .abandon_consumer_hold(&key_id, &owner)
+                        .await
+                        .unwrap_or_else(|error| {
+                            tracing::warn!(
+                                error = %error,
+                                "an abandoned call's consumer hold could not be abandoned"
+                            );
+                            Vec::new()
+                        });
+                    Ok(serde_json::json!(owed))
+                },
+            )
+            .await?;
+        serde_json::from_value(recorded).map_err(|error| {
+            crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RecordEncodingFailed,
+                format!("an abandoned call's recorded cancel obligation does not decode: {error}"),
+            )
+        })
+    }
+
     /// FIG-3411 seam: returns one settled child's completed call and emits its
     /// activity events.
     ///
@@ -739,7 +850,9 @@ impl RuntimeExecutionContext<'_> {
         {
             let context = self.with_call_observation_key(self.call_observation_key(call_key));
             let mut cursor = context.observation_cursor(&format!("tool:{call_id}:intents"));
-            for intent_outcome in &outcome.intent_outcomes {
+            // A child's realized outcomes ride its settlement, where its
+            // driver moved them; a declared start's launch receipt is one.
+            for intent_outcome in &settlement.intent_outcomes {
                 cursor.observe(
                     context.dispatch.observer.as_ref(),
                     crate::engine::ObservedEvent::Activity {

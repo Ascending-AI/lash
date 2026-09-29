@@ -610,6 +610,11 @@ pub struct ConsumerHold {
     /// The scope whose close releases the hold: the opener the call ran
     /// under.
     pub owner: ScopeId,
+    /// Whether the call owes the process a cancel when it is abandoned
+    /// (`CancelHint::CancelExternalWork`): an opener that cancels the call
+    /// cancels the process it holds (ADR 0116 §3.4).
+    #[serde(default)]
+    pub cancels: bool,
 }
 
 impl ProcessRegistration {
