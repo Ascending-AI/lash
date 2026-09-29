@@ -2,9 +2,9 @@
 //!
 //! `lash_schema_versions` says what generation of the schema is on disk. It
 //! never says which build produced it, so a host could only learn that by
-//! upgrading crates, opening the store, and reading the refusal — and the
-//! refusal names component integers, not releases. `lash_release_stamp` is the
-//! missing fact: the writing release, the schema-version tuple it required, and
+//! upgrading crates, opening the store, and reading the refusal. The component
+//! integer alone cannot identify that build. `lash_release_stamp` records the
+//! writing release, the schema-version tuple it required, and
 //! the instant that release first wrote here.
 //!
 //! **Update rule.** Written on the first open of an unstamped database and
@@ -111,18 +111,32 @@ pub(crate) async fn read(pool: &PgPool) -> StoreReleaseState {
     }
 }
 
-/// The writing release alone, read inside the transaction that is about to
-/// refuse the open.
+/// The writing release alone, read inside the verifying open transaction.
 ///
-/// Best effort by construction: the refusal it decorates is raised over a
-/// database this build has already declined, so anything but a readable stamp
-/// yields `None` and the message simply says less.
+/// Best effort by construction: anything but a readable stamp yields `None`,
+/// and a later refusal says less. A failed read rolls back to a savepoint so
+/// the compatibility gate can still inspect the database.
 pub(crate) async fn read_release_in_tx(tx: &mut Transaction<'_, Postgres>) -> Option<String> {
-    sqlx::query_scalar(session_sql().release_stamp.select_release.sql())
-        .fetch_optional(&mut **tx)
+    // A missing or unreadable release table must not poison the open
+    // transaction that is about to report a different compatibility refusal.
+    sqlx::query("SAVEPOINT lash_release_read")
+        .execute(&mut **tx)
         .await
-        .ok()
-        .flatten()
+        .ok()?;
+    let release = sqlx::query_scalar(session_sql().release_stamp.select_release.sql())
+        .fetch_optional(&mut **tx)
+        .await;
+    if release.is_err() {
+        sqlx::query("ROLLBACK TO SAVEPOINT lash_release_read")
+            .execute(&mut **tx)
+            .await
+            .ok()?;
+    }
+    sqlx::query("RELEASE SAVEPOINT lash_release_read")
+        .execute(&mut **tx)
+        .await
+        .ok()?;
+    release.ok().flatten()
 }
 
 /// `42P01 undefined_table` — the database predates the stamp rather than being

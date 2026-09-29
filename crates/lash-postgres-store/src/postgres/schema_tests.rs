@@ -11,6 +11,7 @@ fn version_refusal_is_typed_and_names_found_and_range() {
             lash_core_execution::compat::CompatRefusal::ShapeRefused {
                 component,
                 findings,
+                writing_release: None,
             },
     } = &error
     else {
@@ -24,6 +25,25 @@ fn version_refusal_is_typed_and_names_found_and_range() {
                 "{MIN_SUPPORTED_SCHEMA_VERSION}..={SCHEMA_VERSION}"
             )),
         "the refusal must name the found version and the supported range: {message}"
+    );
+}
+
+#[test]
+fn version_refusal_carries_the_writing_release() {
+    let error = version_mismatch_error(Some("public"), Some(SCHEMA_VERSION - 1), Some("1.0.0"));
+    let StoreError::Incompatible {
+        refusal:
+            lash_core_execution::compat::CompatRefusal::ShapeRefused {
+                writing_release, ..
+            },
+    } = &error
+    else {
+        panic!("expected a typed version refusal: {error}")
+    };
+    assert_eq!(writing_release.as_deref(), Some("1.0.0"));
+    assert_eq!(
+        error.to_string().matches("Writing release: 1.0.0").count(),
+        1
     );
 }
 

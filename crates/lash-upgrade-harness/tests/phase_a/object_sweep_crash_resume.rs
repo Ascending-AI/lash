@@ -301,6 +301,7 @@ fn object_sweep_crash_resume() -> Result<()> {
         found: 2,
         min_reader: 2,
         reads: VersionRange::exactly(1),
+        writing_release: None,
     };
     for (handler, body) in [
         ("probe", serde_json::Value::Null),

@@ -673,6 +673,7 @@ async fn apply_synthetic_expand(
                 component: descriptor.component.as_str().to_owned(),
                 found: u32::try_from(version).unwrap_or_default(),
                 reads: descriptor.reads,
+                writing_release: None,
             },
         });
     }

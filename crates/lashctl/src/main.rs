@@ -542,6 +542,7 @@ mod tests {
         let error = CliError::store(StoreError::Incompatible {
             refusal: CompatRefusal::Unstamped {
                 component: "postgres".to_string(),
+                writing_release: None,
             },
         });
         assert_eq!(error.exit as u8, 4);
@@ -558,6 +559,7 @@ mod tests {
         let error = CliError::store(StoreError::Incompatible {
             refusal: CompatRefusal::FleetUnrecorded {
                 component: "postgres".to_string(),
+                writing_release: None,
             },
         });
         assert_eq!(error.exit as u8, 4);

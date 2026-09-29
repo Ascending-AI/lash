@@ -110,7 +110,7 @@ pub async fn fleet_format_conformance(deployment: &dyn FleetFormatDeployment) {
         matches!(
             error,
             StoreError::Incompatible {
-                refusal: lash_core::compat::CompatRefusal::FleetOutsideWritable { recorded, writable }
+                refusal: lash_core::compat::CompatRefusal::FleetOutsideWritable { recorded, writable, writing_release: None }
             } if recorded == next_generation && writable == lash_core::compat::VersionRange::exactly(lash_core::FLEET_FORMAT_VERSION)
         ),
         "an out-of-range fleet format must surface the typed refusal: {error}"

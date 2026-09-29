@@ -150,6 +150,7 @@ impl FleetFormat {
             None => Err(StoreError::Incompatible {
                 refusal: CompatRefusal::FleetUnrecorded {
                     component: component.to_owned(),
+                    writing_release: None,
                 },
             }),
         }
@@ -167,7 +168,11 @@ impl FleetFormat {
             Ok(Self::from_version(recorded))
         } else {
             Err(StoreError::Incompatible {
-                refusal: CompatRefusal::FleetOutsideWritable { recorded, writable },
+                refusal: CompatRefusal::FleetOutsideWritable {
+                    recorded,
+                    writable,
+                    writing_release: None,
+                },
             })
         }
     }
@@ -751,6 +756,7 @@ mod tests {
                     CompatRefusal::FleetOutsideWritable {
                         recorded: r,
                         writable: w,
+                        writing_release: None,
                     },
             }) = FleetFormat::admit(recorded, writable)
             else {
@@ -788,7 +794,11 @@ mod tests {
             1
         );
         let Err(StoreError::Incompatible {
-            refusal: CompatRefusal::FleetUnrecorded { component },
+            refusal:
+                CompatRefusal::FleetUnrecorded {
+                    component,
+                    writing_release: None,
+                },
         }) = FleetFormat::admit_recorded("postgres", None, compatibility)
         else {
             panic!("a store with no recorded F must refuse at open");

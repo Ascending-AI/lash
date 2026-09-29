@@ -196,6 +196,7 @@ impl StorePreflight for PostgresStorePreflight {
                         refusal: compat::CompatRefusal::ShapeRefused {
                             component: descriptor.component.as_str().to_owned(),
                             findings,
+                            writing_release: None,
                         },
                     }
                 }
@@ -217,6 +218,7 @@ impl StorePreflight for PostgresStorePreflight {
                         refusal: compat::CompatRefusal::ShapeRefused {
                             component: descriptor.component.as_str().to_owned(),
                             findings,
+                            writing_release: None,
                         },
                     }
                 }

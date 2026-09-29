@@ -59,6 +59,7 @@ async fn an_unstamped_schema_is_refused_by_preflight_exactly_as_by_open() {
         StoreSchemaVerdict::Refused {
             refusal: lash_core_execution::compat::CompatRefusal::Unstamped {
                 component: "postgres".to_string(),
+                writing_release: None,
             },
         },
         "an unstamped schema is provisioned-but-ungenerated, not absent"

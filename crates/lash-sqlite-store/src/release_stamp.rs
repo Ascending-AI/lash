@@ -2,8 +2,8 @@
 //!
 //! The three `lash_compat` rows say what *this* build requires. They
 //! never say which build produced the rows, so the only way a host could learn
-//! that was to upgrade crates, open the store, and read the refusal — which
-//! names schema integers, not releases. The stamp closes that gap with one row
+//! that was to upgrade crates and inspect the store. The compatibility
+//! integer alone cannot identify a build. The stamp records one row
 //! in the durable-core database: the writing release, the schema-version tuple
 //! it required, and the instant that release first wrote here.
 //!
@@ -97,6 +97,18 @@ pub(crate) fn read(conn: &Connection) -> rusqlite::Result<StoreReleaseState> {
         schema_versions,
         written_at_epoch_ms,
     }))
+}
+
+/// The writing release alone, when the row can still be read during a refusal.
+pub(crate) fn read_release(conn: &Connection) -> Option<String> {
+    conn.query_row(
+        session_sql().release_stamp.select_release.sql(),
+        [],
+        |row| row.get(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
 }
 
 /// Apply the update rule inside the open transaction that just provisioned or

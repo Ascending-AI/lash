@@ -247,6 +247,7 @@ enum Access {
 fn unstamped(family: &ObjectFamily) -> TerminalError {
     crate::wire::incompatible(CompatRefusal::Unstamped {
         component: family.component.as_str().to_owned(),
+        writing_release: None,
     })
 }
 
@@ -260,6 +261,7 @@ fn read_compat(
                 crate::wire::incompatible(CompatRefusal::MalformedStamp {
                     component: family.component.as_str().to_owned(),
                     detail: format!("`{COMPAT_KEY}` does not decode: {error}"),
+                    writing_release: None,
                 })
             })
         })
@@ -281,12 +283,14 @@ fn check_compat(
                 "format {}, reader floor {} and writer floor {} must each be at least 1",
                 compat.format, compat.min_reader, compat.min_writer
             ),
+            writing_release: None,
         });
     }
     let Some(declared) = descriptor(family.component) else {
         return Err(CompatRefusal::MalformedStamp {
             component: component(),
             detail: "this build declares no descriptor for the component".to_owned(),
+            writing_release: None,
         });
     };
     if compat.min_reader > declared.reads.max() {
@@ -295,6 +299,7 @@ fn check_compat(
             found: compat.format,
             min_reader: compat.min_reader,
             reads: declared.reads,
+            writing_release: None,
         });
     }
     if access == Access::Write && compat.min_writer > declared.writes.max() {

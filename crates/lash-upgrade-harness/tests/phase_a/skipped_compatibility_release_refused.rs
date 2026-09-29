@@ -19,6 +19,7 @@ fn skipped_component(component: ComponentId, stamp: CompatStamp) -> Result<()> {
             component: refused,
             found,
             reads,
+            writing_release: None,
         }) => {
             ensure!(refused == component.as_str());
             ensure!(found == stamp.version);
@@ -77,7 +78,7 @@ async fn skipped_compatibility_release_refused() -> Result<()> {
     .err()
     .ok_or_else(|| anyhow::anyhow!("PostgreSQL opened below the writable F range"))?;
     ensure!(
-        matches!(&error, StoreError::Incompatible { refusal: CompatRefusal::FleetOutsideWritable { recorded: 1, writable } } if *writable == skipped_f),
+        matches!(&error, StoreError::Incompatible { refusal: CompatRefusal::FleetOutsideWritable { recorded: 1, writable, writing_release: Some(_) } } if *writable == skipped_f),
         "PostgreSQL returned a different refusal: {error}"
     );
     let (version, min_reader): (i32, i32) = sqlx::query_as(
@@ -155,7 +156,7 @@ async fn skipped_compatibility_release_refused() -> Result<()> {
         .err()
         .ok_or_else(|| anyhow::anyhow!("SQLite opened below the writable F range"))?;
     ensure!(
-        matches!(&error, StoreError::Incompatible { refusal: CompatRefusal::FleetOutsideWritable { recorded: 1, writable } } if *writable == skipped_f),
+        matches!(&error, StoreError::Incompatible { refusal: CompatRefusal::FleetOutsideWritable { recorded: 1, writable, writing_release: Some(_) } } if *writable == skipped_f),
         "SQLite returned a different refusal: {error}"
     );
     let fleet: i64 = rusqlite::Connection::open(&core)?.query_row(

@@ -479,6 +479,7 @@ async fn unsupported_compatibility_floor_reports_real_versions() {
                 found: 1099,
                 min_reader: 1099,
                 reads: VersionRange::exactly(1),
+                writing_release: None,
             },
         }
     );
@@ -622,6 +623,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
                 found: 51,
                 min_reader: 51,
                 reads: VersionRange::exactly(1),
+                writing_release: None,
             },
         }
     );

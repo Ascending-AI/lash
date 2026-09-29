@@ -64,9 +64,9 @@ where
 ///
 /// Open is read-only about the schema itself: workers never run DDL on
 /// PostgreSQL (FIG-3797), so this gate verifies rather than provisions. The
-/// only writes are the release stamp and the fleet-format provisioning row,
-/// both recorded by the transaction that admitted the database. A database
-/// that opens is a database whose shape lash has read — never one whose
+/// only write is the release stamp, recorded in the transaction that admitted
+/// the database. The fleet-format row is read from that same transaction. A
+/// database that opens is one whose shape lash has read — never one whose
 /// version stamp merely claimed the right number.
 /// `writable` is the opening build's fleet-format writable range: the
 /// recorded row is admitted against it, so a generation this build cannot
@@ -90,6 +90,7 @@ pub(crate) async fn ensure_schema(
         .map_err(store_sqlx_error)?;
 
     let report = verify_schema_shape(&mut tx).await?;
+    let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
     let descriptor =
         lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
             .ok_or_else(|| {
@@ -108,17 +109,21 @@ pub(crate) async fn ensure_schema(
     );
     #[cfg(not(feature = "synthetic-next"))]
     let synthetic_expanded = false;
-    let admission = lash_core_execution::compat::admit(descriptor, stamp)
-        .map_err(|refusal| StoreError::Incompatible { refusal })?;
+    let admission = lash_core_execution::compat::admit(descriptor, stamp).map_err(|refusal| {
+        let refusal = refusal.with_writing_release(writing_release.clone());
+        record_schema_gate_refusal(&report, check, &refusal);
+        StoreError::Incompatible { refusal }
+    })?;
     if matches!(
         admission,
         lash_core_execution::compat::CompatAdmission::Provision
     ) {
-        return Err(StoreError::Incompatible {
-            refusal: lash_core_execution::compat::CompatRefusal::Unstamped {
-                component: descriptor.component.as_str().to_owned(),
-            },
-        });
+        let refusal = lash_core_execution::compat::CompatRefusal::Unstamped {
+            component: descriptor.component.as_str().to_owned(),
+            writing_release: writing_release.clone(),
+        };
+        record_schema_gate_refusal(&report, check, &refusal);
+        return Err(StoreError::Incompatible { refusal });
     }
     if matches!(
         admission,
@@ -134,13 +139,13 @@ pub(crate) async fn ensure_schema(
         #[cfg(not(feature = "synthetic-next"))]
         let findings = crate::schema_shape::expanded_findings(&mut tx, &report).await?;
         if !findings.is_empty() {
-            record_schema_gate_decision(&report, check, "denied_shape");
-            return Err(StoreError::Incompatible {
-                refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused {
-                    component: descriptor.component.as_str().to_owned(),
-                    findings,
-                },
-            });
+            let refusal = lash_core_execution::compat::CompatRefusal::ShapeRefused {
+                component: descriptor.component.as_str().to_owned(),
+                findings,
+                writing_release: writing_release.clone(),
+            };
+            record_schema_gate_refusal(&report, check, &refusal);
+            return Err(StoreError::Incompatible { refusal });
         }
     }
     let admitted_as = match (
@@ -154,7 +159,7 @@ pub(crate) async fn ensure_schema(
     ) {
         (true, _) => "allowed",
         (false, SchemaCheck::Enforce) => {
-            record_schema_gate_decision(&report, check, "denied_shape");
+            record_schema_gate_decision(&report, check, "denied_shape", None);
             return Err(StoreError::Backend(report.to_string()));
         }
         (false, SchemaCheck::WarnOnly) => {
@@ -171,10 +176,9 @@ pub(crate) async fn ensure_schema(
     // itself. The admission is recorded only after this succeeds, so a refused
     // open never logs an admission first.
     let Some(catalog_id) = read_catalog_id(&mut *tx).await.map_err(store_sqlx_error)? else {
-        record_schema_gate_decision(&report, check, "denied_seed_catalog_identity_missing");
+        record_schema_gate_decision(&report, check, "denied_seed_catalog_identity_missing", None);
         return Err(missing_catalog_identity_error());
     };
-    record_schema_gate_decision(&report, check, admitted_as);
     // Only an admitted open stamps. A refused open has not written this
     // database and must not claim it did, and the write rides the admitting
     // transaction so a rollback anywhere after this point takes the stamp with
@@ -189,9 +193,35 @@ pub(crate) async fn ensure_schema(
     // than a build constant. An absent row, or a recorded generation this
     // build cannot write, is refused here, inside the transaction, so nothing
     // half-opens and the release stamp above rolls back with it.
-    let fleet_format = crate::fleet_format::admit(&mut tx, writable).await?;
+    let fleet_format = crate::fleet_format::admit(&mut tx, writable)
+        .await
+        .map_err(|error| match error {
+            StoreError::Incompatible { refusal } => {
+                let refusal = refusal.with_writing_release(writing_release);
+                record_schema_gate_refusal(&report, check, &refusal);
+                StoreError::Incompatible { refusal }
+            }
+            other => other,
+        })?;
     tx.commit().await.map_err(store_sqlx_error)?;
+    record_schema_gate_decision(&report, check, admitted_as, None);
     Ok((catalog_id, fleet_format))
+}
+
+fn record_schema_gate_refusal(
+    report: &SchemaReport,
+    check: SchemaCheck,
+    refusal: &lash_core_execution::compat::CompatRefusal,
+) {
+    let outcome = if matches!(
+        refusal,
+        lash_core_execution::compat::CompatRefusal::ShapeRefused { .. }
+    ) {
+        "denied_shape"
+    } else {
+        "denied_compat"
+    };
+    record_schema_gate_decision(report, check, outcome, Some(refusal));
 }
 
 /// The catalog's identity row, the random id the seed statements wrote at
@@ -282,7 +312,12 @@ async fn verify_within_repeatable_read(
 /// (`docs/agents/way-of-working.md`): the stamped and expected versions, the
 /// policy knob, and the finding counts per class, so a refused open can be
 /// diagnosed from a trace without reproducing it.
-fn record_schema_gate_decision(report: &SchemaReport, check: SchemaCheck, outcome: &'static str) {
+fn record_schema_gate_decision(
+    report: &SchemaReport,
+    check: SchemaCheck,
+    outcome: &'static str,
+    refusal: Option<&lash_core_execution::compat::CompatRefusal>,
+) {
     let counts = report.finding_counts();
     let fields = tracing::field::display(
         counts
@@ -292,6 +327,7 @@ fn record_schema_gate_decision(report: &SchemaReport, check: SchemaCheck, outcom
             .join(", "),
     );
     let schema = report.schema.as_deref().unwrap_or("<unresolved>");
+    let reason = refusal.map(ToString::to_string);
     match outcome {
         "allowed" => tracing::debug!(
             component = SCHEMA_COMPONENT,
@@ -302,6 +338,7 @@ fn record_schema_gate_decision(report: &SchemaReport, check: SchemaCheck, outcom
             schema_check = ?check,
             findings = %fields,
             finding_total = report.findings.len(),
+            refusal = ?reason,
             outcome,
             "lash Postgres schema gate admitted the database"
         ),
@@ -314,6 +351,7 @@ fn record_schema_gate_decision(report: &SchemaReport, check: SchemaCheck, outcom
             schema_check = ?check,
             findings = %fields,
             finding_total = report.findings.len(),
+            refusal = ?reason,
             outcome,
             "lash Postgres schema gate decided against admitting the database as-is"
         ),
@@ -353,8 +391,8 @@ fn recreate_trust_domain_remedy() -> String {
 /// provisioned.
 ///
 /// `writing_release` names the lash release that wrote the database when the
-/// release stamp could still be read. It rides as a trailing sentence: every
-/// substring the store tests pin — the
+/// release stamp could still be read. The typed refusal renders it after the
+/// finding, preserving the
 /// component clause, the `has no applicable migration` phrase, the remedy, the
 /// `SchemaCheck::WarnOnly` sentence — is produced byte-identically, and a
 /// database with no readable stamp produces the message unchanged rather than a
@@ -410,10 +448,6 @@ pub(crate) fn version_mismatch_error(
                 .to_string(),
         ),
     };
-    let release_clause = match writing_release {
-        Some(release) => format!(" This database was last written by lash release {release}."),
-        None => String::new(),
-    };
     StoreError::Incompatible {
         refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused {
             component: lash_core_execution::compat::ComponentId::POSTGRES
@@ -422,8 +456,9 @@ pub(crate) fn version_mismatch_error(
             findings: vec![format!(
                 "Postgres schema component `{SCHEMA_COMPONENT}` {stamp}, expected {SCHEMA_VERSION} \
              (supported range {range}). {explanation} This gate is unconditional; \
-             SchemaCheck::WarnOnly does not relax it.{release_clause}"
+             SchemaCheck::WarnOnly does not relax it."
             )],
+            writing_release: writing_release.map(str::to_owned),
         },
     }
 }

@@ -102,6 +102,7 @@ async fn read_compat_verdict(
                         StoreSchemaVerdict::Refused {
                             refusal: lash_core_execution::compat::CompatRefusal::Unstamped {
                                 component: database.component().as_str().to_owned(),
+                                writing_release: None,
                             },
                         },
                         None,

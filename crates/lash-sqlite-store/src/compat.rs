@@ -13,10 +13,30 @@ fn incompatible(refusal: CompatRefusal) -> rusqlite::Error {
     crate::sqlite_conversion_error(StoreError::Incompatible { refusal })
 }
 
+pub(crate) fn writing_release(conn: &Connection, database: SqliteDatabase) -> Option<String> {
+    if database != SqliteDatabase::DurableCore {
+        return None;
+    }
+    crate::release_stamp::read_release(conn)
+}
+
 pub(crate) fn malformed(database: SqliteDatabase, detail: impl Into<String>) -> rusqlite::Error {
     incompatible(CompatRefusal::MalformedStamp {
         component: database.component().as_str().to_owned(),
         detail: detail.into(),
+        writing_release: None,
+    })
+}
+
+fn malformed_on(
+    conn: &Connection,
+    database: SqliteDatabase,
+    detail: impl Into<String>,
+) -> rusqlite::Error {
+    incompatible(CompatRefusal::MalformedStamp {
+        component: database.component().as_str().to_owned(),
+        detail: detail.into(),
+        writing_release: writing_release(conn, database),
     })
 }
 
@@ -44,18 +64,23 @@ pub(crate) fn read(
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()
-        .map_err(|error| malformed(database, error.to_string()))?;
+        .map_err(|error| malformed_on(conn, database, error.to_string()))?;
     let Some((component, version, min_reader, fleet_format)) = row else {
         return Ok(None);
     };
     if component != database.component().as_str() {
-        return Err(malformed(database, format!("component is {component}")));
+        return Err(malformed_on(
+            conn,
+            database,
+            format!("component is {component}"),
+        ));
     }
-    let version = u32::try_from(version).map_err(|error| malformed(database, error.to_string()))?;
-    let min_reader =
-        u32::try_from(min_reader).map_err(|error| malformed(database, error.to_string()))?;
-    let fleet_format =
-        u32::try_from(fleet_format).map_err(|error| malformed(database, error.to_string()))?;
+    let version =
+        u32::try_from(version).map_err(|error| malformed_on(conn, database, error.to_string()))?;
+    let min_reader = u32::try_from(min_reader)
+        .map_err(|error| malformed_on(conn, database, error.to_string()))?;
+    let fleet_format = u32::try_from(fleet_format)
+        .map_err(|error| malformed_on(conn, database, error.to_string()))?;
     Ok(Some((
         CompatStamp {
             version,
@@ -77,13 +102,23 @@ pub(crate) fn admit(
         },
         |(stamp, _)| StampRead::Present(stamp),
     );
-    let descriptor = compat::descriptor(database.component())
-        .ok_or_else(|| malformed(database, "the build has no descriptor for this database"))?;
-    let admission = compat::admit(descriptor, stamp).map_err(incompatible)?;
+    let descriptor = compat::descriptor(database.component()).ok_or_else(|| {
+        malformed_on(
+            conn,
+            database,
+            "the build has no descriptor for this database",
+        )
+    })?;
+    let release = writing_release(conn, database);
+    let admission = compat::admit(descriptor, stamp)
+        .map_err(|refusal| incompatible(refusal.with_writing_release(release.clone())))?;
     let fleet = match row {
-        Some((_, fleet)) => {
-            FleetFormat::admit(fleet, writable).map_err(crate::sqlite_conversion_error)?
-        }
+        Some((_, fleet)) => FleetFormat::admit(fleet, writable).map_err(|error| match error {
+            StoreError::Incompatible { refusal } => {
+                incompatible(refusal.with_writing_release(release))
+            }
+            other => crate::sqlite_conversion_error(other),
+        })?,
         None => FleetFormat::current(),
     };
     Ok((admission, fleet))
@@ -118,24 +153,38 @@ pub(crate) fn fence(
                 })
                 .optional()
         })
-        .map_err(|error| malformed(database, error.to_string()))?;
+        .map_err(|error| malformed_on(conn, database, error.to_string()))?;
     let Some((component, version, min_reader, fleet)) = row else {
         return Err(incompatible(CompatRefusal::Unstamped {
             component: database.component().as_str().to_owned(),
+            writing_release: writing_release(conn, database),
         }));
     };
-    let descriptor = compat::descriptor(database.component())
-        .ok_or_else(|| malformed(database, "the build has no descriptor for this database"))?;
+    let descriptor = compat::descriptor(database.component()).ok_or_else(|| {
+        malformed_on(
+            conn,
+            database,
+            "the build has no descriptor for this database",
+        )
+    })?;
     if component != database.component().as_str() {
-        return Err(malformed(database, format!("component is {component}")));
+        return Err(malformed_on(
+            conn,
+            database,
+            format!("component is {component}"),
+        ));
     }
     let stamp = CompatStamp {
-        version: u32::try_from(version).map_err(|error| malformed(database, error.to_string()))?,
+        version: u32::try_from(version)
+            .map_err(|error| malformed_on(conn, database, error.to_string()))?,
         min_reader: u32::try_from(min_reader)
-            .map_err(|error| malformed(database, error.to_string()))?,
+            .map_err(|error| malformed_on(conn, database, error.to_string()))?,
     };
-    compat::admit(descriptor, StampRead::Present(stamp)).map_err(incompatible)?;
-    let fleet = u32::try_from(fleet).map_err(|error| malformed(database, error.to_string()))?;
+    compat::admit(descriptor, StampRead::Present(stamp)).map_err(|refusal| {
+        incompatible(refusal.with_writing_release(writing_release(conn, database)))
+    })?;
+    let fleet =
+        u32::try_from(fleet).map_err(|error| malformed_on(conn, database, error.to_string()))?;
     FleetFormat::fence(fleet, writable).map_err(crate::sqlite_conversion_error)
 }
 
@@ -221,6 +270,7 @@ pub(crate) fn finalize(
         } else {
             Err(incompatible(CompatRefusal::Unstamped {
                 component: database.component().as_str().to_owned(),
+                writing_release: writing_release(tx, database),
             }))
         }
     })
@@ -279,6 +329,7 @@ pub(crate) fn read_fleet_state(conn: &Connection) -> rusqlite::Result<FleetForma
 /// component open can mistake the set for a consistent fleet epoch.
 pub(crate) fn check_set(location: &SqliteLocation) -> rusqlite::Result<()> {
     let mut rows = Vec::new();
+    let mut release = None;
     for database in SqliteDatabase::ALL {
         let target = location.target(database);
         if target.file_path().is_some_and(|path| !path.exists()) {
@@ -288,6 +339,9 @@ pub(crate) fn check_set(location: &SqliteLocation) -> rusqlite::Result<()> {
             target.uri(),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )?;
+        if database == SqliteDatabase::DurableCore {
+            release = writing_release(&conn, database);
+        }
         let Some((stamp, fleet)) = read(&conn, database)? else {
             return Ok(());
         };
@@ -299,6 +353,7 @@ pub(crate) fn check_set(location: &SqliteLocation) -> rusqlite::Result<()> {
     {
         Err(incompatible(CompatRefusal::PartiallyAdvanced {
             databases: rows,
+            writing_release: release,
         }))
     } else {
         Ok(())
@@ -427,6 +482,7 @@ pub(crate) fn verify_tolerant(conn: &Connection, database: SqliteDatabase) -> ru
         Err(incompatible(CompatRefusal::ShapeRefused {
             component: database.component().as_str().to_owned(),
             findings,
+            writing_release: writing_release(conn, database),
         }))
     }
 }

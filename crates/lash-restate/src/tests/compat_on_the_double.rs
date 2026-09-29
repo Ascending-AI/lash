@@ -238,6 +238,7 @@ async fn each_family_refuses_a_compat_record_above_this_build_with_zero_state_ch
                     found: 2,
                     min_reader: 2,
                     reads,
+                    writing_release: None,
                 },
             },
             "{service}/{exclusive}"
@@ -316,7 +317,10 @@ async fn each_family_refuses_a_compat_record_above_this_build_with_zero_state_ch
         assert_eq!(
             compat_refusal(&error),
             RestateCompatError::Incompatible {
-                refusal: CompatRefusal::Unstamped { component },
+                refusal: CompatRefusal::Unstamped {
+                    component,
+                    writing_release: None
+                },
             },
             "{service}/{exclusive}"
         );

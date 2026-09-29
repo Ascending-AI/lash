@@ -96,6 +96,7 @@ async fn a_refused_open_names_the_release_that_wrote_the_store() {
                 found: 2,
                 min_reader: 2,
                 reads: VersionRange::exactly(1),
+                writing_release: None,
             },
         }
     );
@@ -137,6 +138,7 @@ async fn an_unstamped_store_is_refused_without_inventing_a_release() {
                 found: 2,
                 min_reader: 2,
                 reads: VersionRange::exactly(1),
+                writing_release: None,
             },
         }
     );

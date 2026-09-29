@@ -9,10 +9,10 @@
 //!
 //! [`StorePreflight`] is the surface that answers it first. It is deliberately
 //! *not* implemented on a wired store, because constructing one is itself the
-//! side-effectful act this exists to precede: PostgreSQL takes an exclusive
-//! advisory lock and may run creation DDL, an explicit migration, a
-//! signing-secret precondition and schema-gate telemetry; SQLite takes the
-//! write lock and applies its schema batch. A probe reachable only through a
+//! side-effectful act this exists to precede: PostgreSQL takes a schema
+//! advisory lock, requires the seeded catalog identity, may write a release
+//! stamp, and emits schema-gate telemetry; SQLite takes the write lock and
+//! applies its schema batch. A probe reachable only through a
 //! successful open could not describe the deployments worth describing.
 //!
 //! Backends therefore implement this on a dedicated read-only handle built

@@ -1480,6 +1480,90 @@ async fn the_schema_gate_emits_its_decision_basis() {
     scratch.cleanup().await;
 }
 
+#[tokio::test]
+async fn failed_open_after_schema_check_does_not_record_admission() {
+    let Some(database_url) = database_url() else {
+        return;
+    };
+    let capture = installed_capture();
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply("ALTER TABLE lash_release_stamp DROP COLUMN release_version")
+        .await;
+    let error = scratch
+        .open_host_provisioned(SchemaCheck::WarnOnly)
+        .await
+        .err()
+        .expect("release stamp failure must fail open");
+    assert!(error.to_string().contains("release_version"), "{error}");
+    let events = capture.events_for(&scratch.name);
+    assert!(
+        !events
+            .iter()
+            .any(|event| event.contains("outcome=allowed_warn_only")),
+        "a failed open must not record admission: {events:#?}"
+    );
+    scratch.cleanup().await;
+}
+
+#[tokio::test]
+async fn fleet_refusal_records_its_reason() {
+    let Some(database_url) = database_url() else {
+        return;
+    };
+    let capture = installed_capture();
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .expect("stamp release");
+    scratch.apply("DELETE FROM lash_fleet_format").await;
+    let error = scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .err()
+        .expect("missing fleet epoch must refuse open");
+    assert!(
+        matches!(
+            error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::FleetUnrecorded { .. }
+            }
+        ),
+        "{error}"
+    );
+    assert_evidence(capture, &scratch.name, "denied_compat", &["fleet epoch"]);
+    scratch.cleanup().await;
+}
+
+#[tokio::test]
+async fn fleet_refusal_names_the_writing_release() {
+    let Some(database_url) = database_url() else {
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .expect("stamp release");
+    scratch.apply("DELETE FROM lash_fleet_format").await;
+    let error = scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .err()
+        .expect("missing fleet epoch must refuse open");
+    let StoreError::Incompatible {
+        refusal: CompatRefusal::FleetUnrecorded {
+            writing_release, ..
+        },
+    } = error
+    else {
+        panic!("expected a typed fleet refusal: {error}");
+    };
+    assert_eq!(writing_release.as_deref(), Some(env!("CARGO_PKG_VERSION")));
+    scratch.cleanup().await;
+}
+
 /// Asserts one captured decision carries the named outcome plus the inputs the gate
 /// consulted to reach it.
 fn assert_evidence(capture: &EventCapture, schema: &str, outcome: &str, extra: &[&str]) {

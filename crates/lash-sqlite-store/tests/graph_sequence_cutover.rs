@@ -53,6 +53,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
                 found: 70,
                 min_reader: 70,
                 reads: VersionRange::exactly(1),
+                writing_release: None,
             },
         }
     );
@@ -108,6 +109,7 @@ async fn sqlite_graph_sequence_unique_constraint_is_rejected_without_migration()
                 CompatRefusal::ShapeRefused {
                     component,
                     findings,
+                    writing_release: None,
                 },
         } => {
             assert_eq!(component, "sqlite-core");

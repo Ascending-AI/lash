@@ -190,34 +190,51 @@ pub enum CompatRefusal {
     #[error(
         "{component} holds lash data but carries no compatibility stamp; a stamp is never \
          assumed, so the store is refused unchanged. Restore it from a backup or recreate it; \
-         `lashctl preflight` reports what it found"
+         `lashctl preflight` reports what it found{}",
+        release_suffix(.writing_release)
     )]
-    Unstamped { component: String },
+    Unstamped {
+        component: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writing_release: Option<String>,
+    },
     #[error(
         "{component} compatibility stamp is malformed ({detail}); the store is refused \
-         unchanged. Restore it from a backup; `lashctl preflight` reports the stamp"
+         unchanged. Restore it from a backup; `lashctl preflight` reports the stamp{}",
+        release_suffix(.writing_release)
     )]
-    MalformedStamp { component: String, detail: String },
+    MalformedStamp {
+        component: String,
+        detail: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writing_release: Option<String>,
+    },
     #[error(
         "{component} is at version {found}, older than this build reads ({reads}): an older or \
          skipped release wrote it. Run `lashctl migrate` from the intermediate release first, \
-         then from this build"
+         then from this build{}",
+        release_suffix(.writing_release)
     )]
     TooOld {
         component: String,
         found: u32,
         reads: VersionRange,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writing_release: Option<String>,
     },
     #[error(
         "{component} is at version {found} with reader floor {min_reader}, above the newest \
          this build reads ({reads}): a newer release contracted it. Run a build whose range \
-         reaches {min_reader}; `lashctl version` prints a build's ranges"
+         reaches {min_reader}; `lashctl version` prints a build's ranges{}",
+        release_suffix(.writing_release)
     )]
     ReaderFloorAbove {
         component: String,
         found: u32,
         min_reader: u32,
         reads: VersionRange,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writing_release: Option<String>,
     },
     /// A Restate object's `_compat` writer floor is above the newest family
     /// format this build writes (ADR 0115 §3.2): a newer release upgraded
@@ -235,40 +252,54 @@ pub enum CompatRefusal {
     },
     #[error(
         "{component} carries additions this build cannot write beside: {}. Run the release \
-         that expanded it; `lashctl preflight` lists them",
-        .findings.join("; ")
+         that expanded it; `lashctl preflight` lists them{}",
+        .findings.join("; "),
+        release_suffix(.writing_release)
     )]
     ShapeRefused {
         component: String,
         findings: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writing_release: Option<String>,
     },
     /// `F` at open: below the writable range (a skipped release) or above it
     /// (a newer fleet).
     #[error(
         "store records fleet epoch {recorded}, outside this build's writable range {writable}: \
          below it a release was skipped, above it the fleet is newer. Run a build whose \
-         writable range contains {recorded}; `lashctl version` prints a build's range"
+         writable range contains {recorded}; `lashctl version` prints a build's range{}",
+        release_suffix(.writing_release)
     )]
     FleetOutsideWritable {
         recorded: u32,
         writable: VersionRange,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writing_release: Option<String>,
     },
     /// `F` at open: the store records no fleet epoch. The installer seeds it
     /// and an open never does, so no build decides `F` by opening first.
     #[error(
         "{component} records no fleet epoch: `lashctl migrate` seeds it when it provisions or \
          advances the store, and an open never records one. The store is refused unchanged; \
-         run `lashctl migrate`, then open again"
+         run `lashctl migrate`, then open again{}",
+        release_suffix(.writing_release)
     )]
-    FleetUnrecorded { component: String },
+    FleetUnrecorded {
+        component: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writing_release: Option<String>,
+    },
     /// The SQLite databases of one store disagree on their stamps or `F`.
     #[error(
         "the store's databases disagree on their stamps ({}): a migration or finalize stopped \
-         part way. Run `lashctl migrate` from the build that advanced them to complete the set",
-        describe_databases(.databases)
+         part way. Run `lashctl migrate` from the build that advanced them to complete the set{}",
+         describe_databases(.databases),
+        release_suffix(.writing_release)
     )]
     PartiallyAdvanced {
         databases: Vec<(String, CompatStamp, u32)>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writing_release: Option<String>,
     },
     /// A stored label this build has no name for (an obligation state or
     /// kind, an attachment owner kind, a referrer kind): a newer build wrote
@@ -279,6 +310,41 @@ pub enum CompatRefusal {
          ranges)"
     )]
     UnknownVocabulary { surface: String, label: String },
+}
+
+impl CompatRefusal {
+    /// Attach the release that last wrote the store when its stamp is readable.
+    /// The refusal's reason and JSON tag remain unchanged.
+    pub fn with_writing_release(mut self, release: Option<String>) -> Self {
+        match &mut self {
+            Self::Unstamped {
+                writing_release, ..
+            }
+            | Self::MalformedStamp {
+                writing_release, ..
+            }
+            | Self::TooOld {
+                writing_release, ..
+            }
+            | Self::ReaderFloorAbove {
+                writing_release, ..
+            }
+            | Self::ShapeRefused {
+                writing_release, ..
+            }
+            | Self::FleetOutsideWritable {
+                writing_release, ..
+            }
+            | Self::FleetUnrecorded {
+                writing_release, ..
+            }
+            | Self::PartiallyAdvanced {
+                writing_release, ..
+            } => *writing_release = release,
+            Self::WriterFloorAbove { .. } | Self::UnknownVocabulary { .. } => {}
+        }
+        self
+    }
 }
 
 fn describe_databases(databases: &[(String, CompatStamp, u32)]) -> String {
@@ -294,6 +360,12 @@ fn describe_databases(databases: &[(String, CompatStamp, u32)]) -> String {
         .join(", ")
 }
 
+fn release_suffix(release: &Option<String>) -> String {
+    release.as_deref().map_or_else(String::new, |release| {
+        format!(". Writing release: {release}")
+    })
+}
+
 /// The admission rule of §1.3, answered in order: absent, malformed, too old,
 /// floor passed, admitted.
 pub fn admit(
@@ -306,12 +378,14 @@ pub fn admit(
         StampRead::Absent { populated: true } => {
             return Err(CompatRefusal::Unstamped {
                 component: component(),
+                writing_release: None,
             });
         }
         StampRead::Unreadable(detail) => {
             return Err(CompatRefusal::MalformedStamp {
                 component: component(),
                 detail,
+                writing_release: None,
             });
         }
         StampRead::Present(stamp) => stamp,
@@ -323,6 +397,7 @@ pub fn admit(
                 "reader floor {} outside [1, version {}]",
                 stamp.min_reader, stamp.version
             ),
+            writing_release: None,
         });
     }
     let reads = descriptor.reads;
@@ -331,6 +406,7 @@ pub fn admit(
             component: component(),
             found: stamp.version,
             reads,
+            writing_release: None,
         });
     }
     if stamp.min_reader > reads.max() {
@@ -339,6 +415,7 @@ pub fn admit(
             found: stamp.version,
             min_reader: stamp.min_reader,
             reads,
+            writing_release: None,
         });
     }
     if stamp.version <= reads.max() {
@@ -383,7 +460,8 @@ mod tests {
         assert_eq!(
             admit(&descriptor, StampRead::Absent { populated: true }),
             Err(CompatRefusal::Unstamped {
-                component: component.clone()
+                component: component.clone(),
+                writing_release: None,
             })
         );
 
@@ -392,7 +470,8 @@ mod tests {
             admit(&descriptor, StampRead::Unreadable("not an integer".into())),
             Err(CompatRefusal::MalformedStamp {
                 component: component.clone(),
-                detail: "not an integer".into()
+                detail: "not an integer".into(),
+                writing_release: None,
             })
         );
         for (version, min_reader) in [(3, 0), (2, 3), (9, 0), (1, 5), (0, 0)] {
@@ -411,7 +490,8 @@ mod tests {
             Err(CompatRefusal::TooOld {
                 component: component.clone(),
                 found: 1,
-                reads
+                reads,
+                writing_release: None,
             })
         );
 
@@ -422,7 +502,8 @@ mod tests {
                 component: component.clone(),
                 found: 5,
                 min_reader: 4,
-                reads
+                reads,
+                writing_release: None,
             })
         );
 
@@ -465,6 +546,7 @@ mod tests {
         let refusal = CompatRefusal::FleetOutsideWritable {
             recorded: 3,
             writable: VersionRange::new(1, 2).expect("range"),
+            writing_release: None,
         };
         let json = serde_json::to_string(&refusal).expect("encode");
         assert_eq!(
@@ -473,6 +555,25 @@ mod tests {
         );
         assert_eq!(
             serde_json::from_str::<CompatRefusal>(&json).expect("decode"),
+            refusal
+        );
+    }
+
+    #[test]
+    fn refusal_names_writing_release_without_changing_its_reason() {
+        let refusal = CompatRefusal::ReaderFloorAbove {
+            component: "postgres".into(),
+            found: 2,
+            min_reader: 2,
+            reads: VersionRange::exactly(1),
+            writing_release: Some("1.1.0".into()),
+        };
+        assert!(refusal.to_string().contains("Writing release: 1.1.0"));
+        let json = serde_json::to_value(&refusal).expect("encode");
+        assert_eq!(json["refusal"], "reader_floor_above");
+        assert_eq!(json["writing_release"], "1.1.0");
+        assert_eq!(
+            serde_json::from_value::<CompatRefusal>(json).expect("decode"),
             refusal
         );
     }
