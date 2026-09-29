@@ -4,15 +4,14 @@ mod tests {
     use lash_sansio::sync::MutexExt as _;
     use std::sync::Arc;
     use std::sync::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     const SEED: u64 = 0x5_f730;
 
     fn granted_tool_definition() -> crate::ToolDefinition {
         crate::ToolDefinition::raw(
-            "tool:granted_orchestration_probe",
-            "granted_orchestration_probe",
-            "Proves granted calls stay in the leaf lane",
+            "tool:granted_leaf_probe",
+            "granted_leaf_probe",
+            "Proves granted calls run the granted leaf",
             serde_json::json!({ "type": "object" }),
             serde_json::json!({ "type": "string" }),
         )
@@ -27,8 +26,7 @@ mod tests {
         }
 
         fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-            (name == "granted_orchestration_probe")
-                .then(|| Arc::new(granted_tool_definition().contract()))
+            (name == "granted_leaf_probe").then(|| Arc::new(granted_tool_definition().contract()))
         }
 
         async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -36,43 +34,11 @@ mod tests {
         }
     }
 
-    struct OrchestrationProbe {
-        executions: Arc<AtomicUsize>,
-    }
-
-    #[async_trait::async_trait]
-    impl crate::facade_support::OrchestratingToolImplementation for OrchestrationProbe {
-        fn manifest(&self) -> crate::ToolManifest {
-            granted_tool_definition().manifest()
-        }
-
-        fn contract(&self) -> Arc<crate::ToolContract> {
-            Arc::new(granted_tool_definition().contract())
-        }
-
-        async fn execute(
-            &self,
-            _args: &serde_json::Value,
-            _context: &crate::facade_support::OrchestrationContext<'_>,
-        ) -> crate::ToolOutcome {
-            self.executions.fetch_add(1, Ordering::SeqCst);
-            crate::ToolOutcome::ok(serde_json::json!("orchestrated"))
-        }
-    }
-
     async fn granted_call_context<'run>(
         backend: &crate::Backend,
         scoped: crate::ScopedEffectController<'run>,
         observer: Arc<dyn crate::engine::ObservationSink>,
-    ) -> (crate::RuntimeExecutionContext<'run>, Arc<AtomicUsize>) {
-        let executions = Arc::new(AtomicUsize::default());
-        let orchestrating =
-            crate::facade_support::OrchestratingToolDef::new(Arc::new(OrchestrationProbe {
-                executions: Arc::clone(&executions),
-            }));
-        let registry =
-            crate::tool_registry_from_registrations(Vec::new(), Vec::new(), vec![orchestrating])
-                .expect("orchestration probe registry");
+    ) -> crate::RuntimeExecutionContext<'run> {
         let plugins = crate::support::plugin_host(Vec::new())
             .build_session("granted-call-session")
             .expect("plugin session");
@@ -83,7 +49,7 @@ mod tests {
         let dispatch = crate::tool_dispatch::ToolDispatchContext {
             plugins,
             tools: Arc::new(GrantedLeafTool),
-            tool_registry: Some(Arc::new(registry)),
+            tool_registry: None,
             tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(vec![
                 granted_tool_definition(),
             ])),
@@ -135,7 +101,7 @@ mod tests {
         if let Some(guard) = wiring {
             context = context.with_live_opener_guard(Arc::new(guard));
         }
-        (context, executions)
+        context
     }
 
     fn granted_call() -> crate::ToolExecutionGrant {
@@ -143,7 +109,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn scalar_granted_call_never_orchestrates() {
+    async fn scalar_granted_call_runs_the_granted_leaf() {
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let backend = double.lash_backend();
@@ -154,7 +120,7 @@ mod tests {
             ))
             .await
             .expect("open the granted-call handler");
-        let (context, orchestration_executions) = granted_call_context(
+        let context = granted_call_context(
             &backend,
             handler.scoped(),
             crate::engine::NullObservationSink::arc(),
@@ -166,18 +132,13 @@ mod tests {
                 &crate::CommandReplayKey::new("scalar-granted"),
                 ToolInvocation::new(
                     "scalar-granted",
-                    crate::ToolId::from("tool:granted_orchestration_probe"),
+                    crate::ToolId::from("tool:granted_leaf_probe"),
                     serde_json::json!({}),
                 )
                 .with_execution_grant(granted_call()),
             )
             .await;
 
-        assert_eq!(
-            orchestration_executions.load(Ordering::SeqCst),
-            0,
-            "grant authority cannot enter the orchestration lane"
-        );
         assert_eq!(
             reply.output.value_for_projection(),
             serde_json::json!("granted leaf")
@@ -190,7 +151,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn batch_granted_call_never_orchestrates() {
+    async fn batch_granted_call_runs_the_granted_leaf() {
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let backend = double.lash_backend();
@@ -201,7 +162,7 @@ mod tests {
             ))
             .await
             .expect("open the granted-call handler");
-        let (context, orchestration_executions) = granted_call_context(
+        let context = granted_call_context(
             &backend,
             handler.scoped(),
             crate::engine::NullObservationSink::arc(),
@@ -212,18 +173,13 @@ mod tests {
             .call_tool_batch(vec![
                 ToolInvocation::new(
                     "batch-granted",
-                    crate::ToolId::from("tool:granted_orchestration_probe"),
+                    crate::ToolId::from("tool:granted_leaf_probe"),
                     serde_json::json!({}),
                 )
                 .with_execution_grant(granted_call()),
             ])
             .await;
 
-        assert_eq!(
-            orchestration_executions.load(Ordering::SeqCst),
-            0,
-            "grant authority cannot enter the batch child's orchestration lane"
-        );
         assert_eq!(
             replies.replies[0].output.value_for_projection(),
             serde_json::json!("granted leaf")
@@ -378,7 +334,7 @@ mod tests {
                     ref name,
                     ref args,
                 } if call_id == "start-order"
-                    && name == "granted_orchestration_probe"
+                    && name == "granted_leaf_probe"
                     && args == &serde_json::json!({ "probe": true })
             ));
             assert!(matches!(
@@ -393,7 +349,7 @@ mod tests {
                     ref args,
                     ..
                 } if call_id == "start-order"
-                    && name == "granted_orchestration_probe"
+                    && name == "granted_leaf_probe"
                     && args == &serde_json::json!({ "probe": true })
             ));
             self.lines
@@ -417,7 +373,7 @@ mod tests {
             ))
             .await
             .expect("open the granted-call handler");
-        let (context, _) = granted_call_context(
+        let context = granted_call_context(
             &backend,
             handler.scoped(),
             crate::testing::ChannelObservationSink::new(Some(event_tx), Some(turn_tx)),
@@ -440,7 +396,7 @@ mod tests {
             &context,
             "test:start-order",
             "start-order",
-            "granted_orchestration_probe",
+            "granted_leaf_probe",
             serde_json::json!({ "probe": true }),
             crate::TurnActivityId::new("tool:start-order"),
         );
@@ -459,7 +415,7 @@ mod tests {
                 graph_key: None,
                 parent_call_id: None,
             } if call_id == "start-order"
-                && name == "granted_orchestration_probe"
+                && name == "granted_leaf_probe"
                 && args == &serde_json::json!({ "probe": true })
         ));
         sink.lines.lock_recover().push("activity ToolCallStarted");

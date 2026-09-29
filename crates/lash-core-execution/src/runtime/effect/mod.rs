@@ -20,7 +20,6 @@ pub use tool_child::{
     UnrecordedSessionSources,
 };
 mod tool_child_driver;
-pub(crate) use tool_child_driver::await_journaled_tool_completion;
 #[cfg(feature = "testing")]
 pub(crate) use tool_child_driver::validate_recorded_authorities;
 pub use tool_child_driver::{

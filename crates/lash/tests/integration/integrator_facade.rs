@@ -53,8 +53,8 @@ use lash::runtime::{
     RuntimeTurnPhaseProbeSlot,
 };
 use lash::tools::{
-    CompactToolContract, OrchestratingToolDef, PreparedToolBatch, PreparedToolBatchCall,
-    ToolBatchReplies, ToolCallOutcome, ToolChildExecutionTraceHook, ToolChildProcessStarted,
+    CompactToolContract, PreparedToolBatch, PreparedToolBatchCall, ToolBatchReplies,
+    ToolCallOutcome, ToolChildExecutionTraceHook, ToolChildProcessStarted,
     ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolInvocation, ToolInvocationReply,
     ToolTriggerEffectOutcome, ToolValue,
 };

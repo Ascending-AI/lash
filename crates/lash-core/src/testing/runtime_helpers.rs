@@ -332,21 +332,6 @@ pub fn test_host_config_with_trace_path_and_stream_events(
     EmbeddedRuntimeHost::new(config)
 }
 
-pub fn plugin_session_with_orchestrating_tool(
-    session_id: &SessionId,
-    tool: crate::tool_provider::orchestration::OrchestratingToolDef,
-) -> Arc<crate::PluginSession> {
-    let tool_factory = StaticPluginFactory::new(
-        "test_orchestrating_tools",
-        crate::PluginSpec::new().with_orchestrating_tool(tool),
-    );
-    let mut factories = crate::testing::test_standard_protocol_factories();
-    factories.push(Arc::new(tool_factory));
-    crate::PluginHost::new(factories)
-        .build_session(session_id)
-        .expect("plugins")
-}
-
 pub fn plugin_session_with_tools(
     session_id: &SessionId,
     tools: Arc<dyn crate::ToolProvider>,

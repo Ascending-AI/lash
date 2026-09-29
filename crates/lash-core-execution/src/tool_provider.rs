@@ -17,8 +17,6 @@ mod attachments;
 mod completion_support;
 mod direct_completion;
 mod dispatch;
-pub mod orchestration;
-mod process;
 pub mod process_events;
 mod session;
 mod triggers;
@@ -26,10 +24,6 @@ mod triggers;
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
 pub use dispatch::ToolDispatchClient;
-pub use process::{
-    ExternalLaunchAudit, InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
-    InternalProcessToolDef, InternalProcessToolImplementation,
-};
 pub use process_events::ToolProcessEventClient;
 pub use session::{ToolSessionAdmin, ToolSessionModel};
 pub use triggers::ToolTriggerClient;
@@ -469,19 +463,6 @@ pub struct ToolContext<'run> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
-    /// The realized-start sink a group child's driver installs so an
-    /// orchestrating body's process starts reach its settlement's possession.
-    /// `None` for every caller that is not a group child — its presence is
-    /// the mark that this context was admitted under a group child's rebound
-    /// dispatch; an ordinary orchestrating run's starts still ride its
-    /// `ToolIntent` records.
-    pub(crate) orchestrating_sinks: Option<crate::tool_dispatch::OrchestratingChildSinks>,
-    /// The cancellation trio the child was validated to wait under, carried
-    /// whole from its driver. `None` for every caller that is not a group
-    /// child; a nested call must inherit exactly this wait — deriving one
-    /// from the scope alone is always observing, which would wire a child
-    /// admitted with no cooperative authority to a gate it must never see.
-    pub(crate) turn_cancel_wait: Option<crate::runtime::TurnCancelWait>,
     /// Where this call's progress chunks are persisted (ADR 0114 §2.2).
     /// `None` outside a turn's capture: the call's progress is then accepted
     /// and kept nowhere.
@@ -577,7 +558,7 @@ pub enum ProgressRefused {
 }
 
 #[derive(Clone)]
-/// Notification emitted when an orchestrating tool starts a child process.
+/// Notification emitted when a tool call's declared start realizes a child process.
 pub struct ToolChildProcessStarted {
     /// The minted id of the child process that started.
     pub process_id: ProcessId,
@@ -644,8 +625,6 @@ pub struct ToolContextBuilder<'run> {
     parent_invocation: Option<crate::RuntimeInvocation>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
-    orchestrating_sinks: Option<crate::tool_dispatch::OrchestratingChildSinks>,
-    turn_cancel_wait: Option<crate::runtime::TurnCancelWait>,
     progress_reporter: Option<Arc<dyn ToolProgressReporter>>,
 }
 
@@ -676,8 +655,6 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: dispatch.parent_invocation.clone(),
             execution_env_spec: dispatch.execution_env_spec.clone(),
             child_execution_trace_hook: None,
-            orchestrating_sinks: None,
-            turn_cancel_wait: None,
             progress_reporter: None,
         }
     }
@@ -771,28 +748,6 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
-    /// Installs the sinks an orchestrating group child's driver drains: the
-    /// realized starts its settlement possesses and the refusal a nested call
-    /// met. Internal: only the tool-child driver
-    /// sets one, which is also what marks the context as admitted under a
-    /// group child's rebound dispatch.
-    pub(crate) fn orchestrating_sinks(
-        mut self,
-        buffer: crate::tool_dispatch::OrchestratingChildSinks,
-    ) -> Self {
-        self.orchestrating_sinks = Some(buffer);
-        self
-    }
-
-    /// Installs the cancellation trio the child waits under, computed once by
-    /// its driver from the recorded cancellation authority. Internal: only
-    /// the tool-child driver sets one, and every nested retry sleep and
-    /// deferred wait inside the child inherits it exactly.
-    pub(crate) fn turn_cancel_wait(mut self, wait: crate::runtime::TurnCancelWait) -> Self {
-        self.turn_cancel_wait = Some(wait);
-        self
-    }
-
     /// Installs the turn capture writer that persists this call's progress
     /// (ADR 0114 §2.2). Only the runtime's tool step body sets one.
     pub fn progress_reporter(mut self, reporter: Option<Arc<dyn ToolProgressReporter>>) -> Self {
@@ -826,8 +781,6 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: self.parent_invocation,
             execution_env_spec: self.execution_env_spec,
             child_execution_trace_hook: self.child_execution_trace_hook,
-            orchestrating_sinks: self.orchestrating_sinks,
-            turn_cancel_wait: self.turn_cancel_wait,
             progress_reporter: self.progress_reporter,
         }
     }
@@ -901,8 +854,6 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
-            orchestrating_sinks: self.orchestrating_sinks.clone(),
-            turn_cancel_wait: self.turn_cancel_wait.clone(),
             progress_reporter: self.progress_reporter.clone(),
         })
     }
@@ -953,8 +904,6 @@ impl<'run> ToolContext<'run> {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             child_execution_trace_hook: None,
-            orchestrating_sinks: None,
-            turn_cancel_wait: None,
             progress_reporter: None,
         }
     }
@@ -1013,20 +962,6 @@ impl<'run> ToolContext<'run> {
         }
     }
 
-    pub(crate) fn process_admin(&self) -> InternalProcessAdmin<'run> {
-        InternalProcessAdmin {
-            session_id: self.session_id.clone(),
-            agent_frame_id: self.agent_frame_id.clone(),
-            processes: Arc::clone(&self.processes),
-            effect_controller: self.effect_controller.clone(),
-            parent_invocation: self.parent_invocation.clone(),
-            tool_call_id: self.tool_call_id.clone(),
-            execution_env_spec: self.execution_env_spec.clone(),
-            orchestrating_sinks: self.orchestrating_sinks.clone(),
-            process_lineage: self.process_lineage(),
-        }
-    }
-
     /// Exposes emit child process started to protocol and process-engine implementors while
     /// preparing or executing an authorized tool call.
     pub fn emit_child_process_started(
@@ -1076,16 +1011,6 @@ impl<'run> ToolContext<'run> {
     /// boundary supplied no cancellation scope.
     pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
         self.cancellation_token.as_ref()
-    }
-
-    /// The cancellation trio this context's nested waits inherit, installed
-    /// by the tool-child driver from the child's recorded authority.
-    /// `None` for every context that is not a group child's — the fallback
-    /// callers that reach this accessor only do so under a group-child
-    /// context, so a `None` here degrades to an unobserved wait rather than
-    /// a scope-derived observing one.
-    pub(crate) fn turn_cancel_wait(&self) -> Option<&crate::runtime::TurnCancelWait> {
-        self.turn_cancel_wait.as_ref()
     }
 
     pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
@@ -1783,19 +1708,6 @@ mod tests {
         let attempt = crate::AttemptContext::__for_testing(&context, "attempt-scope".to_string());
         assert!(
             attempt.start_cx().is_err(),
-            "a process opener without its lineage has no start context"
-        );
-    }
-
-    /// The orchestrating surface takes the same shared derivation.
-    #[tokio::test]
-    async fn an_orchestrating_context_without_its_lineage_is_refused() {
-        let context = tool_context_under_scope(crate::AdmittedScope::process(
-            crate::process_id_for_test("worker"),
-        ));
-        let orchestration = crate::OrchestrationContext::new(context);
-        assert!(
-            orchestration.start_cx().is_err(),
             "a process opener without its lineage has no start context"
         );
     }

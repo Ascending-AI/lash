@@ -10,9 +10,9 @@
 //! journal could already name — a sleep, a process command, an await.
 //!
 //! It stops holding for a **tool** child. ADR 0099 §2 makes a tool child a
-//! replayable *invocation driver*: retry, completion-key derivation, deferred
-//! await and the orchestrating lane are coordination that runs at handler
-//! level, and only the atomic attempt runs inside a recorded body.
+//! replayable *invocation driver*: retry, completion-key derivation and
+//! deferred await are coordination that runs at handler level, and only the
+//! atomic attempt runs inside a recorded body.
 //! [`ToolAttempt`](super::envelope::RuntimeEffectCommand::ToolAttempt) does not
 //! name that: it is the atomic body itself — one attempt of one call, the thing
 //! that goes inside `ctx.run` — so a driver expressed as a `ToolAttempt` could

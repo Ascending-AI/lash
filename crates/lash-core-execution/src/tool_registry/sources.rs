@@ -1,117 +1,5 @@
 use super::*;
 
-pub(super) struct InternalProcessToolSource {
-    definition: crate::InternalProcessToolDef,
-}
-
-impl InternalProcessToolSource {
-    pub(super) fn new(definition: crate::InternalProcessToolDef) -> Self {
-        Self { definition }
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolSourceExecutor for InternalProcessToolSource {
-    fn id(&self) -> &str {
-        "internal"
-    }
-
-    fn snapshot_execution_source(
-        &self,
-        _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
-        Ok(Arc::new(Self::new(self.definition.clone())))
-    }
-
-    fn source_key(&self) -> ToolSourceKey {
-        ToolSourceKey::Internal(self.definition.manifest().id)
-    }
-
-    fn registration_kind(&self) -> ToolRegistrationKind {
-        ToolRegistrationKind::Leaf
-    }
-
-    fn advertised_tools(&self) -> Vec<ToolManifest> {
-        vec![self.definition.manifest()]
-    }
-
-    fn advertised_ids(&self) -> BTreeSet<ToolId> {
-        BTreeSet::from([self.definition.manifest().id])
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        (self.definition.manifest().name == name).then(|| self.definition.contract())
-    }
-
-    async fn prepare_tool_call(
-        &self,
-        call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolOutcome> {
-        self.definition.prepare_tool_call(call).await
-    }
-
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Internal(&self.definition)
-    }
-}
-
-pub(super) struct OrchestratingToolSource {
-    definition: crate::tool_provider::orchestration::OrchestratingToolDef,
-}
-
-impl OrchestratingToolSource {
-    pub(super) fn new(
-        definition: crate::tool_provider::orchestration::OrchestratingToolDef,
-    ) -> Self {
-        Self { definition }
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolSourceExecutor for OrchestratingToolSource {
-    fn id(&self) -> &str {
-        "orchestrating"
-    }
-
-    fn snapshot_execution_source(
-        &self,
-        _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
-        Ok(Arc::new(Self::new(self.definition.clone())))
-    }
-
-    fn source_key(&self) -> ToolSourceKey {
-        ToolSourceKey::Orchestrating(self.definition.manifest().id)
-    }
-
-    fn registration_kind(&self) -> ToolRegistrationKind {
-        ToolRegistrationKind::Orchestrating
-    }
-
-    fn advertised_tools(&self) -> Vec<ToolManifest> {
-        vec![self.definition.manifest()]
-    }
-
-    fn advertised_ids(&self) -> BTreeSet<ToolId> {
-        BTreeSet::from([self.definition.manifest().id])
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        (self.definition.manifest().name == name).then(|| self.definition.contract())
-    }
-
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Orchestrating(&self.definition)
-    }
-
-    async fn prepare_tool_call(
-        &self,
-        call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolOutcome> {
-        self.definition.prepare_tool_call(call).await
-    }
-}
-
 /// Accept a provider's name-resolved contract only when its process-local
 /// identity matches the manifest an id lookup established; otherwise preserve
 /// the provider's by-id outcome.
@@ -238,7 +126,7 @@ impl ToolSourceCapture for ToolProviderSourceCapture {
                         return Err(ReconfigureError::Validation(format!(
                             "source `{}` resolved tool id `{resident_id}` with mismatched \
                              manifest id `{}`",
-                            ToolSourceKey::Leaf(id.clone()),
+                            ToolSourceKey::new(id.clone()),
                             manifest.id,
                         )));
                     }
@@ -369,8 +257,8 @@ impl ToolSourceExecutor for ToolProviderSource {
         self.providers[provider_idx].prepare_tool_call(call).await
     }
 
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Leaf(self)
+    fn execution(&self) -> &dyn LeafToolSourceExecutor {
+        self
     }
 }
 
@@ -495,8 +383,8 @@ impl ToolSourceExecutor for PinnedToolProviderSource {
         route.provider.prepare_tool_call(call).await
     }
 
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Leaf(self)
+    fn execution(&self) -> &dyn LeafToolSourceExecutor {
+        self
     }
 }
 

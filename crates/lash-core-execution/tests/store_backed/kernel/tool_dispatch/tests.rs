@@ -18,14 +18,12 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio::sync::{Barrier, mpsc};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
 
 mod attachment_normalization;
 mod directives;
 mod host_effect_ledger;
-mod internal_activation;
-mod orchestrating;
 mod protocol_version_refusal;
 mod retry_effect_controllers;
 mod retry_laws;
@@ -98,42 +96,6 @@ fn contract_from(
 }
 
 struct MockTools;
-
-struct InternalProbe {
-    executed: Arc<AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl crate::InternalProcessToolImplementation for InternalProbe {
-    async fn execute(&self, _call: crate::InternalProcessToolCall<'_>) -> crate::ToolOutcomeDone {
-        self.executed.fetch_add(1, Ordering::SeqCst);
-        crate::ToolOutcomeDone::ok(json!("internal body ran"))
-    }
-}
-
-fn internal_probe_plugins(executed: Arc<AtomicUsize>) -> Arc<PluginSession> {
-    crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        "test_tools",
-        crate::PluginSpec::new().with_internal_tool(crate::InternalProcessToolDef::new(
-            test_tool("internal_probe"),
-            Arc::new(InternalProbe { executed }),
-        )),
-    ))])
-    .build_session("root")
-    .expect("plugin session")
-}
-
-/// Internal-lane dispatch resolves its registration through the tool registry,
-/// which the plain leaf-dispatch fixture leaves unset.
-async fn internal_probe_dispatch_context<'h>(
-    ports: crate::support::DispatchPorts<'h>,
-    executed: Arc<AtomicUsize>,
-) -> ToolDispatchContext<'h> {
-    let mut context =
-        exact_dispatch_context_with_plugins(ports, internal_probe_plugins(executed)).await;
-    context.tool_registry = Some(context.plugins.tool_registry());
-    context
-}
 
 #[derive(Clone)]
 struct AttemptIntentTools {
@@ -633,11 +595,6 @@ impl ToolProvider for MockTools {
     }
 }
 
-struct ParallelProbeTools {
-    barrier: Arc<Barrier>,
-    started: Arc<AtomicUsize>,
-}
-
 #[derive(Clone, Copy)]
 enum PendingProbeMode {
     MissingKey,
@@ -705,27 +662,6 @@ impl ToolProvider for PendingProbeTools {
                 ))
             }
             PendingProbeMode::Done => ToolOutcome::ok(json!({ "done": true })),
-        })
-        .into()
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolProvider for ParallelProbeTools {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        manifests(vec![test_tool("probe_a"), test_tool("probe_b")])
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        contract_from(vec![test_tool("probe_a"), test_tool("probe_b")], name)
-    }
-
-    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        self.started.fetch_add(1, Ordering::SeqCst);
-        let waited = timeout(Duration::from_millis(100), self.barrier.wait()).await;
-        (match waited {
-            Ok(_) => ToolOutcome::ok(json!(call.name())),
-            Err(_) => ToolOutcome::err_fmt(format!("{} did not overlap with peer", call.name())),
         })
         .into()
     }
@@ -853,53 +789,6 @@ fn test_plugins(provider: Arc<dyn ToolProvider>) -> Arc<PluginSession> {
     ))])
     .build_session("root")
     .expect("plugin session")
-}
-
-/// The test `batch` tool lives in the orchestration lane — a recorded leaf
-/// attempt receives an `AttemptContext` and cannot fan out — so these laws
-/// enter through the same seam the runtime uses instead of the leaf route.
-async fn dispatch_orchestrating_tool_call(
-    context: &ToolDispatchContext<'_>,
-    tool_name: &str,
-    args: serde_json::Value,
-) -> ToolDispatchOutcome {
-    Box::pin(dispatch_orchestrating_tool_call_with_prepared_name(
-        context, tool_name, tool_name, args,
-    ))
-    .await
-}
-
-async fn dispatch_orchestrating_tool_call_with_prepared_name(
-    context: &ToolDispatchContext<'_>,
-    tool_name: &str,
-    prepared_tool_name: &str,
-    args: serde_json::Value,
-) -> ToolDispatchOutcome {
-    // The orchestration lane resolves its registration through the tool
-    // registry, which the plain leaf-dispatch fixture leaves unset.
-    let mut context = context.clone();
-    context.tool_registry = Some(context.plugins.tool_registry());
-    let context = &context;
-    let manifest = crate::tool_dispatch::resolve_callable_manifest(context, tool_name)
-        .unwrap_or_else(|| panic!("orchestrating tool `{tool_name}` must be registered"));
-    let prepared = crate::PreparedToolCall::identity(
-        manifest.id,
-        crate::sansio::PendingToolCall {
-            call_id: format!("orchestrating:{tool_name}"),
-            tool_name: prepared_tool_name.to_string(),
-            args,
-            replay: None,
-        },
-    );
-    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
-        .prepared_call(&prepared)
-        .build();
-    Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
-        context,
-        prepared,
-        tool_context,
-    ))
-    .await
 }
 
 use crate::testing::MockSessionManager;
@@ -1459,53 +1348,6 @@ fn tool_context_for_prepared<'run>(
         .build()
 }
 
-async fn parallel_dispatch_context<'h>(
-    ports: crate::support::DispatchPorts<'h>,
-    barrier: Arc<Barrier>,
-    started: Arc<AtomicUsize>,
-) -> ToolDispatchContext<'h> {
-    let plugins = test_plugins(Arc::new(ParallelProbeTools { barrier, started }));
-    let tools = plugins.tools();
-    let tool_catalog = plugins
-        .resolved_tool_catalog(&SessionId::from("session"))
-        .expect("tool catalog");
-    ToolDispatchContext {
-        plugins,
-        tools,
-        tool_registry: None,
-        tool_catalog,
-        sessions: Arc::new(MockSessionManager::default()),
-        session_lifecycle: Arc::new(MockSessionManager::default()),
-        session_graph: Arc::new(MockSessionManager::default()),
-        processes: Arc::new(crate::UnavailableProcessService),
-        trigger_router: None,
-        process_definitions: None,
-        process_engines: Default::default(),
-        effect_controller: ports.controller,
-        direct_completions: crate::DirectCompletionClient::unavailable(
-            "direct completions are unavailable in this test context",
-        ),
-        parent_invocation: None,
-        observation_call_key: None,
-        execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-        ),
-        session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        observer: crate::engine::NullObservationSink::arc(),
-        checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
-        trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: ports.attachment_store,
-        attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
-        turn_context: crate::TurnContext::default(),
-        clock: std::sync::Arc::new(crate::SystemClock),
-        process_lineage: None,
-        turn_capture: None,
-        process_originator: None,
-    }
-}
-
 #[tokio::test]
 async fn dispatch_rejects_invalid_args_before_provider_execution() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
@@ -1950,161 +1792,6 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
 
     assert!(outcome.record.output.is_success());
     assert_eq!(executed.load(Ordering::SeqCst), 1);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn batch_returns_explicit_errors_without_runtime_execution_context() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let outcome = dispatch_orchestrating_tool_call(
-        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
-        "batch",
-        json!({
-            "tool_calls": [
-                {"tool": "alpha", "parameters": {}},
-                {"tool": "beta", "parameters": {"value": "ok"}},
-                {"tool": "beta", "parameters": {"value": "fail"}}
-            ]
-        }),
-    )
-    .await;
-
-    assert!(outcome.record.output.is_success());
-    assert_eq!(outcome.record.tool, "batch");
-    let value = outcome.record.output.value_for_projection();
-    let results = value
-        .get("results")
-        .and_then(|value| value.as_array())
-        .expect("results");
-    assert_eq!(results.len(), 3);
-    assert_eq!(
-        results
-            .iter()
-            .filter(|item| item.get("success").and_then(|value| value.as_bool()) == Some(false))
-            .count(),
-        3
-    );
-    assert_eq!(results[0].get("tool"), Some(&json!("tool:alpha")));
-    assert_eq!(
-        results[0]
-            .get("error")
-            .and_then(|value| value.get("message"))
-            .and_then(|value| value.as_str()),
-        Some("tool batch orchestration is unavailable outside process replay")
-    );
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn frameless_orchestrating_record_uses_manifest_name_when_prepared_call_is_renamed() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let outcome = dispatch_orchestrating_tool_call_with_prepared_name(
-        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
-        "batch",
-        "provider_controlled_name",
-        json!({
-            "tool_calls": [
-                {"tool": "alpha", "parameters": {}}
-            ]
-        }),
-    )
-    .await;
-
-    assert!(outcome.record.output.is_success());
-    assert_eq!(outcome.record.tool, "batch");
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn batch_rejects_nested_batch_as_partial_failure() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let outcome = dispatch_orchestrating_tool_call(
-        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
-        "batch",
-        json!({
-            "tool_calls": [
-                {"tool": "batch", "parameters": {"tool_calls": []}}
-            ]
-        }),
-    )
-    .await;
-
-    assert!(outcome.record.output.is_success());
-    let value = outcome.record.output.value_for_projection();
-    let first = value
-        .get("results")
-        .and_then(|value| value.as_array())
-        .and_then(|items| items.first())
-        .expect("first result");
-    assert_eq!(
-        first.get("error"),
-        Some(&json!("Tool 'batch' is not allowed inside batch"))
-    );
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn batch_marks_overflow_calls_as_failures() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let tool_calls = (0..26)
-        .map(|_| json!({"tool": "alpha", "parameters": {}}))
-        .collect::<Vec<_>>();
-
-    let outcome = dispatch_tool_call(
-        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
-        "batch".to_string(),
-        json!({ "tool_calls": tool_calls }),
-    )
-    .await;
-
-    assert!(!outcome.record.output.is_success());
-    let value = outcome.record.output.value_for_projection();
-    let error = value
-        .get("message")
-        .and_then(|value| value.as_str())
-        .expect("string error result");
-    assert!(
-        error.contains("tool_calls") && error.contains("has more than 25 items"),
-        "{error}",
-    );
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn batch_does_not_run_child_tools_without_runtime_execution_context() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let barrier = Arc::new(Barrier::new(2));
-    let started = Arc::new(AtomicUsize::new(0));
-    let outcome = dispatch_orchestrating_tool_call(
-        &parallel_dispatch_context(
-            crate::support::double_dispatch_ports(&double, &handler),
-            Arc::clone(&barrier),
-            Arc::clone(&started),
-        )
-        .await,
-        "batch",
-        json!({
-            "tool_calls": [
-                {"tool": "probe_a", "parameters": {}},
-                {"tool": "probe_b", "parameters": {}}
-            ]
-        }),
-    )
-    .await;
-
-    assert!(outcome.record.output.is_success());
-    assert_eq!(started.load(Ordering::SeqCst), 0);
-    let value = outcome.record.output.value_for_projection();
-    let results = value
-        .get("results")
-        .and_then(|value| value.as_array())
-        .expect("results");
-    assert_eq!(results.len(), 2);
-    assert!(
-        results
-            .iter()
-            .all(|item| item.get("success").and_then(|value| value.as_bool()) == Some(false))
-    );
     handler.close().await.expect("close the dispatch handler");
 }
 

@@ -10,54 +10,35 @@ struct AttachmentWritingTool;
 
 struct FirstTurnProcessTool;
 
-impl FirstTurnProcessTool {
-    /// Starting a durable process is journal-capable work, so this test tool
-    /// registers in the runtime-owned orchestrating lane.
-    #[expect(
-        unsafe_code,
-        reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
-    )]
-    fn orchestrating() -> lash_core::facade_support::OrchestratingToolDef {
-        let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
-            Arc::new(Self);
-        // SAFETY: lash-core owns this test-only tool contract and its body.
-        unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
-    }
-}
-
+/// Starting a durable process is a declared effect: the tool declares the
+/// start and lash realizes it after the attempt commits.
 #[async_trait::async_trait]
-impl lash_core::facade_support::OrchestratingToolImplementation for FirstTurnProcessTool {
-    fn manifest(&self) -> lash_core::ToolManifest {
-        first_turn_process_tool_definition().manifest()
+impl lash_core::ToolProvider for FirstTurnProcessTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![first_turn_process_tool_definition().manifest()]
     }
 
-    fn contract(&self) -> Arc<lash_core::ToolContract> {
-        Arc::new(first_turn_process_tool_definition().contract())
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "start_first_turn_process")
+            .then(|| Arc::new(first_turn_process_tool_definition().contract()))
     }
 
-    async fn execute(
-        &self,
-        _args: &serde_json::Value,
-        context: &lash_core::facade_support::OrchestrationContext<'_>,
-    ) -> lash_core::ToolOutcome {
-        let start_key = match context.start_key(0) {
-            Ok(start_key) => start_key,
-            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
-        };
-        match context
-            .start_process(
-                lash_core::ProcessStartRequest::external(
-                    lash_core::ProcessOriginator::host(),
-                    serde_json::json!({ "source": "first child turn" }),
-                    lash_core::Lifetime::Detached,
-                )
-                .with_start_key(Some(start_key)),
-            )
-            .await
-        {
-            Ok(process) => lash_core::ToolOutcome::ok(serde_json::json!({ "process": process.id })),
-            Err(err) => lash_core::ToolOutcome::err_fmt(err),
-        }
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let session_id = lash_core::SessionId::from(call.context.session_id());
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({ "declared": "start" })),
+            lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
+                lash_core::StartProcessIntent {
+                    session_id: session_id.clone(),
+                    declaration: lash_core::ProcessStartDeclaration::external(
+                        lash_core::ProcessOriginator::host(),
+                        serde_json::json!({ "source": "first child turn" }),
+                        lash_core::Lifetime::Detached,
+                    )
+                    .with_observers([session_id]),
+                },
+            ))]),
+        )
     }
 }
 
@@ -489,10 +470,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     );
     let runtime_host = host;
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
-        plugin_session_with_orchestrating_tool(
-            &SessionId::from("root"),
-            FirstTurnProcessTool::orchestrating(),
-        ),
+        plugin_session_with_tools(&SessionId::from("root"), Arc::new(FirstTurnProcessTool)),
         root_store as Arc<dyn lash_core::store::RuntimePersistence>,
         std::sync::Arc::clone(&runtime_host.embedded().core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.embedded().core.durability.process_env_store),

@@ -18,8 +18,8 @@
 //! registry is possessed by exactly one live opener — the opener that realized
 //! it — and no opener possesses an id nothing realized.** Two of the three
 //! failure shapes are the C1 finding in miniature: a realized child possessed
-//! by *zero* openers is unreachable to the run that owns it (the
-//! orchestrating-starts leak), and a child possessed by *two* openers is an
+//! by *zero* openers is unreachable to the run that owns it (a start that
+//! leaks past its opener), and a child possessed by *two* openers is an
 //! authority leak outright. The third — possession of a never-realized id —
 //! is the phantom half of the same boundary.
 //!

@@ -162,7 +162,7 @@ pub use tool_catalog::{
 #[cfg(feature = "schema-validation")]
 pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
-    CompactToolContract, LashSchema, ModelTool, TYPESCRIPT_TOOL_BINDING_KEY, ToolActivation,
+    CompactToolContract, LashSchema, ModelTool, TYPESCRIPT_TOOL_BINDING_KEY,
     ToolArgumentProjectionPolicy, ToolBinding, ToolContract, ToolDefinition,
     ToolDefinitionBindingExt, ToolDiscovery, ToolId, ToolManifest, ToolOutputContract,
     ToolRetryPolicy, schema_for,

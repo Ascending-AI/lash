@@ -69,12 +69,6 @@ impl ToolSourceCapture for FrozenToolSourceCapture {
     }
 }
 
-pub(crate) enum ToolSourceExecution<'a> {
-    Leaf(&'a dyn LeafToolSourceExecutor),
-    Internal(&'a crate::InternalProcessToolDef),
-    Orchestrating(&'a crate::tool_provider::orchestration::OrchestratingToolDef),
-}
-
 #[async_trait::async_trait]
 pub(crate) trait LeafToolSourceExecutor: Send + Sync {
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome;
@@ -98,10 +92,7 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         known_resident_ids: &BTreeSet<ToolId>,
     ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError>;
     fn source_key(&self) -> ToolSourceKey {
-        ToolSourceKey::Leaf(self.id().to_string())
-    }
-    fn registration_kind(&self) -> ToolRegistrationKind {
-        ToolRegistrationKind::Leaf
+        ToolSourceKey::new(self.id())
     }
     fn advertised_tools(&self) -> Vec<ToolManifest>;
     /// The ids this source advertises. Implementors that already index by id
@@ -129,8 +120,6 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
     ) -> Result<PreparedToolCall, ToolOutcome> {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
-    /// The typed execution capability this source provides. Leaf sources
-    /// expose a [`LeafToolSourceExecutor`]; internal and orchestrating sources
-    /// expose only their typed definitions, never a leaf body.
-    fn execution(&self) -> ToolSourceExecution<'_>;
+    /// The execution capability this source provides.
+    fn execution(&self) -> &dyn LeafToolSourceExecutor;
 }

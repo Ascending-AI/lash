@@ -101,28 +101,6 @@ fn is_default_tool_retry_policy(policy: &ToolRetryPolicy) -> bool {
 }
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolActivation {
-    #[default]
-    Always,
-    Internal,
-}
-
-fn is_default_tool_activation(activation: &ToolActivation) -> bool {
-    *activation == ToolActivation::default()
-}
-
-#[derive(
     Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -319,8 +297,6 @@ pub struct ToolManifest {
     pub description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compact_contract: Option<Arc<CompactToolContract>>,
-    #[serde(default, skip_serializing_if = "is_default_tool_activation")]
-    pub activation: ToolActivation,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub bindings: std::collections::BTreeMap<String, serde_json::Value>,
     #[serde(
@@ -727,7 +703,6 @@ impl ToolDefinition {
                 name: name.clone(),
                 description: description.into(),
                 compact_contract: None,
-                activation: ToolActivation::default(),
                 bindings: std::collections::BTreeMap::new(),
                 argument_projection: ToolArgumentProjectionPolicy::default(),
                 retry_policy: default_tool_retry_policy(),
@@ -761,11 +736,6 @@ impl ToolDefinition {
 
     pub fn with_examples(mut self, examples: Vec<String>) -> Self {
         self.contract.examples = examples;
-        self
-    }
-
-    pub fn with_activation(mut self, activation: ToolActivation) -> Self {
-        self.manifest.activation = activation;
         self
     }
 

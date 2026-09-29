@@ -121,24 +121,6 @@ pub async fn validate_recorded_authorities(
     crate::runtime::effect::validate_recorded_authorities(host, controller, request).await
 }
 
-/// `InternalProcessAdmin` for a session over `processes`: the admin surface a
-/// process tool receives, which the await-visibility law drives directly.
-pub fn internal_process_admin<'run>(
-    session_id: crate::SessionId,
-    agent_frame_id: crate::FrameNodeId,
-    processes: std::sync::Arc<dyn crate::ProcessService>,
-    effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
-    execution_env_spec: crate::ProcessExecutionEnvSpec,
-) -> crate::InternalProcessAdmin<'run> {
-    crate::InternalProcessAdmin::for_testing(
-        session_id,
-        agent_frame_id,
-        processes,
-        effect_controller,
-        execution_env_spec,
-    )
-}
-
 // `RuntimeExecutionContext`'s process-handle and process-await operations:
 // what a language runtime's process host calls on a context, which the
 // relocated handle, await and batch laws drive directly.
@@ -171,15 +153,6 @@ pub async fn cancel_process_handle(
     context.cancel_process_handle(call_id, handle).await
 }
 
-pub async fn start_tool_process(
-    context: &crate::RuntimeExecutionContext<'_>,
-    call_id: String,
-    tool_name: String,
-    args: serde_json::Value,
-) -> crate::session::ToolInvocationReply {
-    context.start_tool_process(call_id, tool_name, args).await
-}
-
 pub fn record_started_process(
     context: &crate::RuntimeExecutionContext<'_>,
     process_id: &ProcessId,
@@ -207,16 +180,6 @@ pub fn emit_tool_call_started(
     activity_id: crate::TurnActivityId,
 ) {
     context.emit_tool_call_started(call_key, call_id, name, args, activity_id);
-}
-
-/// `ToolRegistry::from_tool_registrations`: a registry over explicit source,
-/// internal and orchestrating registrations, as a plugin session assembles it.
-pub fn tool_registry_from_registrations(
-    sources: Vec<(String, Vec<std::sync::Arc<dyn crate::ToolProvider>>)>,
-    internal_tools: Vec<crate::InternalProcessToolDef>,
-    orchestrating_tools: Vec<crate::facade_support::OrchestratingToolDef>,
-) -> Result<crate::ToolRegistry, crate::tool_registry::ReconfigureError> {
-    crate::ToolRegistry::from_tool_registrations(sources, internal_tools, orchestrating_tools)
 }
 
 /// The turn's cancellation-escalation await-event key, so a test can peek or

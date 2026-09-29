@@ -3,7 +3,7 @@
 //!
 //! The process kernel intentionally understands `ToolCall`, `SessionTurn`, and
 //! `External` because those inputs carry runtime mechanisms core must enforce:
-//! tool orchestration, child-session turns, and externally completed work. New
+//! recorded tool attempts, child-session turns, and externally completed work. New
 //! process runtimes should use `ProcessInput::Engine { kind, payload }` unless
 //! core must understand their semantics to enforce a kernel mechanism.
 //!
@@ -136,9 +136,6 @@ pub mod facade_support {
     ) -> lash_trace::TraceContext {
         crate::trace::trace_context_for_effect_invocation(context, invocation)
     }
-    pub use crate::tool_provider::orchestration::{
-        OrchestratingToolDef, OrchestratingToolImplementation, OrchestrationContext,
-    };
     pub fn build_core_tool_registry(
         host: &crate::plugin::PluginHost,
     ) -> Result<std::sync::Arc<crate::ToolRegistry>, crate::PluginError> {
@@ -512,13 +509,12 @@ pub use lash_sansio::{
     PromptContributionGate, PromptLayer, PromptSectionTitle, PromptSlot, PromptSlotLayer,
     PromptTemplate, PromptTemplateEntry, PromptTemplateSection, PromptTitleBuiltin, SchemaContract,
     SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata,
-    TokenUsage, TokenUsageOverflow, ToolActivation, ToolArgumentProjectionPolicy, ToolCallOutcome,
-    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
-    ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition, ToolDiscovery, ToolFailure,
-    ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity,
-    ToolIntentKind, ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy,
-    ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId,
-    TurnOutputSource,
+    TokenUsage, TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput,
+    ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry,
+    ToolContract, ToolControl, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureClass,
+    ToolFailureSource, ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+    ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus,
+    ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
 };
 pub use tool_provider::{
     ToolAttachmentClient, ToolDirectCompletionClient, ToolDispatchClient, ToolProcessEventClient,
@@ -886,12 +882,11 @@ pub use tool_intent::{
 };
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, ExternalLaunchAudit,
-    InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall, InternalProcessToolDef,
-    InternalProcessToolImplementation, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall,
-    ProgressRefused, ToolAttemptCaptureWriter, ToolCall, ToolChildExecutionTraceHook,
-    ToolChildProcessStarted, ToolContext, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext,
-    ToolProgressReporter, ToolProgressSink, ToolProvider, TurnToolCapture,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, PreparedToolBatch,
+    PreparedToolBatchCall, PreparedToolCall, ProgressRefused, ToolAttemptCaptureWriter, ToolCall,
+    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolContext, ToolExecutionGrant,
+    ToolPrepareCall, ToolPrepareContext, ToolProgressReporter, ToolProgressSink, ToolProvider,
+    TurnToolCapture,
 };
 
 #[doc(hidden)]

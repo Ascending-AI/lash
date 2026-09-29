@@ -31,7 +31,7 @@ use lash::plugins::{
 };
 use lash::provider::{ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy};
 use lash::runtime::AdvancedLashCoreBuilder;
-use lash::tools::{ToolActivation, ToolCallRecord, ToolOutputContract};
+use lash::tools::{ToolCallRecord, ToolOutputContract};
 use lash::turn::{AssistantOutput, TurnFailureCode, TurnFailureKind, TurnIssue};
 use lash::usage::{TokenLedgerEntry, TokenUsage};
 use lash::{ModelLimits, ModelSpec};
@@ -524,12 +524,8 @@ fn a_core_is_built_over_one_backend(backend: lash::Backend) -> lash::LashCoreBui
     lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
 }
 
-fn tool_contract_types_are_nameable(
-    activation: ToolActivation,
-    record: ToolCallRecord,
-    contract: ToolOutputContract,
-) {
-    let _ = (activation, record, contract);
+fn tool_contract_types_are_nameable(record: ToolCallRecord, contract: ToolOutputContract) {
+    let _ = (record, contract);
 }
 
 fn tool_catalog_types_are_nameable(contribution: ToolCatalogContribution) {

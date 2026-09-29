@@ -5,11 +5,11 @@
 //! `PresentToolResult` effect keyed by `{call_id}:present`, and a redrive
 //! re-issues it for the journal to serve. How long the call took is an
 //! observation, not a recorded fact: a redriven call serves its journaled
-//! attempt at once, or re-runs an orchestrating body against its recorded
-//! effects, so its settled duration differs from the live one. The journal
-//! compares the redriven envelope with the recorded one, so a duration in the
-//! envelope would refuse a healthy redrive with a replay hash conflict — and
-//! the model would be shown that conflict in place of the tool's result.
+//! attempt at once, so its settled duration differs from the live one. The
+//! journal compares the redriven envelope with the recorded one, so a duration
+//! in the envelope would refuse a healthy redrive with a replay hash conflict
+//! — and the model would be shown that conflict in place of the tool's
+//! result.
 
 use serde_json::json;
 use std::sync::{Arc, Mutex};

@@ -114,8 +114,8 @@ impl ToolSourceExecutor for AdmissionSourceSnapshot {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
 
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Leaf(self)
+    fn execution(&self) -> &dyn LeafToolSourceExecutor {
+        self
     }
 }
 
@@ -170,8 +170,8 @@ impl ToolSourceExecutor for MutableAdmissionSource {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
 
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Leaf(self)
+    fn execution(&self) -> &dyn LeafToolSourceExecutor {
+        self
     }
 }
 
@@ -278,8 +278,8 @@ impl ToolSourceExecutor for RoutedAdmissionSource {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
 
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Leaf(self)
+    fn execution(&self) -> &dyn LeafToolSourceExecutor {
+        self
     }
 }
 
@@ -789,7 +789,7 @@ fn generation_overflow_leaves_source_and_surface_unmodified() {
     assert!(
         authority
             .sources
-            .contains_key(&ToolSourceKey::Leaf("existing".to_string()))
+            .contains_key(&ToolSourceKey::new("existing"))
     );
     drop(authority);
     assert_eq!(registry.export_state().entries(), before.entries());
@@ -824,7 +824,7 @@ fn write_revision_overflow_leaves_source_and_surface_unmodified() {
     assert!(
         authority
             .sources
-            .contains_key(&ToolSourceKey::Leaf("existing".to_string()))
+            .contains_key(&ToolSourceKey::new("existing"))
     );
     assert_eq!(authority.write_revision, u64::MAX);
     drop(authority);
@@ -993,9 +993,7 @@ fn refresh_cannot_lose_a_source_admitted_mid_capture() {
         .expect("refresh retries the moved fence");
     let authority = pinned.inner.read_recover();
     assert!(
-        authority
-            .sources
-            .contains_key(&ToolSourceKey::Leaf("late".to_string())),
+        authority.sources.contains_key(&ToolSourceKey::new("late")),
         "the pinned registry must carry the source admitted mid-capture"
     );
     assert!(

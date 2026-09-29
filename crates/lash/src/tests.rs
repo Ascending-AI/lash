@@ -1891,8 +1891,7 @@ pub(crate) use harness::{
     explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget, held_double, latest_double,
     memory_store_backend, memory_store_set, mock_model_spec, model_spec, output_into_cancelled_by,
     redeploy, restate_double, retry_when_claim_frees, run_async_test_on_stack_budget,
-    run_async_test_on_stack_size, serve_processes, settle_session_drive, store_backend_with_clock,
-    turn_input_states,
+    serve_processes, settle_session_drive, store_backend_with_clock, turn_input_states,
 };
 mod agent_scenarios;
 #[cfg(feature = "rlm")]

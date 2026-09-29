@@ -87,7 +87,6 @@ const TOOL_MANIFEST_FIELDS: &[&str] = &[
     "name",
     "description",
     "compact_contract",
-    "activation",
     "bindings",
     "argument_projection",
     "retry_policy",

@@ -55,9 +55,6 @@ impl ToolRegistry {
 
     /// Resolve the source for a registry entry, distinguishing "unknown tool"
     /// from "known but orphaned" so callers can fail with a precise error.
-    /// Callers that do not need the admitted manifest use this over
-    /// [`Self::resolve_execution_source`] so dispatch does not pay a manifest
-    /// clone per call.
     fn resolve_bound_source(
         &self,
         tool_id: &ToolId,
@@ -87,40 +84,6 @@ impl ToolRegistry {
         })
     }
 
-    /// Like [`Self::resolve_bound_source`] but also returns the admitted
-    /// manifest view for callers that inspect it.
-    fn resolve_execution_source(
-        &self,
-        tool_id: &ToolId,
-    ) -> Result<(Arc<dyn ToolSourceExecutor>, ToolManifest), ToolOutcome> {
-        let authority = self.inner.read_recover();
-        let Some(entry) = authority.state.surface.get(tool_id) else {
-            return Err(ToolOutcome::err_fmt(format_args!(
-                "Unknown tool id: {tool_id}"
-            )));
-        };
-        if !entry.is_member() {
-            return Err(ToolOutcome::err_fmt(format_args!(
-                "Tool id `{tool_id}` is unavailable"
-            )));
-        }
-        let source_key = match &entry.binding {
-            ToolBinding::Bound { source_key } => source_key,
-            ToolBinding::Orphaned => {
-                return Err(ToolOutcome::err_fmt(format_args!(
-                    "Tool id `{tool_id}` is unavailable: it was restored from a persisted session \
-                     but its source is not currently registered"
-                )));
-            }
-        };
-        let source = authority.sources.get(source_key).cloned();
-        source
-            .map(|source| (source, entry.view_manifest()))
-            .ok_or_else(|| {
-                ToolOutcome::err_fmt(format_args!("Tool source missing for tool id `{tool_id}`"))
-            })
-    }
-
     fn resolve_granted_execution_source(
         &self,
         tool_id: &ToolId,
@@ -139,19 +102,15 @@ impl ToolRegistry {
                 .unwrap_or(&authority.sources)
                 .clone()
         };
-        let leaf_source_key = ToolSourceKey::Leaf(source_id.to_string());
+        let leaf_source_key = ToolSourceKey::new(source_id);
         let source = match sources.get(&leaf_source_key) {
             Some(source) => Arc::clone(source),
             None if source_id == PLUGIN_TOOL_SOURCE_ID => {
-                let mut matches = sources
-                    .iter()
-                    .filter(|(source_key, _)| matches!(source_key, ToolSourceKey::Leaf(_)))
-                    .map(|(_, source)| source)
-                    .filter(|source| {
-                        source
-                            .resolve_manifest_by_id(tool_id)
-                            .is_some_and(|manifest| manifest.id == *tool_id)
-                    });
+                let mut matches = sources.values().filter(|source| {
+                    source
+                        .resolve_manifest_by_id(tool_id)
+                        .is_some_and(|manifest| manifest.id == *tool_id)
+                });
                 let Some(source) = matches.next().cloned() else {
                     return Err(ToolOutcome::err_fmt(format_args!(
                         "Tool source `{source_id}` missing for granted tool id `{tool_id}`"
@@ -202,32 +161,7 @@ impl ToolRegistry {
         let Ok(source) = self.resolve_granted_execution_source(tool_id, source_id) else {
             return false;
         };
-        match source.execution() {
-            ToolSourceExecution::Leaf(leaf) => leaf.attempt_may_defer(tool_id),
-            ToolSourceExecution::Internal(_) | ToolSourceExecution::Orchestrating(_) => false,
-        }
-    }
-
-    pub(crate) async fn execute_orchestrating_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> ToolOutcome {
-        let source = match self.resolve_bound_source(tool_id) {
-            Ok(resolved) => resolved,
-            Err(result) => return result,
-        };
-        match source.execution() {
-            ToolSourceExecution::Orchestrating(definition) => {
-                definition.execute(args, context).await
-            }
-            ToolSourceExecution::Leaf(_) | ToolSourceExecution::Internal(_) => {
-                ToolOutcome::err_fmt(format_args!(
-                    "Tool id `{tool_id}` is not an orchestrating registration"
-                ))
-            }
-        }
+        source.execution().attempt_may_defer(tool_id)
     }
 }
 
@@ -300,63 +234,11 @@ impl ToolProvider for ToolRegistry {
             Ok(source) => source,
             Err(result) => return result.into(),
         };
-        match source.execution() {
-            ToolSourceExecution::Leaf(leaf) => leaf.execute(call).await,
-            ToolSourceExecution::Internal(_) => ToolOutcome::err_fmt(format_args!(
-                "tool id `{}` is an internal process tool",
-                call.tool_id()
-            ))
-            .into(),
-            ToolSourceExecution::Orchestrating(_) => ToolOutcome::err_fmt(format_args!(
-                "tool id `{}` is an orchestrating tool",
-                call.tool_id()
-            ))
-            .into(),
-        }
+        source.execution().execute(call).await
     }
 
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
         self.resolve_bound_source(tool_id)
-            .is_ok_and(|source| match source.execution() {
-                ToolSourceExecution::Leaf(leaf) => leaf.attempt_may_defer(tool_id),
-                ToolSourceExecution::Internal(_) | ToolSourceExecution::Orchestrating(_) => false,
-            })
-    }
-}
-
-impl ToolRegistry {
-    pub(crate) async fn execute_internal_process_tool(
-        &self,
-        call: crate::InternalProcessToolCall<'_>,
-    ) -> Result<crate::ToolOutcomeDone, ToolOutcome> {
-        let (source, manifest) = self.resolve_execution_source(call.tool_id())?;
-        if manifest.id != *call.tool_id() || manifest.activation != crate::ToolActivation::Internal
-        {
-            return Err(ToolOutcome::err_fmt(format_args!(
-                "tool id `{}` is not activated for internal execution",
-                call.tool_id()
-            )));
-        }
-        match source.execution() {
-            ToolSourceExecution::Internal(definition) => {
-                // The implementation sees the registered definition manifest,
-                // not the caller's view: a curated alias must not rewrite the
-                // provider-facing name.
-                let definition_manifest = definition.manifest();
-                Ok(definition
-                    .execute(crate::InternalProcessToolCall::new(
-                        &definition_manifest,
-                        call.args,
-                        call.context,
-                    ))
-                    .await)
-            }
-            ToolSourceExecution::Leaf(_) | ToolSourceExecution::Orchestrating(_) => {
-                Err(ToolOutcome::err_fmt(format_args!(
-                    "tool id `{}` has no internal implementation",
-                    call.tool_id()
-                )))
-            }
-        }
+            .is_ok_and(|source| source.execution().attempt_may_defer(tool_id))
     }
 }

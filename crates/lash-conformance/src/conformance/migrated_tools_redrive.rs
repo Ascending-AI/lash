@@ -1,20 +1,21 @@
 //! FIG-1293: the public migrated tools settle to literal outcomes across a
 //! crash-and-redrive of the turn that called them.
 //!
-//! One model response calls three migrated public tools in one turn:
-//! `cancel_process` (a process-control intent), `spawn_agent` (an
-//! orchestrating start whose child session runs as a process) and `batch`
-//! (the protocol's nested batch of two echo calls). The turn crashes after
-//! its tool calls settled and before it commits, and the tier redelivers it
-//! the way it recovers a crashed turn. The redriven turn finishes with the
-//! literal outcomes the first attempt produced, without asking the model
-//! again: every call settled once, as a group child, and the redrive reads
-//! the settlements back.
+//! One model response calls the two migrated public tools and a `batch` in
+//! one turn: `cancel_process` (a process-control intent), `spawn_agent` (a
+//! declared start whose child session runs as a process) and a `batch` of two
+//! echo calls, which the standard protocol expands into the step's tool group
+//! and folds back into one result. The turn crashes after its tool calls
+//! settled and before it commits, and the tier redelivers it the way it
+//! recovers a crashed turn. The redriven turn finishes with the literal
+//! outcomes the first attempt produced, without asking the model again: every
+//! call settled once, as a group child, and the redrive reads the settlements
+//! back.
 //!
-//! `spawn_agent` and `cancel_process` come from plugins that sit above this
-//! crate in the dependency graph, so the tier supplies them as
-//! `orchestration` factories — the same way producers from higher crates
-//! reach the tool-batch parallelism law.
+//! The standard protocol, `spawn_agent` and `cancel_process` come from
+//! plugins that sit above this crate in the dependency graph, so the tier
+//! supplies them as plugin factories — the same way producers from higher
+//! crates reach the tool-batch parallelism law.
 
 use crate::admit;
 use lash_core::testing::TestTurnDrive as _;
@@ -179,7 +180,8 @@ fn literal_outputs(turn: &crate::AssembledTurn) -> Vec<(String, serde_json::Valu
         .collect()
 }
 
-/// The public migrated tools settle once and redrive to literal outcomes.
+/// The public migrated tools and a `batch` settle once and redrive to literal
+/// outcomes.
 ///
 /// The first attempt panics after its tool calls settled and before its turn
 /// commits; the tier's runner redelivers the turn, and the redriven turn
@@ -194,7 +196,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
-    orchestration: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
+    plugins: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 ) {
     let registry = stores.process_registry();
     let session_id = SessionId::from(format!("{prefix}-session"));
@@ -225,9 +227,8 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let echo: Arc<dyn crate::ToolProvider> = Arc::new(crate::testing::FixtureTools);
-    let factories = crate::testing::test_standard_protocol_factories()
+    let factories = plugins
         .into_iter()
-        .chain(orchestration)
         .chain([Arc::new(crate::plugin::StaticPluginFactory::new(
             "conformance-migrated-echo",
             crate::facade_support::PluginSpec::new().with_tool_provider(echo),

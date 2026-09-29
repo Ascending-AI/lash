@@ -17,8 +17,8 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
     };
     use lash_sansio::{
         CompactToolContract, ProjectionMode, SchemaContract, SchemaProjectionOverride,
-        SchemaProjectionPolicy, ToolActivation, ToolArgumentProjectionPolicy, ToolDefinition,
-        ToolOutputContract, ToolRetryPolicy,
+        SchemaProjectionPolicy, ToolArgumentProjectionPolicy, ToolDefinition, ToolOutputContract,
+        ToolRetryPolicy,
     };
 
     let compact_contract = CompactToolContract {
@@ -63,7 +63,6 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
     );
     definition.manifest.inline = false;
     definition.manifest.compact_contract = Some(std::sync::Arc::new(compact_contract.clone()));
-    definition.manifest.activation = ToolActivation::Internal;
     definition
         .manifest
         .bindings
@@ -206,7 +205,6 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
             "name",
             "description",
             "compact_contract",
-            "activation",
             "bindings",
             "argument_projection",
             "retry_policy",

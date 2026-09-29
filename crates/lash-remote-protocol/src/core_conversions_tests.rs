@@ -2046,7 +2046,6 @@ fn demo_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant {
         output_schema: RemoteSchemaContract::default(),
         output_contract: RemoteToolOutputContract::Static,
         examples: Vec::new(),
-        activation: None,
         argument_projection: None,
         retry_policy: None,
         bindings: BTreeMap::from([(

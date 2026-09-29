@@ -63,7 +63,6 @@ pub(super) fn surface_matches_state_entries(
                 stored.manifest == entry.manifest
                     && stored.orphaned == entry.is_orphaned()
                     && stored.member == entry.member
-                    && stored.registration_kind == entry.kind
             })
         })
 }
@@ -76,7 +75,6 @@ pub(super) fn surfaces_publicly_equal(left: &ToolSurface, right: &ToolSurface) -
                 other.manifest == entry.manifest
                     && other.member == entry.member
                     && other.is_orphaned() == entry.is_orphaned()
-                    && other.kind == entry.kind
             })
         })
 }
@@ -129,35 +127,14 @@ pub(super) fn reconcile_tool_state_entries(
 
     for (id, stored) in entries {
         if let Some(live) = surface.get_mut(id) {
-            // A persisted internal entry must not silently rebind to a live
-            // leaf or orchestrating source on the same id: the stored
-            // activation is only consistent with an explicit internal source.
-            if stored.manifest.activation == crate::ToolActivation::Internal
-                && !matches!(live.binding.source_key(), Some(ToolSourceKey::Internal(_)))
-            {
-                let owner = live
-                    .binding
-                    .source_key()
-                    .map_or_else(|| "<orphaned>".to_string(), ToolSourceKey::to_string);
-                return Err(ReconfigureError::Validation(format!(
-                    "stored internal tool `{id}` cannot bind to non-internal source `{owner}`"
-                )));
-            }
             live.member = stored.member;
             continue;
         }
 
         let resolved = resolve_snapshot_id(id, sources, preferred_source_key)?;
         match resolved {
-            Some((source_key, manifest, kind)) => {
-                if stored.manifest.activation == crate::ToolActivation::Internal
-                    && !matches!(source_key, ToolSourceKey::Internal(_))
-                {
-                    return Err(ReconfigureError::Validation(format!(
-                        "stored internal tool `{id}` cannot bind to non-internal source `{source_key}`"
-                    )));
-                }
-                let mut entry = bound_tool_entry(manifest, source_key, kind);
+            Some((source_key, manifest)) => {
+                let mut entry = ToolRegistryEntry::new(manifest, source_key);
                 entry.member = stored.member;
                 insert_result_entry(&mut surface, id.clone(), entry)?;
             }
@@ -190,11 +167,7 @@ pub(super) fn reconcile_tool_state_entries(
                 } else {
                     unresolved.parked_opt_outs.push(id.clone());
                 }
-                let orphan = ToolRegistryEntry::orphaned(
-                    stored.manifest.clone(),
-                    stored.registration_kind,
-                    stored.member,
-                );
+                let orphan = ToolRegistryEntry::orphaned(stored.manifest.clone(), stored.member);
                 insert_result_entry(&mut surface, id.clone(), orphan)?;
             }
         }
@@ -221,13 +194,7 @@ fn advertised_tool_entries(
             .collect::<Vec<_>>();
         validate_unique_manifests(&manifests)?;
         for manifest in manifests {
-            insert_advertised_entry(
-                &mut advertised,
-                source_key,
-                source.registration_kind(),
-                manifest,
-                preferred_source_key,
-            )?;
+            insert_advertised_entry(&mut advertised, source_key, manifest, preferred_source_key)?;
         }
     }
     Ok(advertised)
@@ -241,18 +208,9 @@ fn advertised_tool_entries(
 pub(super) fn insert_advertised_entry(
     advertised: &mut ToolSurface,
     source_key: &ToolSourceKey,
-    kind: ToolRegistrationKind,
     manifest: ToolManifest,
     preferred_source_key: Option<&ToolSourceKey>,
 ) -> Result<(), ReconfigureError> {
-    if matches!(source_key, ToolSourceKey::Leaf(_))
-        && manifest.activation == crate::ToolActivation::Internal
-    {
-        return Err(ReconfigureError::Validation(format!(
-            "leaf source `{source_key}` cannot register internally activated tool `{}`",
-            manifest.id
-        )));
-    }
     let manifest_id = manifest.id.clone();
     let id_conflict = advertised.get(&manifest.id).map(|entry| {
         (
@@ -262,7 +220,6 @@ pub(super) fn insert_advertised_entry(
                 .source_key()
                 .expect("advertised entries are bound")
                 .clone(),
-            entry.registration_kind(),
         )
     });
     let name_conflict = advertised.get_by_name(&manifest.name).map(|(id, entry)| {
@@ -276,29 +233,8 @@ pub(super) fn insert_advertised_entry(
         )
     });
 
-    if let Some((tool_id, owner, existing_kind)) = id_conflict.as_ref() {
-        if matches!(source_key, ToolSourceKey::Internal(_))
-            != matches!(owner, ToolSourceKey::Internal(_))
-        {
-            return Err(ReconfigureError::Validation(format!(
-                "tool id `{tool_id}` is claimed by conflicting leaf/internal sources `{source_key}` and `{owner}`"
-            )));
-        }
-        if *existing_kind != kind {
-            let leaf_source_id = if kind == ToolRegistrationKind::Leaf {
-                source_key.to_string()
-            } else {
-                owner.to_string()
-            };
-            return Err(ReconfigureError::CrossLaneToolIdCollision {
-                tool_id: tool_id.clone(),
-                leaf_source_id,
-            });
-        }
-    }
-
     let conflicts = [
-        id_conflict.as_ref().map(|(id, _owner, _)| id.clone()),
+        id_conflict.as_ref().map(|(id, _owner)| id.clone()),
         name_conflict.as_ref().map(|(id, _owner)| id.clone()),
     ]
     .into_iter()
@@ -311,7 +247,7 @@ pub(super) fn insert_advertised_entry(
             }
         } else if id_conflict
             .as_ref()
-            .is_some_and(|(_, owner, _)| preferred_source_key == Some(owner))
+            .is_some_and(|(_, owner)| preferred_source_key == Some(owner))
             || name_conflict
                 .as_ref()
                 .is_some_and(|(_, owner)| preferred_source_key == Some(owner))
@@ -320,11 +256,11 @@ pub(super) fn insert_advertised_entry(
         }
     }
 
-    let entry = bound_tool_entry(manifest, source_key.clone(), kind);
+    let entry = ToolRegistryEntry::new(manifest, source_key.clone());
     match advertised.insert(entry) {
         Ok(()) => Ok(()),
         Err(ToolSurfaceInsertError::DuplicateId) => {
-            let (_, owner, _) = id_conflict.expect("surface id conflict was indexed");
+            let (_, owner) = id_conflict.expect("surface id conflict was indexed");
             Err(ReconfigureError::Validation(format!(
                 "duplicate tool id `{}` from source `{source_key}` conflicts with source `{owner}`",
                 manifest_id
@@ -339,35 +275,16 @@ pub(super) fn insert_advertised_entry(
     }
 }
 
-fn bound_tool_entry(
-    manifest: ToolManifest,
-    source_key: ToolSourceKey,
-    kind: ToolRegistrationKind,
-) -> ToolRegistryEntry {
-    ToolRegistryEntry::new(manifest, source_key, kind)
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the branch is entered only when the matches contain a leaf registration, which is what the find returns"
-)]
 fn resolve_snapshot_id(
     id: &ToolId,
     sources: &BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
     preferred_source_key: Option<&ToolSourceKey>,
-) -> Result<Option<(ToolSourceKey, ToolManifest, ToolRegistrationKind)>, ReconfigureError> {
+) -> Result<Option<(ToolSourceKey, ToolManifest)>, ReconfigureError> {
     let mut matches = Vec::new();
     for (source_key, source) in sources {
         let Some(manifest) = source.resolve_manifest_by_id(id) else {
             continue;
         };
-        if matches!(source_key, ToolSourceKey::Leaf(_))
-            && manifest.activation == crate::ToolActivation::Internal
-        {
-            return Err(ReconfigureError::Validation(format!(
-                "leaf source `{source_key}` cannot resolve internally activated tool `{id}`"
-            )));
-        }
         if manifest.id != *id {
             return Err(ReconfigureError::Validation(format!(
                 "source `{source_key}` resolved tool id `{id}` with mismatched manifest id `{}`",
@@ -377,46 +294,16 @@ fn resolve_snapshot_id(
         matches.push((
             source_key.clone(),
             manifest_with_compact_contract(source.as_ref(), manifest),
-            source.registration_kind(),
         ));
     }
 
-    if matches
-        .iter()
-        .any(|(_, _, kind)| *kind == ToolRegistrationKind::Leaf)
-        && matches
-            .iter()
-            .any(|(_, _, kind)| *kind == ToolRegistrationKind::Orchestrating)
-    {
-        let leaf_source_id = matches
-            .iter()
-            .find(|(_, _, kind)| *kind == ToolRegistrationKind::Leaf)
-            .map(|(source_key, _, _)| source_key.to_string())
-            .expect("mixed registration kinds include a leaf source");
-        return Err(ReconfigureError::CrossLaneToolIdCollision {
-            tool_id: id.clone(),
-            leaf_source_id,
-        });
-    }
-    let internal = matches
-        .iter()
-        .find(|(source_key, _, _)| matches!(source_key, ToolSourceKey::Internal(_)));
-    if let Some((internal_key, _, _)) = internal
-        && matches
-            .iter()
-            .any(|(source_key, _, _)| source_key != internal_key)
-    {
-        return Err(ReconfigureError::Validation(format!(
-            "internal tool id `{id}` is resolved by conflicting sources"
-        )));
-    }
     if matches.len() <= 1 {
         return Ok(matches.pop());
     }
     if let Some(preferred_source_key) = preferred_source_key
         && let Some(preferred) = matches
             .into_iter()
-            .find(|(source_key, _, _)| source_key == preferred_source_key)
+            .find(|(source_key, _)| source_key == preferred_source_key)
     {
         return Ok(Some(preferred));
     }

@@ -76,7 +76,7 @@ impl ProcessIdMint {
 ///
 /// Every key is a framed digest in one family, with each start path in its own
 /// namespace, so a host-supplied key can never collide with one lash derives
-/// for a model, orchestration or trigger start. The digest is over admitted
+/// for a tool intent or trigger start. The digest is over admitted
 /// operation identity only — never over submitted content, source or compiler
 /// identity, or the minted result.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, schemars::JsonSchema)]
@@ -98,8 +98,6 @@ pub const START_KEY_FAMILY_VERSION: u8 = 1;
 enum StartKeyNamespace {
     /// A start declared by a recorded tool intent.
     ToolIntent,
-    /// The nth start of an orchestrating tool call.
-    OrchestrationCall,
     /// The one start of a trigger delivery.
     TriggerDelivery,
     /// A key a host or remote caller supplied, scoped to its owner.
@@ -109,9 +107,8 @@ enum StartKeyNamespace {
 }
 
 impl StartKeyNamespace {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 4] = [
         Self::ToolIntent,
-        Self::OrchestrationCall,
         Self::TriggerDelivery,
         Self::Host,
         Self::KeylessHost,
@@ -120,7 +117,6 @@ impl StartKeyNamespace {
     fn tag(self) -> u8 {
         match self {
             Self::ToolIntent => 1,
-            Self::OrchestrationCall => 2,
             Self::TriggerDelivery => 3,
             Self::Host => 4,
             Self::KeylessHost => 5,
@@ -130,7 +126,6 @@ impl StartKeyNamespace {
     fn name(self) -> &'static str {
         match self {
             Self::ToolIntent => "intent",
-            Self::OrchestrationCall => "call",
             Self::TriggerDelivery => "trigger",
             Self::Host => "host",
             Self::KeylessHost => "keyless",
@@ -185,20 +180,6 @@ impl StartKey {
     pub fn for_tool_intent(identity: &crate::ToolIntentIdentity) -> Self {
         Self::derive(StartKeyNamespace::ToolIntent, |encoder| {
             encoder.string(&identity.replay_key);
-        })
-    }
-
-    /// The key of the `ordinal`th start an orchestrating tool call makes, such
-    /// as `spawn_agent`: the call's admitted scope and id, and its ordinal.
-    pub fn for_orchestration_call(
-        scope: &crate::ExecutionScope,
-        call_id: &str,
-        ordinal: u32,
-    ) -> Self {
-        Self::derive(StartKeyNamespace::OrchestrationCall, |encoder| {
-            write_scope(encoder, scope);
-            encoder.string(call_id);
-            encoder.u32(ordinal);
         })
     }
 

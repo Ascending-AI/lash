@@ -379,7 +379,7 @@ impl EffectGroupDispatchImpl {
         if let RuntimeEffectCommand::ToolInvocation { request: child } = &request.envelope.command {
             // ADR 0099 §2: a tool child is a handler-level invocation driver,
             // not a recorded body. Its replayable work — retries, deferred
-            // completion, intent orchestration, completion-key derivation —
+            // completion, intent realization, completion-key derivation —
             // runs as journaled steps of *this* invocation; only the atomic
             // `ToolAttempt` executions it emits enter `ctx.run`. Resolving the
             // driver uses the same `GroupExecutors` answer first dispatch and

@@ -70,15 +70,6 @@ impl From<RemoteSchemaContract> for lash_core::SchemaContract {
     }
 }
 
-impl From<RemoteToolActivation> for lash_core::ToolActivation {
-    fn from(value: RemoteToolActivation) -> Self {
-        match value {
-            RemoteToolActivation::Always => Self::Always,
-            RemoteToolActivation::Internal => Self::Internal,
-        }
-    }
-}
-
 impl From<RemoteToolOutputContract> for lash_core::ToolOutputContract {
     fn from(value: RemoteToolOutputContract) -> Self {
         match value {
@@ -161,7 +152,6 @@ impl TryFrom<&RemoteToolGrant> for ToolDefinition {
             output_schema,
             output_contract,
             examples,
-            activation,
             argument_projection,
             retry_policy,
             bindings,
@@ -178,9 +168,6 @@ impl TryFrom<&RemoteToolGrant> for ToolDefinition {
         definition.contract.input_schema.projection = input_schema.projection.clone().into();
         definition.contract.output_schema.projection = output_schema.projection.clone().into();
         definition.manifest.bindings = bindings.clone();
-        if let Some(activation) = *activation {
-            definition = definition.with_activation(activation.into());
-        }
         if let Some(argument_projection) = argument_projection.clone() {
             definition = definition.with_argument_projection(argument_projection.into());
         }

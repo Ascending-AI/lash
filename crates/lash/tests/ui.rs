@@ -75,8 +75,6 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/session_store_factory_requires_by_id_lookup.rs");
     t.compile_fail("tests/ui/session_store_factory_requires_unsettled_turn_count.rs");
     t.compile_fail("tests/ui/tool_state_generation_is_sealed.rs");
-    t.compile_fail("tests/ui/orchestrating_tool_def_requires_unsafe.rs");
-    t.compile_fail("tests/ui/orchestrating_tool_def_unsafe_is_auditable.rs");
     t.compile_fail("tests/ui/session_head_meta_is_not_serializable.rs");
     t.compile_fail("tests/ui/session_head_meta_requires_assemble.rs");
     t.compile_fail("tests/ui/commit_budget_has_no_default.rs");

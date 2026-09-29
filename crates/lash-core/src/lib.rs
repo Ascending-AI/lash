@@ -2,7 +2,7 @@
 //!
 //! The process kernel intentionally understands `ToolCall`, `SessionTurn`, and
 //! `External` because those inputs carry runtime mechanisms core must enforce:
-//! tool orchestration, child-session turns, and externally completed work. New
+//! recorded tool attempts, child-session turns, and externally completed work. New
 //! process runtimes should use `ProcessInput::Engine { kind, payload }` unless
 //! core must understand their semantics to enforce a kernel mechanism.
 //!
@@ -147,9 +147,6 @@ pub mod facade_support {
     }
     pub use crate::runtime::run_head_advancing_commit_attempt;
     pub use crate::runtime::turn_loop::{EmptyQueuedDrainReason, QueuedTurnDrain};
-    pub use crate::tool_provider::orchestration::{
-        OrchestratingToolDef, OrchestratingToolImplementation, OrchestrationContext,
-    };
     pub fn build_core_tool_registry(
         host: &crate::plugin::PluginHost,
     ) -> Result<std::sync::Arc<crate::ToolRegistry>, crate::PluginError> {
@@ -565,13 +562,13 @@ pub use lash_sansio::{
     PromptTemplate, PromptTemplateEntry, PromptTemplateSection, PromptTitleBuiltin, SchemaContract,
     SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode,
     TYPESCRIPT_TOOL_BINDING_KEY, TextProjectionMetadata, TokenUsage, TokenUsageOverflow,
-    ToolActivation, ToolArgumentProjectionPolicy, ToolBinding, ToolCallOutcome, ToolCallOutput,
-    ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry,
-    ToolContract, ToolControl, ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery,
-    ToolFailure, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome,
-    ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason, ToolManifest, ToolOutputContract,
-    ToolRetryPolicy, ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause,
-    TurnId, TurnOutputSource,
+    ToolArgumentProjectionPolicy, ToolBinding, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolContract,
+    ToolControl, ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery, ToolFailure,
+    ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity,
+    ToolIntentKind, ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy,
+    ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId,
+    TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
@@ -848,11 +845,10 @@ pub use tool_intent::{
 };
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, ExternalLaunchAudit,
-    InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall, InternalProcessToolDef,
-    InternalProcessToolImplementation, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall,
-    ToolCall, ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolContext,
-    ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, PreparedToolBatch,
+    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolChildExecutionTraceHook,
+    ToolChildProcessStarted, ToolContext, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext,
+    ToolProvider,
 };
 #[doc(hidden)]
 pub mod core_internal {

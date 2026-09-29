@@ -105,10 +105,11 @@ fn resolve_callable_definition<'a>(
     context: &'a ToolDispatchContext<'_>,
     tool_name: &str,
 ) -> Option<&'a crate::ToolCatalogEntry> {
-    context.tool_catalog.tools.iter().find(|tool| {
-        tool.manifest.name == tool_name
-            && tool.manifest.activation != crate::ToolActivation::Internal
-    })
+    context
+        .tool_catalog
+        .tools
+        .iter()
+        .find(|tool| tool.manifest.name == tool_name)
 }
 
 pub async fn prepare_granted_tool_call_with_context(
@@ -135,12 +136,9 @@ pub async fn prepare_granted_tool_call_with_context(
 /// the call's envelope is the one the journal recorded and it is served from
 /// there without the live tool being consulted.
 ///
-/// An orchestrating tool the registry still holds is the exception: it
-/// re-runs its body against its recorded nested effects, and its own
-/// preparation shapes those effects, so its live provider prepares it. A
-/// tool whose attempt may defer is the other: its preparation seals the
-/// declared start its recorded attempt carries (ADR 0116 §4), so its live
-/// provider prepares it too.
+/// A tool whose attempt may defer is the exception: its preparation seals
+/// the declared start its recorded attempt carries (ADR 0116 §4), so its
+/// live provider prepares it.
 pub async fn prepare_recorded_tool_call_with_context(
     context: &ToolDispatchContext<'_>,
     binding: &ToolExecutionGrant,
@@ -149,12 +147,11 @@ pub async fn prepare_recorded_tool_call_with_context(
 ) -> ToolPreparationOutcome {
     pending.tool_name = binding.manifest().name.clone();
     let tool_id = &binding.manifest().id;
-    let preparation =
-        if context.is_orchestrating_tool(tool_id) || context.attempt_may_defer(tool_id, None) {
-            ProviderPreparation::Live(None)
-        } else {
-            ProviderPreparation::Recorded
-        };
+    let preparation = if context.attempt_may_defer(tool_id, None) {
+        ProviderPreparation::Live(None)
+    } else {
+        ProviderPreparation::Recorded
+    };
     prepare_authorized_tool_call_with_context(
         context,
         binding.manifest().clone(),
@@ -317,26 +314,11 @@ pub fn resolve_callable_manifest_by_id(
     context: &ToolDispatchContext<'_>,
     tool_id: &crate::ToolId,
 ) -> Option<ToolManifest> {
-    if let Some(entry) = context.tool_catalog.tools.iter().find(|tool| {
-        tool.manifest.id == *tool_id && tool.manifest.activation != crate::ToolActivation::Internal
-    }) {
-        return Some(entry.manifest.clone());
-    }
-    None
-}
-
-pub fn resolve_internal_manifest_by_id(
-    context: &ToolDispatchContext<'_>,
-    tool_id: &crate::ToolId,
-) -> Option<ToolManifest> {
     context
         .tool_catalog
         .tools
         .iter()
-        .find(|tool| {
-            tool.manifest.id == *tool_id
-                && tool.manifest.activation == crate::ToolActivation::Internal
-        })
+        .find(|tool| tool.manifest.id == *tool_id)
         .map(|entry| entry.manifest.clone())
 }
 

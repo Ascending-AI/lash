@@ -23,10 +23,10 @@ use std::sync::Arc;
 /// identity is the batch's content again, and on the aggregate path it names
 /// nothing durable: it is a digest the group head checks, never a key.
 ///
-/// The host-code batch path (`call_tool_batch` from a provider or
-/// orchestrating-tool body) keeps content identity. Two structurally
-/// identical batches raised from one such body still share an identity; that
-/// body is ordinary host code with no deterministic count of its own.
+/// The host-code batch path (`call_tool_batch` outside a lashlang aggregate)
+/// keeps content identity. Two structurally identical batches raised from one
+/// such caller still share an identity; that caller is ordinary host code with
+/// no deterministic count of its own.
 const TOOL_BATCH_FAMILY_VERSION: u8 = 3;
 
 enum ToolCallAuthorization {
@@ -97,13 +97,6 @@ impl ToolCallAuthorization {
                 .await
             }
         }
-    }
-
-    /// A recorded binding orchestrates as the catalog call it replays did
-    /// (FIG-3587): a drifted orchestrating tool re-runs its body against its
-    /// recorded nested effects, each served only from the journal (FIG-3719).
-    fn allows_orchestration(&self) -> bool {
-        matches!(self, Self::Catalog(_) | Self::Recorded(_))
     }
 
     fn execution_grant(&self) -> Option<&crate::ToolExecutionGrant> {
@@ -468,7 +461,6 @@ fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
                 name: _,
                 description: _,
                 compact_contract: _,
-                activation: _,
                 bindings: _,
                 argument_projection: _,
                 retry_policy: _,
@@ -642,10 +634,7 @@ impl RuntimeExecutionContext<'_> {
             .tool_catalog
             .tools
             .iter()
-            .find(|tool| {
-                tool.manifest.name == tool_name
-                    && tool.manifest.activation != crate::ToolActivation::Internal
-            })
+            .find(|tool| tool.manifest.name == tool_name)
             .map(|tool| tool.manifest.id.clone())
     }
 
@@ -903,9 +892,8 @@ impl RuntimeExecutionContext<'_> {
         let AdmittedCallIdentity(call_id, tool_id) = identity;
         let (tool, args) = (outcome.record.tool.clone(), outcome.record.args.clone());
         // A run that already recorded a nested effect error aborts: this call
-        // was settled from inside it — an orchestrating body whose nested call
-        // was refused, a sibling's divergence — so it presents and journals
-        // nothing of its own (FIG-3679).
+        // was settled from inside it — a sibling's divergence — so it presents
+        // and journals nothing of its own (FIG-3679).
         if let Some(error) = self.peek_nested_effect_error() {
             return self
                 .refused_completion(call_id, tool, args, error, call_key, duration_ms)
@@ -1373,82 +1361,41 @@ impl RuntimeExecutionContext<'_> {
             .await
         {
             ToolPreparationOutcome::Prepared(prepared) => {
-                if authorization.allows_orchestration()
-                    && self.dispatch.is_orchestrating_tool(&prepared.tool_id)
-                {
-                    #[expect(
-                        clippy::expect_used,
-                        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
-                    )]
-                    let tool_context =
-                        crate::ToolContext::from_dispatch(Arc::new(dispatch.clone()))
-                            .prepared_call(&prepared)
-                            .cancellation_token(self.cancellation_token.clone())
-                            .runtime_execution_context(self.clone().with_parent_invocation(
-                                parent_invocation.clone().unwrap_or_else(|| {
-                                    crate::RuntimeInvocation::effect(
-                                        crate::EffectAddress::new(
-                                            dispatch
-                                                .effect_controller
-                                                .scoped()
-                                                .execution_scope()
-                                                .clone(),
-                                            format!("orchestration:{call_id}"),
-                                        )
-                                        .expect("orchestration carries an admitted effect scope"),
-                                        dispatch.parentless_attribution(),
-                                        format!("orchestration:{call_id}"),
-                                    )
-                                }),
-                            ))
-                            .parent_invocation(parent_invocation.clone())
-                            .child_execution_trace_hook(child_execution_trace_hook.clone())
-                            .build();
-                    ToolCallLaunch::Done(Box::new(
-                        Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
-                            &dispatch,
-                            *prepared,
-                            tool_context,
-                        ))
-                        .await,
-                    ))
-                } else {
-                    let (execution_grant, retry_grant) = authorization.into_execution_grant();
-                    let retry_policy = crate::tool_dispatch::resolve_retry_policy(
-                        &dispatch,
-                        &prepared.tool_id,
-                        retry_grant.as_deref(),
-                    );
-                    let intent_trace_hook = child_execution_trace_hook.clone();
-                    let trace_hooks: BTreeMap<String, crate::ToolChildExecutionTraceHook> =
-                        child_execution_trace_hook
-                            .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
-                            .unwrap_or_default();
-                    let turn_cancel_wait = Box::new(
-                        self.turn_cancel_wait(self.cancellation_token.clone().unwrap_or_default()),
-                    );
-                    let coordinated = coordinate_tool_invocation(
-                        &dispatch,
-                        *prepared,
-                        execution_grant,
-                        retry_policy,
-                        None,
-                        ToolAttemptEffectIdentity::Command {
-                            command: command.clone(),
-                        },
-                        turn_cancel_wait.as_ref(),
-                        intent_trace_hook,
-                        |completion_key| {
-                            crate::RuntimeEffectLocalExecutor::tool_attempt(
-                                self.clone(),
-                                trace_hooks.clone(),
-                                completion_key,
-                            )
-                        },
-                    )
-                    .await;
-                    coordinated.launch
-                }
+                let (execution_grant, retry_grant) = authorization.into_execution_grant();
+                let retry_policy = crate::tool_dispatch::resolve_retry_policy(
+                    &dispatch,
+                    &prepared.tool_id,
+                    retry_grant.as_deref(),
+                );
+                let intent_trace_hook = child_execution_trace_hook.clone();
+                let trace_hooks: BTreeMap<String, crate::ToolChildExecutionTraceHook> =
+                    child_execution_trace_hook
+                        .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
+                        .unwrap_or_default();
+                let turn_cancel_wait = Box::new(
+                    self.turn_cancel_wait(self.cancellation_token.clone().unwrap_or_default()),
+                );
+                let coordinated = coordinate_tool_invocation(
+                    &dispatch,
+                    *prepared,
+                    execution_grant,
+                    retry_policy,
+                    None,
+                    ToolAttemptEffectIdentity::Command {
+                        command: command.clone(),
+                    },
+                    turn_cancel_wait.as_ref(),
+                    intent_trace_hook,
+                    |completion_key| {
+                        crate::RuntimeEffectLocalExecutor::tool_attempt(
+                            self.clone(),
+                            trace_hooks.clone(),
+                            completion_key,
+                        )
+                    },
+                )
+                .await;
+                coordinated.launch
             }
             ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(outcome),
         };

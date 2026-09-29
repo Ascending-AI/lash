@@ -595,12 +595,11 @@ fn build_tool_registry(
             .or_default()
             .push(Arc::clone(&registered.hook));
     }
-    let registry = crate::ToolRegistry::from_tool_registrations(
-        providers_by_source.into_iter().collect(),
-        contributions.internal_tools.clone(),
-        contributions.orchestrating_tools.clone(),
-    )
-    .map_err(|err| PluginError::Registration(format!("failed to build tool registry: {err}")))?;
+    let registry =
+        crate::ToolRegistry::from_tool_registrations(providers_by_source.into_iter().collect())
+            .map_err(|err| {
+                PluginError::Registration(format!("failed to build tool registry: {err}"))
+            })?;
     match tool_snapshot {
         Some(snapshot) => registry
             .fork_with_state(snapshot)

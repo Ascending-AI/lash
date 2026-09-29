@@ -30,10 +30,14 @@ where
 pub async fn a_start_key_reports_created_then_existing_and_is_trusted(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let key = crate::StartKey::for_orchestration_call(
-        &crate::ExecutionScope::runtime_operation("start-key-disposition"),
-        "call-1",
-        0,
+    let key = crate::StartKey::for_tool_intent(
+        &crate::derive_tool_intent_identity(
+            &crate::SessionId::from("start-key-disposition"),
+            "start-key-disposition",
+            Some("call-1"),
+            0,
+        )
+        .expect("the start's intent identity derives"),
     );
     let first = registry
         .register_process_reporting_disposition(
