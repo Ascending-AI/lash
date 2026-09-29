@@ -38,6 +38,16 @@ lash_store_sql::statements! {
         delete_deleted_session_roots = "DELETE FROM attachment_manifest AS manifest
              WHERE EXISTS (SELECT 1 FROM deleted_sessions AS deleted
                            WHERE deleted.session_id = manifest.session_id)
+               AND (
+                   (manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
+                   OR (manifest.owner_kind = 'turn' AND manifest.owner_id IS NOT NULL)
+                   OR (manifest.owner_kind = 'process'
+                       AND length(manifest.owner_id) = 34
+                       AND substr(manifest.owner_id, 1, 2) = 'p_'
+                       AND substr(manifest.owner_id, 3) NOT GLOB '*[^0-9a-f]*'
+                       AND substr(manifest.owner_id, 15, 1) = '7'
+                       AND substr(manifest.owner_id, 19, 1) IN ('8', '9', 'a', 'b'))
+               )
                AND (manifest.committed_at_ms IS NULL OR NOT EXISTS (
                    SELECT 1 FROM graph_nodes AS node
                    WHERE node.session_id = manifest.session_id AND node.tombstoned = 0
@@ -176,14 +186,55 @@ pub(crate) fn attachment_sql() -> &'static AttachmentSql {
 /// The live-root probe this store may issue: the one that proves a process
 /// owner dead only when a registry is attached to read it from.
 fn live_root_sql(process_registry_attached: bool) -> &'static str {
-    if process_registry_attached {
-        attachment_sql()
-            .manifest_process_owner
-            .select_live_root_proving_process_death
-            .sql()
-    } else {
-        attachment_sql().manifest.select_live_root.sql()
-    }
+    static GUARDED: LazyLock<[String; 2]> = LazyLock::new(|| {
+        [false, true].map(|attached| {
+            let base = if attached {
+                attachment_sql()
+                    .manifest_process_owner
+                    .select_live_root_proving_process_death
+                    .sql()
+            } else {
+                attachment_sql().manifest.select_live_root.sql()
+            };
+            format!(
+                "SELECT 1 WHERE EXISTS ({base}) OR EXISTS (
+                    SELECT 1 FROM attachment_manifest AS manifest
+                    WHERE manifest.attachment_id = ?1
+                      AND NOT COALESCE(({}), 0)
+                )",
+                decodable_owner_sql()
+            )
+        })
+    });
+    &GUARDED[usize::from(process_registry_attached)]
+}
+
+fn aged_forget_sql(process_registry_attached: bool) -> &'static str {
+    static GUARDED: LazyLock<[String; 2]> = LazyLock::new(|| {
+        [false, true].map(|attached| {
+            let base = if attached {
+                attachment_sql()
+                    .manifest_process_owner
+                    .delete_aged_uncommitted_proving_process_death
+                    .sql()
+            } else {
+                attachment_sql().manifest.delete_aged_uncommitted.sql()
+            };
+            format!("{base} AND ({})", decodable_owner_sql())
+        })
+    });
+    &GUARDED[usize::from(process_registry_attached)]
+}
+
+fn decodable_owner_sql() -> &'static str {
+    "(manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
+      OR (manifest.owner_kind = 'turn' AND manifest.owner_id IS NOT NULL)
+      OR (manifest.owner_kind = 'process'
+          AND length(manifest.owner_id) = 34
+          AND substr(manifest.owner_id, 1, 2) = 'p_'
+          AND substr(manifest.owner_id, 3) NOT GLOB '*[^0-9a-f]*'
+          AND substr(manifest.owner_id, 15, 1) = '7'
+          AND substr(manifest.owner_id, 19, 1) IN ('8', '9', 'a', 'b'))"
 }
 
 /// Adopt stored references under the boundary transaction.
@@ -783,14 +834,7 @@ impl AttachmentManifest for Store {
             // layouts. Without a registry the owner-death statement has no
             // layout to render for, so process-owned rows are conservatively
             // retained rather than guessed at.
-            let forget = if self.process_registry_attached {
-                attachment_sql()
-                    .manifest_process_owner
-                    .delete_aged_uncommitted_proving_process_death
-                    .sql()
-            } else {
-                attachment_sql().manifest.delete_aged_uncommitted.sql()
-            };
+            let forget = aged_forget_sql(self.process_registry_attached);
             self.conn
                 .write(move |tx| {
                     crate::conn::cached_execute(
@@ -878,6 +922,60 @@ impl AttachmentManifest for Store {
 #[cfg(test)]
 mod cross_database_plan_tests {
     use super::*;
+
+    #[test]
+    fn gc_keeps_an_attachment_whose_owner_does_not_decode() {
+        let (_directory, connection) = catalog_with_registry();
+        connection
+            .pragma_update(None, "ignore_check_constraints", true)
+            .expect("inject future owner kind");
+        connection
+            .execute_batch(
+                "INSERT INTO attachment_manifest
+                     (attachment_id, session_id, canonical_uri, intent_at_ms, owner_kind, owner_id)
+                 VALUES
+                     ('blake3:future', 'future-session', 'uri', 1, 'future-owner', 'opaque'),
+                     ('blake3:invalid-process', 'future-session', 'uri', 1, 'process', 'p_invalid'),
+                     ('blake3:missing-owner', 'future-session', 'uri', 1, 'turn', NULL);
+                 INSERT INTO deleted_sessions
+                     (session_id, created_at_ms, head_revision, relation_kind)
+                 VALUES ('future-session', 2, 0, 'root');",
+            )
+            .expect("seed unknown owner and deleted session");
+        for digest in [
+            "blake3:future",
+            "blake3:invalid-process",
+            "blake3:missing-owner",
+        ] {
+            let rooted = connection
+                .query_row(live_root_sql(true), params![digest, 100_i64], |_| Ok(()))
+                .optional()
+                .expect("probe")
+                .is_some();
+            assert!(
+                rooted,
+                "undecodable owner of {digest} must remain a GC root"
+            );
+        }
+        connection
+            .execute(
+                attachment_sql()
+                    .manifest_sqlite
+                    .delete_deleted_session_roots
+                    .sql(),
+                [],
+            )
+            .expect("deleted-session forget");
+        connection
+            .execute(aged_forget_sql(true), params![100_i64])
+            .expect("aged forget");
+        let remaining: i64 = connection
+            .query_row("SELECT COUNT(*) FROM attachment_manifest", [], |row| {
+                row.get(0)
+            })
+            .expect("read owner roots");
+        assert_eq!(remaining, 3, "GC must keep every undecodable owner");
+    }
 
     /// The text the live-root probe was built with per call before FIG-3406,
     /// reproduced verbatim, including the `format!` site's indentation.
@@ -1031,7 +1129,14 @@ mod cross_database_plan_tests {
         let (_directory, connection) = catalog_with_registry();
         seed(&connection);
 
-        let probe = plan(&connection, live_root_sql(true), 2);
+        let probe = plan(
+            &connection,
+            attachment_sql()
+                .manifest_process_owner
+                .select_live_root_proving_process_death
+                .sql(),
+            2,
+        );
         assert_eq!(
             probe,
             plan(&connection, &historical_live_ref_sql(), 2),
@@ -1109,7 +1214,7 @@ mod cross_database_plan_tests {
                  VALUES
                      ('blake3:aged-host', 's1', 'uri', 10, NULL, NULL),
                      ('blake3:live-turn', 's2', 'uri', 10, 'turn', 't2'),
-                     ('blake3:dead-process', 's3', 'uri', 10, 'process', 'p3');",
+                     ('blake3:dead-process', 's3', 'uri', 10, 'process', 'p_00000000000070008000000000000003');",
             )
             .expect("seed the three owner classes");
 
@@ -1130,13 +1235,7 @@ mod cross_database_plan_tests {
         }
 
         connection
-            .execute(
-                attachment_sql()
-                    .manifest_process_owner
-                    .delete_aged_uncommitted_proving_process_death
-                    .sql(),
-                params![100_i64],
-            )
+            .execute(aged_forget_sql(true), params![100_i64])
             .expect("forget");
         let survivors: Vec<String> = {
             let mut statement = connection

@@ -43,7 +43,9 @@ pub mod otel;
 
 pub use content_block::{TraceContentBlock, TraceToolResultBlock};
 use jsonl_records::truncate_torn_tail;
-pub use jsonl_records::{JsonlTraceReadError, parse_jsonl_records};
+pub use jsonl_records::{
+    JsonlTraceReadError, TraceRead, parse_jsonl_records, parse_trace_jsonl_records,
+};
 pub use language_execution::{
     TraceLanguageExecutionPayload, TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution,
 };
@@ -795,6 +797,49 @@ pub struct TraceExecutionEvidence {
 }
 
 impl TraceEvent {
+    /// Whether this build can decode a trace event kind. Readers use this
+    /// before decoding so an unfamiliar observational event can be skipped.
+    pub(crate) fn knows_kind(kind: &str) -> bool {
+        matches!(
+            kind,
+            "turn_started"
+                | "prompt_built"
+                | "attachment_degraded"
+                | "composition_changed"
+                | "compaction_needed"
+                | "compaction_started"
+                | "compaction_completed"
+                | "prompt_view_attachments_pruned"
+                | "llm_call_started"
+                | "llm_call_completed"
+                | "llm_call_failed"
+                | "provider_request"
+                | "provider_replay_dropped"
+                | "effect_envelope_diff"
+                | "provider_stream_event"
+                | "runtime_stream_event"
+                | "tool_call_started"
+                | "tool_call_completed"
+                | "exec_code_started"
+                | "exec_code_completed"
+                | "exec_code_failed"
+                | "rlm_step"
+                | "observation_projection"
+                | "journaled_effect_started"
+                | "journaled_effect_settled"
+                | "durable_wait_parked"
+                | "durable_wait_resolved"
+                | "durable_timer_started"
+                | "durable_timer_resolved"
+                | "durable_segment_boundary"
+                | "store_error_observed"
+                | "protocol_step"
+                | "language_execution"
+                | "turn_completed"
+                | "custom"
+        )
+    }
+
     /// - [`Self::LlmCallFailed`], [`Self::EffectEnvelopeDiff`], and
     ///   [`Self::StoreErrorObserved`] always;
     /// - [`Self::JournaledEffectSettled`] only with

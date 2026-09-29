@@ -18360,6 +18360,7 @@
         "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-core-execution",
+        "lash-internal-core-store",
         "lash-internal-lashlang",
         "lash-internal-restate-test",
         "lash-internal-sansio",

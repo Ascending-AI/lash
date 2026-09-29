@@ -63,6 +63,20 @@ upgrade = "coexist"
 description = "NDJSON trace records, event variants, contexts, and graph payloads"
 outside_manifest = "trace wire: gates a trace reader, not state lash reopens"
 
+[[surface]]
+constant = "SQLITE_BLOB_ENVELOPE_VERSION"
+constant_path = "crates/lash-sqlite-store/src/codec.rs"
+upgrade = "migrate"
+description = "versioned SQLite artifact blob envelope and compression codec"
+outside_manifest = "backend-local blob encoding: SQLite admits it when reading the blob"
+
+[[surface]]
+constant = "PROCESS_CURSOR_VERSION"
+constant_path = "crates/lash-sansio/src/process_cursor.rs"
+upgrade = "coexist"
+description = "opaque process-event cursor held by a host between reads"
+outside_manifest = "live host cursor: it is not stored by Lash"
+
 # Every SQLite catalog is created with `CREATE INDEX IF NOT EXISTS` and open runs
 # the whole schema text, so adding a non-unique index is not a compatibility
 # boundary: it reaches an existing file on its next open, and a file that already
@@ -591,12 +605,6 @@ reason = "lower bound of the admission window for the registered CURRENT_SESSION
 constant = "MIN_SUPPORTED_SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 reason = "lower bound of the admission window for the registered SCHEMA_VERSION, not a format of its own"
-
-[[unregistered]]
-constant = "PROCESS_CURSOR_VERSION"
-constant_path = "crates/lash-sansio/src/process_cursor.rs"
-upgrade = "coexist"
-reason = "stamps the opaque live process cursor a host holds between reads; lash persists no cursor, a retired stamp is refused by name at parse, and its wire carriers are guarded by REMOTE_PROTOCOL_VERSION"
 
 [[unregistered]]
 constant = "PROCESS_CURSOR_UNROUTED_EPOCH"

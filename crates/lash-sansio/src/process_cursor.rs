@@ -18,10 +18,15 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::ProcessId;
+use crate::{ProcessId, VersionRange};
 
-/// The version stamp every current process cursor starts with.
-pub const PROCESS_CURSOR_VERSION: &str = "lashpc3";
+/// The newest process cursor format this build reads and writes.
+pub const PROCESS_CURSOR_VERSION: u32 = 3;
+
+/// Cursor versions whose identity and position shape this build understands.
+/// A compatibility release widens this range while its fleet pins writers to
+/// the earlier version.
+pub const PROCESS_CURSOR_READ_RANGE: VersionRange = VersionRange::exactly(PROCESS_CURSOR_VERSION);
 
 /// Cursor version stamps this build recognises only to refuse them.
 ///
@@ -74,6 +79,9 @@ pub enum ProcessCursorError {
     /// The cursor carries a retired version stamp. It is refused, never
     /// reinterpreted; `found` names the version so old state stays identifiable.
     RetiredVersion { found: String },
+    /// The cursor carries a version outside this build's read range. List
+    /// again from a fresh cursor on a build that knows that version.
+    UnsupportedVersion { found: String },
     /// The cursor is not a well-formed current cursor.
     Malformed,
 }
@@ -83,7 +91,11 @@ impl fmt::Display for ProcessCursorError {
         match self {
             Self::RetiredVersion { found } => write!(
                 formatter,
-                "process cursor version `{found}` is retired; this build reads only `{PROCESS_CURSOR_VERSION}` cursors"
+                "process cursor version `{found}` is retired; this build reads only `lashpc{PROCESS_CURSOR_VERSION}` cursors"
+            ),
+            Self::UnsupportedVersion { found } => write!(
+                formatter,
+                "process cursor version `{found}` is unsupported; list again from a fresh cursor"
             ),
             Self::Malformed => formatter.write_str("malformed process cursor"),
         }
@@ -95,6 +107,7 @@ impl std::error::Error for ProcessCursorError {}
 /// One position in a process's durable history and live observation.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ProcessCursor {
+    version: u32,
     epoch: String,
     reference: ProcessCursorReference,
     position: u64,
@@ -109,11 +122,28 @@ impl ProcessCursor {
         position: u64,
         sequence: u64,
     ) -> Result<Self, ProcessCursorError> {
+        Self::at_version(PROCESS_CURSOR_VERSION, epoch, reference, position, sequence)
+    }
+
+    /// Mint at the version selected by the fleet epoch for this surface.
+    pub fn at_version(
+        version: u32,
+        epoch: impl Into<String>,
+        reference: ProcessCursorReference,
+        position: u64,
+        sequence: u64,
+    ) -> Result<Self, ProcessCursorError> {
+        if !PROCESS_CURSOR_READ_RANGE.contains(version) {
+            return Err(ProcessCursorError::UnsupportedVersion {
+                found: format!("lashpc{version}"),
+            });
+        }
         let epoch = epoch.into();
         if epoch.is_empty() || epoch.contains(':') {
             return Err(ProcessCursorError::Malformed);
         }
         Ok(Self {
+            version,
             epoch,
             reference,
             position,
@@ -131,8 +161,14 @@ impl ProcessCursor {
                 found: version.to_string(),
             });
         }
-        if version != PROCESS_CURSOR_VERSION {
-            return Err(ProcessCursorError::Malformed);
+        let number = version
+            .strip_prefix("lashpc")
+            .and_then(|number| number.parse::<u32>().ok())
+            .ok_or(ProcessCursorError::Malformed)?;
+        if !PROCESS_CURSOR_READ_RANGE.contains(number) {
+            return Err(ProcessCursorError::UnsupportedVersion {
+                found: version.to_string(),
+            });
         }
         let mut parts = rest.split(':');
         let (Some(epoch), Some(reference), Some(position), Some(sequence), None) = (
@@ -152,11 +188,22 @@ impl ProcessCursor {
                 .flatten()
                 .ok_or(ProcessCursorError::Malformed)
         };
-        Self::new(epoch, reference, decimal(position)?, decimal(sequence)?)
+        Self::at_version(
+            number,
+            epoch,
+            reference,
+            decimal(position)?,
+            decimal(sequence)?,
+        )
     }
 
     pub fn epoch(&self) -> &str {
         &self.epoch
+    }
+
+    /// The version stamped on this cursor.
+    pub fn version(&self) -> u32 {
+        self.version
     }
 
     pub fn reference(&self) -> &ProcessCursorReference {
@@ -194,7 +241,8 @@ impl fmt::Display for ProcessCursor {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "{PROCESS_CURSOR_VERSION}:{}:{}:{}:{}",
+            "lashpc{}:{}:{}:{}:{}",
+            self.version,
             self.epoch,
             self.reference.as_str(),
             self.position,
@@ -225,13 +273,12 @@ impl schemars::JsonSchema for ProcessCursor {
         schemars::schema::SchemaObject {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some("^lashpc3:[^:]+:p_[0-9a-f]{32}:[0-9]+:[0-9]+$".to_string()),
+                pattern: Some(format!("^lashpc{PROCESS_CURSOR_VERSION}:[^:]+:p_[0-9a-f]{{32}}:[0-9]+:[0-9]+$")),
                 ..Default::default()
             })),
             metadata: Some(Box::new(schemars::schema::Metadata {
                 description: Some(
-                    "Opaque process cursor: `lashpc3:<epoch>:<process-reference>:<position>:<sequence>`."
-                        .to_string(),
+                    format!("Opaque process cursor: `lashpc{PROCESS_CURSOR_VERSION}:<epoch>:<process-reference>:<position>:<sequence>`."),
                 ),
                 ..Default::default()
             })),
@@ -302,7 +349,6 @@ mod tests {
         for bad in [
             String::new(),
             "invalid".to_string(),
-            "lashpc4:e:p_00000000000070008000000000000003:1:2".to_string(),
             good.replace(":1:2", ":1"),
             format!("{good}:9"),
             good.replace(":1:2", ":-1:2"),
@@ -320,5 +366,21 @@ mod tests {
             );
         }
         assert!(ProcessCursor::new("a:b", reference(), 0, 0).is_err());
+        assert_eq!(
+            ProcessCursor::parse("lashpc4:e:p_00000000000070008000000000000003:1:2"),
+            Err(ProcessCursorError::UnsupportedVersion {
+                found: "lashpc4".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn cursor_is_minted_at_the_fleet_version() {
+        let version = PROCESS_CURSOR_VERSION;
+        let cursor = ProcessCursor::at_version(version, "fleet", reference(), 2, 7)
+            .expect("mint at selected fleet version");
+        assert_eq!(cursor.version(), version);
+        assert!(cursor.to_string().starts_with(&format!("lashpc{version}:")));
+        assert_eq!(ProcessCursor::parse(&cursor.to_string()), Ok(cursor));
     }
 }

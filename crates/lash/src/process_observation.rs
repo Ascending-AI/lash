@@ -904,7 +904,14 @@ pub struct ProcessObservationSubscription {
 
 impl ProcessObservationSubscription {
     fn cursor(&self) -> ProcessCursor {
-        ProcessCursor::new(
+        let version = self
+            .registry
+            .fleet_format()
+            .writer_version(lash_core::surface_format!(
+                lash_sansio::PROCESS_CURSOR_VERSION
+            ));
+        ProcessCursor::at_version(
+            version,
             self.epoch.clone(),
             self.reference.clone(),
             self.position,
@@ -1151,7 +1158,12 @@ pub(crate) async fn read_events(
                 None => (PROCESS_CURSOR_UNROUTED_EPOCH.to_string(), 0),
             };
             let reference = ProcessCursorReference::for_process(&process_id);
-            let cursor = ProcessCursor::new(epoch, reference, position, 0)
+            let version = registry
+                .fleet_format()
+                .writer_version(lash_core::surface_format!(
+                    lash_sansio::PROCESS_CURSOR_VERSION
+                ));
+            let cursor = ProcessCursor::at_version(version, epoch, reference, position, 0)
                 .map_err(|error| PluginError::Session(error.to_string()))?;
             (process_id, cursor)
         }

@@ -3,6 +3,8 @@
 
 use std::io::{self, Read, Seek, SeekFrom};
 
+use crate::{TRACE_SCHEMA_VERSION, TraceEvent, TraceRecord};
+
 /// Drop an unterminated final line — the torn record a writer killed mid-append
 /// (or short-written on ENOSPC) leaves behind — by truncating just after the
 /// file's last newline. A file already ending in `\n` is untouched; a file with
@@ -68,4 +70,53 @@ where
         }
     }
     Ok(records)
+}
+
+/// Trace records and the number of unfamiliar observational event kinds
+/// skipped while reading them.
+#[derive(Debug)]
+pub struct TraceRead {
+    pub records: Vec<TraceRecord>,
+    pub skipped_unknown_kinds: usize,
+}
+
+/// Read a trace from this build or a peer whose schema this build knows.
+/// Unfamiliar event kinds are observational, so they are counted and skipped;
+/// malformed known events and unsupported schema versions still refuse.
+pub fn parse_trace_jsonl_records(text: &str) -> Result<TraceRead, JsonlTraceReadError> {
+    let terminated = text.is_empty() || text.ends_with('\n');
+    let mut read = TraceRead {
+        records: Vec::new(),
+        skipped_unknown_kinds: 0,
+    };
+    let mut lines = text.lines().enumerate().peekable();
+    while let Some((index, line)) = lines.next() {
+        let torn_tail = lines.peek().is_none() && !terminated;
+        let decoded = serde_json::from_str::<serde_json::Value>(line).and_then(|value| {
+            if value
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                == Some(u64::from(TRACE_SCHEMA_VERSION))
+                && value
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|kind| !TraceEvent::knows_kind(kind))
+            {
+                return Ok(None);
+            }
+            serde_json::from_value::<TraceRecord>(value).map(Some)
+        });
+        match decoded {
+            Ok(Some(record)) => read.records.push(record),
+            Ok(None) => read.skipped_unknown_kinds += 1,
+            Err(_) if torn_tail => {}
+            Err(source) => {
+                return Err(JsonlTraceReadError {
+                    line: index + 1,
+                    source,
+                });
+            }
+        }
+    }
+    Ok(read)
 }

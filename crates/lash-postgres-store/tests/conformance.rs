@@ -1271,14 +1271,88 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
 
     let error = result.expect_err("unknown Postgres attachment owner kind must refuse");
     assert!(
-        matches!(
-            error,
-            StoreError::StoredDataCorrupt {
-                record_kind: "AttachmentManifest owner kind",
-                ref message,
-            } if message == "unknown attachment owner kind `unknown`"
-        ),
-        "Postgres must return the canonical attachment-owner corruption refusal, got {error:?}"
+        matches!(error, StoreError::Incompatible { .. }),
+        "Postgres must return the typed attachment-owner incompatibility, got {error:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gc_keeps_an_attachment_whose_owner_does_not_decode() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping PostgreSQL GC owner test: database URL is not set");
+        return;
+    };
+    reset(storage.pool()).await;
+    sqlx::query(
+        "ALTER TABLE lash_attachment_manifest
+         DROP CONSTRAINT IF EXISTS ck_attachment_manifest_owner_kind,
+         DROP CONSTRAINT IF EXISTS ck_lash_attachment_manifest_owner_identity",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("allow future owner fixture");
+    sqlx::query(
+        "INSERT INTO lash_attachment_manifest
+         (attachment_id, session_id, canonical_uri, intent_at_ms, owner_kind, owner_id)
+         VALUES ('future-owner-root', 'future-owner-session', 'uri', 1, 'future', 'opaque'),
+                ('invalid-process-root', 'future-owner-session', 'uri', 1, 'process', 'p_invalid')",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("seed undecodable owners");
+    sqlx::query("INSERT INTO lash_deleted_sessions (session_id) VALUES ('future-owner-session')")
+        .execute(storage.pool())
+        .await
+        .expect("seed deleted session");
+
+    let factory = storage.session_store_factory_with_shared_process_registry();
+    let mut rooted = Vec::new();
+    for name in ["future-owner-root", "invalid-process-root"] {
+        let id = lash_core_execution::AttachmentId::parse(name).expect("attachment id");
+        rooted.push(
+            lash_core_execution::AttachmentRootSet::has_live_attachment_ref(&factory, &id, 100)
+                .await
+                .expect("probe unknown owner"),
+        );
+    }
+    let refs = lash_core_execution::AttachmentRootSet::live_attachment_refs(&factory, 100)
+        .await
+        .expect("reconcile roots");
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_attachment_manifest
+         WHERE session_id = 'future-owner-session'",
+    )
+    .fetch_one(storage.pool())
+    .await
+    .expect("count retained roots");
+
+    sqlx::query("DELETE FROM lash_attachment_manifest WHERE session_id = 'future-owner-session'")
+        .execute(storage.pool())
+        .await
+        .expect("remove fixture");
+    sqlx::query("DELETE FROM lash_deleted_sessions WHERE session_id = 'future-owner-session'")
+        .execute(storage.pool())
+        .await
+        .expect("remove deleted session");
+    sqlx::query(
+        "ALTER TABLE lash_attachment_manifest
+         ADD CONSTRAINT ck_attachment_manifest_owner_kind
+             CHECK (owner_kind IN ('turn', 'process')),
+         ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity
+             CHECK (
+                 (owner_kind IS NULL AND owner_id IS NULL)
+                 OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL)
+             )",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("restore owner checks");
+
+    assert_eq!(rooted, vec![true, true]);
+    assert_eq!(count, 2, "reconciliation must retain both roots");
+    assert!(refs.contains(&lash_core_execution::AttachmentId::parse("future-owner-root").unwrap()));
+    assert!(
+        refs.contains(&lash_core_execution::AttachmentId::parse("invalid-process-root").unwrap())
     );
 }
 

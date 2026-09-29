@@ -645,7 +645,8 @@ pub struct StoreOptions {
 /// never disagree with the row that names it (FIG-1949).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct StoredBlobEnvelope {
-    compression: BlobCompression,
+    version: u32,
+    compression: String,
     #[serde(with = "serde_bytes")]
     content: Vec<u8>,
 }

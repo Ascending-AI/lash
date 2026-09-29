@@ -29,6 +29,7 @@ workspace = true
 lash-store-sql = { workspace = true }
 lash-sansio = { workspace = true }
 lash-core-execution = { workspace = true }
+lash-core-store = { workspace = true }
 async-trait = { workspace = true }
 flate2 = "1"
 rmp-serde = "1"
