@@ -32,9 +32,9 @@
 //! only give each step its journal. The root's claim step repairs orphaned
 //! inputs and records its claim. Its `InspectAdmittedHead` step records the
 //! store-backed decision about the claimed head. On replay both steps return
-//! their recorded outcomes. Before a turn effect, a fenced live check may
-//! stop a root whose claim lost authority between attempts (FIG-3824,
-//! ADR 0105 §2). Rule 6 of `scripts/check-substrate-boundary.sh` pins direct
+//! their recorded outcomes: the inspection's live check runs only when its
+//! step is the attempt's live frontier, and a replay honours its recorded
+//! verdict (FIG-3824, FIG-4058, ADR 0105 §2). Rule 6 of `scripts/check-substrate-boundary.sh` pins direct
 //! store calls and the repair helper in the session drive. The core installs its
 //! [`SessionDriver`] on the engine ([`SessionWorkEngine::install_session_driver`]),
 //! and both handlers read it from the deployment's

@@ -13,10 +13,12 @@
 //! The root's claim body repairs orphaned inputs before it claims the admitted
 //! head. A separate `InspectAdmittedHead` step records whether that head is
 //! ready, ceded, or divergent. A redrive reads both outcomes from its journal
-//! and issues no second repair. It revalidates a `Ready` verdict under its
-//! current drive epoch before any turn effect: a root whose claim lost
-//! authority while the handler was down can only cede or park. This check
-//! cannot select new work or change the claim's recorded base (ADR 0105 §2).
+//! and issues no second repair. The inspection's body is the drive's one live
+//! head check, and it runs only when that step is the attempt's live
+//! frontier; a redrive honours the recorded verdict at every position
+//! (FIG-4058), and the turn's fenced commit meets a head that moved since as
+//! a typed refusal. The check cannot select new work or change the claim's
+//! recorded base (ADR 0105 §2).
 //! Rule 6 of the substrate lint pins direct store calls and the orphan-repair
 //! helper in the drive.
 //!

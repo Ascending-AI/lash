@@ -1419,7 +1419,7 @@ impl crate::store::RuntimePersistenceDecorator for NoReplayRepairRead {
 
 /// A committed root redriven on its journal replays the admission that included
 /// orphan repair. The repair's store read runs only on first execution;
-/// the current lease's stop-only head check may still read committed evidence.
+/// a replay honours the recorded head verdict without a live head check.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

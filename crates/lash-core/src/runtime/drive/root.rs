@@ -160,7 +160,6 @@ impl LashRuntime {
                 let verdict = verdict.map_err(abort)?;
                 if let Err(error) = self
                     .adopt_admitted_turn(
-                        &store,
                         AdmittedTurn {
                             base: &admission.base,
                             turn_index: admission.turn_index,
@@ -329,15 +328,13 @@ impl LashRuntime {
     /// Adopt the head a root's admission admitted it on and pin its recorded
     /// turn index for the prepare phase (FIG-3682).
     ///
-    /// The recorded inspection decides whether the resident head may be
-    /// rebuilt from the admission's base. A live revalidation may only stop a
-    /// root whose admission lost its fence while its handler was down; it
-    /// cannot select new work or alter the admission's recorded base.
+    /// The recorded inspection alone decides whether the resident head may
+    /// be rebuilt from the admission's base: a `Diverged` verdict parks the
+    /// root, and a `Ready` one is honoured whatever the live head is now.
     ///
     /// A base the store no longer retains parks the root too.
     async fn adopt_admitted_turn(
         &mut self,
-        store: &Arc<dyn crate::store::RuntimePersistence>,
         admitted: AdmittedTurn<'_>,
         verdict: AdmittedHeadVerdict,
     ) -> Result<(), RuntimeError> {
@@ -356,42 +353,14 @@ impl LashRuntime {
                 "admitted turn index exceeds platform range",
             )
         })?;
-        let head_moved = self.state.head_revision != base.revision
-            || self.state.session_graph.leaf_node_id != base.leaf
-            || self.state.checkpoint_ref != base.checkpoint;
-        // The head is bound to this root alone (FIG-3927), so a head that
-        // moved without this turn's commit diverged from the admission: the
-        // root parks rather than drive a head it was not admitted on.
-        //
-        // A root its own refusal already ended (FIG-4018) is being replayed
-        // by the run that met the refusal, which died before it recorded its
-        // outcome. That run went past this check, so its replay does too: it
-        // retraces the recorded turn to the same refusal, whose end is
-        // already written, and records the outcome. Parking here instead
-        // would write at a position the journal already recorded, and the
-        // run would never finish.
-        let verdict = if matches!(verdict, AdmittedHeadVerdict::Ready)
-            && head_moved
-            && !store
-                .committed_turn_exists(turn_id)
-                .await
-                .map_err(crate::runtime::runtime_error_from_store_commit)?
-            && !store
-                .root_terminal(&self.state.session_id, turn_id)
-                .await
-                .map_err(crate::runtime::runtime_error_from_store_commit)?
-                .is_some_and(|terminal| {
-                    matches!(
-                        terminal.cause,
-                        crate::store::RootTerminalCause::Refused { .. }
-                    )
-                }) {
-            AdmittedHeadVerdict::Diverged {
-                live_revision: self.state.head_revision,
-            }
-        } else {
-            verdict
-        };
+        // The verdict is the one `drive-head` recorded, honoured at every
+        // position (FIG-4058). Its live check, a head that moved from the
+        // admission's base with no commit of this root behind it, is the
+        // inspection's body, which runs only when `drive-head` is this
+        // attempt's live frontier. A replay is served the recorded verdict:
+        // whatever the first attempt did after it is already journaled, so a
+        // head that moved since is met by the turn's fenced commit as a typed
+        // refusal, never re-decided here at a recorded position.
         match verdict {
             AdmittedHeadVerdict::Ready => {}
             AdmittedHeadVerdict::Diverged { live_revision } => {
@@ -428,6 +397,14 @@ struct AdmittedTurn<'a> {
     root: &'a TurnId,
 }
 
+/// The body of a root's `drive-head` step: the drive's one live head check.
+///
+/// It runs only when the step is not recorded yet, so at the attempt's live
+/// frontier before any turn effect, and decides from the resident head this
+/// attempt refreshed: a head that moved from the admission's base with no
+/// commit of the root behind it is `Diverged`, and the root parks before it
+/// drives a head it was not admitted on. A replay serves the recorded
+/// verdict and never runs it.
 struct InspectAdmittedHeadRunner {
     store: Arc<dyn crate::store::RuntimePersistence>,
     root: TurnId,

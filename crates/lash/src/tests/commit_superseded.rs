@@ -39,6 +39,16 @@ impl Fixture {
     /// The fixture whose provider moves the head while it answers model
     /// call `moving` (0-based), as another writer would.
     async fn head_moves_under_model_call(moving: usize) -> Self {
+        Self::head_moves_under_model_call_and(moving, |_| {}).await
+    }
+
+    /// The fixture whose provider moves the head while it answers model
+    /// call `moving`, then `arm`s a one-shot fault on the session's store.
+    async fn head_moves_under_model_call_and(
+        moving: usize,
+        arm: impl Fn(&lash_core::testing::runtime_helpers::RecordingStore) + Send + Sync + 'static,
+    ) -> Self {
+        let arm = Arc::new(arm);
         let catalog = Arc::new(std::sync::OnceLock::<Arc<RecordingSessionStoreFactory>>::new());
         let installed = Arc::clone(&catalog);
         let backend =
@@ -61,6 +71,7 @@ impl Fixture {
                 .complete(move |_request| {
                     let provider_calls = Arc::clone(&provider_calls);
                     let catalog = Arc::clone(&catalog);
+                    let arm = Arc::clone(&arm);
                     async move {
                         if provider_calls.fetch_add(1, Ordering::SeqCst) == moving {
                             let store = catalog
@@ -73,6 +84,7 @@ impl Fixture {
                                 |_| {},
                             )
                             .await;
+                            arm(&store);
                         }
                         Ok(text_response("answered"))
                     }
@@ -359,4 +371,137 @@ async fn a_refused_root_crashed_before_its_outcome_converges_on_one_terminal() -
         "the engine drains: no invocation is left running, retrying or paused: {open:#?}"
     );
     Ok(())
+}
+
+/// Drive FIG-4058's crash cells: the session's first turn commits, the head
+/// moves under the second turn's model call and `fixture` arms its fault,
+/// and the engine retries the second root's run past its recorded
+/// `drive-head` verdict. The replay honours the recorded `Ready`, retraces
+/// the journal to the superseded commit and ends the root with that
+/// refusal: the send answers it, the root's one terminal is the refusal, it
+/// is never parked, and the session's next send completes under a new root.
+async fn a_redriven_root_past_drive_head_ends_with_its_refusal(fixture: Fixture) -> Result<()> {
+    let session = fixture.core.session(SESSION).open().await?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        session
+            .send(TurnInput::text("the session's first turn"))
+            .id(FIRST_TURN)
+            .output(),
+    )
+    .await
+    .expect("the first turn settles")?;
+
+    let refused = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        session
+            .send(TurnInput::text("the head moves under this turn's commit"))
+            .id(TURN)
+            .output(),
+    )
+    .await;
+    let runs = fixture.turn_runs(TURN);
+    let refused = refused
+        .unwrap_or_else(|_| panic!("the redriven turn settles; its runs: {runs:#?}"))
+        .expect_err("the superseded commit ends the turn with its refusal");
+    assert!(
+        matches!(&refused, EmbedError::Runtime(error)
+            if error.code == lash_core::RuntimeErrorCode::StoreCommitSuperseded),
+        "the redriven root answers its typed refusal, never a park: {refused:?}; runs: {runs:#?}"
+    );
+
+    let session_id = lash_core::SessionId::from(SESSION);
+    let root = lash_core::TurnId::from(TURN);
+    let terminal = fixture
+        .core
+        .store_factory
+        .root_terminal(&session_id, &root)
+        .await?
+        .expect("the redriven root has terminal evidence");
+    assert!(
+        matches!(
+            &terminal.cause,
+            lash_core::store::RootTerminalCause::Refused { code, .. }
+                if *code == lash_core::RuntimeErrorCode::StoreCommitSuperseded
+        ),
+        "the root's one terminal is its refusal: {terminal:?}"
+    );
+    let parks = fixture
+        .core
+        .store_factory
+        .list_turn_parks(&lash_core::store::TurnParkQuery {
+            reasons: None,
+            session: Some(session_id.clone()),
+            parked_at_or_before_ms: None,
+            after: None,
+            limit: std::num::NonZeroUsize::new(16).expect("a nonzero page"),
+        })
+        .await?;
+    assert!(parks.is_empty(), "the root is never parked: {parks:#?}");
+
+    let next = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        session
+            .send(TurnInput::text("the session's next send"))
+            .id(NEXT_TURN)
+            .output(),
+    )
+    .await
+    .expect("the next send settles")
+    .unwrap_or_else(|error| panic!("the next send completes under a new root: {error:?}"));
+    assert_eq!(next.assistant_message(), Some("answered"));
+
+    fixture.double.server().settle().await;
+    let runs = fixture.turn_runs(TURN);
+    let [run] = runs.as_slice() else {
+        panic!("the redriven root ran in one invocation: {runs:#?}");
+    };
+    assert_eq!(run.status, "completed", "the replay completed: {run:?}");
+    assert_eq!(
+        run.attempts, 2,
+        "the fault cut the first attempt and the replay finished: {run:?}"
+    );
+    assert_eq!(
+        fixture.provider_calls.load(Ordering::SeqCst),
+        3,
+        "the replay called no model: the first turn, the redriven turn and the next send did"
+    );
+    let open = fixture.open_after_settling().await;
+    assert!(
+        open.is_empty(),
+        "the engine drains: no invocation is left running, retrying or paused: {open:#?}"
+    );
+    Ok(())
+}
+
+/// FIG-4058: a live fault the engine retries after the root's journal has
+/// run past `drive-head`. The head moved under the turn and its commit
+/// meets a live store fault, so the retry replays a journal that already
+/// holds the turn's model call. Its recorded `Ready` is honoured rather
+/// than turned into `Diverged` by the moved head, which parked the root at
+/// a recorded position.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_live_fault_retried_past_drive_head_keeps_the_recorded_ready() -> Result<()> {
+    let fixture = Fixture::head_moves_under_model_call_and(1, |store| {
+        store.fail_next_runtime_commit(lash_core::StoreError::Backend(
+            "injected live fault on the turn's commit".to_string(),
+        ));
+    })
+    .await;
+    a_redriven_root_past_drive_head_ends_with_its_refusal(fixture).await
+}
+
+/// FIG-4058: the refused run fails between meeting its refusal and writing
+/// the root's end (FIG-4018). The retry replays to the same refusal and
+/// ends the root, rather than meeting the moved head with no terminal
+/// written and parking it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_root_failed_before_its_end_write_replays_to_an_ended_root() -> Result<()> {
+    let fixture = Fixture::head_moves_under_model_call_and(1, |store| {
+        store.fail_next_end_refused_root(lash_core::StoreError::Backend(
+            "injected live fault on the refused root's end".to_string(),
+        ));
+    })
+    .await;
+    a_redriven_root_past_drive_head_ends_with_its_refusal(fixture).await
 }

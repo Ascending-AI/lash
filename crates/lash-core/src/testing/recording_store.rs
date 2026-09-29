@@ -38,6 +38,7 @@ pub struct RecordingStore {
     load_session_head_meta_count: AtomicUsize,
     list_queued_work_count: AtomicUsize,
     fail_next_runtime_commit: Mutex<Option<StoreError>>,
+    fail_next_end_refused_root: Mutex<Option<StoreError>>,
     inject_turn_cancel_before_next_runtime_commit: Mutex<Option<crate::TurnCancelRequest>>,
     fail_next_load_session_head_meta: AtomicBool,
     fail_load_session_on_call: Mutex<Option<usize>>,
@@ -62,6 +63,7 @@ impl RecordingStore {
             load_session_head_meta_count: AtomicUsize::new(0),
             list_queued_work_count: AtomicUsize::new(0),
             fail_next_runtime_commit: Mutex::new(None),
+            fail_next_end_refused_root: Mutex::new(None),
             inject_turn_cancel_before_next_runtime_commit: Mutex::new(None),
             fail_next_load_session_head_meta: AtomicBool::new(false),
             fail_load_session_on_call: Mutex::new(None),
@@ -141,6 +143,13 @@ impl RecordingStore {
     /// sees it.
     pub fn fail_next_runtime_commit(&self, error: StoreError) {
         *self.fail_next_runtime_commit.lock_recover() = Some(error);
+    }
+
+    /// Refuse the next root-end write of a refused run with `error`, before
+    /// the wrapped store sees it: the refused run fails between meeting its
+    /// refusal and writing its end.
+    pub fn fail_next_end_refused_root(&self, error: StoreError) {
+        *self.fail_next_end_refused_root.lock_recover() = Some(error);
     }
 
     /// Record `request` on the wrapped store immediately before the next
@@ -260,6 +269,22 @@ impl RuntimePersistenceDecorator for RecordingStore {
             self.runtime_commits.lock_recover().push(applied);
         }
         Ok(receipt)
+    }
+
+    async fn end_refused_root(
+        &self,
+        session_id: &SessionId,
+        root: &crate::TurnId,
+        refusal: &crate::RuntimeError,
+        at_ms: u64,
+    ) -> Result<Option<crate::store::RootTerminal>, StoreError> {
+        let injected_failure = self.fail_next_end_refused_root.lock_recover().take();
+        if let Some(error) = injected_failure {
+            return Err(error);
+        }
+        self.inner
+            .end_refused_root(session_id, root, refusal, at_ms)
+            .await
     }
 
     async fn begin_attachment_write(
