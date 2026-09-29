@@ -987,7 +987,7 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
             .session_graph
             .nodes
             .iter()
-            .any(|node| &node.node_id == id)
+            .any(|node| node.node_id == id)
     }));
     assert_eq!(state.agent_frames.len(), 1);
     assert_eq!(

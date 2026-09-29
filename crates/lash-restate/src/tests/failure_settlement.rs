@@ -78,7 +78,7 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
     );
     let store = session_view(
         Arc::new(
-            lash_sqlite_store::SqliteStore::open(&dir.path().join("session.db"))
+            lash_sqlite_store::SqliteStore::open(&dir.path().join("store"))
                 .await
                 .expect("open session store"),
         ),
@@ -131,7 +131,7 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
     assert_eq!(replay_turn.outcome, first_turn.outcome);
     assert_eq!(protocol.calls.load(Ordering::SeqCst), 1);
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
-    let conn = rusqlite::Connection::open(dir.path().join("session.db"))
+    let conn = rusqlite::Connection::open(dir.path().join("store").join("durable-core.db"))
         .expect("open raw session sqlite store");
     let rows: i64 = conn
         .query_row(
