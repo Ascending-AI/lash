@@ -1022,7 +1022,7 @@ pub(crate) fn build_report(
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use lash_core::DeploymentStore;
+    use lash_core::SessionCatalogStore as _;
 
     use super::*;
 
