@@ -11,16 +11,15 @@
 //! admits, records membership, runs anything, or dispatches its tool.
 
 use crate::EffectGroupDispatch as _;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::store::StoreTestSupport as _;
-use lash_core::store::{IngressStore as _, SessionCommitStore as _};
+use lash_core::store::{SessionCatalogStore as _, TurnInputStore as _};
 use lash_core::{
     DeploymentStore, EffectAddress, ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy,
     RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectLocalExecutor, RuntimeErrorCode, RuntimePersistence, StoreError,
+    RuntimeEffectLocalExecutor, RuntimeErrorCode, StoreError,
 };
 use lash_sansio::SessionId;
 use restate_sdk::prelude::Endpoint;
@@ -38,167 +37,6 @@ const SESSION: &str = "pre-cutover-session";
 const GROUP: &str = "pre-cutover-turn:tool-batch";
 /// `RunCommandMessage`: the journal entry of an atomic `ctx.run` body.
 const RESTATE_RUN_COMMAND_MESSAGE_TYPE: u16 = 0x0411;
-
-/// The catalog a deployment hands its effect-group services: the one session
-/// the child names.
-struct OneSessionCatalog {
-    session_id: SessionId,
-    store: Arc<dyn RuntimePersistence>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::AttachmentRootSet for OneSessionCatalog {
-    async fn live_attachment_refs(
-        &self,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<BTreeSet<lash_core::AttachmentId>, StoreError> {
-        Ok(BTreeSet::new())
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        _id: &lash_core::AttachmentId,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
-        Ok(false)
-    }
-}
-
-#[async_trait::async_trait]
-impl DeploymentStore for OneSessionCatalog {
-    async fn create_store(
-        &self,
-        _request: &lash_core::SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "create_store",
-        })
-    }
-
-    async fn open_existing_store_by_id(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
-        Ok((*session_id == self.session_id).then(|| Arc::clone(&self.store)))
-    }
-
-    async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
-        Ok(false)
-    }
-
-    async fn delete_session(
-        &self,
-        _session_id: &SessionId,
-    ) -> lash_core::store::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
-        Ok(lash_core::SessionBlobReclaimReport::default())
-    }
-
-    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
-    async fn count_unsettled_turns(
-        &self,
-    ) -> Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
-        Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "DeploymentStore::count_unsettled_turns",
-        })
-    }
-
-    async fn list_turn_parks(
-        &self,
-        _query: &lash_core::store::TurnParkQuery,
-    ) -> Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
-        Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "DeploymentStore::list_turn_parks",
-        })
-    }
-
-    async fn turn_park_feed(
-        &self,
-        _after: lash_core::store::ParkFeedCursor,
-        _limit: std::num::NonZeroUsize,
-    ) -> Result<
-        lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>,
-        lash_core::StoreError,
-    > {
-        Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "DeploymentStore::turn_park_feed",
-        })
-    }
-
-    async fn root_terminal(
-        &self,
-        _session_id: &lash_core::SessionId,
-        _root: &lash_core::TurnId,
-    ) -> std::result::Result<Option<lash_core::store::RootTerminal>, lash_core::StoreError> {
-        Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "DeploymentStore::root_terminal",
-        })
-    }
-
-    async fn compact_turn_park_feed(
-        &self,
-        _through: lash_core::store::ParkFeedCursor,
-    ) -> Result<(), lash_core::StoreError> {
-        Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "DeploymentStore::compact_turn_park_feed",
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::store::ControlIntentStore for OneSessionCatalog {
-    async fn begin_session_close(
-        &self,
-        _session_id: &SessionId,
-        _at_ms: u64,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::begin_session_close",
-        })
-    }
-
-    async fn claim_intent_application(
-        &self,
-        _id: lash_core::store::ControlIntentId,
-        _at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentApplication, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::claim_intent_application",
-        })
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        _id: lash_core::store::ControlIntentId,
-        _claim: &lash_core::store::ClaimToken,
-        _at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::acknowledge_intent",
-        })
-    }
-
-    async fn record_intent_failure(
-        &self,
-        _id: lash_core::store::ControlIntentId,
-        _claim: &lash_core::store::ClaimToken,
-        _error: &str,
-        _retryable: bool,
-        _at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::record_intent_failure",
-        })
-    }
-
-    async fn load_intent(
-        &self,
-        _id: lash_core::store::ControlIntentId,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::load_intent",
-        })
-    }
-}
 
 /// Counts every time the deployment asks how to run a child — the step before
 /// the child's tool could be dispatched — and answers that it cannot.
@@ -223,26 +61,24 @@ async fn session_catalog(
     generation: Option<u32>,
 ) -> Arc<dyn DeploymentStore> {
     let store = Arc::new(
-        lash_sqlite_store::Store::open(&dir.join("session.db"))
+        lash_sqlite_store::SqliteStore::open(&dir.join("session.db"))
             .await
             .expect("open session store"),
     );
     let session_id = SessionId::from(SESSION);
-    lash_core::testing::store_fixtures::bind_conformance_session(
-        &(Arc::clone(&store) as Arc<dyn RuntimePersistence>),
-        &session_id,
-    )
-    .await;
+    store
+        .admit_session(&lash_core::testing::store_fixtures::root_session_request(
+            &session_id,
+        ))
+        .await
+        .expect("admit the session");
     if let Some(generation) = generation {
         store
-            .stamp_session_state_version_for_testing(generation)
+            .stamp_session_state_version_for_testing(&session_id, generation)
             .await
             .expect("stamp the session's generation marker");
     }
-    Arc::new(OneSessionCatalog {
-        session_id,
-        store: store as Arc<dyn RuntimePersistence>,
-    })
+    store
 }
 
 /// The admitted request of one tool in the batch.
@@ -455,16 +291,17 @@ async fn a_current_sessions_group_child_passes_the_gate_to_admission() {
 async fn a_refused_redrive_parks_only_a_turn_in_flight() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = Arc::new(
-        lash_sqlite_store::Store::open(&dir.path().join("session.db"))
+        lash_sqlite_store::SqliteStore::open(&dir.path().join("session.db"))
             .await
             .expect("open session store"),
     );
     let session_id = SessionId::from(SESSION);
-    lash_core::testing::store_fixtures::bind_conformance_session(
-        &(Arc::clone(&store) as Arc<dyn RuntimePersistence>),
-        &session_id,
-    )
-    .await;
+    store
+        .admit_session(&lash_core::testing::store_fixtures::root_session_request(
+            &session_id,
+        ))
+        .await
+        .expect("admit the session");
     // What the crashed execution's journaled acceptance wrote: the turn's
     // input row, under the id its acceptance address provisions.
     let in_flight = ExecutionScope::turn(SESSION, "turn-in-flight");
@@ -488,13 +325,10 @@ async fn a_refused_redrive_parks_only_a_turn_in_flight() {
         .expect("record the accepted input");
     let previous = lash_core::store::CURRENT_SESSION_STATE_VERSION - 1;
     store
-        .stamp_session_state_version_for_testing(previous)
+        .stamp_session_state_version_for_testing(&session_id, previous)
         .await
         .expect("stamp the pre-cutover generation");
-    let sessions: Arc<dyn DeploymentStore> = Arc::new(OneSessionCatalog {
-        session_id: session_id.clone(),
-        store: Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-    });
+    let sessions: Arc<dyn DeploymentStore> = store.clone();
     let refusal = lash_core::SessionStateVersionRefusal::of_store_error(
         &lash_core::admit_session_state_generation(sessions.as_ref(), &session_id)
             .await
@@ -511,8 +345,7 @@ async fn a_refused_redrive_parks_only_a_turn_in_flight() {
         "nothing ran for a scope with no accepted input: its refusal stays terminal"
     );
     assert_eq!(
-        store
-            .load_turn_park(&session_id)
+        lash_core::store::SessionCommitStore::load_turn_park(store.as_ref(), &session_id)
             .await
             .expect("read the park"),
         None

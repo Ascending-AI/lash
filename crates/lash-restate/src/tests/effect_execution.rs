@@ -481,7 +481,7 @@ pub(super) async fn restate_turn_control_owner_is_stable_per_configured_authorit
     let session_id = SessionId::from("restate-authority-reopen");
     let store = memory_session_store(session_id.as_str()).await;
     let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
-        &store,
+        store.store(),
         &session_id,
         "restate-authority-reopen",
     )
@@ -504,16 +504,16 @@ pub(super) async fn restate_turn_control_owner_is_stable_per_configured_authorit
     )
     .unwrap();
     store
-        .validate_turn_cancellation_binding(&session_id, &lease, &first_binding, &physical_scope)
+        .validate_turn_cancellation_binding(&lease, &first_binding, &physical_scope)
         .await
         .expect("admit the original Restate authority and physical scope");
     store
-        .pending_turn_cancel_closures(&session_id, &lease, &restarted_binding, &physical_scope)
+        .pending_turn_cancel_closures(&lease, &restarted_binding, &physical_scope)
         .await
         .expect("the same authority survives an endpoint move before work");
     assert!(matches!(
         store
-            .pending_turn_cancel_closures(&session_id, &lease, &other_binding, &physical_scope,)
+            .pending_turn_cancel_closures(&lease, &other_binding, &physical_scope,)
             .await,
         Err(lash_core::StoreError::TurnCancelBindingMismatch { .. })
     ));

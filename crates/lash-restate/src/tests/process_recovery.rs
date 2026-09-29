@@ -7,9 +7,11 @@ use lashlang::testing::ast_builders as b;
 pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_after_worker_reopen() {
     let temp = tempfile::tempdir().expect("tempdir");
     let process_db = temp.path().join("processes.db");
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        temp.path().join("sessions"),
-    )) as Arc<dyn lash_core::DeploymentStore>;
+    let store_factory = Arc::new(
+        lash_sqlite_store::SqliteStore::open(&temp.path().join("sessions"))
+            .await
+            .expect("open the session catalog"),
+    ) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &process_db,
@@ -150,9 +152,11 @@ fn mutate_snapshot_lashlang_input(
 pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure_codes() {
     let temp = tempfile::tempdir().expect("tempdir");
     let process_db = temp.path().join("processes.db");
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        temp.path().join("sessions"),
-    )) as Arc<dyn lash_core::DeploymentStore>;
+    let store_factory = Arc::new(
+        lash_sqlite_store::SqliteStore::open(&temp.path().join("sessions"))
+            .await
+            .expect("open the session catalog"),
+    ) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &process_db,
@@ -836,9 +840,11 @@ pub(super) fn assert_lashlang_engine_record(
 pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen() {
     let temp = tempfile::tempdir().expect("tempdir");
     let process_db = temp.path().join("processes.db");
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        temp.path().join("sessions"),
-    )) as Arc<dyn lash_core::DeploymentStore>;
+    let store_factory = Arc::new(
+        lash_sqlite_store::SqliteStore::open(&temp.path().join("sessions"))
+            .await
+            .expect("open the session catalog"),
+    ) as Arc<dyn lash_core::DeploymentStore>;
 
     // A worker started the trigger process and crashed before it could run:
     // the durable row exists and is non-terminal. We register it directly to

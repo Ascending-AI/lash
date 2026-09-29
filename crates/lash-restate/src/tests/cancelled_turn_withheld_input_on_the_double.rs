@@ -19,16 +19,22 @@ lash_conformance::cancelled_turn_withheld_input_tests!({
         Arc::new(RecordingContext::default()),
     ));
     let backend = lash_conformance::backend_over(Arc::clone(&stores), host);
-    let store = stores
-        .session_store_factory()
-        .create_store(&lash_core::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(lash_conformance::CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        })
+    let store: Arc<dyn lash_core::RuntimeStore> = Arc::clone(
+        lash_core::runtime::admit_session_view(
+            &stores.session_store_factory(),
+            &lash_core::SessionStoreCreateRequest {
+                owning_process_id: None,
+                pending_observer_intents: Vec::new(),
+                session_id: SessionId::from(
+                    lash_conformance::CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID,
+                ),
+                relation: lash_core::SessionRelation::Root,
+                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            },
+        )
         .await
-        .expect("create the withheld-input session store");
+        .expect("create the withheld-input session store")
+        .store(),
+    );
     (stores, "restate-double", backend, store)
 });

@@ -76,10 +76,13 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
             lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
         )),
     );
-    let store: lash_core::store::SessionStore = Arc::new(
-        lash_sqlite_store::Store::open(&dir.path().join("session.db"))
-            .await
-            .expect("open session store"),
+    let store = session_view(
+        Arc::new(
+            lash_sqlite_store::SqliteStore::open(&dir.path().join("session.db"))
+                .await
+                .expect("open session store"),
+        ),
+        session_id.clone(),
     );
     let policy = replay_test_policy(&session_id);
     let initial_state = replay_test_state(&session_id, &policy);
@@ -100,7 +103,7 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
         policy.clone(),
         initial_state.clone(),
         host.clone(),
-        Arc::clone(&store),
+        store.clone(),
         plugins(),
     )
     .await;
@@ -112,8 +115,7 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
     // The hook would proceed on a second invocation. The replay must serve
     // the first refusal from the journal without invoking it again.
     context.start_replay();
-    let retry_store: lash_core::store::SessionStore =
-        Arc::new(CommitRetryStore::new(Arc::clone(&store)));
+    let retry_store = decorated_view(&store, CommitRetryStore::new);
     let mut replay = replay_test_runtime_with_plugins(
         &session_id,
         policy,

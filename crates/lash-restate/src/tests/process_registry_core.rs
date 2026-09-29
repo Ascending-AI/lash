@@ -43,11 +43,11 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
         )),
     );
     let store = Arc::new(
-        lash_sqlite_store::Store::open(&dir.path().join("session.db"))
+        lash_sqlite_store::SqliteStore::open(&dir.path().join("session.db"))
             .await
             .expect("open session store"),
     );
-    let runtime_store: lash_core::store::SessionStore = store.clone();
+    let runtime_store = session_view(store.clone(), session_id);
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
@@ -58,7 +58,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
         policy.clone(),
         initial_state.clone(),
         host.clone(),
-        Arc::clone(&runtime_store),
+        runtime_store.clone(),
     )
     .await;
     let first_turn = run_restate_replay_turn(
@@ -76,8 +76,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
     assert!(!first_runs.is_empty());
 
     context.start_replay();
-    let retry_store: lash_core::store::SessionStore =
-        Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
+    let retry_store = decorated_view(&runtime_store, CommitRetryStore::new);
     let mut replay = replay_test_runtime(
         &SessionId::from(session_id),
         policy,
@@ -159,14 +158,14 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
     );
 
     let store = Arc::new(
-        lash_sqlite_store::Store::open(&dir.path().join("session.db"))
+        lash_sqlite_store::SqliteStore::open(&dir.path().join("session.db"))
             .await
             .expect("open session store"),
     );
-    let underlying_store: lash_core::store::SessionStore = store.clone();
+    let underlying_store = session_view(store.clone(), session_id);
     let drive_seal_count = Arc::new(AtomicUsize::new(0));
-    let probed_store = Arc::new(CommitRetryStore {
-        inner: Arc::clone(&underlying_store),
+    let probed_store = decorated_view(&underlying_store, |inner| CommitRetryStore {
+        inner,
         drive_seal_count: Arc::clone(&drive_seal_count),
     });
     let runtime_store: lash_core::store::SessionStore = probed_store;
@@ -180,7 +179,7 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
         policy.clone(),
         initial_state.clone(),
         host.clone(),
-        Arc::clone(&runtime_store),
+        runtime_store.clone(),
     )
     .await;
     let suspended_context = Arc::clone(&context);
@@ -484,11 +483,11 @@ finish(await handle);
         ),
     );
     let store = Arc::new(
-        lash_sqlite_store::Store::open(&dir.path().join("session.db"))
+        lash_sqlite_store::SqliteStore::open(&dir.path().join("session.db"))
             .await
             .expect("open session store"),
     );
-    let runtime_store: lash_core::store::SessionStore = store;
+    let runtime_store = session_view(store, session_id);
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
@@ -567,7 +566,7 @@ finish(await handle);
         policy.clone(),
         initial_state.clone(),
         host.clone(),
-        Arc::clone(&runtime_store),
+        runtime_store.clone(),
         plugin_factories.clone(),
         Some(Arc::clone(&process_registry)),
     ))
@@ -700,8 +699,7 @@ finish(await handle);
             &RestateDurableWaitAddress::for_key(&completion_key).workflow_key,
         );
     context.start_replay_allowing_journal_extension();
-    let retry_store: lash_core::store::SessionStore =
-        Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
+    let retry_store = decorated_view(&runtime_store, CommitRetryStore::new);
     let mut replay = Box::pin(replay_test_runtime_with_plugins_and_registry(
         &SessionId::from(session_id),
         policy,

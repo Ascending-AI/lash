@@ -832,16 +832,16 @@ impl LiveConformanceHarness {
     /// handlers read.
     pub(super) fn law_persistence(
         &self,
-    ) -> impl Fn(&str) -> Arc<lash_sqlite_store::Store> + Send + Sync + 'static + use<> {
+    ) -> impl Fn(&str) -> Arc<lash_sqlite_store::SqliteStore> + Send + Sync + 'static + use<> {
         let stores = self.stores.clone();
         move |_scenario| {
             let stores = stores.clone();
-            Arc::new(super::conformance_and_poison::sync_await(async move {
+            super::conformance_and_poison::sync_await(async move {
                 stores
                     .open_store()
                     .await
                     .expect("open a conformance handle on the endpoint's session catalog")
-            }))
+            })
         }
     }
 

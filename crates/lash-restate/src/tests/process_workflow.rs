@@ -1305,9 +1305,11 @@ pub(super) async fn snapshot_lashlang_registration(
 pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_cancel() {
     let temp = tempfile::tempdir().expect("tempdir");
     let process_db = temp.path().join("processes.db");
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        temp.path().join("sessions"),
-    )) as Arc<dyn lash_core::DeploymentStore>;
+    let store_factory = Arc::new(
+        lash_sqlite_store::SqliteStore::open(&temp.path().join("sessions"))
+            .await
+            .expect("open the session catalog"),
+    ) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &process_db,
@@ -1317,16 +1319,18 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
     let worker_a = recovery_worker(Arc::clone(&registry_a), Arc::clone(&store_factory)).await;
-    let _root_store = store_factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    let _root_store = lash_core::runtime::admit_session_view(
+        &store_factory,
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
             relation: lash_core::SessionRelation::default(),
             policy: recovery_session_policy(),
-        })
-        .await
-        .expect("create root session store before wake delivery");
+        },
+    )
+    .await
+    .expect("create root session store before wake delivery");
     let endpoint_a = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(
@@ -1439,8 +1443,9 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             .expect("await recovered terminal process"),
         process_success(serde_json::json!({ "echo": "wake-after-rebuild" }))
     );
-    let queue_store = store_factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    let queue_store = lash_core::runtime::admit_session_view(
+        &store_factory,
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
@@ -1452,11 +1457,12 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
                     .expect("model spec"),
                 ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
             },
-        })
-        .await
-        .expect("open root session store");
+        },
+    )
+    .await
+    .expect("open root session store");
     let queued = queue_store
-        .list_queued_work(&SessionId::from("root"))
+        .list_queued_work()
         .await
         .expect("list queued wakes");
     assert_eq!(queued.len(), 1);

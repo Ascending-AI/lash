@@ -114,8 +114,7 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
         "the child runtime must be dropped when the Restate process run ends"
     );
     assert!(
-        session_store_factory
-            .open_existing_store_by_id(&child_session_id)
+        lash_core::runtime::live_session_view(&session_store_factory, &child_session_id)
             .await
             .expect("inspect durable child")
             .is_some(),

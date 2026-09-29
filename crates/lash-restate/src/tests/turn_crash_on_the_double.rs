@@ -19,7 +19,7 @@ use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 async fn turn_crash_runner_fixture() -> (
     LiveConformanceHarness,
     Arc<dyn lash_core::StoreSet>,
-    impl Fn(&str) -> Arc<lash_sqlite_store::Store> + Send + Sync + 'static,
+    impl Fn(&str) -> Arc<lash_sqlite_store::SqliteStore> + Send + Sync + 'static,
     Arc<dyn EffectHost>,
     Arc<dyn lash_conformance::ConformanceTurnRunner>,
 ) {

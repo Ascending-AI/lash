@@ -68,17 +68,18 @@ impl World {
         let backend = layer(harness.law_backend());
         let registry = backend.process_registry();
         let session_id = SessionId::from(format!("parent-end-{law}-{nonce}"));
-        let store = backend
-            .session_store_factory()
-            .create_store(&lash_core::SessionStoreCreateRequest {
+        let store = lash_core::runtime::admit_session_view(
+            &backend.session_store_factory(),
+            &lash_core::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::Root,
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-            })
-            .await
-            .expect("create the law's session store");
+            },
+        )
+        .await
+        .expect("create the law's session store");
         Self {
             harness,
             backend,
@@ -177,7 +178,7 @@ impl World {
             .with_policy(policy)
             .with_initial_state(state)
             .with_plugin_factories(lash_core::testing::test_standard_protocol_factories())
-            .with_store(Arc::clone(&self.store))
+            .with_store(self.store.clone())
             .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))
             .with_process_work(self.backend.process_work())
             .build(),

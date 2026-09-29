@@ -3,7 +3,7 @@
 use super::*;
 use lash_core::testing::TestTurnDrive;
 use lash_core::testing::runtime_helpers::RecordingSessionStoreFactory;
-use lash_core::{IngressStore, SessionCommitStore};
+
 fn parked_provider(
     started: tokio::sync::mpsc::Sender<()>,
 ) -> lash_core::facade_support::ProviderHandle {
@@ -141,16 +141,18 @@ async fn parent_runtime(
         provider_id: "mock".to_string(),
         ..recovery_session_policy()
     };
-    let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    let store = lash_core::runtime::admit_session_view(
+        &factory,
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             session_id: parent.clone(),
             relation: lash_core::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             policy: policy.clone(),
-        })
-        .await
-        .expect("create parent session store");
+        },
+    )
+    .await
+    .expect("create parent session store");
     let state = lash_core::RuntimeSessionState {
         session_id: parent.clone(),
         policy: policy.clone(),
@@ -287,8 +289,9 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
     let ProcessInput::SessionTurn { create_request, .. } = registration.input.as_ref() else {
         unreachable!("SessionTurn registration");
     };
-    session_factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    lash_core::runtime::admit_session_view(
+        &session_factory,
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             session_id: child.clone(),
             relation: create_request
@@ -300,16 +303,17 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
                 .relation,
             pending_observer_intents: Vec::new(),
             policy: recovery_session_policy(),
-        })
-        .await
-        .expect("create metadata-only child");
-    let partial = session_factory
-        .open_existing_store_by_id(&child)
+        },
+    )
+    .await
+    .expect("create metadata-only child");
+    let partial = lash_core::runtime::live_session_view(&session_factory, &child)
         .await
         .expect("open metadata-only child")
         .expect("metadata-only child exists");
     assert!(
-        lash_core::store::load_persisted_session_state(partial.as_ref())
+        partial
+            .load_session_window(lash_core::store::WindowSelector::Current)
             .await
             .expect("load partial session")
             .is_none(),
@@ -336,7 +340,8 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
     .expect("run SessionTurn after metadata-only create");
     assert_completed(&outcome);
     assert!(
-        lash_core::store::load_persisted_session_state(partial.as_ref())
+        partial
+            .load_session_window(lash_core::store::WindowSelector::Current)
             .await
             .expect("load completed session")
             .is_some(),
@@ -372,8 +377,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_rows() {
         received = started.recv() => assert_eq!(received, Some(())),
         outcome = attempt.as_mut() => panic!("the child completed before cancellation: {outcome:?}"),
     }
-    let store = factory
-        .open_existing_store_by_id(&child)
+    let store = lash_core::runtime::live_session_view(&factory, &child)
         .await
         .expect("open child before cancellation")
         .expect("the parked child has durable rows");
@@ -399,15 +403,14 @@ async fn cancelled_mid_turn_subagent_retains_durable_rows() {
     );
     assert!(
         store
-            .list_pending_turn_inputs(&child)
+            .list_pending_turn_inputs()
             .await
             .expect("read retained child inputs")
             .is_empty(),
         "the retained child has no claimable input"
     );
     assert!(
-        factory
-            .open_existing_store_by_id(&child)
+        lash_core::runtime::live_session_view(&factory, &child)
             .await
             .expect("reopen retained child")
             .is_some(),
@@ -458,8 +461,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
         "a failed child commit must not terminalize: {failed:?}"
     );
     assert!(
-        store
-            .load_session_meta()
+        lash_core::store::SessionCommitStore::load_session_meta(store.as_ref(), &child)
             .await
             .expect("load retained child")
             .is_some()
@@ -479,8 +481,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
     .expect("redelivery settles the retained child");
     assert_cancelled(&replay);
     assert!(
-        store
-            .list_pending_turn_inputs(&child)
+        lash_core::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &child)
             .await
             .expect("read settled child inputs")
             .is_empty()
@@ -515,14 +516,13 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
         received = started.recv() => assert_eq!(received, Some(())),
         outcome = attempt.as_mut() => panic!("the child completed before the crash: {outcome:?}"),
     }
-    let store = factory
-        .open_existing_store_by_id(&child)
+    let store = lash_core::runtime::live_session_view(&factory, &child)
         .await
         .expect("open accepted child")
         .expect("the child is durable before the crash");
     assert!(
         !store
-            .list_pending_turn_inputs(&child)
+            .list_pending_turn_inputs()
             .await
             .expect("read accepted child input")
             .is_empty(),
@@ -546,7 +546,7 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
     assert_cancelled(&replay);
     assert!(
         store
-            .list_pending_turn_inputs(&child)
+            .list_pending_turn_inputs()
             .await
             .expect("read settled child inputs")
             .is_empty()
@@ -578,13 +578,13 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
         ))
         .await
         .expect("commit child create without accepting turn input");
-    let store = factory
-        .open_existing_store_by_id(&child)
+    let store = lash_core::runtime::live_session_view(&factory, &child)
         .await
         .expect("open created child")
         .expect("created child row exists");
     assert!(
-        lash_core::store::load_persisted_session_state(store.as_ref())
+        store
+            .load_session_window(lash_core::store::WindowSelector::Current)
             .await
             .expect("load committed child")
             .is_some(),
@@ -592,7 +592,7 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
     );
     assert!(
         store
-            .list_pending_turn_inputs(&child)
+            .list_pending_turn_inputs()
             .await
             .expect("read child turn inputs")
             .is_empty(),
@@ -733,8 +733,7 @@ async fn a_start_in_a_process_owned_session_records_its_owner_above_the_session(
     .await
     .expect("owner SessionTurn completes");
     assert_completed(&outcome);
-    let owned_store = factory
-        .open_existing_store_by_id(&child)
+    let owned_store = lash_core::runtime::live_session_view(&factory, &child)
         .await
         .expect("open process-owned session")
         .expect("owner created child session");

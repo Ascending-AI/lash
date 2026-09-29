@@ -208,17 +208,41 @@ pub(super) async fn reconcile_parked_processes(
     .expect("reconcile paused processes")
 }
 
+/// The view of `session_id` on `store`, a catalog store.
+pub(super) fn session_view(
+    store: Arc<dyn lash_core::RuntimeStore>,
+    session_id: impl Into<SessionId>,
+) -> lash_core::store::SessionStore {
+    lash_core::store::SessionStore::new(store, session_id.into()).expect("a valid session id")
+}
+
+/// `view`'s session seen through the store decorator `decorate` builds over
+/// `view`'s catalog.
+pub(super) fn decorated_view<D>(
+    view: &lash_core::store::SessionStore,
+    decorate: impl FnOnce(Arc<dyn lash_core::RuntimeStore>) -> D,
+) -> lash_core::store::SessionStore
+where
+    D: lash_core::RuntimeStore + 'static,
+{
+    session_view(
+        Arc::new(decorate(Arc::clone(view.store()))),
+        view.session_id().clone(),
+    )
+}
+
 /// A root session store for `session_id` over a fresh SQLite memory backend.
 pub(super) async fn memory_session_store(session_id: &str) -> lash_core::store::SessionStore {
-    memory_session_store_factory()
-        .await
-        .create_store(&lash_core::testing::store_fixtures::session_store_request(
+    lash_core::runtime::admit_session_view(
+        &memory_session_store_factory().await,
+        &lash_core::testing::store_fixtures::session_store_request(
             &SessionId::from(session_id),
             "restate-test-model",
             lash_core::SessionRelation::Root,
-        ))
-        .await
-        .expect("create a SQLite memory session store")
+        ),
+    )
+    .await
+    .expect("create a SQLite memory session store")
 }
 
 /// The trigger store of a fresh SQLite memory store set.

@@ -85,7 +85,7 @@ async fn backend_for(
 ) -> Option<(
     (DatabaseLock, tempfile::TempDir),
     lash_core::Backend,
-    lash_core::store::SessionStore,
+    Arc<dyn lash_core::RuntimeStore>,
 )> {
     let url = database_url()?;
     let lock = DatabaseLock::acquire(&url).await;
@@ -105,17 +105,21 @@ async fn backend_for(
         Arc::new(RecordingContext::default()),
     ));
     let backend = lash_conformance::backend_over(Arc::clone(&stores), host);
-    let store = stores
-        .session_store_factory()
-        .create_store(&lash_core::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        })
+    let store: Arc<dyn lash_core::RuntimeStore> = Arc::clone(
+        lash_core::runtime::admit_session_view(
+            &stores.session_store_factory(),
+            &lash_core::SessionStoreCreateRequest {
+                owning_process_id: None,
+                pending_observer_intents: Vec::new(),
+                session_id: SessionId::from(session_id),
+                relation: lash_core::SessionRelation::Root,
+                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            },
+        )
         .await
-        .expect("create PostgreSQL ingress law session");
+        .expect("create PostgreSQL ingress law session")
+        .store(),
+    );
     Some(((lock, attachments), backend, store))
 }
 

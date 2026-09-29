@@ -64,7 +64,7 @@ impl SessionDriver for Driver {
         let root = if !self.repeat_released.load(Ordering::SeqCst)
             && self
                 .store
-                .root_terminal(&self.session, &self.root)
+                .root_terminal(&self.root)
                 .await
                 .expect("terminal")
                 .is_some()
@@ -75,7 +75,7 @@ impl SessionDriver for Driver {
             };
             if self
                 .store
-                .root_terminal(&self.session, &next)
+                .root_terminal(&next)
                 .await
                 .expect("next terminal")
                 .is_some()
@@ -196,16 +196,18 @@ impl Fixture {
         let session = SessionId::from(format!("control-witness-{}", harness.run_nonce()));
         let root = TurnId::from("root");
         let factory = harness.law_stores().session_store_factory();
-        let store = factory
-            .create_store(&lash_core::SessionStoreCreateRequest {
+        let store = lash_core::runtime::admit_session_view(
+            &factory,
+            &lash_core::SessionStoreCreateRequest {
                 session_id: session.clone(),
                 relation: lash_core::SessionRelation::Root,
                 pending_observer_intents: vec![],
                 policy: lash_core::testing::mock_session_policy(),
                 owning_process_id: None,
-            })
-            .await
-            .expect("store");
+            },
+        )
+        .await
+        .expect("store");
         let (input, batch) = if command_only {
             let batch = store
                 .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
@@ -230,7 +232,7 @@ impl Fixture {
                 .expect("enqueue")
                 .input_id;
             store
-                .bind_root_inputs(&session, &root, std::slice::from_ref(&input))
+                .bind_root_inputs(&root, std::slice::from_ref(&input))
                 .await
                 .expect("bind");
             (input, None)
@@ -479,7 +481,7 @@ async fn pause_resume(server: HarnessServer) {
     let park = f
         .driver
         .store
-        .load_turn_park(&f.driver.session)
+        .load_turn_park()
         .await
         .expect("park")
         .expect("parked");
@@ -509,11 +511,7 @@ async fn pause_resume(server: HarnessServer) {
         .await
         .expect("second pass");
     assert_eq!(
-        f.driver
-            .store
-            .load_turn_park(&f.driver.session)
-            .await
-            .expect("park"),
+        f.driver.store.load_turn_park().await.expect("park"),
         Some(park.clone())
     );
     f.driver.restored.store(true, Ordering::SeqCst);
@@ -544,7 +542,7 @@ async fn pause_resume(server: HarnessServer) {
     assert!(
         f.driver
             .store
-            .load_turn_park(&f.driver.session)
+            .load_turn_park()
             .await
             .expect("park")
             .is_none()
@@ -579,7 +577,7 @@ async fn a_paused_admission_is_parked_and_only_its_redrive_resumes_it() {
     let park = f
         .driver
         .store
-        .load_turn_park(&f.driver.session)
+        .load_turn_park()
         .await
         .expect("park")
         .expect("the paused drive parked its session's next root");
@@ -604,11 +602,7 @@ async fn a_paused_admission_is_parked_and_only_its_redrive_resumes_it() {
         .expect("second pass");
     assert_eq!((again.attached, again.parked.len()), (1, 0));
     assert_eq!(
-        f.driver
-            .store
-            .load_turn_park(&f.driver.session)
-            .await
-            .expect("park"),
+        f.driver.store.load_turn_park().await.expect("park"),
         Some(park.clone()),
         "a second pass writes nothing"
     );
@@ -654,7 +648,7 @@ async fn a_paused_admission_is_parked_and_only_its_redrive_resumes_it() {
     assert!(
         f.driver
             .store
-            .load_turn_park(&f.driver.session)
+            .load_turn_park()
             .await
             .expect("park")
             .is_none(),
@@ -675,7 +669,7 @@ async fn a_drive_paused_only_by_an_unsettled_redrive_is_resumed_once_it_settles(
     let park = f
         .driver
         .store
-        .load_turn_park(&f.driver.session)
+        .load_turn_park()
         .await
         .expect("park")
         .expect("the paused drive parked its session's next root");
@@ -742,7 +736,7 @@ async fn a_drive_paused_only_by_an_unsettled_redrive_is_resumed_once_it_settles(
     assert!(
         f.driver
             .store
-            .load_turn_park(&f.driver.session)
+            .load_turn_park()
             .await
             .expect("park")
             .is_none(),
@@ -883,7 +877,7 @@ async fn crash_gaps(server: HarnessServer) {
             let park = f
                 .driver
                 .store
-                .load_turn_park(&f.driver.session)
+                .load_turn_park()
                 .await
                 .expect("park")
                 .expect("parked");
@@ -1014,7 +1008,7 @@ async fn crash_gaps(server: HarnessServer) {
             assert!(
                 f.driver
                     .store
-                    .load_turn_park(&f.driver.session)
+                    .load_turn_park()
                     .await
                     .expect("park")
                     .is_none()
@@ -1040,7 +1034,7 @@ async fn released_then_next(server: HarnessServer) {
     let park = f
         .driver
         .store
-        .load_turn_park(&f.driver.session)
+        .load_turn_park()
         .await
         .expect("park")
         .expect("held");
@@ -1092,7 +1086,7 @@ async fn released_then_repeated(server: HarnessServer) {
     let park = f
         .driver
         .store
-        .load_turn_park(&f.driver.session)
+        .load_turn_park()
         .await
         .expect("park")
         .expect("held");
