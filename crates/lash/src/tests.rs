@@ -53,6 +53,8 @@ struct SnapshotStore {
     drive_epochs: lash_core::store::InMemoryDriveEpochs,
     /// Logical roots' terminal evidence and input bindings (FIG-3600 S7).
     roots: lash_core::store::InMemoryRootLedger,
+    /// Staged turn capture and sealed stopped partials (ADR 0114).
+    captures: lash_core::store::InMemoryTurnCapture,
     root_claim_results:
         std::sync::Mutex<HashMap<(SessionId, lash_core::TurnId), lash_core::store::RootAdmission>>,
     read: std::sync::Mutex<Option<lash_core::store::PersistedSessionRead>>,
@@ -113,6 +115,7 @@ impl SnapshotStore {
         Self {
             drive_epochs: Default::default(),
             roots: Default::default(),
+            captures: Default::default(),
             root_claim_results: Default::default(),
             read: std::sync::Mutex::new(Some(lash_core::store::PersistedSessionRead {
                 session_id: state.session_id,
@@ -384,6 +387,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         // session reopen) must advance the durable head revision; only receipt
         // replay may return a non-advancing receipt.
         let next_head_revision = read.as_ref().map_or(0, |read| read.head_revision) + 1;
+        self.captures.commit(&commit)?;
         self.settle_ingress(&commit);
         if let Some(write) = commit.root_terminal.as_deref().cloned() {
             self.roots.write_terminal(write.into_terminal(
@@ -689,7 +693,50 @@ macro_rules! impl_unsupported_capture_store {
     };
 }
 
-impl_unsupported_capture_store!(SnapshotStore);
+#[async_trait]
+impl lash_core::store::TurnCaptureStore for SnapshotStore {
+    async fn open_capture_writer(
+        &self,
+        request: &lash_core::store::OpenCaptureWriter,
+    ) -> std::result::Result<lash_core::store::CaptureWriterLease, lash_core::StoreError> {
+        self.captures.open_capture_writer(request).await
+    }
+
+    async fn append_capture_batch(
+        &self,
+        batch: &lash_core::store::CaptureBatch,
+    ) -> std::result::Result<lash_core::store::CaptureAck, lash_core::StoreError> {
+        self.captures.append_capture_batch(batch).await
+    }
+
+    async fn persist_attempt_reset(
+        &self,
+        reset: &lash_core::store::CaptureAttemptReset,
+    ) -> std::result::Result<lash_core::store::CaptureWriterLease, lash_core::StoreError> {
+        self.captures.persist_attempt_reset(reset).await
+    }
+
+    async fn advance_capture_base(
+        &self,
+        advance: &lash_core::store::CaptureBaseAdvance,
+    ) -> std::result::Result<(), lash_core::StoreError> {
+        self.captures.advance_capture_base(advance).await
+    }
+
+    async fn seal_turn_capture(
+        &self,
+        request: &lash_core::store::SealTurnCapture,
+    ) -> std::result::Result<lash_core::store::SealedCapture, lash_core::StoreError> {
+        self.captures.seal_turn_capture(request).await
+    }
+
+    async fn read_stopped_partial(
+        &self,
+        request: &lash_core::store::StoppedPartialReadRequest,
+    ) -> std::result::Result<lash_core::store::StoppedPartialRead, lash_core::StoreError> {
+        self.captures.read_stopped_partial(request).await
+    }
+}
 impl_unsupported_capture_store!(BoundSessionStore);
 
 lash_core::impl_noop_attachment_manifest!(BoundSessionStore);

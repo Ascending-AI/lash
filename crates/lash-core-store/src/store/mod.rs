@@ -4,6 +4,7 @@ use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
 pub mod attachment_manifest;
 mod capture;
+mod capture_memory;
 mod checkpoint;
 pub mod namespace;
 pub use checkpoint::{
@@ -82,6 +83,7 @@ pub use capture::{
     CaptureWriterLease, CaptureWriterLeaseRef, OpenCaptureWriter, SealTurnCapture, SealedCapture,
     StoppedPartialRead, StoppedPartialReadRequest, TurnCaptureStore,
 };
+pub use capture_memory::InMemoryTurnCapture;
 pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{
     APPEND_REQUEST_IDENTITY_ENCODING_VERSION, OperationId, RuntimeCommitReceiptDecision,
