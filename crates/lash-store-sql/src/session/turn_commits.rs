@@ -42,13 +42,13 @@ crate::statements! {
                  WHERE session_id = ?1 AND turn_id = ?2";
 
         /// The first failure-evidence page, with one extra row for `next`.
-        select_failure_settlements = "SELECT committed_at_ms, turn_id, result_json
+        select_failure_settlements = "SELECT committed_at_ms, turn_id, result_json, outcome_code
              FROM runtime_turn_commits
              WHERE session_id = ?1 AND failure_evidence
              ORDER BY committed_at_ms, turn_id LIMIT ?2";
 
         /// Resume after the last returned receipt, in stable key order.
-        select_failure_settlements_after = "SELECT committed_at_ms, turn_id, result_json
+        select_failure_settlements_after = "SELECT committed_at_ms, turn_id, result_json, outcome_code
              FROM runtime_turn_commits
              WHERE session_id = ?1 AND failure_evidence
                AND (committed_at_ms, turn_id) > (?2, ?3)
