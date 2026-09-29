@@ -393,17 +393,17 @@ finish("started");
 #[tokio::test]
 async fn production_process_map_is_the_compiled_inventory_after_a_store_round_trip() {
     let dir = tempfile::tempdir().expect("store directory");
-    let path = dir.path().join("artifacts.db");
+    let path = dir.path().join("artifacts");
     // The cell publishes through one store; the engine reads through another
     // opened on the same file, so every module it runs comes back through
     // the decoder.
     let cell_store = lashlang::LashlangArtifacts::new(Arc::new(
-        lash_sqlite_store::Store::open(&path)
+        lash_sqlite_store::SqliteStore::open(&path)
             .await
             .expect("open the publishing store"),
     ));
     let engine_store = lashlang::LashlangArtifacts::new(Arc::new(
-        lash_sqlite_store::Store::open(&path)
+        lash_sqlite_store::SqliteStore::open(&path)
             .await
             .expect("open the engine's store"),
     ));

@@ -622,8 +622,7 @@ mod tests {
             .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
                 session_id: SessionId::from("root"),
                 checkpoint: lash_core::CheckpointKind::AfterWork,
-                state: lash_core::SessionReadView::from_snapshot(&state)
-                    .expect("test snapshot frame scope resolves"),
+                state: lash_core::SessionReadView::from_snapshot(&state),
                 sessions: Arc::new(NoopPromptManager),
                 session_lifecycle: Arc::new(NoopPromptManager),
                 session_graph: Arc::new(NoopPromptManager),
@@ -677,8 +676,7 @@ mod tests {
             .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
                 session_id: SessionId::from("root"),
                 checkpoint: lash_core::CheckpointKind::AfterWork,
-                state: lash_core::SessionReadView::from_snapshot(&state)
-                    .expect("test snapshot frame scope resolves"),
+                state: lash_core::SessionReadView::from_snapshot(&state),
                 sessions: Arc::new(NoopPromptManager),
                 session_lifecycle: Arc::new(NoopPromptManager),
                 session_graph: Arc::new(NoopPromptManager),

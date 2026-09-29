@@ -14,8 +14,8 @@ use lash_core::plugin::{PluginFactory, RecordedSessionConfig};
 use lash_core::testing::TestTurnDrive as _;
 use lash_core::{
     CommitBudget, LlmOutputPart, LlmResponse, ModelSpec, QueuedWorkBatchingConfig,
-    RuntimePersistence, RuntimeSessionState, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, TurnBudget, TurnInput,
+    RuntimeSessionState, SessionPolicy, SessionRelation, SessionStoreCreateRequest, TurnBudget,
+    TurnInput,
 };
 use lash_protocol_rlm::{
     CodeRenderer, CodeRendererSlot, InstructionBound, MemoryBound, RlmChannel,
@@ -114,7 +114,7 @@ fn provider(script: Arc<Script>) -> lash_core::facade_support::ProviderHandle {
 
 async fn open_runtime(
     backend: &lash_core::Backend,
-    store: Arc<dyn RuntimePersistence>,
+    store: lash_core::store::SessionStore,
     script: Arc<Script>,
     state: RuntimeSessionState,
     renderer: Arc<dyn CodeRenderer>,
@@ -198,7 +198,7 @@ async fn drive(
 async fn drive_with_run_spec(
     runtime: &mut LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
-    store: &Arc<dyn RuntimePersistence>,
+    store: &lash_core::store::SessionStore,
     session_id: &SessionId,
 ) {
     let mut options = lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
@@ -305,17 +305,18 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
             .expect("Restate double");
             let backend = double.lash_backend();
             let session_id = SessionId::from("rlm-render-cache-law");
-            let base = backend
-                .session_store_factory()
-                .create_store(&SessionStoreCreateRequest {
+            let base = lash_core::runtime::admit_session_view(
+                &backend.session_store_factory(),
+                &SessionStoreCreateRequest {
                     owning_process_id: None,
                     pending_observer_intents: Vec::new(),
                     session_id: session_id.clone(),
                     relation: SessionRelation::Root,
                     policy: policy(),
-                })
-                .await
-                .expect("create session store");
+                },
+            )
+            .await
+            .expect("create session store");
             let first_code = "let saved = \"live value\"; print(\"ok\"); print(\"abcdefgh\");";
             let next_code = "print(history[1].output[1]);";
             let script = Arc::new(Script {
@@ -472,10 +473,14 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
             Box::pin(runtime.park())
                 .await
                 .expect("park second runtime");
-            let state = lash_core::store::load_persisted_session_state(base.as_ref())
-                .await
-                .expect("load second state")
-                .expect("persisted second state");
+            let state = lash_core::store::load_session_window_state(
+                &base,
+                lash_core::store::WindowSelector::Current,
+            )
+            .await
+            .expect("load second state")
+            .expect("persisted second state")
+            .state;
             let third_calls = Arc::new(AtomicUsize::new(0));
             let third_renderer: Arc<dyn CodeRenderer> = Arc::new(CountingRenderer {
                 id: "law.third",
