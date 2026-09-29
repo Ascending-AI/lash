@@ -19,6 +19,9 @@ mod observation_projection;
 #[path = "core_conversions_tests/registration_parity.rs"]
 mod registration_parity;
 
+#[path = "core_conversions_tests/stopped_partial.rs"]
+mod stopped_partial;
+
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[test]
