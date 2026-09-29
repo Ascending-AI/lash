@@ -12,8 +12,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use lash_core_execution::{
-    ProcessContinuationStore, ProcessExecutionEnvStore, RuntimePersistence, SessionStoreFactory,
-    TriggerStore,
+    DeploymentStore, ProcessContinuationStore, ProcessExecutionEnvStore, TriggerStore,
 };
 use lash_postgres_store::PostgresStorage;
 use serde::{Deserialize, Serialize};
@@ -106,12 +105,6 @@ async fn regenerate_postgres_durable_fixture() {
 
 fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::FixtureHandles {
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
-    let runtime = Arc::new(
-        storage
-            .session_store(fixture::SESSION_ID)
-            .with_lease_clock_for_testing(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
-    );
     let processes = Arc::new(
         storage
             .process_registry()
@@ -127,7 +120,7 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
             .with_incarnation_for_testing("durable-read-trigger-incarnation"),
     );
-    let session_factory = Arc::new(
+    let store = Arc::new(
         storage
             .session_store_factory()
             .with_lease_clock_for_testing(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
@@ -135,8 +128,7 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
     );
     fixture::FixtureHandles {
         clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-        runtime: runtime as Arc<dyn RuntimePersistence>,
-        session_factory: session_factory as Arc<dyn SessionStoreFactory>,
+        store: store as Arc<dyn DeploymentStore>,
         processes: Arc::clone(&processes)
             as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
         continuations: processes as Arc<dyn ProcessContinuationStore>,

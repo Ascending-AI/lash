@@ -585,9 +585,9 @@ table lash_usage_deltas
   column output_tokens bigint not-null
   column payload_encoding_version integer not-null
   column payload_hash text not-null
+  column reasoning_output_tokens bigint not-null
   column reconciled_attempt_ordinal bigint nullable
   column reconciled_call_id text nullable
-  column reasoning_output_tokens bigint not-null
   column seq bigint not-null default
   column session_id text not-null
   column source text not-null

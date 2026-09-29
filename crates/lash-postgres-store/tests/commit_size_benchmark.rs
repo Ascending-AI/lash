@@ -11,12 +11,12 @@ use std::time::{Duration, Instant};
 use lash_core_execution::store::GraphAppend;
 use lash_core_execution::{
     AttachmentId, CommitBudget, CommitBudgetLimit, PersistedSessionConfig, ProtocolEvent,
-    RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionHistoryRecord,
-    SessionNodePayload, SessionNodeRecord, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory,
+    RuntimeCommit, RuntimeSessionState, RuntimeStore, SessionCatalogStore as _,
+    SessionHistoryRecord, SessionNodePayload, SessionNodeRecord, SessionPolicy, SessionRelation,
+    SessionStoreCreateRequest,
 };
 use lash_postgres_store::PostgresStorage;
-use lash_sqlite_store::SqliteSessionStoreFactory;
+use lash_sqlite_store::SqliteStoreSet;
 use rusqlite::{Connection, params};
 use sqlx::QueryBuilder;
 
@@ -292,7 +292,7 @@ async fn postgres_seed_attachment_intents(pool: &sqlx::PgPool, commit: &RuntimeC
         .expect("insert PostgreSQL benchmark attachment intents");
 }
 
-async fn time_commit(store: Arc<dyn RuntimePersistence>, commit: RuntimeCommit) -> Duration {
+async fn time_commit(store: Arc<dyn RuntimeStore>, commit: RuntimeCommit) -> Duration {
     let started = Instant::now();
     store
         .commit_runtime_state(commit)
@@ -379,7 +379,13 @@ async fn measured_commit_size_curve() {
         .await
         .expect("connect PostgreSQL benchmark fixture pool");
     let sqlite_dir = tempfile::tempdir().expect("SQLite benchmark directory");
-    let sqlite_factory = SqliteSessionStoreFactory::new(sqlite_dir.path());
+    let sqlite_stores = SqliteStoreSet::open(sqlite_dir.path())
+        .await
+        .expect("open SQLite benchmark stores");
+    let sqlite_store = sqlite_stores
+        .open_store()
+        .await
+        .expect("open SQLite benchmark catalog");
     let sqlite_database_path = sqlite_dir.path().join("durable-core.db");
     let cases = BYTE_TARGETS
         .iter()
@@ -413,19 +419,37 @@ async fn measured_commit_size_curve() {
                     case.target,
                     case.rows.total()
                 ));
-                let store = match backend {
-                    "sqlite" => sqlite_factory
-                        .create_store(&SessionStoreCreateRequest {
-                            owning_process_id: None,
-                            pending_observer_intents: Vec::new(),
-                            session_id: session_id.clone(),
-                            relation: SessionRelation::Root,
-                            policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
-                        })
-                        .await
-                        .expect("create SQLite benchmark store"),
+                let store: Arc<dyn RuntimeStore> = match backend {
+                    "sqlite" => {
+                        sqlite_store
+                            .admit_session(&SessionStoreCreateRequest {
+                                owning_process_id: None,
+                                pending_observer_intents: Vec::new(),
+                                session_id: session_id.clone(),
+                                relation: SessionRelation::Root,
+                                policy: SessionPolicy::new(
+                                    lash_core_execution::TurnBudget::Unbounded,
+                                ),
+                            })
+                            .await
+                            .expect("create SQLite benchmark store");
+                        Arc::clone(&sqlite_store) as Arc<dyn RuntimeStore>
+                    }
                     "postgres" => {
-                        Arc::new(postgres.session_store(&session_id)) as Arc<dyn RuntimePersistence>
+                        let catalog = postgres.store();
+                        catalog
+                            .admit_session(&SessionStoreCreateRequest {
+                                owning_process_id: None,
+                                pending_observer_intents: Vec::new(),
+                                session_id: session_id.clone(),
+                                relation: SessionRelation::Root,
+                                policy: SessionPolicy::new(
+                                    lash_core_execution::TurnBudget::Unbounded,
+                                ),
+                            })
+                            .await
+                            .expect("create PostgreSQL benchmark session");
+                        Arc::new(catalog) as Arc<dyn RuntimeStore>
                     }
                     _ => unreachable!(),
                 };
@@ -438,10 +462,6 @@ async fn measured_commit_size_curve() {
                 assert_eq!(sample_measurement.adopted_intent_rows, case.rows.adoption);
                 assert_eq!(sample_measurement.total_rows, case.rows.total());
                 assert_reference_admission(&commit);
-                store
-                    .admit_and_bind_session(&lash_core_execution::SessionBinding::root(session_id))
-                    .await
-                    .expect("bind benchmark session to store");
                 match backend {
                     "sqlite" => sqlite_seed_attachment_intents(&sqlite_database_path, &commit),
                     "postgres" => {

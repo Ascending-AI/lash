@@ -12,8 +12,7 @@ use lash_core_execution::store::{
 };
 use lash_core_execution::{
     DeploymentStore, ForkSessionRequest, OperationId, RuntimeCommit, RuntimeSessionState,
-    RuntimeStore, SessionCatalogStore as _, SessionHistoryStore as _, SessionRelation,
-    SessionStoreCreateRequest,
+    RuntimeStore, SessionRelation, SessionStoreCreateRequest,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -159,7 +158,7 @@ async fn create_fork_chain(
             .expect("load fork-chain session")
             .expect("fork-chain session exists")
             .window
-            .leaf_node_id()
+            .leaf_node_id
             .clone()
             .expect("fork-chain leaf")
             .to_string();
@@ -197,7 +196,10 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn DeploymentStore>, run
         create_state(&factory, &SessionId::from(wide_source_id)).await;
     wide_state.ensure_agent_frame_initialized();
     let (wide_root, _) = commit_state(&wide_source, &wide_state, "seed-wide").await;
-    factory.pin(&wide_root).await.expect("pin wide root");
+    factory
+        .pin(&wide_root.clone().into())
+        .await
+        .expect("pin wide root");
     for ordinal in 0..WIDE_SIBLING_COUNT {
         let branch_id = format!("{prefix}-wide-sibling-{ordinal}");
         let branch_id = SessionId::from(branch_id);

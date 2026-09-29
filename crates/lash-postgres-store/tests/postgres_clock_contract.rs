@@ -5,17 +5,18 @@ use std::sync::Arc;
 
 use lash_core_execution::runtime::QueuedWorkBatchDraft;
 use lash_core_execution::store::{
-    AdmittedHead, CheckpointAdmissionRequest, IngressSettlement, PhysicalTurn, RootTerminalWrite,
-    TurnCommitId,
+    AdmittedHead, CheckpointAdmissionRequest, IngressSettlement, PhysicalTurn, RootStore,
+    RootTerminalWrite, TurnCommitId,
 };
 use lash_core_execution::testing::TestClock;
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt as _;
+use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
 use lash_core_execution::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputReadStatus,
-    PendingTurnInputSuffixCancelOutcome, RuntimeCommit, RuntimeSessionState, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, TurnId, TurnInput, TurnInputCheckpointBoundary,
-    TurnInputIngress, facade_support::SessionCommand,
+    PendingTurnInputSuffixCancelOutcome, QueuedWorkStore, RuntimeCommit, RuntimeSessionState,
+    SessionCatalogStore as _, SessionCommitStore, SessionRelation, SessionStoreCreateRequest,
+    TurnId, TurnInput, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputStore,
+    facade_support::SessionCommand,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -244,8 +245,8 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
     let factory = storage
         .session_store_factory()
         .with_clock(Arc::clone(&clock) as Arc<dyn Clock>);
-    let store = factory
-        .create_store(&SessionStoreCreateRequest {
+    factory
+        .admit_session(&SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session.clone(),
@@ -256,6 +257,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         })
         .await
         .expect("create skewed-clock session store");
+    let store = factory;
     let fence = store
         .seal_drive_epoch_for_test(
             &session,
@@ -481,8 +483,8 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
     let factory = storage
         .session_store_factory()
         .with_clock(clock as Arc<dyn Clock>);
-    let store = factory
-        .create_store(&SessionStoreCreateRequest {
+    factory
+        .admit_session(&SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.clone()),
@@ -493,6 +495,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
         })
         .await
         .expect("create final-commit session store");
+    let store = factory;
     let state = RuntimeSessionState {
         session_id: SessionId::from(session_id.clone()),
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(

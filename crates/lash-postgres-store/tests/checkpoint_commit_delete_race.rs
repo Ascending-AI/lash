@@ -6,8 +6,8 @@ use lash_sansio::SessionId;
 use std::time::Duration;
 
 use lash_core_execution::{
-    HydratedCheckpointComponent, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
-    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    HydratedCheckpointComponent, RuntimeCommit, RuntimeSessionState, SessionCatalogStore,
+    SessionCommitStore, SessionRelation, SessionStoreCreateRequest, StoreError,
 };
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck};
 use sqlx::postgres::PgPoolOptions;
@@ -60,8 +60,8 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
     reset(&storage).await;
     let factory = storage.session_store_factory();
 
-    let victim = factory
-        .create_store(&request(&SessionId::from("commit-delete-victim")))
+    factory
+        .admit_session(&request(&SessionId::from("commit-delete-victim")))
         .await
         .expect("create delete victim");
     let mut victim_state = RuntimeSessionState {
@@ -74,14 +74,14 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         "law/commit-delete-shared".to_string(),
         HydratedCheckpointComponent::changed(b"commit-delete-shared".to_vec()),
     );
-    let victim_receipt = victim
+    let victim_receipt = factory
         .commit_runtime_state(victim_commit)
         .await
         .expect("commit delete victim checkpoint");
     let shared = victim_receipt.manifest.components["law/commit-delete-shared"].clone();
 
-    let _target = factory
-        .create_store(&request(&SessionId::from("commit-delete-target")))
+    factory
+        .admit_session(&request(&SessionId::from("commit-delete-target")))
         .await
         .expect("create commit target");
     let mut target_state = RuntimeSessionState {
@@ -154,7 +154,7 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
     )
     .await
     .expect("open tagged commit storage");
-    let commit_target = commit_storage.session_store("commit-delete-target");
+    let commit_target = commit_storage.store();
     let commit_task =
         tokio::spawn(async move { commit_target.commit_runtime_state(target_commit).await });
 

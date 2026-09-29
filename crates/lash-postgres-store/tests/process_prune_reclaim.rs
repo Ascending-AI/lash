@@ -6,12 +6,13 @@
 //! This lives in its own test target rather than the conformance suite, which is
 //! at its line budget.
 
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt as _;
+use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
 use std::sync::Arc;
 
+use lash_core_execution::store::RootStore;
 use lash_core_execution::{
-    ProcessLifecycle as _, ProcessRegistrar as _, ProcessRegistry, ProcessRetention as _,
-    SessionStoreFactory,
+    DeploymentStore, ProcessLifecycle as _, ProcessRegistrar as _, ProcessRegistry,
+    ProcessRetention as _, SessionCatalogStore as _, TurnInputStore,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -70,7 +71,7 @@ lash_conformance::process_prune_reclaim_tests!({
     reset(&storage).await;
     let storage = Arc::new(storage);
     let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
-        as Arc<dyn SessionStoreFactory>;
+        as Arc<dyn DeploymentStore>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(blob_probe::PostgresBlobProbe::new(
         storage,
@@ -184,8 +185,8 @@ async fn postgres_process_prune_removes_an_admitted_roots_record() {
     let session_id =
         lash_core_execution::facade_support::process_runtime_session_ids(&process.id)[0].clone();
     let factory = storage.session_store_factory_with_shared_process_registry();
-    let store = factory
-        .create_store(&lash_core_execution::SessionStoreCreateRequest {
+    factory
+        .admit_session(&lash_core_execution::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
@@ -196,6 +197,7 @@ async fn postgres_process_prune_removes_an_admitted_roots_record() {
         })
         .await
         .expect("create process-owned session");
+    let store = factory;
     let input = store
         .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
             &session_id,

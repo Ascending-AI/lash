@@ -3,8 +3,8 @@
 //! rows cannot split request metadata from the payloads it reports.
 
 use lash_core_execution::{
-    IngressStore, PendingTurnInputDraft, StoreMaintenance, TurnCancelDisposition, TurnInput,
-    TurnInputCheckpointBoundary, TurnInputIngress,
+    PendingTurnInputDraft, StoreMaintenance, TurnCancelDisposition, TurnInput,
+    TurnInputCheckpointBoundary, TurnInputIngress, TurnInputStore,
     facade_support::{TurnAddress, TurnCancelRequest},
 };
 use lash_postgres_store::PostgresStorage;
@@ -59,7 +59,7 @@ async fn seed_cancelled_inputs(
     lash_core_execution::PendingTurnInput,
     lash_core_execution::PendingTurnInput,
 ) {
-    let store = storage.session_store(session_id.clone());
+    let store = storage.store();
     let first = store
         .enqueue_pending_turn_input(
             PendingTurnInputDraft::new(
@@ -143,13 +143,16 @@ async fn postgres_turn_cancel_receipt_survives_vacuum_when_configured() {
     };
     let session_id = SessionId::from("turn-cancel-receipt-vacuum");
     let turn_id = TurnId::from("turn-cancel-receipt-vacuum:turn");
-    let store = storage.session_store(session_id.clone());
+    let store = storage.store();
     let (first, second) = seed_cancelled_inputs(&storage, &session_id, &turn_id).await;
     let address = TurnAddress::new(&session_id, &turn_id);
 
     // The pending rows are gone before the receipt is read: the evidence must
     // come entirely from the child-table snapshot.
-    let report = store.vacuum().await.expect("vacuum affected inputs");
+    let report = store
+        .vacuum(&session_id)
+        .await
+        .expect("vacuum affected inputs");
     assert_eq!(report.removed_pending_turn_input_tombstone_count, 2);
 
     let record = store

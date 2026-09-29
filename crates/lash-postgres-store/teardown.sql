@@ -36,8 +36,9 @@ DROP TABLE IF EXISTS lash_graph_nodes CASCADE;
 
 DROP TABLE IF EXISTS lash_fork_lineage CASCADE;
 
-DROP TABLE IF EXISTS lash_usage_delta_holes CASCADE;
 DROP TABLE IF EXISTS lash_usage_deltas CASCADE;
+
+DROP TABLE IF EXISTS lash_usage_delta_holes CASCADE;
 
 DROP TABLE IF EXISTS lash_session_meta CASCADE;
 

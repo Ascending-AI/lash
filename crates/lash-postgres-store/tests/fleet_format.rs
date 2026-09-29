@@ -99,9 +99,7 @@ async fn postgres_session_meta_stamps_the_version_the_fleet_format_selects() {
         generation: FLEET_FORMAT_VERSION,
         version: 7,
     }]);
-    let store = storage
-        .session_store(session_id.clone())
-        .with_fleet_format_for_testing(fleet);
+    let store = storage.store().with_fleet_format_for_testing(fleet);
     lash_core::SessionCommitStore::save_session_meta(
         &store,
         lash_core::SessionMeta {
@@ -208,7 +206,7 @@ async fn a_select_only_role_reads_the_fleet_format_and_is_refused_on_write() {
     // A write attempt is refused as a typed `StoreError`: the row-level DML
     // the writer needs is a privilege the role does not hold.
     let session_id = lash_core::SessionId::from("select-only-session");
-    let store = storage.session_store(session_id.clone());
+    let store = storage.store();
     let error = lash_core::SessionCommitStore::save_session_meta(
         &store,
         lash_core::SessionMeta {

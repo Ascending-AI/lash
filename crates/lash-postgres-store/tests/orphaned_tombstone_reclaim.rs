@@ -5,7 +5,7 @@
 //! reclaim law is asserted through raw catalog reads, and the conformance file is
 //! at its line budget.
 
-use lash_core_execution::SessionStoreFactory;
+use lash_core_execution::SessionCatalogStore;
 use lash_postgres_store::PostgresStorage;
 use lash_sansio::SessionId;
 
@@ -93,12 +93,12 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     }
 
     async fn commit_single_root_node(
-        factory: &impl SessionStoreFactory,
+        factory: &(impl SessionCatalogStore + lash_core_execution::SessionCommitStore),
         session_id: &SessionId,
         policy: &lash_core_execution::SessionPolicy,
     ) -> String {
-        let store = factory
-            .create_store(&lash_core_execution::SessionStoreCreateRequest {
+        factory
+            .admit_session(&lash_core_execution::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
@@ -117,7 +117,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             .leaf_node_id
             .clone()
             .expect("root leaf node id");
-        store
+        factory
             .commit_runtime_state(
                 lash_core_execution::store::RuntimeCommit::persisted_state_for_test(&state, &[]),
             )
@@ -129,13 +129,16 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     // Flow 1: unpin after the owning session's delete.
     let owner_leaf =
         commit_single_root_node(&factory, &SessionId::from("orphan-owner"), &policy).await;
-    factory.pin(&owner_leaf).await.expect("pin owner leaf");
+    factory
+        .pin(&owner_leaf.clone().into())
+        .await
+        .expect("pin owner leaf");
     factory
         .delete_session(&SessionId::from("orphan-owner"))
         .await
         .expect("delete owner session");
     factory
-        .unpin(&owner_leaf)
+        .unpin(&owner_leaf.clone().into())
         .await
         .expect("unpin after owner delete");
     assert_eq!(
@@ -149,7 +152,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     let parent_leaf =
         commit_single_root_node(&factory, &SessionId::from("orphan-fork-parent"), &policy).await;
     factory
-        .fork_at(&lash_core_execution::ForkSessionRequest {
+        .fork_session(&lash_core_execution::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("orphan-fork-child"),
             node_id: parent_leaf.clone().into(),
@@ -159,22 +162,19 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
         .await
         .expect("fork at the parent's live tip");
     {
-        let child = factory
-            .open_existing_store(&lash_core_execution::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: SessionId::from("orphan-fork-child"),
-                relation: lash_core_execution::SessionRelation::Root,
-                policy: policy.clone(),
-            })
-            .await
-            .expect("open forked child")
-            .expect("forked child exists");
-        let mut child_state =
-            lash_core_execution::store::load_persisted_session_state(child.as_ref())
-                .await
-                .expect("load child state")
-                .expect("child state exists");
+        let child = lash_core_execution::store::SessionStore::new(
+            std::sync::Arc::new(factory.clone()),
+            SessionId::from("orphan-fork-child"),
+        )
+        .expect("child session view");
+        let mut child_state = lash_core_execution::store::load_session_window_state(
+            &child,
+            lash_core_execution::store::WindowSelector::Current,
+        )
+        .await
+        .expect("load child state")
+        .expect("child state exists")
+        .state;
         let parent_node_id = child_state.session_graph.leaf_node_id.clone();
         child_state
             .session_graph
