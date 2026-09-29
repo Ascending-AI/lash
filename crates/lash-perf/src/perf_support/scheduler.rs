@@ -125,6 +125,14 @@ fn ratio(numerator: f64, denominator: f64) -> f64 {
     }
 }
 
+/// This process's cumulative `utime + stime` so far, in ms. Deltas between
+/// two reads bracket every thread's CPU over that interval.
+pub fn process_cpu_ms() -> Option<f64> {
+    let ticks = process_cpu_ticks()?;
+    let ticks_per_second = process_clock_ticks_per_second()?;
+    Some(round3(ticks as f64 / ticks_per_second as f64 * 1_000.0))
+}
+
 fn process_cpu_ticks() -> Option<u64> {
     let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
     parse_process_cpu_ticks(&stat)
@@ -190,6 +198,13 @@ mod tests {
         let stat = "42 (lash perf) worker) R 1 2 3 4 5 6 7 8 9 10 120 30 0 0";
 
         assert_eq!(parse_process_cpu_ticks(stat), Some(150));
+    }
+
+    #[test]
+    fn process_cpu_ms_reads_this_process_on_linux() {
+        if cfg!(target_os = "linux") {
+            assert!(process_cpu_ms().is_some_and(|ms| ms >= 0.0));
+        }
     }
 
     #[test]

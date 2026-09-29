@@ -187,6 +187,15 @@ enum Command {
         /// Shrink every case to a smoke-sized sample count for development.
         #[arg(long)]
         scale_down: bool,
+
+        /// Write a dhat heap profile of the measured cases here. Needs a
+        /// `--features dhat-heap` build; meant for `--lanes 1` growth runs.
+        #[arg(long, value_name = "OUT.json")]
+        dhat_out: Option<std::path::PathBuf>,
+
+        /// Trim dhat backtraces to this many frames.
+        #[arg(long, value_name = "FRAMES", requires = "dhat_out")]
+        dhat_frames: Option<usize>,
     },
 
     /// The cross-worker child a latency case drives: serves lash's Restate
@@ -235,6 +244,8 @@ fn main() -> anyhow::Result<()> {
             fast_samples,
             lanes,
             scale_down,
+            dhat_out,
+            dhat_frames,
         }) => {
             let run = lash_perf::latency::LatencyRun {
                 out: out.clone(),
@@ -244,6 +255,8 @@ fn main() -> anyhow::Result<()> {
                 fast_samples: *fast_samples,
                 lanes: *lanes,
                 scale_down: *scale_down,
+                dhat_out: dhat_out.clone(),
+                dhat_frames: *dhat_frames,
             };
             let mut runtime = tokio::runtime::Builder::new_multi_thread();
             runtime.enable_all();
@@ -309,4 +322,61 @@ fn main() -> anyhow::Result<()> {
     runtime
         .build()?
         .block_on(lash_perf::runtime_perf::run_cli(run))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LATENCY: [&str; 6] = [
+        "lash-perf",
+        "latency",
+        "--out",
+        "latency.json",
+        "--store-dir",
+        "stores",
+    ];
+
+    #[test]
+    fn latency_runs_without_a_heap_profile_by_default() {
+        let args = Args::try_parse_from(LATENCY).expect("parse");
+
+        assert!(matches!(
+            args.command,
+            Some(Command::Latency {
+                dhat_out: None,
+                dhat_frames: None,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn latency_takes_a_heap_profile_path_and_frame_trim() {
+        let args = Args::try_parse_from(LATENCY.into_iter().chain([
+            "--dhat-out",
+            "dhat.json",
+            "--dhat-frames",
+            "24",
+        ]))
+        .expect("parse");
+
+        let Some(Command::Latency {
+            dhat_out,
+            dhat_frames,
+            ..
+        }) = args.command
+        else {
+            panic!("expected the latency command");
+        };
+        assert_eq!(dhat_out, Some(std::path::PathBuf::from("dhat.json")));
+        assert_eq!(dhat_frames, Some(24));
+    }
+
+    #[test]
+    fn latency_refuses_a_frame_trim_without_a_heap_profile() {
+        let parsed = Args::try_parse_from(LATENCY.into_iter().chain(["--dhat-frames", "24"]));
+
+        assert!(parsed.is_err());
+    }
 }

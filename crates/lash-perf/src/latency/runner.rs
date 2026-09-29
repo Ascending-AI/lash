@@ -33,7 +33,9 @@ use super::provider::{
 };
 use super::restate::{LocalDeployment, LocalRestate, LocalRestateServer};
 use super::work_engine::{AwaitDriveMode, LatencySessionWork};
+use crate::perf_support::memory::process_memory_sample;
 use crate::perf_support::metrics::percentile_sorted;
+use crate::perf_support::scheduler::process_cpu_ms;
 use crate::perf_support::time::round3;
 use crate::runtime_perf::openai_compat::OpenAiCompatBenchServer;
 use crate::runtime_perf::providers::BenchmarkStreamProfile;
@@ -142,6 +144,11 @@ pub(crate) struct Sample {
     /// settlement — the simulated wake schedule applied to `settled`.
     pub(crate) poll_detect_ms: Option<f64>,
     pub(crate) poller_timed_out: bool,
+    /// Process-wide CPU (every thread, `utime + stime`) and RSS read as the
+    /// sample completes. Both are cumulative: consecutive samples' deltas
+    /// give per-turn growth on a 1-lane run, not a turn's own cost.
+    pub(crate) process_cpu_ms_at_end: Option<f64>,
+    pub(crate) process_rss_kb_at_end: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error: Option<String>,
 }
@@ -623,6 +630,8 @@ async fn measure_send(
         Err(error) => ("error".to_string(), Some(format!("{error:#}"))),
     };
     let send_to_completion_ms = elapsed_ms(t_request);
+    let process_cpu_ms_at_end = process_cpu_ms();
+    let process_rss_kb_at_end = process_memory_sample().rss_kb;
     let marks = poller.await.unwrap_or_default();
     let sink_state = sink.state.lock_recover();
     let first_delta_ms = sink_state.first_delta_ms.or(sink_state.first_activity_ms);
@@ -661,6 +670,8 @@ async fn measure_send(
         model_span_ms,
         poll_detect_ms,
         poller_timed_out: marks.timed_out,
+        process_cpu_ms_at_end,
+        process_rss_kb_at_end,
         error: outcome_error,
     })
 }
