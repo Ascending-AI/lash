@@ -6,11 +6,9 @@ use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use crate::store::{RuntimeCommit, RuntimeCommitReceipt, RuntimeStore, StoreError};
-use crate::{
-    AttachmentId, BlobRef, DeploymentStore, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
-    SessionStoreCreateRequest,
-};
+use crate::store::{RuntimeCommit, RuntimeCommitReceipt, RuntimeStore, RuntimeStoreDecorator, StoreError, WindowSelector};
+use crate::{AttachmentId, BlobRef, DeploymentStore};
+use lash_core_execution::DeploymentStoreDecorator;
 use serde::{Deserialize, Serialize};
 
 /// Schema tag carried on every observed commit.
@@ -306,186 +304,32 @@ impl ObservedSessionStoreFactory {
         Self { inner, collector }
     }
 
-    fn wrap(&self, inner: Arc<dyn RuntimeStore>) -> Arc<dyn RuntimeStore> {
-        Arc::new(ObservedSessionStore {
-            inner,
-            collector: self.collector.clone(),
-        })
-    }
 }
 
 /// Give conformance roles distinct outer handles over one in-memory substrate
 /// without adding `Clone` or shared-field semantics to the production store.
 #[cfg(any(test, feature = "testing"))]
 pub fn fresh_runtime_persistence_handle(inner: Arc<dyn RuntimeStore>) -> Arc<dyn RuntimeStore> {
-    Arc::new(ObservedSessionStore {
+    Arc::new(ObservedRuntimeStore {
         inner,
         collector: CheckpointWriteCollector::default(),
     })
 }
 
 #[async_trait::async_trait]
-impl DeploymentStore for ObservedSessionStoreFactory {
-    // The backend binds its host and artifact stores through whatever
-    // factory it hands out; the observer passes both to the catalog it wraps.
-    fn bind_effect_host(&self, effect_host: &Arc<dyn crate::EffectHost>) {
-        self.inner.bind_effect_host(effect_host);
+impl RuntimeStoreDecorator for ObservedSessionStoreFactory {
+    type Inner = dyn DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
     }
 
-    fn bind_artifact_stores(
-        &self,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-        process_engines: crate::ProcessEngineRegistry,
-    ) {
-        self.inner
-            .bind_artifact_stores(process_env_store, process_engines);
-    }
-
-    async fn pending_turn_cancel_closure_pins(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
-        self.inner
-            .pending_turn_cancel_closure_pins(session_id)
-            .await
-    }
-
-    async fn retire_turn_cancel_closure_scope(
-        &self,
-        scope: &crate::ExecutionScope,
-    ) -> Result<(), StoreError> {
-        self.inner.retire_turn_cancel_closure_scope(scope).await
-    }
-
-    async fn has_claimable_queued_work(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Option<bool>, StoreError> {
-        self.inner.has_claimable_queued_work(request).await
-    }
-
-    async fn reclaim_retained_evidence(
-        &self,
-        bound: crate::store::RetentionBound,
-    ) -> crate::store::MaintenanceResult<crate::store::RetentionReport> {
-        self.inner.reclaim_retained_evidence(bound).await
-    }
-
-    async fn create_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimeStore>, StoreError> {
-        Ok(self.wrap(self.inner.create_store(request).await?))
-    }
-
-    async fn open_existing_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn RuntimeStore>>, String> {
-        Ok(self
-            .inner
-            .open_existing_store(request)
-            .await?
-            .map(|store| self.wrap(store)))
-    }
-
-    // A decorator forwards the by-id seam to the catalog it wraps, keeping the
-    // observation wrapper on the store it hands back.
-    async fn open_existing_store_by_id(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimeStore>>, StoreError> {
-        Ok(self
-            .inner
-            .open_existing_store_by_id(session_id)
-            .await?
-            .map(|store| self.wrap(store)))
-    }
-
-    // The unbound open forwards the same way; its store binds on its first
-    // admitted session, and the wrapper still observes its commits.
-    async fn open_unbound_store(&self) -> Result<Arc<dyn RuntimeStore>, StoreError> {
-        Ok(self.wrap(self.inner.open_unbound_store().await?))
-    }
-
-    async fn read_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<crate::SessionReadView>, StoreError> {
-        self.inner.read_session(session_id).await
-    }
-
-    async fn list_sessions(
-        &self,
-        filter: &crate::SessionListFilter,
-    ) -> Result<Vec<crate::SessionSummary>, StoreError> {
-        self.inner.list_sessions(filter).await
-    }
-
-    async fn count_unsettled_turns(&self) -> Result<crate::store::UnsettledTurnCounts, StoreError> {
-        self.inner.count_unsettled_turns().await
-    }
-
-    async fn list_turn_parks(
-        &self,
-        query: &crate::store::TurnParkQuery,
-    ) -> Result<Vec<crate::store::TurnPark>, StoreError> {
-        self.inner.list_turn_parks(query).await
-    }
-
-    async fn turn_park_feed(
-        &self,
-        after: crate::store::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<crate::store::ParkFeedPage<crate::store::TurnParkTarget>, StoreError> {
-        self.inner.turn_park_feed(after, limit).await
-    }
-
-    async fn root_terminal(
-        &self,
-        session_id: &crate::SessionId,
-        root: &crate::TurnId,
-    ) -> std::result::Result<Option<crate::store::RootTerminal>, StoreError> {
-        self.inner.root_terminal(session_id, root).await
-    }
-
-    async fn compact_turn_park_feed(
-        &self,
-        through: crate::store::ParkFeedCursor,
-    ) -> Result<(), StoreError> {
-        self.inner.compact_turn_park_feed(through).await
-    }
-
-    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        self.inner.session_was_deleted(session_id).await
-    }
-
-    async fn delete_session(
-        &self,
-        session_id: &SessionId,
-    ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
-        self.inner.delete_session(session_id).await
-    }
-
-    async fn pin(&self, node_id: &str) -> Result<ForkPoint, StoreError> {
-        self.inner.pin(node_id).await
-    }
-
-    async fn unpin(&self, node_id: &str) -> Result<(), StoreError> {
-        self.inner.unpin(node_id).await
-    }
-
-    async fn fork_points(&self) -> Result<Vec<ForkPoint>, StoreError> {
-        self.inner.fork_points().await
-    }
-
-    async fn fork_at(
-        &self,
-        request: &ForkSessionRequest,
-    ) -> Result<ForkSessionReceipt, StoreError> {
-        self.inner.fork_at(request).await
+    async fn commit_runtime_state(&self, commit: RuntimeCommit) -> Result<RuntimeCommitReceipt, StoreError> {
+        observe_commit(self.inner.as_ref(), &self.collector, commit).await
     }
 }
+
+impl DeploymentStoreDecorator for ObservedSessionStoreFactory {}
 
 #[async_trait::async_trait]
 impl crate::store::ControlIntentStore for ObservedSessionStoreFactory {
@@ -560,58 +404,65 @@ impl crate::AttachmentRootSet for ObservedSessionStoreFactory {
     }
 }
 
-struct ObservedSessionStore {
+struct ObservedRuntimeStore {
     inner: Arc<dyn RuntimeStore>,
     collector: CheckpointWriteCollector,
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimeStoreDecorator for ObservedSessionStore {
-    fn inner(&self) -> &(dyn RuntimeStore + '_) {
+impl RuntimeStoreDecorator for ObservedRuntimeStore {
+    type Inner = dyn RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
-    async fn commit_runtime_state(
-        &self,
-        mut commit: RuntimeCommit,
-    ) -> Result<RuntimeCommitReceipt, StoreError> {
-        self.collector.apply_mutation(&mut commit);
-        let mut event = checkpoint_write_event(&commit);
-        let budget = crate::testing::measure_runtime_commit_budget(&commit)?;
-        let committed_attachment_ids = commit.committed_attachment_ids.clone();
-        let result = self.inner.commit_runtime_state(commit).await?;
-        self.collector
-            .record_manifest(&event.session_id, &result.manifest);
-        if let Some(state) = event.state.as_mut()
-            && let Some(accepted) = self.inner.load_session().await?
-        {
-            let read_model = accepted
-                .graph
-                .read_model(accepted.current_frame_node_id.as_ref())
-                .expect("accepted current frame must resolve in its validated session graph");
-            state.accepted_raw_rows = Some(serde_json::json!({
-                "graph_nodes": accepted.graph.nodes,
-                "graph_leaf_node_id": accepted.graph.leaf_node_id,
-                "turn_state": accepted.checkpoint.as_ref().map(|checkpoint| &checkpoint.turn_state),
-                "token_ledger": accepted.token_ledger,
-            }));
-            state.accepted_read_model = Some(serde_json::json!({
-                "graph_node_count": accepted.graph.nodes.len(),
-                "messages": read_model.messages.as_ref(),
-                "token_usage": accepted.checkpoint.as_ref().map(|checkpoint| &checkpoint.turn_state.token_usage),
-            }));
-        }
-        self.collector.push_runtime_commit(
-            CheckpointWriteEvent {
-                revision_after: result.head_revision,
-                ..event
-            },
-            budget,
-            committed_attachment_ids,
-        );
-        Ok(result)
+    async fn commit_runtime_state(&self, commit: RuntimeCommit) -> Result<RuntimeCommitReceipt, StoreError> {
+        observe_commit(self.inner.as_ref(), &self.collector, commit).await
     }
 }
+
+async fn observe_commit(
+    inner: &dyn RuntimeStore,
+    collector: &CheckpointWriteCollector,
+    mut commit: RuntimeCommit,
+) -> Result<RuntimeCommitReceipt, StoreError> {
+    collector.apply_mutation(&mut commit);
+    let mut event = checkpoint_write_event(&commit);
+    let budget = crate::testing::measure_runtime_commit_budget(&commit)?;
+    let committed_attachment_ids = commit.committed_attachment_ids.clone();
+    let result = inner.commit_runtime_state(commit).await?;
+    collector.record_manifest(&event.session_id, &result.manifest);
+    if let Some(state) = event.state.as_mut()
+        && let Some(accepted) = inner.load_session_window(&event.session_id, WindowSelector::Current).await?
+    {
+        let read_model = accepted
+            .window
+            .read_model(accepted.current_frame_node_id.as_ref())
+            .expect("accepted current frame must resolve in its validated session graph");
+        state.accepted_raw_rows = Some(serde_json::json!({
+            "graph_nodes": accepted.window.nodes,
+            "graph_leaf_node_id": accepted.window.leaf_node_id,
+            "turn_state": accepted.checkpoint.as_ref().map(|checkpoint| &checkpoint.turn_state),
+            "usage": accepted.usage,
+        }));
+        state.accepted_read_model = Some(serde_json::json!({
+            "graph_node_count": accepted.window.nodes.len(),
+            "messages": read_model.messages.as_ref(),
+            "token_usage": accepted.checkpoint.as_ref().map(|checkpoint| &checkpoint.turn_state.token_usage),
+        }));
+    }
+    collector.push_runtime_commit(
+        CheckpointWriteEvent {
+            revision_after: result.head_revision,
+            ..event
+        },
+        budget,
+        committed_attachment_ids,
+    );
+    Ok(result)
+}
+
 fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
     let checkpoint = &commit.checkpoint;
     let mut components = vec![CheckpointComponentWrite {
