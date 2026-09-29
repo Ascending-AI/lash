@@ -226,6 +226,17 @@ async fn postgres_artifact_read_refuses_an_undecodable_referrer_id() {
         .publish_module_artifact(&claim, artifact_ref, b"bytes")
         .await
         .expect("publish under live host pin");
+    let empty_id = sqlx::query(
+        "UPDATE lash_artifact_referrer_edges SET referrer_id = ''
+         WHERE namespace = 'lashlang_module' AND artifact_ref = $1",
+    )
+    .bind(artifact_ref)
+    .execute(storage.pool())
+    .await;
+    assert!(
+        empty_id.is_err(),
+        "an empty stored referrer id must fail CHECK"
+    );
     sqlx::query(
         "UPDATE lash_artifact_referrer_edges SET referrer_id = 'invalid-host-pin'
          WHERE namespace = 'lashlang_module' AND artifact_ref = $1",
