@@ -99,11 +99,25 @@ state while investigating either refusal.
    ```
 
    Repeat `drain-status` until its `drained` field is true and exit code is 0.
-   A code 5 means work remains; inspect the reported live and parked processes,
-   turns, closing sessions and stalled obligations. Keep N's deployment
-   registered while any invocation or recorded route still needs it. Settle
-   stuck work through the owning host; do not treat a missing heartbeat or an
-   empty host queue as retirement evidence.
+   Drained means nothing left needs N's deployment: the generation is marked,
+   and it holds no live or parked process, no parked or in-flight turn, and no
+   session is closing. A code 5 means some of that remains; inspect those
+   counts. Keep N's deployment registered while any invocation or recorded
+   route still needs it. Settle stuck work through the owning host; do not
+   treat a missing heartbeat or an empty host queue as retirement evidence.
+
+   Stalled obligations do not hold the drain, so a drained result can still
+   list them. `stalled_obligations` counts them per kind, and `stalled` lists
+   each one, at most 100 per kind in id order, with its `kind`,
+   `obligation_id`, typed `reason` (`attempts_exhausted`, `refused` or
+   `undecodable`), the `row` it lives on, and, when this build cannot name
+   that row, an `undecodable` detail such as a kind no build of this release
+   knows. No obligation is pinned to a generation: whichever build leads
+   recovery delivers one that is re-armed, and an `undecodable` one stays
+   stalled whichever deployments remain. Retiring N neither loses nor settles
+   them. Read the list before you retire N, settle each obligation through
+   the owning host (re-arm it once its cause is fixed), and keep the ones no
+   build can decode, with the listing, in the release record.
 
 4. Retire N's Restate deployment only after the drain and the host's pinned
    invocation check both pass. Close the generation drain after retirement:

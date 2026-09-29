@@ -672,6 +672,18 @@ the stamp and the wire protect the readers that come later.
    Inboxed object calls are not pinned yet; they start on the newest
    deployment.
 
+**Amendment, 2026-09-29 (FIG-4076).** Stalled obligations do not hold
+`drain_status(G)`. `G` reads drained when it is marked and nothing left needs
+its deployment: no live or parked process, no parked or in-flight turn, and
+no closing session. No obligation is pinned to a generation. Whichever build
+leads recovery delivers a re-armed one, and one stalled `undecodable` (§5) is
+one no build of the window can decode, so keeping the deployment settles
+none of them, and a drain that waited on them never finished. `lashctl
+drain-status` counts them per kind and lists each one by kind, obligation
+id, typed reason and row, for the operator to settle before retirement.
+This amends ADR 0109 §1.5, which gave the generation drain the deployment
+drain's rule. The deployment drain status keeps that rule.
+
 ### 4. Remote protocol negotiation
 
 `crates/lash-remote-protocol/src/negotiation.rs` (new) holds the bootstrap.

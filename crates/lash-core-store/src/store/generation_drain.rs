@@ -94,12 +94,17 @@ pub trait GenerationDrainStore: Send + Sync {
 /// processes, each hands its open wait to a successor on the newest build,
 /// and the count runs down. Parked work does not move by itself: an
 /// operator redrives it on a build of the generation, cancels it, or forks
-/// it. Stalled obligations are counted as in the deployment drain status:
-/// they are not per generation, but a drain is not finished while one waits
-/// for an operator. Nor is it while a session is closing: its close ended its
-/// roots, but each root's turn-control waits stay registered with the
+/// it. Nor is a drain finished while a session is closing: its close ended
+/// its roots, but each root's turn-control waits stay registered with the
 /// engine, on whichever build ran the root, until the session's physical
 /// delete revokes them (ADR 0109 §4).
+///
+/// Stalled obligations are counted, but they do not hold the drain (ADR 0115
+/// §3.5, amended by FIG-4076). No obligation is pinned to a generation: any
+/// build of the window delivers one an operator re-arms, and one that no
+/// build of the window can decode stays stalled whichever deployments are
+/// registered. Keeping the generation's deployment would settle none of
+/// them, so the operator is shown them to settle, not made to wait on them.
 ///
 /// The type lives beside the store port that answers it so the facade's
 /// `LashCore::generation_drain_status` and the operator binary compose the
@@ -126,7 +131,8 @@ pub struct GenerationDrainStatus {
     /// not run. Not per generation, as stalled obligations are not.
     pub closing_sessions: u64,
     /// Stalled store→engine delivery obligations per kind (ADR 0109 §1.5),
-    /// every kind present, zero included.
+    /// every kind present, zero included. Not per generation, and they do
+    /// not hold the drain: see [`drained`](Self::drained).
     pub stalled_obligations: BTreeMap<ObligationKind, u64>,
     /// Host-clock epoch milliseconds at which this read completed.
     pub checked_at: u64,
@@ -195,9 +201,16 @@ impl GenerationDrainStatus {
         })
     }
 
-    /// True only when the generation is marked draining and it holds no live
-    /// process, no parked process or turn, no in-flight turn, no session is
-    /// closing, and no obligation is stalled.
+    /// True only when the generation is marked draining, it holds no live
+    /// process, no parked process or turn and no in-flight turn, and no
+    /// session is closing: nothing is left that needs the generation's own
+    /// deployment.
+    ///
+    /// Stalled obligations do not hold it (ADR 0115 §3.5, FIG-4076). They
+    /// are not pinned to any generation and none of them moves until an
+    /// operator acts, so a drain that waited on them would never finish. An
+    /// operator reads [`stalled_obligations`](Self::stalled_obligations) and
+    /// settles each one before retiring the deployment.
     pub fn drained(&self) -> bool {
         self.draining_since_ms.is_some()
             && self.live_processes == 0
@@ -205,7 +218,6 @@ impl GenerationDrainStatus {
             && self.parked_turns == 0
             && self.in_flight_turns == 0
             && self.closing_sessions == 0
-            && self.stalled_obligations.values().all(|count| *count == 0)
     }
 }
 
@@ -239,5 +251,57 @@ impl serde::Serialize for GenerationDrainStatus {
             drained: self.drained(),
         }
         .serialize(serializer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn marked_and_empty() -> GenerationDrainStatus {
+        GenerationDrainStatus {
+            generation: BuildGeneration::parse("0123456789ab").expect("a generation"),
+            draining_since_ms: Some(1),
+            live_processes: 0,
+            parked_processes: 0,
+            parked_turns: 0,
+            in_flight_turns: 0,
+            closing_sessions: 0,
+            stalled_obligations: ObligationKind::ALL
+                .into_iter()
+                .map(|kind| (kind, 0))
+                .collect(),
+            checked_at: 2,
+        }
+    }
+
+    #[test]
+    fn a_stalled_obligation_does_not_hold_the_drain() {
+        let mut status = marked_and_empty();
+        status
+            .stalled_obligations
+            .insert(ObligationKind::ArtifactCleanup, 1);
+        assert!(status.drained(), "{status:?}");
+        assert_eq!(
+            serde_json::to_value(&status).expect("serialize")["drained"],
+            true
+        );
+    }
+
+    #[test]
+    fn work_pinned_to_the_generation_holds_the_drain() {
+        let holds: [fn(&mut GenerationDrainStatus); 6] = [
+            |status| status.draining_since_ms = None,
+            |status| status.live_processes = 1,
+            |status| status.parked_processes = 1,
+            |status| status.parked_turns = 1,
+            |status| status.in_flight_turns = 1,
+            |status| status.closing_sessions = 1,
+        ];
+        for hold in holds {
+            let mut status = marked_and_empty();
+            hold(&mut status);
+            assert!(!status.drained(), "{status:?}");
+        }
     }
 }

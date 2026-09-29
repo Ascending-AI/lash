@@ -21,7 +21,9 @@
 //! On PostgreSQL the ledger also holds a cleanup row whose referrer kind no
 //! build of this window knows, as a later build writes it after widening
 //! the column's check. N's relay stalls it `undecodable`, typed, and it
-//! stays outstanding and listed under N and again under N+1. On SQLite the
+//! stays outstanding and listed under N and again under N+1. It does not
+//! hold N's drain: `lashctl drain-status` reads drained and lists the row,
+//! its identity and its typed reason, for the operator to settle. On SQLite the
 //! kind check is inline in the table, so no build can stall such a row
 //! there without rebuilding the table; the unknown kind runs on PostgreSQL
 //! only.
@@ -451,25 +453,7 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
     }
     n_node.stop()?;
     if let Some(operator) = operator {
-        // The unknown-kind row is outstanding and the operator sees it: the
-        // drain waits on it alone, not yet (exit 5), until someone acts.
-        let (code, status) = operator.answer("drain-status", Some(&n_generation))?;
-        let result = &status["result"];
-        let stalled = &result["stalled_obligations"];
-        ensure!(
-            code == 5
-                && result["drained"] == false
-                && result["in_flight_turns"] == 0
-                && result["parked_turns"] == 0
-                && result["closing_sessions"] == 0
-                && stalled["artifact_cleanup"] == 1
-                && stalled.as_object().is_some_and(|kinds| kinds
-                    .values()
-                    .filter(|count| **count != 0)
-                    .count()
-                    == 1),
-            "the drain does not wait on the one stalled row alone: {status}"
-        );
+        drained_with_the_stalled_row_listed(operator, &n_generation)?;
         operator.run("end-drain", Some(&n_generation))?;
     }
     let relay_next: RelayReport = next.retention(case, &["relay"])?;
@@ -552,6 +536,46 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
         inspect_n,
         inspect_next,
     })
+}
+
+/// N's generation holds nothing, so it reads drained (exit 0) although the
+/// unknown-kind row is stalled: no build of the window can decode that row,
+/// and keeping N's deployment would not settle it. The status lists it alone,
+/// by its obligation id, with its typed reason and the kind no build knows.
+fn drained_with_the_stalled_row_listed(operator: &Operator, generation: &str) -> Result<()> {
+    let (code, status) = operator.answer("drain-status", Some(generation))?;
+    let result = &status["result"];
+    let counts = &result["stalled_obligations"];
+    let listed = result["stalled"].as_array();
+    ensure!(
+        code == 0
+            && status["error"].is_null()
+            && result["drained"] == true
+            && result["live_processes"] == 0
+            && result["parked_processes"] == 0
+            && result["in_flight_turns"] == 0
+            && result["parked_turns"] == 0
+            && result["closing_sessions"] == 0
+            && counts["artifact_cleanup"] == 1
+            && counts.as_object().is_some_and(|kinds| kinds
+                .values()
+                .filter(|count| **count != 0)
+                .count()
+                == 1),
+        "a stalled row alone does not read drained: {status}"
+    );
+    ensure!(
+        listed.is_some_and(|listed| listed.len() == 1)
+            && result["stalled"][0]["kind"] == "artifact_cleanup"
+            && result["stalled"][0]["obligation_id"] == UNKNOWN_OBLIGATION
+            && result["stalled"][0]["reason"] == "undecodable"
+            && result["stalled"][0]["row"].is_null()
+            && result["stalled"][0]["undecodable"]
+                .as_str()
+                .is_some_and(|detail| detail.contains(UNKNOWN_KIND)),
+        "the drain does not list the one stalled row, typed: {status}"
+    );
+    Ok(())
 }
 
 /// The unknown-kind row is still in the ledger, stalled `undecodable`, and

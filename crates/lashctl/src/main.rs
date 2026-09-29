@@ -7,11 +7,11 @@ use lash_core_execution::ClockWallTime;
 use lash_core_execution::engine::BuildGeneration;
 use lash_core_execution::store::generation_drain::GenerationDrainStatus;
 use lash_core_store::compat::{CompatRefusal, DESCRIPTORS};
-use lash_core_store::store::StoreError;
 use lash_core_store::store::{
     FLEET_WRITABLE_RANGE, FleetFormatState, StorePreflight, StoreReleaseState, StoreSchemaOutcome,
     StoreSchemaVerdict,
 };
+use lash_core_store::store::{ObligationKey, ObligationKind, StalledObligation, StoreError};
 use lash_postgres_store::{
     MigrationPhase, MigrationReport, MigrationStep, PostgresStorage, PostgresStorePreflight,
 };
@@ -19,6 +19,9 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 const LASHCTL_JSON_SCHEMA_VERSION: u32 = 1;
+/// The most stalled obligations `drain-status` lists per kind, first by id;
+/// `stalled_obligations` still counts every one.
+const STALLED_LISTED_PER_KIND: std::num::NonZeroUsize = std::num::NonZeroUsize::new(100).unwrap();
 const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> | end-drain <generation> | preflight | version>";
 
 #[derive(Clone, Copy)]
@@ -205,7 +208,51 @@ fn migration_result(report: &MigrationReport, dry_run: bool) -> Value {
     })
 }
 
-fn drain_status_result(status: &GenerationDrainStatus) -> Value {
+/// The row a stalled obligation lives on, by its key's column names, or
+/// `None` when this build cannot name it.
+fn stalled_row(key: &ObligationKey) -> Value {
+    match key {
+        ObligationKey::Ingress {
+            session_id,
+            item_id,
+        } => json!({"session_id":session_id.as_str(),"item_id":item_id}),
+        ObligationKey::ControlIntent { intent_id } => json!({"intent_id":intent_id.sequence()}),
+        ObligationKey::ScopeClose { session_id, root } => {
+            json!({"session_id":session_id.as_str(),"root":root.as_str()})
+        }
+        ObligationKey::ParentEnd {
+            parent_kind,
+            parent_id,
+        } => json!({"parent_kind":parent_kind,"parent_id":parent_id}),
+        ObligationKey::SessionDelete { session_id } => json!({"session_id":session_id.as_str()}),
+        ObligationKey::ProcessStart { process_id }
+        | ObligationKey::ProcessTerminal { process_id } => {
+            json!({"process_id":process_id.as_str()})
+        }
+        ObligationKey::ArtifactCleanup { referrer } => {
+            json!({"referrer_kind":referrer.kind().as_str(),"referrer_id":referrer.canonical_id()})
+        }
+    }
+}
+
+fn stalled_result(stalled: &StalledObligation) -> Value {
+    let (row, undecodable) = match &stalled.key {
+        Ok(key) => (stalled_row(key), None),
+        Err(error) => (Value::Null, Some(error.detail.as_str())),
+    };
+    json!({
+        "kind": stalled.kind.label(),
+        "obligation_id": stalled.id.as_str(),
+        "reason": stalled.reason.as_str(),
+        "row": row,
+        "undecodable": undecodable,
+        "attempts": stalled.attempts,
+        "last_error": stalled.last_error,
+        "stalled_at_ms": stalled.stalled_at_ms,
+    })
+}
+
+fn drain_status_result(status: &GenerationDrainStatus, stalled: &[StalledObligation]) -> Value {
     json!({
         "generation": status.generation.as_str(),
         "draining_since_ms": status.draining_since_ms,
@@ -215,6 +262,7 @@ fn drain_status_result(status: &GenerationDrainStatus) -> Value {
         "in_flight_turns": status.in_flight_turns,
         "closing_sessions": status.closing_sessions,
         "stalled_obligations": status.stalled_obligations.iter().map(|(kind, count)| (kind.label(), *count)).collect::<std::collections::BTreeMap<_, _>>(),
+        "stalled": stalled.iter().map(stalled_result).collect::<Vec<_>>(),
         "drained": status.drained(),
         "checked_at_ms": status.checked_at,
     })
@@ -361,12 +409,26 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
                     )
                     .await
                     .map_err(CliError::store)?;
+                    // Stalled obligations never hold the drain, so each is
+                    // listed for the operator to settle before retirement.
+                    let mut stalled = Vec::new();
+                    for kind in ObligationKind::ALL {
+                        if status.stalled_obligations.get(&kind).copied().unwrap_or(0) > 0 {
+                            stalled.extend(
+                                storage
+                                    .obligation_ledger(kind)
+                                    .list_stalled(None, STALLED_LISTED_PER_KIND)
+                                    .await
+                                    .map_err(CliError::store)?,
+                            );
+                        }
+                    }
                     let exit = if status.drained() {
                         Exit::Done
                     } else {
                         Exit::NotYet
                     };
-                    (drain_status_result(&status), exit)
+                    (drain_status_result(&status, &stalled), exit)
                 }
                 _ => unreachable!("matched a drain command"),
             }
@@ -448,6 +510,53 @@ mod tests {
         assert_eq!(
             error_json(&error)["refusal"],
             json!({"refusal":"unstamped","component":"postgres"})
+        );
+    }
+
+    #[test]
+    fn a_stalled_obligation_lists_its_identity_and_typed_reason() {
+        use lash_core_store::store::{KeyColumn, ObligationId, StallReason, UndecodableObligation};
+
+        let decoded = StalledObligation {
+            kind: ObligationKind::ControlIntent,
+            id: ObligationId::new("obligation-decoded"),
+            key: ObligationKey::decode(ObligationKind::ControlIntent, vec![KeyColumn::Integer(7)]),
+            reason: StallReason::AttemptsExhausted,
+            attempts: 3,
+            last_error: Some("the engine was unavailable".to_owned()),
+            stalled_at_ms: 11,
+        };
+        assert_eq!(
+            stalled_result(&decoded),
+            json!({
+                "kind": "control_intent",
+                "obligation_id": "obligation-decoded",
+                "reason": "attempts_exhausted",
+                "row": {"intent_id": 7},
+                "undecodable": null,
+                "attempts": 3,
+                "last_error": "the engine was unavailable",
+                "stalled_at_ms": 11,
+            })
+        );
+
+        let foreign = StalledObligation {
+            kind: ObligationKind::ArtifactCleanup,
+            id: ObligationId::new("obligation-foreign"),
+            key: Err(UndecodableObligation {
+                detail: "unknown artifact referrer kind `synthetic_next`".to_owned(),
+            }),
+            reason: StallReason::Undecodable,
+            attempts: 1,
+            last_error: None,
+            stalled_at_ms: 12,
+        };
+        let listed = stalled_result(&foreign);
+        assert_eq!(listed["reason"], "undecodable");
+        assert_eq!(listed["row"], Value::Null);
+        assert_eq!(
+            listed["undecodable"],
+            "unknown artifact referrer kind `synthetic_next`"
         );
     }
 }
