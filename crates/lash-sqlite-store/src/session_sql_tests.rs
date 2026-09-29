@@ -34,8 +34,8 @@ fn every_session_core_statement_renders_unqualified() {
         sql.turn_commits
             .select_failure_settlements
             .sql()
-            .contains(r#"result_json LIKE '%"failure_evidence"%'"#),
-        "a `{{` inside a SQL string literal survives rendering: {}",
+            .contains("WHERE session_id = ?1 AND failure_evidence"),
+        "failure paging uses the indexed flag: {}",
         sql.turn_commits.select_failure_settlements.sql()
     );
     assert!(
@@ -50,12 +50,8 @@ fn every_session_core_statement_renders_unqualified() {
 
 /// The query plan of every named filter shape, pinned.
 ///
-/// Each of these pairs exists because a single statement carrying an optional
-/// predicate — `?2 IS NULL OR generation <= ?2`, `turn_id NOT IN (…)` with an
-/// empty list — cannot be planned well for either shape. Pinning the plans is
-/// what makes that claim checkable: a change that turns one of these seeks
-/// into a scan, or that adds an index one of them should now be using, moves
-/// the text below instead of passing silently.
+/// Window and page reads must seek within a session's generations. Retention
+/// keeps its two filter shapes because an empty exclusion list needs no scan.
 #[tokio::test]
 async fn every_named_filter_shape_keeps_its_query_plan() {
     let store = crate::test_support::memory_store()
@@ -66,8 +62,8 @@ async fn every_named_filter_shape_keeps_its_query_plan() {
         .conn
         .call(|conn| {
             Ok([
-                explain(conn, sql.graph_sqlite.select_readable.sql())?,
-                explain(conn, sql.graph_sqlite.select_readable_to_generation.sql())?,
+                explain(conn, sql.graph_sqlite.window_rows.sql())?,
+                explain(conn, sql.graph_sqlite.page_headers.sql())?,
                 explain(conn, sql.turn_commits_sqlite.delete_retained.sql())?,
                 explain(
                     conn,
@@ -77,23 +73,18 @@ async fn every_named_filter_shape_keeps_its_query_plan() {
         })
         .await
         .expect("explain every named filter shape");
-    let [readable, readable_bounded, retained, retained_except_live] = plans;
-
-    // Both readable-graph shapes scan `graph_nodes` today, and that is not
-    // what the split buys: the disjunction with the fork-lineage `EXISTS` is
-    // what keeps the scan, and no index this schema carries can serve it. What
-    // the split buys is that the bounded shape's `generation <= ?2` is a plain
-    // comparison a future index could serve, where `?2 IS NULL OR …` could
-    // never be.
-    assert_eq!(
-        readable,
-        "SCAN node\n\
-         CORRELATED SCALAR SUBQUERY 1\n\
-         SEARCH lineage USING INDEX sqlite_autoindex_fork_lineage_1 \
-         (session_id=? AND ancestor_session_id=?)\n\
-         USE TEMP B-TREE FOR ORDER BY"
-    );
-    assert_eq!(readable_bounded, readable);
+    let [window, page, retained, retained_except_live] = plans;
+    for (name, plan) in [("window", window), ("page", page)] {
+        assert!(
+            plan.contains("SEARCH node USING INDEX sqlite_autoindex_graph_nodes_2")
+                || plan.contains("SEARCH node USING INDEX sqlite_autoindex_graph_nodes_1"),
+            "{name} must seek by session and generation: {plan}"
+        );
+        assert!(
+            !plan.contains("SCAN node"),
+            "{name} scanned graph nodes: {plan}"
+        );
+    }
 
     // The retention sweep's two shapes differ exactly where they are meant to:
     // the exclusion list is a `json_each` scan the plain shape does not pay

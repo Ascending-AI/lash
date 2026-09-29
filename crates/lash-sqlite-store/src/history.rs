@@ -1,7 +1,5 @@
 use super::*;
-use lash_core_execution::runtime::usage::{
-    SessionUsageTotals, UnreportedUsageAttempt, UsageTotalRow,
-};
+use lash_core_execution::runtime::{SessionUsageTotals, UnreportedUsageAttempt, UsageTotalRow};
 use lash_core_execution::store::{
     AnchorUnavailable, FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget,
     HistoryCursor, HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore,
@@ -49,9 +47,6 @@ struct Header {
     owner: String,
     tombstoned: bool,
 }
-const VISIBLE_HEADER: &str = "SELECT node.node_id,node.parent_node_id,node.generation,node.frame_node_id,node.body_bytes,node.session_id,node.tombstoned FROM graph_nodes AS node WHERE node.node_id=?1 AND (node.session_id=?2 OR EXISTS(SELECT 1 FROM fork_lineage AS lineage WHERE lineage.session_id=?2 AND lineage.ancestor_session_id=node.session_id AND node.generation<=lineage.fork_generation))";
-const WINDOW_ROWS: &str = "WITH readable_sessions AS (SELECT ?1 AS session_id, NULL AS generation_ceiling UNION ALL SELECT ancestor_session_id, fork_generation FROM fork_lineage WHERE session_id=?1) SELECT node.node_id,node.parent_node_id,node.node_json,node.generation,node.frame_node_id,node.body_bytes FROM readable_sessions AS readable JOIN graph_nodes AS node ON node.session_id=readable.session_id AND node.generation BETWEEN ?2 AND ?3 AND (readable.generation_ceiling IS NULL OR node.generation<=readable.generation_ceiling) WHERE node.tombstoned=0 ORDER BY node.generation";
-const PAGE_HEADERS: &str = "WITH readable_sessions AS (SELECT ?1 AS session_id, NULL AS generation_ceiling UNION ALL SELECT ancestor_session_id, fork_generation FROM fork_lineage WHERE session_id=?1) SELECT node.node_id,node.parent_node_id,node.generation,node.frame_node_id,node.body_bytes,node.session_id,node.tombstoned FROM readable_sessions AS readable JOIN graph_nodes AS node ON node.session_id=readable.session_id AND node.generation<=?2 AND (readable.generation_ceiling IS NULL OR node.generation<=readable.generation_ceiling) WHERE node.tombstoned=0 ORDER BY node.generation DESC LIMIT ?3";
 fn header(row: &rusqlite::Row<'_>) -> rusqlite::Result<Header> {
     Ok(Header {
         id: row.get(0)?,
@@ -68,9 +63,13 @@ fn visible_header(
     session: &SessionId,
     node: &str,
 ) -> Result<Option<Header>, StoreError> {
-    conn.query_row(VISIBLE_HEADER, params![node, session.as_str()], header)
-        .optional()
-        .map_err(sqlite_error)
+    conn.query_row(
+        session_sql::session_sql().graph_sqlite.visible_header.sql(),
+        params![node, session.as_str()],
+        header,
+    )
+    .optional()
+    .map_err(sqlite_error)
 }
 fn missing_anchor(
     conn: &Connection,
@@ -178,7 +177,9 @@ fn window(
         if frame.generation < 0 || frame.generation > last.generation {
             return Err(corrupt("SessionGraph", "frame generation exceeds leaf"));
         }
-        let mut stmt = conn.prepare_cached(WINDOW_ROWS).map_err(sqlite_error)?;
+        let mut stmt = conn
+            .prepare_cached(session_sql::session_sql().graph_sqlite.window_rows.sql())
+            .map_err(sqlite_error)?;
         let rows = stmt
             .query_map(
                 params![session.as_str(), frame.generation, last.generation],
@@ -410,7 +411,9 @@ fn ancestors(
     if expected.is_some_and(|g| g != start_generation) {
         return Err(corrupt("SessionGraph", "history cursor generation changed"));
     }
-    let mut stmt = conn.prepare_cached(PAGE_HEADERS).map_err(sqlite_error)?;
+    let mut stmt = conn
+        .prepare_cached(session_sql::session_sql().graph_sqlite.page_headers.sql())
+        .map_err(sqlite_error)?;
     let rows = stmt
         .query_map(
             params![
@@ -498,7 +501,7 @@ fn ancestors(
         ))
     };
     let mut body_stmt = conn
-        .prepare_cached("SELECT node_json FROM graph_nodes WHERE node_id=?1")
+        .prepare_cached(session_sql::session_sql().graph_sqlite.select_body.sql())
         .map_err(sqlite_error)?;
     let mut nodes = Vec::with_capacity(headers.len());
     for header in headers {
@@ -702,14 +705,12 @@ fn usage_page(
     {
         let holes = hole_stmt
             .query_map(params![session.as_str(), seq], |row| {
-                Ok(
-                    lash_core_execution::runtime::usage::UnreportedLedgerAttempt {
-                        call_id: row.get(0)?,
-                        attempt_ordinal: u32::try_from(row.get::<_, i64>(1)?)
-                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                        generation_id: row.get(2)?,
-                    },
-                )
+                Ok(lash_core_execution::runtime::UnreportedLedgerAttempt {
+                    call_id: row.get(0)?,
+                    attempt_ordinal: u32::try_from(row.get::<_, i64>(1)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    generation_id: row.get(2)?,
+                })
             })
             .map_err(sqlite_error)?
             .collect::<Result<Vec<_>, _>>()

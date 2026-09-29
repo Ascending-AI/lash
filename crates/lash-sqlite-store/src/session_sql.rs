@@ -289,25 +289,6 @@ lash_store_sql::statements! {
                               )
                              WHERE head.session_id = ?1";
 
-        /// The sole session this catalog holds, if it holds exactly one.
-        ///
-        /// A head row and a metadata row are each evidence of a session, and a
-        /// session may have either without the other, so the union is the
-        /// question. Two rows are read from each side so "exactly one" can be
-        /// decided without counting the whole catalog.
-        select_sole_bound_session_id = "SELECT session_id FROM (
-                         SELECT session_id FROM (
-                             SELECT session_id FROM session_head
-                             LIMIT 2
-                         )
-                         UNION
-                         SELECT session_id FROM (
-                             SELECT session_id FROM session_meta
-                             LIMIT 2
-                         )
-                     )
-                     LIMIT 2";
-
         /// The stored head document of `?1`, for a test that wants to read or
         /// rewrite it behind the store's back.
         select_head_json = "SELECT head_json FROM session_head WHERE session_id = ?1";
@@ -328,59 +309,38 @@ lash_store_sql::statements! {
         /// The generation of `?1` and whether it is tombstoned.
         select_leaf_state = "SELECT generation, tombstoned FROM graph_nodes WHERE node_id = ?1";
 
-        /// Every node session `?1` may read, oldest first.
-        ///
-        /// The whole-graph shape. Its generation-bounded sibling is
-        /// [`GraphNodeSqliteStatements::select_readable_to_generation`]: one
-        /// statement per filter shape, because a single statement carrying
-        /// `?2 IS NULL OR generation <= ?2` cannot use an index for either.
-        select_readable = "SELECT node.node_id, node.parent_node_id, node.node_json,
-                node.generation, node.frame_node_id
-                 FROM graph_nodes AS node
-                 WHERE node.tombstoned = 0
-                   AND (
-                       node.session_id = ?1
-                       OR EXISTS (
-                           SELECT 1 FROM fork_lineage AS lineage
-                           WHERE lineage.session_id = ?1
-                             AND lineage.ancestor_session_id = node.session_id
-                             AND node.generation <= lineage.fork_generation
-                       )
-                   )
-                 ORDER BY node.generation ASC";
+        /// Header for one node readable by `?2`, including tombstone state.
+        visible_header = "SELECT node.node_id,node.parent_node_id,node.generation,
+                node.frame_node_id,node.body_bytes,node.session_id,node.tombstoned
+                FROM graph_nodes AS node WHERE node.node_id=?1 AND
+                (node.session_id=?2 OR EXISTS(SELECT 1 FROM fork_lineage AS lineage
+                WHERE lineage.session_id=?2 AND lineage.ancestor_session_id=node.session_id
+                AND node.generation<=lineage.fork_generation))";
 
-        /// Every node session `?1` may read up to generation `?2`, oldest
-        /// first: the active-path shape.
-        select_readable_to_generation = "SELECT node.node_id, node.parent_node_id, node.node_json,
-                node.generation, node.frame_node_id
-                 FROM graph_nodes AS node
-                 WHERE node.tombstoned = 0
-                   AND node.generation <= ?2
-                   AND (
-                       node.session_id = ?1
-                       OR EXISTS (
-                           SELECT 1 FROM fork_lineage AS lineage
-                           WHERE lineage.session_id = ?1
-                             AND lineage.ancestor_session_id = node.session_id
-                             AND node.generation <= lineage.fork_generation
-                       )
-                   )
-                 ORDER BY node.generation ASC";
+        /// Only the frame window between the base and selected leaf.
+        window_rows = "WITH readable_sessions AS
+                (SELECT ?1 AS session_id, NULL AS generation_ceiling UNION ALL
+                SELECT ancestor_session_id, fork_generation FROM fork_lineage WHERE session_id=?1)
+                SELECT node.node_id,node.parent_node_id,node.node_json,node.generation,
+                node.frame_node_id,node.body_bytes FROM readable_sessions AS readable
+                JOIN graph_nodes AS node ON node.session_id=readable.session_id
+                AND node.generation BETWEEN ?2 AND ?3
+                AND (readable.generation_ceiling IS NULL OR node.generation<=readable.generation_ceiling)
+                WHERE node.tombstoned=0 ORDER BY node.generation";
 
-        /// Node `?1`, if session `?2` may read it.
-        select_lookup = "SELECT node.node_id, node.parent_node_id, node.node_json,
-                node.session_id, node.generation
-                         FROM graph_nodes AS node
-                         WHERE node.node_id = ?1 AND node.tombstoned = 0
-                           AND (
-                               node.session_id = ?2
-                               OR EXISTS (
-                                   SELECT 1 FROM fork_lineage AS lineage
-                                   WHERE lineage.session_id = ?2
-                                     AND lineage.ancestor_session_id = node.session_id
-                                     AND node.generation <= lineage.fork_generation
-                               )
-                           )";
+        /// One page of readable ancestor headers; bodies are fetched after budgeting.
+        page_headers = "WITH readable_sessions AS
+                (SELECT ?1 AS session_id, NULL AS generation_ceiling UNION ALL
+                SELECT ancestor_session_id, fork_generation FROM fork_lineage WHERE session_id=?1)
+                SELECT node.node_id,node.parent_node_id,node.generation,node.frame_node_id,
+                node.body_bytes,node.session_id,node.tombstoned FROM readable_sessions AS readable
+                JOIN graph_nodes AS node ON node.session_id=readable.session_id
+                AND node.generation<=?2
+                AND (readable.generation_ceiling IS NULL OR node.generation<=readable.generation_ceiling)
+                WHERE node.tombstoned=0 ORDER BY node.generation DESC LIMIT ?3";
+
+        /// Fetch one selected history node's body after the page budget is fixed.
+        select_body = "SELECT node_json FROM graph_nodes WHERE node_id=?1";
 
         exists_live = "SELECT 1 FROM graph_nodes
                      WHERE node_id = ?1 AND tombstoned = 0";
