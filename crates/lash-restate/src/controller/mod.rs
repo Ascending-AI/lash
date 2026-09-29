@@ -640,25 +640,6 @@ where
         self.scoped_effect_controller(admitted)
     }
 
-    async fn prepare_tool_intent(
-        &self,
-        _sink: &dyn lash_core::ToolIntentOutcomeSink,
-        _identity: &lash_core::ToolIntentIdentity,
-        _intent: lash_core::ToolIntent,
-    ) -> Result<lash_core::ToolIntentPreparation, RuntimeError> {
-        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
-    }
-
-    async fn record_tool_intent_outcome(
-        &self,
-        sink: &dyn lash_core::ToolIntentOutcomeSink,
-        identity: &lash_core::ToolIntentIdentity,
-        submitted: lash_core::ToolIntent,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> Result<(), RuntimeError> {
-        sink.retain_in_journal(identity, submitted, outcome).await
-    }
-
     /// A handler-scoped controller runs inside one journal and cannot see
     /// whether another will replay, so it never promises one settled
     /// (ADR 0113 §2.5); the deployment host answers the cleanup executor.

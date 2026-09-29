@@ -823,25 +823,6 @@ impl lash_core::EffectHost for KeyJournalController {
         self
     }
 
-    async fn prepare_tool_intent(
-        &self,
-        _sink: &dyn lash_core::ToolIntentOutcomeSink,
-        _identity: &lash_core::ToolIntentIdentity,
-        _intent: lash_core::ToolIntent,
-    ) -> std::result::Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
-        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
-    }
-
-    async fn record_tool_intent_outcome(
-        &self,
-        sink: &dyn lash_core::ToolIntentOutcomeSink,
-        identity: &lash_core::ToolIntentIdentity,
-        submitted: lash_core::ToolIntent,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> std::result::Result<(), lash_core::RuntimeError> {
-        sink.retain_in_journal(identity, submitted, outcome).await
-    }
-
     fn scoped<'run>(
         &'run self,
         scope: lash_core::AdmittedScope,
@@ -954,25 +935,6 @@ impl lash_core::EffectHost for AdmissionCrashController {
 
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
-    }
-
-    async fn prepare_tool_intent(
-        &self,
-        _sink: &dyn lash_core::ToolIntentOutcomeSink,
-        _identity: &lash_core::ToolIntentIdentity,
-        _intent: lash_core::ToolIntent,
-    ) -> std::result::Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
-        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
-    }
-
-    async fn record_tool_intent_outcome(
-        &self,
-        sink: &dyn lash_core::ToolIntentOutcomeSink,
-        identity: &lash_core::ToolIntentIdentity,
-        submitted: lash_core::ToolIntent,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> std::result::Result<(), lash_core::RuntimeError> {
-        sink.retain_in_journal(identity, submitted, outcome).await
     }
 
     fn scoped<'run>(
@@ -2188,3 +2150,5 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
 }
 
 mod redelivery;
+
+mod engine_owned;

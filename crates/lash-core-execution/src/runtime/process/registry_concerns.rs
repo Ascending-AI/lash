@@ -775,7 +775,7 @@ pub trait ProcessLifecycle: Send + Sync {
 /// Every method is an **integrator class 3: store implementor** seam.
 #[async_trait::async_trait]
 pub trait ProcessToolIntents: Send + Sync {
-    /// Atomically bind a runtime-owned intent identity to its first payload.
+    /// Atomically bind a host-submitted intent identity to its first payload.
     ///
     /// This is an **integrator class 3: store implementor** seam. The returned
     /// existing row must be the authoritative first writer across processes

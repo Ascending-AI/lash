@@ -33,8 +33,7 @@ pub use control::{
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildCancelWatch,
     JournalReplay, ProcessDriveStep, RecordedJournal, RecordedKeyFence, RefusedWriteRange,
     Resolution, ResolveOutcome, RuntimeEffectController, ScopeBoundController,
-    ScopedEffectController, SegmentProgress, ServedOnlyRange, ToolIntentOutcomeSink,
-    ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
+    ScopedEffectController, SegmentProgress, ServedOnlyRange, TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectControllerTaskRequest, EffectControllerTaskRequests};
 pub use control::{EffectTaskController, drive_effect_controller_task};

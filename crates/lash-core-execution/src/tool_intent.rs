@@ -98,11 +98,12 @@ macro_rules! define_tool_intent {
 
 lash_sansio::tool_intent_variants!(define_tool_intent);
 
-/// Durable first-submission row for one runtime-owned tool-intent identity.
+/// Durable submission-ledger row for one host-submitted tool-intent identity.
 ///
 /// This is an **integrator class 3: protocol and process-engine implementor**
 /// seam. Process registries persist it so independent facade handles and
-/// crash redrives consult the same first writer before realization.
+/// crash redrives see the same first writer: a cancel binds its target here
+/// before realization, and every submission retains its first outcome here.
 #[derive(Clone, Debug, Serialize)]
 pub struct ToolIntentSubmissionRecord {
     /// Version selecting the admission and realization contract.
@@ -174,7 +175,7 @@ impl<'de> Deserialize<'de> for ToolIntentSubmissionRecord {
     }
 }
 
-/// Atomic result of claiming a runtime-owned tool-intent identity.
+/// Atomic result of claiming a tool-intent identity in the submission ledger.
 ///
 /// This is an **integrator class 3: protocol and process-engine implementor**
 /// seam returned by [`crate::ProcessRegistry`] implementations.

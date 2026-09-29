@@ -20,12 +20,11 @@ use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancel
 mod progress;
 pub use progress::{BoundaryReason, SegmentProgress};
 
-mod lane;
 use lash_core_effect::retirement;
 pub mod scope;
 pub mod task;
-pub use lane::*;
 pub use lash_core_effect::AwaitEventResolver;
+pub use lash_core_effect::CompletionKeyPreparation;
 pub use retirement::*;
 pub use scope::facade_ops;
 pub use scope::*;
@@ -222,37 +221,6 @@ pub trait EffectHost: AwaitEventResolver {
             resolver,
             self.turn_attach(),
         ))
-    }
-
-    async fn prepare_tool_intent(
-        &self,
-        sink: &dyn ToolIntentOutcomeSink,
-        identity: &crate::ToolIntentIdentity,
-        intent: crate::ToolIntent,
-    ) -> Result<ToolIntentPreparation, RuntimeError> {
-        let guard = sink.lock_submission_gate(&identity.replay_key).await;
-        let record =
-            crate::ToolIntentSubmissionRecord::new(identity.clone(), intent).map_err(|error| {
-                RuntimeError::new(
-                    RuntimeErrorCode::RecordEncodingFailed,
-                    format!("failed to hash tool-intent submission: {error}"),
-                )
-            })?;
-        let admission = sink.admit(record).await?;
-        Ok(ToolIntentPreparation::RuntimeOwned {
-            admission,
-            _guard: guard,
-        })
-    }
-
-    async fn record_tool_intent_outcome(
-        &self,
-        sink: &dyn ToolIntentOutcomeSink,
-        identity: &crate::ToolIntentIdentity,
-        _submitted: crate::ToolIntent,
-        outcome: crate::ToolIntentExecutionOutcome,
-    ) -> Result<(), RuntimeError> {
-        sink.complete_submission(identity, outcome).await
     }
 
     /// Retire durable effect history after its owning lifecycle is no longer

@@ -143,10 +143,10 @@ pub enum ToolIntentIngressRefusal {
 
 /// Admission result for one host-submitted intent.
 ///
-/// On controller-owned, key-addressed tiers, repeating the same key returns the
-/// first typed `outcome` with `replayed: true` and cannot realize a conflicting
-/// payload twice -- whether the repeat is caught by the controller's effect
-/// journal or, on a fresh invocation with an empty journal, by the durable key
+/// Repeating the same key returns the first typed `outcome` with
+/// `replayed: true` and cannot realize a conflicting payload twice -- whether
+/// the repeat is caught by the effect host's journal or, on a fresh invocation
+/// with an empty journal or a host that journals nothing, by the durable key
 /// the store already holds.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -157,9 +157,9 @@ pub enum ToolIntentIngressOutcome {
         outcome: lash_core::ToolIntentExecutionOutcome,
         /// `false` only when this submission wrote the durable fact.
         ///
-        /// `true` covers both ways a submission can realize nothing: a
-        /// controller-owned key-addressed journal returned an earlier outcome
-        /// without reaching the store, or the store coalesced the write onto
+        /// `true` covers both ways a submission can realize nothing: the
+        /// effect host's journal returned an earlier outcome without
+        /// reaching the store, or the store coalesced the write onto
         /// the fact it already held under the same durable key (FIG-3070).
         replayed: bool,
     },
@@ -196,33 +196,6 @@ pub struct ToolIntentIngress {
     scope: lash_core::ExecutionScope,
 }
 
-#[derive(Default)]
-pub(crate) struct RuntimeSubmissionGates {
-    by_replay_key: std::sync::Mutex<
-        std::collections::HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>,
-    >,
-}
-
-impl RuntimeSubmissionGates {
-    async fn lock(&self, replay_key: &str) -> tokio::sync::OwnedMutexGuard<()> {
-        let gate = {
-            let mut gates = self
-                .by_replay_key
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            gates.retain(|_, gate| gate.strong_count() > 0);
-            if let Some(gate) = gates.get(replay_key).and_then(std::sync::Weak::upgrade) {
-                gate
-            } else {
-                let gate = std::sync::Arc::new(tokio::sync::Mutex::new(()));
-                gates.insert(replay_key.to_string(), std::sync::Arc::downgrade(&gate));
-                gate
-            }
-        };
-        gate.lock_owned().await
-    }
-}
-
 fn ingress_runtime_error(error: crate::EmbedError) -> lash_core::RuntimeError {
     match error {
         crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)) => error,
@@ -237,79 +210,6 @@ fn ingress_runtime_error(error: crate::EmbedError) -> lash_core::RuntimeError {
         error => {
             lash_core::RuntimeError::new(lash_core::RuntimeErrorCode::Plugin, error.to_string())
         }
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::ToolIntentOutcomeSink for ToolIntentIngress {
-    async fn lock_submission_gate(&self, replay_key: &str) -> lash_core::ToolIntentSubmissionGuard {
-        lash_core::ToolIntentSubmissionGuard::from_owned_mutex_guard(
-            self.core
-                .tool_intent_submission_gates
-                .lock(replay_key)
-                .await,
-        )
-    }
-
-    async fn admit(
-        &self,
-        record: lash_core::ToolIntentSubmissionRecord,
-    ) -> Result<lash_core::ToolIntentSubmissionAdmission, lash_core::RuntimeError> {
-        self.process_registry()
-            .map_err(ingress_runtime_error)?
-            .admit_tool_intent_submission(record)
-            .await
-            .map_err(|error| ingress_runtime_error(error.into()))
-    }
-
-    async fn complete_submission(
-        &self,
-        identity: &lash_core::ToolIntentIdentity,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> Result<(), lash_core::RuntimeError> {
-        self.process_registry()
-            .map_err(ingress_runtime_error)?
-            .complete_tool_intent_submission(&identity.replay_key, outcome)
-            .await
-            .map(|_| ())
-            .map_err(|error| ingress_runtime_error(error.into()))
-    }
-
-    async fn retain_in_journal(
-        &self,
-        identity: &lash_core::ToolIntentIdentity,
-        submitted: lash_core::ToolIntent,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> Result<(), lash_core::RuntimeError> {
-        let registry = self.process_registry().map_err(ingress_runtime_error)?;
-        let submission = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), submitted)
-            .map_err(|error| {
-                lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RecordEncodingFailed,
-                    format!("failed to hash admitted tool-intent submission: {error}"),
-                )
-            })?;
-        match registry
-            .admit_tool_intent_submission(submission)
-            .await
-            .map_err(|error| ingress_runtime_error(error.into()))?
-        {
-            lash_core::ToolIntentSubmissionAdmission::Admitted => {
-                registry
-                    .complete_tool_intent_submission(&identity.replay_key, outcome)
-                    .await
-                    .map_err(|error| ingress_runtime_error(error.into()))?;
-            }
-            lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
-                if existing.outcome.is_none() {
-                    registry
-                        .complete_tool_intent_submission(&identity.replay_key, outcome)
-                        .await
-                        .map_err(|error| ingress_runtime_error(error.into()))?;
-                }
-            }
-        }
-        Ok(())
     }
 }
 
@@ -396,22 +296,20 @@ impl ToolIntentIngress {
 
     /// Submit one durable intent using first-writer-wins identity semantics.
     ///
-    /// Validation happens before any process command. Admission and realization
-    /// use the identity-derived replay key at the configured effect host, so a
-    /// crash redrives the same command frame rather than creating a second
-    /// realization. On a
-    /// controller-owned key-addressed tier, reuse of an identity returns the
-    /// first writer's outcome with `replayed: true`; the later payload is not
-    /// realized. Runtime-owned tiers report process-store identity collisions as
-    /// [`ToolIntentIngressRefusal::DuplicateIdentity`]. Controller-owned tiers
-    /// report the same refusal: every shape lands on a durable key at the point
-    /// it mutates, so a re-submitted identity realizes once and a changed
-    /// payload under a bound identity is refused at the store. `CancelProcess`
+    /// Validation happens before any process command. The configured effect
+    /// host owns admission: realization uses the identity-derived replay key
+    /// there, so a crash redrives the same command frame rather than creating
+    /// a second realization. Reuse of an identity returns the first writer's
+    /// outcome with `replayed: true`; the later payload is not realized. Every
+    /// shape lands on a durable key at the point it mutates, so a re-submitted
+    /// identity the effect journal cannot see realizes once too, and a changed
+    /// payload under a bound identity is refused at the store as
+    /// [`ToolIntentIngressRefusal::DuplicateIdentity`]. `CancelProcess`
     /// carries no content past its target, and its store fence lives on the
     /// target record, so its identity is bound to the target it first named in
     /// the durable submission ledger instead: a re-used identity naming a
     /// *different* target is refused there, before the second target is
-    /// touched.
+    /// touched. Every outcome is retained in that ledger.
     ///
     /// `StartProcess` and `EmitTrigger` submissions do not retain their
     /// host-chosen realization identifiers. Lash replaces a start's
@@ -475,17 +373,7 @@ impl ToolIntentIngress {
                     },
                 };
                 if let Err(store_error) = self
-                    .core
-                    .env
-                    .core
-                    .control
-                    .effect_host
-                    .record_tool_intent_outcome(
-                        self,
-                        &identity,
-                        submitted_intent.clone(),
-                        outcome.clone(),
-                    )
+                    .retain_outcome(&identity, submitted_intent.clone(), outcome.clone())
                     .await
                 {
                     outcome = lash_core::ToolIntentExecutionOutcome::Refused {
@@ -646,73 +534,7 @@ impl ToolIntentIngress {
     > {
         let kind = intent.kind();
         let submitted_intent = intent.clone();
-        let preparation = self
-            .core
-            .env
-            .core
-            .control
-            .effect_host
-            .prepare_tool_intent(self, identity, intent.clone())
-            .await
-            .map_err(|error| {
-                RealizationFailure::Command(
-                    kind,
-                    crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)),
-                )
-            })?;
-        let intent = match &preparation {
-            lash_core::ToolIntentPreparation::ControllerOwned => {
-                self.bind_controller_owned_cancel_target(identity, &intent)
-                    .await?;
-                intent
-            }
-            lash_core::ToolIntentPreparation::RuntimeOwned {
-                admission,
-                _guard: _,
-            } => {
-                let submitted =
-                    lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone())
-                        .map_err(|error| {
-                            RealizationFailure::Command(
-                                kind,
-                                crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                                    format!("failed to hash tool-intent submission: {error}"),
-                                )),
-                            )
-                        })?;
-                match admission {
-                    lash_core::ToolIntentSubmissionAdmission::Admitted => intent,
-                    lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
-                        if existing.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V3 {
-                            return Err(RealizationFailure::Refused(
-                                ToolIntentIngressRefusal::UnsupportedProtocolVersion {
-                                    recorded: existing.protocol_version,
-                                },
-                            ));
-                        }
-                        if existing.kind != kind {
-                            return Err(RealizationFailure::Refused(
-                                ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
-                                    recorded_kind: existing.kind,
-                                    submitted_kind: kind,
-                                },
-                            ));
-                        }
-                        if existing.payload_hash != submitted.payload_hash {
-                            return Err(RealizationFailure::Refused(
-                                ToolIntentIngressRefusal::DuplicateIdentity { kind },
-                            ));
-                        }
-                        if existing.outcome.is_some() {
-                            return Err(RealizationFailure::Refused(
-                                ToolIntentIngressRefusal::DuplicateIdentity { kind },
-                            ));
-                        }
-                        existing.intent.clone()
-                    }
-                }
-            }
-        };
+        self.bind_cancel_target(identity, &intent).await?;
         let (result, replayed) = self
             .realize_inner(identity, intent)
             .await
@@ -752,12 +574,7 @@ impl ToolIntentIngress {
                     kind,
                     result: value.clone(),
                 };
-                self.core
-                    .env
-                    .core
-                    .control
-                    .effect_host
-                    .record_tool_intent_outcome(self, identity, submitted_intent.clone(), outcome)
+                self.retain_outcome(identity, submitted_intent.clone(), outcome)
                     .await
                     .map_err(|error| {
                         RealizationFailure::Command(
@@ -866,12 +683,7 @@ impl ToolIntentIngress {
             kind,
             result: value.clone(),
         };
-        self.core
-            .env
-            .core
-            .control
-            .effect_host
-            .record_tool_intent_outcome(self, identity, submitted_intent, outcome)
+        self.retain_outcome(identity, submitted_intent, outcome)
             .await
             .map_err(|error| {
                 RealizationFailure::Command(
@@ -891,22 +703,21 @@ impl ToolIntentIngress {
     /// unfenced and cancels it. Nothing on the first target can see that
     /// (FIG-3072).
     ///
-    /// The binding is therefore taken where the runtime-owned tier takes it:
-    /// the durable tool-intent submission ledger, which this ingress already
-    /// writes on the controller-owned tier through
-    /// [`retain_in_journal`](lash_core::ToolIntentOutcomeSink::retain_in_journal)
-    /// once an outcome exists. Claiming the row *before* realization instead
-    /// is what makes the target durable across invocations: the redelivery
-    /// arrives with an empty effect journal, reads the row the first
-    /// invocation left, and compares payload hashes.
+    /// The binding is therefore taken in the durable tool-intent submission
+    /// ledger, which [`Self::retain_outcome`] writes once an outcome exists.
+    /// Claiming the row *before* realization is what makes the target durable
+    /// across invocations: the redelivery arrives with an empty effect
+    /// journal, reads the row the first invocation left, and compares payload
+    /// hashes. The store's claim is atomic and answers the first writer, so
+    /// two concurrent submissions of one identity cannot both bind a target.
     ///
-    /// A matching payload is not refused, unlike on the runtime-owned tier: a
-    /// redelivered invocation legitimately re-presents its own submission, and
-    /// the target record coalesces it onto the recorded request. Only a
-    /// changed payload — for a cancel, only a changed target — is refused, as
-    /// [`ToolIntentIngressRefusal::DuplicateIdentity`], the same vocabulary
-    /// both other shapes and the runtime-owned tier use.
-    async fn bind_controller_owned_cancel_target(
+    /// A matching payload is not refused: a redelivered invocation
+    /// legitimately re-presents its own submission, and the target record
+    /// coalesces it onto the recorded request. Only a changed payload — for a
+    /// cancel, only a changed target — is refused, as
+    /// [`ToolIntentIngressRefusal::DuplicateIdentity`], the same vocabulary the
+    /// other shapes' store fences use.
+    async fn bind_cancel_target(
         &self,
         identity: &lash_core::ToolIntentIdentity,
         intent: &lash_core::ToolIntent,
@@ -926,14 +737,12 @@ impl ToolIntentIngress {
                     )
                 },
             )?;
-        use lash_core::ToolIntentOutcomeSink as _;
-        let _guard = self.lock_submission_gate(&identity.replay_key).await;
-        let admission = self.admit(submitted.clone()).await.map_err(|error| {
-            RealizationFailure::Command(
-                kind,
-                crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)),
-            )
-        })?;
+        let admission = self
+            .process_registry()
+            .map_err(|error| RealizationFailure::Command(kind, error))?
+            .admit_tool_intent_submission(submitted.clone())
+            .await
+            .map_err(|error| RealizationFailure::Command(kind, crate::EmbedError::Plugin(error)))?;
         let lash_core::ToolIntentSubmissionAdmission::Existing(existing) = admission else {
             return Ok(());
         };
@@ -960,6 +769,43 @@ impl ToolIntentIngress {
         Ok(())
     }
 
+    /// Retain `outcome` in the durable tool-intent submission ledger under
+    /// `identity`, claiming the row first when no cancel binding claimed it
+    /// before realization. The first recorded outcome is kept: a redelivery
+    /// that realizes again never replaces it.
+    async fn retain_outcome(
+        &self,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<(), lash_core::RuntimeError> {
+        let registry = self.process_registry().map_err(ingress_runtime_error)?;
+        let submission = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), submitted)
+            .map_err(|error| {
+                lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                    format!("failed to hash admitted tool-intent submission: {error}"),
+                )
+            })?;
+        let recorded = match registry
+            .admit_tool_intent_submission(submission)
+            .await
+            .map_err(|error| ingress_runtime_error(error.into()))?
+        {
+            lash_core::ToolIntentSubmissionAdmission::Admitted => false,
+            lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
+                existing.outcome.is_some()
+            }
+        };
+        if !recorded {
+            registry
+                .complete_tool_intent_submission(&identity.replay_key, outcome)
+                .await
+                .map_err(|error| ingress_runtime_error(error.into()))?;
+        }
+        Ok(())
+    }
+
     /// Classify one realization error.
     ///
     /// Every shape this ingress realizes is fenced by a durable key at the
@@ -967,11 +813,10 @@ impl ToolIntentIngress {
     /// event replay key for a signal or an emitted event, the cancel replay
     /// override, the occurrence idempotency key for a trigger. When one of
     /// those keys is re-presented with different content the store refuses with
-    /// [`lash_core::durable_identity_conflict`], and that refusal is the same
-    /// fact the runtime-owned tier reports from its submission ledger. Mapping
-    /// it here is what gives hosts one refusal vocabulary across both tiers
-    /// (FIG-1489) instead of a typed refusal on one and a generic command
-    /// failure on the other.
+    /// [`lash_core::durable_identity_conflict`]. Mapping it here to
+    /// [`ToolIntentIngressRefusal::DuplicateIdentity`] gives hosts one refusal
+    /// vocabulary for every shape (FIG-1489) instead of a generic command
+    /// failure.
     fn realization_failure(
         kind: lash_core::ToolIntentKind,
         error: crate::EmbedError,

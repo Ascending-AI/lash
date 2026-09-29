@@ -33,7 +33,7 @@ use super::{
     GroupExecutors, GroupSettlement, LoserPolicy, RankedGroupSettlement, Resolution,
     ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
-    SegmentProgress, ToolChildHost, ToolIntentOutcomeSink, ToolIntentPreparation,
+    SegmentProgress, ToolChildHost,
 };
 use crate::{RuntimeError, RuntimeErrorCode, SessionId};
 
@@ -409,27 +409,6 @@ impl EffectHost for LayeredEffectHost {
     /// binding from this host's resolver and scoped controllers.
     fn await_event_resolver(&self) -> &dyn AwaitEventResolver {
         self
-    }
-
-    async fn prepare_tool_intent(
-        &self,
-        sink: &dyn ToolIntentOutcomeSink,
-        identity: &crate::ToolIntentIdentity,
-        intent: crate::ToolIntent,
-    ) -> Result<ToolIntentPreparation, RuntimeError> {
-        self.inner.prepare_tool_intent(sink, identity, intent).await
-    }
-
-    async fn record_tool_intent_outcome(
-        &self,
-        sink: &dyn ToolIntentOutcomeSink,
-        identity: &crate::ToolIntentIdentity,
-        submitted: crate::ToolIntent,
-        outcome: crate::ToolIntentExecutionOutcome,
-    ) -> Result<(), RuntimeError> {
-        self.inner
-            .record_tool_intent_outcome(sink, identity, submitted, outcome)
-            .await
     }
 
     async fn retire_effect_journal(

@@ -16,7 +16,7 @@ use lash_core::{
     Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
-    ScopedEffectController, ToolIntentOutcomeSink, ToolIntentPreparation,
+    ScopedEffectController,
     facade_support::{RuntimeAwaitEventOptions, ToolChildHost},
 };
 
@@ -409,25 +409,6 @@ impl EffectHost for RestateEffectHost {
             .ok()?;
         installed.enable_handler_group_pinning();
         Some(Arc::clone(installed))
-    }
-
-    async fn prepare_tool_intent(
-        &self,
-        _sink: &dyn ToolIntentOutcomeSink,
-        _identity: &lash_core::ToolIntentIdentity,
-        _intent: lash_core::ToolIntent,
-    ) -> Result<ToolIntentPreparation, RuntimeError> {
-        Ok(ToolIntentPreparation::ControllerOwned)
-    }
-
-    async fn record_tool_intent_outcome(
-        &self,
-        sink: &dyn ToolIntentOutcomeSink,
-        identity: &lash_core::ToolIntentIdentity,
-        submitted: lash_core::ToolIntent,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> Result<(), RuntimeError> {
-        sink.retain_in_journal(identity, submitted, outcome).await
     }
 
     /// Restate owns invocation-journal retention natively, so no Lash-side

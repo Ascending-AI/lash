@@ -69,8 +69,6 @@ pub struct LashCore {
     /// This core's seat in the recovery leader election (ADR 0109 §1.6),
     /// shared with its session driver.
     pub(crate) recovery: Arc<recovery::RecoverySlot>,
-    pub(crate) tool_intent_submission_gates:
-        Arc<crate::tool_intent_ingress::RuntimeSubmissionGates>,
     /// The context a group tool child of this core's sessions runs under when
     /// its opener is not live where it runs (FIG-3712). The backend's
     /// tool-child host holds it weakly; the core and every session it opens
@@ -1151,7 +1149,6 @@ impl LashCoreBuilder {
             _session_driver: installed_driver,
             recovery: session_driver.recovery(),
             residents,
-            tool_intent_submission_gates: Default::default(),
             tool_child_context_source,
         })
     }

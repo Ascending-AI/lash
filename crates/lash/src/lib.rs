@@ -1019,8 +1019,7 @@ pub mod runtime {
         RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
         RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
         RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkEngine, SleepSpec,
-        ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelWait,
-        TurnContext, TurnControlBinding, WorkCadenceError, WorkCadencePolicy,
+        TurnCancelWait, TurnContext, TurnControlBinding, WorkCadenceError, WorkCadencePolicy,
         effect_groups_unsupported,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used

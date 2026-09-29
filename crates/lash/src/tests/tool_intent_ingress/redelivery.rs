@@ -18,8 +18,8 @@ use super::*;
 // Each test below therefore submits from a *second* core over the same durable
 // registry (or trigger store), and asserts two facts: the identity realizes
 // once, and the same identity carrying different content is refused as
-// `DuplicateIdentity` — the same typed refusal the runtime-owned tier returns
-// from its submission ledger, so hosts see one vocabulary on both tiers.
+// `DuplicateIdentity` — the same typed refusal a cancel's submission-ledger
+// binding returns, so hosts see one vocabulary for every shape.
 // ---------------------------------------------------------------------------
 
 fn ingress_of(core: &LashCore) -> Result<crate::tools::ToolIntentIngress> {
@@ -356,8 +356,7 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
     // see the first binding. The pre-realization submission ledger is what
     // binds the identity to the target it first named (FIG-3072), so the
     // changed target is refused with the same `DuplicateIdentity` vocabulary
-    // the other four shapes and the runtime-owned tier use, and the second
-    // process is never cancelled.
+    // the other four shapes use, and the second process is never cancelled.
     let other = registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(

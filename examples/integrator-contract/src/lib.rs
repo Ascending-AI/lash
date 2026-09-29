@@ -379,23 +379,6 @@ impl EffectHost for Integrator {
     ) -> Result<TurnControlBinding<'a>, RuntimeError> {
         unreachable!("external signature witness")
     }
-    async fn prepare_tool_intent(
-        &self,
-        sink: &dyn ToolIntentOutcomeSink,
-        identity: &ToolIntentIdentity,
-        intent: ToolIntent,
-    ) -> Result<ToolIntentPreparation, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn record_tool_intent_outcome(
-        &self,
-        sink: &dyn ToolIntentOutcomeSink,
-        identity: &ToolIntentIdentity,
-        _submitted: ToolIntent,
-        outcome: ToolIntentExecutionOutcome,
-    ) -> Result<(), RuntimeError> {
-        unreachable!("external signature witness")
-    }
     async fn retire_effect_journal(
         &self,
         _retirement: EffectJournalRetirement,
