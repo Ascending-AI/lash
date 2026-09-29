@@ -109,6 +109,17 @@ impl TypescriptDialect {
     pub(crate) fn artifact_store(&self) -> lashlang::LashlangArtifacts {
         self.services.artifact_store.clone()
     }
+    /// The lashlang host surface a cell of this dialect links against.
+    pub(crate) fn surface(&self) -> LashlangSurface {
+        self.surface.clone()
+    }
+    /// The dialect's front end as a plain parser: the rendered refusal on
+    /// failure. `processes.create` lowers its source through it.
+    pub(crate) fn parse_source(source: &str) -> Result<lashlang::Program, String> {
+        TypeScript
+            .parse(source)
+            .map_err(|diagnostic| diagnostic.rendered)
+    }
     pub(crate) fn new(surface: LashlangSurface, services: RlmDialectServices) -> Self {
         Self { surface, services }
     }

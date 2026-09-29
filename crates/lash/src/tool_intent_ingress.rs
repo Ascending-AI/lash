@@ -1231,7 +1231,7 @@ impl ToolIntentIngress {
                 lash_core::process_registry::RevisionReferrerDefinitionRegistry::new(
                     self.core.env.core.process_definitions(),
                     self.core.env.core.process_engines.clone(),
-                    creator,
+                    creator.clone(),
                 ),
             );
         let name = intent
@@ -1246,6 +1246,35 @@ impl ToolIntentIngress {
             })?;
         lash_core::process_registry::validate_process_definition_name(name)
             .map_err(crate::EmbedError::Plugin)?;
+        if let Some(module) = intent.module.as_ref() {
+            // A declared module lands under this ingress's journal referrer,
+            // which holds it until the revision below acquires it (ADR 0113
+            // §3.6, §3.7).
+            let claim = lash_core::ReferrerClaim::guarded(
+                lash_core::ArtifactReferrer::Execution(creator.clone()),
+                lash_core::ArtifactCleanupPlan::AwaitJournal,
+            )
+            .map_err(|error| {
+                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
+            })?;
+            let ports = self
+                .core
+                .env
+                .core
+                .process_engines
+                .artifact_ports()
+                .ok_or_else(|| {
+                    crate::EmbedError::Plugin(lash_core::PluginError::Session(format!(
+                        "process definition `{name}` carries a module but the runtime's engine \
+                         registry has no artifact stores to publish it"
+                    )))
+                })?;
+            ports
+                .modules()
+                .publish_module_artifact(&claim, &module.module_ref, module.bytes.as_bytes())
+                .await
+                .map_err(|error| crate::EmbedError::Plugin(error.into()))?;
+        }
         let existing = lash_core::process_registry::resolve_named_definition(
             registry.as_ref(),
             &intent.session_id,

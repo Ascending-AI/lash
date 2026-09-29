@@ -556,3 +556,171 @@ async fn named_definition_survives_uncarried_frame_switch() {
         "the registered definition's module survives its frame"
     );
 }
+
+/// The source every `processes.create` case compiles: one process, whose
+/// answer a later turn reads back to prove it ran the created module.
+const CREATED_SOURCE: &str = "const answer = async () => 40 + 2;";
+
+fn create_definition_cell(binding: &str) -> String {
+    format!(
+        "const {binding} = await processes.create({{ source: {CREATED_SOURCE:?}, dialect: 'typescript' }}); finish('created');"
+    )
+}
+
+/// FIG-3116: a definition `processes.create` returns is an RLM value like
+/// any other (ADR 0113 §6). The call's realization publishes its module under
+/// the realizing execution, the cell's global holds it in the frame, and a
+/// later turn in the same frame starts it by value after a cold reopen.
+#[tokio::test]
+async fn created_definition_survives_cold_reopen_and_starts_by_value() {
+    let double =
+        lash_restate_test::backend(0x3116_0001, lash_restate_test::ServerConfig::default())
+            .await
+            .expect("Restate double");
+    let responses = Arc::new(Mutex::new(VecDeque::from(vec![
+        response(&create_definition_cell("made")),
+        response("const run = await processes.start({ definition: made }); finish(await run);"),
+    ])));
+    let first_core = rlm_core_with_queue(&double, Arc::clone(&responses));
+    let first_session = first_core
+        .session("processes-create-cold-reopen")
+        .open()
+        .await
+        .expect("open first session");
+    let first = first_session
+        .send(TurnInput::text("create definition"))
+        .output()
+        .await
+        .expect("first turn");
+    assert!(first.is_success(), "processes.create turn: {first:?}");
+    let created = wait_edges(&double, |edges| {
+        edges.len() == 1 && edges[0].kind == "frame_environment"
+    })
+    .await;
+    let module_ref = created[0].artifact_ref.clone();
+    let frame_id = created[0].id.clone();
+    drop(first_session);
+    drop(first_core);
+
+    let second_core = rlm_core_with_queue(&double, Arc::clone(&responses));
+    serve_processes(&double, &second_core);
+    let second_session = second_core
+        .session("processes-create-cold-reopen")
+        .open()
+        .await
+        .expect("cold reopen");
+    let second = second_session
+        .send(TurnInput::text("start created definition"))
+        .output()
+        .await
+        .expect("second turn");
+    assert!(
+        second.is_success(),
+        "a created definition survives cold reopen: {second:?}"
+    );
+    assert!(responses.lock_recover().is_empty());
+    assert_eq!(last_cell_finish(&second), Some(serde_json::json!(42)));
+    let after_start = wait_edges(&double, |edges| {
+        edges.iter().any(|edge| {
+            edge.kind == "frame_environment"
+                && edge.id == frame_id
+                && edge.artifact_ref == module_ref
+        })
+    })
+    .await;
+    assert_eq!(
+        frame_artifacts(&after_start),
+        BTreeSet::from([module_ref.as_str()]),
+        "the frame holds exactly the created module"
+    );
+}
+
+/// FIG-3116: deleting the session that created a definition ends the frame
+/// that held it, and the relay reclaims the module (ADR 0113 §3.1): nothing
+/// else keeps a created definition alive.
+#[tokio::test]
+async fn created_definition_is_reclaimed_after_session_deletion() {
+    let double =
+        lash_restate_test::backend(0x3116_0002, lash_restate_test::ServerConfig::default())
+            .await
+            .expect("Restate double");
+    let core = rlm_core(&double, vec![response(&create_definition_cell("made"))]);
+    let session_id = "processes-create-deletion";
+    let session = core.session(session_id).open().await.expect("session");
+    let created = session
+        .send(TurnInput::text("create definition"))
+        .output()
+        .await
+        .expect("create turn");
+    assert!(created.is_success(), "processes.create turn: {created:?}");
+    let held = wait_edges(&double, |edges| {
+        edges.len() == 1 && edges[0].kind == "frame_environment"
+    })
+    .await;
+    let module_ref = held[0].artifact_ref.clone();
+    let modules = double.lash_backend().module_artifacts();
+    assert!(
+        modules
+            .get_module_artifact(&module_ref)
+            .await
+            .expect("read created module")
+            .is_some(),
+        "the frame holds the created module"
+    );
+    drop(session);
+
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::session_delete(
+            lash_core::SessionId::from(session_id),
+        ))
+        .await
+        .expect("open the delete handler");
+    let deletion = {
+        struct HandlerExecution<'a> {
+            administration: lash_core::SessionAdministration,
+            scoped: lash_core::ScopedEffectController<'a>,
+        }
+        impl lash_core::SessionDeleteExecution for HandlerExecution<'_> {
+            fn administration(&self) -> &lash_core::SessionAdministration {
+                &self.administration
+            }
+            fn scoped<'run>(
+                &'run self,
+                _: lash_core::AdmittedScope,
+            ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError>
+            {
+                Ok(self.scoped.clone())
+            }
+        }
+        let execution = HandlerExecution {
+            administration: core.session_administration().await,
+            scoped: handler.scoped(),
+        };
+        let context = lash_core::SessionDeleteContext::from_execution(&execution, session_id)
+            .expect("delete context");
+        LashCore::delete_session(context).await
+    };
+    handler.close().await.expect("close the delete handler");
+    assert!(
+        matches!(deletion, Ok(lash::SessionDeletion::Deleted(_))),
+        "the delete runs in the call: {deletion:?}"
+    );
+
+    let after = wait_edges(&double, |edges| {
+        !edges.iter().any(|edge| edge.artifact_ref == module_ref)
+    })
+    .await;
+    assert!(after.is_empty(), "no edge survives the session: {after:?}");
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while modules
+            .get_module_artifact(&module_ref)
+            .await
+            .expect("read module after deletion")
+            .is_some()
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the created module is reclaimed after its session is deleted");
+}

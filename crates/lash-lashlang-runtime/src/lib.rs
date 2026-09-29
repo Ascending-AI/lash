@@ -26,7 +26,12 @@ pub use replay_run::{
 };
 mod language_trace_host;
 pub use language_trace_host::{LanguageTraceHost, trace_failure};
+mod process_create_tool;
 mod trace_waits;
+pub use process_create_tool::{
+    ProcessCreateTools, ProcessSourceParser, process_create_tool_definition,
+    process_create_tool_provider,
+};
 mod trigger_commands;
 mod trigger_tools;
 pub use trace_waits::TraceWaitBookkeeping;

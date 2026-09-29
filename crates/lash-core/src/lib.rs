@@ -837,7 +837,7 @@ pub(crate) use store::{
     SessionHeadPayload, ensure_supported_schema_version, load_persisted_session_state,
 };
 pub use tool_intent::{
-    CancelProcessIntent, EmitProcessEventIntent, EmitTriggerIntent,
+    CancelProcessIntent, DeclaredModuleArtifact, EmitProcessEventIntent, EmitTriggerIntent,
     RegisterProcessDefinitionIntent, RegisterTriggerIntent, SignalProcessIntent,
     StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
     TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, ToolAttemptOutcome, ToolIntent,

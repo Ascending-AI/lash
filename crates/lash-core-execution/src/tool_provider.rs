@@ -171,6 +171,9 @@ pub struct AttemptContext<'run> {
     completion_support: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     tool_execution_route: ToolExecutionRoute,
+    /// The catalog the attempt was dispatched against. `None` outside a
+    /// runtime dispatch.
+    tool_catalog: Option<Arc<crate::ToolCatalog>>,
 }
 
 impl<'run> AttemptContext<'run> {
@@ -242,6 +245,10 @@ impl<'run> AttemptContext<'run> {
             completion_support,
             phase_probe,
             tool_execution_route: context.tool_execution_route.clone(),
+            tool_catalog: context
+                .runtime_dispatch
+                .as_ref()
+                .map(|dispatch| Arc::clone(&dispatch.tool_catalog)),
         }
     }
 
@@ -268,6 +275,12 @@ impl<'run> AttemptContext<'run> {
     /// Integrator class 3 controller-free process reads for this attempt.
     pub fn processes(&self) -> AttemptProcessReads {
         self.processes.clone()
+    }
+    /// Integrator class 3 read of the tool catalog this attempt was dispatched
+    /// against: the tools its caller can call. A body that compiles a program
+    /// links it against them (FIG-3116). `None` outside a runtime dispatch.
+    pub fn tool_catalog(&self) -> Option<&Arc<crate::ToolCatalog>> {
+        self.tool_catalog.as_ref()
     }
     /// Integrator class 3 cooperative cancellation token supplied by the attempt host.
     pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
