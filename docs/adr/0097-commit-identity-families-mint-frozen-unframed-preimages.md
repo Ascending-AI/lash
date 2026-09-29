@@ -1,8 +1,9 @@
 # Commit-identity families mint frozen unframed preimages
 
-Amended 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) changes the
-`lash.intent` typed payload at its reject-and-recreate cutover. The two
-completed-claim lists become one and the config carries `config_revision`.
+Amended 2026-09-23 (FIG-3540), **not adopted**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) retains
+two admission tables composed under one sequence. The proposed merger of the
+two completed-claim lists does not apply. `config_revision` remains in the
+persisted config that `lash.intent` hashes.
 Implemented ahead of it (FIG-3542): `enqueued_queue_batches` is removed, and the
 pending follow-on (a session-head field, present only when the commit leaves
 one) takes its place. The serializer, the unframed grammar and the domain label are

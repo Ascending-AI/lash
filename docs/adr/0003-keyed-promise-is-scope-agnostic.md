@@ -57,3 +57,10 @@ replay, wait keys, cancellation, tracing, and environment binding.
 - The process-event/signal resolver ports onto EffectHost `AwaitEvent` as the
   only path; the process-scoped `AwaitEvent` resolver is deleted, not kept
   alongside.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 5: The native in-process park described above is historical.
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+places durable execution on Restate. The separate wait-key authority and seed
+ruling belongs to FIG-4123.

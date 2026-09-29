@@ -160,3 +160,11 @@ reference-benchmarking round corrected the Restate characterization and the
 marker argument, and recorded the fork clause. Amended 2026-09-23 (FIG-3586):
 the producer fingerprint is the seal-carried attribution above, and
 `drain_status` counts parked and in-flight turns.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 16: [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) and
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) supersede
+the fork prescription, epoch-4 reset, child routing and retirement count above.
+The host duty to keep deployed code immutable while its journals may replay
+remains.

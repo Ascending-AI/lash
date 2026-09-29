@@ -208,7 +208,9 @@ impl ArtifactReferrer {
     pub fn canonical_id(&self) -> String;
     /// Typed decode of a stored pair. Refuses an unknown kind, an empty id,
     /// an id that does not decode, and an id whose re-encoding differs from
-    /// the stored text. Stores map a refusal to `StoredDataCorrupt`.
+    /// the stored text. Stores map an unknown kind to
+    /// `Incompatible(UnknownVocabulary)` under ADR 0115; malformed ids
+    /// remain `StoredDataCorrupt`.
     pub fn decode(kind: &str, id: &str) -> Result<Self, ArtifactReferrerError>;
 }
 
@@ -1547,3 +1549,11 @@ committed. This is the reasoning session deletion uses.
 **Locks.** On PostgreSQL the commit takes the referrer locks of every ended
 frame and of the successor, sorted by key, then the carried artifacts' locks,
 as §2.3 orders them. SQLite serializes on its one writer.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 21: An unknown referrer kind is a typed `Incompatible(UnknownVocabulary)`
+refusal under
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md). Other
+malformed IDs remain corruption; the blanket `StoredDataCorrupt` sentence in §1
+has this exception.

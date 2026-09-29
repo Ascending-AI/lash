@@ -42,3 +42,9 @@ contract is satisfied.
 lifetime discriminator. That does not alter content-addressed component
 identity: component refs still identify bytes, while the host-provided,
 single-use session id identifies the checkpoint owner and binding.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 8: [ADR 0056](0056-checkpoint-components-generalize-to-a-keyed-set.md)
+supersedes the fixed three-component cardinality. Component identity and
+hydration remain backend contracts.

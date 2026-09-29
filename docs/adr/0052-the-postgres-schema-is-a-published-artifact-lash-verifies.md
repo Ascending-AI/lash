@@ -302,3 +302,10 @@ verify against; shape-checking there would be lash verifying itself.
 - The await-event signing secret is a data precondition rather than a shape, so
   `SchemaCheck::WarnOnly` does not relax it: without the row there is no secret
   to authenticate promises with, and the store cannot construct itself.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 17: [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) makes
+the old provisioning enum historical.
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs the
+Expanded constraint check. FIG-4123 owns the signing-secret seed text.

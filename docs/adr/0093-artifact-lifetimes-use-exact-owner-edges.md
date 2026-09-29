@@ -72,3 +72,9 @@ path is provided.
 - A backend must make publication, transfer, release/reclaim, and execution-owner
   retirement atomic and retry-safe. Missing exact edges on release are an
   idempotent success; missing both sides of a transfer is an error.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 20: [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md)
+supersedes the owner-kind and verb inventory here. Exact owner edges remain the
+rule.
