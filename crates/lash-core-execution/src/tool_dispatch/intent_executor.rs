@@ -315,6 +315,23 @@ fn refuse_all(
         .collect()
 }
 
+/// The identity a call's attempt derives for its declared start (index 0),
+/// minted under `minting_emission`, the attempt's own invocation: the one a
+/// declared start is bound to before it launches (ADR 0116 §3.1).
+pub(crate) fn declaring_identity(
+    context: &ToolDispatchContext<'_>,
+    tool_call_id: &lash_sansio::ToolCallId,
+    minting_emission: &crate::RuntimeInvocation,
+) -> crate::ToolIntentIdentity {
+    crate::derive_tool_intent_identity_under(
+        &context.session_id,
+        context.effect_controller.scoped().scope_id(),
+        tool_call_id,
+        0,
+        Some(minting_emission),
+    )
+}
+
 fn derive_identity(
     context: &ToolDispatchContext<'_>,
     execution_scope_id: &str,

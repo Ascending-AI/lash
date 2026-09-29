@@ -6,8 +6,7 @@ use crate::{PreparedToolCall, ToolContext, ToolFailureClass, ToolManifest, ToolO
 #[cfg(any(test, feature = "testing"))]
 use super::context::ToolDispatchOutcome;
 use super::context::{
-    PendingToolDispatchOutcome, ToolCallIds, ToolCallLaunch, ToolDispatchContext, launch_done,
-    runtime_failure,
+    ToolCallIds, ToolCallLaunch, ToolDispatchContext, attempt_done, runtime_failure,
 };
 use super::directives::apply_after_tool_directives;
 use super::retry::{execute_leaf_tool_attempt, normalized_outcome};
@@ -197,11 +196,11 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     attempt: u32,
     max_attempts: u32,
     tool_context: ToolContext<'run>,
-) -> ToolCallLaunch {
+) -> crate::ToolAttemptLaunch {
     let args = prepared.args.clone();
     let ids = ToolCallIds::of(&prepared);
     let Some(authority) = AttemptAuthority::resolve(context, &prepared.tool_id, grant) else {
-        return launch_done(
+        return attempt_done(
             normalized_outcome(
                 context,
                 &ids,
@@ -218,7 +217,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     };
     let tool_name = authority.manifest().name.clone();
     if let Err(failure) = authority.verify_prepared_identity(&prepared) {
-        return launch_done(normalized_outcome(context, &ids, tool_name, args, failure).await);
+        return attempt_done(normalized_outcome(context, &ids, tool_name, args, failure).await);
     }
 
     let tool_context = authority.apply_execution_binding(
@@ -247,7 +246,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                 match completion_context.take_completion_key() {
                     Some(key) => key,
                     None => {
-                        return launch_done(normalized_outcome(
+                        return attempt_done(normalized_outcome(
                         context,
                         &ids,
                         tool_name,
@@ -262,22 +261,15 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
             let pending = match announce_pending_park(&completion_context, pending).await {
                 Ok(pending) => pending,
                 Err(failure) => {
-                    return launch_done(
+                    return attempt_done(
                         normalized_outcome(context, &ids, tool_name, args, failure).await,
                     );
                 }
             };
-            return ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
-                call_id: ids.call_id,
-                provider_call_id: ids.provider_call_id,
-                tool_name,
-                args,
-                key,
+            return crate::ToolAttemptLaunch::Pending {
+                key: Box::new(key),
                 pending,
-                attempts: Vec::new(),
-                captures: Vec::new(),
-                triggers: Vec::new(),
-            }));
+            };
         }
     };
 
@@ -293,7 +285,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
 
     let mut outcome = normalized_outcome(context, &ids, tool_name, args, result).await;
     outcome.intents = intents;
-    launch_done(outcome)
+    attempt_done(outcome)
 }
 
 /// Executes one atomic tool attempt and reports everything it produced.
@@ -325,20 +317,15 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
     )
     .await;
     let launch = match launch {
-        ToolCallLaunch::Done(outcome) => {
-            let mut record = outcome.record;
+        crate::ToolAttemptLaunch::Done {
+            mut record,
+            intents,
+        } => {
             record.call_id = ids.call_id;
             record.provider_call_id = ids.provider_call_id;
-            crate::ToolAttemptLaunch::Done {
-                record: Box::new(record),
-                intents: outcome.intents,
-            }
+            crate::ToolAttemptLaunch::Done { record, intents }
         }
-        ToolCallLaunch::Pending(pending) => crate::ToolAttemptLaunch::Pending {
-            key: Box::new(pending.key),
-            pending: pending.pending,
-        },
-        ToolCallLaunch::ControllerAborted(error) => return Err(error),
+        pending @ crate::ToolAttemptLaunch::Pending { .. } => pending,
     };
     let triggers = context.trigger_outcomes.drain();
     let capture = crate::runtime::ToolAttemptCapture {

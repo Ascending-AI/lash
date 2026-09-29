@@ -126,6 +126,11 @@ impl PendingResolver {
 ///
 /// Only the attempt whose `Pending` the runtime records ever launches: a
 /// retried or superseded attempt's declaration is discarded with it.
+///
+/// It decodes, because it is durable, and so a decoded declaration is bound
+/// to the admitted call again before it launches: a start naming another
+/// session, or an identity that is not its declaring attempt's for index 0,
+/// is refused with nothing registered.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct DeclaredStart {
     // Both boxed: a pending completion rides every recorded attempt launch.
@@ -178,6 +183,38 @@ impl DeclaredStart {
     /// The declaring attempt's intent identity for the start.
     pub fn identity(&self) -> &crate::ToolIntentIdentity {
         &self.identity
+    }
+
+    /// Refuses a declaration that does not belong to the call that admitted
+    /// it (ADR 0116 §3.1).
+    ///
+    /// A declared start is durable, so it decodes without its constructor,
+    /// and a decoded one names whatever session and identity its bytes say.
+    /// `declaring` is the identity the runtime derived for index 0 from the
+    /// admitted call itself: its session, execution scope, `ToolCallId` and
+    /// the attempt emission that minted the declaration. The start must name
+    /// that session, and its identity must be exactly that one, or the
+    /// launch would register a child under another call's key, another
+    /// session's, or one its own fields do not derive.
+    pub(crate) fn bound_to(
+        &self,
+        declaring: &crate::ToolIntentIdentity,
+    ) -> Result<(), crate::ToolIntentRefusalReason> {
+        if self.start.session_id != declaring.session_id {
+            return Err(crate::ToolIntentRefusalReason::SessionMismatch {
+                expected: declaring.session_id.to_string(),
+                recorded: self.start.session_id.to_string(),
+            });
+        }
+        if *self.identity != *declaring {
+            return Err(
+                crate::ToolIntentRefusalReason::DeclaredStartIdentityMismatch {
+                    expected: Box::new(declaring.clone()),
+                    recorded: self.identity.clone(),
+                },
+            );
+        }
+        Ok(())
     }
 
     /// The start request realization presents: the declaration under its
@@ -812,6 +849,91 @@ mod tests {
         };
         assert_eq!(start.identity().intent_index, 0);
         assert!(resolver.awaits_process_terminal());
+    }
+
+    /// A decoded declaration launches only for the call that declared it:
+    /// its start names the admitted session and its identity is exactly the
+    /// declaring attempt's for index 0, every field of it (ADR 0116 §3.1).
+    #[test]
+    fn a_decoded_declared_start_is_bound_to_its_declaring_call() {
+        let crate::PendingResolver::DeclaredStart(declared) = declared_start() else {
+            unreachable!()
+        };
+        let declaring = declared.identity().clone();
+        assert_eq!(declared.bound_to(&declaring), Ok(()));
+
+        let with_identity = |identity: crate::ToolIntentIdentity| -> DeclaredStart {
+            let mut bytes = serde_json::to_value(&declared).expect("encode");
+            bytes["identity"] = serde_json::to_value(identity).expect("encode identity");
+            serde_json::from_value(bytes).expect("a forged declaration decodes")
+        };
+        let derive = |session: &str, scope: &str, call: &str, index: u32| {
+            crate::derive_tool_intent_identity_under(
+                &crate::SessionId::from(session),
+                scope,
+                &crate::ToolCallId::fixture(call),
+                index,
+                None,
+            )
+        };
+        let emission = crate::RuntimeInvocation::effect(
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn(crate::SessionId::from("parent"), "turn-1"),
+                "tool:call-1:attempt:2",
+            )
+            .expect("a turn address"),
+            crate::RuntimeAttribution::for_session("parent"),
+            "tool:call-1:attempt:2",
+        );
+        let mut forged_key = declaring.clone();
+        forged_key.replay_key = derive("parent", "turn-1", "call-2", 0).replay_key;
+        let mismatches = [
+            (
+                "another execution scope",
+                derive("parent", "turn-2", "call-1", 0),
+            ),
+            ("another call", derive("parent", "turn-1", "call-2", 0)),
+            ("a nonzero index", derive("parent", "turn-1", "call-1", 1)),
+            (
+                "another minting emission",
+                crate::derive_tool_intent_identity_under(
+                    &crate::SessionId::from("parent"),
+                    "turn-1",
+                    &crate::ToolCallId::fixture("call-1"),
+                    0,
+                    Some(&emission),
+                ),
+            ),
+            (
+                "another session's identity",
+                derive("other", "turn-1", "call-1", 0),
+            ),
+            ("a replay key its fields do not derive", forged_key),
+        ];
+        for (what, identity) in mismatches {
+            assert_eq!(
+                with_identity(identity.clone()).bound_to(&declaring),
+                Err(
+                    crate::ToolIntentRefusalReason::DeclaredStartIdentityMismatch {
+                        expected: Box::new(declaring.clone()),
+                        recorded: Box::new(identity),
+                    }
+                ),
+                "{what} is refused"
+            );
+        }
+
+        let mut bytes = serde_json::to_value(&declared).expect("encode");
+        bytes["start"]["session_id"] = serde_json::json!("other");
+        let foreign: DeclaredStart = serde_json::from_value(bytes).expect("decode");
+        assert_eq!(
+            foreign.bound_to(&declaring),
+            Err(crate::ToolIntentRefusalReason::SessionMismatch {
+                expected: "parent".to_string(),
+                recorded: "other".to_string(),
+            }),
+            "a start naming another session is refused"
+        );
     }
 
     #[test]

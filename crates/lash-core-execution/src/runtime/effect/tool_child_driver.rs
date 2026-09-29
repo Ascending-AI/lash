@@ -1477,15 +1477,12 @@ async fn await_journaled_tool_completion(
             crate::tool_dispatch::ArmedResolver::default(),
         ));
     };
-    let armed =
-        match crate::tool_dispatch::arm_pending_resolver(&site, &pending.pending, &pending.key)
-            .await?
-        {
-            crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
-            crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
-                return Ok(unarmed_child_outcome(pending, *failure, armed));
-            }
-        };
+    let armed = match crate::tool_dispatch::arm_pending_resolver(&site, &pending).await? {
+        crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
+        crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
+            return Ok(unarmed_child_outcome(pending, *failure, armed));
+        }
+    };
     let resolver = pending.pending.resolved_by.clone();
     // The journaled await's replay key is the settled call's observation key:
     // unique per (parent, call id) and re-derived identically on a redrive

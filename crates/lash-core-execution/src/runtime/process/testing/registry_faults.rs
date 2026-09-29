@@ -55,6 +55,7 @@ struct ReadFaultPlan {
     registration_hold: Option<RegistrationHold>,
     registration_pause: Option<NonTerminalPagePause>,
     consumer_release_pause: Option<NonTerminalPagePause>,
+    consumer_released_pause: Option<NonTerminalPagePause>,
     start_key_read_pause: Option<NonTerminalPagePause>,
 }
 
@@ -251,6 +252,16 @@ impl ProcessRegistryFaults {
     pub fn pause_next_consumer_release(&self) -> NonTerminalPagePause {
         let pause = NonTerminalPagePause::new();
         self.faults.lock_recover().consumer_release_pause = Some(pause.clone());
+        pause
+    }
+
+    /// Hold the answer of the next consumer-hold release, once the wrapped
+    /// registry committed it, until the returned handle resumes it: the
+    /// instant a parked call's child is prunable and the call has not yet
+    /// settled (ADR 0116 §3.6).
+    pub fn pause_after_next_consumer_release(&self) -> NonTerminalPagePause {
+        let pause = NonTerminalPagePause::new();
+        self.faults.lock_recover().consumer_released_pause = Some(pause.clone());
         pause
     }
 
@@ -869,7 +880,12 @@ impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults
         if let Some(pause) = pause {
             pause.hold().await;
         }
-        self.inner.release_consumer_hold(process_id, key).await
+        let released = self.inner.release_consumer_hold(process_id, key).await;
+        let pause = self.faults.lock_recover().consumer_released_pause.take();
+        if let Some(pause) = pause {
+            pause.hold().await;
+        }
+        released
     }
 
     async fn abandon_consumer_hold(

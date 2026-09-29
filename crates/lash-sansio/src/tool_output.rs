@@ -168,6 +168,16 @@ pub enum ToolIntentRefusalReason {
     /// ADR 0099 §4 forbids new semantic admission under a cancelled
     /// invocation, so the intent is refused before any of its commands run.
     MintingGroupChildCancelled,
+    /// A declared start whose identity is not the one its call's declaring
+    /// attempt derives for index 0 (ADR 0116 §3.1): another call's, another
+    /// execution scope's or minting emission's, a nonzero index, or a replay
+    /// key its own fields do not derive. `expected` is the identity the
+    /// runtime derived from the admitted call; `recorded` is the one the
+    /// declaration carried. Nothing was registered.
+    DeclaredStartIdentityMismatch {
+        expected: Box<ToolIntentIdentity>,
+        recorded: Box<ToolIntentIdentity>,
+    },
 }
 
 impl ToolIntentRefusalReason {
@@ -183,6 +193,7 @@ impl ToolIntentRefusalReason {
             Self::ForeignTriggerActor { .. } => "foreign_trigger_actor",
             Self::CommandFailed { .. } => "command_failed",
             Self::MintingGroupChildCancelled => "minting_group_child_cancelled",
+            Self::DeclaredStartIdentityMismatch { .. } => "declared_start_identity_mismatch",
         }
     }
 }

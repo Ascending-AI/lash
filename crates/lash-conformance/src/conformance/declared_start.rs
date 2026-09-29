@@ -96,6 +96,10 @@ enum Producer {
     PromiseAll,
     /// One call to the law's own declaring tool.
     Probe(Probe),
+    /// Two calls to the law's declaring tool, one step after the other: the
+    /// first builds a declaration and keeps its serialized bytes without
+    /// launching it; the second submits those bytes as its own.
+    ReusedIdentity,
 }
 
 /// The tool name of [`DeclaringProbe`].
@@ -114,7 +118,34 @@ struct Probe {
     /// The first attempt fails retryably, declaring a start as a completed
     /// intent; the retry declares the start and parks on it.
     fail_first: bool,
+    /// What the call does to the declaration's serialized bytes.
+    #[serde(default)]
+    forge: Forge,
 }
+
+/// How a [`DeclaringProbe`] call tampers with its declaration: a declared
+/// start is durable, so it decodes without its constructor, and these are
+/// the bytes a decoded one may carry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Forge {
+    /// The declaration exactly as [`crate::DeclaredStart::new`] built it.
+    #[default]
+    None,
+    /// The start and its identity name another session, the identity
+    /// re-derived under it so its replay key is its own.
+    ForeignSession,
+    /// The identity is the declaring attempt's own for index 1.
+    NonzeroIndex,
+    /// Build the declaration, keep its bytes, launch nothing, and answer.
+    Keep,
+    /// Submit the bytes a [`Forge::Keep`] call kept: another call's
+    /// identity.
+    Reuse,
+}
+
+/// The session a [`Forge::ForeignSession`] declaration names.
+const FOREIGN_SESSION: &str = "declared-start-law-foreign-session";
 
 fn probe_tool() -> crate::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
@@ -131,9 +162,58 @@ fn probe_tool() -> crate::ToolDefinition {
 /// A tool whose `Pending` declares one externally owned child: nothing runs
 /// it, so the law controls its lifetime, the wait's cancel hint and the
 /// attempt that declares it.
-struct DeclaringProbe;
+#[derive(Default)]
+struct DeclaringProbe {
+    /// The serialized declaration a [`Forge::Keep`] call kept.
+    kept: std::sync::Mutex<Option<serde_json::Value>>,
+}
 
 impl DeclaringProbe {
+    /// The declaration `start` as `forge` leaves it: built by its
+    /// constructor, then re-read from its serialized bytes. `Ok(None)` is a
+    /// call that kept its bytes and declares nothing.
+    fn declare(
+        &self,
+        context: &crate::AttemptContext<'_>,
+        start: crate::StartProcessIntent,
+        forge: Forge,
+    ) -> Result<Option<crate::DeclaredStart>, String> {
+        let declared = crate::DeclaredStart::new(context, start).map_err(|e| e.to_string())?;
+        let mut bytes = serde_json::to_value(&declared).map_err(|e| e.to_string())?;
+        match forge {
+            Forge::None => return Ok(Some(declared)),
+            Forge::ForeignSession => {
+                let mut identity = context.intent_identity(0);
+                identity.session_id = SessionId::from(FOREIGN_SESSION);
+                let identity = crate::rederive_tool_intent_identity(&identity);
+                bytes["start"]["session_id"] = serde_json::json!(FOREIGN_SESSION);
+                bytes["identity"] = serde_json::to_value(identity).map_err(|e| e.to_string())?;
+            }
+            Forge::NonzeroIndex => {
+                bytes["identity"] =
+                    serde_json::to_value(context.intent_identity(1)).map_err(|e| e.to_string())?;
+            }
+            Forge::Keep => {
+                *self
+                    .kept
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(bytes);
+                return Ok(None);
+            }
+            Forge::Reuse => {
+                bytes = self
+                    .kept
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone()
+                    .ok_or("no call kept a declaration to reuse")?;
+            }
+        }
+        serde_json::from_value(bytes)
+            .map(Some)
+            .map_err(|error| format!("a serialized declaration decodes: {error}"))
+    }
+
     fn start(
         context: &crate::AttemptContext<'_>,
         probe: Probe,
@@ -199,8 +279,11 @@ impl crate::ToolProvider for DeclaringProbe {
                 crate::ToolIntents::v3(vec![crate::ToolIntent::StartProcess(Box::new(start))]),
             );
         }
-        let start = match crate::DeclaredStart::new(call.context, start) {
-            Ok(start) => start,
+        let start = match self.declare(call.context, start, probe.forge) {
+            Ok(Some(start)) => start,
+            Ok(None) => {
+                return crate::ToolOutcome::ok(serde_json::json!("kept")).into();
+            }
             Err(error) => return crate::ToolOutcome::err_fmt(error).into(),
         };
         let mut pending = crate::PendingCompletion::new();
@@ -302,15 +385,14 @@ impl Script {
                     ..crate::LlmResponse::default()
                 }
             }
-            Producer::Probe(probe) => crate::LlmResponse {
-                parts: vec![crate::LlmOutputPart::ToolCall {
-                    call_id: "declared-start-probe-0".to_string(),
-                    tool_name: PROBE_TOOL.to_string(),
-                    input_json: serde_json::json!(probe).to_string(),
-                    replay: None,
-                }],
-                ..crate::LlmResponse::default()
-            },
+            Producer::Probe(probe) => probe_step(0, probe),
+            Producer::ReusedIdentity => probe_step(
+                0,
+                Probe {
+                    forge: Forge::Keep,
+                    ..Probe::default()
+                },
+            ),
             Producer::PromiseAll => {
                 let spawns = (0..self.children)
                     .map(|index| {
@@ -346,6 +428,16 @@ impl Script {
                 self.parent_calls.fetch_add(1, Ordering::SeqCst);
                 return self.parent_first_step();
             }
+            if self.producer == Producer::ReusedIdentity && results.len() == 1 {
+                self.parent_calls.fetch_add(1, Ordering::SeqCst);
+                return probe_step(
+                    1,
+                    Probe {
+                        forge: Forge::Reuse,
+                        ..Probe::default()
+                    },
+                );
+            }
             self.followup_gate.passed().await;
             self.parent_calls.fetch_add(1, Ordering::SeqCst);
             *self
@@ -376,12 +468,27 @@ impl Script {
         }
         self.child_gate.passed().await;
         match self.producer {
-            Producer::Native { .. } | Producer::Probe(_) => text_response(child_reply(index)),
+            Producer::Native { .. } | Producer::Probe(_) | Producer::ReusedIdentity => {
+                text_response(child_reply(index))
+            }
             Producer::PromiseAll => text_response(format!(
                 "<typescript>\nfinish({:?});\n</typescript>",
                 child_reply(index)
             )),
         }
+    }
+}
+
+/// One parent step calling the law's declaring tool once, as call `index`.
+fn probe_step(index: usize, probe: Probe) -> crate::LlmResponse {
+    crate::LlmResponse {
+        parts: vec![crate::LlmOutputPart::ToolCall {
+            call_id: format!("declared-start-probe-{index}"),
+            tool_name: PROBE_TOOL.to_string(),
+            input_json: serde_json::json!(probe).to_string(),
+            replay: None,
+        }],
+        ..crate::LlmResponse::default()
     }
 }
 
@@ -523,7 +630,7 @@ impl World {
         host.providers.provider_resolver =
             Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
         let protocol = match shape.producer {
-            Producer::Native { .. } | Producer::Probe(_) => {
+            Producer::Native { .. } | Producer::Probe(_) | Producer::ReusedIdentity => {
                 crate::testing::test_standard_protocol_factories()
             }
             Producer::PromiseAll => tier.rlm.clone(),
@@ -535,9 +642,10 @@ impl World {
                 "conformance-declared-start-echo",
                 Arc::new(crate::testing::FixtureTools),
             )),
-            Producer::Probe(_) => {
-                Some(("conformance-declared-start-probe", Arc::new(DeclaringProbe)))
-            }
+            Producer::Probe(_) | Producer::ReusedIdentity => Some((
+                "conformance-declared-start-probe",
+                Arc::new(DeclaringProbe::default()),
+            )),
             Producer::PromiseAll => None,
         };
         let tools = tools.map(|(id, provider)| {
@@ -814,6 +922,21 @@ impl World {
             }
             tokio::time::sleep(REREAD).await;
         }
+    }
+
+    /// Every process the registry holds that names this world's session
+    /// anywhere: its provenance, its input or its lifetime.
+    async fn registered(&self) -> Vec<crate::ProcessRecord> {
+        self.registry
+            .list_processes(&crate::ProcessListFilter {
+                status: crate::ProcessStatusFilter::Any,
+                ..Default::default()
+            })
+            .await
+            .expect("list the registry's processes")
+            .into_iter()
+            .filter(|record| format!("{record:?}").contains(self.session_id.as_str()))
+            .collect()
     }
 
     fn intent_outcomes(&self) -> Vec<(String, crate::ToolIntentExecutionOutcome)> {
@@ -1516,7 +1639,9 @@ pub async fn batch_of_spawns_overlaps(tier: DeclaredStartTier) {
                     );
                 }
             }
-            Producer::Probe(_) => unreachable!("the overlap law spawns agents"),
+            Producer::Probe(_) | Producer::ReusedIdentity => {
+                unreachable!("the overlap law spawns agents")
+            }
         }
     }
     batch_of_spawns_cancelled_mid_flight(&tier).await;
@@ -1734,5 +1859,239 @@ pub async fn declared_start_scope_close_cancels_until_children(tier: DeclaredSta
         !matches!(spawns[0].output.outcome, crate::ToolCallOutcome::Success(_)),
         "the call resolved on the cancelled child: {:?}",
         spawns[0].output
+    );
+}
+
+/// A declared start is durable, so it decodes without its constructor. A
+/// decoded declaration that names another session, carries its declaring
+/// attempt's identity for a nonzero index, or carries another call's
+/// identity is refused before it launches: the call settles as the typed
+/// refusal, and nothing is registered and no child runs.
+///
+/// The other call is a real one: the parent's first step calls the probe to
+/// build a declaration and keep its bytes, and its second step calls the
+/// probe again to submit them.
+pub async fn declared_start_rejects_foreign_or_reused_serialized_identity_before_launch(
+    tier: DeclaredStartTier,
+) {
+    for (name, shape, call) in [
+        (
+            "foreign-session",
+            Shape::probe(Probe {
+                forge: Forge::ForeignSession,
+                ..Probe::default()
+            }),
+            "declared-start-probe-0",
+        ),
+        (
+            "nonzero-index",
+            Shape::probe(Probe {
+                forge: Forge::NonzeroIndex,
+                ..Probe::default()
+            }),
+            "declared-start-probe-0",
+        ),
+        (
+            "reused-identity",
+            Shape {
+                children: 0,
+                producer: Producer::ReusedIdentity,
+                timeout: None,
+                barrier: None,
+            },
+            "declared-start-probe-1",
+        ),
+    ] {
+        let world = World::new(&tier, &format!("unbound-{name}"), shape).await;
+        let turn = finished(&world, world.run().await);
+        let record = turn
+            .tool_calls
+            .iter()
+            .find(|record| record.provider_call_id.as_deref() == Some(call))
+            .unwrap_or_else(|| panic!("{name}: the forged call has a record: {turn:#?}"));
+        let crate::ToolCallOutcome::Failure(failure) = &record.output.outcome else {
+            panic!("{name}: the refusal settles the call as a failure: {record:#?}");
+        };
+        let receipts = world
+            .intent_outcomes()
+            .into_iter()
+            .filter(|(reported, _)| reported == call)
+            .map(|(_, outcome)| outcome)
+            .collect::<Vec<_>>();
+        assert!(
+            !receipts.is_empty(),
+            "{name}: the call reports its launch receipt"
+        );
+        for receipt in &receipts {
+            let crate::ToolIntentExecutionOutcome::Refused {
+                identity: Some(identity),
+                intent_index: 0,
+                kind: crate::ToolIntentKind::StartProcess,
+                refusal,
+            } = receipt
+            else {
+                panic!("{name}: the receipt is the start's refusal at index 0: {receipt:#?}");
+            };
+            assert_eq!(
+                (
+                    &identity.session_id,
+                    &identity.tool_call_id,
+                    identity.intent_index
+                ),
+                (&world.session_id, &record.call_id, 0),
+                "{name}: the refusal names the admitted call's own identity"
+            );
+            assert_eq!(
+                failure.code,
+                refusal.code(),
+                "{name}: the call fails under the refusal's typed code"
+            );
+            match (name, refusal) {
+                (
+                    "foreign-session",
+                    crate::ToolIntentRefusalReason::SessionMismatch { expected, recorded },
+                ) => {
+                    assert_eq!(
+                        (expected.as_str(), recorded.as_str()),
+                        (world.session_id.as_str(), FOREIGN_SESSION),
+                        "foreign-session: the refusal names both sessions"
+                    );
+                }
+                (
+                    "nonzero-index",
+                    crate::ToolIntentRefusalReason::DeclaredStartIdentityMismatch {
+                        expected,
+                        recorded,
+                    },
+                ) => {
+                    assert_eq!(
+                        expected.as_ref(),
+                        identity,
+                        "nonzero-index: expected is the call's own"
+                    );
+                    assert_eq!(
+                        (recorded.intent_index, &recorded.tool_call_id),
+                        (1, &record.call_id),
+                        "nonzero-index: the recorded identity is the call's own for index 1"
+                    );
+                }
+                (
+                    "reused-identity",
+                    crate::ToolIntentRefusalReason::DeclaredStartIdentityMismatch {
+                        expected,
+                        recorded,
+                    },
+                ) => {
+                    let keeper = turn
+                        .tool_calls
+                        .iter()
+                        .find(|record| {
+                            record.provider_call_id.as_deref() == Some("declared-start-probe-0")
+                        })
+                        .unwrap_or_else(|| {
+                            panic!("reused-identity: the keeping call has a record")
+                        });
+                    assert_eq!(
+                        expected.as_ref(),
+                        identity,
+                        "reused-identity: expected is the call's own"
+                    );
+                    assert_eq!(
+                        (&recorded.tool_call_id, recorded.intent_index),
+                        (&keeper.call_id, 0),
+                        "reused-identity: the recorded identity is the keeping call's"
+                    );
+                    assert_ne!(
+                        recorded.replay_key, expected.replay_key,
+                        "reused-identity: the two calls' identities differ"
+                    );
+                }
+                (name, refusal) => panic!("{name}: an unexpected refusal: {refusal:#?}"),
+            }
+        }
+        let registered = world.registered().await;
+        assert!(
+            registered.is_empty(),
+            "{name}: the refused declaration registered nothing: {registered:#?}"
+        );
+        assert_eq!(world.script.child_calls(), 0, "{name}: no child ran");
+    }
+}
+
+/// A parked call's child can be pruned once the call released its hold,
+/// before the call settled, and a redrive still answers the child's recorded
+/// terminal: the durable wait answered, the hold is released, a prune takes
+/// the child, and the parent is killed before the call settles. The redrive
+/// replays the start's receipt, the arming and the wait from the parent's
+/// journal, so it answers exactly the child's value and neither registers nor
+/// runs the child again.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn declared_start_prune_after_hold_release_before_settlement_replays_terminal(
+    tier: DeclaredStartTier,
+) {
+    let world = World::new(&tier, "prune-after-release", Shape::one_child()).await;
+    let crash = crate::ConformanceCrash::new();
+    let released = world.faults.pause_after_next_consumer_release();
+    let pruned = {
+        let world = world.clone();
+        let crash = crash.clone();
+        let released = released.clone();
+        tokio::spawn(async move {
+            released.wait_until_validated().await;
+            let child = world.only_child().await;
+            assert!(
+                child.is_terminal(),
+                "the call released its hold on a terminal child: {child:#?}"
+            );
+            let report = world
+                .registry
+                .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+                .await
+                .expect("prune the terminal processes");
+            // A pruned row leaves a payload-free tombstone: its read answers
+            // that the process is no longer retained.
+            let after = world.registry.get_process(&child.id).await;
+            crash.fire();
+            released.resume();
+            (child, report, after)
+        })
+    };
+    let turn = finished(&world, world.run_crashed_at(crash.clone()).await);
+    let (child, report, after) = pruned.await.expect("the prune ran");
+    assert!(crash.has_fired(), "the parent was killed after the prune");
+    assert!(
+        report.pruned_processes >= 1
+            && matches!(
+                after,
+                Ok(None) | Err(crate::PluginError::ProcessNoLongerRetained { .. })
+            ),
+        "the prune took the released child: {report:?}, {after:#?}"
+    );
+    assert_answered_the_child(&world, &turn);
+    assert_eq!(
+        world.script.child_calls(),
+        1,
+        "the redrive did not run the child again"
+    );
+    let children = world.children().await;
+    assert!(
+        children.is_empty(),
+        "the redrive registered no second child: {children:#?}"
+    );
+    let receipts = world
+        .intent_outcomes()
+        .into_iter()
+        .filter(|(call, _)| call == "declared-start-spawn-0")
+        .map(|(_, outcome)| outcome)
+        .collect::<Vec<_>>();
+    assert!(
+        !receipts.is_empty()
+            && receipts
+                .iter()
+                .all(|receipt| format!("{receipt:?}").contains(child.id.as_str())),
+        "every receipt the call reported names the one pruned child: {receipts:#?}"
     );
 }

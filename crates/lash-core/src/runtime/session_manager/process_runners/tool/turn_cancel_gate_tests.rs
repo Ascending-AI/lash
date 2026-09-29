@@ -263,6 +263,12 @@ async fn runner_side_deferred_await_inside_a_process_body_attaches_no_turn_cance
         args: serde_json::json!({}),
         key,
         pending: crate::PendingCompletion::default(),
+        declaring_identity: crate::derive_tool_intent_identity(
+            &crate::SessionId::from("session-1"),
+            "process-1",
+            &crate::ToolCallId::fixture("deferred"),
+            0,
+        ),
         attempts: Vec::new(),
         captures: Vec::new(),
         triggers: Vec::new(),

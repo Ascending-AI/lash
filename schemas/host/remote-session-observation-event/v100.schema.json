@@ -1878,6 +1878,28 @@
             "reason"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "expected": {
+              "$ref": "#/definitions/RemoteToolIntentIdentity"
+            },
+            "reason": {
+              "enum": [
+                "declared_start_identity_mismatch"
+              ],
+              "type": "string"
+            },
+            "recorded": {
+              "$ref": "#/definitions/RemoteToolIntentIdentity"
+            }
+          },
+          "required": [
+            "expected",
+            "reason",
+            "recorded"
+          ],
+          "type": "object"
         }
       ]
     },

@@ -175,18 +175,13 @@ impl RuntimeSessionServices {
                     scope: dispatch.process_scope(),
                     child_trace_hook: None,
                 };
-                let armed = match crate::tool_dispatch::arm_pending_resolver(
-                    &site,
-                    &pending.pending,
-                    &pending.key,
-                )
-                .await?
-                {
-                    crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
-                    crate::tool_dispatch::ResolverArming::Settled { failure, .. } => {
-                        break 'park crate::ToolCallOutput::failure(*failure);
-                    }
-                };
+                let armed =
+                    match crate::tool_dispatch::arm_pending_resolver(&site, &pending).await? {
+                        crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
+                        crate::tool_dispatch::ResolverArming::Settled { failure, .. } => {
+                            break 'park crate::ToolCallOutput::failure(*failure);
+                        }
+                    };
                 let completion = pending.pending.clone();
                 let completion_key = pending.key.clone();
                 let resolution = Box::pin(await_pending_process_tool(

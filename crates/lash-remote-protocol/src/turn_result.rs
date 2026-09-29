@@ -536,6 +536,10 @@ pub enum RemoteToolIntentRefusalReason {
         message: String,
     },
     MintingGroupChildCancelled,
+    DeclaredStartIdentityMismatch {
+        expected: Box<RemoteToolIntentIdentity>,
+        recorded: Box<RemoteToolIntentIdentity>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

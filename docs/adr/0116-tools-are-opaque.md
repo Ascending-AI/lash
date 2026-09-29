@@ -510,6 +510,22 @@ is `AttemptContext::intent_identity(0)`, and its start key is
 `StartKey::for_tool_intent` of that identity. A second start, a second
 intent or a malformed index cannot be written.
 
+Written is not decoded. A declared start is durable, so it decodes without its
+constructor, and decoded bytes may name another session, another call's
+identity or a nonzero index. Before the launch is journaled or registered,
+the park's one arming entry (`arm_pending_resolver`,
+`crates/lash-core-execution/src/tool_dispatch/pending_resolver.rs`) binds the
+declaration to the call that admitted it: the start must name the admitted
+session, and its identity must equal the identity the parked attempt derives
+for index 0 from the admitted session, execution scope, `ToolCallId` and its
+own minting emission (`PendingToolDispatchOutcome::declaring_identity`,
+derived by the attempt coordinator, never read off the declaration). A
+foreign start session is refused as `SessionMismatch`; any other difference is
+`DeclaredStartIdentityMismatch { expected, recorded }`. The refusal is the
+call's launch receipt for index 0 and settles the call as a failure under the
+refusal's code, with nothing registered. This is Lash's own integrity, not
+host authorization.
+
 #### 3.2 The launch rule
 
 These are the rules of the spawn recheck (`study-spawn-recheck-astra.report.md`),
@@ -517,7 +533,8 @@ made normative:
 
 1. **One same-session start.** A pending launch contains exactly one
    `StartProcess` of the declaring session, and nothing else.
-   `DeclaredStart::new` checks the session; the types forbid the rest.
+   `DeclaredStart::new` checks the session; the types forbid the rest, and
+   the launch binds a decoded declaration to its call again (§3.1).
 2. **The completion key is reserved before execution.** A provider that can
    return a declared start answers `attempt_may_defer` `true` for that tool,
    so the attempt's completion key is derived and taken before the body runs.
@@ -1023,6 +1040,8 @@ test module.
 | `declared_start_timeout_cancels_the_child` | A deadline resolves the call as a timeout error and cancels the child. |
 | `declared_start_scope_close_cancels_until_children` | Closing the starter scope cancels an unresolved child through its lifetime. |
 | `declared_start_retention_hold_blocks_prune_until_consumed` | Prune leaves a held child, and a redrive with a lost receipt finds it. After incorporation the hold is released and prune may take it. |
+| `declared_start_prune_after_hold_release_before_settlement_replays_terminal` | The durable wait answers and the hold is released, a prune takes the child, and the parent is killed before the call settles. The redrive answers exactly the child's recorded terminal, registers no second child and does not run the child again. |
+| `declared_start_rejects_foreign_or_reused_serialized_identity_before_launch` | A decoded declaration naming a foreign session, carrying its attempt's identity for index 1, or carrying another real call's identity is refused as the call's typed launch receipt, with zero registrations and zero child launches. |
 | `spawn_agent_projects_final_value` (unit) | Final value, tool value and text extraction; schema pass and fail; `submit_error`; frame-switch and stopped-child refusals; typed cancellation. |
 | `spawn_agent_record_carries_child_identity` | The tool record's intent outcome and the trace name the child process, and the model's result is the value only. |
 | `batch_of_spawns_overlaps` | At widths 2, 8 and 64, each child's first model step waits on a barrier for every sibling child to start, so the children demonstrably run at once and no drain waits serially. It mixes in ordinary and deferred siblings, then cancels mid-flight (every child cancelled once) and crash-redrives (every child reused). Width 64 uses one `batch`, width 8 uses native parallel calls, and width 2 uses RLM `Promise.all` over `agents.spawn`. |

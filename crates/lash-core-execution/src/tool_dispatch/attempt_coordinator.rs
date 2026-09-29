@@ -309,6 +309,14 @@ pub async fn coordinate_tool_invocation<'run>(
         captures.push(outcome.capture);
         match outcome.launch {
             crate::ToolAttemptLaunch::Pending { key, pending } => {
+                // The attempt that parked is the declaring attempt: its own
+                // invocation minted whatever start it declared, exactly as it
+                // mints a completed attempt's intents (ADR 0116 §3.1).
+                let declaring_identity = super::intent_executor::declaring_identity(
+                    context,
+                    &call.call_id,
+                    &invocation.clone().into_runtime_invocation(),
+                );
                 return CoordinatedToolInvocation {
                     launch: ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
                         call_id: call.call_id,
@@ -317,6 +325,7 @@ pub async fn coordinate_tool_invocation<'run>(
                         args: call.args,
                         key: *key,
                         pending,
+                        declaring_identity,
                         attempts,
                         captures,
                         triggers,

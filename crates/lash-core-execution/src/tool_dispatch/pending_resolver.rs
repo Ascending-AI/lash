@@ -31,6 +31,15 @@
 //! intent outcome for index 0. Then the terminal of the realized id is armed,
 //! from the recorded receipt, on the park and on every redrive.
 //!
+//! Every park site arms through here, so this is where a declaration is bound
+//! to the call that admitted it, before anything is journaled or registered.
+//! A declared start decodes without its constructor, so its bytes may name
+//! another session, another call's identity or a nonzero index. The start
+//! must name the admitted session, and its identity must be exactly the one
+//! the declaring attempt derives for index 0
+//! ([`PendingToolDispatchOutcome::declaring_identity`](crate::tool_dispatch::PendingToolDispatchOutcome::declaring_identity)).
+//! A mismatch is the call's typed launch refusal, with nothing registered.
+//!
 //! # The cancel obligation (ADR 0116 §3.4)
 //!
 //! A parked wait on a process terminal whose wait is cancelled or times out
@@ -120,17 +129,23 @@ pub struct ParkSite<'a, 'scope> {
 /// that recovery retries.
 pub async fn arm_pending_resolver(
     site: &ParkSite<'_, '_>,
-    pending: &crate::PendingCompletion,
-    key: &crate::AwaitEventKey,
+    parked: &crate::tool_dispatch::PendingToolDispatchOutcome,
 ) -> Result<ResolverArming, crate::RuntimeEffectControllerError> {
+    let pending = &parked.pending;
+    let key = &parked.key;
     match pending.resolved_by.as_ref() {
         None => Ok(ResolverArming::Armed(ArmedResolver::default())),
         Some(crate::PendingResolver::ProcessTerminal { process_id }) => {
             Ok(arm_terminal(site, process_id, key, ArmedResolver::default()).await)
         }
         Some(crate::PendingResolver::DeclaredStart(start)) => {
-            let cancels = pending.on_cancel == crate::CancelHint::CancelExternalWork;
-            let launch = launch_declared_start(site, start, key, cancels).await?;
+            let launch = match start.bound_to(&parked.declaring_identity) {
+                Ok(()) => {
+                    let cancels = pending.on_cancel == crate::CancelHint::CancelExternalWork;
+                    launch_declared_start(site, start, key, cancels).await?
+                }
+                Err(refusal) => unbound_declaration(&parked.declaring_identity, refusal),
+            };
             let Some(process_id) = launch.process_id.clone() else {
                 let failure = launch_refusal(&launch.outcome);
                 return Ok(ResolverArming::Settled {
@@ -221,6 +236,30 @@ async fn launch_declared_start(
     })
 }
 
+/// The launch receipt of a declaration that does not belong to its call:
+/// refused under the call's own identity for index 0, before anything was
+/// journaled or registered.
+fn unbound_declaration(
+    declaring: &crate::ToolIntentIdentity,
+    refusal: crate::ToolIntentRefusalReason,
+) -> LaunchReceipt {
+    tracing::warn!(
+        target: "lash::tool_intent",
+        tool_call_id = %declaring.tool_call_id,
+        refusal_reason = refusal.code(),
+        "a declared start that does not belong to its call was refused before launch"
+    );
+    LaunchReceipt {
+        outcome: crate::ToolIntentExecutionOutcome::Refused {
+            identity: Some(declaring.clone()),
+            intent_index: declaring.intent_index,
+            kind: crate::ToolIntentKind::StartProcess,
+            refusal,
+        },
+        process_id: None,
+    }
+}
+
 /// The scope that owns a call's consumer hold: the starter the call's
 /// declared start is admitted under. A scope with no start context owns no
 /// hold, and its calls launch unheld.
@@ -258,13 +297,30 @@ fn launch_parent(
     })
 }
 
+/// The failure a refused launch settles its call with. A start the registry
+/// or its scope refused keeps that refusal's own code; a declaration refused
+/// because it does not belong to its call is the declaring tool's fault, and
+/// fails under the refusal's typed code.
 fn launch_refusal(outcome: &crate::ToolIntentExecutionOutcome) -> crate::ToolFailure {
-    let (code, message) = match outcome {
+    let (class, code, message) = match outcome {
         crate::ToolIntentExecutionOutcome::Refused {
             refusal: crate::ToolIntentRefusalReason::CommandFailed { code, message },
             ..
-        } => (code.clone(), message.clone()),
+        } => (
+            crate::ToolFailureClass::Unavailable,
+            code.clone(),
+            message.clone(),
+        ),
+        crate::ToolIntentExecutionOutcome::Refused { refusal, .. } => (
+            crate::ToolFailureClass::Internal,
+            refusal.code().to_string(),
+            format!(
+                "the declared start did not launch: {}",
+                outcome.model_addendum()
+            ),
+        ),
         other => (
+            crate::ToolFailureClass::Unavailable,
             "declared_start_refused".to_string(),
             format!(
                 "the declared start did not launch: {}",
@@ -272,7 +328,7 @@ fn launch_refusal(outcome: &crate::ToolIntentExecutionOutcome) -> crate::ToolFai
             ),
         ),
     };
-    crate::ToolFailure::runtime(crate::ToolFailureClass::Unavailable, code, message)
+    crate::ToolFailure::runtime(class, code, message)
 }
 
 /// What became of a cancel obligation.

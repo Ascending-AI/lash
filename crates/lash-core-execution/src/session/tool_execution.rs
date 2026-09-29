@@ -1085,15 +1085,12 @@ impl RuntimeExecutionContext<'_> {
             scope: self.process_scope(parent_invocation.clone()),
             child_trace_hook,
         };
-        let armed =
-            match crate::tool_dispatch::arm_pending_resolver(&site, &pending.pending, &pending.key)
-                .await?
-            {
-                crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
-                crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
-                    return Ok(pending.settle_unarmed(*failure, &armed));
-                }
-            };
+        let armed = match crate::tool_dispatch::arm_pending_resolver(&site, &pending).await? {
+            crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
+            crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
+                return Ok(pending.settle_unarmed(*failure, &armed));
+            }
+        };
         let cancellation = cancellation.unwrap_or_default();
         let resolver = pending.pending.resolved_by.clone();
         let completion_key = pending.key.clone();

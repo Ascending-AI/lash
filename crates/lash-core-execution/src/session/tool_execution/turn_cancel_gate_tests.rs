@@ -142,6 +142,12 @@ fn pending_tool() -> crate::tool_dispatch::PendingToolDispatchOutcome {
             signature: "signature".to_string(),
         },
         pending: crate::PendingCompletion::default(),
+        declaring_identity: crate::derive_tool_intent_identity(
+            &SessionId::from("test-session"),
+            "turn-1",
+            &crate::ToolCallId::fixture("call"),
+            0,
+        ),
         attempts: Vec::new(),
         captures: Vec::new(),
         triggers: Vec::new(),

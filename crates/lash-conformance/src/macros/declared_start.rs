@@ -23,6 +23,10 @@ macro_rules! declared_start_tests {
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_retention_hold_blocks_prune_until_consumed);
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
+            declared_start_prune_after_hold_release_before_settlement_replays_terminal);
+        $crate::declared_start_tests!(@law [$($attr)*] $fixture;
+            declared_start_rejects_foreign_or_reused_serialized_identity_before_launch);
+        $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_early_terminal_resolves_before_wait);
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_rearm_is_idempotent);

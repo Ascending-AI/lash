@@ -525,6 +525,12 @@ pub struct PendingToolDispatchOutcome {
     pub args: serde_json::Value,
     pub key: crate::AwaitEventKey,
     pub pending: crate::PendingCompletion,
+    /// The intent identity the attempt that parked derives for index 0,
+    /// from the admitted call: its session, execution scope, `ToolCallId`
+    /// and the attempt's own emission. A declared start launches only under
+    /// exactly this identity (ADR 0116 §3.1); it is never read off the
+    /// declaration.
+    pub declaring_identity: crate::ToolIntentIdentity,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attempts: Vec<lash_trace::TraceRetryAttempt>,
     /// Captures collected from the attempts that ran before this call parked,
@@ -600,8 +606,13 @@ pub(super) fn outcome(
     }
 }
 
-pub(super) fn launch_done(outcome: ToolDispatchOutcome) -> ToolCallLaunch {
-    ToolCallLaunch::Done(Box::new(outcome))
+/// A completed attempt's launch: the record it settled and the intents it
+/// declared.
+pub(super) fn attempt_done(outcome: ToolDispatchOutcome) -> crate::ToolAttemptLaunch {
+    crate::ToolAttemptLaunch::Done {
+        record: Box::new(outcome.record),
+        intents: outcome.intents,
+    }
 }
 
 pub(super) fn runtime_failure(
