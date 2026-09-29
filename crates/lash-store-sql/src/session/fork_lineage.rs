@@ -17,5 +17,9 @@ crate::statements! {
              VALUES (?1, ?2, ?3, ?4)";
 
         delete_by_session = "DELETE FROM fork_lineage WHERE session_id = ?1";
+
+        /// Ordered pairs used for the history cursor's lineage stamp.
+        select_for_stamp = "SELECT ancestor_session_id, fork_generation
+             FROM fork_lineage WHERE session_id = ?1 ORDER BY ancestor_session_id";
     }
 }

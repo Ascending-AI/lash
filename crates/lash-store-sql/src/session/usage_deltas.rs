@@ -8,15 +8,11 @@ pub const TABLE: &str = "usage_deltas";
 ///
 /// `seq` is absent: it is the table's own monotonic key, assigned by the
 /// backend, and the read below is the only thing that names it.
-pub const INSERT_COLUMNS: &str = "session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json";
+pub const INSERT_COLUMNS: &str = "session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, reconciled_call_id, reconciled_attempt_ordinal";
 
 crate::statements! {
     /// `usage_deltas` statements both backends issue verbatim.
     pub struct UsageDeltaStatements @ "usage_delta" {
-        /// Session `?1`'s ledger, in the order the rows were appended.
-        select_for_session = "SELECT source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json
-             FROM usage_deltas WHERE session_id = ?1 ORDER BY seq ASC";
-
         /// Drop every ledger row of a deleted session whose operation no
         /// longer has a receipt.
         ///

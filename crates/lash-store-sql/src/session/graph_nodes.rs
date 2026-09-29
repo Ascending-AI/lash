@@ -21,7 +21,7 @@ pub const TABLE: &str = "graph_nodes";
 /// `tombstoned` is absent: it defaults to "live", and a node is only ever
 /// tombstoned by [`GraphNodeStatements`]' backends' retire statement.
 pub const INSERT_COLUMNS: &str =
-    "session_id, node_id, parent_node_id, generation, frame_node_id, node_json";
+    "session_id, node_id, parent_node_id, generation, frame_node_id, body_bytes, node_json";
 
 crate::statements! {
     /// `graph_nodes` statements both backends issue verbatim.
@@ -31,7 +31,7 @@ crate::statements! {
         /// SQLite replays the batch through when a constraint violation has to
         /// be attributed to a row.
         insert = "INSERT INTO graph_nodes
-             (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
+             (session_id, node_id, parent_node_id, generation, frame_node_id, body_bytes, node_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
     }
 }

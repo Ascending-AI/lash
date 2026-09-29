@@ -12,15 +12,15 @@ pub const TABLE: &str = "runtime_turn_commits";
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str =
     "session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-                request_identity_hash, requested_node_count, identity_encoding_version";
+                request_identity_hash, requested_node_count, identity_encoding_version,
+                failure_evidence";
 
 /// A settled turn's identity and result, as the failure-evidence and
 /// turn-input reads fold them.
 ///
-/// `result_json` is unbounded, so this is the narrowest projection that can
-/// answer either question: both decode the receipt body and neither needs the
-/// commit hash or the identity columns.
-pub const SETTLEMENT_COLUMNS: &str = "turn_id, result_json";
+/// The page orders by the immutable commit time and turn id. Its predicate
+/// reads the indexed flag without decoding receipts outside the page.
+pub const SETTLEMENT_COLUMNS: &str = "committed_at_ms, turn_id, result_json";
 
 crate::statements! {
     /// `runtime_turn_commits` statements both backends issue verbatim.
@@ -41,33 +41,36 @@ crate::statements! {
                  FROM runtime_turn_commits
                  WHERE session_id = ?1 AND turn_id = ?2";
 
-        /// Session `?1`'s receipts that carry failure evidence, oldest first.
-        ///
-        /// The `LIKE` is a pre-filter over the receipt body, not the decision:
-        /// the caller decodes each row and keeps the ones whose evidence is
-        /// actually non-empty, so a false positive costs a decode and a false
-        /// negative is impossible.
-        select_failure_settlements = "SELECT turn_id, result_json
+        /// The first failure-evidence page, with one extra row for `next`.
+        select_failure_settlements = "SELECT committed_at_ms, turn_id, result_json
              FROM runtime_turn_commits
-             WHERE session_id = ?1
-               AND result_json LIKE '%\"failure_evidence\"%'
-             ORDER BY committed_at_ms, turn_id";
+             WHERE session_id = ?1 AND failure_evidence = ?2
+             ORDER BY committed_at_ms, turn_id LIMIT ?3";
+
+        /// Resume after the last returned receipt, in stable key order.
+        select_failure_settlements_after = "SELECT committed_at_ms, turn_id, result_json
+             FROM runtime_turn_commits
+             WHERE session_id = ?1 AND failure_evidence = ?2
+               AND (committed_at_ms, turn_id) > (?3, ?4)
+             ORDER BY committed_at_ms, turn_id LIMIT ?5";
 
         /// Every receipt session `?1` recorded.
         select_all_for_session = "SELECT turn_id, result_json FROM runtime_turn_commits WHERE session_id = ?1";
 
         insert = "INSERT INTO runtime_turn_commits (
                 session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-                request_identity_hash, requested_node_count, identity_encoding_version
+                request_identity_hash, requested_node_count, identity_encoding_version,
+                failure_evidence
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
 
         /// The three append-identity columns are `NULL` by construction: a
         /// marker is not an append request, so it has no request hash, no node
         /// count and no identity encoding.
         insert_marker = "INSERT INTO runtime_turn_commits (
                 session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-                request_identity_hash, requested_node_count, identity_encoding_version
-             ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL)";
+                request_identity_hash, requested_node_count, identity_encoding_version,
+                failure_evidence
+             ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL, ?6)";
     }
 }

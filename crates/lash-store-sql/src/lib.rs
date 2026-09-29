@@ -153,6 +153,7 @@ pub const TABLES: &[&str] = &[
     session::sessions::TABLE,
     session::turn_commits::TABLE,
     session::usage_deltas::TABLE,
+    session::usage_delta_holes::TABLE,
     session_roots::control_intents::TABLE,
     session_roots::root_inputs::TABLE,
     session_roots::roots::TABLE,
@@ -195,6 +196,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(session::node_anchors::NodeAnchorStatements::NEUTRAL);
     statements.extend_from_slice(session::turn_commits::TurnCommitStatements::NEUTRAL);
     statements.extend_from_slice(session::usage_deltas::UsageDeltaStatements::NEUTRAL);
+    statements.extend_from_slice(session::usage_delta_holes::UsageDeltaHoleStatements::NEUTRAL);
     statements.extend_from_slice(session_ingress::SessionIngressStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::roots::SessionRootStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::root_inputs::RootInputVerbStatements::NEUTRAL);
