@@ -1536,6 +1536,26 @@ fn remote_activity_preserves_model_attempt_reset_targets() {
 }
 
 #[test]
+fn checkpoint_recorded_round_trips_through_remote_activity_json() {
+    let core = lash_core::TurnActivity::independent(lash_core::TurnEvent::CheckpointRecorded {
+        protocol_iteration: 7,
+    });
+    let remote = RemoteTurnActivity::from_core(12, core).expect("checkpoint activity converts");
+    let json = serde_json::to_value(&remote).expect("serialize checkpoint activity");
+    assert_eq!(json["type"], "checkpoint_recorded");
+    assert_eq!(json["protocol_iteration"], 7);
+    let decoded: RemoteTurnActivity =
+        serde_json::from_value(json).expect("deserialize checkpoint activity");
+    assert_eq!(decoded.sequence, 12);
+    assert_eq!(
+        decoded.event,
+        RemoteTurnEvent::CheckpointRecorded {
+            protocol_iteration: 7,
+        }
+    );
+}
+
+#[test]
 fn remote_activity_exposes_typed_turn_input_application_without_display_text() {
     let application = lash_core::TurnInputApplication {
         input_id: lash_core::InputId::from("input-1"),

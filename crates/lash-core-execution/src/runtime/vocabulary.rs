@@ -261,6 +261,11 @@ pub enum TurnEvent {
     ModelRequestStarted {
         protocol_iteration: usize,
     },
+    /// The checkpoint for this protocol iteration was recorded. All earlier
+    /// deltas on this turn's live lane precede that checkpoint.
+    CheckpointRecorded {
+        protocol_iteration: usize,
+    },
     AssistantProseDelta {
         text: Arc<str>,
         /// Provider-minted identity of the assistant-text block this delta

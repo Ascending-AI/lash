@@ -273,6 +273,7 @@ impl RuntimeTurnDriver<'_> {
         checkpoint: CheckpointKind,
         event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
+        let protocol_iteration = machine.protocol_iteration();
         if matches!(checkpoint, CheckpointKind::BeforeCompletion) {
             // The opener's end precedes the turn's terminal checkpoint, so
             // the facts its losers' settlements carry are delivered and
@@ -286,6 +287,13 @@ impl RuntimeTurnDriver<'_> {
             Ok(delivery) => {
                 let committed_user_messages = delivery.committed_user_messages.clone();
                 self.handle_machine_response(machine, Response::Checkpoint { id, delivery })?;
+                self.turn_observations.observe(
+                    event_tx,
+                    crate::engine::ObservedEvent::Activity {
+                        correlation_id: None,
+                        event: TurnEvent::CheckpointRecorded { protocol_iteration },
+                    },
+                );
                 if let Some(mut admitted) = self.pending_checkpoint_turn_inputs.take() {
                     admitted.record_checkpoint_applications(
                         &self.turn_id,

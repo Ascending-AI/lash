@@ -338,6 +338,9 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
             lash_core::TurnEvent::ModelRequestStarted { protocol_iteration } => {
                 Ok(Self::ModelRequestStarted { protocol_iteration })
             }
+            lash_core::TurnEvent::CheckpointRecorded { protocol_iteration } => {
+                Ok(Self::CheckpointRecorded { protocol_iteration })
+            }
             lash_core::TurnEvent::AssistantProseDelta { text, block } => {
                 Ok(Self::AssistantProseDelta {
                     text: text.to_string(),

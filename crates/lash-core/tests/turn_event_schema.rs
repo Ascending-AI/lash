@@ -47,6 +47,7 @@ turn_event_tags! {
     TurnStarted => "turn_started",
     QueuedWorkStarted => "queued_work_started",
     ModelRequestStarted => "model_request_started",
+    CheckpointRecorded => "checkpoint_recorded",
     AssistantProseDelta => "assistant_prose_delta",
     ReasoningDelta => "reasoning_delta",
     StreamBlockStarted => "stream_block_started",
@@ -147,6 +148,13 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 protocol_iteration: 2,
             },
             json!({ "type": "model_request_started", "protocol_iteration": 2 }),
+        ),
+        (
+            "checkpoint_recorded",
+            TurnEvent::CheckpointRecorded {
+                protocol_iteration: 2,
+            },
+            json!({ "type": "checkpoint_recorded", "protocol_iteration": 2 }),
         ),
         (
             "assistant_prose_delta",

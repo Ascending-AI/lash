@@ -152,6 +152,14 @@ cancel-at-wake (FIG-2321): the wait completes, the iteration finishes, and the
 stop honours at its boundary. The undelivered-input disposition applies in
 both modes; a stop never drains queued work.
 
+Each accepted checkpoint publishes `CheckpointRecorded { protocol_iteration }`
+on the turn's live activity lane after its record is accepted. The marker
+follows every delta included in that checkpoint and precedes an `AfterStep`
+stop at the same boundary. For an `Immediate` stop, a host can find the
+uncommitted streamed tail after the last marker, or after `TurnStarted` when
+there was no checkpoint, after removing deltas retracted by
+`ModelAttemptReset`. The marker is live observation, not durable history.
+
 The gate itself stays first-writer-wins, so a stronger request cannot rewrite
 it. Its accepted request permanently owns the undelivered-input policy.
 Escalation rides a third reserved promise, `TurnCancelEscalation`, written only

@@ -170,6 +170,32 @@ fn cancelled_evidence(turn: &AssembledTurn) -> TurnCancellationEvidence {
     }
 }
 
+#[derive(Clone, Default)]
+struct OrderedStopSink(Arc<Mutex<Vec<&'static str>>>);
+
+#[async_trait::async_trait]
+impl lash_core::runtime::EventSink for OrderedStopSink {
+    async fn emit(&self, event: SessionStreamEvent) {
+        if matches!(
+            event,
+            SessionStreamEvent::TurnOutcome {
+                outcome: TurnOutcome::Stopped(_)
+            }
+        ) {
+            self.0.lock_recover().push("stopped");
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::runtime::TurnActivitySink for OrderedStopSink {
+    async fn emit(&self, activity: TurnActivity) {
+        if matches!(activity.event, TurnEvent::CheckpointRecorded { .. }) {
+            self.0.lock_recover().push("checkpoint");
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -190,8 +216,10 @@ async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
         driver,
     } = Box::pin(native_harness(&double, Arc::new(tool.clone()), transport)).await;
     let turn_id = "after-step-mid-model";
+    let observed = OrderedStopSink::default();
     let turn = lash_core::task::spawn({
         let double = double.clone();
+        let observed = observed.clone();
         async move {
             let handler = double
                 .open_handler(AdmittedScope::turn(
@@ -203,7 +231,9 @@ async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
             let assembled = runtime
                 .drive_turn(
                     TurnInput::text("stop after this step"),
-                    TurnOptions::new(CancellationToken::new(), handler.scoped()),
+                    TurnOptions::new(CancellationToken::new(), handler.scoped())
+                        .with_events(&observed)
+                        .with_turn_events(&observed),
                 )
                 .await;
             handler.close().await.expect("close the scope's handler");
@@ -237,6 +267,11 @@ async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
     assert_eq!(evidence.mode, TurnCancelMode::AfterStep);
     assert_eq!(evidence.honoured_after_step, Some(0));
     assert_eq!(evidence.origin.as_deref(), Some("test-user"));
+    assert_eq!(
+        *observed.0.lock_recover(),
+        ["checkpoint", "stopped"],
+        "the accepted checkpoint reaches the host before the after-step stop"
+    );
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
         1,
@@ -324,6 +359,210 @@ async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() {
     assert_eq!(tool.executions.load(Ordering::SeqCst), 1);
     assert!(!tool.observed_cancelled.load(Ordering::SeqCst));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn immediate_stop_tail_after_checkpoint_is_absent_from_next_turn_context() {
+    const CHECKPOINTED: &str = "committed before the tool";
+    const RETRACTED: &str = "discarded transient attempt";
+    const TAIL: &str = "uncommitted streamed tail";
+    let double = kernel_double(SEED + 20, lash_restate_test::ServerConfig::default()).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let transport = TestProvider::builder()
+        .kind("checkpoint-tail")
+        .requires_streaming(true)
+        .generation_retry_guarantee(lash_core::provider::GenerationRetryGuarantee::Idempotent)
+        .options(lash_core::facade_support::ProviderOptions {
+            reliability: lash_core::provider::ProviderReliability::default()
+                .max_attempts(2)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..lash_core::facade_support::ProviderOptions::default()
+        })
+        .complete({
+            let calls = Arc::clone(&calls);
+            let requests = Arc::clone(&requests);
+            move |request| {
+                requests.lock_recover().push(request.messages.clone());
+                let call = calls.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    match call {
+                        0 => Ok(LlmResponse {
+                            parts: vec![
+                                LlmOutputPart::Text {
+                                    text: CHECKPOINTED.to_string(),
+                                    response_meta: None,
+                                },
+                                LlmOutputPart::ToolCall {
+                                    call_id: "checkpoint-tool".to_string(),
+                                    tool_name: "echo_tool".to_string(),
+                                    input_json: serde_json::json!({"value": "done"}).to_string(),
+                                    replay: None,
+                                },
+                            ],
+                            ..LlmResponse::default()
+                        }),
+                        1 => {
+                            request
+                                .stream_events
+                                .expect("stream sender")
+                                .send(LlmStreamEvent::Delta {
+                                    block: lash_core::llm::types::StreamBlockIdentity::new(
+                                        "failed-block", 0,
+                                    ),
+                                    text: RETRACTED.to_string(),
+                                });
+                            Err(LlmTransportError::new("transient provider failure")
+                                .with_kind(lash_core::ProviderFailureKind::Stream)
+                                .with_retry_verdict(
+                                    lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
+                                ))
+                        }
+                        2 => {
+                            let stream = request.stream_events.expect("stream sender");
+                            stream.send(LlmStreamEvent::Delta {
+                                block: lash_core::llm::types::StreamBlockIdentity::new(
+                                    "tail-block", 0,
+                                ),
+                                text: TAIL.to_string(),
+                            });
+                            std::future::pending().await
+                        }
+                        3 => Ok(text_response("next turn answered")),
+                        other => panic!("unexpected model call {other}"),
+                    }
+                }
+            }
+        })
+        .build();
+    let ModeHarness {
+        mut runtime,
+        driver,
+    } = Box::pin(native_harness(&double, Arc::new(EchoTool), transport)).await;
+    let activities = RecordingTurnEvents::default();
+    let first_turn = lash_core::task::spawn({
+        let double = double.clone();
+        let activities = activities.clone();
+        async move {
+            let handler = double
+                .open_handler(AdmittedScope::turn(
+                    SessionId::from("root"),
+                    TurnId::from("checkpoint-tail-first"),
+                ))
+                .await
+                .expect("open first turn");
+            let turn = runtime
+                .drive_turn(
+                    TurnInput::text("first turn"),
+                    TurnOptions::new(CancellationToken::new(), handler.scoped())
+                        .with_turn_events(&activities),
+                )
+                .await
+                .expect("stopped turn assembles");
+            handler.close().await.expect("close first turn");
+            (runtime, turn)
+        }
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if activities.snapshot().iter().any(|activity| {
+                matches!(&activity.event, TurnEvent::AssistantProseDelta { text, .. } if &**text == TAIL)
+            }) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("host sees streamed tail");
+    let receipt = driver
+        .request_cancel(request(
+            &TurnId::from("checkpoint-tail-first"),
+            "stop-after-checkpoint",
+            TurnCancelMode::Immediate,
+        ))
+        .await
+        .expect("request immediate stop");
+    assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
+    let (mut runtime, first) = first_turn.await.expect("first turn task");
+    assert_eq!(cancelled_evidence(&first).mode, TurnCancelMode::Immediate);
+
+    let host = activities.snapshot();
+    let checkpoint = host
+        .iter()
+        .rposition(|activity| matches!(activity.event, TurnEvent::CheckpointRecorded { .. }))
+        .expect("first iteration records a checkpoint");
+    assert!(host[..checkpoint].iter().any(|activity| {
+        matches!(&activity.event, TurnEvent::AssistantProseDelta { text, .. } if &**text == CHECKPOINTED)
+    }));
+    let retracted = host[checkpoint + 1..]
+        .iter()
+        .find(|activity| {
+            matches!(&activity.event, TurnEvent::AssistantProseDelta { text, .. } if &**text == RETRACTED)
+        })
+        .expect("failed attempt delta reached the host");
+    let reset = host[checkpoint + 1..]
+        .iter()
+        .find_map(|activity| match &activity.event {
+            TurnEvent::ModelAttemptReset {
+                assistant_prose_correlation_ids,
+                ..
+            } => Some(assistant_prose_correlation_ids),
+            _ => None,
+        })
+        .expect("retry retracts the failed attempt");
+    assert!(reset.contains(&retracted.correlation_id));
+    let tail: String = host[checkpoint + 1..]
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::AssistantProseDelta { text, .. }
+                if !reset.contains(&activity.correlation_id) =>
+            {
+                Some(text.as_ref())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tail, TAIL);
+
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("checkpoint-tail-next"),
+        ))
+        .await
+        .expect("open next turn");
+    let next = runtime
+        .drive_turn(
+            TurnInput::text("next turn"),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        )
+        .await
+        .expect("next turn assembles");
+    handler.close().await.expect("close next turn");
+    assert!(matches!(next.outcome, TurnOutcome::Finished(_)));
+    let requests = requests.lock_recover();
+    let next_request = requests.get(3).expect("next turn reaches the model");
+    let contains = |text: &str| {
+        next_request.iter().any(|message| {
+            message.blocks.iter().any(|block| {
+                matches!(block, lash_core::llm::types::LlmContentBlock::Text { text: value, .. } if value.contains(text))
+            })
+        })
+    };
+    assert!(
+        contains(CHECKPOINTED),
+        "checkpointed prose is in the next prompt"
+    );
+    assert!(
+        !contains(TAIL),
+        "the streamed tail is absent from the next prompt"
+    );
+    assert!(
+        !contains(RETRACTED),
+        "the retracted attempt is absent from the next prompt"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
