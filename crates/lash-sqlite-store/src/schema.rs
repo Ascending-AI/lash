@@ -202,6 +202,7 @@ CREATE TABLE IF NOT EXISTS graph_nodes (
     parent_node_id TEXT,
     generation     INTEGER NOT NULL CONSTRAINT ck_graph_nodes_generation CHECK (generation >= 0),
     frame_node_id  TEXT NOT NULL,
+    body_bytes     INTEGER NOT NULL CONSTRAINT ck_graph_nodes_body_bytes CHECK (body_bytes >= 0),
     node_json      TEXT NOT NULL,
     tombstoned     INTEGER NOT NULL DEFAULT 0,
     UNIQUE (session_id, generation)
@@ -231,13 +232,25 @@ CREATE TABLE IF NOT EXISTS usage_deltas (
     cache_read_input_tokens  INTEGER NOT NULL,
     cache_write_input_tokens INTEGER NOT NULL,
     reasoning_output_tokens     INTEGER NOT NULL,
-    -- The complete typed disposition, hole identities included: a reopened
-    -- runtime rebuilds the attempts it still owes usage for from this column.
-    usage_disposition_json   TEXT NOT NULL,
+    reconciled_call_id TEXT,
+    reconciled_attempt_ordinal INTEGER,
+    CONSTRAINT ck_usage_deltas_reconciled_pair CHECK ((reconciled_call_id IS NULL) = (reconciled_attempt_ordinal IS NULL)),
     UNIQUE (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
 );
 CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
     ON usage_deltas(session_id, seq);
+
+CREATE TABLE IF NOT EXISTS usage_delta_holes (
+    session_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    call_id TEXT NOT NULL,
+    attempt_ordinal INTEGER NOT NULL,
+    generation_id TEXT,
+    PRIMARY KEY (session_id, seq, call_id, attempt_ordinal),
+    FOREIGN KEY (seq) REFERENCES usage_deltas(seq) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_usage_delta_holes_attempt
+    ON usage_delta_holes(session_id, call_id, attempt_ordinal);
 
 CREATE TABLE IF NOT EXISTS session_meta (
     session_id                       TEXT PRIMARY KEY,
@@ -313,9 +326,13 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     request_identity_hash       TEXT,
     requested_node_count        INTEGER,
     identity_encoding_version   INTEGER,
+    failure_evidence            INTEGER NOT NULL,
     PRIMARY KEY (session_id, turn_id),
     CONSTRAINT ck_runtime_turn_commits_identity CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL) AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL))
 );
+CREATE INDEX IF NOT EXISTS idx_runtime_turn_commits_failure_evidence
+    ON runtime_turn_commits(session_id, committed_at_ms, turn_id)
+    WHERE failure_evidence;
 
 CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     session_id TEXT NOT NULL,

@@ -616,6 +616,16 @@ impl SessionCommitStore for Store {
                             .prepare(session_sql().usage_sqlite.insert.sql())
                             .map_err(sqlite_error)?;
                         for entry in &commit.usage_deltas {
+                            let (reconciled_call_id, reconciled_attempt_ordinal) =
+                                match &entry.entry.usage_disposition {
+                                    lash_core_execution::LedgerUsageDisposition::Reconciled {
+                                        call_id,
+                                        attempt_ordinal,
+                                    } => (Some(call_id.as_str()), Some(i64::from(*attempt_ordinal))),
+                                    lash_core_execution::LedgerUsageDisposition::Reported
+                                    | lash_core_execution::LedgerUsageDisposition::Unreported { .. } =>
+                                        (None, None),
+                                };
                             let entry_ordinal = i64::try_from(entry.identity.entry_ordinal)
                                 .map_err(|_| {
                                     StoreError::Backend(
@@ -623,7 +633,7 @@ impl SessionCommitStore for Store {
                                             .to_string(),
                                     )
                                 })?;
-                            stmt.execute(params![
+                            let inserted = stmt.execute(params![
                                 commit.session_id.as_str(),
                                 entry.identity.operation_storage_key,
                                 entry_ordinal,
@@ -636,11 +646,27 @@ impl SessionCommitStore for Store {
                                 entry.entry.usage.cache_read_input_tokens,
                                 entry.entry.usage.cache_write_input_tokens,
                                 entry.entry.usage.reasoning_output_tokens,
-                                crate::blobs::encode_usage_disposition(
-                                    &entry.entry.usage_disposition,
-                                )?,
+                                reconciled_call_id,
+                                reconciled_attempt_ordinal,
                             ])
                             .map_err(sqlite_error)?;
+                            if inserted != 0 {
+                                let seq = tx.last_insert_rowid();
+                                for hole in entry.entry.usage_disposition.unreported_attempt_descriptors() {
+                                    crate::conn::cached_execute(
+                                        tx,
+                                        session_sql().usage_holes.insert.sql(),
+                                        params![
+                                            commit.session_id.as_str(),
+                                            seq,
+                                            hole.call_id,
+                                            i64::from(hole.attempt_ordinal),
+                                            hole.generation_id,
+                                        ],
+                                    )
+                                    .map_err(sqlite_error)?;
+                                }
+                            }
                         }
                     }
 
@@ -761,6 +787,7 @@ impl SessionCommitStore for Store {
                                 identity.0,
                                 identity.1,
                                 identity.2,
+                                !result.failure_evidence.is_empty(),
                             ],
                         )
                         .map_err(sqlite_error)?;
@@ -778,6 +805,7 @@ impl SessionCommitStore for Store {
                                         receipt.turn_commit_hash,
                                         result_json,
                                         now as i64,
+                                        !result.failure_evidence.is_empty(),
                                     ],
                                 )
                                 .map_err(sqlite_error)?;

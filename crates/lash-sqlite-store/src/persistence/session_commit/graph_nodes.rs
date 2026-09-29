@@ -79,6 +79,7 @@ pub(super) fn insert_graph_nodes_conn(
                 node.parent_node_id.as_deref(),
                 generation,
                 facts.frame_node_id.as_str(),
+                node_json.len(),
                 node_json,
             ]));
         }
@@ -132,6 +133,9 @@ fn insert_graph_nodes_one_at_a_time(
                     "node generation does not fit SQLite INTEGER".to_string()
                 ))?,
                 facts.frame_node_id.as_str(),
+                i64::try_from(node_json.len()).map_err(|_| StoreError::Backend(
+                    "node body length does not fit SQLite INTEGER".to_string()
+                ))?,
                 node_json
             ],
         )
