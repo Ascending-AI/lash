@@ -13,7 +13,7 @@ use anyhow::{Context, Result, anyhow, bail, ensure};
 use serde::de::DeserializeOwned;
 
 use crate::identity::BuildLabel;
-use crate::node::{ServeReady, StoreSpec, TurnReport};
+use crate::node::{ProbeReport, ServeReady, StoreSpec, TurnReport};
 
 /// The N build's `lash-upgrade-node`.
 pub const NODE_N_ENV: &str = "LASH_UPGRADE_NODE_N";
@@ -90,6 +90,52 @@ impl NodeBinary {
 
     pub fn label(&self) -> BuildLabel {
         self.label
+    }
+
+    /// Open the store in this build's own process without registering a
+    /// deployment. A requested session is read through the backend view.
+    fn probe_report(&self, case: &Case, session: Option<&str>) -> Result<ProbeReport> {
+        let mut command = Command::new(&self.path);
+        command.arg("probe").args(case.store_args());
+        if let Some(session) = session {
+            command.args(["--session", session]);
+        }
+        let output = command
+            .output()
+            .with_context(|| format!("run {} probe", self.label()))?;
+        let report: ProbeReport = report(&self.path, "probe", output)?;
+        ensure!(
+            report.build == self.label,
+            "{} probed as {}",
+            self.label,
+            report.build
+        );
+        Ok(report)
+    }
+
+    /// Open this build's store in its own process and require admission.
+    pub fn probe(&self, case: &Case, session: Option<&str>) -> Result<ProbeReport> {
+        let report = self.probe_report(case, session)?;
+        ensure!(
+            report.refusal.is_none(),
+            "{} refused {}: {:?}",
+            self.label,
+            case.name,
+            report.refusal
+        );
+        Ok(report)
+    }
+
+    /// Open this build's store in its own process and return a typed refusal.
+    pub fn probe_refusal(&self, case: &Case) -> Result<lash_core::compat::CompatRefusal> {
+        let report = self.probe_report(case, None)?;
+        report.refusal.ok_or_else(|| {
+            anyhow!(
+                "{} admitted {} when a compatibility refusal was required",
+                self.label,
+                case.name
+            )
+        })
     }
 
     /// Serve a deployment of this build over `case`'s store, registered at

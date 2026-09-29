@@ -1033,7 +1033,11 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// and trigger registration (FIG-4057, changed in place under the version
 /// freeze): a catalog whose kind CHECK predates them rejects both kinds, so
 /// recreate it.
-pub(crate) const SCHEMA_VERSION: i32 = 99;
+const BASE_SCHEMA_VERSION: i32 = 99;
+#[cfg(not(feature = "synthetic-next"))]
+pub(crate) const SCHEMA_VERSION: i32 = BASE_SCHEMA_VERSION;
+#[cfg(feature = "synthetic-next")]
+pub(crate) const SCHEMA_VERSION: i32 = BASE_SCHEMA_VERSION + 1;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS lash_compat (
@@ -1482,7 +1486,11 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 /// set together or not at all, and indexed by owner. A held row is never
 /// pruned. A registry written before the change lacks the columns; recreate
 /// it.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 44;
+const BASE_PROCESS_SCHEMA_VERSION: i32 = 44;
+#[cfg(not(feature = "synthetic-next"))]
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = BASE_PROCESS_SCHEMA_VERSION;
+#[cfg(feature = "synthetic-next")]
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = BASE_PROCESS_SCHEMA_VERSION + 1;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS lash_compat (
@@ -1590,7 +1598,11 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // key registered is bound before the delivery is reported. Existing trigger
 // stores hold precomputed process names, so they are rejected rather than
 // migrated.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 12;
+const BASE_TRIGGER_SCHEMA_VERSION: i32 = 12;
+#[cfg(not(feature = "synthetic-next"))]
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = BASE_TRIGGER_SCHEMA_VERSION;
+#[cfg(feature = "synthetic-next")]
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = BASE_TRIGGER_SCHEMA_VERSION + 1;
 
 pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<()> {
     // WAL + busy_timeout are already applied in `SqliteConnection::open`. The
@@ -1670,7 +1682,19 @@ fn apply_versioned_schema_tx_with_writable(
             apply_schema(tx)?;
             crate::compat::provision(tx, database)?;
         }
-        lash_core_execution::compat::CompatAdmission::Native => {}
+        lash_core_execution::compat::CompatAdmission::Native => {
+            #[cfg(feature = "synthetic-next")]
+            {
+                let written_version = lash_core_execution::compat::descriptor(database.component())
+                    .expect("SQLite component has a descriptor")
+                    .writes
+                    .max();
+                tx.execute(
+                    "UPDATE lash_compat SET version = ?1 WHERE singleton = 1 AND version < ?1",
+                    [i64::from(written_version)],
+                )?;
+            }
+        }
         lash_core_execution::compat::CompatAdmission::Expanded { .. } => {
             crate::compat::verify_tolerant(tx, database)?;
         }

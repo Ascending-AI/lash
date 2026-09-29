@@ -27,6 +27,7 @@ lash-sansio = { workspace = true, features = ["schema-validation"] }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 lash-core = { workspace = true }
+lash-core-store = { workspace = true }
 lash-core-worker = { workspace = true }
 lash-lashlang-runtime = { workspace = true, optional = true }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
@@ -73,6 +74,14 @@ sqlite = ["dep:lash-sqlite-store"]
 postgres = ["dep:lash-postgres-store"]
 s3 = ["dep:lash-s3-store"]
 restate = ["dep:lash-restate"]
+# Phase A's test-only next release. Optional backends move only when a host
+# enables them; the default facade still selects the 1.0 constants.
+synthetic-next = [
+    "lash-core-store/synthetic-next",
+    "lash-postgres-store?/synthetic-next",
+    "lash-sqlite-store?/synthetic-next",
+    "lash-restate?/synthetic-next",
+]
 openai = ["dep:lash-provider-openai"]
 anthropic = ["dep:lash-provider-anthropic"]
 google = ["dep:lash-provider-google"]

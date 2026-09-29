@@ -16,7 +16,11 @@ autotests = false
 workspace = true
 
 [features]
-synthetic-next = ["lash-restate/synthetic-next"]
+synthetic-next = [
+    "lash/synthetic-next",
+    "lash-core-store/synthetic-next",
+    "lash-postgres-store/synthetic-next",
+]
 
 [dependencies]
 lash = { workspace = true, features = ["rlm", "restate"] }

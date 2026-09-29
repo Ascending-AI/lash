@@ -367,14 +367,14 @@ e2e-rolling:
   fi
   read -r -a bazel_flags <<< "${BAZEL_SHARED_CACHE_FLAGS:---config=shared}"
   bazel "${bazel_startup[@]}" build "${bazel_flags[@]}" --remote_download_outputs=all \
-    //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_126f2aa8 \
-    //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_4165473b \
+    //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_10a0ebcb \
+    //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_11ec8a4e \
     //crates/lashctl:lashctl \
-    //crates/lashctl:lashctl__fv_0935a4fe
-  cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_126f2aa8 "$artifacts/bin/n+1/lash-upgrade-node"
-  cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_4165473b "$artifacts/bin/n/lash-upgrade-node"
+    //crates/lashctl:lashctl__fv_3f424e37
+  cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_10a0ebcb "$artifacts/bin/n+1/lash-upgrade-node"
+  cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_11ec8a4e "$artifacts/bin/n/lash-upgrade-node"
   cp bazel-bin/crates/lashctl/lashctl "$artifacts/bin/n/lashctl"
-  cp bazel-bin/crates/lashctl/lashctl__fv_0935a4fe "$artifacts/bin/n+1/lashctl"
+  cp bazel-bin/crates/lashctl/lashctl__fv_3f424e37 "$artifacts/bin/n+1/lashctl"
   cargo test --locked -p lash-upgrade-harness --test rolling --no-run
 
   export LASH_UPGRADE_NODE_N="$artifacts/bin/n/lash-upgrade-node"

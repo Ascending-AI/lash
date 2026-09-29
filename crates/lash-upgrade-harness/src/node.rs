@@ -37,6 +37,8 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Open a store and optionally read one existing session without serving.
+    Probe(ProbeArgs),
     /// Serve a Restate deployment over a store until killed.
     Serve(ServeArgs),
     /// Send one input to a session and wait for its turn to settle.
@@ -98,6 +100,15 @@ pub struct TurnArgs {
     /// How long the turn may take to settle.
     #[arg(long, default_value_t = 120)]
     pub timeout_secs: u64,
+}
+
+#[derive(Clone, Debug, Args)]
+pub struct ProbeArgs {
+    #[command(flatten)]
+    pub store: StoreArgs,
+    /// Read this session through the store's read-only session view.
+    #[arg(long)]
+    pub session: Option<String>,
 }
 
 /// A store a node opens.
@@ -162,6 +173,14 @@ pub struct TurnReport {
     pub reply: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProbeReport {
+    pub build: BuildLabel,
+    pub backend: String,
+    pub session_present: Option<bool>,
+    pub refusal: Option<lash_core::compat::CompatRefusal>,
+}
+
 /// The reply the scripted provider gives on `build` at `generation`.
 pub fn served_by(build: BuildLabel, generation: &str) -> String {
     format!("served by {build} at generation {generation}")
@@ -170,9 +189,52 @@ pub fn served_by(build: BuildLabel, generation: &str) -> String {
 /// Run one command and print its report.
 pub async fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Command::Probe(args) => print(&probe(args).await?),
         Command::Serve(args) => serve(args).await,
         Command::Turn(args) => print(&turn(args).await?),
     }
+}
+
+async fn probe(args: ProbeArgs) -> Result<ProbeReport> {
+    let build = BuildLabel::current();
+    let backend = args.store.store.backend().to_string();
+    let stores = match open_stores(&args.store).await {
+        Ok(stores) => stores,
+        Err(error) => {
+            if let Some(refusal) = error.chain().find_map(|cause| {
+                match cause.downcast_ref::<lash_core::StoreError>() {
+                    Some(lash_core::StoreError::Incompatible { refusal }) => Some(refusal.clone()),
+                    _ => None,
+                }
+            }) {
+                return Ok(ProbeReport {
+                    build,
+                    backend,
+                    session_present: None,
+                    refusal: Some(refusal),
+                });
+            }
+            return Err(error);
+        }
+    };
+    let session_present = if let Some(session) = args.session {
+        let id = lash::SessionId::from(session);
+        Some(
+            stores
+                .session_store_factory()
+                .read_session(&id)
+                .await?
+                .is_some(),
+        )
+    } else {
+        None
+    };
+    Ok(ProbeReport {
+        build,
+        backend,
+        session_present,
+        refusal: None,
+    })
 }
 
 fn print(report: &impl Serialize) -> Result<()> {
@@ -184,7 +246,7 @@ async fn open_sqlite(dir: &Path) -> Result<lash::sqlite::SqliteStoreSet> {
     std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
     lash::sqlite::SqliteStoreSet::open(dir)
         .await
-        .map_err(|error| anyhow!("open the SQLite store set at {}: {error}", dir.display()))
+        .with_context(|| format!("open the SQLite store set at {}", dir.display()))
 }
 
 async fn open_stores(args: &StoreArgs) -> Result<Arc<dyn lash::StoreSet>> {
@@ -192,7 +254,7 @@ async fn open_stores(args: &StoreArgs) -> Result<Arc<dyn lash::StoreSet>> {
         StoreSpec::Postgres(url) => {
             let storage = lash_postgres_store::PostgresStorage::connect(url)
                 .await
-                .map_err(|error| anyhow!("open the PostgreSQL store: {error}"))?;
+                .context("open the PostgreSQL store")?;
             let attachments = args.data_dir.join("attachments");
             std::fs::create_dir_all(&attachments)
                 .with_context(|| format!("create {}", attachments.display()))?;

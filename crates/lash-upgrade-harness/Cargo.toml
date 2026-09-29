@@ -10,7 +10,11 @@ description = "Phase A's synthetic N+1 harness (ADR 0115 §6): two builds of one
 # The synthetic N+1 build (ADR 0115 §6). It moves the constants whose
 # `synthetic-next` blocks sit beside them in the crates it forwards to. No
 # production build enables it.
-synthetic-next = ["lash-restate/synthetic-next"]
+synthetic-next = [
+    "lash-restate/synthetic-next",
+    "lash/synthetic-next",
+    "lash-postgres-store/synthetic-next",
+]
 
 [lib]
 name = "lash_upgrade_harness"
@@ -45,3 +49,8 @@ tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", 
 
 [dev-dependencies]
 tempfile = { workspace = true }
+lash-core-store = { workspace = true }
+sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+lash-postgres-store = { workspace = true, features = ["testing"] }
+lash-sqlite-store = { workspace = true, features = ["testing"] }

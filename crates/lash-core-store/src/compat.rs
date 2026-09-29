@@ -65,25 +65,53 @@ pub struct CompatDescriptor {
 /// stamp records. 1.0 is the clean-slate release, so every component starts
 /// at `[1,1]`.
 pub const DESCRIPTORS: &[CompatDescriptor] = &[
+    #[cfg(not(feature = "synthetic-next"))]
     CompatDescriptor {
         component: ComponentId::POSTGRES,
         reads: VersionRange::exactly(1),
         writes: VersionRange::exactly(1),
     },
+    #[cfg(feature = "synthetic-next")]
+    CompatDescriptor {
+        component: ComponentId::POSTGRES,
+        reads: VersionRange::between(1, 2),
+        writes: VersionRange::exactly(2),
+    },
+    #[cfg(not(feature = "synthetic-next"))]
     CompatDescriptor {
         component: ComponentId::SQLITE_CORE,
         reads: VersionRange::exactly(1),
         writes: VersionRange::exactly(1),
     },
+    #[cfg(feature = "synthetic-next")]
+    CompatDescriptor {
+        component: ComponentId::SQLITE_CORE,
+        reads: VersionRange::between(1, 2),
+        writes: VersionRange::exactly(2),
+    },
+    #[cfg(not(feature = "synthetic-next"))]
     CompatDescriptor {
         component: ComponentId::SQLITE_REGISTRY,
         reads: VersionRange::exactly(1),
         writes: VersionRange::exactly(1),
     },
+    #[cfg(feature = "synthetic-next")]
+    CompatDescriptor {
+        component: ComponentId::SQLITE_REGISTRY,
+        reads: VersionRange::between(1, 2),
+        writes: VersionRange::exactly(2),
+    },
+    #[cfg(not(feature = "synthetic-next"))]
     CompatDescriptor {
         component: ComponentId::SQLITE_TRIGGERS,
         reads: VersionRange::exactly(1),
         writes: VersionRange::exactly(1),
+    },
+    #[cfg(feature = "synthetic-next")]
+    CompatDescriptor {
+        component: ComponentId::SQLITE_TRIGGERS,
+        reads: VersionRange::between(1, 2),
+        writes: VersionRange::exactly(2),
     },
     CompatDescriptor {
         component: ComponentId::RESTATE_EFFECT_GROUP_STATE,

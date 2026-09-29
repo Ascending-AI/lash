@@ -21,6 +21,7 @@ doctest = false
 [features]
 perf-witness = ["lash-core-execution/perf-witness", "rusqlite/trace"]
 testing = ["lash-core-execution/testing"]
+synthetic-next = []
 
 [lints]
 workspace = true

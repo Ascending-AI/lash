@@ -27,7 +27,12 @@ use crate::compat::{CompatRefusal, VersionRange};
 /// the range is one version wide and this constant is it. The first format
 /// upgrade introduces `min_F`/`max_F` and widens the range; until then a store
 /// recording any other value is refused at open.
+#[cfg(not(feature = "synthetic-next"))]
 pub const FLEET_FORMAT_VERSION: u32 = 1;
+
+/// Phase A's next release owns epoch 2 while it still writes under epoch 1.
+#[cfg(feature = "synthetic-next")]
+pub const FLEET_FORMAT_VERSION: u32 = 2;
 
 /// The fleet epochs this build writes under: `[F_prev, F_self]` (ADR 0115
 /// §2.1).
@@ -37,7 +42,12 @@ pub const FLEET_FORMAT_VERSION: u32 = 1;
 /// to its own even when no format changed, because moving it is what fences
 /// the old release's writers. 1.0 is the first release, so its range is the
 /// one epoch it introduces.
+#[cfg(not(feature = "synthetic-next"))]
 pub const FLEET_WRITABLE_RANGE: VersionRange = VersionRange::exactly(FLEET_FORMAT_VERSION);
+
+/// The synthetic compatibility release opens fleets at either epoch.
+#[cfg(feature = "synthetic-next")]
+pub const FLEET_WRITABLE_RANGE: VersionRange = VersionRange::between(1, FLEET_FORMAT_VERSION);
 
 /// The fleet format a store records, as the fleet-format row reports it.
 ///
@@ -379,7 +389,15 @@ impl SurfaceFormat {
 /// unpinned surface writes build-newest, and the first format upgrade adds
 /// the rows that hold a superseded surface's writers at the old version until
 /// `finalize-upgrade` moves `F`.
+#[cfg(not(feature = "synthetic-next"))]
 const WRITER_PINS: &[WriterPin] = &[];
+
+#[cfg(feature = "synthetic-next")]
+const WRITER_PINS: &[WriterPin] = &[WriterPin {
+    constant: "SESSION_HEAD_META_SCHEMA_VERSION",
+    generation: 1,
+    version: super::SESSION_HEAD_META_SCHEMA_VERSION,
+}];
 
 /// The [`SurfaceFormat`] a call site hands [`FleetFormat::writer_version`]
 /// names a registered surface and carries the constant's own value as its
@@ -639,7 +657,10 @@ mod tests {
     #[test]
     fn fleet_epoch_is_admitted_at_open_and_fenced_in_a_transaction() {
         assert_eq!(FleetFormat::writable(), FLEET_WRITABLE_RANGE);
+        #[cfg(not(feature = "synthetic-next"))]
         assert_eq!(FLEET_WRITABLE_RANGE, VersionRange::exactly(1));
+        #[cfg(feature = "synthetic-next")]
+        assert_eq!(FLEET_WRITABLE_RANGE, VersionRange::between(1, 2));
         let writable = VersionRange::new(2, 3).expect("range");
 
         assert_eq!(

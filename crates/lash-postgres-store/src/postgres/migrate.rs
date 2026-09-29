@@ -52,6 +52,19 @@ const FLEET_FORMAT_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS lash_fleet_form
     CONSTRAINT ck_fleet_format_singleton CHECK (singleton)
 );";
 
+/// Phase A's single post-cut expand. None of these objects constrains writes
+/// made by N: the column is nullable, the table is new, and the index is not
+/// unique. The compatibility stamp moves to 2 in the same transaction.
+#[cfg(feature = "synthetic-next")]
+const SYNTHETIC_NEXT_EXPAND_DDL: &str = "ALTER TABLE lash_sessions
+    ADD COLUMN IF NOT EXISTS synthetic_next_note TEXT;
+CREATE TABLE IF NOT EXISTS lash_synthetic_next (
+    id BIGSERIAL PRIMARY KEY,
+    note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_lash_synthetic_next_note
+    ON lash_synthetic_next(note);";
+
 /// The 139→140 expand step (FIG-3600 S7): the logical-root family. The
 /// session head gains its closing intent, a park its engine reference and
 /// resume intent, a park event the `redrive_requested` kind, and the store
@@ -631,6 +644,74 @@ async fn apply_step(
     })
 }
 
+#[cfg(feature = "synthetic-next")]
+async fn apply_synthetic_expand(
+    connection: &mut sqlx::PgConnection,
+) -> Result<Option<MigrationStep>, StoreError> {
+    let mut tx = sqlx::Connection::begin(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)?;
+    let version: i32 =
+        sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
+            .bind(SCHEMA_COMPONENT)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    let descriptor =
+        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+            .expect("PostgreSQL component has a descriptor");
+    let next = i32::try_from(descriptor.writes.max())
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    if version == next {
+        return Ok(None);
+    }
+    if version + 1 != next {
+        return Err(StoreError::Incompatible {
+            refusal: lash_core_execution::compat::CompatRefusal::TooOld {
+                component: descriptor.component.as_str().to_owned(),
+                found: u32::try_from(version).unwrap_or_default(),
+                reads: descriptor.reads,
+            },
+        });
+    }
+    let started_at_ms = server_clock_ms(&mut tx).await?;
+    sqlx::raw_sql(SYNTHETIC_NEXT_EXPAND_DDL)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    sqlx::query("UPDATE lash_schema_versions SET version = $1 WHERE component = $2")
+        .bind(next)
+        .bind(SCHEMA_COMPONENT)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let migration = "synthetic-next-expand";
+    let (release, state, started_at_ms, finished_at_ms) = record_step(
+        &mut tx,
+        "lash_migrations",
+        MigrationPhase::Expand.name(),
+        migration,
+        Some(SCHEMA_VERSION),
+        SCHEMA_VERSION,
+        started_at_ms,
+    )
+    .await?;
+    crate::release_stamp::write(&mut tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    tx.commit().await.map_err(store_sqlx_error)?;
+    Ok(Some(MigrationStep {
+        phase: MigrationPhase::Expand.name().to_string(),
+        migration: migration.to_string(),
+        release,
+        state,
+        from_version: Some(SCHEMA_VERSION),
+        to_version: SCHEMA_VERSION,
+        started_at_ms: Some(started_at_ms),
+        finished_at_ms,
+    }))
+}
+
 fn report(state: &MigrationState, executed: Vec<MigrationStep>) -> MigrationReport {
     MigrationReport {
         namespace: state
@@ -754,6 +835,10 @@ pub(crate) async fn migrate_on(
         for step in &pending {
             executed.push(apply_step(&mut connection, state.installation.as_ref(), step).await?);
         }
+        #[cfg(feature = "synthetic-next")]
+        if let Some(step) = apply_synthetic_expand(&mut connection).await? {
+            executed.push(step);
+        }
         // A run that changed the catalog proves it before releasing the lock:
         // the structural check is the same one an open would run, so a
         // migrated database that cannot open fails here, not at the first
@@ -762,7 +847,19 @@ pub(crate) async fn migrate_on(
         let mut result = report(&state, executed);
         if !result.executed.is_empty() {
             let verification = verify_schema_shape(&mut connection).await?;
-            if !verification.is_conformant() {
+            #[cfg(not(feature = "synthetic-next"))]
+            let conformant = verification.is_conformant();
+            #[cfg(feature = "synthetic-next")]
+            let conformant = {
+                let mut tx = sqlx::Connection::begin(&mut connection)
+                    .await
+                    .map_err(store_sqlx_error)?;
+                let findings =
+                    crate::schema_shape::synthetic_next_findings(&mut tx, &verification).await?;
+                tx.rollback().await.map_err(store_sqlx_error)?;
+                findings.is_empty()
+            };
+            if !conformant {
                 return Err(StoreError::Backend(format!(
                     "`lash migrate` applied {} step(s) but the resulting schema is not \
                      conformant — do not start workers against it: {verification}",

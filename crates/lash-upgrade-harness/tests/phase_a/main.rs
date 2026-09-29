@@ -13,37 +13,12 @@
 
 use anyhow::{Result, bail};
 
+mod expanded_store_rollback;
+mod skipped_compatibility_release_refused;
+
 /// A leg whose lane has not landed: it fails, never passes empty.
 fn waits_for(lane: &str) -> Result<()> {
     bail!("this Phase A leg waits for {lane}")
-}
-
-/// N+1's migrate expands PostgreSQL and every SQLite database. N restarts,
-/// opens `Expanded`, writes, and N+1 reads N's rows. Raising `min_reader`
-/// makes N refuse `ReaderFloorAbove` on both backends. Each unsafe addition
-/// of §1.4 makes N refuse `ShapeRefused`. A populated store with its stamp
-/// deleted refuses `Unstamped`.
-///
-/// Waits for lane L1 (FIG-4043): the stamps with `min_reader`, admission and
-/// the tolerant shape check, plus the `synthetic-next` expand step in
-/// `crates/lash-postgres-store/src/postgres/migrate.rs` and the SQLite
-/// component bumps in `crates/lash-sqlite-store/src/schema.rs`.
-#[test]
-#[ignore = "waits for lane L1 (FIG-4043): store stamps, admission and the tolerant shape check"]
-fn expanded_store_rollback() -> Result<()> {
-    waits_for("lane L1 (FIG-4043)")
-}
-
-/// A build whose writable range starts above the recorded `F` refuses at
-/// open with `FleetOutsideWritable`, before it takes traffic. So does one
-/// whose component range starts above the stamp.
-///
-/// Waits for lane L1 (FIG-4043): the opens move onto `FleetFormat::admit`
-/// and the component descriptor.
-#[test]
-#[ignore = "waits for lane L1 (FIG-4043): opens admit F and the component stamp"]
-fn skipped_compatibility_release_refused() -> Result<()> {
-    waits_for("lane L1 (FIG-4043)")
 }
 
 /// For every mutation class of §2.2, N pauses a transaction after its fence
