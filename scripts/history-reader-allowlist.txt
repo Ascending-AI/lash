@@ -4,4 +4,6 @@
 crates/lash-perf/src/runtime_perf/store.rs  |  self.inner.load_session_window(session_id, selector).await  |  1  # WINDOW reopen decorator observes bounded window loads
 crates/lash-perf/src/runtime_perf/store.rs  |  self.inner.load_ancestors(session_id, anchor, budget).await  |  1  # PAGED decorator forwards caller budget
 crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs  |  .load_session_window(  |  1  # WINDOW reopen checkpoint measurement loads current frame
+crates/lash-sim/src/content_oracle.rs  |  .load_ancestors(  |  1  # PAGED simulator oracle walks committed graph in bounded pages
+crates/lash-sim/src/content_oracle.rs  |  .load_usage_ledger_page(  |  1  # PAGED simulator oracle folds reported usage in bounded pages
 runbooks/restate-postgres-workers/src/bin/runner/process_assertions.rs  |  .load_session_window(  |  1  # WINDOW read-view runbook assertion reads current frame

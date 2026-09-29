@@ -1,4 +1,11 @@
 {
+  "frame_residency_curve": {
+    "current_frame_nodes": 64,
+    "earlier_history_nodes": [0, 1000, 8000, 32000],
+    "max_resident_heap_growth_percent": 1.0,
+    "max_resident_heap_growth_bytes": 65536,
+    "max_commit_median_ratio": 1.2
+  },
   "runtime_stack": {
     "deep_turn_composition": {
       "budget_bytes": 2097152,
