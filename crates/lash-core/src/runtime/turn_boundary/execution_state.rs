@@ -61,10 +61,16 @@ pub(super) async fn frame_switch_execution_state_update(
 
 /// The artifact half of a commit that moves the session from frame `ended`
 /// to the state's current frame (ADR 0113 §3.1), gated on `committing`: the
-/// one execution that can still read what `ended` held. With no `ended`, the
-/// commit ends the last frame the store already holds, which a frame opened
-/// in resident state and committed by this commit leaves behind. `None` when
-/// the commit opens no frame, or when there was no frame to end.
+/// one execution that can still read what `ended` held.
+///
+/// The ended frame is always the committed head's frame, the only one the
+/// store can end. A switch names the frame its turn was admitted on, and
+/// carries its seed's modules out of it when the store already holds that
+/// frame. Otherwise (no switch, or a turn admitted on a frame opened in
+/// resident state since the last commit) the commit ends the last committed
+/// frame and carries nothing: the carried modules hold edges of the
+/// uncommitted frame, not of the committed one. `None` when the commit opens
+/// no frame, or when there was no frame to end.
 ///
 /// # Errors
 ///
@@ -78,8 +84,12 @@ pub(in crate::runtime) fn committed_frame_transition(
     let Some(successor) = state.current_frame_node_id.clone() else {
         return Ok(None);
     };
-    let Some(ended) = ended.or_else(|| last_committed_frame(state)) else {
-        return Ok(None);
+    let (ended, carries) = match ended.filter(|ended| is_committed(state, ended)) {
+        Some(ended) => (ended, carries),
+        None => match last_committed_frame(state) {
+            Some(ended) => (ended, Vec::new()),
+            None => return Ok(None),
+        },
     };
     if ended == successor {
         return Ok(None);
@@ -103,10 +113,7 @@ pub(in crate::runtime) fn committed_frame_transition(
 fn last_committed_frame(state: &RuntimeSessionState) -> Option<crate::FrameNodeId> {
     let mut frame = state.current_frame_node_id.clone()?;
     loop {
-        if state
-            .persisted_node_ids
-            .contains(&crate::NodeId::new(frame.as_str().to_string()))
-        {
+        if is_committed(state, &frame) {
             return Some(frame);
         }
         frame = state
@@ -192,4 +199,11 @@ pub(super) async fn settle_execution_state_capture(
     } else {
         code_executor.abort_execution_state_capture().await;
     }
+}
+
+/// Whether the store already holds `frame`'s open.
+fn is_committed(state: &RuntimeSessionState, frame: &crate::FrameNodeId) -> bool {
+    state
+        .persisted_node_ids
+        .contains(&crate::NodeId::new(frame.as_str().to_string()))
 }

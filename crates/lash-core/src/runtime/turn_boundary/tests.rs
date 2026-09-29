@@ -1958,16 +1958,46 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
         store: crate::ArtifactStoreId::LashlangModule,
         artifact_ref: "lashlang:v2:blake3:carried".to_string(),
     };
-    let transition = committed_frame_transition(&state, None, vec![carried.clone()], &committing)
-        .unwrap()
-        .expect("the commit ends the committed frame");
+    let ended = crate::FrameEnvironmentId::new(state.session_id.clone(), committed.clone());
+    let opened = crate::FrameEnvironmentId::new(state.session_id.clone(), successor);
+    let gate = committing.journal_identity().unwrap();
+    // A switch out of the committed frame carries its seed's modules.
     assert_eq!(
-        transition,
-        crate::store::FrameTransition {
-            ended: crate::FrameEnvironmentId::new(state.session_id.clone(), committed),
-            successor: crate::FrameEnvironmentId::new(state.session_id.clone(), successor),
-            carries: vec![carried],
-            gate: committing.journal_identity().unwrap(),
-        }
+        committed_frame_transition(
+            &state,
+            Some(committed.clone()),
+            vec![carried.clone()],
+            &committing
+        )
+        .unwrap(),
+        Some(crate::store::FrameTransition {
+            ended: ended.clone(),
+            successor: opened.clone(),
+            carries: vec![carried.clone()],
+            gate: gate.clone(),
+        })
     );
+    // A switch out of a frame the store does not hold yet ends the
+    // committed frame instead, and carries nothing out of it.
+    let uncommitted = crate::FrameNodeId::new(opened_frame_a(&state)).unwrap();
+    for named in [None, Some(uncommitted)] {
+        assert_eq!(
+            committed_frame_transition(&state, named, vec![carried.clone()], &committing).unwrap(),
+            Some(crate::store::FrameTransition {
+                ended: ended.clone(),
+                successor: opened.clone(),
+                carries: Vec::new(),
+                gate: gate.clone(),
+            })
+        );
+    }
+}
+
+/// The frame `open frame a` opened: the one the current frame follows.
+fn opened_frame_a(state: &RuntimeSessionState) -> String {
+    state
+        .current_agent_frame()
+        .and_then(|frame| frame.previous_frame_node_id.clone())
+        .expect("frame b follows frame a")
+        .into_inner()
 }
