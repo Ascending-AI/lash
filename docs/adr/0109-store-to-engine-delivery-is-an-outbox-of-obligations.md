@@ -41,7 +41,7 @@ O2 and O3 (the mechanism behind "reconcile every unacknowledged intent" and
 (amendment text in §6 below). [ADR 0080](0080-substrate-attestation-is-not-a-lease-short-circuit.md)
 stands: the leader lease is load control, never a fence.
 
-Amended 2026-09-28 (FIG-3927), **not yet implemented**: [ADR
+Amended 2026-09-28 (FIG-3927), implemented: [ADR
 0101](0101-one-session-ingress-carries-every-admitted-item.md)'s claim-free
 amendment replaces the drive's claim of an ingress row with the root's
 admission write (§3). The obligation/relay claim machinery this ADR owns is
@@ -575,6 +575,14 @@ The conformance law in `root_terminal.rs` that asserts a second tick
 "closed" the root again is rewritten to assert it closes nothing.
 
 ## 7. Fencing before the SQL lease goes
+
+*(FIG-3927: the lease is gone (FIG-3862) and the command lane takes no
+binding. The drive applies the leading command run in its own recorded step,
+`drive-commands:{admission}`, under its drive fence, and the commit that
+applies the run settles those rows; a row withdrawn in between refuses that
+commit. The settlement waiter reads the rows' outcome and drains nothing. The
+drain-and-lease arrangement below records the interim this replaced. See ADR
+0101's FIG-3927 amendment.)*
 
 The settlement waiter's command drain (`session_api.rs`, the
 `try_acquire_for_executor` … `drain_next_session_command` loop) runs under

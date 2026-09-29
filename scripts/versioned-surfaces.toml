@@ -576,11 +576,6 @@ reason = "hash-domain family tag: an identity-preimage component, not a durable 
 # discriminator, not a mutable current-version constant, and predecessors are
 # refused by number rather than rewritten in place.
 [[unregistered]]
-constant = "QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION"
-constant_path = "crates/lash-core-store/src/store/queued_work.rs"
-reason = "tags the identity encoding of newly minted claim-lease tokens; stored tokens are opaque at release, settlement and recovery and never re-derived, so a bump strands no stored bytes and no reader fences on it"
-
-[[unregistered]]
 constant = "OLDEST_SUPPORTED_SESSION_STATE_VERSION"
 constant_path = "crates/lash-core-store/src/store/state_version.rs"
 reason = "lower bound of the admission window for the registered CURRENT_SESSION_STATE_VERSION, not a format of its own"

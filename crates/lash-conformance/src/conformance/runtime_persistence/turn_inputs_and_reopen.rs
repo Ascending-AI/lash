@@ -251,7 +251,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
         crate::CheckpointKind::AfterWork,
         "suffix-active-turn:step",
         10,
-        crate::testing::queued_work_claim_policy(10),
+        crate::testing::queued_work_admission_policy(10),
     )
     .await
     .expect("admit the suffix active input");
@@ -520,7 +520,7 @@ pub async fn a_checkpoint_admission_rerun_returns_its_own_rows(store: Arc<dyn Ru
                 crate::CheckpointKind::AfterWork,
                 STEP,
                 10,
-                crate::testing::queued_work_claim_policy(10),
+                crate::testing::queued_work_admission_policy(10),
             )
             .await
             .expect("admit at the checkpoint")
@@ -594,7 +594,7 @@ pub async fn accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_
         crate::CheckpointKind::AfterWork,
         "fig1511:step",
         1,
-        crate::testing::queued_work_claim_policy(1),
+        crate::testing::queued_work_admission_policy(1),
     )
     .await
     .expect("admit the active input");
@@ -856,7 +856,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         crate::CheckpointKind::AfterWork,
         "active-turn-1:step",
         1,
-        crate::testing::queued_work_claim_policy(1),
+        crate::testing::queued_work_admission_policy(1),
     )
     .await
     .expect("admit active inputs");

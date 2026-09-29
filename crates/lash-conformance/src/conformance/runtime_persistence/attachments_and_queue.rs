@@ -534,7 +534,7 @@ pub async fn concurrent_admissions_bind_every_row_to_at_most_one_root(
                 crate::CheckpointKind::AfterWork,
                 step,
                 8,
-                crate::testing::queued_work_claim_policy(8),
+                crate::testing::queued_work_admission_policy(8),
             )
             .await
             .expect("a contested checkpoint admission resolves cleanly")
@@ -792,7 +792,7 @@ pub async fn queued_work_admission_respects_boundaries_and_stale_completion(
                 crate::CheckpointKind::AfterWork,
                 step,
                 10,
-                crate::testing::queued_work_claim_policy(10),
+                crate::testing::queued_work_admission_policy(10),
             )
             .await
             .expect("checkpoint admission")

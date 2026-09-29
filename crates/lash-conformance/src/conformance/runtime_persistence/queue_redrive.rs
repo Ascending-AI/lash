@@ -131,7 +131,7 @@ pub async fn queued_work_respects_membership_limits_exclusivity_and_sessions(
         &fence,
         "membership-limited",
         AdmittedHead::Batch(limited[0].batch_id.clone()),
-        crate::testing::queued_work_claim_policy(2),
+        crate::testing::queued_work_admission_policy(2),
     )
     .await;
     assert_eq!(
@@ -289,7 +289,7 @@ pub async fn a_resumed_root_drives_exactly_its_recorded_admission(
     }
     let head = AdmittedHead::Batch(rows[0].batch_id.clone());
     let first = seal_drive_fence_for_test(&store, &session, "resume-owner-a").await;
-    let mut coalescing = crate::testing::queued_work_claim_policy(64);
+    let mut coalescing = crate::testing::queued_work_admission_policy(64);
     coalescing.drain_policy = Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
     let admitted = admitted_under(&store, &first, "resumed-root", head.clone(), coalescing).await;
     assert_eq!(batch_ids(&admitted), ids(&[&rows[0], &rows[1], &rows[2]]));
@@ -311,7 +311,7 @@ pub async fn a_resumed_root_drives_exactly_its_recorded_admission(
         .await
         .expect("the predecessor's drive is superseded");
     let successor = seal_drive_fence_for_test(&store, &session, "resume-owner-b").await;
-    let mut one_at_a_time = crate::testing::queued_work_claim_policy(1);
+    let mut one_at_a_time = crate::testing::queued_work_admission_policy(1);
     one_at_a_time.drain_policy = crate::default_queued_drain_policy();
     let resumed = admitted_under(&store, &successor, "resumed-root", head, one_at_a_time).await;
     assert_eq!(
@@ -562,7 +562,7 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
         crate::CheckpointKind::AfterWork,
         "turn-atomic:checkpoint:0",
         64,
-        crate::testing::queued_work_claim_policy(1),
+        crate::testing::queued_work_admission_policy(1),
     )
     .await
     .expect("the checkpoint admits the ready batch");

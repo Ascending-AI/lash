@@ -195,7 +195,7 @@ pub async fn pending_follow_on_blocks_every_admission_but_its_own(
         crate::CheckpointKind::AfterWork,
         "another-turn:step",
         8,
-        crate::testing::queued_work_claim_policy(8),
+        crate::testing::queued_work_admission_policy(8),
     )
     .await
     .expect("another turn's checkpoint admission");
@@ -210,7 +210,7 @@ pub async fn pending_follow_on_blocks_every_admission_but_its_own(
         crate::CheckpointKind::AfterWork,
         "follow-on:step",
         8,
-        crate::testing::queued_work_claim_policy(8),
+        crate::testing::queued_work_admission_policy(8),
     )
     .await
     .expect("the follow-on's checkpoint admission");

@@ -210,7 +210,7 @@ use crate::{
 /// the drain policy itself set it explicitly — including
 /// `queued_work_redrive_ignores_a_changed_drain_policy`, which pins the shipped
 /// default on the successor.
-pub use lash_core_store::testing::queued_work_claim_policy;
+pub use lash_core_store::testing::queued_work_admission_policy;
 
 /// Fresh test executor host identity used by runtime construction.
 ///

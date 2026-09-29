@@ -519,7 +519,7 @@ pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn Runtim
         crate::CheckpointKind::AfterWork,
         "checkpoint-turn:step:1",
         10,
-        crate::testing::queued_work_claim_policy(10),
+        crate::testing::queued_work_admission_policy(10),
     )
     .await
     .expect("admit both checkpoint work families");
@@ -539,7 +539,7 @@ pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn Runtim
         crate::CheckpointKind::AfterWork,
         "checkpoint-turn:step:2",
         10,
-        crate::testing::queued_work_claim_policy(10),
+        crate::testing::queued_work_admission_policy(10),
     )
     .await
     .expect("a later checkpoint of the same root");
@@ -588,7 +588,7 @@ pub async fn checkpoint_admission_is_idempotent_by_root_and_step(
         crate::CheckpointKind::AfterWork,
         step,
         10,
-        crate::testing::queued_work_claim_policy(10),
+        crate::testing::queued_work_admission_policy(10),
     )
     .await
     .expect("the first execution admits");
@@ -602,7 +602,7 @@ pub async fn checkpoint_admission_is_idempotent_by_root_and_step(
         crate::CheckpointKind::AfterWork,
         step,
         10,
-        crate::testing::queued_work_claim_policy(10),
+        crate::testing::queued_work_admission_policy(10),
     )
     .await
     .expect("a rerun under the same fence");
@@ -641,7 +641,7 @@ pub async fn checkpoint_admission_is_idempotent_by_root_and_step(
         crate::CheckpointKind::AfterWork,
         step,
         10,
-        crate::testing::queued_work_claim_policy(10),
+        crate::testing::queued_work_admission_policy(10),
     )
     .await
     .expect("a rerun under a later fence");
@@ -658,7 +658,7 @@ pub async fn checkpoint_admission_is_idempotent_by_root_and_step(
             crate::CheckpointKind::AfterWork,
             step,
             10,
-            crate::testing::queued_work_claim_policy(10),
+            crate::testing::queued_work_admission_policy(10),
         )
         .await
         .is_err_and(|error| matches!(error, StoreError::StaleDriveFence { .. })),
@@ -698,7 +698,7 @@ pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
         crate::CheckpointKind::AfterWork,
         "min-boundary:step:1",
         10,
-        crate::testing::queued_work_claim_policy(10),
+        crate::testing::queued_work_admission_policy(10),
     )
     .await
     .expect("probe after-work checkpoint holding only before-completion ingress");
@@ -737,7 +737,7 @@ pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
             crate::CheckpointKind::AfterWork,
             step,
             1,
-            crate::testing::queued_work_claim_policy(10),
+            crate::testing::queued_work_admission_policy(10),
         )
         .await
         .expect("admit after-work checkpoint work");
@@ -757,7 +757,7 @@ pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
         crate::CheckpointKind::BeforeCompletion,
         "min-boundary:step:4",
         10,
-        crate::testing::queued_work_claim_policy(10),
+        crate::testing::queued_work_admission_policy(10),
     )
     .await
     .expect("admit before-completion checkpoint work");
@@ -872,7 +872,7 @@ pub async fn checkpoint_admission_probe_transaction_counts(
         crate::CheckpointKind::AfterWork,
         "counter:step:1",
         64,
-        crate::testing::queued_work_claim_policy(64),
+        crate::testing::queued_work_admission_policy(64),
     )
     .await
     .expect("probe quiescent checkpoint");
@@ -894,7 +894,7 @@ pub async fn checkpoint_admission_probe_transaction_counts(
         crate::CheckpointKind::AfterWork,
         "counter:step:2",
         64,
-        crate::testing::queued_work_claim_policy(64),
+        crate::testing::queued_work_admission_policy(64),
     )
     .await
     .expect("probe deferred checkpoint head");
@@ -943,7 +943,7 @@ pub async fn checkpoint_admission_probe_transaction_counts(
         crate::CheckpointKind::AfterWork,
         "counter:step:3",
         64,
-        crate::testing::queued_work_claim_policy(64),
+        crate::testing::queued_work_admission_policy(64),
     )
     .await
     .expect("admit pending checkpoint work");

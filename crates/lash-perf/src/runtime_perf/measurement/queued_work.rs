@@ -814,7 +814,7 @@ async fn admit_perf_root(
 ) -> anyhow::Result<Option<lash_core::store::RootAdmission>> {
     let mut request =
         lash_core::testing::store_fixtures::admit_root_request_for_test(fence, root, head);
-    request.policy = lash_core::testing::queued_work_claim_policy(max_batches);
+    request.policy = lash_core::testing::queued_work_admission_policy(max_batches);
     request.max_inputs = TURN_INPUT_INGRESS_ACTIVE_PER_TURN + TURN_INPUT_INGRESS_NEXT_PER_TURN;
     Ok(store.admit_root(&request).await?)
 }
@@ -859,7 +859,9 @@ async fn admit_perf_checkpoint(
             checkpoint: lash_core::CheckpointKind::AfterWork,
             step: step.to_string(),
             max_inputs: TURN_INPUT_INGRESS_ACCEPTED_PER_TURN,
-            policy: lash_core::testing::queued_work_claim_policy(QUEUED_WORK_JOIN_BATCHES_PER_TURN),
+            policy: lash_core::testing::queued_work_admission_policy(
+                QUEUED_WORK_JOIN_BATCHES_PER_TURN,
+            ),
         })
         .await?)
 }

@@ -383,7 +383,7 @@ fn surface_admit_request(
     let mut request =
         lash_core::testing::store_fixtures::admit_root_request_for_test(fence, &root, head);
     request.max_inputs = 8;
-    request.policy = lash_core::testing::queued_work_claim_policy(1);
+    request.policy = lash_core::testing::queued_work_admission_policy(1);
     request.admitted_generation = lash_core::engine::BuildGeneration::for_test("surface-root");
     request
 }
@@ -1046,7 +1046,7 @@ impl BackendRunner {
                         checkpoint: lash_core::CheckpointKind::AfterWork,
                         step: "fig-2841-surface-checkpoint".to_string(),
                         max_inputs: 1,
-                        policy: lash_core::testing::queued_work_claim_policy(1),
+                        policy: lash_core::testing::queued_work_admission_policy(1),
                     })
                     .await?;
                 format!(

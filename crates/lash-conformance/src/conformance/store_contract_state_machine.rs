@@ -2268,7 +2268,7 @@ async fn consume_wake(
         &root,
         crate::store::AdmittedHead::Batch(batch.batch_id.clone()),
     );
-    request.policy = crate::testing::queued_work_claim_policy(1);
+    request.policy = crate::testing::queued_work_admission_policy(1);
     let Some(admission) = runtime
         .admit_root(&request)
         .await

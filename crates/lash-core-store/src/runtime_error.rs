@@ -82,8 +82,8 @@ pub enum RuntimeErrorCode {
     /// write authority was contended. Retrying the same operation unchanged is
     /// safe; reloading or rebasing is not required.
     StoreCommitContended,
-    /// A physical queued attempt yielded with a durable continuation.
-    QueuedRunPending,
+    /// Session work waits for an unfinished root or its owed follow-on.
+    SessionRootPending,
     /// A pending follow-on owns the session (ADR 0101 §3): the commit or
     /// frame change is refused until the follow-on's own terminal commit.
     FollowOnPending,
@@ -557,7 +557,7 @@ impl RuntimeErrorCode {
                 "turn_execution_requires_reconciled_tool_surface"
             }
             Self::StoreCommitContended => "store_commit_contended",
-            Self::QueuedRunPending => "queued_run_pending",
+            Self::SessionRootPending => "session_root_pending",
             Self::FollowOnPending => "follow_on_pending",
             Self::StoreCommitSuperseded => "store_commit_superseded",
             Self::SessionDeleted => "session_deleted",
@@ -806,7 +806,7 @@ impl RuntimeErrorCode {
         Self::SessionWorkUnavailable,
         Self::TurnExecutionRequiresReconciledToolSurface,
         Self::StoreCommitContended,
-        Self::QueuedRunPending,
+        Self::SessionRootPending,
         Self::FollowOnPending,
         Self::StoreCommitSuperseded,
         Self::SessionDeleted,
@@ -989,7 +989,7 @@ impl RuntimeErrorCode {
                 Self::TurnExecutionRequiresReconciledToolSurface
             }
             "store_commit_contended" => Self::StoreCommitContended,
-            "queued_run_pending" => Self::QueuedRunPending,
+            "session_root_pending" => Self::SessionRootPending,
             "follow_on_pending" => Self::FollowOnPending,
             "store_commit_superseded" => Self::StoreCommitSuperseded,
             "session_deleted" => Self::SessionDeleted,

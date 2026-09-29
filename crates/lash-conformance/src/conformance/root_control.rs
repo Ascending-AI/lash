@@ -235,7 +235,7 @@ impl Fixture {
                 root: root.clone(),
                 head: lash_core::store::AdmittedHead::Input(input.clone()),
                 max_inputs: 1,
-                policy: lash_core::testing::queued_work_claim_policy(1),
+                policy: lash_core::testing::queued_work_admission_policy(1),
                 base: lash_core::store::SessionHeadRef {
                     generation: 0,
                     revision: state.head_revision,

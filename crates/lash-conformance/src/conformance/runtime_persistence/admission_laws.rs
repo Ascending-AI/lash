@@ -185,7 +185,7 @@ pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn Run
             crate::CheckpointKind::AfterWork,
             &format!("{root}:checkpoint"),
             64,
-            crate::testing::queued_work_claim_policy(64),
+            crate::testing::queued_work_admission_policy(64),
         )
         .await
         .expect("admit at the checkpoint");
@@ -504,7 +504,7 @@ pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimePersistence>) {
         crate::CheckpointKind::AfterWork,
         "stale-fence-root:checkpoint",
         64,
-        crate::testing::queued_work_claim_policy(64),
+        crate::testing::queued_work_admission_policy(64),
     )
     .await;
     assert!(
@@ -539,7 +539,7 @@ pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimePersistence>) {
         crate::CheckpointKind::AfterWork,
         "stale-fence-root:checkpoint",
         64,
-        crate::testing::queued_work_claim_policy(64),
+        crate::testing::queued_work_admission_policy(64),
     )
     .await
     .expect("the live fence admits at the checkpoint");
@@ -687,7 +687,7 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimePersistence>) {
         crate::CheckpointKind::AfterWork,
         "command-lane-root:checkpoint",
         64,
-        crate::testing::queued_work_claim_policy(64),
+        crate::testing::queued_work_admission_policy(64),
     )
     .await
     .expect("admit at the checkpoint");

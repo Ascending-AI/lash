@@ -100,8 +100,8 @@ impl RuntimeErrorCode {
             Self::TurnExecutionRequiresReconciledToolSurface => Terminal,
             // transactional write authority was contended; the identical commit is safe to retry.
             Self::StoreCommitContended => Retryable,
-            // the queued run yielded with a durable continuation that a redrive resumes.
-            Self::QueuedRunPending => Retryable,
+            // the unfinished root or owed follow-on is resumed by a later drive.
+            Self::SessionRootPending => Retryable,
             // a follow-on owns the session; it runs first, then a redrive finds the head free.
             Self::FollowOnPending => Redrivable,
             // a newer commit moved the head; a redrive reloads it and re-establishes authority.

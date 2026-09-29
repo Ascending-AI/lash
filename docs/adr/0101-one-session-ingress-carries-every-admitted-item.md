@@ -50,7 +50,7 @@ serialized execution becomes an engine obligation. Those passages stay as
 written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for
 the session lease) rewrites them.
 
-Amended 2026-09-28 (FIG-3927), **not yet implemented**: the FIG-3927
+Amended 2026-09-28 (FIG-3927), implemented: the FIG-3927
 amendment below removes the durable claim token and the `queued_runs` ledger
 from selection and settlement. A fenced write under the session's drive fence
 binds each admitted row to its root (`admitted_root`, `admitted_by`), the
@@ -127,7 +127,7 @@ composition unit, and it already spans several rows.
 | `authority`, `merge_key` | Per-item data, nullable where a kind has none. They feed the drain policy and traces. Nothing authorizes on them and nothing gates a claim on them (§5). |
 | `state` | `open \| accepted \| completed \| cancelled`. `held` stays a read projection, as ADR 0010 defined it. |
 | `terminal_cause` | Closed, non-null exactly on terminal rows (§8). |
-| claim columns | One set: `claim_id`, owner id and incarnation, `claim_token`, `claim_fencing_token`, `claim_session_lease_generation`, and the predecessor claim identity. Null on every terminal row. *(FIG-3927, not yet implemented: the claim columns are replaced by `admitted_root` and `admitted_by`; see the FIG-3927 amendment.)* |
+| claim columns | One set: `claim_id`, owner id and incarnation, `claim_token`, `claim_fencing_token`, `claim_session_lease_generation`, and the predecessor claim identity. Null on every terminal row. *(FIG-3927: the claim columns are replaced by `admitted_root` and `admitted_by`; see the FIG-3927 amendment.)* |
 | `enqueued_at_ms`, `terminal_at_ms` | Informational and for claim-size bounds. Never an order key. |
 
 `available_at_ms` is deleted: it has no non-test setter.
@@ -146,8 +146,8 @@ token and no `WorkClaim` lease fields.
 It replaces `TurnInputClaimMode` and `QueuedWorkClaimBoundary`.
 An ingress drive is always a claimed drive: FIG-3532 removed the runtime
 unclaimed drive, so there is no `Unclaimed` variant. `WithheldTerminalWork`
-becomes one list of claims. *(FIG-3927, not yet implemented: the claim type
-itself dies; the root's recorded `AdmitRoot` step is the admission, and
+becomes one list of claims. *(FIG-3927: the claim type
+itself is gone; the root's recorded `AdmitRoot` step is the admission, and
 `WithheldTerminalWork` carries admitted row ids. See the FIG-3927
 amendment.)*
 
@@ -377,7 +377,7 @@ always matches. The immutable submission digest (§8) stays as defence in depth.
 
 #### 5.2 Composition
 
-*(FIG-3927, not yet implemented: the composition rule below is unchanged, but
+*(FIG-3927: the composition rule below is unchanged, but
 it runs over the open rows of both admission tables inside the root's
 recorded `AdmitRoot` step, not inside a claim. See the FIG-3927 amendment.)*
 
@@ -435,7 +435,7 @@ checkpoint path commits input first; both become input-then-wake.
 
 ### 7. Claims, deferral and redrive (D16, D17)
 
-*(Superseded by the FIG-3927 amendment below, not yet implemented: no durable
+*(Superseded by the FIG-3927 amendment below: no durable
 claim token takes part in selecting or settling a turn. `Defer` releases an
 admitted row's binding at its own position, and an interrupted selection is
 the root's recorded admission.)*
@@ -949,8 +949,8 @@ reason *Alternatives* rejects a `dedup_domain` column.
 §14's table and two-list deletions; §15's table cutover; §16's
 re-expression against `SessionIngressStore` (the laws hold per table).
 `WithheldTerminalWork` keeps one list per claim type: a turn-input claim and a
-queued-work claim remain different types. *(FIG-3927, not yet implemented:
-the claims this amendment keeps die — each root's contiguous run is bound by
+queued-work claim remain different types. *(FIG-3927: the
+claims this amendment kept are gone — each root's contiguous run is bound by
 its recorded admission, not by a claim. See the FIG-3927 amendment.)*
 
 **FIG-3589's surface is deleted with it** (A8): `claim_bound_*`, `TurnBound`,
@@ -974,13 +974,17 @@ queued run headed by queued work, and a checkpoint's queued-work claim, take no
 work accepted after an unclaimed next-turn input. So one turn never takes an
 item past an earlier unconsumed item of the other kind. A session command stops
 nothing (§4); an addressed checkpoint input and the recomposition of an
-interrupted claim are exempt, as §5.2 and §7 already make them.
+interrupted claim are exempt, as §5.2 and §7 already make them. *(FIG-3927:
+the contiguous run is a root's admission, not a claim, and a queued-headed run
+is an ordinary root; the stop is unchanged. See the FIG-3927 amendment.)*
 
 ## Amendment (FIG-3927, 2026-09-28): admission binds rows to a root; there are no claims
 
-**Status.** Decided in FIG-3927 under D19, D22 and D24; not yet implemented. The
-units in the FIG-3927 design land it, and the last one updates this line. It
-amends §1 (the claim columns and claim type), §5.2, §7, §13, §16 laws 3 and 20,
+**Status.** Decided in FIG-3927 under D19, D22 and D24; implemented. FIG-3945
+deleted the `queued_runs` ledger and admits a queued-work head as an ordinary
+root; FIG-3946 replaced the claim columns with the admission binding, keyed
+settlement by root and deleted the claim, abandon and orphan-repair machinery;
+FIG-3947 closed it out. It amends §1 (the claim columns and claim type), §5.2, §7, §13, §16 laws 3 and 20,
 the FIG-3540 close-out, and ADR 0029 and ADR 0053, which it supersedes. Each
 carries a note pointing here.
 
@@ -992,7 +996,8 @@ is the row's admission and delivers its ingress obligation (ADR 0109 §3). An
 admitted row is released or settled only by a fenced commit of that root, or by
 the root's terminal write, whatever ended it. No row stays admitted to a root
 that has terminal evidence. A session has at most one root that is admitted and
-unfinished, and the drive admits that root before anything else.
+unfinished, and the drive resumes that root after any owed follow-on and
+before new work.
 
 **Selection** runs inside the drive, after the seal, as the root's recorded
 `AdmitRoot` step. It is keyed by the root, and its composition is the §5.2 rule

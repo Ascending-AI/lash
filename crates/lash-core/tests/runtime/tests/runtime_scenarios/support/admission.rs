@@ -26,7 +26,7 @@ impl RuntimeScenarioContext {
             &TurnId::from(SCENARIO_ROOT),
             head,
         );
-        request.policy = lash_core::testing::queued_work_claim_policy(10);
+        request.policy = lash_core::testing::queued_work_admission_policy(10);
         request.max_inputs = 10;
         self.store()
             .admit_root(&request)
@@ -92,7 +92,7 @@ impl RuntimeScenarioContext {
                         checkpoint: lash_core::CheckpointKind::AfterWork,
                         step: "runtime-scenario-checkpoint".to_string(),
                         max_inputs: 10,
-                        policy: lash_core::testing::queued_work_claim_policy(10),
+                        policy: lash_core::testing::queued_work_admission_policy(10),
                     })
                     .await
                     .unwrap_or_else(|err| {

@@ -334,7 +334,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         &root,
         AdmittedHead::Batch(batch.batch_id.clone()),
     );
-    request.policy = lash_core_execution::testing::queued_work_claim_policy(1);
+    request.policy = lash_core_execution::testing::queued_work_admission_policy(1);
     let admission = store
         .admit_root(&request)
         .await
@@ -358,7 +358,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
             checkpoint: CheckpointKind::AfterWork,
             step: "clock-contract-checkpoint".to_string(),
             max_inputs: 1,
-            policy: lash_core_execution::testing::queued_work_claim_policy(1),
+            policy: lash_core_execution::testing::queued_work_admission_policy(1),
         })
         .await
         .expect("the checkpoint admission must validate against PostgreSQL time");

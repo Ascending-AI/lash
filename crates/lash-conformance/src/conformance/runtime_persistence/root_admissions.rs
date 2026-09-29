@@ -180,7 +180,7 @@ pub async fn an_admitted_row_is_not_withdrawable_until_its_root_releases_it(
         crate::CheckpointKind::AfterWork,
         "withdrawal-root:step",
         64,
-        crate::testing::queued_work_claim_policy(64),
+        crate::testing::queued_work_admission_policy(64),
     )
     .await
     .expect("the checkpoint admits the batch");

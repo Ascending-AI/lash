@@ -167,7 +167,7 @@ impl LashRuntime {
                 EmptyQueuedDrainReason::AdmissionRefused(self.idle_drain_refusal().await?),
             )),
             crate::engine::DriveStop::Parked(park) => Err(RuntimeError::new(
-                RuntimeErrorCode::QueuedRunPending,
+                RuntimeErrorCode::SessionRootPending,
                 format!(
                     "queued work on session `{}` waits behind parked root `{}` (park {}); it \
                      is driven once that park is resolved",

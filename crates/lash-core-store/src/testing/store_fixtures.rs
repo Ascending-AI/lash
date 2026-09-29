@@ -242,7 +242,7 @@ pub fn admit_root_request_for_test(
         root: root.clone(),
         head,
         max_inputs: 64,
-        policy: super::queued_work_claim_policy(64),
+        policy: super::queued_work_admission_policy(64),
         base: crate::store::SessionHeadRef {
             generation: 0,
             revision: 0,

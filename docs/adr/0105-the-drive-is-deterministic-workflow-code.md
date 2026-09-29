@@ -95,10 +95,9 @@ so the seal rechecks it in the same transaction. A child never mints an epoch.
 
 - **Implemented (FIG-3682, FIG-3600 S5a): the root's admission records its
   base.** `Admitted` records no head. The root's recorded admission step
-  (`ClaimAcceptedTurnInput`, keyed by the root as `drive-claim:{root}`;
-  `AdmitRoot` at `drive-admit:{root}` under the FIG-3927 amendment, not yet
-  implemented) takes the rows and records, in its
-  `AcceptedTurnInputDrive::Claimed` outcome, the head the root runs on
+  (`AdmitRoot`, keyed by the root as `drive-admit:{root}` under the FIG-3927
+  amendment) binds the rows and records, in its `RootAdmission` outcome,
+  the head the root runs on
   (`base: SessionHeadRef`: generation, revision, leaf and checkpoint) and its
   `turn_index`. The admission is the one source of truth for the base: a
   replay reads that outcome back, rebuilds the turn from
@@ -112,15 +111,13 @@ so the seal rechecks it in the same transaction. A child never mints an epoch.
   re-execution reads it back rather than selecting again (FIG-3927).
 
 - **Implemented (FIG-3824): the admission and head inspection record drive
-  decisions.** The `ClaimAcceptedTurnInput` body repairs orphaned inputs
-  before admitting the root (the repair dies with the claims under FIG-3927:
-  a root's terminal write releases its rows, so there is nothing to repair).
-  It runs the store repair and any idempotent
-  await-event resolution inside that recorded body; a replay serves its
-  admission outcome and issues no second repair. After the admission,
+  decisions.** The `AdmitRoot` body runs no orphan repair: the repair died
+  with the claims under FIG-3927, because a root's terminal write releases
+  its rows, so there is nothing to repair. A replay serves its admission
+  outcome. After the admission,
   `InspectAdmittedHead` records `Ready` or `Diverged` from the refreshed
   resident head, committed-root evidence and pending input rows: `Ceded` is
-  no longer reachable after admission (FIG-3927, not yet implemented), because
+  no longer reachable after admission (FIG-3927), because
   an admitted head row is bound to the root and only the root's own commit or
   terminal settles it. Replay serves that verdict.
   A `Ready` verdict is revalidated under the current drive fence

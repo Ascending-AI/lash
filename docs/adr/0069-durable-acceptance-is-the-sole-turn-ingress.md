@@ -50,7 +50,7 @@ session-execution lease. Those passages stay as written until the PR that
 deletes the code (FIG-3667, FIG-3668, or FIG-3600 for the session lease)
 rewrites them.
 
-Amended 2026-09-28 (FIG-3927), **not yet implemented**: [ADR
+Amended 2026-09-28 (FIG-3927), implemented: [ADR
 0101](0101-one-session-ingress-carries-every-admitted-item.md)'s claim-free
 amendment replaces claims with admission binding. In sections 5 and 6,
 claiming an accepted input reads as admitting it: the root's recorded
@@ -217,7 +217,7 @@ today gets it the way it always has: by using `enqueue(..).id(..)` with a
 > stores in the [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
 > cutover; the claimed regime below remains the only one.
 >
-> Amended 2026-09-28 (FIG-3927), **not yet implemented**: the claim itself is
+> Amended 2026-09-28 (FIG-3927), implemented: the claim itself is
 > deleted. The root's recorded admission binds the row to the root
 > (`admitted_root`), and settlement is keyed by the root and the turn under the
 > drive fence. "Claimed" below reads as "admitted to the root"; the unclaimed
@@ -308,7 +308,7 @@ failover scenario is the behavioural witness.
 
 ### 6. Acceptance is journaled, so engine replay re-derives it
 
-> Amended 2026-09-28 (FIG-3927), **not yet implemented**: the journaled
+> Amended 2026-09-28 (FIG-3927), implemented: the journaled
 > `ClaimAcceptedTurnInput` drive set becomes the root's recorded `AdmitRoot`
 > admission, keyed by the root, and the store records the admission on the
 > root so a re-execution reads it back rather than selecting again. "Claiming"
