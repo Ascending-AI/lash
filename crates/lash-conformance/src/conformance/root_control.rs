@@ -713,7 +713,7 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
         root: root.clone(),
         head: lash_core::store::AdmittedHead::Input(head.clone()),
         max_inputs: 1,
-        policy: lash_core::testing::queued_work_claim_policy(1),
+        policy: lash_core::testing::queued_work_admission_policy(1),
         base: base.clone(),
         turn_index: state.turn_index as u64 + 1,
         generation: None,
