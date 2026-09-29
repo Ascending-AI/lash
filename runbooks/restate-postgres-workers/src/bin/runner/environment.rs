@@ -532,6 +532,11 @@ pub(super) async fn submit_workflow(
     request: &TurnRequest,
 ) -> Result<RestateInvocationId> {
     report_workflow_progress(&request.workflow_id, "submitting");
+    // The submission is witnessed before anything is sent, so no receipt the
+    // workflow causes can predate it on the witness clock (law 3).
+    let witness = runner_witness()?;
+    let request_bytes = serde_json::to_vec(request).context("encode workflow submission")?;
+    witness::record_submission(&witness.pool, &request.workflow_id, &request_bytes).await?;
     let client = reqwest::Client::builder()
         .http2_prior_knowledge()
         .build()
@@ -545,6 +550,12 @@ pub(super) async fn submit_workflow(
             .await
         {
             Ok(invocation_id) => {
+                witness::record_acknowledgement(
+                    &witness.pool,
+                    &request.workflow_id,
+                    invocation_id.as_str(),
+                )
+                .await?;
                 report_workflow_progress(&request.workflow_id, "submitted");
                 return Ok(invocation_id);
             }
@@ -557,6 +568,69 @@ pub(super) async fn submit_workflow(
         request.workflow_id,
         last_error.unwrap_or_else(|| "unknown error".to_string())
     )
+}
+
+/// Read `workflow_id`'s terminal as a client does, from the workflow's
+/// Restate output at its address, and witness the exact bytes (law 1).
+pub(super) async fn observe_client_terminal(workflow_id: &str, phase: &str) -> Result<()> {
+    let witness = runner_witness()?;
+    let output = fetch_workflow_output(&witness.ingress_url, workflow_id).await?;
+    witness::record_client_terminal(&witness.pool, workflow_id, phase, &output).await
+}
+
+/// After the cluster restart, read every terminal a client saw before it again
+/// from the identical address and witness those bytes too.
+pub(super) async fn reattach_client_terminals() -> Result<usize> {
+    let witness = runner_witness()?;
+    let workflows: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT workflow_id FROM witness_client_terminals
+         WHERE phase = $1
+         ORDER BY workflow_id",
+    )
+    .bind(witness::TERMINAL_OBSERVED)
+    .fetch_all(&witness.pool)
+    .await
+    .context("list the client terminals observed before the restart")?;
+    for workflow_id in &workflows {
+        observe_client_terminal(workflow_id, witness::TERMINAL_REATTACHED).await?;
+    }
+    Ok(workflows.len())
+}
+
+/// The workflow's result bytes exactly as Restate's ingress returns them.
+pub(super) async fn fetch_workflow_output(ingress_url: &str, workflow_id: &str) -> Result<Vec<u8>> {
+    let client = reqwest::Client::builder()
+        .http2_prior_knowledge()
+        .build()
+        .context("build Restate ingress client")?;
+    let url = format!(
+        "{}/restate/workflow/{TURN_WORKFLOW_NAME}/{workflow_id}/output",
+        ingress_url.trim_end_matches('/')
+    );
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let last_error = match client.get(&url).send().await {
+            Ok(response) if response.status().is_success() => {
+                return Ok(response
+                    .bytes()
+                    .await
+                    .with_context(|| format!("read `{workflow_id}` workflow output"))?
+                    .to_vec());
+            }
+            Ok(response) => {
+                let status = response.status();
+                format!(
+                    "HTTP {status}: {}",
+                    response.text().await.unwrap_or_default()
+                )
+            }
+            Err(err) => err.to_string(),
+        };
+        if Instant::now() >= deadline {
+            anyhow::bail!("workflow `{workflow_id}` output was not readable: {last_error}");
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 pub(super) async fn submit_signal_workflow(
@@ -668,6 +742,7 @@ pub(super) async fn wait_for_terminal_result(
     let deadline = Instant::now() + Duration::from_secs(180);
     while Instant::now() < deadline {
         if let Some(response) = load_terminal_result(pool, workflow_id).await? {
+            observe_client_terminal(workflow_id, witness::TERMINAL_OBSERVED).await?;
             report_workflow_progress(workflow_id, "completed");
             return Ok(response);
         }

@@ -24,10 +24,10 @@ use lash_restate_postgres_workers_e2e::{
     FRAME_CRASH_WORKFLOW_ID, ProcessSignalRequest, TRIGGER_EMIT_WORKFLOW_ID, TURN_WORKFLOW_NAME,
     TurnRequest, TurnResponse, TurnScenario, build_e2e_core, driven_queued_roots, e2e_backend,
     e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env, expected_attachment_bytes,
-    reset_e2e_rows, s3_store_from_env, turn_session_id,
+    reset_e2e_rows, s3_store_from_env, turn_session_id, witness,
 };
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -275,6 +275,21 @@ fn runner_progress() -> &'static Mutex<RunnerProgress> {
     })
 }
 
+/// The runner's handle on the witness ledgers: the client side of laws 1 and
+/// 3 (submissions, acknowledgements, terminal bytes) is written through it.
+struct RunnerWitness {
+    pool: sqlx::PgPool,
+    ingress_url: String,
+}
+
+static RUNNER_WITNESS: OnceLock<RunnerWitness> = OnceLock::new();
+
+fn runner_witness() -> Result<&'static RunnerWitness> {
+    RUNNER_WITNESS
+        .get()
+        .context("the runner's witness ledger is not connected")
+}
+
 fn report_workflow_progress(workflow_id: &str, phase: &str) {
     let description = format!("workflow={workflow_id} phase={phase}");
     {
@@ -367,6 +382,9 @@ async fn async_main() -> Result<()> {
     let storage = wait_for_postgres(&database_url).await?;
     ensure_e2e_schema(storage.pool()).await?;
     reset_e2e_rows(storage.pool()).await?;
+    let witness_pool = witness::connect_witness().await?;
+    // The ledgers are append-only, so stale evidence is refused, never reset.
+    assert_witness_ledger_empty(&witness_pool).await?;
 
     let trace_dir = std::env::var("LASH_E2E_TRACE_DIR").ok().map(PathBuf::from);
     if let Some(dir) = &trace_dir {
@@ -381,6 +399,15 @@ async fn async_main() -> Result<()> {
     let admin_url = env("RESTATE_ADMIN_URL", "http://restate:9070");
     let deployment_url = env("WORKER_DEPLOYMENT_URL", "http://worker-proxy:18100");
     let ingress_url = env("RESTATE_INGRESS_URL", "http://restate:8080");
+    if RUNNER_WITNESS
+        .set(RunnerWitness {
+            pool: witness_pool.clone(),
+            ingress_url: ingress_url.clone(),
+        })
+        .is_err()
+    {
+        anyhow::bail!("the runner's witness ledger was connected twice");
+    }
     // Register through the engine the workers run on — same store set, same
     // authority — so the namespace guard (FIG-3898) applies to this
     // registration exactly as it would to a worker's own.
@@ -402,6 +429,7 @@ async fn async_main() -> Result<()> {
         drive_turn_control_scenarios(&storage, &ingress_url).await?;
         assert_no_active_lash_restate_invocations(&admin_url).await?;
         assert_no_problem_lash_restate_invocations(&admin_url).await?;
+        assert_recovery_laws(&witness_pool, &LawScope::causal_only()).await?;
         watchdog.abort();
         println!("focused turn-control E2E passed");
         return Ok(());
@@ -421,6 +449,7 @@ async fn async_main() -> Result<()> {
         );
         run_engine_promise_gates(&admin_url, &ingress_url).await?;
         assert_durable_input_attempts(storage.pool()).await?;
+        assert_recovery_laws(&witness_pool, &LawScope::causal_only()).await?;
         println!(
             "wake RCA soak passed: failover; queued-drain; waiter-before-resolution; resolution-before-waiter"
         );
@@ -445,9 +474,9 @@ async fn async_main() -> Result<()> {
     assert_no_duplicate_runtime_rows(storage.pool()).await?;
     assert_worker_distribution(storage.pool()).await?;
     assert_failover(storage.pool(), selection).await?;
-    assert_provider_calls(storage.pool(), selection).await?;
+    assert_provider_calls(&witness_pool, selection).await?;
     if selection.includes(WorkflowSegment::Two) {
-        assert_frame_switch_provider_order(storage.pool()).await?;
+        assert_frame_switch_provider_order(&witness_pool).await?;
     }
     assert_tool_and_turn_telemetry(storage.pool(), selection).await?;
     if selection.includes(WorkflowSegment::Two) {
@@ -462,6 +491,7 @@ async fn async_main() -> Result<()> {
     if selection.includes(WorkflowSegment::One) {
         assert_reopened_session_agrees(
             &storage,
+            &witness_pool,
             &mock_provider_base_url,
             trace_dir.clone(),
             &ingress_url,
@@ -476,12 +506,13 @@ async fn async_main() -> Result<()> {
         drive_break_glass_scenario(&storage, &ingress_url, &admin_url).await?;
     }
     assert_no_active_lash_restate_invocations(&admin_url).await?;
+    assert_recovery_laws(&witness_pool, &recovery_law_scope(selection)).await?;
     write_completed_workflow_manifest(selection)?;
 
     if selection == SegmentSelection::All {
         let output = segment_one.as_ref().context("segment 1 output missing")?;
         println!(
-            "restate-postgres-workers e2e passed: {} workflows; suspended-sleep gates: post-suspension-cancel; engine-restart gates: journal-replay, suspended-sleep-cancel, post-restart-cancel-evidence, post-restart-completion; turn-control gates: cross-process, before-start, seal-race, crash-recovery, terminal-attach, break-glass-negative; trigger process {}; signal process {}; traces {}",
+            "restate-postgres-workers e2e passed: {} workflows; suspended-sleep gates: post-suspension-cancel; engine-restart gates: workers-and-restate-restart, journal-replay, suspended-sleep-cancel, post-restart-cancel-evidence, post-restart-completion; turn-control gates: cross-process, before-start, seal-race, crash-recovery, terminal-attach, break-glass-negative; trigger process {}; signal process {}; traces {}",
             responses.len(),
             output.trigger_process_id,
             output.signal_process_id,
