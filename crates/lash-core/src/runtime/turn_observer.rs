@@ -200,10 +200,13 @@ impl TurnObserver {
         }
     }
 
-    /// The commit was accepted: publish what was held, in order, with
-    /// `after_outcome` right after the held `TurnOutcome` (or last, when none
-    /// was held).
-    pub(in crate::runtime) fn release_terminal(&self, after_outcome: Option<SessionStreamEvent>) {
+    /// The commit was accepted: publish what was held, in order, with the
+    /// announcement of `partial` on both lanes right after the held
+    /// `TurnOutcome` (or last, when none was held).
+    pub(in crate::runtime) fn release_terminal(
+        &self,
+        partial: Option<lash_sansio::StoppedPartialSummary>,
+    ) {
         let mut state = self.queue.state.lock_recover();
         let Some(held) = state.held.take() else {
             return;
@@ -211,13 +214,19 @@ impl TurnObserver {
         if state.closed {
             return;
         }
-        let mut after_outcome =
-            after_outcome
-                .filter(|_| !self.quiet_sessions)
-                .map(|event| Observation {
-                    turn: None,
-                    event: RuntimeStreamEvent::Session(event),
-                });
+        let mut after_outcome = partial.map(|summary| {
+            let session = (!self.quiet_sessions).then(|| Observation {
+                turn: None,
+                event: RuntimeStreamEvent::Session(SessionStreamEvent::StoppedPartialAvailable {
+                    summary: summary.clone(),
+                }),
+            });
+            let activity = (!self.quiet_activities).then(|| Observation {
+                turn: self.turn.clone(),
+                event: RuntimeStreamEvent::Turn(TurnActivity::stopped_partial_available(summary)),
+            });
+            [session, activity]
+        });
         for observation in held {
             let outcome = matches!(
                 observation.event,
@@ -225,11 +234,13 @@ impl TurnObserver {
             );
             push_observation(&mut state, observation);
             if outcome && let Some(extra) = after_outcome.take() {
-                push_observation(&mut state, extra);
+                for observation in extra.into_iter().flatten() {
+                    push_observation(&mut state, observation);
+                }
             }
         }
-        if let Some(extra) = after_outcome {
-            push_observation(&mut state, extra);
+        for observation in after_outcome.into_iter().flatten().flatten() {
+            push_observation(&mut state, observation);
         }
         if let Some(publisher) = state.publisher.take() {
             drop(state);

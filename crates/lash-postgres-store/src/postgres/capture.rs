@@ -331,10 +331,15 @@ pub(crate) fn retention_delete_sql() -> &'static str {
     SQL.partials.delete_retained.sql()
 }
 
+/// Fence, seal and materialize one turn's capture. `worker_lost` names a
+/// seal the lost-root write makes: the worker that wrote the capture is gone,
+/// so the partial carries recovery evidence and promises only the prefix it
+/// acknowledged (ADR 0114 §1.3, §4.4), whatever the turn's own row recorded.
 async fn seal_capture_tx(
     tx: &mut Transaction<'_, Postgres>,
     request: &SealTurnCapture,
     now: u64,
+    worker_lost: bool,
 ) -> Result<SealedCapture, StoreError> {
     let session = &request.turn.session_id;
     let turn = &request.turn.turn_id;
@@ -418,7 +423,7 @@ async fn seal_capture_tx(
                 .map_err(|_| stored_data_corrupt("TurnCapture", "epoch overflow"))?,
         ));
     }
-    let recovered = recovered != 0;
+    let recovered = recovered != 0 || worker_lost;
     let id = lash_sansio::StoppedPartialId {
         session_id: session.clone(),
         root: request.root.clone(),
@@ -487,6 +492,7 @@ pub(crate) async fn seal_root_terminal_capture_tx(
     root: &TurnId,
     reason: lash_sansio::StopReason,
     now: u64,
+    worker_lost: bool,
 ) -> Result<lash_sansio::StoppedPartialSummary, StoreError> {
     if let Some(summary) = committed_root_summary_conn(&mut *tx, session, root).await? {
         return Ok(summary);
@@ -512,7 +518,9 @@ pub(crate) async fn seal_root_terminal_capture_tx(
         reason,
         recorded_watermark: None,
     };
-    let partial = seal_capture_tx(tx, &request, now).await?.into_partial();
+    let partial = seal_capture_tx(tx, &request, now, worker_lost)
+        .await?
+        .into_partial();
     sqlx::query(SQL.partials.commit.sql())
         .bind(session.as_str())
         .bind(turn.as_str())
@@ -845,7 +853,7 @@ impl TurnCaptureStore for PostgresSessionStore {
         self.bind_session_id(&request.turn.session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        let result = seal_capture_tx(&mut tx, request, self.clock.timestamp_ms()).await?;
+        let result = seal_capture_tx(&mut tx, request, self.clock.timestamp_ms(), false).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(result)
     }

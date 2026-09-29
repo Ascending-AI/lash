@@ -85,6 +85,11 @@ pub fn activity_projection(event: &SessionStreamEvent) -> Option<TurnEvent> {
         SessionStreamEvent::Error { message, .. } => Some(TurnEvent::Error {
             message: message.clone(),
         }),
+        SessionStreamEvent::StoppedPartialAvailable { summary } => {
+            Some(TurnEvent::StoppedPartialAvailable {
+                summary: summary.clone(),
+            })
+        }
         SessionStreamEvent::TurnOutcome {
             outcome: crate::TurnOutcome::Finished(crate::TurnFinish::FinalValue { value }),
         } => Some(TurnEvent::FinalValue {

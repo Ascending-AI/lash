@@ -446,3 +446,130 @@ async fn a_tool_child_redriven_on_a_successor_captures_its_progress() {
         "the successor's chunk, and never the retracted one"
     );
 }
+
+const LOST_SESSION: &str = "stopped-partial-lost-root";
+const LOST: &str = "streamed before the root's run was lost";
+
+/// The session events a host reading the session's live replay from
+/// `cursor` finds, as turn activities.
+fn replayed_activities(
+    session: &lash::LashSession,
+    cursor: &lash::observe::SessionCursor,
+) -> Vec<lash_core::TurnEvent> {
+    match session
+        .observe()
+        .resume_from_cursor(cursor)
+        .expect("resume the session's observations")
+    {
+        lash::observe::SessionResume::Replayed { events } => events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                lash::observe::SessionObservationEventPayload::TurnActivity(activity) => {
+                    Some(activity.event.clone())
+                }
+                _ => None,
+            })
+            .collect(),
+        lash::observe::SessionResume::Gap { gap, .. } => {
+            panic!("the replay window still holds the turn: {gap:?}")
+        }
+    }
+}
+
+async fn replayed_until(
+    session: &lash::LashSession,
+    cursor: &lash::observe::SessionCursor,
+    what: &str,
+    seen: impl Fn(&lash_core::TurnEvent) -> bool,
+) -> lash_core::TurnEvent {
+    tokio::time::timeout(std::time::Duration::from_secs(40), async {
+        loop {
+            if let Some(event) = replayed_activities(session, cursor).into_iter().find(&seen) {
+                return event;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the session's hosts never saw {what}"))
+}
+
+/// A root whose engine run is lost ends through the recovery pass's
+/// `end_lost_root` (ADR 0114 §4.4): the write seals the prefix the lost
+/// worker acknowledged as a `ProcessLoss` partial, the session's hosts are
+/// told through the core's Live Replay publisher, and the partial is read by
+/// the root (§5.2).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_lost_root_seals_process_loss_and_announces_it_to_the_sessions_hosts() {
+    let backend = lash_restate_test::backend(SEED + 2, ServerConfig::default())
+        .await
+        .expect("build the Restate test backend");
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("stopped-partial-lost-root")
+        .requires_streaming(true)
+        .complete(|request: LlmRequest| async move {
+            stream_text(&request, LOST);
+            std::future::pending::<Result<LlmResponse, LlmTransportError>>().await
+        })
+        .build()
+        .into_handle();
+    let core = core(&backend, provider);
+    let session = core
+        .session(LOST_SESSION)
+        .open()
+        .await
+        .expect("open the session");
+    let cursor = session.observe().current_observation().cursor;
+    let handle = session
+        .send(TurnInput::text("answer"))
+        .id(ROOT)
+        .await
+        .expect("accept the turn input");
+    let run = tokio::spawn(handle.output());
+    replayed_until(&session, &cursor, "the streamed text", |event| {
+        matches!(event, lash_core::TurnEvent::AssistantProseDelta { text, .. } if &**text == LOST)
+    })
+    .await;
+
+    // The root's run fails for good, as an operator's kill leaves it.
+    let server = backend.server();
+    let turn_driver = backend.service_name(TURN_DRIVER_SERVICE);
+    let root_run = server
+        .invocations()
+        .into_iter()
+        .find(|view| {
+            view.target.starts_with(&format!("{turn_driver}/")) && view.status != "completed"
+        })
+        .expect("the root's run is open");
+    assert_eq!(server.kill_and_await(&root_run.id).await, Some(true));
+
+    let announced = replayed_until(&session, &cursor, "the partial's announcement", |event| {
+        matches!(event, lash_core::TurnEvent::StoppedPartialAvailable { .. })
+    })
+    .await;
+    let lash_core::TurnEvent::StoppedPartialAvailable { summary } = announced else {
+        unreachable!("matched above");
+    };
+    let lash::StoppedPartialRead::Available(partial) = session
+        .stopped_partial(&lash::TurnId::from(ROOT))
+        .await
+        .expect("read the root's partial")
+    else {
+        panic!("the lost root's partial is readable");
+    };
+    assert_eq!(partial.verify_digest(), Ok(()));
+    assert_eq!(
+        summary,
+        partial.summary(),
+        "the announcement names the partial"
+    );
+    assert_eq!(partial.reason, StopReason::ProcessLoss);
+    assert!(partial.recovered_after_process_loss);
+    assert_eq!(partial.coverage, CaptureCoverage::AcknowledgedPrefix);
+    let [PartialItem::Text { state, text, .. }] = partial.items.as_slice() else {
+        panic!("expected the acknowledged text, got {:?}", partial.items);
+    };
+    assert_eq!(text, LOST, "the prefix the lost worker acknowledged");
+    assert_eq!(*state, lash::CutState::Interrupted);
+    run.abort();
+}

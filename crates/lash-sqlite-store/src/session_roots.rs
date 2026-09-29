@@ -133,6 +133,7 @@ pub(crate) fn write_root_terminal_conn(
             &terminal.root,
             reason,
             terminal.at_ms,
+            matches!(terminal.cause, RootTerminalCause::SubstrateLost { .. }),
         )?;
     }
     let sql = session_roots_sql();

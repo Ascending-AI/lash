@@ -143,9 +143,10 @@ pub(crate) async fn end_lost_root_runs(
     }
 }
 
-/// Best-effort announcement of a lost root's sealed partial, after the write
-/// that sealed it. A host that misses it reads the partial from the stopped
-/// turn's report (ADR 0114 §5.2).
+/// The lost-root write sealed a partial. The pass reports it, and the core
+/// that runs the pass announces it to the session's hosts through its Live
+/// Replay publisher (ADR 0114 §4.4); a host that misses the announcement
+/// reads the partial by its root (§5.2).
 fn announce_stopped_partial(target: &RootRef, summary: &lash_sansio::StoppedPartialSummary) {
     tracing::info!(
         event = "root.stopped_partial_available",
@@ -575,6 +576,9 @@ impl SessionControlEngine for RestateSessionControl {
         {
             Ok(pass) => {
                 report.ended_roots.extend(pass.ended);
+                report
+                    .sealed_partials
+                    .extend(pass.sealed.into_iter().map(|(_, summary)| summary));
                 report.unchanged += pass.unchanged;
                 report.failed.extend(
                     pass.failed

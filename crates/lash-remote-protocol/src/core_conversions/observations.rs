@@ -486,6 +486,15 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                     message: "tool output progress has no remote form".to_string(),
                 })
             }
+            // The announcement has no remote form yet: a remote host reads
+            // the partial from its turn's report or by the root (ADR 0114
+            // §5.2).
+            lash_core::TurnEvent::StoppedPartialAvailable { .. } => {
+                Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name: "RemoteTurnEvent",
+                    message: "a stopped partial's announcement has no remote form".to_string(),
+                })
+            }
         }
     }
 }

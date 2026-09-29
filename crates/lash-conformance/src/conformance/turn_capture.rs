@@ -529,3 +529,60 @@ pub async fn capture_deletion_reclaims_staging_frames(
         Err(StoreError::SessionDeleted { .. })
     ));
 }
+
+/// A root the engine lost ends through `end_lost_root`, whose write seals the
+/// root's capture in its own transaction (ADR 0114 §4.4): the worker that
+/// wrote it is gone, so the partial is `ProcessLoss`, carries recovery
+/// evidence and promises only the acknowledged prefix (§1.3), and the read
+/// by the root returns it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_lost_root_seals_the_acknowledged_prefix(
+    factory: Arc<dyn SessionStoreFactory>,
+    label: &str,
+) {
+    let (store, turn) = fixture(Arc::clone(&factory), label).await;
+    store
+        .bind_root_inputs(&turn.session_id, &turn.turn_id, &[])
+        .await
+        .expect("open the root");
+    let lease = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &lease, 0, text_frames()).await;
+    let terminal = factory
+        .end_lost_root(
+            &lash_core::engine::RootRef {
+                session: turn.session_id.clone(),
+                root: turn.turn_id.clone(),
+            },
+            1,
+        )
+        .await
+        .expect("end the lost root")
+        .expect("the open root ends");
+    let summary = terminal
+        .stopped_partial
+        .expect("the terminal write sealed the root's partial");
+    assert_eq!(summary.reason, StopReason::ProcessLoss);
+    assert!(summary.recovered_after_process_loss);
+    assert_eq!(
+        summary.coverage,
+        lash_sansio::CaptureCoverage::AcknowledgedPrefix
+    );
+    let StoppedPartialRead::Available(partial) = store
+        .read_stopped_partial(&StoppedPartialReadRequest {
+            session_id: turn.session_id.clone(),
+            turn: turn.turn_id.clone(),
+        })
+        .await
+        .expect("read the root's partial")
+    else {
+        panic!("the lost root's partial is committed");
+    };
+    assert_eq!(partial.summary(), summary);
+    let [PartialItem::Text { text, .. }] = partial.items.as_slice() else {
+        panic!("expected the acknowledged text, got {:?}", partial.items);
+    };
+    assert_eq!(text, "partial");
+}

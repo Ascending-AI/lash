@@ -840,11 +840,13 @@ impl LashRuntime {
         self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
 
-        observer.release_terminal(delivery.turn.stopped_partial.as_ref().map(|partial| {
-            SessionStreamEvent::StoppedPartialAvailable {
-                summary: partial.summary(),
-            }
-        }));
+        observer.release_terminal(
+            delivery
+                .turn
+                .stopped_partial
+                .as_ref()
+                .map(lash_sansio::StoppedPartial::summary),
+        );
         emit_session_events(observer, delivery.events);
         observer.published().await;
         publish_terminal_after_commit(

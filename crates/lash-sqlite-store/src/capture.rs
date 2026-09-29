@@ -321,10 +321,15 @@ pub(crate) fn delete_session_capture_conn(
     Ok(removed)
 }
 
+/// Fence, seal and materialize one turn's capture. `worker_lost` names a
+/// seal the lost-root write makes: the worker that wrote the capture is gone,
+/// so the partial carries recovery evidence and promises only the prefix it
+/// acknowledged (ADR 0114 §1.3, §4.4), whatever the turn's own row recorded.
 pub(crate) fn seal_capture_conn(
     conn: &Connection,
     request: &SealTurnCapture,
     now: u64,
+    worker_lost: bool,
 ) -> Result<SealedCapture, StoreError> {
     let session = &request.turn.session_id;
     let turn = &request.turn.turn_id;
@@ -413,7 +418,7 @@ pub(crate) fn seal_capture_conn(
         ));
     }
     drop(writer_stmt);
-    let recovered = recovered != 0;
+    let recovered = recovered != 0 || worker_lost;
     let id = lash_sansio::StoppedPartialId {
         session_id: session.clone(),
         root: request.root.clone(),
@@ -486,6 +491,7 @@ pub(crate) fn seal_root_terminal_capture_conn(
     root: &TurnId,
     reason: lash_sansio::StopReason,
     now: u64,
+    worker_lost: bool,
 ) -> Result<lash_sansio::StoppedPartialSummary, StoreError> {
     if let Some(summary) = committed_root_summary_conn(conn, session, root)? {
         return Ok(summary);
@@ -516,7 +522,7 @@ pub(crate) fn seal_root_terminal_capture_conn(
         reason,
         recorded_watermark: None,
     };
-    let partial = seal_capture_conn(conn, &request, now)?.into_partial();
+    let partial = seal_capture_conn(conn, &request, now, worker_lost)?.into_partial();
     conn.execute(
         SQL.partials.commit.sql(),
         params![session.as_str(), turn.as_str(), number(now)?],
@@ -927,7 +933,7 @@ impl TurnCaptureStore for Store {
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let result = seal_capture_conn(tx, &request, now);
+                let result = seal_capture_conn(tx, &request, now, false);
                 Ok(match result {
                     Ok(value) => TxOutcome::Commit(Ok(value)),
                     Err(error) => TxOutcome::Rollback(Err(error)),

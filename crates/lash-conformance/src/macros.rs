@@ -21,6 +21,7 @@ macro_rules! turn_capture_tests {
             (capture_commit_publishes_exact_partial, "commit"),
             (capture_retention_waits_for_deletion, "retention"),
             (capture_deletion_reclaims_staging_frames, "deletion"),
+            (capture_lost_root_seals_the_acknowledged_prefix, "lost-root"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
