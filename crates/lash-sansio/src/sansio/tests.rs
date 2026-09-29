@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::*;
+
+mod fold;
 use crate::TurnFinish;
 use crate::llm::types::{LlmOutputPart, LlmRequest, LlmResponse, LlmTerminalReason};
 use crate::session_model::message::PartAttachment;
@@ -891,6 +893,7 @@ impl ProtocolDriverHandle for ToolBatchDriver {
                     }),
                 },
             ],
+            expansion: ToolExpansionPlan::default(),
         })]
     }
 
@@ -1543,7 +1546,7 @@ fn checkpoint_preserves_parallel_tool_batch_before_any_result() {
     let (tool_id, calls) = effects
         .iter()
         .find_map(|effect| match effect {
-            Effect::ToolCalls { id, calls } => Some((*id, calls.clone())),
+            Effect::ToolCalls { id, calls, .. } => Some((*id, calls.clone())),
             _ => None,
         })
         .expect("tool batch");
@@ -1557,7 +1560,7 @@ fn checkpoint_preserves_parallel_tool_batch_before_any_result() {
     let (restored_tool_id, restored_calls) = effects
         .iter()
         .find_map(|effect| match effect {
-            Effect::ToolCalls { id, calls } => Some((*id, calls)),
+            Effect::ToolCalls { id, calls, .. } => Some((*id, calls)),
             _ => None,
         })
         .expect("restored tool batch");

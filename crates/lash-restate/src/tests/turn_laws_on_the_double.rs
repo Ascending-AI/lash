@@ -83,7 +83,9 @@ lash_conformance::tool_batch_parallelism_tests!(
             prefix,
             host,
             stores,
-            vec![lash_conformance::parallel_model_tool_calls_producer()],
+            vec![lash_conformance::parallel_model_tool_calls_producer(vec![
+                std::sync::Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
+            ])],
             runner,
         )
     }

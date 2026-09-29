@@ -107,7 +107,7 @@ const TUPLE_VALUES_AS_JSON_ARRAYS: AgentScenarioCoverage = agent_scenario_covera
 const PROCESS_TOOL_COMPOSITION: AgentScenarioCoverage = agent_scenario_coverage!(
     agent_scenario_process_tool_composition,
     "process tool composition",
-    "Facade composition of process cancellation, subagent spawn/await, and protocol batch."
+    "Facade composition of process cancellation, subagent spawn/await, and a Promise.all tool aggregate."
 );
 
 const PLUGIN_OPERATIONS: AgentScenarioCoverage = agent_scenario_coverage!(
@@ -162,7 +162,7 @@ fn agent_scenario_process_tool_composition() -> Result<()> {
         run_agent_turn_scenario(
             AgentScenario::new(
                 PROCESS_TOOL_COMPOSITION.scenario_name,
-                "Exercise process cancellation, subagent spawn/await, and protocol batch.",
+                "Exercise process cancellation, subagent spawn/await, and a Promise.all tool aggregate.",
             )
             .responses([
                 typescript_block(
@@ -179,14 +179,14 @@ const child = await agents.spawn({
   seed: { chunk: ["a", "b"] },
   output: { len: "int" }
 });
-const batched = await tools.batch({ tool_calls: [
-  { tool: "app_lookup", parameters: {} },
-  { tool: "app_lookup", parameters: {} }
-] });
+const lookups = await Promise.all([
+  tools.app_lookup({}),
+  tools.app_lookup({})
+]);
 finish({
   cancel_status: cancelled.status,
   child_len: child.len,
-  batch_count: batched.results.length
+  lookup_count: lookups.length
 });"#,
                 ),
                 typescript_block("finish({ len: chunk.length });"),
@@ -194,11 +194,11 @@ finish({
             .expected_final_value(serde_json::json!({
                 "cancel_status": "cancelled",
                 "child_len": 2,
-                "batch_count": 2
+                "lookup_count": 2
             }))
             .tool_provider(Arc::new(AppTools))
             .install_subagents()
-            .install_process_composition(),
+            .install_process_controls(),
         )
         .await?;
         Ok(())

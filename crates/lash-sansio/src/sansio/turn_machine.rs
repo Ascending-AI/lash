@@ -417,8 +417,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     ..
                 },
             ) => self.handle_llm_complete(request, driver_state, result, text_streamed)?,
-            (PendingWork::Tools { .. }, Response::ToolResults { results, .. }) => {
-                self.handle_tool_results(results);
+            (PendingWork::Tools { expansion, .. }, Response::ToolResults { results, .. }) => {
+                self.handle_tool_results(&expansion, results);
             }
             (PendingWork::Exec { driver_state, .. }, Response::ExecResult { result, .. }) => {
                 self.handle_exec_result(driver_state, result);
@@ -800,7 +800,16 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }));
     }
 
-    fn handle_tool_results(&mut self, completed: Vec<CompletedToolCall>) {
+    fn handle_tool_results(
+        &mut self,
+        expansion: &ToolExpansionPlan,
+        completed: Vec<CompletedToolCall>,
+    ) {
+        let completed = if expansion.is_empty() {
+            completed
+        } else {
+            Arc::clone(&self.config.protocol_driver).fold_tool_results(expansion, completed)
+        };
         for outcome in &completed {
             self.emit(SessionStreamEvent::ToolCall {
                 call_id: Some(outcome.call_id.clone()),

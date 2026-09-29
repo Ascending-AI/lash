@@ -31,7 +31,9 @@ cwd = "crates/lash-restate"
 filters = ["live_effect_group_sdk_preconditions", "tests::conformance_and_poison::"]
 endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
 shards = 3
-timeout_seconds = 240
+# The barrier law drives width-64 tool groups (ADR 0116 §7.1) through five
+# producers; on the live leg it runs about 170 s.
+timeout_seconds = 360
 
 [suites.effect-group.replay]
 # Every replay failure gates the suite. Remaining held-back laws have their

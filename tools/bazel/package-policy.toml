@@ -270,7 +270,7 @@ compile_data = ["//:perf_guard_budgets"]
 # reading the budget file with `include_str!`, the way lash-perf does
 # (FIG-4068).
 [[rule]]
-packages = ["lash-internal-protocol-rlm"]
+packages = ["lash-internal-protocol-rlm", "lash-internal-protocol-standard"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["tool_batch_parallelism"]
 compile_data = ["//:perf_guard_budgets"]

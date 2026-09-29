@@ -438,7 +438,9 @@ pub(super) fn run_standard_protocol_contract(
                 let (tool_id, calls) = effects
                     .iter()
                     .find_map(|effect| match effect {
-                        lash_core::Effect::ToolCalls { id, calls } => Some((*id, calls.clone())),
+                        lash_core::Effect::ToolCalls { id, calls, .. } => {
+                            Some((*id, calls.clone()))
+                        }
                         _ => None,
                     })
                     .ok_or_else(|| {

@@ -38,7 +38,6 @@ pub(super) struct AgentScenario {
     /// scenario whose scripted program authors `processes.*` must install this factory or the
     /// cell is refused with "unknown module `processes`".
     pub(super) install_process_controls: bool,
-    pub(super) install_process_composition: bool,
     pub(super) max_turns: Option<usize>,
     /// A process the harness registers and completes before the turn, whose
     /// handle a scripted response names as [`PRECOMPLETED_PROCESS_HANDLE`].
@@ -68,7 +67,6 @@ impl AgentScenario {
             tool_provider: None,
             install_subagents: false,
             install_process_controls: false,
-            install_process_composition: false,
             max_turns: None,
             precompleted_process: None,
             seeded_attachment_writes: Vec::new(),
@@ -120,11 +118,6 @@ impl AgentScenario {
 
     pub(super) fn install_process_controls(mut self) -> Self {
         self.install_process_controls = true;
-        self
-    }
-
-    pub(super) fn install_process_composition(mut self) -> Self {
-        self.install_process_composition = true;
         self
     }
 
@@ -229,7 +222,6 @@ struct AgentScenarioSetup {
     tool_provider: Option<Arc<dyn ToolProvider>>,
     install_subagents: bool,
     install_process_controls: bool,
-    install_process_composition: bool,
     install_llm_tools: bool,
     max_turns: Option<usize>,
 }
@@ -242,7 +234,6 @@ impl AgentScenarioSetup {
             tool_provider: None,
             install_subagents: false,
             install_process_controls: false,
-            install_process_composition: false,
             install_llm_tools: false,
             max_turns: None,
         }
@@ -270,11 +261,6 @@ impl AgentScenarioSetup {
 
     fn install_process_controls(mut self, install_process_controls: bool) -> Self {
         self.install_process_controls = install_process_controls;
-        self
-    }
-
-    fn install_process_composition(mut self, install_process_composition: bool) -> Self {
-        self.install_process_composition = install_process_composition;
         self
     }
 
@@ -329,20 +315,12 @@ impl AgentScenarioSetup {
         if self.install_subagents {
             builder = builder.plugin(subagents_plugin());
         }
-        if self.install_process_controls || self.install_process_composition {
+        if self.install_process_controls {
             builder = builder.plugin(Arc::new(
                 lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                     lash_core::lifetime::session_or_starter,
                 ),
             ));
-        }
-        if self.install_process_composition {
-            builder = builder.plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
-                "agent-scenario-standard-batch",
-                lash_core::facade_support::PluginSpec::new().with_orchestrating_tool(
-                    lash_protocol_standard::standard_batch_orchestrating_tool(),
-                ),
-            )));
         }
         if self.install_llm_tools {
             builder = builder.plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()));
@@ -406,7 +384,6 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         .maybe_tool_provider(case.tool_provider.clone())
         .install_subagents(case.install_subagents)
         .install_process_controls(case.install_process_controls)
-        .install_process_composition(case.install_process_composition)
         .max_turns(case.max_turns)
         .build()
         .await?;

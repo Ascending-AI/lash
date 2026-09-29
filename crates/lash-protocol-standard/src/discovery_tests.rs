@@ -38,7 +38,8 @@ fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
         }),
     ] {
         validate_discovery(&manifests, discovery.as_ref()).unwrap();
-        let expected = if discovery.is_some() { 1 } else { 2 };
+        // The catalog's inline (or every) member, plus the `batch` sugar.
+        let expected = if discovery.is_some() { 2 } else { 3 };
         let driver = StandardProtocolDriver {
             config: StandardProtocolConfig {
                 discovery,

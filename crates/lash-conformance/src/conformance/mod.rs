@@ -104,6 +104,7 @@ pub use turn_commit_outcome::{
     cancelled as turn_commit_cancelled, completed as turn_commit_completed,
     failed as turn_commit_failed, frame_switch as turn_commit_frame_switch,
 };
+mod batch_sugar;
 mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_maintenance_outcome;
@@ -134,6 +135,7 @@ pub use artifact_store::*;
 pub use attachment_owner::*;
 pub use attachment_store::*;
 pub use await_event_cold::*;
+pub use batch_sugar::*;
 pub use cancelled_turn_withheld_input::*;
 pub use cell_binding_drift::*;
 pub use cell_orchestration_redrive::*;

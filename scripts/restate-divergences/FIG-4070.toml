@@ -1,0 +1,9 @@
+# On the replay leg every await suspends and every resumption replays the
+# journal. A tool group whose members block until their siblings start does
+# not start every member there, so these laws hang or finish with members
+# unstarted. The live leg gates all of them.
+[suites.effect-group.replay.divergent]
+"tests::conformance_and_poison::tool_group_members_start_before_any_finishes" = "the group's blocking members never all start under replay (FIG-4070)"
+"tests::conformance_and_poison::tool_group_reverse_dependency" = "the group's blocking members never all start under replay (FIG-4070)"
+"tests::conformance_and_poison::forced_serial_host_fails_the_barrier" = "the negative control's blocking members hang under replay (FIG-4070)"
+"tests::conformance_and_poison::batch_redrive_reuses_children" = "the held members never start under replay, so the crash never fires (FIG-4070)"

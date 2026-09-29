@@ -1,17 +1,19 @@
-//! The two RLM-driven registrations of the cross-tier tool-batch parallelism
-//! law (FIG-3400).
+//! The RLM-driven registrations of the barrier laws (FIG-3400, ADR 0116 §7.1)
+//! on the in-process tier: the Restate server double this crate opens.
 //!
-//! `Promise.all` over n tool calls is the product surface a user reaches for
-//! when they want the calls to overlap. It reaches `call_tool_batch` twice over,
-//! through two independently written callers: this crate's cell host bridge
-//! (`src/executor/host_bridge.rs`) when the aggregate is awaited in the cell,
-//! and the process host bridge (`lash-lashlang-runtime/src/process.rs`) when the
-//! same aggregate is the body of a started process. Both are registered here.
+//! `Promise.all` and `Promise.allSettled` over n tool calls are the product
+//! surfaces a user reaches for when they want the calls to overlap. They reach
+//! a group through two independently written callers: this crate's cell host
+//! bridge (`src/executor/host_bridge.rs`) when the aggregate is awaited in the
+//! cell, and the process host bridge (`lash-lashlang-runtime/src/process.rs`)
+//! when the same aggregate is the body of a started process. All three are
+//! registered here.
 //!
-//! The law itself, the leaves, the named-leaves failure message and every
-//! assertion live in lash-conformance; this file supplies only what that crate
-//! cannot construct — the RLM protocol plugin factory, the process-controls
-//! plugin that puts `processes.*` in a cell, and the tiers this crate can open.
+//! The laws themselves, the leaves, the named-members failure message and
+//! every assertion live in lash-conformance; this file supplies only what that
+//! crate cannot construct — the RLM protocol plugin factory with a deferred
+//! tool resolver that grants the laws' granted leaves, the process-controls
+//! plugin that puts `processes.*` in a cell, and the tier this crate can open.
 
 #![expect(
     clippy::expect_used,
@@ -44,11 +46,41 @@ fn rlm_factory(
                 .build(),
             backend,
         )
-        .with_process_lifecycle(process_lifecycle),
+        .with_process_lifecycle(process_lifecycle)
+        .with_deferred_tool_resolver(Arc::new(GrantedLeaves)),
     )
 }
 
-/// The cell-bridge producer's factories: the RLM protocol and nothing else.
+/// Grants the barrier laws' granted leaves: call-paths the catalogue does not
+/// list, which a cell reaches only through deferred tool resolution, so its
+/// group child carries a `ToolExecutionGrant`.
+struct GrantedLeaves;
+
+#[async_trait::async_trait]
+impl lash_lashlang_runtime::DeferredToolResolver for GrantedLeaves {
+    async fn resolve(
+        &self,
+        paths: &[&str],
+    ) -> std::collections::BTreeMap<String, lash_lashlang_runtime::Resolution> {
+        paths
+            .iter()
+            .map(|path| {
+                let resolution = match lash_conformance::tool_batch_granted_leaf(path) {
+                    Some((definition, source_id)) => {
+                        lash_lashlang_runtime::Resolution::Resolved(Box::new(
+                            lash_lashlang_runtime::ToolGrant::new(definition)
+                                .with_source_id(source_id),
+                        ))
+                    }
+                    None => lash_lashlang_runtime::Resolution::NotAvailable,
+                };
+                ((*path).to_string(), resolution)
+            })
+            .collect()
+    }
+}
+
+/// The cell-bridge producers' factories: the RLM protocol and nothing else.
 fn cell_bridge_factories(
     backend: &lash_core::Backend,
 ) -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
@@ -166,13 +198,6 @@ mod restate_double {
                 .expect("start the Restate server double");
         let backend = double.lash_backend();
         let host = backend.effect_host() as Arc<dyn EffectHost>;
-        let mut producer =
-            lash_conformance::rlm_promise_all_producer(cell_bridge_factories(&backend));
-        // The relay entry's nested batch rides the relay child's invocation
-        // journal, which Restate replays serially (FIG-3671): the direct
-        // entry — one parallel model response dispatched as one effect
-        // group — is the coverage this tier can carry.
-        producer.reaches_relay = false;
         // The process bridge's aggregate runs in a segment of the double's
         // process workflow, over the engine's own registry: the registry the
         // workflow writes the process's terminal into.
@@ -181,9 +206,6 @@ mod restate_double {
             process_bridge_factories(&backend),
             Arc::new(move || engine_stores.process_registry()),
         );
-        // A relay's nested batch rides its child's invocation journal, which
-        // Restate replays serially (FIG-3671), inside a process as in a turn.
-        in_process.reaches_relay = false;
         // The handler already lends the turn the controller a Restate host
         // hands it; the task proxy models that shape for in-process tiers.
         in_process.through_task_proxy = false;
@@ -192,7 +214,14 @@ mod restate_double {
             "restate-double",
             host,
             Arc::clone(double.engine_stores()),
-            vec![producer, in_process],
+            vec![
+                lash_conformance::rlm_promise_all_producer(cell_bridge_factories(&backend), true),
+                lash_conformance::rlm_promise_all_settled_producer(
+                    cell_bridge_factories(&backend),
+                    true,
+                ),
+                in_process,
+            ],
             Arc::new(DoubleTurnRunner { backend: double })
                 as Arc<dyn lash_conformance::ConformanceTurnRunner>,
         )
@@ -209,7 +238,8 @@ mod restate_double {
                 .expect("start the Restate server double");
         let backend = double.lash_backend();
         let host = backend.effect_host() as Arc<dyn EffectHost>;
-        let producer = lash_conformance::rlm_promise_all_producer(cell_bridge_factories(&backend));
+        let producer =
+            lash_conformance::rlm_promise_all_producer(cell_bridge_factories(&backend), false);
         (
             double.clone(),
             "restate-double",
@@ -255,7 +285,9 @@ mod restate_double {
             stores,
             Arc::new(DoubleTurnRunner { backend: double })
                 as Arc<dyn lash_conformance::ConformanceTurnRunner>,
-            &lash_conformance::parallel_model_tool_calls_producer(),
+            &lash_conformance::parallel_model_tool_calls_producer(
+                lash_core::testing::test_standard_protocol_factories(),
+            ),
             child.width,
             child.catalog,
         )

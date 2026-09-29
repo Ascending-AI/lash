@@ -34,6 +34,57 @@ pub struct CompletedToolCall {
     pub replay: Option<ProviderReplayMeta>,
 }
 
+/// How a step's flat tool slots fold back into the calls its response made.
+///
+/// A protocol that offers call sugar (the standard protocol's `batch`)
+/// expands each sugared call into executable slots of the step's one tool
+/// group, and records here how their results fold back into one result per
+/// sugared call. The plan is a pure function of the recorded response and the
+/// turn's admitted protocol configuration, so a replay recomputes it rather
+/// than reading it back. Empty when the response held no sugar.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, serde::Deserialize)]
+pub struct ToolExpansionPlan {
+    pub wrappers: Vec<ExpandedWrapper>,
+}
+
+impl ToolExpansionPlan {
+    pub fn is_empty(&self) -> bool {
+        self.wrappers.is_empty()
+    }
+}
+
+/// One sugared call of the response and the slots its members took.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct ExpandedWrapper {
+    /// Position of the wrapper call among the response's dispatched calls.
+    pub source_position: u32,
+    /// The provider's call id and replay metadata, kept for the transcript.
+    pub call_id: String,
+    pub tool_name: String,
+    pub args: Value,
+    pub replay: Option<ProviderReplayMeta>,
+    /// One row per member, in member order.
+    pub rows: Vec<ExpandedRow>,
+}
+
+/// Where one member of a sugared call went.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExpandedRow {
+    /// The member runs in flat slot `slot` of the step's tool group.
+    Slot {
+        member_index: u32,
+        tool: String,
+        slot: u32,
+    },
+    /// The member was refused before the group opened.
+    Refused {
+        member_index: u32,
+        tool: String,
+        error: Value,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct TurnCause {
     pub id: String,
@@ -181,7 +232,13 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
     },
     ToolCalls {
         id: EffectId,
+        /// The flat executable slots of the step's one tool group.
         calls: Vec<PendingToolCall>,
+        /// How the slots fold back into the response's calls. The host runs
+        /// `calls` and answers one result per slot, in slot order; the
+        /// machine folds them.
+        #[serde(default, skip_serializing_if = "ToolExpansionPlan::is_empty")]
+        expansion: ToolExpansionPlan,
     },
     ExecCode {
         id: EffectId,
@@ -232,9 +289,14 @@ impl<M: TurnProtocol> Clone for Effect<M> {
                 id: *id,
                 request: Arc::clone(request),
             },
-            Self::ToolCalls { id, calls } => Self::ToolCalls {
+            Self::ToolCalls {
+                id,
+                calls,
+                expansion,
+            } => Self::ToolCalls {
                 id: *id,
                 calls: calls.clone(),
+                expansion: expansion.clone(),
             },
             Self::ReportToolCalls { completed } => Self::ReportToolCalls {
                 completed: completed.clone(),
@@ -402,7 +464,12 @@ pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
         driver_state: Option<M::DriverState>,
     },
     Tools {
+        /// The flat executable slots of the step's one tool group.
         calls: Vec<PendingToolCall>,
+        /// How the slots fold back into the response's calls. Empty when the
+        /// response held no sugar, and then absent from the encoding.
+        #[serde(default, skip_serializing_if = "ToolExpansionPlan::is_empty")]
+        expansion: ToolExpansionPlan,
     },
     Exec {
         language: String,
@@ -426,8 +493,9 @@ impl<M: TurnProtocol> Clone for PendingWork<M> {
                 request: Arc::clone(request),
                 driver_state: driver_state.clone(),
             },
-            Self::Tools { calls } => Self::Tools {
+            Self::Tools { calls, expansion } => Self::Tools {
                 calls: calls.clone(),
+                expansion: expansion.clone(),
             },
             Self::Exec {
                 language,
@@ -459,9 +527,10 @@ impl<M: TurnProtocol> PendingWork<M> {
                 id,
                 request: Arc::clone(request),
             },
-            Self::Tools { calls } => Effect::ToolCalls {
+            Self::Tools { calls, expansion } => Effect::ToolCalls {
                 id,
                 calls: calls.clone(),
+                expansion: expansion.clone(),
             },
             Self::Exec { language, code, .. } => Effect::ExecCode {
                 id,
@@ -716,6 +785,22 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
         llm_response: LlmResponse,
         text_streamed: bool,
     ) -> Vec<DriverAction<M>>;
+    /// Fold the step's per-slot results back into one result per call of the
+    /// response, as `plan` records. Runs before anything is appended or
+    /// emitted, so only folded calls reach the stream, the transcript and
+    /// [`Self::handle_tool_results`]. A driver that never starts tool work
+    /// with a non-empty plan keeps the default, which returns the slots.
+    fn fold_tool_results(
+        &self,
+        plan: &ToolExpansionPlan,
+        completed: Vec<CompletedToolCall>,
+    ) -> Vec<CompletedToolCall> {
+        debug_assert!(
+            plan.is_empty(),
+            "a driver that expands tool calls must fold them"
+        );
+        completed
+    }
     fn handle_tool_results(
         &self,
         ctx: DriverContextView<'_, M>,

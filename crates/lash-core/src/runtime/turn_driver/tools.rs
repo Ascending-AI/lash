@@ -106,9 +106,12 @@ impl RuntimeTurnDriver<'_> {
         }
 
         if !prepared_entries.is_empty() {
-            // ADR 0099: the turn's tool calls open as a durable effect group
+            // ADR 0099: the turn's tool calls open as one durable effect group
             // of `ToolInvocation` children; a deferred leaf parks inside its
-            // own child driver.
+            // own child driver. The calls are the step's flat slots: native
+            // calls and the members the protocol expanded from its sugar
+            // (ADR 0116 §2) alike, so every one starts before any is awaited.
+            // A step with no slot left opens no group.
             let group_invocation = crate::runtime::causal::turn_tool_group_invocation(
                 self.scoped_effect_controller.execution_scope(),
                 &self.session_id,

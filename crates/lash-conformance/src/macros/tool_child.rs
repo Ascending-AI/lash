@@ -401,45 +401,6 @@ macro_rules! __turn_runner_register {
     };
 }
 
-/// Register the cross-tier tool-batch parallelism law (FIG-3400).
-///
-/// The fixture hands back a guard, a session prefix, the tier's effect host,
-/// the store set under test, the product producers reachable on that tier and
-/// the tier's
-/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner). Every producer
-/// runs the same law, so "this tier overlaps a tool batch" is one statement
-/// per surface and not a family of look-alike tests. A handler-bound tier
-/// supplies a runner that drives each turn inside a live handler.
-#[macro_export]
-macro_rules! tool_batch_parallelism_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::tool_batch_parallelism_tests!(@law [$(#[$attr])*] $fixture;
-            (tool_batch_cross_tier_parallelism, "tool-batch-cross-tier-parallelism"));
-    };
-    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
-        $($attr)*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-        async fn $law() {
-            let (_guard, prefix, host, stores, producers, runner) = $fixture;
-            assert!(
-                !producers.is_empty(),
-                "a tier registers at least one product producer, or the law \
-                 runs on nothing"
-            );
-            for producer in producers {
-                $crate::registration_macro_support::$law(
-                    prefix,
-                    std::sync::Arc::clone(&host),
-                    std::sync::Arc::clone(&stores),
-                    std::sync::Arc::clone(&runner),
-                    producer,
-                )
-                .await;
-            }
-        }
-    };
-}
-
 /// Register the batch crash-redrive law (FIG-4064): a turn crashed while its
 /// batch holds one settled and one in-flight member recovers without running
 /// the settled member again.

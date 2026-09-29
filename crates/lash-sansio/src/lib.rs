@@ -114,10 +114,11 @@ pub use prompt::{
 pub use redacted::Redacted;
 pub use sansio::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
-    ContextProjector, DriverAction, DriverContextView, Effect, EffectId, LlmCallError,
-    PendingToolCall, PendingWork, ProjectorContext, ProtocolDriverHandle, Response,
-    TURN_CHECKPOINT_SCHEMA_VERSION, TurnCause, TurnCheckpoint, TurnCheckpointRestoreError,
-    TurnMachine, TurnMachineConfig, TurnProtocol, UnitTurnProtocol, render_turn_causes_prompt,
+    ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExpandedRow,
+    ExpandedWrapper, LlmCallError, PendingToolCall, PendingWork, ProjectorContext,
+    ProtocolDriverHandle, Response, TURN_CHECKPOINT_SCHEMA_VERSION, ToolExpansionPlan, TurnCause,
+    TurnCheckpoint, TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig, TurnProtocol,
+    UnitTurnProtocol, render_turn_causes_prompt,
 };
 pub use schema_contract::{
     OmissionNullPath, OmissionNullPathSegment, ProjectionMode, ProviderSchemaCapabilities,

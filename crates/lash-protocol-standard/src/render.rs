@@ -89,20 +89,10 @@ pub struct StandardRenderConfig {
 }
 
 impl StandardRenderConfig {
+    /// The builtin layer under a host's and a turn's patches: the render
+    /// defaults, with no per-tool overrides.
     pub fn builtin() -> Self {
-        Self {
-            per_tool: BTreeMap::from([(
-                ToolId::new("tool:batch"),
-                ToolRenderPatch {
-                    value: RenderParamsPatch {
-                        max_depth: Some(6),
-                        ..RenderParamsPatch::default()
-                    },
-                    ..ToolRenderPatch::default()
-                },
-            )]),
-            ..Self::default()
-        }
+        Self::default()
     }
 }
 
@@ -631,13 +621,6 @@ mod tests {
         assert_eq!(
             resolved.for_tool(&id).authored_view,
             AuthoredViewPolicy::Ignore
-        );
-        assert_eq!(
-            resolved
-                .for_tool(&ToolId::new("tool:batch"))
-                .value
-                .max_depth,
-            6
         );
         assert!(
             resolve(

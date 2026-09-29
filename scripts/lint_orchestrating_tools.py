@@ -29,9 +29,7 @@ ALIASED_FORBIDDEN = {
 }
 
 ENTRYPOINT = re.compile(r"\basync\s+fn\s+execute_orchestration(?:_by_id)?\s*\(")
-EXPECTED_ENTRYPOINTS = {
-    Path("crates/lash-protocol-standard/src/lib.rs"): 1,
-}
+EXPECTED_ENTRYPOINTS: dict[Path, int] = {}
 RAW_STRING_PREFIX = re.compile(r"b?r(#*)\"")
 IDENTIFIER_CHAR = re.compile(r"[A-Za-z0-9_]")
 USE = re.compile(r"\buse\s+([^;]+);")

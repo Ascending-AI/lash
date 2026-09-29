@@ -393,6 +393,75 @@ lash_conformance::declared_start_tests!(
     }
 );
 
+// The barrier laws (FIG-3400, ADR 0116 §7.1) on live Restate. Each
+// scenario's turn runs in a live handler, and every member of its step's tool
+// group — native calls, `batch` members and `Promise.all` leaves alike — is a
+// child invocation of one durable effect group. The process-bridge producer
+// drives its worker in the test process and stays on the in-process tiers.
+lash_conformance::tool_batch_parallelism_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        // Restate state outlives a run: each run names its own sessions.
+        let prefix: &'static str =
+            Box::leak(format!("restate-tool-group-{}", harness.run_nonce()).into_boxed_str());
+        let standard = || -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
+            vec![Arc::new(
+                lash_protocol_standard::StandardProtocolPluginFactory::new(),
+            )]
+        };
+        (
+            harness,
+            prefix,
+            effect_host,
+            stores,
+            vec![
+                lash_conformance::batch_sugar_producer(standard()),
+                lash_conformance::batch_wrappers_beside_native_calls_producer(standard()),
+                lash_conformance::parallel_model_tool_calls_producer(standard()),
+                lash_conformance::rlm_promise_all_producer(vec![drift_law_rlm_factory()], false),
+                lash_conformance::rlm_promise_all_settled_producer(
+                    vec![drift_law_rlm_factory()],
+                    false,
+                ),
+            ],
+            turn_runner,
+        )
+    }
+);
+
+// The `batch` sugar laws (ADR 0116 §7.2) on live Restate.
+lash_conformance::batch_sugar_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        // Restate state outlives a run: each run names its own sessions.
+        let prefix: &'static str =
+            Box::leak(format!("restate-batch-sugar-{}", harness.run_nonce()).into_boxed_str());
+        (
+            harness,
+            prefix,
+            effect_host,
+            stores,
+            turn_runner,
+            lash_conformance::BatchSugarFactories {
+                enabled: vec![Arc::new(
+                    lash_protocol_standard::StandardProtocolPluginFactory::new(),
+                )],
+                disabled: super::tool_batch_parallelism_on_the_double::withheld_factories(),
+            },
+        )
+    }
+);
+
 // FIG-3547's segment re-drive law on the live endpoint: the segments run in
 // the endpoint's `LashProcessWorkflow`, a crash is a failed attempt Restate
 // delivers again, and a lost substrate is the invocation killed and purged
