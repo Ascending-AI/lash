@@ -28,31 +28,25 @@ impl StoreTestSupport for SqliteStore {
         self.conn
             .write(move |tx| {
                 let sql = &crate::session_sql::session_sql().graph_sqlite;
-                match corruption {
-                    GraphRowCorruption::DeleteRow => {
-                        crate::conn::cached_execute(
-                            tx,
-                            sql.delete_by_id_for_testing.sql(),
-                            params![node_id.as_str()],
-                        )?;
-                    }
-                    GraphRowCorruption::SetParent(parent) => {
-                        crate::conn::cached_execute(
-                            tx,
-                            sql.set_parent_for_testing.sql(),
-                            params![
-                                node_id.as_str(),
-                                parent.as_ref().map(lash_core_execution::NodeId::as_str)
-                            ],
-                        )?;
-                    }
-                    GraphRowCorruption::SetFramePointer(frame) => {
-                        crate::conn::cached_execute(
-                            tx,
-                            sql.set_frame_pointer_for_testing.sql(),
-                            params![node_id.as_str(), frame.as_str()],
-                        )?;
-                    }
+                let changed = match corruption {
+                    GraphRowCorruption::DeleteRow => crate::conn::cached_execute(
+                        tx,
+                        sql.delete_by_id_for_testing.sql(),
+                        params![node_id.as_str()],
+                    )?,
+                    GraphRowCorruption::SetParent(parent) => crate::conn::cached_execute(
+                        tx,
+                        sql.set_parent_for_testing.sql(),
+                        params![
+                            node_id.as_str(),
+                            parent.as_ref().map(lash_core_execution::NodeId::as_str)
+                        ],
+                    )?,
+                    GraphRowCorruption::SetFramePointer(frame) => crate::conn::cached_execute(
+                        tx,
+                        sql.set_frame_pointer_for_testing.sql(),
+                        params![node_id.as_str(), frame.as_str()],
+                    )?,
                     GraphRowCorruption::SetBodyBytes(bytes) => {
                         let bytes =
                             i64::try_from(bytes).map_err(|_| rusqlite::Error::InvalidQuery)?;
@@ -60,7 +54,7 @@ impl StoreTestSupport for SqliteStore {
                             tx,
                             sql.set_body_bytes_for_testing.sql(),
                             params![node_id.as_str(), bytes],
-                        )?;
+                        )?
                     }
                     GraphRowCorruption::SetPayloadKindToPlugin => {
                         let (parent, body): (Option<String>, String) = tx.query_row(
@@ -88,8 +82,11 @@ impl StoreTestSupport for SqliteStore {
                             tx,
                             sql.set_body_for_testing.sql(),
                             params![node_id.as_str(), body, bytes],
-                        )?;
+                        )?
                     }
+                };
+                if changed != 1 {
+                    return Err(rusqlite::Error::QueryReturnedNoRows);
                 }
                 Ok(())
             })

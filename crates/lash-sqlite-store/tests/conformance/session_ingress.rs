@@ -1,7 +1,7 @@
 //! The session-ingress store laws (ADR 0101 §16) on SQLite.
 
 use lash_core::store::{ObligationKind, TurnInputAdmission};
-use lash_core::{SessionCatalogStore as _, SessionCommitStore as _, TurnInputStore as _};
+use lash_core::{SessionCatalogStore as _, TurnInputStore as _};
 use lash_core_execution::StoreSet as _;
 
 use super::SUBSTRATE;
