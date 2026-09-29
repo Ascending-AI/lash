@@ -269,7 +269,7 @@ impl LashRuntime {
             turn_graph_appends,
         );
         turn_pipeline.apply_prepared_messages(&prepared.messages);
-        emit_terminal_sequence(
+        hold_terminal_sequence(
             &mut recorded_assembly,
             observer,
             &mut turn_observation_cursor(scoped_effect_controller, &trace_turn_id, "terminal"),

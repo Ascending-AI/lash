@@ -954,7 +954,7 @@ impl LashRuntime {
         // Only a recorded cancellation reaches this finisher; lash's own
         // evidence stands in for none (FIG-3672 P9).
         let evidence = turn_cancel.unwrap_or_else(|| turn_control.internal_evidence(None));
-        emit_terminal_sequence(
+        hold_terminal_sequence(
             &mut recorded_assembly,
             observer,
             &mut turn_observation_cursor(
@@ -1047,7 +1047,7 @@ impl LashRuntime {
             .await?,
         );
         let mut recorded_assembly = RecordedTurnAssembly::default();
-        emit_terminal_sequence(
+        hold_terminal_sequence(
             &mut recorded_assembly,
             observer,
             &mut turn_observation_cursor(&scoped_effect_controller, &trace_turn_id, "terminal"),
