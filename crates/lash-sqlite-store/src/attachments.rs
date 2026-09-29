@@ -40,8 +40,8 @@ lash_store_sql::statements! {
                            WHERE deleted.session_id = manifest.session_id)
                AND (
                    (manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
-                   OR (manifest.owner_kind = 'turn' AND manifest.owner_id IS NOT NULL)
-                   OR (manifest.owner_kind = 'process'
+                   OR ({{turn_attachment_owner(manifest.owner_kind)}} AND manifest.owner_id IS NOT NULL)
+                   OR ({{process_attachment_owner(manifest.owner_kind)}}
                        AND length(manifest.owner_id) = 34
                        AND substr(manifest.owner_id, 1, 2) = 'p_'
                        AND substr(manifest.owner_id, 3) NOT GLOB '*[^0-9a-f]*'
@@ -226,15 +226,24 @@ fn aged_forget_sql(process_registry_attached: bool) -> &'static str {
     &GUARDED[usize::from(process_registry_attached)]
 }
 
-fn decodable_owner_sql() -> &'static str {
-    "(manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
-      OR (manifest.owner_kind = 'turn' AND manifest.owner_id IS NOT NULL)
-      OR (manifest.owner_kind = 'process'
+fn decodable_owner_sql() -> String {
+    let turn = lash_core_execution::store_backend_support::turn_attachment_owner_predicate_sql(
+        "manifest.owner_kind",
+    );
+    let process =
+        lash_core_execution::store_backend_support::process_attachment_owner_predicate_sql(
+            "manifest.owner_kind",
+        );
+    format!(
+        "(manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
+      OR ({turn} AND manifest.owner_id IS NOT NULL)
+      OR ({process}
           AND length(manifest.owner_id) = 34
           AND substr(manifest.owner_id, 1, 2) = 'p_'
           AND substr(manifest.owner_id, 3) NOT GLOB '*[^0-9a-f]*'
           AND substr(manifest.owner_id, 15, 1) = '7'
           AND substr(manifest.owner_id, 19, 1) IN ('8', '9', 'a', 'b'))"
+    )
 }
 
 /// Adopt stored references under the boundary transaction.

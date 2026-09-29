@@ -31,8 +31,8 @@ lash_store_sql::statements! {
                            WHERE deleted.session_id = manifest.session_id)
                AND (
                    (manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
-                   OR (manifest.owner_kind = 'turn' AND manifest.owner_id IS NOT NULL)
-                   OR (manifest.owner_kind = 'process'
+                   OR ({{turn_attachment_owner(manifest.owner_kind)}} AND manifest.owner_id IS NOT NULL)
+                   OR ({{process_attachment_owner(manifest.owner_kind)}}
                        AND manifest.owner_id ~ '^p_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$')
                )
                AND (manifest.committed_at_ms IS NULL OR NOT EXISTS (
@@ -186,11 +186,20 @@ pub(crate) fn forget_aged_uncommitted_attachment_intents_sql(
     &GUARDED[usize::from(process_registry_shared)]
 }
 
-fn decodable_owner_sql() -> &'static str {
-    "(manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
-      OR (manifest.owner_kind = 'turn' AND manifest.owner_id IS NOT NULL)
-      OR (manifest.owner_kind = 'process'
-          AND manifest.owner_id ~ '^p_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$')"
+fn decodable_owner_sql() -> String {
+    let turn = lash_core_execution::store_backend_support::turn_attachment_owner_predicate_sql(
+        "manifest.owner_kind",
+    );
+    let process =
+        lash_core_execution::store_backend_support::process_attachment_owner_predicate_sql(
+            "manifest.owner_kind",
+        );
+    format!(
+        "(manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
+      OR ({turn} AND manifest.owner_id IS NOT NULL)
+      OR ({process}
+          AND manifest.owner_id ~ '^p_[0-9a-f]{{12}}7[0-9a-f]{{3}}[89ab][0-9a-f]{{15}}$')"
+    )
 }
 
 /// Advisory-lock namespace for the attachment GC fence. Both halves of the
