@@ -238,50 +238,64 @@ impl SessionDriver for ScriptedDriver {
         &self,
         _controller: ScopedEffectController<'_>,
         admitted: Admitted,
-    ) -> Result<RootOutcome, DriveAbort> {
-        let root = admitted.root().clone();
-        let script = self.scripts.lock().unwrap().get(item_of(&root)).copied();
-        {
-            let mut ledgers = self.ledgers.lock().unwrap();
-            let ledger = ledgers.entry(admitted.session().clone()).or_default();
-            ledger.root_runs += 1;
-            match script {
-                Some(RootScript::Refuse) => {
-                    return Err(DriveAbort::Refused(runtime_error(format!(
-                        "root {root} is refused"
-                    ))));
+    ) -> lash_core::engine::RootRunEnd {
+        lash_core::engine::RootRunEnd::owing_nothing(
+            async {
+                let root = admitted.root().clone();
+                let script = self.scripts.lock().unwrap().get(item_of(&root)).copied();
+                {
+                    let mut ledgers = self.ledgers.lock().unwrap();
+                    let ledger = ledgers.entry(admitted.session().clone()).or_default();
+                    ledger.root_runs += 1;
+                    match script {
+                        Some(RootScript::Refuse) => {
+                            return Err(DriveAbort::Refused(runtime_error(format!(
+                                "root {root} is refused"
+                            ))));
+                        }
+                        Some(RootScript::Supersede) => {
+                            return Ok(RootOutcome::Refused {
+                                root,
+                                verdict: SealVerdict::Superseded { epoch: 2 },
+                            });
+                        }
+                        Some(RootScript::Cede) => return Ok(RootOutcome::Ceded { root }),
+                        Some(RootScript::RefusedRetryable) => {
+                            self.scripts.lock().unwrap().remove(item_of(&root));
+                            return Err(DriveAbort::Refused(RuntimeError::new(
+                                RuntimeErrorCode::SessionExecutionLaneBusy,
+                                format!("root {root} met the session lane still held"),
+                            )));
+                        }
+                        None => {}
+                    }
+                    // Idempotent, like a commit fenced by its admission: a redrive of
+                    // a root that already consumed its item consumes nothing.
+                    if ledger.open.front().map(String::as_str) == Some(root.as_str()) {
+                        ledger.open.pop_front();
+                        ledger.consumed.push(root.as_str().to_owned());
+                    }
                 }
-                Some(RootScript::Supersede) => {
-                    return Ok(RootOutcome::Refused {
-                        root,
-                        verdict: SealVerdict::Superseded { epoch: 2 },
-                    });
-                }
-                Some(RootScript::Cede) => return Ok(RootOutcome::Ceded { root }),
-                Some(RootScript::RefusedRetryable) => {
-                    self.scripts.lock().unwrap().remove(item_of(&root));
-                    return Err(DriveAbort::Refused(RuntimeError::new(
-                        RuntimeErrorCode::SessionExecutionLaneBusy,
-                        format!("root {root} met the session lane still held"),
-                    )));
-                }
-                None => {}
+                Ok(RootOutcome::Committed {
+                    outcome: lash_core::facade_support::TurnOutcome::Finished(
+                        lash_core::facade_support::TurnFinish::AssistantMessage {
+                            text: format!("answered {}", root.as_str()),
+                        },
+                    ),
+                    root,
+                })
             }
-            // Idempotent, like a commit fenced by its admission: a redrive of
-            // a root that already consumed its item consumes nothing.
-            if ledger.open.front().map(String::as_str) == Some(root.as_str()) {
-                ledger.open.pop_front();
-                ledger.consumed.push(root.as_str().to_owned());
-            }
-        }
-        Ok(RootOutcome::Committed {
-            outcome: lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::AssistantMessage {
-                    text: format!("answered {}", root.as_str()),
-                },
-            ),
-            root,
-        })
+            .await,
+        )
+    }
+
+    async fn close_root(
+        &self,
+        _controller: lash_core::ScopedEffectController<'_>,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::DriveAbort> {
+        Ok(())
     }
 }
 

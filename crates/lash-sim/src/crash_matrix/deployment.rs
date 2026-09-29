@@ -341,8 +341,20 @@ impl SessionDriver for DriverProxy {
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         admitted: lash_core::engine::Admitted,
-    ) -> Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
+    ) -> lash_core::engine::RootRunEnd {
         self.live().await.run_root(controller, admitted).await
+    }
+
+    async fn close_root(
+        &self,
+        controller: lash_core::ScopedEffectController<'_>,
+        session: &lash_core::SessionId,
+        root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::DriveAbort> {
+        self.live()
+            .await
+            .close_root(controller, session, root)
+            .await
     }
 }
 

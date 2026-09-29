@@ -99,9 +99,19 @@ The scope-close ledger (`parent_end_plans`) holds one row per closed scope.
 - **Process.** A process's terminal completion writes `Process(id)` in its
   own transaction.
 - **Turn root.** A root's `Turn(root)` closes only after the root's terminal
-  evidence is durable. The drive's recorded `CloseRootScope` step does this
+  evidence is durable. The root's recorded `CloseRootScope` step does this
   through the process registry's `RegistryScopeClose` adapter (R9). A frame
   switch writes no evidence, so the root's children survive it (FIG-3554).
+  The in-process drive records the step in the root's journal before it
+  admits anything else. An engine that splits the drive over its own
+  handlers records it in a journal of its own, which the root's run starts
+  once its report is handed over (Restate: the `LashTurn` workflow's
+  `close` handler). The session's next admission never waits on it: the
+  root is finished at its terminal write (ADR 0101), and nothing the next
+  root does reads whether the previous root's scope is closed yet, since a
+  start reaches only its own root's scope, the session and its process
+  ancestors (§3). The owed close changes only how long the previous root's
+  `Until` children live before their cancel (FIG-4035).
 - **Session.** `Session(s)` closes through the session's `CloseSession`
   control intent, the one writer of that row (R10). The intent's engine half
   closes the session's open roots and then the session. Deleting the
@@ -112,9 +122,12 @@ no terminal evidence (L-C1). A crash between the terminal commit and the
 close leaves the evidence durable and the scope open. The root's terminal
 transaction arms the root row's scope-close obligation (ADR 0109), and the
 close's own transaction delivers it. An engine that redelivers the
-execution replays the root to its recorded close step; otherwise the relay
+execution replays the root to its recorded close step, or to the start of
+the close's own journal, which it then redelivers; otherwise the relay
 takes the due obligation and closes it. A delivered close is never
-attempted again, and no pass rescans terminal roots.
+attempted again, and no pass rescans terminal roots. A close that runs
+again after its delivery, because its journal lost the result, finds the
+obligation settled and delivers nothing.
 
 Applying the close row's plan then owes each process living `Until` the
 closed scope its cancel: the scope owner applies it when it can deliver, and

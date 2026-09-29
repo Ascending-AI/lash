@@ -157,8 +157,8 @@ pub use process_attach::RestateProcessAttachRequest;
 pub use serve::serve_endpoint;
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use session_driver::{
-    LASH_SESSION_DRIVE_VERSION, RestateSessionDriveRequest, RestateSessionDriverSlot,
-    RestateSessionWork, RestateTurnDriveRequest, turn_workflow_key,
+    LASH_SESSION_DRIVE_VERSION, RestateRootCloseRequest, RestateSessionDriveRequest,
+    RestateSessionDriverSlot, RestateSessionWork, RestateTurnDriveRequest, turn_workflow_key,
 };
 pub use turn::RestateTurnAttach;
 pub use turn_handler::{

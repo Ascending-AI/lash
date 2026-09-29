@@ -22,9 +22,30 @@ use crate::{
     RuntimeEffectOutcome, RuntimeErrorCode, SessionId, StoreError, TurnId,
 };
 
+/// Where a close reads the root's terminal evidence: the session's history
+/// store when it runs on the session's runtime, and the deployment's catalog
+/// when an engine runs it beside the session's next root (FIG-4035).
+pub(super) enum TerminalSource {
+    Session(Arc<dyn crate::store::RuntimePersistence>),
+    Catalog(Arc<dyn crate::SessionStoreFactory>),
+}
+
+impl TerminalSource {
+    async fn root_terminal(
+        &self,
+        session: &SessionId,
+        root: &TurnId,
+    ) -> Result<Option<crate::store::RootTerminal>, StoreError> {
+        match self {
+            Self::Session(store) => store.root_terminal(session, root).await,
+            Self::Catalog(catalog) => catalog.root_terminal(session, root).await,
+        }
+    }
+}
+
 /// The first execution of one `CloseRootScope` step.
 pub(super) struct CloseRootScopeRunner {
-    pub(super) store: Arc<dyn crate::store::RuntimePersistence>,
+    pub(super) terminals: TerminalSource,
     pub(super) session: SessionId,
     pub(super) root: TurnId,
     pub(super) sink: Arc<dyn ScopeCloseSink>,
@@ -66,7 +87,7 @@ impl RuntimeEffectLocalRunner for CloseRootScopeRunner {
             ));
         }
         let terminal = self
-            .store
+            .terminals
             .root_terminal(&self.session, &self.root)
             .await
             .map_err(|error| attempt_fault("root terminal read", error))?

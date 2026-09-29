@@ -22,7 +22,11 @@
 //!   controller scoped to [`drive_root_scope`], under the retry contract of a
 //!   turn handler ([`turn_handler_options`](crate::turn_handler_options)): a
 //!   parked root fails its attempt retryably and pauses after the budget, so
-//!   its journal is kept for a restored build.
+//!   its journal is kept for a restored build. A root that ended owes its
+//!   scope close: `run` sends it to the same key's shared `close` handler,
+//!   which records the kernel's `CloseRootScope` step on a journal of its
+//!   own, and returns. `LashSession` admits the next root beside the close
+//!   rather than after it (FIG-4035).
 //!
 //! The kernel owns what a drive admits and how a root runs; these handlers
 //! only give each step its journal. The root's claim step repairs orphaned
@@ -76,7 +80,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use lash_core::engine::{
     AdmitVerdict, Admitted, BuildGeneration, DriveAbort, DriveLoop, DriveOutcome, DriveRequest,
-    DriveRequestId, DriveStop, MAX_ROOTS_PER_DRIVE, RootOutcome, drive_admission_scope,
+    DriveRequestId, DriveStop, MAX_ROOTS_PER_DRIVE, RootOutcome, RootRunEnd, drive_admission_scope,
     drive_continuation_request, drive_root_scope,
 };
 use lash_core::{SessionDriver, SessionId, SessionWorkEngine};
@@ -120,11 +124,16 @@ mod asks;
 /// Generation 4 changed in place under the pre-1.0 version freeze
 /// (FIG-3980): neither handler journals a separate generation sentinel step;
 /// its generation rides the first recorded step, admission 0 or the root's
-/// start marker.
+/// start marker. It changed in place again for FIG-4035: `LashTurn`'s `run`
+/// journals a send to its key's `close` handler where it recorded the root's
+/// `CloseRootScope` step, and `close` records that step.
 pub const LASH_SESSION_DRIVE_VERSION: u32 = 4;
 
 /// The drive handler's name on `LashSession`.
 const DRIVE_HANDLER: &str = "drive";
+
+/// The `LashTurn` handler `run` sends its root's owed scope close to.
+const CLOSE_HANDLER: &str = "close";
 
 /// The `LashTurn` state entry `run` records the root's outcome under once it
 /// ended, terminally included; `outcome` reads it back.
@@ -160,6 +169,23 @@ pub struct RestateTurnDriveRequest {
     /// its recorded claim was admitted on, and a replay reads that claim back;
     /// adopting that head still reads live store state (FIG-3824).
     pub admitted: Admitted,
+}
+
+/// The request `LashTurn/{session}:{root}/close` runs: the scope close the
+/// key's `run` owed once its root's terminal evidence was durable
+/// (FIG-4035).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestateRootCloseRequest {
+    /// [`LASH_SESSION_DRIVE_VERSION`] of the run that owed the close.
+    #[serde(default = "unstamped_drive_version")]
+    pub drive_version: u32,
+    /// The drain generation of the build whose run owed the close: a close
+    /// sent on a generation lane names that lane's generation.
+    #[serde(default)]
+    pub sender_generation: Option<BuildGeneration>,
+    /// The logical root whose scope closes: the key's own root, or, for a
+    /// follow-on recovery, the root that owed the follow-on.
+    pub root: lash_core::TurnId,
 }
 
 /// The `LashTurn` workflow key of `root` in `session`: one workflow per
@@ -271,8 +297,17 @@ impl SessionDriver for InstalledSessionDriver {
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         admitted: Admitted,
-    ) -> Result<RootOutcome, DriveAbort> {
+    ) -> RootRunEnd {
         self.driver.run_root(controller, admitted).await
+    }
+
+    async fn close_root(
+        &self,
+        controller: lash_core::ScopedEffectController<'_>,
+        session: &SessionId,
+        root: &lash_core::TurnId,
+    ) -> Result<(), DriveAbort> {
+        self.driver.close_root(controller, session, root).await
     }
 }
 
@@ -747,6 +782,13 @@ pub trait LashTurn {
     /// lash outcome. `None` while `run` has not ended.
     #[shared]
     async fn outcome() -> HandlerResult<Json<Option<RootOutcome>>>;
+
+    /// The root's scope close, which `run` sends here once the root's
+    /// terminal evidence is durable (FIG-4035): shared, and on a journal of
+    /// its own, so neither `run` nor the session's drive waits on it and the
+    /// session's next root is admitted beside it.
+    #[shared]
+    async fn close(request: Json<RestateRootCloseRequest>) -> HandlerResult<()>;
 }
 
 /// The `LashSession` object over the deployment's driver slot, journaling
@@ -931,6 +973,30 @@ impl LashTurn for LashTurnImpl {
             .await?
             .map(|Json(outcome)| outcome);
         Ok(Json(recorded))
+    }
+
+    async fn close(
+        &self,
+        ctx: SharedWorkflowContext<'_>,
+        Json(input): Json<RestateRootCloseRequest>,
+    ) -> HandlerResult<()> {
+        // The generation gate precedes every journaled command.
+        if input.drive_version != LASH_SESSION_DRIVE_VERSION {
+            return Err(retired_generation(
+                LashService::TurnDriver,
+                input.drive_version,
+            ));
+        }
+        close_root_journal(
+            &self.slot,
+            &self.authority_id,
+            &self.build_generation,
+            &self.route,
+            ctx,
+            input.sender_generation.as_ref(),
+            &input.root,
+        )
+        .await
     }
 }
 
@@ -1193,9 +1259,12 @@ async fn run_root_journal(
         .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
         .map_err(refused_scope)?;
     let root = admitted.root().clone();
-    let (ended, result) = match sentinel.guard(driver.run_root(scoped, admitted)).await? {
+    let RootRunEnd { result, owed_close } =
+        sentinel.guard(driver.run_root(scoped, admitted)).await?;
+    let (ended, result) = match result {
         Ok(outcome) => (outcome.clone(), Ok(outcome)),
-        // A retryable end records nothing: the run is not over.
+        // A retryable end records nothing: the run is not over, and its
+        // retry owes the root's close again.
         Err(abort @ (DriveAbort::Retry(_) | DriveAbort::Parked { .. })) => {
             return Err(abort_failure(abort));
         }
@@ -1206,9 +1275,76 @@ async fn run_root_journal(
             (RootOutcome::Released { root }, Err(abort_failure(abort)))
         }
     };
+    // The root's scope close runs on the key's `close` handler, not here
+    // (FIG-4035): `run` returns once the root's report is handed over, so
+    // the session's drive admits its next root beside the close. The send is
+    // journaled, so a replay sends it once. The close is its `ScopeClose`
+    // obligation's immediate delivery, so however often it runs, the scope
+    // closes once.
+    if let Some(owed) = owed_close {
+        crate::services::routed_workflow::<_, _, ()>(
+            controller.context(),
+            route,
+            expected,
+            CLOSE_HANDLER,
+            RestateRootCloseRequest {
+                drive_version: LASH_SESSION_DRIVE_VERSION,
+                sender_generation: Some(generation.clone()),
+                root: owed,
+            },
+        )
+        .send()
+        .await?;
+    }
     // The key runs once; a later drive that admits this root reads this.
     controller.context().set(TURN_OUTCOME_STATE, Json(ended));
     result
+}
+
+/// What `LashTurn/{session}:{root}/close` journals: the kernel's recorded
+/// `CloseRootScope` step of `root` on the key's root scope, the scope the
+/// key's `run` would have recorded it under.
+async fn close_root_journal(
+    slot: &RestateSessionDriverSlot,
+    authority_id: &RestateAuthorityId,
+    generation: &BuildGeneration,
+    route: &crate::services::ServiceRoute,
+    ctx: SharedWorkflowContext<'_>,
+    sender_generation: Option<&BuildGeneration>,
+    root: &lash_core::TurnId,
+) -> Result<(), HandlerError> {
+    let Some((session, admitted_root)) = parse_turn_workflow_key(ctx.key()) else {
+        return Err(misaddressed(format!(
+            "LashTurn/{} names no root to close `{root}` under",
+            ctx.key()
+        )));
+    };
+    // A close on a generation lane was sent by a run on that lane, which
+    // names the lane's generation; anything else is a misroute.
+    if let crate::services::Lane::Generation(lane) = route.lane()
+        && sender_generation != Some(lane)
+    {
+        return Err(misrouted(
+            route,
+            &format!("the close of root `{root}` of session `{session}` was not sent by its lane"),
+        ));
+    }
+    let handler = route.namespace().stable(LashService::TurnDriver).name();
+    let driver = slot.driver_for(&handler)?;
+    // The generation sentinel rides the close, the handler's first recorded
+    // step: a journal of another build parks before it replays past it.
+    let sentinel = Arc::new(FoldedSentinel::new(handler, generation.clone()));
+    let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
+        .in_namespace(route.namespace().clone())
+        .with_build_generation(generation.clone())
+        .with_folded_sentinel(Arc::clone(&sentinel));
+    let scoped = controller
+        .scoped_effect_controller(drive_root_scope(&session, &admitted_root))
+        .map_err(refused_scope)?;
+    sentinel
+        .guard(driver.close_root(scoped, &session, root))
+        .await?
+        .map_err(abort_failure)
 }
 
 #[cfg(test)]
@@ -1232,7 +1368,16 @@ mod tests {
             &self,
             _controller: lash_core::ScopedEffectController<'_>,
             _admitted: Admitted,
-        ) -> Result<RootOutcome, DriveAbort> {
+        ) -> RootRunEnd {
+            unreachable!("the slot law runs no drive")
+        }
+
+        async fn close_root(
+            &self,
+            _controller: lash_core::ScopedEffectController<'_>,
+            _session: &SessionId,
+            _root: &lash_core::TurnId,
+        ) -> Result<(), DriveAbort> {
             unreachable!("the slot law runs no drive")
         }
     }

@@ -997,7 +997,9 @@ admitted row is released or settled only by a fenced commit of that root, or by
 the root's terminal write, whatever ended it. No row stays admitted to a root
 that has terminal evidence. A session has at most one root that is admitted and
 unfinished, and the drive resumes that root after any owed follow-on and
-before new work.
+before new work. A root is finished at its terminal write: the scope close it
+then owes (ADR 0108 §5) holds no admission, so the session's next root is
+admitted beside it (FIG-4035).
 
 **Selection** runs inside the drive, after the seal, as the root's recorded
 `AdmitRoot` step. It is keyed by the root, and its composition is the §5.2 rule

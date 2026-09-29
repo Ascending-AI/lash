@@ -48,7 +48,7 @@ pub(crate) async fn run_admitted_root_observed(
     controller: &ScopedEffectController<'_>,
     admitted: lash_core::engine::Admitted,
     unsettled: Option<&crate::core::held_drives::UnsettledRoot>,
-) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
+) -> lash_core::engine::RootRunEnd {
     let session = admitted.session().clone();
     // Marked before the root can commit: a handle that sees its commit waits
     // for the deposit while the run is under way.
@@ -70,15 +70,19 @@ pub(crate) async fn run_admitted_root_observed(
         local_stop: LocalTurnStop::default(),
         settled: &settled,
     };
-    let outcome =
-        lash_core::drive::run_admitted_root_with(&mut writer, controller, admitted, sinks).await;
-    if outcome.is_ok()
+    // The root's scope close is the engine's to run beside the session's
+    // next root (FIG-4035): the run returns, and releases the writer, once
+    // the root's report is handed over.
+    let end =
+        lash_core::drive::run_admitted_root_owing_close(&mut writer, controller, admitted, sinks)
+            .await;
+    if end.result.is_ok()
         && let Some(unsettled) = unsettled
     {
         unsettled.settle();
     }
     runtime.publish_from(&writer);
-    outcome
+    end
 }
 
 /// Deposits a committed root's report the moment the drive hands it over,

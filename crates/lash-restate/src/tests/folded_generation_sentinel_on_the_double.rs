@@ -116,18 +116,32 @@ impl SessionDriver for HeldDriver {
         &self,
         controller: ScopedEffectController<'_>,
         admitted: lash_core::engine::Admitted,
-    ) -> Result<RootOutcome, DriveAbort> {
-        let root = admitted.root().clone();
-        self.recorded_step(&controller, format!("first-step:{root}"))
-            .await?;
-        Ok(RootOutcome::Committed {
-            outcome: lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::AssistantMessage {
-                    text: format!("answered {root}"),
-                },
-            ),
-            root,
-        })
+    ) -> lash_core::engine::RootRunEnd {
+        lash_core::engine::RootRunEnd::owing_nothing(
+            async {
+                let root = admitted.root().clone();
+                self.recorded_step(&controller, format!("first-step:{root}"))
+                    .await?;
+                Ok(RootOutcome::Committed {
+                    outcome: lash_core::facade_support::TurnOutcome::Finished(
+                        lash_core::facade_support::TurnFinish::AssistantMessage {
+                            text: format!("answered {root}"),
+                        },
+                    ),
+                    root,
+                })
+            }
+            .await,
+        )
+    }
+
+    async fn close_root(
+        &self,
+        _controller: lash_core::ScopedEffectController<'_>,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::DriveAbort> {
+        Ok(())
     }
 }
 

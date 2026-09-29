@@ -221,29 +221,43 @@ impl SessionDriver for RollDriver {
         &self,
         _controller: ScopedEffectController<'_>,
         admitted: lash_core::engine::Admitted,
-    ) -> Result<RootOutcome, DriveAbort> {
-        let root = admitted.root().clone();
-        *self
-            .root_runs
-            .lock_recover()
-            .entry(root.as_str().to_owned())
-            .or_default() += 1;
-        // Idempotent, like a commit fenced by its admission: a redrive of a
-        // root that already consumed its item consumes nothing.
-        let mut ledgers = self.ledgers.lock_recover();
-        let ledger = ledgers.entry(admitted.session().clone()).or_default();
-        if ledger.open.front().map(String::as_str) == Some(root.as_str()) {
-            ledger.open.pop_front();
-            ledger.consumed.push(root.as_str().to_owned());
-        }
-        Ok(RootOutcome::Committed {
-            outcome: lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::AssistantMessage {
-                    text: format!("answered {}", root.as_str()),
-                },
-            ),
-            root,
-        })
+    ) -> lash_core::engine::RootRunEnd {
+        lash_core::engine::RootRunEnd::owing_nothing(
+            async {
+                let root = admitted.root().clone();
+                *self
+                    .root_runs
+                    .lock_recover()
+                    .entry(root.as_str().to_owned())
+                    .or_default() += 1;
+                // Idempotent, like a commit fenced by its admission: a redrive of a
+                // root that already consumed its item consumes nothing.
+                let mut ledgers = self.ledgers.lock_recover();
+                let ledger = ledgers.entry(admitted.session().clone()).or_default();
+                if ledger.open.front().map(String::as_str) == Some(root.as_str()) {
+                    ledger.open.pop_front();
+                    ledger.consumed.push(root.as_str().to_owned());
+                }
+                Ok(RootOutcome::Committed {
+                    outcome: lash_core::facade_support::TurnOutcome::Finished(
+                        lash_core::facade_support::TurnFinish::AssistantMessage {
+                            text: format!("answered {}", root.as_str()),
+                        },
+                    ),
+                    root,
+                })
+            }
+            .await,
+        )
+    }
+
+    async fn close_root(
+        &self,
+        _controller: lash_core::ScopedEffectController<'_>,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::DriveAbort> {
+        Ok(())
     }
 }
 
