@@ -1887,3 +1887,58 @@ mod root_control {
         )
     });
 }
+
+mod session_history {
+    use super::*;
+    use lash_core_execution::store::ConformanceDeployment;
+
+    async fn catalog() -> Option<(
+        SharedDatabaseLock,
+        Arc<dyn ConformanceDeployment>,
+        PostgresStorage,
+    )> {
+        let (lock, storage) = storage().await?;
+        reset(storage.pool()).await;
+        let store = Arc::new(storage.store()) as Arc<dyn ConformanceDeployment>;
+        Some((lock, store, storage))
+    }
+
+    #[tokio::test]
+    async fn window_is_frame_bounded() {
+        let Some((_lock, store, _storage)) = catalog().await else {
+            return;
+        };
+        lash_conformance::history_window_is_frame_bounded(store).await;
+    }
+
+    #[tokio::test]
+    async fn pages_are_bounded_and_pinned() {
+        let Some((_lock, store, _storage)) = catalog().await else {
+            return;
+        };
+        lash_conformance::history_pages_are_bounded_and_pinned(store).await;
+    }
+
+    #[tokio::test]
+    async fn fork_respects_ceiling() {
+        let Some((_lock, store, _storage)) = catalog().await else {
+            return;
+        };
+        lash_conformance::history_fork_respects_ceiling(store).await;
+    }
+
+    #[tokio::test]
+    async fn window_rejects_corrupt_anchors() {
+        let Some((_lock, _store, storage)) = catalog().await else {
+            return;
+        };
+        lash_conformance::history_window_rejects_corrupt_anchors(|_| {
+            let storage = storage.clone();
+            async move {
+                reset(storage.pool()).await;
+                Arc::new(storage.store()) as Arc<dyn ConformanceDeployment>
+            }
+        })
+        .await;
+    }
+}

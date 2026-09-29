@@ -202,9 +202,10 @@ impl SessionCommitStore for PostgresStore {
             if let Some(row) = prior {
                 let hash: String = row.get(0);
                 let result_json: String = row.get(1);
-                let stored_identity: Option<String> = row.get(2);
-                let stored_version: Option<i32> = row.get(3);
-                let stored_requested_node_count: Option<i64> = row.get(4);
+                let stored_outcome: Option<String> = row.get(2);
+                let stored_identity: Option<String> = row.get(3);
+                let stored_version: Option<i32> = row.get(4);
+                let stored_requested_node_count: Option<i64> = row.get(5);
                 // The shared codec owns both unit-shape and integer-range validation.
                 // In particular, a negative PostgreSQL INTEGER cannot become legacy replay.
                 // The ancestor column intentionally stays outside this receipt SELECT.
@@ -222,6 +223,10 @@ impl SessionCommitStore for PostgresStore {
                     planner.operation_key(),
                     &result_json,
                     self.fleet_format,
+                )?;
+                lash_core_execution::store::validate_turn_commit_outcome_code(
+                    &result,
+                    stored_outcome.as_deref(),
                 )?;
                 let prior = lash_core_execution::store::RuntimeCommitReceiptRecord {
                     turn_commit_hash: hash,
@@ -732,6 +737,13 @@ impl SessionCommitStore for PostgresStore {
                 .bind(receipt.operation_key)
                 .bind(receipt.turn_commit_hash)
                 .bind(&result_json)
+                .bind(
+                    receipt
+                        .result
+                        .outcome
+                        .as_ref()
+                        .map(|outcome| outcome.as_str()),
+                )
                 .bind(now as i64)
                 .bind(columns.0)
                 .bind(columns.1)

@@ -593,7 +593,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         batch: lash_core_execution::PendingTurnInputBatch,
         _ingress_claim_ttl_ms: u64,
     ) -> Result<lash_core_execution::TurnInputAdmission, StoreError> {
-        self.read_session_state_version().await?;
+        self.read_session_state_version(batch.session_id()).await?;
         self.enqueue_pending_turn_inputs(batch)
             .await
             .map(lash_core_execution::TurnInputAdmission::Enqueued)

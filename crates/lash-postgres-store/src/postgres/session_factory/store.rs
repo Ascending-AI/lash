@@ -1,7 +1,7 @@
 use super::*;
 
 impl PostgresStore {
-    pub(super) fn turn_cancel_closure_owner_binding(
+    pub(crate) fn turn_cancel_closure_owner_binding(
         &self,
     ) -> Option<lash_core_execution::TurnCancelClosureOwnerBinding> {
         let owner = self

@@ -3,14 +3,100 @@
 //! production store traits carry none.
 
 use crate::*;
-use lash_core_execution::store::{
-    ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
-};
+use lash_core_execution::store::{DecodedRowCounts, GraphRowCorruption, StoreTestSupport};
+use std::sync::atomic::Ordering;
 
 #[async_trait::async_trait]
 impl StoreTestSupport for PostgresStore {
+    fn decoded_row_counts_for_testing(&self) -> DecodedRowCounts {
+        DecodedRowCounts {
+            graph_node_bodies: self.decoded_graph_node_bodies.load(Ordering::Relaxed),
+            usage_rows: self.decoded_usage_rows.load(Ordering::Relaxed),
+            usage_holes: self.decoded_usage_holes.load(Ordering::Relaxed),
+            turn_receipt_bodies: self.decoded_turn_receipts.load(Ordering::Relaxed),
+        }
+    }
+
+    async fn corrupt_graph_row_for_testing(
+        &self,
+        node_id: &lash_core_execution::NodeId,
+        corruption: GraphRowCorruption,
+    ) -> Result<(), StoreError> {
+        let result = match corruption {
+            GraphRowCorruption::DeleteRow => {
+                sqlx::query("DELETE FROM lash_graph_nodes WHERE node_id = $1")
+                    .bind(node_id.as_str())
+                    .execute(&self.pool)
+                    .await
+            }
+            GraphRowCorruption::SetParent(parent) => {
+                sqlx::query("UPDATE lash_graph_nodes SET parent_node_id = $2 WHERE node_id = $1")
+                    .bind(node_id.as_str())
+                    .bind(parent.as_ref().map(|id| id.as_str()))
+                    .execute(&self.pool)
+                    .await
+            }
+            GraphRowCorruption::SetFramePointer(frame) => {
+                sqlx::query("UPDATE lash_graph_nodes SET frame_node_id = $2 WHERE node_id = $1")
+                    .bind(node_id.as_str())
+                    .bind(frame.as_str())
+                    .execute(&self.pool)
+                    .await
+            }
+            GraphRowCorruption::SetBodyBytes(bytes) => {
+                sqlx::query("UPDATE lash_graph_nodes SET body_bytes = $2 WHERE node_id = $1")
+                    .bind(node_id.as_str())
+                    .bind(i64::try_from(bytes).map_err(|_| {
+                        StoreError::Backend("test body size exceeds BIGINT".to_string())
+                    })?)
+                    .execute(&self.pool)
+                    .await
+            }
+        }
+        .map_err(store_sqlx_error)?;
+        if result.rows_affected() != 1 {
+            return Err(StoreError::Backend(format!(
+                "test graph node `{node_id}` is missing"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn set_head_current_frame_for_testing(
+        &self,
+        session_id: &SessionId,
+        frame: Option<lash_core_execution::FrameNodeId>,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut head: serde_json::Value = sqlx::query_scalar::<_, String>(
+            crate::session_sql::session_sql()
+                .head
+                .select_head_json_for_update
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)
+        .and_then(|json| {
+            serde_json::from_str(&json).map_err(|error| StoreError::Backend(error.to_string()))
+        })?;
+        head["current_frame_node_id"] =
+            serde_json::to_value(frame).map_err(|error| StoreError::Backend(error.to_string()))?;
+        sqlx::query(crate::session_sql::session_sql().head.set_head_json.sql())
+            .bind(session_id.as_str())
+            .bind(
+                serde_json::to_string(&head)
+                    .map_err(|error| StoreError::Backend(error.to_string()))?,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)
+    }
     async fn rewrite_session_tool_access_for_testing(
         &self,
+        session_id: &SessionId,
         schema_version: u32,
         tool_access: Option<serde_json::Value>,
     ) -> Result<(), StoreError> {
@@ -22,7 +108,7 @@ impl StoreTestSupport for PostgresStore {
                 .select_head_json_for_update
                 .sql(),
         )
-        .bind(self.session_id.as_str())
+        .bind(session_id.as_str())
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -48,7 +134,7 @@ impl StoreTestSupport for PostgresStore {
             StoreError::Backend(format!("failed to encode test session head: {error}"))
         })?;
         sqlx::query(crate::session_sql::session_sql().head.set_head_json.sql())
-            .bind(self.session_id.as_str())
+            .bind(session_id.as_str())
             .bind(head_json)
             .execute(&mut *tx)
             .await
@@ -58,6 +144,7 @@ impl StoreTestSupport for PostgresStore {
 
     async fn stamp_session_state_version_for_testing(
         &self,
+        session_id: &SessionId,
         version: u32,
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -67,7 +154,7 @@ impl StoreTestSupport for PostgresStore {
                 .set_state_version
                 .sql(),
         )
-        .bind(self.session_id.as_str())
+        .bind(session_id.as_str())
         .bind(
             i32::try_from(version).map_err(|_| StoreError::StoredDataCorrupt {
                 record_kind: "SessionStateVersion",
@@ -82,6 +169,7 @@ impl StoreTestSupport for PostgresStore {
 
     async fn stamp_session_state_version_and_corrupt_payload_for_testing(
         &self,
+        session_id: &SessionId,
         version: u32,
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -92,7 +180,7 @@ impl StoreTestSupport for PostgresStore {
                 .set_state_version
                 .sql(),
         )
-        .bind(self.session_id.as_str())
+        .bind(session_id.as_str())
         .bind(
             i32::try_from(version).map_err(|_| StoreError::StoredDataCorrupt {
                 record_kind: "SessionStateVersion",
@@ -108,42 +196,11 @@ impl StoreTestSupport for PostgresStore {
                 .corrupt_head_json
                 .sql(),
         )
-        .bind(self.session_id.as_str())
+        .bind(session_id.as_str())
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)
-    }
-}
-
-#[async_trait::async_trait]
-impl ConformanceSessionStoreFactory for PostgresStore {
-    async fn create_conformance_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn ConformancePersistence>, StoreError> {
-        Ok(self.create_session_store(request).await?)
-    }
-
-    async fn open_existing_conformance_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn ConformancePersistence>>, String> {
-        Ok(self
-            .open_existing_session_store(request)
-            .await?
-            .map(|store| store as Arc<dyn ConformancePersistence>))
-    }
-}
-
-impl PostgresStore {
-    /// Drive transaction admission time independently of record timestamps.
-    pub fn with_lease_clock_for_testing(
-        mut self,
-        clock: Arc<dyn lash_core_execution::Clock>,
-    ) -> Self {
-        self.lease_clock_for_testing = Some(clock);
-        self
     }
 }
 

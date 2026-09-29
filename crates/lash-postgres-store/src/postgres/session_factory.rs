@@ -420,7 +420,11 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         Ok(report)
     }
 
-    async fn pin(&self, node_id: &str) -> Result<lash_core_execution::ForkPoint, StoreError> {
+    async fn pin(
+        &self,
+        node_id: &lash_core_execution::NodeId,
+    ) -> Result<lash_core_execution::ForkPoint, StoreError> {
+        let node_id = node_id.as_str();
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         let (source_session_id, checkpoint_ref) =
             crate::support::retained_checkpoint_tx(&mut tx, node_id)
@@ -491,7 +495,8 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         })
     }
 
-    async fn unpin(&self, node_id: &str) -> Result<(), StoreError> {
+    async fn unpin(&self, node_id: &lash_core_execution::NodeId) -> Result<(), StoreError> {
+        let node_id = node_id.as_str();
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         sqlx::query(session_sql().graph_postgres.lock_live_id.sql())
             .bind(node_id)

@@ -47,21 +47,21 @@ use lash_core_execution::store::queued_work::{
     select_leading_session_command, select_turn_work_prefix,
 };
 use lash_core_execution::store::{
-    HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
-    RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
+    HydratedCheckpointComponent, HydratedSessionCheckpoint, RuntimeCommit, RuntimeCommitReceipt,
+    SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core_execution::{
     AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, DeliveryPolicy, ExecutionScope, GcReport, IngressStore,
+    AttachmentOwnerKind, BlobRef, DeliveryPolicy, ExecutionScope, GcReport,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLiveReferenceView,
     ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
-    ProcessStartOutcome, ProcessStarted, RuntimePersistence, SessionCommitStore, SessionListFilter,
-    SessionMeta, SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest,
-    SessionStoreFactory, SessionSummary, StoreError, StoreMaintenance, TokenLedgerEntry,
-    VacuumReport, facade_support::ProcessStartPlan, facade_support::ProcessTransition,
-    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
+    ProcessStartOutcome, ProcessStarted, SessionCommitStore, SessionListFilter, SessionMeta,
+    SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest, SessionSummary, StoreError,
+    StoreMaintenance, TokenLedgerEntry, VacuumReport, facade_support::ProcessStartPlan,
+    facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
+    facade_support::registry_transitions,
 };
 use lash_core_execution::{
     PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
@@ -1322,6 +1322,21 @@ impl PostgresStorage {
 }
 
 impl PostgresStore {
+    /// Open one multi-session store over a provisioned PostgreSQL catalog.
+    pub async fn open(database_url: &str) -> Result<Self, StoreError> {
+        Ok(PostgresStorage::connect(database_url).await?.store())
+    }
+
+    /// Open with explicit connection policy and schema-check configuration.
+    pub async fn open_with(
+        database_url: &str,
+        config: PostgresStoreConfig,
+    ) -> Result<Self, StoreError> {
+        Ok(PostgresStorage::connect_with(database_url, config)
+            .await?
+            .store())
+    }
+
     pub fn new(storage: &PostgresStorage) -> Self {
         storage.unwired_session_store_factory("PostgresStore::new")
     }
@@ -1499,8 +1514,6 @@ extern crate self as lash_postgres_store;
 #[cfg(test)]
 #[path = "postgres/checkpoint_depth_tests.rs"]
 mod checkpoint_depth_tests;
-#[cfg(test)]
-mod graph_integrity_tests;
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]
 mod postgres_test_support;

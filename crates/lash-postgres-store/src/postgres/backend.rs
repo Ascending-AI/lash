@@ -134,7 +134,7 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         Arc::clone(&self.inner.clock)
     }
 
-    fn session_store_factory(&self) -> Arc<dyn lash_core_execution::SessionStoreFactory> {
+    fn session_store_factory(&self) -> Arc<dyn lash_core_execution::DeploymentStore> {
         PostgresStoreSet::session_store_factory(self)
     }
 

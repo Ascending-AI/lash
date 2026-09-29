@@ -866,7 +866,6 @@ impl RootStore for PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<UnfinishedRoot>, StoreError> {
-        self.bind_session_id(session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         unfinished_root_conn(&mut connection, session_id).await
     }
@@ -875,7 +874,6 @@ impl RootStore for PostgresStore {
         &self,
         request: &lash_core_execution::store::AdmitRootRequest,
     ) -> Result<Option<RootAdmission>, StoreError> {
-        self.bind_session_id(request.session_id())?;
         crate::runtime_persistence::admit_root_postgres(self, request).await
     }
 
@@ -883,7 +881,6 @@ impl RootStore for PostgresStore {
         &self,
         request: &lash_core_execution::store::CheckpointAdmissionRequest,
     ) -> Result<lash_core_execution::store::CheckpointAdmission, StoreError> {
-        self.bind_session_id(request.session_id())?;
         crate::runtime_persistence::admit_at_checkpoint_postgres(self, request).await
     }
 
@@ -921,7 +918,6 @@ impl RootStore for PostgresStore {
         root: &TurnId,
         inputs: &[InputId],
     ) -> Result<(), StoreError> {
-        self.bind_session_id(session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = sqlx::Connection::begin(&mut *connection)
             .await

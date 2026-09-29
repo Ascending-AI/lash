@@ -104,6 +104,7 @@ table lash_fork_lineage
   column session_id text not-null
   primary-key (session_id, ancestor_session_id)
 table lash_graph_nodes
+  column body_bytes bigint not-null
   column frame_node_id text not-null
   column generation bigint not-null
   column node_id text not-null
@@ -347,7 +348,9 @@ table lash_release_stamp
   primary-key (singleton)
 table lash_runtime_turn_commits
   column committed_at_ms bigint not-null
+  column failure_evidence boolean not-null
   column identity_encoding_version integer nullable
+  column outcome_code text nullable
   column request_identity_hash text nullable
   column requested_node_count bigint nullable
   column result_json text not-null
@@ -564,6 +567,14 @@ table lash_turn_parks
   column since_ms bigint not-null
   column turn_id text not-null
   primary-key (session_id)
+table lash_usage_delta_holes
+  column attempt_ordinal bigint not-null
+  column call_id text not-null
+  column generation_id text nullable
+  column seq bigint not-null
+  column session_id text not-null
+  primary-key (session_id, seq, call_id, attempt_ordinal)
+  foreign-key (seq) references lash_usage_deltas (seq) on delete cascade
 table lash_usage_deltas
   column cache_read_input_tokens bigint not-null
   column cache_write_input_tokens bigint not-null
@@ -574,11 +585,12 @@ table lash_usage_deltas
   column output_tokens bigint not-null
   column payload_encoding_version integer not-null
   column payload_hash text not-null
+  column reconciled_attempt_ordinal bigint nullable
+  column reconciled_call_id text nullable
   column reasoning_output_tokens bigint not-null
   column seq bigint not-null default
   column session_id text not-null
   column source text not-null
-  column usage_disposition_json text not-null
   unique (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
   primary-key (seq)
 table lash_wake_allocation_floors

@@ -303,31 +303,6 @@ lash_store_sql::statements! {
              ) retained
              ORDER BY node_id";
 
-        /// The head leaf of `?1` and the readable generation range from `?2`
-        /// up to it. See the SQLite twin for why it is one statement.
-        select_readable_range = "WITH readable_sessions AS (
-                     SELECT ?1::TEXT AS session_id, NULL::BIGINT AS generation_ceiling
-                     UNION ALL
-                     SELECT lineage.ancestor_session_id, lineage.fork_generation
-                     FROM fork_lineage AS lineage
-                     WHERE lineage.session_id = ?1
-                 )
-                 SELECT session.leaf_node_id, head.generation, head.tombstoned,
-                        node.node_id, node.parent_node_id,
-                        node.generation, node.tombstoned
-                 FROM sessions AS session
-                 LEFT JOIN graph_nodes AS head
-                   ON head.node_id = session.leaf_node_id
-                 LEFT JOIN readable_sessions AS readable ON TRUE
-                 LEFT JOIN graph_nodes AS node
-                   ON node.session_id = readable.session_id
-                  AND node.generation BETWEEN ?2 AND head.generation
-                  AND (
-                      readable.generation_ceiling IS NULL
-                      OR node.generation <= readable.generation_ceiling
-                  )
-                 WHERE session.session_id = ?1";
-
         /// The first page of sessions that have published a checkpoint root,
         /// `?1` rows of it.
         ///
@@ -401,66 +376,6 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `graph_nodes` statements only PostgreSQL issues.
     pub(crate) struct GraphNodePostgresStatements @ "graph_node" {
-        /// The generation of live node `?1`.
-        ///
-        /// SQLite reads the generation and the tombstone together, because it
-        /// has to tell "missing" from "tombstoned" without a second read;
-        /// here a missing row and a tombstoned row are the same `None` and the
-        /// caller raises the same refusal.
-        select_live_generation = "SELECT generation FROM graph_nodes
-         WHERE node_id = ?1 AND tombstoned = FALSE";
-
-        /// Every node session `?1` may read, oldest first: the whole-graph
-        /// shape. See the SQLite twin for why the ceiling is a second
-        /// statement rather than a nullable predicate.
-        select_readable = "SELECT node.node_id, node.parent_node_id, node.node_json,
-                node.generation, node.frame_node_id
-         FROM graph_nodes AS node
-         WHERE node.tombstoned = FALSE
-           AND (
-               node.session_id = ?1
-               OR EXISTS (
-                   SELECT 1 FROM fork_lineage AS lineage
-                   WHERE lineage.session_id = ?1
-                     AND lineage.ancestor_session_id = node.session_id
-                     AND node.generation <= lineage.fork_generation
-               )
-           )
-         ORDER BY node.generation ASC";
-
-        /// Every node session `?1` may read up to generation `?2`, oldest
-        /// first: the active-path shape.
-        select_readable_to_generation = "SELECT node.node_id, node.parent_node_id, node.node_json,
-                node.generation, node.frame_node_id
-         FROM graph_nodes AS node
-         WHERE node.tombstoned = FALSE
-           AND node.generation <= ?2
-           AND (
-               node.session_id = ?1
-               OR EXISTS (
-                   SELECT 1 FROM fork_lineage AS lineage
-                   WHERE lineage.session_id = ?1
-                     AND lineage.ancestor_session_id = node.session_id
-                     AND node.generation <= lineage.fork_generation
-               )
-           )
-         ORDER BY node.generation ASC";
-
-        /// Node `?1`, if session `?2` may read it.
-        select_lookup = "SELECT node.node_id, node.parent_node_id, node.node_json,
-                    node.session_id, node.generation
-             FROM graph_nodes AS node
-             WHERE node.node_id = ?1 AND node.tombstoned = FALSE
-               AND (
-                   node.session_id = ?2
-                   OR EXISTS (
-                       SELECT 1 FROM fork_lineage AS lineage
-                       WHERE lineage.session_id = ?2
-                         AND lineage.ancestor_session_id = node.session_id
-                         AND node.generation <= lineage.fork_generation
-                   )
-               )";
-
         /// Take the row lock on live node `?1`, reporting whether it is there.
         lock_live = "SELECT TRUE FROM graph_nodes
              WHERE node_id = ?1 AND tombstoned = FALSE
@@ -634,7 +549,7 @@ lash_store_sql::statements! {
                  FROM settled_park AS park
                  CROSS JOIN settled_park_clock AS clock
              )
-             SELECT turn_commit_hash, result_json,
+             SELECT turn_commit_hash, result_json, outcome_code,
                         request_identity_hash, identity_encoding_version,
                         requested_node_count
                  FROM runtime_turn_commits
