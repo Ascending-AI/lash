@@ -74,6 +74,10 @@ pub enum RuntimeEffectKind {
     /// after the boundary's command drain (FIG-3600 S6, D3 §2): every replay
     /// of the root runs under the recorded config, never the live head's.
     ResolveTurnConfig,
+    /// The base a `/compact` summarizes and opens its frame from, recorded
+    /// before its summarizer runs (FIG-4133): a redrive replays the recorded
+    /// base, never the head the compaction's own commit moved.
+    RecordCompactionBase,
     /// The recorded close of a logical root's scope, after its terminal
     /// evidence (FIG-3600 S7, FIG-3607 item 7): the one step a root's end
     /// runs, and what its lifetime-scope owner hooks.
@@ -116,6 +120,7 @@ impl RuntimeEffectKind {
             Self::DrawRootStart => "draw_root_start",
             Self::SealDriveAdmission => "seal_drive_admission",
             Self::ResolveTurnConfig => "resolve_turn_config",
+            Self::RecordCompactionBase => "record_compaction_base",
             Self::CloseRootScope => "close_root_scope",
             Self::BeginSessionClose => "begin_session_close",
             Self::Checkpoint => "checkpoint",

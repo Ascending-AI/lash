@@ -446,8 +446,9 @@ impl LashRuntime {
         self.adopt_session_read(read).await
     }
 
-    /// Adopt `base`, the head the running direct turn was admitted on, as the
-    /// resident session (FIG-3682).
+    /// Adopt `base`, the head the running direct turn was admitted on, or the
+    /// one a `/compact` recorded (FIG-4133), as the resident session
+    /// (FIG-3682).
     ///
     /// A replay of an admitted turn rebuilds its input state from here, never
     /// from the live head: the turn's own commit, or a lane service, may have
@@ -787,6 +788,13 @@ impl LashRuntime {
         self.reload_invalidated_resident_session_state()
             .await
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        // The compaction runs over its recorded base, never over a head its
+        // own commit moved: a redrive summarizes the same history, reads the
+        // summary back from its journal, derives the same frame key and meets
+        // the frame commit's receipt (FIG-4133, F3).
+        self.adopt_recorded_compaction_base(&scoped_effect_controller)
+            .await
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         let services = self.runtime_session_services()?;
         let compaction_boundary = scoped_effect_controller.scope_id().to_string();
         // The frame a compaction switch ends, and the execution that commits
@@ -832,7 +840,7 @@ impl LashRuntime {
                 PluginOperationInvokeError::Unknown(format!("context compaction failed: {err}"))
             })?
             else {
-                return Ok(false);
+                return Ok(None);
             };
             let frame_key = compaction_frame_key(
                 &self.state.session_id,
@@ -845,7 +853,7 @@ impl LashRuntime {
             let result = self
                 .open_agent_frame(
                     crate::OpenAgentFrameRequest::new(
-                        frame_key,
+                        frame_key.clone(),
                         crate::AgentFrameReason::compaction(),
                     )
                     .with_initial_nodes(compaction.initial_nodes),
@@ -855,17 +863,22 @@ impl LashRuntime {
             if result.opened {
                 self.stamp_live_plugin_state();
             }
-            Ok(result.opened)
+            Ok(result.opened.then_some(frame_key))
         }
         .await;
         // Usage settlement runs on every exit past the reload gate, not only
         // a successful frame switch: a compaction that produced no summary or
         // failed outright can still have staged billed usage into the shared
         // ledger, and this boundary is the only place it persists.
-        let frame_switch = matches!(outcome, Ok(true)).then_some(CompactionFrameSwitch {
-            ended: compacted_frame,
-            committing: compaction_scope,
-        });
+        let frame_switch = match &outcome {
+            Ok(Some(frame_key)) => Some(CompactionFrameSwitch {
+                ended: compacted_frame,
+                committing: compaction_scope,
+                operation: compaction_frame_operation(&self.state.session_id, frame_key),
+            }),
+            Ok(None) | Err(_) => None,
+        };
+        let outcome = outcome.map(|frame_key| frame_key.is_some());
         let settlement = Box::pin(self.settle_pending_compaction_usage(frame_switch)).await;
         match (outcome, settlement) {
             (Ok(opened), Ok(())) => Ok(opened),
@@ -944,7 +957,9 @@ impl LashRuntime {
     /// Administrative compaction has no owning turn to settle usage at a
     /// commit (`direct_outcome.rs` stages into the shared ledger only), so
     /// `compact_context` runs this on every exit past the reload gate —
-    /// including the no-summary and error paths. Mirrors `park()`: pending
+    /// including the no-summary and error paths. A frame switch commits
+    /// under the operation its frame key names, so a redrive meets the first
+    /// commit's receipt (FIG-4133). Anything else mirrors `park()`: pending
     /// state persists at this explicit boundary with the same content-derived
     /// operation, so a retried compact_context reuses byte-identical row
     /// identities.
@@ -964,15 +979,22 @@ impl LashRuntime {
         if self.state.pending_graph_commit().nodes().is_empty() && pending_usage.is_empty() {
             return Ok(());
         }
-        let proposed = super::lifecycle::initial_park_preview(
-            &self.state,
-            &pending_usage,
-            self.host.core.durability.commit_budget,
-            self.fleet_format(),
-        )
-        .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        let operation = super::lifecycle::initial_park_operation(&proposed)
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        // A frame's commit is named by the frame, so a redrive meets its
+        // receipt; any other settlement is named by its content, as a park is.
+        let operation = match frame_switch.as_ref() {
+            Some(switch) => switch.operation.clone(),
+            None => {
+                let proposed = super::lifecycle::initial_park_preview(
+                    &self.state,
+                    &pending_usage,
+                    self.host.core.durability.commit_budget,
+                    self.fleet_format(),
+                )
+                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+                super::lifecycle::initial_park_operation(&proposed)
+                    .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?
+            }
+        };
         let staged =
             session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
                 .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
@@ -997,7 +1019,10 @@ impl LashRuntime {
         // carries: the open cleared execution state, and only `continue_as`
         // carries values (ADR 0113 §3.1).
         let switched = frame_switch.is_some();
-        if let Some(CompactionFrameSwitch { ended, committing }) = frame_switch {
+        if let Some(CompactionFrameSwitch {
+            ended, committing, ..
+        }) = frame_switch
+        {
             commit.frame_transition = super::turn_boundary::committed_frame_transition(
                 &self.state,
                 ended,
@@ -1034,8 +1059,18 @@ impl LashRuntime {
         staged
             .confirm_identities(&confirmed_usage)
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        let receipt_replayed = commit_result.receipt_replayed;
         self.state.apply_persisted_commit_result(commit_result);
         self.state.mark_node_ids_persisted(persisted_node_ids);
+        if receipt_replayed {
+            // A redrive met the commit its first execution made: the durable
+            // head is that commit's, and the resident frame rebuilt over the
+            // recorded base gives way to it.
+            self.invalidate_resident_session_state();
+            self.reload_invalidated_resident_session_state()
+                .await
+                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        }
         if switched {
             self.restore_protocol_session_after_frame_open()
                 .await
@@ -1660,6 +1695,16 @@ fn compaction_frame_key(
     crate::FrameKey::from_compaction_material(session_id, boundary_id, previous_frame_node_id)
 }
 
+/// The operation a compaction frame's commit is written under: named by the
+/// frame, which the session, the compaction's scope and the frame it left
+/// derive, so a redriven compaction meets its receipt (FIG-4133).
+fn compaction_frame_operation(
+    session_id: &SessionId,
+    frame_key: &crate::FrameKey,
+) -> crate::OperationId {
+    crate::runtime::state::boundary_operation(session_id, frame_key.as_str(), "frame-commit")
+}
+
 pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
     RuntimeError::new(
         RuntimeErrorCode::StoreCommitFailed,
@@ -1673,6 +1718,7 @@ pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
 struct CompactionFrameSwitch {
     ended: Option<crate::FrameNodeId>,
     committing: crate::ExecutionScope,
+    operation: crate::OperationId,
 }
 
 #[cfg(test)]

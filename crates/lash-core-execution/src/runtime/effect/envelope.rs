@@ -472,6 +472,16 @@ pub enum RuntimeEffectCommand {
     ResolveTurnConfig {
         root: crate::TurnId,
     },
+    /// Record the base an administrative compaction (`/compact`) summarizes
+    /// and opens its frame from (FIG-4133): the head and the frame current
+    /// when it starts, before its summarizer runs. Keyed by the compaction's
+    /// ordinal in its run, so a redrive replays the base its first execution
+    /// recorded, even after the compaction's own commit moved the head, and
+    /// a repeated compaction records a base of its own. The envelope names
+    /// only the session: the base is the step's outcome.
+    RecordCompactionBase {
+        session: crate::SessionId,
+    },
     /// Close a logical root's scope after its terminal evidence (FIG-3600
     /// S7, FIG-3607 item 7). Recorded under the root's scope at
     /// [`drive_close_root_replay_key`](crate::engine::drive_close_root_replay_key),
@@ -590,6 +600,7 @@ impl RuntimeEffectCommand {
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
+            Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
             Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
             Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
@@ -1111,6 +1122,16 @@ pub enum AdmittedHeadVerdict {
     Diverged { live_revision: u64 },
 }
 
+/// The base an administrative compaction records before its summarizer
+/// runs (FIG-4133): the durable head it summarizes and the frame it opens its
+/// frame from. Plain store identities, so any build replays it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactionBase {
+    pub head: crate::store::SessionHeadRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<crate::FrameNodeId>,
+}
+
 /// Serializable result of a runtime effect command.
 ///
 /// Large payloads stay boxed so this boundary type remains cheap to retain in
@@ -1247,6 +1268,10 @@ pub enum RuntimeEffectOutcome {
     /// of the durable head's config (FIG-3838).
     ResolveTurnConfig {
         resolved: Box<crate::ResolvedRun>,
+    },
+    /// The base a `/compact` recorded before its summarizer ran.
+    RecordCompactionBase {
+        base: Box<CompactionBase>,
     },
     /// The terminal evidence of the root the close closed.
     CloseRootScope {
@@ -1723,6 +1748,7 @@ impl RuntimeEffectOutcome {
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
+            Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
             Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
             Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,

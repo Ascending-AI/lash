@@ -5,6 +5,7 @@ pub mod assembly;
 #[cfg(not(feature = "testing"))]
 mod assembly;
 mod builder;
+mod compaction_base;
 #[cfg(feature = "testing")]
 pub use lash_core_execution::runtime::causal;
 #[cfg(not(feature = "testing"))]

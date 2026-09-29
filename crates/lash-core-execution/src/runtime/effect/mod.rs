@@ -48,8 +48,8 @@ mod validation;
 
 pub use envelope::tool_cancel_work_replay_suffix;
 pub use envelope::{
-    AdmittedHeadVerdict, AssistantResponseHookEvents, CheckpointAdmittedSet, LlmRequestSpec,
-    ProcessCommand, ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome,
+    AdmittedHeadVerdict, AssistantResponseHookEvents, CheckpointAdmittedSet, CompactionBase,
+    LlmRequestSpec, ProcessCommand, ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome,
     RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
     RuntimeEffectOutcome, RuntimeInvocation, ServedExecutionEnvironmentSync, SleepSpec,
     ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolInvocationEffectOutcome,
