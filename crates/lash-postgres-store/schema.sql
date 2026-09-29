@@ -16,7 +16,10 @@
 
 CREATE TABLE IF NOT EXISTS lash_schema_versions (
     component TEXT PRIMARY KEY,
-    version INTEGER NOT NULL
+    version INTEGER NOT NULL,
+    min_reader INTEGER NOT NULL,
+    CONSTRAINT ck_lash_schema_versions_stamp
+        CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version)
 );
 
 -- The migration ledger (FIG-3816): `lash migrate` records each applied step
@@ -1038,8 +1041,8 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- Seed rows. Every opened catalog requires them: the component version stamp, the
 -- transactional clock rows, and the catalog identity. `gen_random_uuid()` is
 -- core PostgreSQL, so the identity needs no extension.
-INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 142)
+INSERT INTO lash_schema_versions (component, version, min_reader)
+VALUES ('lash-postgres-store', 1, 1)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

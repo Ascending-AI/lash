@@ -850,7 +850,7 @@ impl PostgresStorage {
         let (catalog_id, fleet_format) = ensure_schema(
             &pool,
             config.schema_check,
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
         )
         .await?;
         Ok(Self {
@@ -922,7 +922,7 @@ impl PostgresStorage {
         let (catalog_id, fleet_format) = ensure_schema(
             &pool,
             config.schema_check,
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
         )
         .await?;
         Ok(Self {
@@ -945,7 +945,7 @@ impl PostgresStorage {
     pub async fn from_pool_with_fleet_writable_range_for_testing(
         pool: PgPool,
         config: PostgresStoreConfig,
-        writable: std::ops::RangeInclusive<u32>,
+        writable: lash_core_execution::compat::VersionRange,
     ) -> Result<Self, StoreError> {
         let (catalog_id, fleet_format) =
             ensure_schema(&pool, config.schema_check, writable).await?;
@@ -965,15 +965,15 @@ impl PostgresStorage {
     /// data precondition; only structural verification is skipped.
     #[cfg(feature = "testing")]
     pub async fn from_preverified_pool_for_testing(pool: PgPool) -> Result<Self, StoreError> {
-        let found_version: Option<i32> =
-            sqlx::query_scalar(crate::schema::SELECT_COMPONENT_VERSION)
-                .bind(SCHEMA_COMPONENT)
-                .fetch_optional(&pool)
-                .await
-                .map_err(store_sqlx_error)?;
-        if !crate::schema::supported_version(found_version) {
-            return Err(version_mismatch_error(None, found_version, None));
-        }
+        let descriptor = lash_core_execution::compat::descriptor(
+            lash_core_execution::compat::ComponentId::POSTGRES,
+        )
+        .ok_or_else(|| StoreError::Backend("missing PostgreSQL compatibility descriptor".into()))?;
+        lash_core_execution::compat::admit(
+            descriptor,
+            crate::schema::read_compat_stamp(&pool, true).await,
+        )
+        .map_err(|refusal| StoreError::Incompatible { refusal })?;
         let catalog_id = crate::schema::read_catalog_id(&pool)
             .await
             .map_err(store_sqlx_error)?
@@ -1467,6 +1467,9 @@ mod root_verbs;
 mod runtime_persistence;
 #[path = "postgres/schema.rs"]
 mod schema;
+#[cfg(test)]
+#[path = "postgres/schema_compat_tests.rs"]
+mod schema_compat_tests;
 #[path = "postgres/schema_shape.rs"]
 mod schema_shape;
 #[path = "postgres/session_blob_reclaim.rs"]

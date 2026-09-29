@@ -132,7 +132,7 @@ impl Store {
         blob_ref: &BlobRef,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
         let connection = Connection::open(path).map_err(sqlite_error)?;
-        let fleet = crate::fleet_format::recorded_or_current(&connection).map_err(sqlite_error)?;
+        let fleet = crate::compat::recorded_or_current(&connection).map_err(sqlite_error)?;
         Self::get_checkpoint_conn(&connection, blob_ref, fleet)
     }
 

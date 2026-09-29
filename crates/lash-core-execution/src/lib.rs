@@ -24,6 +24,7 @@ pub use tokio_util::sync::CancellationToken;
 pub use lash_core_store::admitted_scope::wire as admitted_scope_wire;
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
+pub use lash_core_store::compat;
 pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_manifest;
 #[cfg(any(test, feature = "testing"))]

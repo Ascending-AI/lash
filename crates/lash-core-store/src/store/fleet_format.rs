@@ -14,8 +14,6 @@
 //! different finding from an absent one, so the state is a three-arm enum
 //! rather than an `Option`.
 
-use std::ops::RangeInclusive;
-
 use super::{
     ensure_supported_record_schema_version, ensure_supported_schema_version, record_schema_version,
 };
@@ -140,44 +138,6 @@ impl FleetFormat {
             Ok(Self::from_version(recorded))
         } else {
             Err(StoreError::WriterFenced { recorded, writable })
-        }
-    }
-
-    /// The fleet-format versions this build can write under — the
-    /// `[min_F, max_F]` writable range of ADR 0106 §1.
-    ///
-    /// Superseded by [`FleetFormat::writable`]; it stays until the store
-    /// lanes move their opens onto [`FleetFormat::admit`].
-    ///
-    /// Before the first format upgrade the range is one version wide. The
-    /// build that introduces the next durable format widens it here, and an
-    /// open hands `admit_recorded` this range so a store carrying a
-    /// generation outside it is refused rather than silently wound back.
-    pub fn writable_range() -> RangeInclusive<u32> {
-        FLEET_FORMAT_VERSION..=FLEET_FORMAT_VERSION
-    }
-
-    /// The fleet format a recorded `version` names, admitted against the
-    /// writable range `writable` of the build doing the opening.
-    ///
-    /// `F` is fail-closed (ADR 0106 §7): a recorded value `writable` does not
-    /// contain means the fleet writes a generation this build cannot emit, and
-    /// the open is refused with the typed error an operator can route rather
-    /// than allowed to stamp retired formats.
-    ///
-    /// Superseded by [`FleetFormat::admit`]; it stays until the store lanes
-    /// move their opens onto it.
-    pub fn admit_recorded(
-        version: u32,
-        writable: RangeInclusive<u32>,
-    ) -> Result<Self, crate::StoreError> {
-        if writable.contains(&version) {
-            Ok(Self::from_version(version))
-        } else {
-            Err(crate::StoreError::FleetFormatOutsideWritableRange {
-                recorded: version,
-                current: FLEET_FORMAT_VERSION,
-            })
         }
     }
 

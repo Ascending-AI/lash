@@ -837,7 +837,7 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
             Arc::new(lash_core_execution::facade_support::SystemClock),
             None,
             None,
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
             Some(injector.clone()),
         )
         .await

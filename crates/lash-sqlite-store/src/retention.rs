@@ -73,7 +73,7 @@ impl SqliteSessionStoreFactory {
             Arc::clone(&self.clock),
             self.process_registry.as_ref(),
             self.turn_cancel_closure_owner_binding(),
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
             #[cfg(feature = "testing")]
             self.fault_injector.clone(),
         )

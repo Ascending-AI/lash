@@ -138,7 +138,7 @@ pub(crate) async fn read_component_version(
 ) -> Result<ComponentVersion, StoreError> {
     // Probed by OID rather than by a `::regclass` cast, which would resolve the
     // name outside the transaction's snapshot.
-    let probed = ["component", "version"];
+    let probed = ["component", "version", "min_reader"];
     if !probe_columns_match_expected(
         connection,
         installation.anchor_oid,
@@ -242,25 +242,8 @@ pub(crate) async fn verify_schema_shape(
         found_version,
         findings: Vec::new(),
     };
-    // The stamp is a generation statement, not a structural finding: only a
-    // stamp *outside* the supported range short-circuits the structural diff,
-    // because diffing an unrelated generation is noise rather than diagnosis.
-    // A stamp inside the range diffs against this build's shape as normal — an
-    // admitted older version is expected to be structurally indistinguishable
-    // under the expand-only rules (FIG-3797).
-    let readable_version_mismatch = match &stamp {
-        ComponentVersion::Readable(version) if !crate::schema::supported_version(*version) => {
-            Some(*version)
-        }
-        ComponentVersion::Readable(_) | ComponentVersion::Unreadable => None,
-    };
-    if let Some(version) = readable_version_mismatch {
-        report.findings.push(SchemaFinding::VersionMismatch {
-            expected: SCHEMA_VERSION,
-            found: version,
-        });
-        return Ok(report);
-    }
+    // Compatibility admission runs separately. An expanded stamp still needs
+    // the full structural comparison against the objects this build knows.
     report
         .findings
         .extend(read_shadow_findings(connection, &installation, &search_path, &table_names).await?);

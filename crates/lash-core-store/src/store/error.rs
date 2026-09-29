@@ -141,13 +141,6 @@ pub enum StoreError {
         "session state version {found} has no conversion chain to {current}; drain sessions and recreate the store with this version"
     )]
     SessionStateVersionUnsupported { found: u32, current: u32 },
-    /// The store's fleet-format row records a generation this build's writable
-    /// range does not admit (ADR 0106 §1): a worker that opened anyway would
-    /// emit a format the fleet has retired.
-    #[error(
-        "store records fleet format {recorded}, outside this build's writable range ending at {current}; run `lashctl version` with a build whose range contains {recorded}, or upgrade this build"
-    )]
-    FleetFormatOutsideWritableRange { recorded: u32, current: u32 },
     /// A store, an epoch or a stored label this build cannot admit
     /// (ADR 0115 §1.5). The refusal names its remedy.
     #[error("{refusal}")]
@@ -713,27 +706,6 @@ pub enum StoreError {
         /// Backend diagnostic for the failed storage operation.
         message: String,
     },
-    /// A store open found a schema component stamp outside the range of
-    /// versions this build admits (FIG-3797). `found` is `None` when the
-    /// database carries the component's relations but no readable stamp, or
-    /// no installation at all. `message` is the full operator-facing refusal —
-    /// it names the found version and the supported range — while the fields
-    /// carry the same facts for programmatic classification.
-    #[error("{message}")]
-    SchemaVersionOutOfRange {
-        /// The versioned schema component, e.g. `lash-postgres-store`.
-        component: String,
-        /// The stamped version found, or `None` for an unstamped/uninstalled
-        /// database.
-        found: Option<i32>,
-        /// The oldest component version this build admits.
-        supported_min: i32,
-        /// The newest component version this build admits.
-        supported_latest: i32,
-        /// The operator-facing refusal text, naming `found` and the supported
-        /// range.
-        message: String,
-    },
     #[error("store backend error: {0}")]
     Backend(String),
 }
@@ -770,7 +742,6 @@ impl StoreError {
             Self::SessionResolutionAmbiguous { .. } => "SessionResolutionAmbiguous",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
             Self::SessionStateVersionUnsupported { .. } => "SessionStateVersionUnsupported",
-            Self::FleetFormatOutsideWritableRange { .. } => "FleetFormatOutsideWritableRange",
             Self::Incompatible { .. } => "Incompatible",
             Self::WriterFenced { .. } => "WriterFenced",
             Self::SessionStateVersionNewerThanRuntime { .. } => {
@@ -861,7 +832,6 @@ impl StoreError {
             Self::ArtifactStagingEdgeMissing { .. } => "ArtifactStagingEdgeMissing",
             Self::ParkFeedCursorCompacted { .. } => "ParkFeedCursorCompacted",
             Self::StorageFailure { .. } => "StorageFailure",
-            Self::SchemaVersionOutOfRange { .. } => "SchemaVersionOutOfRange",
             Self::Backend(_) => "Backend",
         }
     }

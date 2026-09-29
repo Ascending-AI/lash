@@ -55,13 +55,7 @@ use crate::schema::SqliteDatabase;
 /// be read yields [`StoreSchemaVerdict::Unreadable`] carrying SQLite's own
 /// words, because an unreadable database is undecided rather than refused.
 pub async fn verify_schema_at(path: &Path, database: SqliteDatabase) -> StoreSchemaDatabase {
-    let verdict = read_user_version(path).await;
-    let verdict = match verdict {
-        Ok(None) => StoreSchemaVerdict::Absent,
-        Ok(Some(found)) if found == database.expected_version() => StoreSchemaVerdict::Matches,
-        Ok(Some(found)) => StoreSchemaVerdict::Mismatch { found },
-        Err(reason) => StoreSchemaVerdict::Unreadable { reason },
-    };
+    let verdict = read_compat_verdict(path, database).await;
     StoreSchemaDatabase {
         name: database.name().to_string(),
         location: path.display().to_string(),
@@ -70,43 +64,54 @@ pub async fn verify_schema_at(path: &Path, database: SqliteDatabase) -> StoreSch
     }
 }
 
-/// `Ok(None)` when nothing is provisioned: either the file is absent, or it
-/// exists with `user_version` 0 and no user objects, which is precisely the
-/// state the open path would initialise.
-async fn read_user_version(path: &Path) -> Result<Option<i64>, String> {
+/// Inspect the authoritative compatibility row without changing the file.
+async fn read_compat_verdict(path: &Path, database: SqliteDatabase) -> StoreSchemaVerdict {
     if !path.exists() {
-        return Ok(None);
+        return StoreSchemaVerdict::Absent;
     }
     // A failed read-only open is an undecided database, never a reason to reach for a
     // connection that can write.
-    let conn =
-        SqliteConnection::open_readonly(&crate::location::DatabaseTarget::File(path.to_path_buf()))
-            .await
-            .map_err(|err| err.to_string())?;
+    let conn = match SqliteConnection::open_readonly(&crate::location::DatabaseTarget::File(
+        path.to_path_buf(),
+    ))
+    .await
+    {
+        Ok(conn) => conn,
+        Err(error) => {
+            return StoreSchemaVerdict::Unreadable {
+                reason: error.to_string(),
+            };
+        }
+    };
     let probe = conn
-        .call(|c| {
+        .call(move |c| {
             // The engine enforces the promise the module documents: any
             // statement that would write fails here, including the implicit
             // ones a pragma could trigger.
             c.pragma_update(None, "query_only", true)?;
-            let user_version: i64 =
-                c.query_row(crate::connection_sql::SELECT_USER_VERSION, [], |row| {
-                    row.get(0)
-                })?;
-            if user_version != 0 {
-                return Ok(Some(user_version));
-            }
-            // Version 0 over an existing schema is not "empty"; it is a
-            // database the open path would refuse. Distinguish the two here
-            // rather than reporting a fresh file as a live deployment.
-            if crate::schema::has_user_schema_objects(c)? {
-                Ok(Some(0))
-            } else {
-                Ok(None)
+            let Some((stamp, _)) = crate::compat::read(c, database)? else {
+                return if crate::schema::has_user_schema_objects(c)? {
+                    Ok(StoreSchemaVerdict::Mismatch { found: 0 })
+                } else {
+                    Ok(StoreSchemaVerdict::Absent)
+                };
+            };
+            let descriptor = lash_core_execution::compat::descriptor(database.component())
+                .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
+            match lash_core_execution::compat::admit(
+                descriptor,
+                lash_core_execution::compat::StampRead::Present(stamp),
+            ) {
+                Ok(_) => Ok(StoreSchemaVerdict::Matches),
+                Err(_) => Ok(StoreSchemaVerdict::Mismatch {
+                    found: i64::from(stamp.version),
+                }),
             }
         })
         .await;
-    probe.map_err(|err| err.to_string())
+    probe.unwrap_or_else(|error| StoreSchemaVerdict::Unreadable {
+        reason: error.to_string(),
+    })
 }
 
 /// Read the release stamp the durable core carries, read-only.
@@ -172,7 +177,7 @@ async fn read_fleet_format_state(path: &Path) -> FleetFormatState {
     let read = conn
         .call(|c| {
             c.pragma_update(None, "query_only", true)?;
-            crate::fleet_format::read(c)
+            crate::compat::read_fleet_state(c)
         })
         .await;
     match read {

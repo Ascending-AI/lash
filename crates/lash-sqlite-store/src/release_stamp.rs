@@ -99,21 +99,6 @@ pub(crate) fn read(conn: &Connection) -> rusqlite::Result<StoreReleaseState> {
     }))
 }
 
-/// The writing release alone, for a refusal message that has one to name.
-///
-/// Best effort by construction: the refusal it decorates is raised over a
-/// database this build has already declined to read, so anything other than a
-/// readable stamp yields `None` and the message simply says less.
-pub(crate) fn read_release(conn: &Connection) -> Option<String> {
-    match read(conn) {
-        Ok(StoreReleaseState::Stamped(stamp)) => Some(stamp.release),
-        // Anything else — an absent stamp, an unreadable one, a failed read, or
-        // a state a later build adds — names no release, and a refusal that
-        // cannot name one says less rather than guessing.
-        Ok(_) | Err(_) => None,
-    }
-}
-
 /// Apply the update rule inside the open transaction that just provisioned or
 /// admitted the durable-core schema.
 pub(crate) fn write(tx: &Transaction<'_>) -> rusqlite::Result<()> {

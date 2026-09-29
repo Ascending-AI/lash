@@ -75,11 +75,9 @@ pub(super) async fn pin_in_catalog(
     conn.write_flow(move |tx| {
         let outcome: Result<lash_core_execution::ForkPoint, lash_core_execution::StoreError> =
             (|| {
-                let fleet_format = crate::fleet_format::read_recorded(
-                    tx,
-                    lash_core_execution::FleetFormat::writable_range(),
-                )
-                .map_err(sqlite_error)?;
+                let fleet_format =
+                    crate::compat::read_recorded(tx, lash_core_execution::FleetFormat::writable())
+                        .map_err(sqlite_error)?;
                 if let Some((checkpoint_ref, source_session_id)) = tx
                     .query_row(
                         session_sql().anchors.select_by_node.sql(),
@@ -189,11 +187,9 @@ pub(super) async fn fork_points_in_catalog(
         let tx = conn.transaction()?;
         let outcome: Result<Vec<lash_core_execution::ForkPoint>, lash_core_execution::StoreError> =
             (|| {
-                let fleet_format = crate::fleet_format::read_recorded(
-                    &tx,
-                    lash_core_execution::FleetFormat::writable_range(),
-                )
-                .map_err(sqlite_error)?;
+                let fleet_format =
+                    crate::compat::read_recorded(&tx, lash_core_execution::FleetFormat::writable())
+                        .map_err(sqlite_error)?;
                 let mut stmt = tx
                     .prepare(session_sql().head.select_fork_points.sql())
                     .map_err(sqlite_error)?;
@@ -247,9 +243,9 @@ pub(super) async fn fork_at_in_catalog(
             // writer consult; this transaction writes durable head/meta rows,
             // so it reads the deployment's generation rather than a build
             // constant.
-            let fleet_format = crate::fleet_format::read_recorded(
+            let fleet_format = crate::compat::read_recorded(
                 tx,
-                lash_core_execution::FleetFormat::writable_range(),
+                lash_core_execution::FleetFormat::writable(),
             )
             .map_err(sqlite_error)?;
             // Keep the fork fences in the shared order: exists -> deleted ->

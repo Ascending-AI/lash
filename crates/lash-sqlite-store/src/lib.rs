@@ -105,7 +105,7 @@ fn commit_count_entropy_seed() -> u64 {
     (high ^ low) & (u64::MAX >> 1)
 }
 mod backend;
-mod fleet_format;
+mod compat;
 mod forks;
 mod generation_drain;
 mod graph;

@@ -58,7 +58,6 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     let root = temp_root();
     let path = root.path().join("durable-core.db");
     Store::open(&path).await.expect("provision the database");
-    let expected = SqliteDatabase::DurableCore.expected_version();
     // Component 45 introduced BLAKE3 identities, 46 the durable vocabulary
     // CHECKs, 47 the all-or-none session lease identity, 48 the queued-work
     // vocabulary and claim correlation, 49 the pending-input checks and
@@ -82,9 +81,9 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     // generation: nothing older than 45 may ever open, whatever the target is.
     // The 43→44 in-place upgrade arm is deleted, so a generation-43 stamp is
     // refused outright rather than folded forward first.
-    assert_eq!(expected, 99, "the pinned durable-core target changed");
+    assert_eq!(expected, 1, "the 1.0 compatibility version changed");
 
-    rewind_user_version(&path, 43);
+    stamp_compat(&path, 43, 43);
 
     let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
     assert_eq!(found.verdict, StoreSchemaVerdict::Mismatch { found: 43 });
@@ -100,8 +99,7 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     let root = temp_root();
     let path = root.path().join("durable-core.db");
     Store::open(&path).await.expect("provision the database");
-    let expected = SqliteDatabase::DurableCore.expected_version();
-    rewind_user_version(&path, expected - 1);
+    stamp_compat(&path, 2, 2);
 
     let holder = rusqlite::Connection::open(&path).expect("open holder connection");
     holder
@@ -109,7 +107,7 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
         .expect("hold the write lock");
 
     // Red side: the open path takes `BEGIN IMMEDIATE` before it reads
-    // `user_version`, so with the write lock held it cannot even reach the
+    // the compatibility row, so with the write lock held it cannot even reach the
     // question. It blocks on the busy handler instead of reporting the version.
     let blocked = tokio::time::timeout(Duration::from_secs(2), async {
         Store::open(&path)
@@ -131,12 +129,7 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     )
     .await
     .expect("preflight answers while the write lock is held");
-    assert_eq!(
-        answered.verdict,
-        StoreSchemaVerdict::Mismatch {
-            found: expected - 1
-        }
-    );
+    assert_eq!(answered.verdict, StoreSchemaVerdict::Mismatch { found: 2 });
 
     holder.execute_batch("ROLLBACK").expect("release the lock");
 }
@@ -252,24 +245,18 @@ async fn a_preflight_connection_refuses_to_write_even_if_asked() {
 
 #[test]
 fn every_database_publishes_the_version_its_open_enforces() {
-    assert_eq!(
-        SqliteDatabase::DurableCore.expected_version(),
-        i64::from(crate::schema::SCHEMA_VERSION)
-    );
-    assert_eq!(
-        SqliteDatabase::ProcessRegistry.expected_version(),
-        i64::from(crate::schema::PROCESS_SCHEMA_VERSION)
-    );
-    assert_eq!(
-        SqliteDatabase::Triggers.expected_version(),
-        i64::from(crate::schema::TRIGGER_SCHEMA_VERSION)
-    );
+    for database in SqliteDatabase::ALL {
+        assert_eq!(database.expected_version(), 1);
+    }
 }
 
-fn rewind_user_version(path: &std::path::Path, version: i64) {
-    let conn = rusqlite::Connection::open(path).expect("open for rewind");
-    conn.pragma_update(None, "user_version", version)
-        .expect("rewind user_version");
+fn stamp_compat(path: &std::path::Path, version: i64, min_reader: i64) {
+    let conn = rusqlite::Connection::open(path).expect("open for stamp");
+    conn.execute(
+        "UPDATE lash_compat SET version = ?1, min_reader = ?2 WHERE singleton = 1",
+        rusqlite::params![version, min_reader],
+    )
+    .expect("update compatibility stamp");
 }
 
 /// The durable-payload walk: what is parked, whose it is, and what the walk

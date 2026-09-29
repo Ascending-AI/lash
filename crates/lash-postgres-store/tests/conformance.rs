@@ -1545,11 +1545,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     // reds trunk on every schema bump that reaches main before the pin is
     // advanced. This assertion keeps the real invariant: the live database
     // must record the version the compiled store expects.
-    assert_eq!(
-        current_version,
-        PostgresStorage::schema_version(),
-        "live component version must match the compiled store schema version"
-    );
+    assert_eq!(current_version, 1, "the 1.0 compatibility stamp changed");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'
@@ -1585,23 +1581,24 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
         ),
         "usage identity uniqueness must include the payload encoding version and canonical hash: {usage_identity_constraint}"
     );
-    let stale_version = current_version - 1;
-    // Force the recorded component version to a stale value.
+    let newer_version = current_version + 1;
+    // A newer catalog whose floor passed this build must refuse adoption.
     sqlx::query(
-        "INSERT INTO lash_schema_versions (component, version) VALUES ('lash-postgres-store', $1)
-         ON CONFLICT (component) DO UPDATE SET version = EXCLUDED.version",
+        "UPDATE lash_schema_versions SET version = $1, min_reader = $1
+         WHERE component = 'lash-postgres-store'",
     )
-    .bind(stale_version)
+    .bind(newer_version)
     .execute(&pool)
     .await
-    .expect("write stale schema version");
+    .expect("raise reader floor");
 
     let result = PostgresStorage::from_pool(pool.clone()).await;
 
     // Restore the correct version BEFORE asserting so a failed assert never leaves
     // the shared database wedged for other cases.
     sqlx::query(
-        "UPDATE lash_schema_versions SET version = $1 WHERE component = 'lash-postgres-store'",
+        "UPDATE lash_schema_versions SET version = $1, min_reader = $1
+         WHERE component = 'lash-postgres-store'",
     )
     .bind(current_version)
     .execute(&pool)
@@ -1609,13 +1606,12 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .expect("restore schema version");
 
     let message = match result {
-        Ok(_) => panic!("from_pool must reject a stale schema version"),
+        Ok(_) => panic!("from_pool must reject a raised reader floor"),
         Err(err) => err.to_string(),
     };
     assert!(
-        message.contains(&format!("version {stale_version}"))
-            && message.contains(&format!("expected {current_version}")),
-        "expected a schema-version mismatch error, got: {message}"
+        message.contains("reader floor") && message.contains(&newer_version.to_string()),
+        "expected a reader-floor refusal, got: {message}"
     );
 }
 
@@ -1642,8 +1638,8 @@ async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() 
     let result = PostgresStorage::from_pool(pool.clone()).await;
 
     sqlx::query(
-        "INSERT INTO lash_schema_versions (component, version)
-         VALUES ('lash-postgres-store', $1)
+        "INSERT INTO lash_schema_versions (component, version, min_reader)
+         VALUES ('lash-postgres-store', $1, $1)
          ON CONFLICT (component) DO UPDATE SET version = EXCLUDED.version",
     )
     .bind(current_version)
@@ -1656,8 +1652,7 @@ async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() 
         Err(err) => err.to_string(),
     };
     assert!(
-        message.contains("has no version stamp")
-            && message.contains(&format!("expected {current_version}")),
+        message.contains("unstamped") || message.contains("stamp"),
         "expected an unstamped-schema error, got: {message}"
     );
 }

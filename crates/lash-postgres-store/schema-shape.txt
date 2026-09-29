@@ -361,6 +361,7 @@ table lash_runtime_turn_commits
   primary-key (session_id, turn_id)
 table lash_schema_versions
   column component text not-null
+  column min_reader integer not-null
   column version integer not-null
   primary-key (component)
 table lash_session_ingress_sequence
