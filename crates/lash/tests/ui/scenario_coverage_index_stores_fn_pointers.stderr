@@ -1,0 +1,8 @@
+error[E0425]: cannot find value `runtime_scenario_test_that_was_deleted` in this scope
+  --> tests/ui/scenario_coverage_index_stores_fn_pointers.rs:26:5
+   |
+17 |             test_name: stringify!($test_fn),
+   |                                   -------- due to this macro variable
+...
+26 |     runtime_scenario_test_that_was_deleted,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
