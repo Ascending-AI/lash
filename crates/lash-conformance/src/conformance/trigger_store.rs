@@ -26,6 +26,7 @@ where
     disable_preserves_reserved_work_and_requires_explicit_enable(make()).await;
     register_disable_reenable_roundtrip_is_fenced_and_receipted(make()).await;
     delete_tombstones_preserves_history_and_revive_changes_incarnation(make()).await;
+    register_and_revive_commit_their_operation_incarnation(make()).await;
     owner_namespaces_are_exact_and_session_cleanup_is_scoped(make()).await;
     explicit_prune_is_journaled_and_owner_scoped(make()).await;
     occurrence_and_reservations_are_atomic_and_idempotent(make()).await;
@@ -1425,6 +1426,56 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
     assert_eq!(revived.subscription_id, created.subscription_id);
     assert_ne!(revived.incarnation, created.incarnation);
     assert_eq!(revived.revision, 3);
+}
+
+/// A `Register` or `Revive` commits the incarnation `trigger_incarnation`
+/// derives from its owner scope and the operation id the command ran under
+/// (ADR 0113 §1): the subscription revision its effect held before the
+/// commit names that incarnation, and a store that derives it from anything
+/// else commits a revision no referrer holds, so its artifacts are reclaimed
+/// under a live registration.
+async fn register_and_revive_commit_their_operation_incarnation(
+    store: Arc<dyn crate::TriggerStore>,
+) {
+    let session_id = SessionId::from("session-incarnation");
+    let key = "incarnation-key";
+    let draft = sample_draft(&session_id, key, "incarnation-source", "worker");
+    let created = mutate(
+        &store,
+        "incarnation-register",
+        register_command(&session_id, draft.clone()),
+    )
+    .await;
+    assert_eq!(
+        created.incarnation,
+        crate::trigger_incarnation(&owner(&session_id), "incarnation-register"),
+        "a Register commits the incarnation of its own operation id"
+    );
+    assert_eq!(created.record_snapshot.incarnation, created.incarnation);
+    let deleted = mutate(
+        &store,
+        "incarnation-delete",
+        revision_command(&session_id, key, created.revision, "delete"),
+    )
+    .await;
+    let revived = mutate(
+        &store,
+        "incarnation-revive",
+        crate::TriggerCommand::Revive {
+            owner_scope: owner(&session_id),
+            actor: actor(&session_id),
+            subscription_key: key.to_string(),
+            draft,
+            expected_revision: deleted.revision,
+        },
+    )
+    .await;
+    assert_eq!(
+        revived.incarnation,
+        crate::trigger_incarnation(&owner(&session_id), "incarnation-revive"),
+        "a Revive commits the incarnation of its own operation id"
+    );
+    assert_eq!(revived.record_snapshot.incarnation, revived.incarnation);
 }
 
 #[expect(

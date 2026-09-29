@@ -590,8 +590,11 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         );
         let request_fingerprint =
             lash_core_execution::facade_support::trigger_command_fingerprint(&command);
+        // The incarnation derives from the command's own operation id, not its
+        // receipt id: the revision referrer the command's effect held before
+        // this commit names that incarnation (ADR 0113 §1).
         let fixed_incarnation = self.fixed_incarnation.clone().unwrap_or_else(|| {
-            lash_core_execution::trigger_incarnation(command.owner_scope(), &operation_id)
+            lash_core_execution::trigger_incarnation(command.owner_scope(), &public_operation_id)
         });
         let owner_scope = command.owner_scope().clone();
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
