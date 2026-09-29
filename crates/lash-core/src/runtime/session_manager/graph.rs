@@ -154,31 +154,4 @@ impl CurrentSessionCapability {
             leaf_node_id: committed_leaf_node_id.unwrap_or(locally_derived_leaf_node_id),
         })
     }
-    pub(in crate::runtime::session_manager) async fn switch_agent_frame(
-        &self,
-        session_id: &SessionId,
-        request: &crate::SwitchAgentFrameRequest,
-    ) -> Result<crate::OpenAgentFrameResult, crate::PluginError> {
-        if session_id != self.session_id {
-            return Err(crate::PluginError::Session(format!(
-                "unknown session `{session_id}`"
-            )));
-        }
-        match &self.snapshot {
-            // A turn-scoped service never commits on its own: the switch rides the
-            // running turn's draft and materializes with the turn's final commit.
-            CurrentSnapshot::ReadModel {
-                graph_appends,
-                meta,
-                ..
-            } => graph_appends.record_frame_switch(
-                session_id,
-                meta.current_frame_node_id.as_deref(),
-                request,
-            ),
-            _ => Err(crate::PluginError::Session(format!(
-                "agent-frame switch requires the running session's turn scope; session `{session_id}` has no live turn draft"
-            ))),
-        }
-    }
 }

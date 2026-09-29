@@ -13,41 +13,74 @@ use super::PluginError;
 /// Lazily renders the system prompt a compaction completion carries.
 ///
 /// Deferred so plugin prompt hooks run only when a compaction actually
-/// happens — an in-transform overflow recovery is rare, and resolving the
+/// happens — a context-pressure hook summarizes rarely, and resolving the
 /// prompt eagerly on every turn prepare would fire prompt hooks for prompts
 /// that are never sent.
 pub type CompactionSystemPrompt =
     Arc<dyn Fn() -> BoxFuture<'static, Result<Option<Arc<str>>, PluginError>> + Send + Sync>;
 
+/// Emits trace events and nothing else.
+///
+/// The one observable side channel a context hook holds: transforms,
+/// compactors and context-pressure hooks write nothing durable, so they get a
+/// trace emitter instead of a session service (ADR 0001, ADR 0105 §6).
+#[derive(Clone)]
+pub struct PluginTraceEmitter {
+    sink: Arc<dyn Fn(lash_trace::TraceContext, lash_trace::TraceEvent) + Send + Sync>,
+}
+
+impl PluginTraceEmitter {
+    pub fn new(
+        sink: impl Fn(lash_trace::TraceContext, lash_trace::TraceEvent) + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            sink: Arc::new(sink),
+        }
+    }
+
+    /// An emitter that drops every event.
+    pub fn discard() -> Self {
+        Self::new(|_, _| {})
+    }
+
+    pub fn emit(&self, context: lash_trace::TraceContext, event: lash_trace::TraceEvent) {
+        (self.sink)(context, event);
+    }
+}
+
+impl std::fmt::Debug for PluginTraceEmitter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginTraceEmitter").finish_non_exhaustive()
+    }
+}
+
 /// Context passed to a turn-context transform.
+///
+/// A transform is a Prompt View transform (ADR 0001): its output is
+/// ephemeral and it holds no write service, so it can neither append nodes
+/// nor open a frame. Durable context decisions belong to a
+/// [`ContextPressureHook`], whose decision core writes.
 #[derive(Clone)]
 pub struct TurnTransformContext<'run> {
     pub session_id: SessionId,
     pub state: SessionReadView,
     pub prompt_usage: Option<crate::TokenUsage>,
     pub max_context_tokens: Option<usize>,
-    pub sessions: Arc<dyn super::SessionStateService>,
-    pub session_lifecycle: Arc<dyn super::SessionLifecycleService>,
-    pub session_graph: Arc<dyn super::SessionGraphService>,
+    pub traces: PluginTraceEmitter,
     pub scoped_effect_controller: crate::ScopedEffectController<'run>,
     pub direct_completions: crate::DirectCompletionClient<'run>,
-    /// The system prompt an in-transform recovery completion carries: the
-    /// same capability, core, and session prompt layers a turn on this
-    /// session would resolve, minus the turn layer and every tool-gated
-    /// contribution. Lazy — resolved only if recovery runs; `None` when this
-    /// session cannot build a recovery prompt at all.
-    pub system_prompt: Option<CompactionSystemPrompt>,
 }
 
 /// Context passed to an explicit compactor.
+///
+/// A compactor returns seed nodes and core opens the frame; it holds no
+/// write service.
 #[derive(Clone)]
 pub struct CompactionContext<'run> {
     pub session_id: SessionId,
     pub instructions: Option<String>,
     pub state: SessionReadView,
-    pub sessions: Arc<dyn super::SessionStateService>,
-    pub session_lifecycle: Arc<dyn super::SessionLifecycleService>,
-    pub session_graph: Arc<dyn super::SessionGraphService>,
+    pub traces: PluginTraceEmitter,
     pub scoped_effect_controller: crate::ScopedEffectController<'run>,
     pub direct_completions: crate::DirectCompletionClient<'run>,
     /// The system prompt the compaction completion carries: the same
@@ -56,6 +89,69 @@ pub struct CompactionContext<'run> {
     /// (the request ships no tools, so a gated contribution could never be
     /// honored). `None` when the resolved stack renders empty.
     pub system_prompt: Option<Arc<str>>,
+}
+
+/// Context passed to a [`ContextPressureHook`].
+///
+/// Everything in it is recorded state or a journaled effect: the committed
+/// read view (which carries every durable plugin record, a pending
+/// overflow-recovery marker included), the previous provider-reported prompt
+/// usage and the context window. The hook holds no write service: it returns
+/// a [`ContextPressureDecision`] and core writes it.
+#[derive(Clone)]
+pub struct ContextPressureContext<'run> {
+    pub session_id: SessionId,
+    /// The committed session, as it stood when the turn was admitted.
+    pub state: SessionReadView,
+    /// The previous turn's provider-reported prompt usage, if any.
+    pub prompt_usage: Option<crate::TokenUsage>,
+    /// The context window the turn's model runs under.
+    pub max_context_tokens: Option<usize>,
+    pub traces: PluginTraceEmitter,
+    pub scoped_effect_controller: crate::ScopedEffectController<'run>,
+    pub direct_completions: crate::DirectCompletionClient<'run>,
+    /// The system prompt a summarizer completion carries: the same
+    /// capability, core, and session prompt layers a turn on this session
+    /// would resolve, minus the turn layer and every tool-gated contribution.
+    /// Lazy — resolved only if the hook summarizes; `None` when this session
+    /// cannot build one at all.
+    pub system_prompt: Option<CompactionSystemPrompt>,
+}
+
+/// What a [`ContextPressureHook`] decided for the turn being prepared.
+///
+/// Core applies it as the folded outcome of the turn's prepare step (ADR
+/// 0105 §6). Nothing is written until the turn commits, and the turn's
+/// commit carries every node and the frame.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ContextPressureDecision {
+    /// Leave the session as it is.
+    Continue,
+    /// Append plugin records to the current frame. They fold at the turn's
+    /// first boundary, after the turn's own input.
+    Record {
+        nodes: Vec<crate::SessionAppendNode>,
+    },
+    /// Open a compaction frame the turn runs in.
+    ///
+    /// `records` are appended to the frame being left, then core opens a
+    /// frame seeded with `seed` before the turn runs, so the turn's own
+    /// messages follow the seed. Core derives the frame key from the turn's
+    /// scope and the current frame. `task` names the compaction. A turn
+    /// opens at most one frame: a turn that opened one and then ends in a
+    /// `continue_as` is refused typed.
+    OpenFrame {
+        records: Vec<crate::SessionAppendNode>,
+        task: String,
+        seed: Vec<crate::SessionAppendNode>,
+    },
+}
+
+/// The decision a named hook returned, as core applies it.
+#[derive(Clone, Debug)]
+pub struct DecidedContextPressure {
+    pub hook_id: &'static str,
+    pub decision: ContextPressureDecision,
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
@@ -107,7 +203,8 @@ impl ContextCompaction {
     }
 }
 
-/// Prepares the ephemeral turn context presented to the model.
+/// Prepares the ephemeral turn context presented to the model (a Prompt
+/// View transform, ADR 0001).
 #[async_trait::async_trait]
 pub trait TurnContextTransform: Send + Sync {
     fn id(&self) -> &'static str;
@@ -125,4 +222,23 @@ pub trait ContextCompactor: Send + Sync {
         &self,
         ctx: &CompactionContext<'_>,
     ) -> Result<Option<ContextCompaction>, ContextError>;
+}
+
+/// Decides, once per turn and before the Prompt View transforms, whether the
+/// session's context needs a durable change: plugin records, or a compaction
+/// frame the turn then runs in.
+///
+/// The hook owns the strategy (the threshold, the cut, the summarizer
+/// prompt, overflow recovery) and may run effects, such as one journaled
+/// summarizer completion. It never writes: core performs the write its
+/// decision names. A replay calls it again over the same recorded inputs,
+/// and the journaled completion answers the same way, so it reaches the same
+/// decision.
+#[async_trait::async_trait]
+pub trait ContextPressureHook: Send + Sync {
+    fn id(&self) -> &'static str;
+    async fn decide(
+        &self,
+        ctx: &ContextPressureContext<'_>,
+    ) -> Result<ContextPressureDecision, ContextError>;
 }

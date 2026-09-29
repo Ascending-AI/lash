@@ -107,6 +107,7 @@ pub(crate) struct PluginContributions {
     pub(crate) plugin_operations: BTreeMap<String, RegisteredPluginOperation>,
     pub(crate) turn_context_transforms: Vec<(i32, RegisteredHook<Arc<dyn TurnContextTransform>>)>,
     pub(crate) context_compactors: Vec<(i32, RegisteredHook<Arc<dyn ContextCompactor>>)>,
+    pub(crate) context_pressure_hooks: Vec<(i32, RegisteredHook<Arc<dyn ContextPressureHook>>)>,
     pub(crate) protocol_session: Option<RegisteredExclusiveHook<Arc<dyn ProtocolSessionPlugin>>>,
     pub(crate) protocol_driver: Option<RegisteredExclusiveHook<Arc<dyn ProtocolDriverPlugin>>>,
     pub(crate) code_executor: Option<RegisteredExclusiveHook<Arc<dyn CodeExecutorPlugin>>>,
@@ -456,6 +457,17 @@ impl ContextRegistrations<'_> {
             &self.reg.registering_plugin_id,
             priority,
             compactor,
+        );
+    }
+
+    /// Higher priority runs first; the first hook that opens a frame is the
+    /// last one called for that turn.
+    pub fn pressure(self, priority: i32, hook: Arc<dyn ContextPressureHook>) {
+        push_prioritized_registered_hook(
+            &mut self.reg.contributions.context_pressure_hooks,
+            &self.reg.registering_plugin_id,
+            priority,
+            hook,
         );
     }
 }

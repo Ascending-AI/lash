@@ -500,6 +500,9 @@ impl PluginHost {
         contributions
             .context_compactors
             .sort_by_key(|entry| std::cmp::Reverse(entry.0));
+        contributions
+            .context_pressure_hooks
+            .sort_by_key(|entry| std::cmp::Reverse(entry.0));
         let triggers = crate::TriggerEventCatalog::from_events(contributions.triggers.clone())
             .map_err(|message| {
                 PluginError::Registration(format!("invalid trigger event catalog: {message}"))

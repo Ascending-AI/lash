@@ -159,6 +159,15 @@ impl CurrentSessionCapability {
         context: lash_trace::TraceContext,
         event: lash_trace::TraceEvent,
     ) -> Result<(), crate::PluginError> {
+        self.emit_trace(context, event);
+        Ok(())
+    }
+
+    pub(in crate::runtime::session_manager) fn emit_trace(
+        &self,
+        context: lash_trace::TraceContext,
+        event: lash_trace::TraceEvent,
+    ) {
         crate::trace::emit_trace(
             &self.host.core.tracing.trace_sink,
             &self.host.core.tracing.trace_context,
@@ -166,6 +175,5 @@ impl CurrentSessionCapability {
             event,
             self.host.core.clock.as_ref(),
         );
-        Ok(())
     }
 }

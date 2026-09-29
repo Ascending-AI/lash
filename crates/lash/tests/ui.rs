@@ -93,6 +93,8 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/attempt_context_has_no_controller.rs");
     t.compile_fail("tests/ui/plugin_spec_registers_only_providers.rs");
     t.compile_fail("tests/ui/session_read_view_has_no_mutations.rs");
+    // FIG-4110: context hooks hold no write service.
+    t.compile_fail("tests/ui/context_hooks_hold_no_write_service.rs");
     t.compile_fail("tests/ui/pending_attempt_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/pending_start_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/declared_start_is_sealed.rs");

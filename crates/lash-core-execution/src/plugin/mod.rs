@@ -46,7 +46,8 @@ pub use actions::{
 pub use error::{PluginError, durable_identity_conflict, is_durable_identity_conflict};
 pub use history::{
     CompactionContext, CompactionSystemPrompt, ContextCompaction, ContextCompactor, ContextError,
-    SessionReadView, TurnContextTransform, TurnTransformContext,
+    ContextPressureContext, ContextPressureDecision, ContextPressureHook, DecidedContextPressure,
+    PluginTraceEmitter, SessionReadView, TurnContextTransform, TurnTransformContext,
 };
 pub use hooks::{
     AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
@@ -82,7 +83,7 @@ pub use registry::{
 };
 pub use runtime_host::{
     AppendSessionNodesOutcome, AppendSessionNodesRequest, DirectCompletion, DirectLlmCompletion,
-    SessionGraphService, SessionLifecycleService, SessionStateService, SwitchAgentFrameRequest,
+    SessionGraphService, SessionLifecycleService, SessionStateService,
 };
 pub use runtime_impl::{
     PluginHost, ProcessEngineContributionTarget, RecordedSessionConfig, SessionAuthorityContext,

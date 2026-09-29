@@ -332,6 +332,26 @@ lash_conformance::migrated_tools_redrive_tests!(
     }
 );
 
+// FIG-4110's pressure-compaction redrive on a live endpoint: the compacting
+// turn runs in a probe handler, its summarizer completion is journaled by the
+// real server, and the crash after its commit is a failed handler attempt
+// Restate redelivers.
+lash_conformance::pressure_compaction_redrive_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        // Restate state outlives a run: each run names its own session.
+        let prefix: &'static str = Box::leak(
+            format!("restate-pressure-compaction-{}", harness.run_nonce()).into_boxed_str(),
+        );
+        (harness, prefix, effect_host, stores, turn_runner)
+    }
+);
+
 /// ADR 0116 §7.3's declared-start tier on `harness`'s endpoint: the turn runs
 /// in a probe handler, each `spawn_agent` child session runs in the
 /// endpoint's `LashProcessWorkflow` on the law's worker, a crash is a failed

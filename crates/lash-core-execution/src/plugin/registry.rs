@@ -10,12 +10,12 @@ use std::sync::Arc;
 use super::{
     AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantStreamFinishedHook,
     AssistantStreamHook, BeforeToolCallHook, BeforeTurnHook, CheckpointHook, ContextCompactor,
-    ErasedPluginOperationInvokeFuture, PluginCommand, PluginCommandHandler, PluginError,
-    PluginHost, PluginLifecycleEventHook, PluginOperationFailure, PluginOperationOutcome,
-    PluginOperationRegistration, PluginOperationSpec, PluginQuery, PluginQueryHandler,
-    PluginQueryInvokeFuture, PluginRegistrar, PluginTask, PluginTaskHandler, PromptContributor,
-    SessionConfigMutator, SessionToolAccess, SubagentSessionContext, ToolCatalogContributor,
-    ToolPresentationStep, TurnContextTransform,
+    ContextPressureHook, ErasedPluginOperationInvokeFuture, PluginCommand, PluginCommandHandler,
+    PluginError, PluginHost, PluginLifecycleEventHook, PluginOperationFailure,
+    PluginOperationOutcome, PluginOperationRegistration, PluginOperationSpec, PluginQuery,
+    PluginQueryHandler, PluginQueryInvokeFuture, PluginRegistrar, PluginTask, PluginTaskHandler,
+    PromptContributor, SessionConfigMutator, SessionToolAccess, SubagentSessionContext,
+    ToolCatalogContributor, ToolPresentationStep, TurnContextTransform,
 };
 use crate::{PluginOptions, ToolProvider};
 
@@ -100,6 +100,7 @@ pub struct PluginSpec {
     pub(crate) plugin_operations: Vec<PluginOperationRegistration>,
     pub turn_context_transforms: Vec<(i32, Arc<dyn TurnContextTransform>)>,
     pub context_compactors: Vec<(i32, Arc<dyn ContextCompactor>)>,
+    pub context_pressure_hooks: Vec<(i32, Arc<dyn ContextPressureHook>)>,
 }
 
 impl PluginSpec {
@@ -385,6 +386,15 @@ impl PluginSpec {
         compactor: Arc<dyn ContextCompactor>,
     ) -> Self {
         self.context_compactors.push((priority, compactor));
+        self
+    }
+
+    pub fn with_context_pressure_hook(
+        mut self,
+        priority: i32,
+        hook: Arc<dyn ContextPressureHook>,
+    ) -> Self {
+        self.context_pressure_hooks.push((priority, hook));
         self
     }
 }
@@ -735,6 +745,9 @@ impl SessionPlugin for SpecPlugin {
         }
         for (priority, compactor) in &self.spec.context_compactors {
             reg.context().compact(*priority, Arc::clone(compactor));
+        }
+        for (priority, hook) in &self.spec.context_pressure_hooks {
+            reg.context().pressure(*priority, Arc::clone(hook));
         }
         Ok(())
     }

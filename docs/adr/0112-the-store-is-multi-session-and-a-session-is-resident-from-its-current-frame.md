@@ -105,8 +105,10 @@ append fence already runs inside the commit transaction
 The only resident ancestor check left is on the storeless path
 (`crates/lash-core/src/runtime/session_ops.rs:139-149`). Three paths switch
 frames today: explicit compaction
-(`crates/lash-core/src/runtime/session_api.rs:827`), overflow recovery
-(`crates/lash-plugin-standard-compaction/src/recovery.rs:588`) and
+(`crates/lash-core/src/runtime/session_api.rs:827`), context-pressure
+compaction and overflow recovery (a context-pressure hook's decision, which
+core opens in `LashRuntime::apply_context_pressure`,
+`crates/lash-core/src/runtime/turn_loop/prepare.rs`) and
 `continue_as` (`crates/lash-core/src/runtime/turn_boundary.rs:494-505`).
 
 ## Decision
@@ -1093,8 +1095,10 @@ this cutover. The rewrite now costs O(frame).
 ### 10. Frames change on compaction and `continue_as`
 
 A frame is the context window. Explicit compaction
-(`crates/lash-core/src/runtime/session_api.rs:827`), overflow recovery
-(`crates/lash-plugin-standard-compaction/src/recovery.rs:588`) and
+(`crates/lash-core/src/runtime/session_api.rs:827`), context-pressure
+compaction and overflow recovery (a context-pressure hook's decision, which
+core opens in `LashRuntime::apply_context_pressure`,
+`crates/lash-core/src/runtime/turn_loop/prepare.rs`) and
 `continue_as` (`crates/lash-core/src/runtime/turn_boundary.rs:494-505`) all
 append a `FrameOpen` through `open_agent_frame_in_state_with_clock`
 (`crates/lash-core-store/src/session_state.rs:1676`) and commit it. After the

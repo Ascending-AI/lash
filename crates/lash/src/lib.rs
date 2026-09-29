@@ -494,8 +494,7 @@ pub mod plugins {
     /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
     pub use lash_core::TurnDriverConfig;
     /// Durable session-lifecycle operations a hook context carries, alongside
-    /// [`SessionStateService`] and [`SessionGraphService`]. Named by
-    /// [`TurnTransformContext`] and [`CompactionContext`]; runtime-implemented.
+    /// [`SessionStateService`] and [`SessionGraphService`]; runtime-implemented.
     pub use lash_core::facade_support::SessionLifecycleService;
     pub use lash_core::facade_support::{
         AbortTurnDirective, AfterToolCallPluginDirective, AfterTurnPluginDirective,
@@ -509,9 +508,11 @@ pub mod plugins {
         AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform,
         BeforeToolCallHook, BeforeTurnHook, CheckpointHook, CheckpointHookContext,
         CompactionContext, ContextCompaction, ContextCompactor, ContextError,
+        ContextPressureContext, ContextPressureDecision, ContextPressureHook,
         PluginExtensionContribution, PluginSessionMaterialization, PluginSpecBuilder,
-        StaticPluginFactory, ToolCallHookContext, ToolCatalogContext, ToolPresentationPresenter,
-        ToolResultHookContext, ToolResultProjectionContext, TurnHookReport,
+        PluginTraceEmitter, StaticPluginFactory, ToolCallHookContext, ToolCatalogContext,
+        ToolPresentationPresenter, ToolResultHookContext, ToolResultProjectionContext,
+        TurnHookReport,
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{

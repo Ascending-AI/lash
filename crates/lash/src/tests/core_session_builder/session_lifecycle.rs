@@ -91,12 +91,11 @@ impl lash_core::facade_support::TurnContextTransform for ReconciliationTransform
         lash_core::facade_support::PreparedContext,
         lash_core::facade_support::ContextError,
     > {
-        let snapshot = ctx.sessions.snapshot_session(&ctx.session_id).await?;
         self.observations
             .lock_recover()
             .push(ReconciliationTransformObservation {
                 max_context_tokens: ctx.max_context_tokens,
-                session_model: snapshot.policy.model.id,
+                session_model: ctx.state.policy().model.id.clone(),
             });
         Ok(input)
     }

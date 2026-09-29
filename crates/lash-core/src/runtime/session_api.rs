@@ -818,9 +818,7 @@ impl LashRuntime {
             state,
             instructions,
             system_prompt,
-            sessions: services.state_service(),
-            session_lifecycle: services.lifecycle_service(),
-            session_graph: services.graph_service(),
+            traces: services.trace_emitter(),
             scoped_effect_controller: scoped_effect_controller.clone(),
             direct_completions: services.direct_completion_client(
                 crate::runtime::RuntimeEffectControllerHandle::Borrowed(

@@ -187,6 +187,9 @@ pub mod facade_support {
     pub use crate::plugin::ContextCompaction;
     pub use crate::plugin::ContextCompactor;
     pub use crate::plugin::ContextError;
+    pub use crate::plugin::ContextPressureContext;
+    pub use crate::plugin::ContextPressureDecision;
+    pub use crate::plugin::ContextPressureHook;
     pub use crate::plugin::DirectCompletion;
     pub use crate::plugin::DirectLlmCompletion;
     pub use crate::plugin::EnqueueMessagesDirective;
@@ -211,6 +214,7 @@ pub mod facade_support {
     pub use crate::plugin::PluginSpec;
     pub use crate::plugin::PluginSpecFactory;
     pub use crate::plugin::PluginTask;
+    pub use crate::plugin::PluginTraceEmitter;
     pub use crate::plugin::PromptHookContext;
     pub use crate::plugin::RecordedSessionConfig;
     pub use crate::plugin::ReplaceToolArgsDirective;
@@ -701,7 +705,7 @@ pub use plugin::{
     SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginInit,
     SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
     SessionStateService, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
-    SwitchAgentFrameRequest, durable_identity_conflict, is_durable_identity_conflict,
+    durable_identity_conflict, is_durable_identity_conflict,
 };
 pub use plugin::{OpenAgentFrameRequest, OpenAgentFrameResult};
 pub use provider::{

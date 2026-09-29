@@ -1,0 +1,77 @@
+error[E0609]: no field `session_graph` on type `&TurnTransformContext<'_>`
+  --> tests/ui/context_hooks_hold_no_write_service.rs:10:18
+   |
+10 |     let _ = &ctx.session_graph;
+   |                  ^^^^^^^^^^^^^ unknown field
+   |
+   = note: available fields are: `session_id`, `state`, `prompt_usage`, `max_context_tokens`, `traces` ... and 2 others
+
+error[E0609]: no field `session_lifecycle` on type `&TurnTransformContext<'_>`
+  --> tests/ui/context_hooks_hold_no_write_service.rs:11:18
+   |
+11 |     let _ = &ctx.session_lifecycle;
+   |                  ^^^^^^^^^^^^^^^^^ unknown field
+   |
+   = note: available fields are: `session_id`, `state`, `prompt_usage`, `max_context_tokens`, `traces` ... and 2 others
+
+error[E0609]: no field `sessions` on type `&TurnTransformContext<'_>`
+  --> tests/ui/context_hooks_hold_no_write_service.rs:12:18
+   |
+12 |     let _ = &ctx.sessions;
+   |                  ^^^^^^^^ unknown field
+   |
+   = note: available fields are: `session_id`, `state`, `prompt_usage`, `max_context_tokens`, `traces` ... and 2 others
+
+error[E0609]: no field `session_graph` on type `&CompactionContext<'_>`
+  --> tests/ui/context_hooks_hold_no_write_service.rs:16:18
+   |
+16 |     let _ = &ctx.session_graph;
+   |                  ^^^^^^^^^^^^^ unknown field
+   |
+   = note: available fields are: `session_id`, `instructions`, `state`, `traces`, `scoped_effect_controller` ... and 2 others
+
+error[E0609]: no field `session_lifecycle` on type `&CompactionContext<'_>`
+  --> tests/ui/context_hooks_hold_no_write_service.rs:17:18
+   |
+17 |     let _ = &ctx.session_lifecycle;
+   |                  ^^^^^^^^^^^^^^^^^ unknown field
+   |
+   = note: available fields are: `session_id`, `instructions`, `state`, `traces`, `scoped_effect_controller` ... and 2 others
+
+error[E0609]: no field `sessions` on type `&CompactionContext<'_>`
+  --> tests/ui/context_hooks_hold_no_write_service.rs:18:18
+   |
+18 |     let _ = &ctx.sessions;
+   |                  ^^^^^^^^ unknown field
+   |
+   = note: available fields are: `session_id`, `instructions`, `state`, `traces`, `scoped_effect_controller` ... and 2 others
+
+error[E0609]: no field `session_graph` on type `&ContextPressureContext<'_>`
+  --> tests/ui/context_hooks_hold_no_write_service.rs:22:18
+   |
+22 |     let _ = &ctx.session_graph;
+   |                  ^^^^^^^^^^^^^ unknown field
+   |
+   = note: available fields are: `session_id`, `state`, `prompt_usage`, `max_context_tokens`, `traces` ... and 3 others
+
+error[E0609]: no field `session_lifecycle` on type `&ContextPressureContext<'_>`
+  --> tests/ui/context_hooks_hold_no_write_service.rs:23:18
+   |
+23 |     let _ = &ctx.session_lifecycle;
+   |                  ^^^^^^^^^^^^^^^^^ unknown field
+   |
+   = note: available fields are: `session_id`, `state`, `prompt_usage`, `max_context_tokens`, `traces` ... and 3 others
+
+error[E0609]: no field `sessions` on type `&ContextPressureContext<'_>`
+  --> tests/ui/context_hooks_hold_no_write_service.rs:24:18
+   |
+24 |     let _ = &ctx.sessions;
+   |                  ^^^^^^^^ unknown field
+   |
+   = note: available fields are: `session_id`, `state`, `prompt_usage`, `max_context_tokens`, `traces` ... and 3 others
+
+error[E0599]: no method named `switch_agent_frame` found for reference `&dyn SessionGraphService` in the current scope
+  --> tests/ui/context_hooks_hold_no_write_service.rs:29:19
+   |
+29 |     let _ = graph.switch_agent_frame();
+   |                   ^^^^^^^^^^^^^^^^^^ method not found in `&dyn SessionGraphService`
