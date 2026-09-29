@@ -295,6 +295,14 @@ impl SessionHistoryStore for PostgresStore {
                     let row = readable_row(&mut tx, session_id, parent)
                         .await?
                         .ok_or_else(|| corrupt("SessionGraph", "frame parent is missing"))?;
+                    if row.get::<bool, _>("tombstoned")
+                        || row.get::<i64, _>("generation") != first_generation - 1
+                    {
+                        return Err(corrupt(
+                            "SessionGraph",
+                            "frame parent is not the preceding live node",
+                        ));
+                    }
                     lash_core_execution::FrameNodeId::new(row.get::<String, _>("frame_node_id"))
                         .map(Some)
                         .map_err(|error| corrupt("SessionGraph", error.to_string()))?
@@ -739,11 +747,16 @@ impl SessionHistoryStore for PostgresStore {
             let committed_at_ms: i64 = row.get("committed_at_ms");
             let turn_id: String = row.get("turn_id");
             let result_json: String = row.get("result_json");
+            let outcome_code: Option<String> = row.get("outcome_code");
             let receipt = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
                 session_id,
                 &turn_id,
                 &result_json,
                 self.fleet_format,
+            )?;
+            lash_core_execution::store::validate_turn_commit_outcome_code(
+                &receipt,
+                outcome_code.as_deref(),
             )?;
             if receipt.failure_evidence.is_empty() {
                 return Err(corrupt(
@@ -811,8 +824,19 @@ async fn load_usage_totals_tx(
            COALESCE(SUM(cache_write_input_tokens), 0)::text AS cache_write_input_tokens,
            COALESCE(SUM(reasoning_output_tokens), 0)::text AS reasoning_output_tokens,
            COUNT(*) FILTER (WHERE reconciled_call_id IS NOT NULL) AS reconciled_attempts
-         FROM lash_usage_deltas WHERE session_id = $1 GROUP BY source, model ORDER BY source, model",
-    ).bind(session_id.as_str()).fetch_all(&mut **tx).await.map_err(store_sqlx_error)?;
+         FROM lash_usage_deltas AS usage
+         WHERE usage.session_id = $1
+           AND (input_tokens <> 0 OR output_tokens <> 0
+                OR cache_read_input_tokens <> 0 OR cache_write_input_tokens <> 0
+                OR reasoning_output_tokens <> 0 OR reconciled_call_id IS NOT NULL
+                OR EXISTS (SELECT 1 FROM lash_usage_delta_holes AS hole
+                           WHERE hole.seq = usage.seq AND hole.session_id = $1))
+         GROUP BY source, model ORDER BY source, model",
+    )
+    .bind(session_id.as_str())
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     let mut totals = SessionUsageTotals::default();
     for row in rows {
         let source: String = row.get("source");

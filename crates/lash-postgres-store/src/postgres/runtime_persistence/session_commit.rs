@@ -767,6 +767,7 @@ impl SessionCommitStore for PostgresStore {
                     .bind(marker)
                     .bind(receipt.turn_commit_hash)
                     .bind(&result_json)
+                    .bind(None::<&str>)
                     .bind(now as i64)
                     .bind(false)
                     .execute(&mut *tx)

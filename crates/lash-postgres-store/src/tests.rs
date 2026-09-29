@@ -222,8 +222,8 @@ async fn seed_failure_evidence_session(
 
     sqlx::query(
         "INSERT INTO lash_runtime_turn_commits
-         (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms)
-         SELECT $1, 'bad-evidence-receipt', 'bad-evidence-hash', $2, committed_at_ms + 1
+         (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms, failure_evidence)
+         SELECT $1, 'bad-evidence-receipt', 'bad-evidence-hash', $2, committed_at_ms + 1, TRUE
          FROM lash_runtime_turn_commits
          WHERE session_id = $1",
     )
@@ -507,8 +507,8 @@ async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidat
         for (role, session_id, parent_role, generation) in nodes {
             sqlx::query(
                 "INSERT INTO lash_graph_nodes
-                 (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
-                 VALUES ($1, $2, $3, $4, $2, '{}')",
+                 (session_id, node_id, parent_node_id, generation, frame_node_id, node_json, body_bytes)
+                 VALUES ($1, $2, $3, $4, $2, '{}', 2)",
             )
             .bind(session_id)
             .bind(node(role))
@@ -734,8 +734,8 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
     let second_node = format!("generation-node-b:{nonce}");
     sqlx::query(
         "INSERT INTO lash_graph_nodes
-         (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
-         VALUES ($1, $2, NULL, 3, $2, '{}')",
+         (session_id, node_id, parent_node_id, generation, frame_node_id, node_json, body_bytes)
+         VALUES ($1, $2, NULL, 3, $2, '{}', 2)",
     )
     .bind(session_id.as_str())
     .bind(&first_node)
@@ -744,8 +744,8 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
     .expect("seed graph-generation uniqueness fixture");
     let raw = sqlx::query(
         "INSERT INTO lash_graph_nodes
-         (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
-         VALUES ($1, $2, NULL, 3, $2, '{}')",
+         (session_id, node_id, parent_node_id, generation, frame_node_id, node_json, body_bytes)
+         VALUES ($1, $2, NULL, 3, $2, '{}', 2)",
     )
     .bind(session_id.as_str())
     .bind(&second_node)
