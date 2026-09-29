@@ -123,6 +123,7 @@ pub(super) async fn build_endpoint(
             session_driver: crate::RestateSessionDriverSlot::new(),
             build_generation: generation(build),
             namespace: crate::RestateNamespace::default(),
+            fleet: crate::object_state::FleetView::default(),
         },
     )
     .build();
@@ -288,7 +289,7 @@ async fn l4_a_groups_children_run_on_the_build_that_opened_it() {
     let replay_key = format!("{key}:child:0");
     let envelope = group(key, CHILDREN).children()[0].clone();
     let retried: () = RestateIngressClient::new(connection.clone())
-        .call_workflow_json_idempotent(
+        .call_lash_workflow_idempotent(
             &lane,
             key,
             "child",

@@ -7,7 +7,6 @@ use std::future::Future;
 use lash_core::Resolution;
 use restate_sdk::context::macro_support::SealedDurableFuture;
 use restate_sdk::errors::TerminalError;
-use restate_sdk::serde::Json;
 
 use super::{GateWait, RestateControllerContext};
 use crate::durable_wait::{RestateDurableWaitAwaitRequest, RestateTurnCancelRaceOutcome};
@@ -73,7 +72,7 @@ fn first_completed(
 /// the wait stays open for the successor, and the orphaned call completes
 /// harmlessly when the signal resolves it.
 pub(super) async fn race_signal_wait<'run>(
-    event: GateWait<'run, Json<Resolution>>,
+    event: GateWait<'run, crate::compat::Reply<Resolution>>,
     cancel: GateWait<'run, String>,
     hand_over: GateWait<'run, String>,
     generation: &lash_core::engine::BuildGeneration,
@@ -120,7 +119,7 @@ pub(super) async fn race_signal_wait<'run>(
             }
         }
     }
-    let Json(resolution) = event.await?;
+    let resolution = event.await?.into_body();
     Ok(RestateTurnCancelRaceOutcome::Completed(
         SignalWaitOutcome::Resolved(resolution),
     ))
@@ -254,7 +253,7 @@ macro_rules! process_signal_wait_body {
             let event_address = RestateDurableWaitAddress::for_key(&$request.key);
             let event = $namespace
                 .durable_wait_workflow(context, event_address.workflow_key.clone())
-                .await_resolution(Json($request.clone().into()))
+                .await_resolution($request.clone().into())
                 .header(LASH_REPLAY_KEY_HEADER.to_string(), $replay_key.clone());
             let event = erase_gate_wait(event.call());
             let (Some(cancel), Some(hand_over)) = (
@@ -269,12 +268,12 @@ macro_rules! process_signal_wait_body {
             if matches!(outcome, RestateTurnCancelRaceOutcome::ProcessCancelled) {
                 let resolve = $namespace
                     .durable_wait_registry(context, durable_wait_index_object_key(&event_address))
-                    .resolve(Json(RestateDurableWaitResolveRequest {
+                    .resolve(RestateDurableWaitResolveRequest {
                         key: $request.key,
                         resolution: Resolution::Cancelled,
-                    }))
+                    })
                     .header(LASH_REPLAY_KEY_HEADER.to_string(), $replay_key);
-                let Json(_) = resolve.call().await?;
+                resolve.call().await?;
             }
             Ok(outcome)
         }

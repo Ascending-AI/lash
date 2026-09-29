@@ -7,16 +7,26 @@ const PAYLOAD_STATE_KEY: &str = "effect-group/v1/payload";
 const PAYLOAD_RETIRED_KEY: &str = "effect-group/v1/retired";
 
 /// The stored format the payload object stamps into its `effect-group/v1/`
-/// values (FIG-3814): the payload bytes and the retirement fence. Bump it
-/// when a stored shape under those keys changes; the previous format reads
-/// through the N-1 upcaster slot in [`EFFECT_GROUP_PAYLOAD_FORMATS`].
+/// values (FIG-3814), the payload bytes and the retirement fence, and the
+/// family format of every `EffectGroupPayload` object's `_compat` record
+/// (ADR 0115 §3.2). Bump it when a stored shape under those keys changes;
+/// the previous format reads through the N-1 upcaster slot in
+/// [`EFFECT_GROUP_PAYLOAD_FORMATS`].
 pub const EFFECT_GROUP_PAYLOAD_FORMAT_VERSION: u16 = 1;
-/// The payload object's stored-format table: the current stamp, plus the
-/// N-1 upcaster hooks (empty while the first stamped layout is the baseline).
+/// The payload object's stored-format table: the family's registered surface
+/// and descriptor, plus the N-1 upcaster hooks (empty while the first
+/// stamped layout is the baseline).
 pub(crate) const EFFECT_GROUP_PAYLOAD_FORMATS: StoredValueFormats = StoredValueFormats {
     what: "effect-group payload",
-    current: EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,
+    surface: lash_core::surface_format!(EFFECT_GROUP_PAYLOAD_FORMAT_VERSION),
     upcast_n1: &[],
+};
+
+/// The object family whose `_compat` record every handler admits first
+/// (ADR 0115 §3.2).
+pub(crate) const EFFECT_GROUP_PAYLOAD_FAMILY: ObjectFamily = ObjectFamily {
+    component: lash_core_store::compat::ComponentId::RESTATE_EFFECT_GROUP_PAYLOAD,
+    formats: &EFFECT_GROUP_PAYLOAD_FORMATS,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,31 +51,48 @@ pub struct EffectGroupPayloadPutRequest {
     pub bytes: Vec<u8>,
 }
 
-/// A group's successful result bytes, one object per group child.
+/// A group's successful result bytes, one object per group child. Every
+/// handler takes a [`Call`] and answers a [`Reply`], and reads the object's
+/// `_compat` record before any other state (ADR 0115 §3).
 #[restate_sdk::object]
 #[name = "EffectGroupPayload"]
 pub(crate) trait EffectGroupPayload {
     async fn put(
-        request: Json<EffectGroupPayloadPutRequest>,
-    ) -> HandlerResult<Json<EffectGroupPayloadPutResponse>>;
+        call: Call<EffectGroupPayloadPutRequest>,
+    ) -> HandlerResult<Reply<EffectGroupPayloadPutResponse>>;
     #[shared]
-    async fn get() -> HandlerResult<Json<EffectGroupPayloadGetResponse>>;
-    async fn retire() -> HandlerResult<Json<()>>;
-    async fn delete_bytes() -> HandlerResult<Json<()>>;
+    async fn get(call: Call<()>) -> HandlerResult<Reply<EffectGroupPayloadGetResponse>>;
+    async fn retire(call: Call<()>) -> HandlerResult<Reply<()>>;
+    async fn delete_bytes(call: Call<()>) -> HandlerResult<Reply<()>>;
 }
 
 /// The [`EffectGroupPayload`] handlers: they call no other service, so
-/// they are the same in every namespace.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct EffectGroupPayloadImpl;
+/// they are the same in every namespace. They stamp what they write at the
+/// format the deployment's fleet epoch selects.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct EffectGroupPayloadImpl {
+    fleet: FleetView,
+}
+
+impl EffectGroupPayloadImpl {
+    pub(crate) fn new(fleet: FleetView) -> Self {
+        Self { fleet }
+    }
+}
 
 impl EffectGroupPayload for EffectGroupPayloadImpl {
     async fn put(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupPayloadPutRequest>,
-    ) -> HandlerResult<Json<EffectGroupPayloadPutResponse>> {
-        object_state::gate_stamped_object_state(&ctx, &EFFECT_GROUP_PAYLOAD_FORMATS, &[]).await?;
+        call: Call<EffectGroupPayloadPutRequest>,
+    ) -> HandlerResult<Reply<EffectGroupPayloadPutResponse>> {
+        let (wire, request) = call.open()?;
+        let object = object_state::admit_exclusive(
+            &ctx,
+            &EFFECT_GROUP_PAYLOAD_FAMILY,
+            self.fleet.fleet_format(),
+        )
+        .await?;
         if object_state::get_stamped::<bool>(
             &ctx,
             PAYLOAD_RETIRED_KEY,
@@ -74,7 +101,7 @@ impl EffectGroupPayload for EffectGroupPayloadImpl {
         .await?
         .unwrap_or(false)
         {
-            return Ok(Json(EffectGroupPayloadPutResponse::Retired));
+            return Ok(Reply::at(wire, EffectGroupPayloadPutResponse::Retired));
         }
         let response = match object_state::get_stamped::<Vec<u8>>(
             &ctx,
@@ -84,24 +111,22 @@ impl EffectGroupPayload for EffectGroupPayloadImpl {
         .await?
         {
             None => {
-                object_state::set_stamped(
-                    &ctx,
-                    PAYLOAD_STATE_KEY,
-                    &EFFECT_GROUP_PAYLOAD_FORMATS,
-                    request.bytes,
-                );
+                object_state::set_stamped(&ctx, PAYLOAD_STATE_KEY, object.writer, request.bytes);
                 EffectGroupPayloadPutResponse::Written
             }
             Some(existing) if existing == request.bytes => EffectGroupPayloadPutResponse::Duplicate,
             Some(_) => EffectGroupPayloadPutResponse::Conflict,
         };
-        Ok(Json(response))
+        Ok(Reply::at(wire, response))
     }
 
     async fn get(
         &self,
         ctx: SharedObjectContext<'_>,
-    ) -> HandlerResult<Json<EffectGroupPayloadGetResponse>> {
+        call: Call<()>,
+    ) -> HandlerResult<Reply<EffectGroupPayloadGetResponse>> {
+        let (wire, ()) = call.open()?;
+        object_state::admit_shared(&ctx, &EFFECT_GROUP_PAYLOAD_FAMILY).await?;
         if object_state::get_stamped_shared::<bool>(
             &ctx,
             PAYLOAD_RETIRED_KEY,
@@ -110,9 +135,10 @@ impl EffectGroupPayload for EffectGroupPayloadImpl {
         .await?
         .unwrap_or(false)
         {
-            return Ok(Json(EffectGroupPayloadGetResponse::Retired));
+            return Ok(Reply::at(wire, EffectGroupPayloadGetResponse::Retired));
         }
-        Ok(Json(
+        Ok(Reply::at(
+            wire,
             match object_state::get_stamped_shared::<Vec<u8>>(
                 &ctx,
                 PAYLOAD_STATE_KEY,
@@ -126,20 +152,31 @@ impl EffectGroupPayload for EffectGroupPayloadImpl {
         ))
     }
 
-    async fn retire(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
-        object_state::gate_stamped_object_state(&ctx, &EFFECT_GROUP_PAYLOAD_FORMATS, &[]).await?;
-        object_state::set_stamped(
+    async fn retire(&self, ctx: ObjectContext<'_>, call: Call<()>) -> HandlerResult<Reply<()>> {
+        let (wire, ()) = call.open()?;
+        let object = object_state::admit_exclusive(
             &ctx,
-            PAYLOAD_RETIRED_KEY,
-            &EFFECT_GROUP_PAYLOAD_FORMATS,
-            true,
-        );
-        Ok(Json(()))
+            &EFFECT_GROUP_PAYLOAD_FAMILY,
+            self.fleet.fleet_format(),
+        )
+        .await?;
+        object_state::set_stamped(&ctx, PAYLOAD_RETIRED_KEY, object.writer, true);
+        Ok(Reply::at(wire, ()))
     }
 
-    async fn delete_bytes(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
-        object_state::gate_stamped_object_state(&ctx, &EFFECT_GROUP_PAYLOAD_FORMATS, &[]).await?;
+    async fn delete_bytes(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<()>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, ()) = call.open()?;
+        object_state::admit_exclusive(
+            &ctx,
+            &EFFECT_GROUP_PAYLOAD_FAMILY,
+            self.fleet.fleet_format(),
+        )
+        .await?;
         ctx.clear(PAYLOAD_STATE_KEY);
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 }

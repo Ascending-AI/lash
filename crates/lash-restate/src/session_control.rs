@@ -104,7 +104,7 @@ pub(crate) async fn end_lost_root_runs(
                 continue;
             }
             let outcome: Option<lash_core::engine::RootOutcome> = match ingress
-                .call_workflow_json(
+                .call_lash_workflow(
                     &run.target_service_name,
                     &turn_workflow_key(&target.session, &target.root),
                     "outcome",

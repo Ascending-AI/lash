@@ -41,6 +41,7 @@ use super::{
     resolve_process_terminal_promise, restate_now_ms, restate_process_terminal_await_key,
     restate_process_terminal_output, terminal_process_output, workflow_key_authority,
 };
+use crate::compat::{Call, Reply};
 use crate::controller::{
     RestateControllerContext, RestateEffectControllerOptions, RestateRuntimeEffectController,
 };
@@ -186,34 +187,34 @@ fn cancelled_output(process_id: &ProcessId) -> ProcessAwaitOutput {
 #[restate_sdk::workflow]
 pub trait LashProcessWorkflow {
     async fn run(
-        input: Json<RestateProcessWorkflowPayload>,
-    ) -> HandlerResult<Json<RestateProcessWorkflowOutput>>;
+        call: Call<RestateProcessWorkflowPayload>,
+    ) -> HandlerResult<Reply<RestateProcessWorkflowOutput>>;
 
     #[shared]
     async fn complete_terminal(
-        request: Json<RestateProcessCompleteRequest>,
-    ) -> HandlerResult<Json<()>>;
+        call: Call<RestateProcessCompleteRequest>,
+    ) -> HandlerResult<Reply<()>>;
 
     #[shared]
     async fn await_terminal(
-        request: Json<RestateProcessAwaitRequest>,
-    ) -> HandlerResult<Json<ProcessAwaitOutput>>;
+        call: Call<RestateProcessAwaitRequest>,
+    ) -> HandlerResult<Reply<ProcessAwaitOutput>>;
 
     #[shared]
-    async fn cancel(request: Json<RestateProcessCancelRequest>) -> HandlerResult<Json<()>>;
+    async fn cancel(call: Call<RestateProcessCancelRequest>) -> HandlerResult<Reply<()>>;
 
     #[shared]
-    async fn deliver_cancel(request: Json<RestateProcessCancelRequest>) -> HandlerResult<Json<()>>;
+    async fn deliver_cancel(call: Call<RestateProcessCancelRequest>) -> HandlerResult<Reply<()>>;
 
     #[shared]
     async fn deliver_hand_over(
-        request: Json<RestateProcessHandOverRequest>,
-    ) -> HandlerResult<Json<()>>;
+        call: Call<RestateProcessHandOverRequest>,
+    ) -> HandlerResult<Reply<()>>;
 
     #[shared]
     async fn await_cancel(
-        request: Json<RestateProcessAwaitRequest>,
-    ) -> HandlerResult<Json<RestateProcessCancelSignal>>;
+        call: Call<RestateProcessAwaitRequest>,
+    ) -> HandlerResult<Reply<RestateProcessCancelSignal>>;
 }
 pub(crate) struct LashProcessWorkflowImpl<R> {
     runner: Arc<R>,
@@ -475,7 +476,7 @@ where
         process_id: &ProcessId,
         segment_ordinal: u64,
         output: ProcessAwaitOutput,
-    ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
+    ) -> HandlerResult<RestateProcessWorkflowOutput> {
         if segment_ordinal == 0 && *self.route.lane() == Lane::Stable {
             resolve_process_terminal_promise(context, &self.authority_id, process_id, &output)?;
             let key = restate_process_terminal_await_key(&self.authority_id, process_id)
@@ -520,9 +521,9 @@ where
         // process reaches host-owned retention pruning. A redrive after
         // delivery can therefore reproduce every runner command before
         // idempotently repeating this terminal suffix.
-        Ok(Json(RestateProcessWorkflowOutput::Terminal {
+        Ok(RestateProcessWorkflowOutput::Terminal {
             output: Box::new(output),
-        }))
+        })
     }
 
     /// End the process Failed, typed by `failure`'s code, from a segment
@@ -537,7 +538,7 @@ where
         segment_ordinal: u64,
         failure: SegmentFailure,
         signal: SegmentSignal,
-    ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
+    ) -> HandlerResult<RestateProcessWorkflowOutput> {
         tracing::warn!(
             process_id = process_id.as_str(),
             segment_ordinal,
@@ -1022,8 +1023,9 @@ where
     async fn run(
         &self,
         ctx: WorkflowContext<'_>,
-        Json(payload): Json<RestateProcessWorkflowPayload>,
-    ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
+        call: Call<RestateProcessWorkflowPayload>,
+    ) -> HandlerResult<Reply<RestateProcessWorkflowOutput>> {
+        let (wire, payload) = call.open()?;
         // The generation sentinel is the journal's first command (FIG-3795
         // §4.4): a replay that reads back another build's generation parks
         // before it replays anything else, so no journal is ever replayed
@@ -1081,9 +1083,12 @@ where
                     latest_segment_ordinal,
                     "ignoring a completed process segment"
                 );
-                return Ok(Json(RestateProcessWorkflowOutput::SegmentChained {
-                    next_segment_ordinal: latest_segment_ordinal,
-                }));
+                return Ok(Reply::at(
+                    wire,
+                    RestateProcessWorkflowOutput::SegmentChained {
+                        next_segment_ordinal: latest_segment_ordinal,
+                    },
+                ));
             }
             SegmentAdmission::Ended { output } => {
                 // The process ended before this segment could carry it on: run
@@ -1091,7 +1096,10 @@ where
                 // `ProcessTerminal` obligation the terminal transaction armed
                 // (ADR 0109 §3), not this segment's.
                 resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::SegmentFinished)?;
-                return Ok(Json(RestateProcessWorkflowOutput::Terminal { output }));
+                return Ok(Reply::at(
+                    wire,
+                    RestateProcessWorkflowOutput::Terminal { output },
+                ));
             }
             SegmentAdmission::MissingHandover => {
                 return self
@@ -1105,7 +1113,8 @@ where
                         )),
                         SegmentSignal::Unresolved,
                     )
-                    .await;
+                    .await
+                    .map(|output| Reply::at(wire, output));
             }
             SegmentAdmission::Invariant { message } => {
                 return self
@@ -1116,7 +1125,8 @@ where
                         SegmentFailure::AdmissionInvariant(message),
                         SegmentSignal::Unresolved,
                     )
-                    .await;
+                    .await
+                    .map(|output| Reply::at(wire, output));
             }
             SegmentAdmission::SubstrateLost { lost } => {
                 tracing::warn!(
@@ -1140,15 +1150,19 @@ where
                     // handed over before this recovery could end it, and the
                     // recovery stands down (FIG-3820).
                     SubstrateLostRecovery::HandedOver { segment_ordinal } => {
-                        return Ok(Json(RestateProcessWorkflowOutput::SegmentChained {
-                            next_segment_ordinal: segment_ordinal,
-                        }));
+                        return Ok(Reply::at(
+                            wire,
+                            RestateProcessWorkflowOutput::SegmentChained {
+                                next_segment_ordinal: segment_ordinal,
+                            },
+                        ));
                     }
                 };
                 resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::SegmentFinished)?;
                 return self
                     .deliver_segment_terminal(&ctx, &process_id, input.segment_ordinal, output)
-                    .await;
+                    .await
+                    .map(|output| Reply::at(wire, output));
             }
         };
         // The generation fence (FIG-3571), segment 0 included: the start
@@ -1227,7 +1241,8 @@ where
                                 failure,
                                 SegmentSignal::Unresolved,
                             )
-                            .await;
+                            .await
+                            .map(|output| Reply::at(wire, output));
                     }
                 }
             }
@@ -1263,7 +1278,8 @@ where
                             SegmentFailure::Controller(error.to_string()),
                             SegmentSignal::Unresolved,
                         )
-                        .await;
+                        .await
+                        .map(|output| Reply::at(wire, output));
                 }
             };
             let end = self
@@ -1313,7 +1329,8 @@ where
                                 SegmentFailure::Boundary(error),
                                 SegmentSignal::Unresolved,
                             )
-                            .await;
+                            .await
+                            .map(|output| Reply::at(wire, output));
                     }
                 }
             }
@@ -1331,7 +1348,8 @@ where
                 )?;
                 return self
                     .deliver_segment_terminal(context, &process_id, input.segment_ordinal, output)
-                    .await;
+                    .await
+                    .map(|output| Reply::at(wire, output));
             }
             SegmentRunEnd::Boundary(handover) => handover,
         };
@@ -1408,7 +1426,8 @@ where
                     SegmentFailure::HandoverWrite(error),
                     SegmentSignal::Resolved,
                 )
-                .await;
+                .await
+                .map(|output| Reply::at(wire, output));
         }
         // FIG-788: successor emission is unconditional. A cancellation
         // can land between attempts, so the recorded read below may
@@ -1459,7 +1478,7 @@ where
         // The successor carries the process from the send on, so a failure
         // from here cannot strand it: it ends only this invocation.
         if let Some(cancel) = forward.map_err(TerminalError::new)? {
-            let Json(()) = routed_workflow::<_, _, ()>(
+            routed_workflow::<_, _, ()>(
                 context,
                 &successor_route,
                 successor_key,
@@ -1505,15 +1524,19 @@ where
                 );
             }
         }
-        Ok(Json(RestateProcessWorkflowOutput::SegmentChained {
-            next_segment_ordinal,
-        }))
+        Ok(Reply::at(
+            wire,
+            RestateProcessWorkflowOutput::SegmentChained {
+                next_segment_ordinal,
+            },
+        ))
     }
     async fn complete_terminal(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        Json(request): Json<RestateProcessCompleteRequest>,
-    ) -> HandlerResult<Json<()>> {
+        call: Call<RestateProcessCompleteRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
         let key = restate_process_terminal_await_key(&self.authority_id, &request.process_id)
             .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
         if ctx
@@ -1522,7 +1545,7 @@ where
             .is_some()
         {
             // Published already: the first terminal stands.
-            return Ok(Json(()));
+            return Ok(Reply::at(wire, ()));
         }
         resolve_process_terminal_promise(
             &ctx,
@@ -1530,14 +1553,15 @@ where
             &request.process_id,
             &request.output,
         )?;
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 
     async fn cancel(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        Json(request): Json<RestateProcessCancelRequest>,
-    ) -> HandlerResult<Json<()>> {
+        call: Call<RestateProcessCancelRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
         record_cancel_step(&ctx, &self.registry, &request).await?;
         resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::CancelRequested)?;
         // A `SessionTurn` process's child turn is asked to stop through its
@@ -1589,29 +1613,29 @@ where
             .await
             .map_err(HandlerError::from)?;
         if let Some(target) = target.map_err(TerminalError::new)? {
-            let Json(()) = ctx
-                .request::<Json<RestateProcessCancelRequest>, Json<()>>(
-                    restate_sdk::context::RequestTarget::workflow(
-                        target.route,
-                        process_segment_workflow_key(&request.process_id, target.segment_ordinal),
-                        "deliver_cancel",
-                    ),
-                    Json(request.clone()),
-                )
-                .call()
-                .await?;
+            ctx.request::<Call<RestateProcessCancelRequest>, Reply<()>>(
+                restate_sdk::context::RequestTarget::workflow(
+                    target.route,
+                    process_segment_workflow_key(&request.process_id, target.segment_ordinal),
+                    "deliver_cancel",
+                ),
+                Call::new(request.clone()),
+            )
+            .call()
+            .await?;
         }
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 
     async fn deliver_cancel(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        Json(request): Json<RestateProcessCancelRequest>,
-    ) -> HandlerResult<Json<()>> {
+        call: Call<RestateProcessCancelRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
         record_cancel_step(&ctx, &self.registry, &request).await?;
         resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::CancelRequested)?;
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 
     /// The drain's wake (FIG-3799): resolve this segment's hand-over promise
@@ -1622,30 +1646,33 @@ where
     async fn deliver_hand_over(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        Json(request): Json<RestateProcessHandOverRequest>,
-    ) -> HandlerResult<Json<()>> {
+        call: Call<RestateProcessHandOverRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
         let payload = serde_json::to_string(&request.generation)
             .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
         ctx.resolve_promise(PROCESS_HAND_OVER_PROMISE_KEY, payload);
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 
     async fn await_cancel(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        Json(_request): Json<RestateProcessAwaitRequest>,
-    ) -> HandlerResult<Json<RestateProcessCancelSignal>> {
+        call: Call<RestateProcessAwaitRequest>,
+    ) -> HandlerResult<Reply<RestateProcessCancelSignal>> {
+        let (wire, _request) = call.open()?;
         let payload = ctx.promise::<String>(PROCESS_CANCEL_PROMISE_KEY).await?;
         let signal = serde_json::from_str(&payload)
             .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
-        Ok(Json(signal))
+        Ok(Reply::at(wire, signal))
     }
 
     async fn await_terminal(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        Json(request): Json<RestateProcessAwaitRequest>,
-    ) -> HandlerResult<Json<ProcessAwaitOutput>> {
+        call: Call<RestateProcessAwaitRequest>,
+    ) -> HandlerResult<Reply<ProcessAwaitOutput>> {
+        let (wire, request) = call.open()?;
         let key = restate_process_terminal_await_key(&self.authority_id, &request.process_id)
             .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
         let promise_key = key.promise_key();
@@ -1654,7 +1681,7 @@ where
             .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
         let output = restate_process_terminal_output(&request.process_id, resolution)
             .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
-        Ok(Json(output))
+        Ok(Reply::at(wire, output))
     }
 }
 

@@ -208,13 +208,15 @@ impl RestateEngine {
                 session_driver: self.session_work.driver_slot().clone(),
                 build_generation: self.build_generation.clone(),
                 namespace: self.namespace.clone(),
+                fleet: crate::object_state::FleetView::of(self.stores.process_registry()),
             },
         )
     }
 
     /// Register the endpoint at `uri` with the server as a deployment of
     /// this engine, unless another lash deployment already serves one of its
-    /// names (FIG-3898).
+    /// names (FIG-3898), or the URI already serves another build (ADR 0115
+    /// §3.5).
     ///
     /// Restate hands every new call to a service name to the deployment that
     /// registered the name last, so registering over another deployment's
@@ -225,21 +227,34 @@ impl RestateEngine {
     /// [`RestateRegistrationError::NameTaken`], before anything is
     /// registered. Deployments of one authority share their names — a newer
     /// build, or the same deployment coming back — and so does the
-    /// deployment already registered at `uri` itself, which this registration
-    /// replaces. A name registered without a claim is taken over.
+    /// deployment already registered at `uri` itself. A name registered
+    /// without a claim is taken over.
     ///
-    /// The check and the registration are two admin calls, so two
-    /// deployments that register the same names at once can both pass it.
+    /// Endpoints are immutable: Restate pins a started invocation to the
+    /// deployment URI it started on, so a build registered over another
+    /// build's URI would hand that build's pinned journals to new code. The
+    /// registration reads the deployment at `uri` first. None: it registers
+    /// without force. One that serves this build's generation names
+    /// (`…_g<G>`): it registers with force, a redeploy of the same build.
+    /// Any other: [`RestateRegistrationError::EndpointServesAnotherGeneration`],
+    /// with nothing registered. A rollback registers the older build at a
+    /// fresh URI ([`deployment_path`]), which leaves the newer build's
+    /// deployment serving its own pinned work.
+    ///
+    /// The checks and the registration are separate admin calls, so two
+    /// deployments that register the same names at once can both pass them.
     ///
     /// # Errors
     /// [`RestateRegistrationError::NameTaken`] for a name another deployment
-    /// holds; [`RestateRegistrationError::Admin`] when the admin API fails
-    /// or refuses the registration.
+    /// holds; [`RestateRegistrationError::EndpointServesAnotherGeneration`]
+    /// for a URI another build holds; [`RestateRegistrationError::Admin`]
+    /// when the admin API fails or refuses the registration.
     #[allow(
         clippy::result_large_err,
         reason = "RestateHttpError travels unboxed across the crate's admin and ingress API"
     )]
     pub async fn register_deployment(&self, uri: &str) -> Result<(), RestateRegistrationError> {
+        let force = self.redeploys_endpoint(uri).await?;
         let authority = self.effect_host.authority_id().binding_id();
         for &service in crate::services::LASH_SERVICES {
             let name = self.namespace.stable(service).name();
@@ -272,8 +287,49 @@ impl RestateEngine {
                 uri: uri.to_owned(),
             });
         }
-        self.admin.register_deployment(uri).await?;
+        self.admin.register_deployment(uri, force).await?;
         Ok(())
+    }
+
+    /// Whether registering at `uri` redeploys this build over itself: `false`
+    /// for a URI no deployment holds, `true` for one whose deployment serves
+    /// this build's generation names, and the typed refusal for any other.
+    #[allow(
+        clippy::result_large_err,
+        reason = "RestateHttpError travels unboxed across the crate's admin and ingress API"
+    )]
+    async fn redeploys_endpoint(&self, uri: &str) -> Result<bool, RestateRegistrationError> {
+        let Some(held) = self
+            .admin
+            .deployments()
+            .await?
+            .into_iter()
+            .find(|deployment| {
+                deployment
+                    .uri
+                    .as_deref()
+                    .is_some_and(|registered| same_uri(registered, uri))
+            })
+        else {
+            return Ok(false);
+        };
+        let generations = held
+            .services
+            .iter()
+            .filter_map(|name| self.namespace.parse(name))
+            .filter_map(|route| match route.lane() {
+                crate::services::Lane::Generation(generation) => Some(generation.clone()),
+                crate::services::Lane::Stable => None,
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        if generations.contains(&self.build_generation) {
+            return Ok(true);
+        }
+        Err(RestateRegistrationError::EndpointServesAnotherGeneration {
+            uri: uri.to_owned(),
+            held: generations.into_iter().next(),
+            local: self.build_generation.clone(),
+        })
     }
 
     /// Another build of this engine's code in the same process: the same
@@ -405,6 +461,27 @@ pub enum RestateRegistrationError {
         claimed_by: String,
         /// The URI this registration would have registered.
         uri: String,
+    },
+    /// The deployment registered at `uri` serves another build: `held` is
+    /// the drain generation whose names it serves, `None` when it serves no
+    /// lash generation lane of this namespace. Each build registers at a URI
+    /// of its own ([`deployment_path`]), because Restate pins a started
+    /// invocation to the URI it started on (ADR 0115 §3.5).
+    #[error(
+        "Restate endpoint `{uri}` already serves {}; a build of generation `{local}` registers \
+         at a URI of its own (`deployment_path` names one), so it was not registered",
+        .held.as_ref().map_or_else(
+            || "a deployment of no lash generation".to_owned(),
+            |held| format!("the deployment of generation `{held}`"),
+        )
+    )]
+    EndpointServesAnotherGeneration {
+        /// The URI this registration would have registered.
+        uri: String,
+        /// The generation the deployment at `uri` serves.
+        held: Option<BuildGeneration>,
+        /// This build's generation.
+        local: BuildGeneration,
     },
     /// The admin API failed, or refused the registration itself.
     #[error(transparent)]

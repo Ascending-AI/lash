@@ -39,9 +39,10 @@ fn owes_published_terminal(
 
 pub(super) async fn retire_root(
     ctx: ObjectContext<'_>,
+    object: object_state::AdmittedObject,
     namespace: &crate::RestateNamespace,
     request: RestateDurableWaitRootRequest,
-) -> HandlerResult<Json<()>> {
+) -> HandlerResult<()> {
     if request.session_id.as_str() != ctx.key()
         || request.root.as_str().is_empty()
         || request.committed_turn.as_ref().is_some_and(|turn| {
@@ -57,7 +58,7 @@ pub(super) async fn retire_root(
         ))
         .into());
     }
-    let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
+    let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
     for key in load_indexed_waits(&ctx)
         .await?
         .into_iter()
@@ -68,12 +69,13 @@ pub(super) async fn retire_root(
             // Its commit's terminal wins the promise, not a `Cancelled` from
             // here. A wait whose terminal has not landed stays registered: the
             // landing publish settles it, and session revocation still can.
-            let Json(landed) = namespace
+            let landed = namespace
                 .durable_wait_workflow(&ctx, address.workflow_key.clone())
                 .peek()
                 .header(LASH_REPLAY_KEY_HEADER.to_string(), key.key_id.clone())
                 .call()
-                .await?;
+                .await?
+                .into_body();
             if landed.is_some() {
                 ctx.clear(&durable_wait_index_state_key(&address));
                 ctx.clear(&durable_wait_index_resolution_key(&address));
@@ -88,7 +90,7 @@ pub(super) async fn retire_root(
         .await?
         .is_none()
         {
-            resolve_indexed_waits(&ctx, namespace, vec![key.clone()], false).await?;
+            resolve_indexed_waits(&ctx, object.writer, namespace, vec![key.clone()], false).await?;
         }
         ctx.clear(&durable_wait_index_state_key(&address));
         ctx.clear(&durable_wait_index_resolution_key(&address));
@@ -112,9 +114,9 @@ pub(super) async fn retire_root(
         object_state::set_stamped(
             &ctx,
             DURABLE_WAIT_INDEX_METADATA_KEY,
-            &DURABLE_WAIT_REGISTRY_FORMATS,
+            object.writer,
             metadata,
         );
     }
-    Ok(Json(()))
+    Ok(())
 }

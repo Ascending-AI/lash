@@ -149,10 +149,7 @@ impl HttpTransport for ConformanceProcessWaitTransport {
             1 => Ok(HttpResponse {
                 status: 200,
                 headers: vec![("content-type".to_string(), "application/json".to_string())],
-                body: HttpResponseBody::buffered(
-                    serde_json::to_string(&self.terminal)
-                        .expect("serialize conformance process terminal"),
-                ),
+                body: HttpResponseBody::buffered(crate::wire::reply_json(&self.terminal)),
             }),
             _ => Err(LlmTransportError::new(
                 "conformance process wait exceeded one reattachment",

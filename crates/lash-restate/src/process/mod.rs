@@ -102,8 +102,8 @@ pub(crate) fn await_terminal_on_stable_root<'ctx, C>(
     process_id: ProcessId,
 ) -> restate_sdk::context::Request<
     'ctx,
-    restate_sdk::serde::Json<RestateProcessAwaitRequest>,
-    restate_sdk::serde::Json<ProcessAwaitOutput>,
+    crate::Call<RestateProcessAwaitRequest>,
+    crate::Reply<ProcessAwaitOutput>,
 >
 where
     C: restate_sdk::context::ContextClient<'ctx>,
@@ -600,7 +600,7 @@ impl RestateProcessIngressRunner {
         let execution_context = ProcessExecutionContext::default();
         let invocation_id = self
             .ingress
-            .send_workflow_json(
+            .send_lash_workflow(
                 route.as_str(),
                 &workflow_key,
                 "run",
@@ -653,7 +653,7 @@ impl RestateProcessIngressRunner {
         }
         let outcome = self
             .ingress
-            .call_workflow_json::<_, ProcessAwaitOutput>(
+            .call_lash_workflow::<_, ProcessAwaitOutput>(
                 &self
                     .namespace
                     .stable(crate::LashService::ProcessWorkflow)
@@ -792,7 +792,7 @@ pub(crate) async fn deliver_process_hand_over(
         ),
     };
     ingress
-        .send_workflow_json_idempotent(
+        .send_lash_workflow_idempotent(
             &route,
             &process_segment_workflow_key(process_id, segment_ordinal),
             "deliver_hand_over",
@@ -829,7 +829,7 @@ pub(crate) async fn publish_process_terminal(
     output: &ProcessAwaitOutput,
 ) -> Result<(), PluginError> {
     ingress
-        .call_workflow_json::<_, ()>(
+        .call_lash_workflow::<_, ()>(
             &namespace.stable(crate::LashService::ProcessWorkflow).name(),
             process_id.as_str(),
             "complete_terminal",
@@ -868,7 +868,7 @@ pub(crate) async fn deliver_process_cancel(
     delivery_key: &str,
 ) -> Result<(), PluginError> {
     ingress
-        .send_workflow_json_idempotent(
+        .send_lash_workflow_idempotent(
             &namespace.stable(crate::LashService::ProcessWorkflow).name(),
             &process_segment_workflow_key(process_id, 0),
             "cancel",

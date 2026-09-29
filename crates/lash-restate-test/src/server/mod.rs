@@ -212,6 +212,10 @@ struct Deployment {
     /// names the deployment by its id. Only ever reported in refusal
     /// messages.
     label: String,
+    /// The URI the deployment was registered at
+    /// ([`RestateTestServer::register_at`]); an in-process deployment
+    /// registered without one reports none.
+    uri: Option<String>,
     endpoint: Endpoint,
     catalog: Catalog,
     hooks: DeploymentHooks,
@@ -309,6 +313,10 @@ pub(crate) struct Shared {
     /// Every deployment ever registered, in registration order; removal
     /// drops its entry. Lock after `state`, never before it.
     deployments: Mutex<Vec<Arc<Deployment>>>,
+    /// Every `POST /deployments` body the admin API received, in arrival
+    /// order: the double registers deployments through the Rust API, so a
+    /// registration request is recorded, never acted on.
+    registration_requests: Mutex<Vec<serde_json::Value>>,
     /// Deployment ids seed from this ordinal so a removal never lets a new
     /// registration reuse a live deployment's id.
     next_deployment_ordinal: AtomicUsize,
@@ -839,6 +847,7 @@ impl RestateTestServer {
         let state = State::new(config.seed, config.start_time_ms, config.scheduling);
         let shared = Arc::new(Shared {
             deployments: Mutex::new(Vec::new()),
+            registration_requests: Mutex::new(Vec::new()),
             next_deployment_ordinal: AtomicUsize::new(0),
             config,
             runtime,
@@ -883,10 +892,34 @@ impl RestateTestServer {
         label: impl Into<String>,
         hooks: DeploymentHooks,
     ) -> Result<ids::DeploymentId, StartError> {
+        self.register_deployment(endpoint, None, label.into(), hooks)
+            .await
+    }
+
+    /// [`register_with`](Self::register_with) at the endpoint URI `uri`,
+    /// which the admin API then reports for the deployment, as
+    /// `restate-server` reports the URI a deployment was registered at.
+    pub async fn register_at(
+        &self,
+        endpoint: Endpoint,
+        uri: impl Into<String>,
+        label: impl Into<String>,
+        hooks: DeploymentHooks,
+    ) -> Result<ids::DeploymentId, StartError> {
+        self.register_deployment(endpoint, Some(uri.into()), label.into(), hooks)
+            .await
+    }
+
+    async fn register_deployment(
+        &self,
+        endpoint: Endpoint,
+        uri: Option<String>,
+        mut label: String,
+        hooks: DeploymentHooks,
+    ) -> Result<ids::DeploymentId, StartError> {
         let catalog = Catalog::discover(&endpoint)
             .await
             .map_err(StartError::Discovery)?;
-        let mut label = label.into();
         let id = {
             let mut deployments = self.shared.deployments();
             let ordinal = self
@@ -900,6 +933,7 @@ impl RestateTestServer {
             deployments.push(Arc::new(Deployment {
                 id: id.clone(),
                 label,
+                uri,
                 endpoint,
                 catalog,
                 hooks,
@@ -961,6 +995,54 @@ impl RestateTestServer {
         names.sort();
         names.dedup();
         names
+    }
+
+    /// The whole state the object or workflow `key` of `service` holds now,
+    /// by state key: what a test reads to prove a refused call changed
+    /// nothing.
+    pub fn object_state(
+        &self,
+        service: &str,
+        key: &str,
+    ) -> std::collections::BTreeMap<String, Vec<u8>> {
+        self.shared
+            .lock()
+            .keys
+            .get(&(service.to_owned(), key.to_owned()))
+            .map(|record| {
+                record
+                    .state
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.to_vec()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Replace the whole state the object or workflow `key` of `service`
+    /// holds, as the admin API's state modification does.
+    pub fn set_object_state(
+        &self,
+        service: &str,
+        key: &str,
+        state: std::collections::BTreeMap<String, Vec<u8>>,
+    ) {
+        self.shared.lock().replace_state(
+            (service.to_owned(), key.to_owned()),
+            state
+                .into_iter()
+                .map(|(name, value)| (name, bytes::Bytes::from(value)))
+                .collect(),
+        );
+    }
+
+    /// Every `POST /deployments` body the admin API received, oldest first.
+    pub fn registration_requests(&self) -> Vec<serde_json::Value> {
+        self.shared
+            .registration_requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Every deployment registered so far, oldest first.

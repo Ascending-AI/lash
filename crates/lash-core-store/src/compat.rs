@@ -182,6 +182,20 @@ pub enum CompatRefusal {
         min_reader: u32,
         reads: VersionRange,
     },
+    /// A Restate object's `_compat` writer floor is above the newest family
+    /// format this build writes (ADR 0115 §3.2): a newer release upgraded
+    /// the object, and this build may still read it but never mutate it.
+    #[error(
+        "{component} is at format {found} with writer floor {min_writer}, above the newest \
+         this build writes ({writes}): a newer release upgraded it. Run a build whose range \
+         reaches {min_writer}; `lashctl version` prints a build's ranges"
+    )]
+    WriterFloorAbove {
+        component: String,
+        found: u32,
+        min_writer: u32,
+        writes: VersionRange,
+    },
     #[error(
         "{component} carries additions this build cannot write beside: {}. Run the release \
          that expanded it; `lashctl preflight` lists them",

@@ -27,12 +27,12 @@ pub(super) async fn resolve_group_wait(
     let key = group_wait_key(scope, group_key, kind)?;
     let replay_key = key.key_id.clone();
     let address = RestateDurableWaitAddress::for_key(&key);
-    let Json(_) = namespace
+    namespace
         .durable_wait_registry(ctx, durable_wait_index_object_key(&address))
-        .resolve(Json(RestateDurableWaitResolveRequest {
+        .resolve(RestateDurableWaitResolveRequest {
             key,
             resolution: wait_resolution(value)?,
-        }))
+        })
         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
         .call()
         .await?;
@@ -88,9 +88,9 @@ async fn fence_cancel_decided_completions(
         let Some((scope, wait)) = envelope.command.group_child_completion_wait() else {
             continue;
         };
-        let Json(()) = namespace
+        namespace
             .durable_wait_registry(ctx, durable_wait_index_key_for_scope(&scope))
-            .fence_cancel_decided(Json(RestateDurableWaitCancelDecidedRequest { scope, wait }))
+            .fence_cancel_decided(RestateDurableWaitCancelDecidedRequest { scope, wait })
             .call()
             .await?;
     }
@@ -131,12 +131,12 @@ async fn release_cancel_decided_waits(
         };
         let replay_key = key.key_id.clone();
         let address = RestateDurableWaitAddress::for_key(&key);
-        let Json(_) = namespace
+        namespace
             .durable_wait_registry(ctx, durable_wait_index_object_key(&address))
-            .resolve(Json(RestateDurableWaitResolveRequest {
+            .resolve(RestateDurableWaitResolveRequest {
                 key,
                 resolution: Resolution::Cancelled,
-            }))
+            })
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call()
             .await?;

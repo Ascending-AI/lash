@@ -2583,6 +2583,7 @@ dependencies = [
  "hyper-util",
  "lash-internal-conformance",
  "lash-internal-core",
+ "lash-internal-core-store",
  "lash-internal-core-worker",
  "lash-internal-http-transport",
  "lash-internal-lashlang",

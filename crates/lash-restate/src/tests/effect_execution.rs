@@ -549,7 +549,7 @@ pub(super) async fn restate_attach_survives_control_timeout_and_honors_ceiling()
     let (base_url, _captured, server) = spawn_restate_http_capture_delayed(
         vec![MockHttpResponse {
             status: "200 OK",
-            body: r#"{"type":"success","value":"attached"}"#,
+            body: r#"{"wire":1,"body":{"type":"success","value":"attached"}}"#,
         }],
         response_delay,
     )
@@ -564,7 +564,7 @@ pub(super) async fn restate_attach_survives_control_timeout_and_honors_ceiling()
     let started = std::time::Instant::now();
 
     let output: ProcessAwaitOutput = client
-        .call_workflow_json(
+        .call_lash_workflow(
             "LashProcessWorkflow",
             "process-1",
             "await_terminal",
@@ -994,7 +994,7 @@ pub(super) async fn restate_ingress_client_accepts_previously_accepted_send() {
     let client = RestateIngressClient::new(base_url);
 
     let invocation_id = client
-        .send_workflow_json(
+        .send_lash_workflow(
             "LashProcessWorkflow",
             "process-1",
             "run",
@@ -1011,13 +1011,13 @@ pub(super) async fn restate_ingress_client_accepts_previously_accepted_send() {
 pub(super) async fn restate_ingress_client_calls_workflow_and_decodes_output() {
     let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
         status: "200 OK",
-        body: r#"{"type":"success","value":{"ok":true}}"#,
+        body: r#"{"wire":1,"body":{"type":"success","value":{"ok":true}}}"#,
     }])
     .await;
     let client = RestateIngressClient::new(base_url);
 
     let output: ProcessAwaitOutput = client
-        .call_workflow_json(
+        .call_lash_workflow(
             "LashProcessWorkflow",
             "process-1",
             "await_terminal",
@@ -1046,13 +1046,13 @@ pub(super) async fn restate_ingress_client_calls_workflow_and_decodes_output() {
 pub(super) async fn restate_ingress_client_pins_effect_replay_with_idempotency_key() {
     let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
         status: "200 OK",
-        body: r#"{"status":"cancelled"}"#,
+        body: r#"{"wire":1,"body":{"status":"cancelled"}}"#,
     }])
     .await;
     let client = RestateIngressClient::new(base_url);
 
     let output: Resolution = client
-        .call_workflow_json_idempotent(
+        .call_lash_workflow_idempotent(
             "LashDurableWaitWorkflow",
             "promise-key",
             "await_resolution",
@@ -1088,7 +1088,7 @@ pub(super) async fn await_process_terminal_until_terminal(
 pub(super) async fn restate_process_attach_calls_await_terminal_ingress() {
     let (base_url, _captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
         status: "200 OK",
-        body: r#"{"type":"success","value":"attached"}"#,
+        body: r#"{"wire":1,"body":{"type":"success","value":"attached"}}"#,
     }])
     .await;
     let registry = process_registry();
@@ -1195,7 +1195,7 @@ pub(super) async fn restate_process_attach_reattaches_after_timeout_until_termin
     let expected = legacy_process_success(serde_json::json!({"reattached": true}));
     let (base_url, captured, server) = spawn_restate_http_timeout_then_capture(MockHttpResponse {
         status: "200 OK",
-        body: r#"{"type":"success","value":{"reattached":true}}"#,
+        body: r#"{"wire":1,"body":{"type":"success","value":{"reattached":true}}}"#,
     })
     .await;
     let registry = process_registry();
@@ -1299,7 +1299,7 @@ pub(super) async fn restate_attach_before_run_resolves_with_delayed_workflow_out
     let (base_url, captured, server) = spawn_restate_http_capture_delayed(
         vec![MockHttpResponse {
             status: "200 OK",
-            body: r#"{"type":"success","value":{"eventual":true}}"#,
+            body: r#"{"wire":1,"body":{"type":"success","value":{"eventual":true}}}"#,
         }],
         delay,
     )
@@ -1501,11 +1501,11 @@ pub(super) async fn restate_process_attach_is_reentrant_across_sequential_awaits
     let (base_url, captured, server) = spawn_restate_http_capture(vec![
         MockHttpResponse {
             status: "200 OK",
-            body: r#"{"type":"success","value":"first"}"#,
+            body: r#"{"wire":1,"body":{"type":"success","value":"first"}}"#,
         },
         MockHttpResponse {
             status: "200 OK",
-            body: r#"{"type":"success","value":"second"}"#,
+            body: r#"{"wire":1,"body":{"type":"success","value":"second"}}"#,
         },
     ])
     .await;

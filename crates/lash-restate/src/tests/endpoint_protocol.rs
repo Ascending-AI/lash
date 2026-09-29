@@ -272,9 +272,131 @@ pub(super) fn restate_call_parameters(output: &[u8]) -> Option<Vec<(String, serd
         .map(|frame| {
             let call = decode_call_frame(frame)?;
             let parameter = protobuf_len_field(frame.get(8..)?, 3)?;
-            Some((call.handler, serde_json::from_slice(parameter).ok()?))
+            let parameter = serde_json::from_slice(parameter).ok()?;
+            let parameter = if is_lash_service(&call.service) {
+                call_body(parameter)?
+            } else {
+                parameter
+            };
+            Some((call.handler, parameter))
         })
         .collect()
+}
+
+/// Whether `service` names a lash service under any namespace and lane:
+/// its handlers read a Call and answer a Reply (ADR 0115).
+pub(super) fn is_lash_service(service: &str) -> bool {
+    let name = service.split_once('.').map_or(service, |(_, name)| name);
+    crate::RestateNamespace::default().parse(name).is_some()
+}
+
+fn is_call_envelope(value: &serde_json::Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.len() == 2
+            && object.get("wire").is_some_and(serde_json::Value::is_object)
+            && object.contains_key("body")
+    })
+}
+
+fn is_reply_envelope(value: &serde_json::Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.len() == 2
+            && object.get("wire").is_some_and(serde_json::Value::is_u64)
+            && object.contains_key("body")
+    })
+}
+
+/// The body of the Call a lash handler was sent; `None` for anything else.
+fn call_body(parameter: serde_json::Value) -> Option<serde_json::Value> {
+    if !is_call_envelope(&parameter) {
+        return None;
+    }
+    let serde_json::Value::Object(mut call) = parameter else {
+        return None;
+    };
+    call.remove("body")
+}
+
+/// A bare fixture answer to a call to `service`, in the Reply a lash handler
+/// answers with; any other service's answer, one already enveloped, and bytes
+/// that are not JSON pass verbatim.
+pub(super) fn call_answer(service: &str, value: &[u8]) -> Vec<u8> {
+    if !is_lash_service(service) {
+        return value.to_vec();
+    }
+    match serde_json::from_slice::<serde_json::Value>(value) {
+        Ok(value) if !is_reply_envelope(&value) => crate::wire::reply_json(&value).into_bytes(),
+        _ => value.to_vec(),
+    }
+}
+
+/// A bare fixture input, in the Call a lash caller sends; one already
+/// enveloped, and bytes that are not JSON, pass verbatim.
+fn call_input(value: &[u8]) -> Vec<u8> {
+    match serde_json::from_slice::<serde_json::Value>(value) {
+        Ok(value) if !is_call_envelope(&value) => {
+            serde_json::to_vec(&crate::Call::new(value)).expect("encode a fixture call")
+        }
+        _ => value.to_vec(),
+    }
+}
+
+/// `body`, an invocation of `service`, with the envelopes a lash service's
+/// fixtures leave out: the input of an invocation of a lash service goes in
+/// a Call, and each completion of a call the journal makes to a lash
+/// service in a Reply. The fixtures here speak the bare bodies the handlers
+/// open; frames of any other shape pass verbatim.
+pub(super) fn envelope_lash_invocation(service: &str, body: Bytes) -> Bytes {
+    let Some(frames) = split_frames(&body) else {
+        return body;
+    };
+    let lash_calls = frames
+        .iter()
+        .filter(|frame| frame_type(frame) == Some(0x040D))
+        .filter_map(|frame| decode_call_frame(frame))
+        .filter(|call| is_lash_service(&call.service))
+        .map(|call| (call.result_completion_id, call.service))
+        .collect::<std::collections::HashMap<_, _>>();
+    let lash_invocation = is_lash_service(service);
+    let mut enveloped = BytesMut::with_capacity(body.len());
+    for frame in frames {
+        match frame_type(frame) {
+            Some(0x0400) if lash_invocation => {
+                if let Some(input) = frame
+                    .get(8..)
+                    .and_then(|payload| protobuf_len_field(payload, 14))
+                    .and_then(|value| protobuf_len_field(value, 1))
+                    && encode_input_command(input).as_ref() == frame
+                {
+                    enveloped.extend_from_slice(&encode_input_command(&call_input(input)));
+                    continue;
+                }
+            }
+            Some(0x800D) => {
+                if let Some(payload) = frame.get(8..)
+                    && let Some(id) =
+                        protobuf_varint_field(payload, 1).and_then(|id| u32::try_from(id).ok())
+                    && let Some(service) = lash_calls.get(&id)
+                    && let Some(value) = protobuf_len_field(payload, 5)
+                        .and_then(|value| protobuf_len_field(value, 1))
+                    && encode_call_completion(id, value).as_ref() == frame
+                {
+                    enveloped.extend_from_slice(&encode_call_completion(
+                        id,
+                        &call_answer(service, value),
+                    ));
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        enveloped.extend_from_slice(frame);
+    }
+    enveloped.freeze()
+}
+
+fn frame_type(frame: &[u8]) -> Option<u16> {
+    frame.get(..2).map(|ty| u16::from_be_bytes([ty[0], ty[1]]))
 }
 
 /// One command the deployed handler journaled: its frame, and the completion
@@ -593,11 +715,22 @@ pub(super) fn encode_call_replay<T: serde::Serialize>(
     Ok(body.freeze())
 }
 
+/// The output the invocation in `input` ended with: the body of a lash
+/// handler's Reply, any other handler's output as it is.
 pub(super) fn restate_output_json<T: serde::de::DeserializeOwned>(input: &[u8]) -> Option<T> {
     let frame = restate_message_frame(input, 0x0401)?;
     let value = protobuf_len_field(frame.get(8..)?, 14)?;
     let json = protobuf_len_field(value, 1)?;
-    serde_json::from_slice(json).ok()
+    let output = serde_json::from_slice::<serde_json::Value>(json).ok()?;
+    let output = match output {
+        serde_json::Value::Object(mut reply)
+            if is_reply_envelope(&serde_json::Value::Object(reply.clone())) =>
+        {
+            reply.remove("body")?
+        }
+        output => output,
+    };
+    serde_json::from_value(output).ok()
 }
 
 pub(super) fn restate_output_failure_message(input: &[u8]) -> Option<String> {
@@ -1128,7 +1261,10 @@ async fn invoke_process_workflow_body_unbounded(
             http::Request::builder()
                 .uri(format!("/invoke/LashProcessWorkflow/{handler}"))
                 .header(http::header::CONTENT_TYPE, RESTATE_INVOCATION_CONTENT_TYPE)
-                .body(Full::new(body))
+                .body(Full::new(envelope_lash_invocation(
+                    "LashProcessWorkflow",
+                    body,
+                )))
                 .expect("workflow invocation request"),
         );
         let status = response.status();
@@ -1146,7 +1282,7 @@ async fn invoke_process_workflow_body_unbounded(
             .map_err(|err| TerminalError::new(format!("workflow endpoint body failed: {err}")));
     }
 
-    let invocation_body = body;
+    let invocation_body = envelope_lash_invocation("LashProcessWorkflow", body);
     let (mut input_sender, body) = Channel::<Bytes, Infallible>::new(4);
     input_sender
         .send_data(invocation_body)
@@ -1229,6 +1365,7 @@ async fn invoke_process_workflow_body_unbounded(
                 {
                     let response =
                         serde_json::to_vec(&response).map_err(TerminalError::from_error)?;
+                    let response = call_answer(&call.service, &response);
                     input_sender
                         .as_mut()
                         .expect("workflow input remains open until the end message")
@@ -1446,6 +1583,7 @@ async fn invoke_endpoint_body_with_named_call_responses_unbounded(
     invocation_ids: Vec<String>,
     mut responses: Vec<(String, serde_json::Value)>,
 ) -> Result<Bytes, TerminalError> {
+    let invocation_body = envelope_lash_invocation(service, invocation_body);
     let (input_sender, receiver) = tokio::sync::mpsc::channel(8);
     input_sender
         .send(invocation_body)
@@ -1543,6 +1681,7 @@ async fn invoke_endpoint_body_with_named_call_responses_unbounded(
                         let (_, response) = responses.remove(response_index);
                         let response =
                             serde_json::to_vec(&response).map_err(TerminalError::from_error)?;
+                        let response = call_answer(&call.service, &response);
                         input_sender
                             .as_mut()
                             .expect("endpoint input remains open for named calls")
@@ -1763,6 +1902,7 @@ async fn invoke_endpoint_body_with_scripted_responses_unbounded(
     invocation_ids: Vec<String>,
     responses: Vec<serde_json::Value>,
 ) -> Result<Bytes, TerminalError> {
+    let invocation_body = envelope_lash_invocation(service, invocation_body);
     let (input_sender, receiver) = tokio::sync::mpsc::channel(8);
     input_sender
         .send(invocation_body)
@@ -1860,6 +2000,7 @@ async fn invoke_endpoint_body_with_scripted_responses_unbounded(
                     if let Some(response) = responses.next() {
                         let response =
                             serde_json::to_vec(&response).map_err(TerminalError::from_error)?;
+                        let response = call_answer(&call.service, &response);
                         input_sender
                             .as_mut()
                             .expect("endpoint input remains open for scripted calls")
@@ -1890,6 +2031,7 @@ async fn invoke_endpoint_body_with_json_call_responses_unbounded(
     responses: Vec<serde_json::Value>,
     after_last_response: InputAfterLastResponse,
 ) -> Result<Bytes, TerminalError> {
+    let invocation_body = envelope_lash_invocation(service, invocation_body);
     let (mut input_sender, body) = Channel::<Bytes, Infallible>::new(8);
     input_sender
         .send_data(invocation_body)
@@ -1943,6 +2085,7 @@ async fn invoke_endpoint_body_with_json_call_responses_unbounded(
                 if let Some(response) = responses.next() {
                     let response =
                         serde_json::to_vec(&response).map_err(TerminalError::from_error)?;
+                    let response = call_answer(&call.service, &response);
                     input_sender
                         .as_mut()
                         .expect("endpoint input remains open for scripted calls")
@@ -2012,6 +2155,7 @@ async fn invoke_endpoint_body_open_unbounded(
     handler: &str,
     invocation_body: Bytes,
 ) -> Result<Bytes, TerminalError> {
+    let invocation_body = envelope_lash_invocation(service, invocation_body);
     let (mut input_sender, body) = Channel::<Bytes, Infallible>::new(4);
     let replayed = invocation_body.clone();
     input_sender
@@ -2105,7 +2249,7 @@ async fn invoke_endpoint_body_unbounded(
         http::Request::builder()
             .uri(format!("/invoke/{service}/{handler}"))
             .header(http::header::CONTENT_TYPE, RESTATE_INVOCATION_CONTENT_TYPE)
-            .body(Full::new(body))
+            .body(Full::new(envelope_lash_invocation(service, body)))
             .expect("endpoint invocation request"),
     );
     let status = response.status();

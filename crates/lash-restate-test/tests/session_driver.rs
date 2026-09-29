@@ -29,9 +29,7 @@ use lash_core::{
     RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
     RuntimeErrorCode, ScopedEffectController, SessionDriver, SessionId, SessionWorkEngine, TurnId,
 };
-use lash_restate::{
-    LASH_SESSION_DRIVE_VERSION, RestateSessionDriveRequest, RestateTurnDriveRequest,
-};
+use lash_restate::{Call, Reply, RestateSessionDriveRequest, RestateTurnDriveRequest};
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{
     CrashPoint, RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
@@ -660,44 +658,56 @@ async fn one_session_drives_one_request_at_a_time() {
     assert_eq!(second.stop, DriveStop::Idle);
 }
 
-/// A request stamped with another generation is refused before either
-/// handler journals anything.
+/// A call on a wire this build does not read is refused before either
+/// handler journals anything (ADR 0115 §3.1). A request carries no drain
+/// stamp: only its wire range is checked.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_request_of_another_generation_is_refused_before_any_journal_command() {
+async fn a_call_on_a_wire_this_build_does_not_read_is_refused_before_any_journal_command() {
     let (backend, driver, _installation) = fixture(15).await;
     let session = SessionId::from("drive-generation");
     driver.accept(&session, "a");
     let ingress = backend.ingress();
-    for version in [0, LASH_SESSION_DRIVE_VERSION + 1] {
-        let refused = ingress
-            .call_object_json::<_, DriveOutcome>(
-                SESSION_DRIVER_SERVICE,
-                session.as_str(),
-                "drive",
-                &RestateSessionDriveRequest {
-                    drive_version: version,
+    let newer = lash_restate::VersionRange::new(
+        lash_restate::RESTATE_WIRE_VERSION + 1,
+        lash_restate::RESTATE_WIRE_VERSION + 1,
+    )
+    .expect("a wire range");
+    let refused = ingress
+        .call_object_json::<_, Reply<DriveOutcome>>(
+            SESSION_DRIVER_SERVICE,
+            session.as_str(),
+            "drive",
+            &Call {
+                wire: newer,
+                body: RestateSessionDriveRequest {
                     request: DriveRequest {
                         session: session.clone(),
-                        request: request(&format!("generation-{version}")),
+                        request: request("newer-wire"),
                         build_generation: lash_core::engine::BuildGeneration::for_test("any"),
                     },
                 },
-            )
-            .await;
-        assert!(refused.is_err(), "generation {version} is refused");
-        let turn = ingress
-            .call_workflow_json::<_, RootOutcome>(
-                TURN_DRIVER_SERVICE,
-                &format!("{}:{}a", session.as_str().len(), session.as_str()),
-                "run",
-                &RestateTurnDriveRequest {
-                    drive_version: version,
+            },
+        )
+        .await;
+    let refusal = refused.expect_err("a disjoint wire is refused by LashSession");
+    assert!(
+        refusal.to_string().contains("lash.wire_unsupported"),
+        "{refusal}"
+    );
+    let turn = ingress
+        .call_workflow_json::<_, Reply<RootOutcome>>(
+            TURN_DRIVER_SERVICE,
+            &format!("{}:{}a", session.as_str().len(), session.as_str()),
+            "run",
+            &Call {
+                wire: newer,
+                body: RestateTurnDriveRequest {
                     sender_generation: Some(lash_core::engine::BuildGeneration::for_test("any")),
                     admitted: admission_body::admitted(
                         session.clone(),
                         TurnId::from("a"),
-                        request("generation"),
-                        lash_core::engine::AdmissionId::new("generation"),
+                        request("newer-wire"),
+                        lash_core::engine::AdmissionId::new("newer-wire"),
                         0,
                         lash_core::engine::BuildGeneration::for_test("any"),
                         lash_core::engine::AdmittedWork::Queued {
@@ -705,10 +715,14 @@ async fn a_request_of_another_generation_is_refused_before_any_journal_command()
                         },
                     ),
                 },
-            )
-            .await;
-        assert!(turn.is_err(), "generation {version} is refused by LashTurn");
-    }
+            },
+        )
+        .await;
+    let refusal = turn.expect_err("a disjoint wire is refused by LashTurn");
+    assert!(
+        refusal.to_string().contains("lash.wire_unsupported"),
+        "{refusal}"
+    );
     settle(&backend).await;
     for view in backend.server().invocations() {
         let journaled: Vec<_> = backend

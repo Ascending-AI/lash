@@ -23,9 +23,9 @@
 use lash_core::{AwaitEventKey, ProcessId, Resolution};
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::HandlerResult;
-use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 
+use crate::compat::{Call, Reply};
 use crate::durable_wait::{
     LASH_REPLAY_KEY_HEADER, RestateDurableWaitAddress, RestateDurableWaitResolveRequest,
     durable_wait_index_object_key,
@@ -58,7 +58,7 @@ pub(crate) fn process_attach_workflow_key(key: &AwaitEventKey) -> String {
 /// process terminals without it would park calls nothing ever resolves.
 #[restate_sdk::workflow]
 pub trait LashProcessAttach {
-    async fn run(request: Json<RestateProcessAttachRequest>) -> HandlerResult<Json<()>>;
+    async fn run(call: Call<RestateProcessAttachRequest>) -> HandlerResult<Reply<()>>;
 }
 
 /// [`LashProcessAttach`] in one deployment's namespace (FIG-3898).
@@ -77,8 +77,9 @@ impl LashProcessAttach for LashProcessAttachImpl {
     async fn run(
         &self,
         ctx: WorkflowContext<'_>,
-        Json(request): Json<RestateProcessAttachRequest>,
-    ) -> HandlerResult<Json<()>> {
+        call: Call<RestateProcessAttachRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
         let RestateProcessAttachRequest { process_id, key } = request;
         // The terminal lives on the stable root, whatever lane the process's
         // last segment ran under (FIG-3795).
@@ -95,7 +96,7 @@ impl LashProcessAttach for LashProcessAttachImpl {
         // this workflow could not observe at all becomes an error resolution,
         // so the parked call reports why instead of hanging.
         let resolution = match output {
-            Ok(Json(output)) => match serde_json::to_value(&output) {
+            Ok(reply) => match serde_json::to_value(reply.into_body()) {
                 Ok(value) => Resolution::Ok(value),
                 Err(error) => Resolution::Err(lash_core::runtime::ExternalCompletionError {
                     code: lash_core::TurnFailureCode::from_wire("process_terminal_encode").into(),
@@ -115,13 +116,12 @@ impl LashProcessAttach for LashProcessAttachImpl {
         // index retains the resolution for a registration that has not happened
         // yet, so a terminal that beats the parked turn's registration is not
         // lost.
-        let Json(_outcome) = self
-            .namespace
+        self.namespace
             .durable_wait_registry(&ctx, durable_wait_index_object_key(&address))
-            .resolve(Json(RestateDurableWaitResolveRequest { key, resolution }))
+            .resolve(RestateDurableWaitResolveRequest { key, resolution })
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call()
             .await?;
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 }

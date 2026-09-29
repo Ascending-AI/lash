@@ -32,12 +32,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::RestateIngressClient;
+use crate::compat::{Call, Reply};
 use crate::durable_wait::{
     LASH_REPLAY_KEY_HEADER, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
     RestateDurableWaitGroupChildRequest, RestateDurableWaitResolveRequest,
     durable_wait_index_key_for_scope, durable_wait_index_object_key, restate_await_event_key,
 };
-use crate::object_state::{self, StoredValueFormats};
+use crate::object_state::{self, FleetView, ObjectFamily, StoredValueFormats};
 
 const INDEX_STATE_KEY: &str = "effect-group/v1/state";
 
@@ -49,11 +50,10 @@ mod wire;
 use drain_barrier::blocking_positions;
 pub(crate) use drain_barrier::{drained_wait_lifted, drained_wait_request};
 use group_waits::{resolve_group_wait, seal_cancel_decisions, wait_resolution};
+pub(crate) use protocol::EFFECT_GROUP_STATE_FAMILY;
+#[cfg(test)]
 pub(crate) use protocol::EFFECT_GROUP_STATE_FORMATS;
-pub use protocol::{
-    EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_STATE_FORMAT_VERSION,
-    EFFECT_GROUP_WIRE_VERSION,
-};
+pub use protocol::{EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_STATE_FORMAT_VERSION};
 use protocol::{load_index, load_index_shared};
 pub(crate) use reopen::{content_checked_shape_mismatch, content_mismatch};
 pub(crate) use wire::btree_map_as_pairs;
@@ -79,325 +79,8 @@ pub enum EffectGroupDispatchState {
 mod state_record;
 pub use state_record::*;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupOpenResponse {
-    /// A fresh group: `dispatch_route` is the recorded route the dispatch
-    /// runs under, as the request declared it (FIG-3795 S10).
-    OpenedFresh {
-        dispatch_route: String,
-    },
-    ReopenedReady,
-    /// A preparing group the caller may submit the dispatch for:
-    /// `dispatch_route` is the route the index retains, which a reopen's
-    /// offer never overrides.
-    ReopenedPreparing {
-        dispatch_route: String,
-    },
-    ReopenedClosed {
-        effective: EffectGroupCloseDisposition,
-    },
-    Retired,
-    ShapeMismatch,
-    /// A content-checked reopen offered a child that is not the retained one
-    /// at `position`.
-    ContentMismatch {
-        position: usize,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupProbeAdoptResponse {
-    /// The dispatch was adopted; `shape` is the recorded shape whose retained
-    /// membership is the authoritative child set — a reopen's offered
-    /// children never reach dispatch.
-    Adopted {
-        shape: EffectGroupShape,
-    },
-    /// A redrive of an already-adopted dispatch, answered with the same
-    /// recorded shape so the replayed `run` rebuilds the same children.
-    AlreadyAdopted {
-        shape: EffectGroupShape,
-    },
-    DifferentDispatcher,
-    Ready,
-    Closed,
-    UnknownGroup,
-    Retired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupRecordDispatchResponse {
-    Recorded,
-    Duplicate,
-    DispatchMismatch,
-    NotPreparing,
-    UnknownGroup,
-    Retired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupRegisterResponse {
-    Registered,
-    AlreadyRegistered,
-    RegistrationMismatch,
-    AlreadyClosed,
-    UnknownGroup,
-    Retired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupRegisterRefusalResponse {
-    Refused,
-    AlreadyRegistered,
-    AlreadyClosed,
-    UnknownGroup,
-    Retired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupAdmissionResponse {
-    Admitted,
-    NotYetRecorded,
-    /// The index retains a *different* invocation id for this position: the
-    /// retained invocation's retention expired and the idempotency-keyed
-    /// re-dispatch minted a fresh one. Distinct from `Refused` because the
-    /// successor must surface the typed `AttachExpired` failure rather than
-    /// exit silently — the rank it would never settle is a caller's wait
-    /// (ADR 0099 §8).
-    AttachExpired,
-    /// The close decided this child `Cancel` before it was admitted. The
-    /// close owns everything that follows, including releasing a wait
-    /// child's wait (ADR 0099 §12, FIG-3630), so the child just exits.
-    CancelDecided,
-    Refused,
-    Retired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupRecordSettlementResponse {
-    Recorded {
-        rank: u64,
-    },
-    Duplicate {
-        rank: u64,
-    },
-    /// Refused: the cancel disposition won this child's §4 point before its
-    /// final record arrived. `rank` is the seat the decision holds — the
-    /// child's own terminal journals nothing.
-    CancelDecided {
-        rank: u64,
-    },
-    UnknownChild,
-    UnknownGroup,
-    Retired,
-}
-
-/// One child's final record reaching the §4 point: the index-side decision
-/// the durable tiers' `commit_group_child` mirrors.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupCommitChildRequest {
-    /// The child's declared replay key; the index resolves its position from
-    /// the retained shape rather than trusting a caller-supplied position.
-    pub replay_key: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupCommitChildResponse {
-    /// This child's final won the §4 point: `commit_seq` is its durable
-    /// position in the group's final-commit order and `blocking_positions`
-    /// the committed siblings below it whose seats are still owed — the §5
-    /// barrier the child's drain and settlement wait behind.
-    Committed {
-        commit_seq: u64,
-        blocking_positions: Vec<usize>,
-    },
-    /// The commit already landed (idempotent redrive): the recorded position
-    /// and whichever lower siblings still owe their seats.
-    AlreadyCommitted {
-        commit_seq: u64,
-        blocking_positions: Vec<usize>,
-    },
-    /// The cancel disposition won first; the child's final journals nothing.
-    CancelDecided {
-        rank: u64,
-    },
-    UnknownChild,
-    UnknownGroup,
-    Retired,
-}
-
-/// The §5 barrier read: which siblings committed below `commit_seq` still owe
-/// their settlement seats.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupDrainBlockersRequest {
-    pub commit_seq: u64,
-}
-
-/// The §5 barrier as the index sees it for one committed child.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupDrainBlockersResponse {
-    /// No sibling below the caller still owes its seat. An absent or retired
-    /// group holds no committed children, so it answers this too.
-    Admitted,
-    /// These lower-commit siblings still owe their seats. Each resolves its
-    /// drained wake under the group's retained `wait_scope` when it seats, so
-    /// the caller builds the wake keys from the scope the index resolves them
-    /// under rather than re-deriving it.
-    Blocked {
-        wait_scope: ExecutionScope,
-        positions: Vec<usize>,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupReadRankResponse {
-    Settled {
-        settlement: EffectGroupSettlementRecord,
-        /// The settled child's durable identity — the replay key a §6 prefix
-        /// record or a §8 attach names, derived from the retained shape rather
-        /// than stored twice on the settlement record.
-        child_replay_key: String,
-    },
-    NotSettled,
-    Closed,
-    UnknownGroup,
-    Retired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupCloseResponse {
-    Closed,
-    AlreadyClosed,
-    WidenRefused,
-    NotReady,
-    UnknownGroup,
-    Retired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupRetireResponse {
-    Retired { cleanup: EffectGroupCleanupFacts },
-    AlreadyRetired { cleanup: EffectGroupCleanupFacts },
-    Tombstone,
-    UnknownGroup,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupFinishRetirementResponse {
-    Finished,
-    AlreadyFinished,
-    NotRetired,
-    UnknownGroup,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupRetirementCancelResponse {
-    Applied,
-    AlreadyApplied,
-    Tombstone,
-    NotRetired,
-    UnknownGroup,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupOpenRequest {
-    pub shape: EffectGroupShape,
-    /// The route — the full Restate service name — the group's dispatch is
-    /// sent under (FIG-3795 S10). The index records it verbatim at open, and
-    /// a reopen keeps the retained route: the route is data, and every later
-    /// dispatcher self-call or host-side group call addresses the recorded
-    /// route rather than recomputing a name.
-    pub dispatch_route: String,
-    /// The opener asked for a content-checked reopen (FIG-3586,
-    /// `GroupReopen::RetainedContent`): a reopen whose offered membership
-    /// differs from the retained one is refused rather than served.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub content_checked: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupAdoptRequest {
-    pub invocation_id: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupRecordDispatchRequest {
-    pub position: usize,
-    pub invocation_id: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupRegisterRequest {
-    #[serde(with = "btree_map_as_pairs")]
-    pub addresses: BTreeMap<usize, String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupRefusalRequest {
-    pub reason: EffectGroupRefusal,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupAdmissionRequest {
-    pub position: usize,
-    pub invocation_id: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct EffectGroupRecordSettlementRequest {
-    pub position: usize,
-    pub terminal: EffectGroupSettlementTerminal,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupReadRankRequest {
-    pub rank: u64,
-    /// The read is the group caller's own await. A caller is refused a
-    /// closed group's ranks until it reopens the group, as the SQL engines'
-    /// caller path refuses (FIG-3676); the host's own readers (drain,
-    /// finalization, the settlement reader) see every recorded rank.
-    #[serde(default)]
-    pub for_caller: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupCloseRequest {
-    pub disposition: LoserPolicy,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupWaitResolution {
-    Ready,
-    Rank,
-    Cancel,
-    Admit,
-    /// The child at this position seated its settlement: the wake a §5
-    /// barrier parks on while a lower-commit sibling finishes its drain.
-    Drained,
-    /// The child at this position seated its settlement, so no cancel can
-    /// reach it: its cancel wait ends without cancelling it, and the watch
-    /// its dispatch invocation held on the wait ends with it (FIG-3709).
-    Settled,
-    Refused {
-        reason: EffectGroupRefusal,
-    },
-    Retired,
-}
+mod messages;
+pub use messages::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EffectGroupWaitKind<'a> {
@@ -524,60 +207,70 @@ fn phase(lifecycle: &EffectGroupLifecycle) -> EffectGroupPhase {
     }
 }
 
-fn store_index(ctx: &ObjectContext<'_>, record: EffectGroupStateRecord) {
-    object_state::set_stamped(ctx, INDEX_STATE_KEY, &EFFECT_GROUP_STATE_FORMATS, record);
+fn store_index(
+    ctx: &ObjectContext<'_>,
+    writer: object_state::StoredValueWriter,
+    record: EffectGroupStateRecord,
+) {
+    object_state::set_stamped(ctx, INDEX_STATE_KEY, writer, record);
 }
 
 /// An effect group's lifecycle and settlement rank, one object per group.
+/// Every handler takes a [`Call`] and answers a [`Reply`], and reads the
+/// object's `_compat` record before any other state (ADR 0115 §3).
 // The registered service keeps its `EffectGroupIndex` name (FIG-3814).
 #[restate_sdk::object]
 #[name = "EffectGroupIndex"]
 pub(crate) trait EffectGroupState {
     #[shared]
-    async fn probe() -> HandlerResult<Json<EffectGroupProbeResponse>>;
+    async fn probe(call: Call<()>) -> HandlerResult<Reply<EffectGroupProbeResponse>>;
     #[shared]
-    async fn unsettled_children() -> HandlerResult<Json<usize>>;
+    async fn unsettled_children(call: Call<()>) -> HandlerResult<Reply<usize>>;
     async fn open(
-        request: Json<EffectGroupOpenRequest>,
-    ) -> HandlerResult<Json<EffectGroupOpenResponse>>;
+        call: Call<EffectGroupOpenRequest>,
+    ) -> HandlerResult<Reply<EffectGroupOpenResponse>>;
     async fn probe_and_adopt(
-        request: Json<EffectGroupAdoptRequest>,
-    ) -> HandlerResult<Json<EffectGroupProbeAdoptResponse>>;
+        call: Call<EffectGroupAdoptRequest>,
+    ) -> HandlerResult<Reply<EffectGroupProbeAdoptResponse>>;
     async fn record_dispatch(
-        request: Json<EffectGroupRecordDispatchRequest>,
-    ) -> HandlerResult<Json<EffectGroupRecordDispatchResponse>>;
+        call: Call<EffectGroupRecordDispatchRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRecordDispatchResponse>>;
     async fn register_children(
-        request: Json<EffectGroupRegisterRequest>,
-    ) -> HandlerResult<Json<EffectGroupRegisterResponse>>;
+        call: Call<EffectGroupRegisterRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRegisterResponse>>;
     async fn register_refusal(
-        request: Json<EffectGroupRefusalRequest>,
-    ) -> HandlerResult<Json<EffectGroupRegisterRefusalResponse>>;
+        call: Call<EffectGroupRefusalRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRegisterRefusalResponse>>;
     async fn admit_child(
-        request: Json<EffectGroupAdmissionRequest>,
-    ) -> HandlerResult<Json<EffectGroupAdmissionResponse>>;
+        call: Call<EffectGroupAdmissionRequest>,
+    ) -> HandlerResult<Reply<EffectGroupAdmissionResponse>>;
     async fn commit_child(
-        request: Json<EffectGroupCommitChildRequest>,
-    ) -> HandlerResult<Json<EffectGroupCommitChildResponse>>;
+        call: Call<EffectGroupCommitChildRequest>,
+    ) -> HandlerResult<Reply<EffectGroupCommitChildResponse>>;
     async fn admit_semantic(
-        request: Json<EffectGroupAdmitSemanticRequest>,
-    ) -> HandlerResult<Json<EffectGroupAdmitSemanticResponse>>;
+        call: Call<EffectGroupAdmitSemanticRequest>,
+    ) -> HandlerResult<Reply<EffectGroupAdmitSemanticResponse>>;
     #[shared]
     async fn drain_blockers(
-        request: Json<EffectGroupDrainBlockersRequest>,
-    ) -> HandlerResult<Json<EffectGroupDrainBlockersResponse>>;
+        call: Call<EffectGroupDrainBlockersRequest>,
+    ) -> HandlerResult<Reply<EffectGroupDrainBlockersResponse>>;
     async fn record_settlement(
-        request: Json<EffectGroupRecordSettlementRequest>,
-    ) -> HandlerResult<Json<EffectGroupRecordSettlementResponse>>;
+        call: Call<EffectGroupRecordSettlementRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRecordSettlementResponse>>;
     #[shared]
     async fn read_rank(
-        request: Json<EffectGroupReadRankRequest>,
-    ) -> HandlerResult<Json<EffectGroupReadRankResponse>>;
+        call: Call<EffectGroupReadRankRequest>,
+    ) -> HandlerResult<Reply<EffectGroupReadRankResponse>>;
     async fn close(
-        request: Json<EffectGroupCloseRequest>,
-    ) -> HandlerResult<Json<EffectGroupCloseResponse>>;
-    async fn retire() -> HandlerResult<Json<EffectGroupRetireResponse>>;
-    async fn finish_retirement() -> HandlerResult<Json<EffectGroupFinishRetirementResponse>>;
-    async fn retirement_cancel() -> HandlerResult<Json<EffectGroupRetirementCancelResponse>>;
+        call: Call<EffectGroupCloseRequest>,
+    ) -> HandlerResult<Reply<EffectGroupCloseResponse>>;
+    async fn retire(call: Call<()>) -> HandlerResult<Reply<EffectGroupRetireResponse>>;
+    async fn finish_retirement(
+        call: Call<()>,
+    ) -> HandlerResult<Reply<EffectGroupFinishRetirementResponse>>;
+    async fn retirement_cancel(
+        call: Call<()>,
+    ) -> HandlerResult<Reply<EffectGroupRetirementCancelResponse>>;
 }
 
 /// [`EffectGroupState`] in one deployment's namespace: the durable-wait
@@ -586,11 +279,22 @@ pub(crate) trait EffectGroupState {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct EffectGroupStateImpl {
     namespace: crate::RestateNamespace,
+    /// Where the handlers read the fleet epoch their writes are stamped at.
+    fleet: FleetView,
 }
 
 impl EffectGroupStateImpl {
-    pub(crate) fn new(namespace: crate::RestateNamespace) -> Self {
-        Self { namespace }
+    pub(crate) fn new(namespace: crate::RestateNamespace, fleet: FleetView) -> Self {
+        Self { namespace, fleet }
+    }
+
+    /// The group's `_compat` gate for a handler that may write.
+    async fn admit(
+        &self,
+        ctx: &ObjectContext<'_>,
+    ) -> Result<object_state::AdmittedObject, TerminalError> {
+        object_state::admit_exclusive(ctx, &EFFECT_GROUP_STATE_FAMILY, self.fleet.fleet_format())
+            .await
     }
 }
 
@@ -598,7 +302,10 @@ impl EffectGroupState for EffectGroupStateImpl {
     async fn probe(
         &self,
         ctx: SharedObjectContext<'_>,
-    ) -> HandlerResult<Json<EffectGroupProbeResponse>> {
+        call: Call<()>,
+    ) -> HandlerResult<Reply<EffectGroupProbeResponse>> {
+        let (wire, ()) = call.open()?;
+        object_state::admit_shared(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
         let response = match load_index_shared(&ctx).await? {
             None => EffectGroupProbeResponse::Absent,
             Some(record) => EffectGroupProbeResponse::Exists {
@@ -606,13 +313,19 @@ impl EffectGroupState for EffectGroupStateImpl {
                 phase: phase(&record.lifecycle),
             },
         };
-        Ok(Json(response))
+        Ok(Reply::at(wire, response))
     }
 
     /// How many of this group's children have no settlement yet: the count
     /// the owning scope's quiescence proof reads (FIG-2499). An absent or
     /// retired group, or one whose live record is gone, has none.
-    async fn unsettled_children(&self, ctx: SharedObjectContext<'_>) -> HandlerResult<Json<usize>> {
+    async fn unsettled_children(
+        &self,
+        ctx: SharedObjectContext<'_>,
+        call: Call<()>,
+    ) -> HandlerResult<Reply<usize>> {
+        let (wire, ()) = call.open()?;
+        object_state::admit_shared(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
         let unsettled = match load_index_shared(&ctx).await? {
             Some(record) => record.live().map_or(0, |live| {
                 live.shape
@@ -621,14 +334,16 @@ impl EffectGroupState for EffectGroupStateImpl {
             }),
             None => 0,
         };
-        Ok(Json(unsettled))
+        Ok(Reply::at(wire, unsettled))
     }
 
     async fn open(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupOpenRequest>,
-    ) -> HandlerResult<Json<EffectGroupOpenResponse>> {
+        call: Call<EffectGroupOpenRequest>,
+    ) -> HandlerResult<Reply<EffectGroupOpenResponse>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         request.shape.validate_wire()?;
         // The route is recorded verbatim, so it must name a dispatcher lane
         // a deployment binds (FIG-3795): an opener cannot declare a route
@@ -651,6 +366,7 @@ impl EffectGroupState for EffectGroupStateImpl {
             let dispatch_route = request.dispatch_route.clone();
             store_index(
                 &ctx,
+                object.writer,
                 EffectGroupStateRecord {
                     shape_digest,
                     dispatch_route: dispatch_route.clone(),
@@ -667,19 +383,20 @@ impl EffectGroupState for EffectGroupStateImpl {
                     },
                 },
             );
-            return Ok(Json(EffectGroupOpenResponse::OpenedFresh {
-                dispatch_route,
-            }));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupOpenResponse::OpenedFresh { dispatch_route },
+            ));
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
-            return Ok(Json(EffectGroupOpenResponse::Retired));
+            return Ok(Reply::at(wire, EffectGroupOpenResponse::Retired));
         }
         // The fence is the shared reopen contract — arity, wake rule, declared
         // disposition — never the retained membership: a reopen *offers*
         // children that may disagree with what the journal kept, and the
         // recorded membership wins (ADR 0099 §3).
         if !record.live()?.shape.fences_equivalent(&request.shape) {
-            return Ok(Json(EffectGroupOpenResponse::ShapeMismatch));
+            return Ok(Reply::at(wire, EffectGroupOpenResponse::ShapeMismatch));
         }
         // A content-checked reopen (FIG-3586) is refused when any offered
         // child is not the retained one: the aggregate is addressed by its
@@ -693,7 +410,10 @@ impl EffectGroupState for EffectGroupStateImpl {
                 .zip(&request.shape.membership)
                 .position(|(retained, offered)| retained != offered)
         {
-            return Ok(Json(EffectGroupOpenResponse::ContentMismatch { position }));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupOpenResponse::ContentMismatch { position },
+            ));
         }
         // A reopen is a new caller interest (FIG-3481): a non-refused Closed
         // entry keeps its cumulative disposition but its reopened marker
@@ -721,21 +441,23 @@ impl EffectGroupState for EffectGroupStateImpl {
             EffectGroupLifecycle::Retired { .. } => EffectGroupOpenResponse::Retired,
         };
         if marked {
-            store_index(&ctx, record);
+            store_index(&ctx, object.writer, record);
         }
-        Ok(Json(response))
+        Ok(Reply::at(wire, response))
     }
 
     async fn probe_and_adopt(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupAdoptRequest>,
-    ) -> HandlerResult<Json<EffectGroupProbeAdoptResponse>> {
+        call: Call<EffectGroupAdoptRequest>,
+    ) -> HandlerResult<Reply<EffectGroupProbeAdoptResponse>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let Some(mut record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupProbeAdoptResponse::UnknownGroup));
+            return Ok(Reply::at(wire, EffectGroupProbeAdoptResponse::UnknownGroup));
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
-            return Ok(Json(EffectGroupProbeAdoptResponse::Retired));
+            return Ok(Reply::at(wire, EffectGroupProbeAdoptResponse::Retired));
         }
         // Read before the mutable match below: the adopting dispatcher gets
         // the recorded shape so its children are always the retained
@@ -748,7 +470,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                         id: request.invocation_id,
                         dispatched: BTreeMap::new(),
                     };
-                    store_index(&ctx, record);
+                    store_index(&ctx, object.writer, record);
                     EffectGroupProbeAdoptResponse::Adopted { shape }
                 }
                 EffectGroupDispatchState::Adopted { id, .. } if id == &request.invocation_id => {
@@ -762,20 +484,25 @@ impl EffectGroupState for EffectGroupStateImpl {
             EffectGroupLifecycle::Closed { .. } => EffectGroupProbeAdoptResponse::Closed,
             EffectGroupLifecycle::Retired { .. } => EffectGroupProbeAdoptResponse::Retired,
         };
-        Ok(Json(response))
+        Ok(Reply::at(wire, response))
     }
 
     async fn record_dispatch(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupRecordDispatchRequest>,
-    ) -> HandlerResult<Json<EffectGroupRecordDispatchResponse>> {
+        call: Call<EffectGroupRecordDispatchRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRecordDispatchResponse>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let group_key = ctx.key().to_string();
         let Some(mut record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupRecordDispatchResponse::UnknownGroup));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupRecordDispatchResponse::UnknownGroup,
+            ));
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
-            return Ok(Json(EffectGroupRecordDispatchResponse::Retired));
+            return Ok(Reply::at(wire, EffectGroupRecordDispatchResponse::Retired));
         }
         let shape = record.live()?.shape.clone();
         let children = shape.children();
@@ -793,7 +520,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                 }
                 None => {
                     dispatched.insert(request.position, request.invocation_id);
-                    store_index(&ctx, record.clone());
+                    store_index(&ctx, object.writer, record.clone());
                     EffectGroupRecordDispatchResponse::Recorded
                 }
             },
@@ -820,25 +547,30 @@ impl EffectGroupState for EffectGroupStateImpl {
             )
             .await?;
         }
-        Ok(Json(response))
+        Ok(Reply::at(wire, response))
     }
 
     async fn register_children(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupRegisterRequest>,
-    ) -> HandlerResult<Json<EffectGroupRegisterResponse>> {
+        call: Call<EffectGroupRegisterRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRegisterResponse>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let group_key = ctx.key().to_string();
         let Some(mut record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupRegisterResponse::UnknownGroup));
+            return Ok(Reply::at(wire, EffectGroupRegisterResponse::UnknownGroup));
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
-            return Ok(Json(EffectGroupRegisterResponse::Retired));
+            return Ok(Reply::at(wire, EffectGroupRegisterResponse::Retired));
         }
         let shape = record.live()?.shape.clone();
         let expected_positions = (0..shape.children()).collect::<Vec<_>>();
         if request.addresses.keys().copied().collect::<Vec<_>>() != expected_positions {
-            return Ok(Json(EffectGroupRegisterResponse::RegistrationMismatch));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupRegisterResponse::RegistrationMismatch,
+            ));
         }
         let response = match &record.lifecycle {
             EffectGroupLifecycle::Preparing {
@@ -849,7 +581,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                     addresses: request.addresses,
                     live: live.clone(),
                 };
-                store_index(&ctx, record.clone());
+                store_index(&ctx, object.writer, record.clone());
                 resolve_group_wait(
                     &ctx,
                     &self.namespace,
@@ -876,20 +608,25 @@ impl EffectGroupState for EffectGroupStateImpl {
             }
             EffectGroupLifecycle::Retired { .. } => EffectGroupRegisterResponse::Retired,
         };
-        Ok(Json(response))
+        Ok(Reply::at(wire, response))
     }
 
     async fn register_refusal(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupRefusalRequest>,
-    ) -> HandlerResult<Json<EffectGroupRegisterRefusalResponse>> {
+        call: Call<EffectGroupRefusalRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRegisterRefusalResponse>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let group_key = ctx.key().to_string();
         let Some(mut record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupRegisterRefusalResponse::UnknownGroup));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupRegisterRefusalResponse::UnknownGroup,
+            ));
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
-            return Ok(Json(EffectGroupRegisterRefusalResponse::Retired));
+            return Ok(Reply::at(wire, EffectGroupRegisterRefusalResponse::Retired));
         }
         let shape = record.live()?.shape.clone();
         let response = match &record.lifecycle {
@@ -902,7 +639,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                     addresses: BTreeMap::new(),
                     live: live.clone(),
                 };
-                store_index(&ctx, record.clone());
+                store_index(&ctx, object.writer, record.clone());
                 resolve_group_wait(
                     &ctx,
                     &self.namespace,
@@ -937,18 +674,20 @@ impl EffectGroupState for EffectGroupStateImpl {
             }
             EffectGroupLifecycle::Retired { .. } => EffectGroupRegisterRefusalResponse::Retired,
         };
-        Ok(Json(response))
+        Ok(Reply::at(wire, response))
     }
 
     async fn admit_child(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupAdmissionRequest>,
-    ) -> HandlerResult<Json<EffectGroupAdmissionResponse>> {
+        call: Call<EffectGroupAdmissionRequest>,
+    ) -> HandlerResult<Reply<EffectGroupAdmissionResponse>> {
+        let (wire, request) = call.open()?;
+        object_state::admit_exclusive_read(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
         #[cfg(test)]
         let group_key = ctx.key().to_string();
         let Some(record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupAdmissionResponse::Refused));
+            return Ok(Reply::at(wire, EffectGroupAdmissionResponse::Refused));
         };
         let response = decide_group_child_admission(
             &record.lifecycle,
@@ -959,7 +698,7 @@ impl EffectGroupState for EffectGroupStateImpl {
         if response == EffectGroupAdmissionResponse::NotYetRecorded {
             admission_witness::notify(&group_key);
         }
-        Ok(Json(response))
+        Ok(Reply::at(wire, response))
     }
 
     /// The §4 point for one child's final record: `pending` to `committed`,
@@ -976,14 +715,19 @@ impl EffectGroupState for EffectGroupStateImpl {
     async fn commit_child(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupCommitChildRequest>,
-    ) -> HandlerResult<Json<EffectGroupCommitChildResponse>> {
+        call: Call<EffectGroupCommitChildRequest>,
+    ) -> HandlerResult<Reply<EffectGroupCommitChildResponse>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let group_key = ctx.key().to_string();
         let Some(mut record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupCommitChildResponse::UnknownGroup));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupCommitChildResponse::UnknownGroup,
+            ));
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
-            return Ok(Json(EffectGroupCommitChildResponse::Retired));
+            return Ok(Reply::at(wire, EffectGroupCommitChildResponse::Retired));
         }
         let live = record.live_mut()?;
         let Some(position) = live
@@ -992,7 +736,10 @@ impl EffectGroupState for EffectGroupStateImpl {
             .iter()
             .position(|replay_key| replay_key == &request.replay_key)
         else {
-            return Ok(Json(EffectGroupCommitChildResponse::UnknownChild));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupCommitChildResponse::UnknownChild,
+            ));
         };
         match live.commit_states.get(&position).copied() {
             Some(EffectGroupChildCommitState::CancelDecided) => {
@@ -1006,13 +753,19 @@ impl EffectGroupState for EffectGroupStateImpl {
                              holds no rank; the decision and its seat commit in one handler"
                         ))
                     })?;
-                return Ok(Json(EffectGroupCommitChildResponse::CancelDecided { rank }));
+                return Ok(Reply::at(
+                    wire,
+                    EffectGroupCommitChildResponse::CancelDecided { rank },
+                ));
             }
             Some(EffectGroupChildCommitState::Committed { commit_seq }) => {
-                return Ok(Json(EffectGroupCommitChildResponse::AlreadyCommitted {
-                    commit_seq,
-                    blocking_positions: blocking_positions(live, commit_seq),
-                }));
+                return Ok(Reply::at(
+                    wire,
+                    EffectGroupCommitChildResponse::AlreadyCommitted {
+                        commit_seq,
+                        blocking_positions: blocking_positions(live, commit_seq),
+                    },
+                ));
             }
             None => {}
         }
@@ -1027,11 +780,14 @@ impl EffectGroupState for EffectGroupStateImpl {
             EffectGroupChildCommitState::Committed { commit_seq },
         );
         let blocking_positions = blocking_positions(live, commit_seq);
-        store_index(&ctx, record);
-        Ok(Json(EffectGroupCommitChildResponse::Committed {
-            commit_seq,
-            blocking_positions,
-        }))
+        store_index(&ctx, object.writer, record);
+        Ok(Reply::at(
+            wire,
+            EffectGroupCommitChildResponse::Committed {
+                commit_seq,
+                blocking_positions,
+            },
+        ))
     }
 
     /// §4's admission fence on this tier (FIG-3470): may a semantic effect
@@ -1046,13 +802,21 @@ impl EffectGroupState for EffectGroupStateImpl {
     async fn admit_semantic(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupAdmitSemanticRequest>,
-    ) -> HandlerResult<Json<EffectGroupAdmitSemanticResponse>> {
+        call: Call<EffectGroupAdmitSemanticRequest>,
+    ) -> HandlerResult<Reply<EffectGroupAdmitSemanticResponse>> {
+        let (wire, request) = call.open()?;
+        object_state::admit_exclusive_read(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
         let Some(record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupAdmitSemanticResponse::UnknownGroup));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupAdmitSemanticResponse::UnknownGroup,
+            ));
         };
         let Ok(live) = record.live() else {
-            return Ok(Json(EffectGroupAdmitSemanticResponse::UnknownGroup));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupAdmitSemanticResponse::UnknownGroup,
+            ));
         };
         let Some(position) = live
             .shape
@@ -1060,14 +824,20 @@ impl EffectGroupState for EffectGroupStateImpl {
             .iter()
             .position(|replay_key| replay_key == &request.replay_key)
         else {
-            return Ok(Json(EffectGroupAdmitSemanticResponse::UnknownChild));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupAdmitSemanticResponse::UnknownChild,
+            ));
         };
-        Ok(Json(match live.commit_states.get(&position).copied() {
-            Some(EffectGroupChildCommitState::CancelDecided) => {
-                EffectGroupAdmitSemanticResponse::CancelDecided
-            }
-            _ => EffectGroupAdmitSemanticResponse::Admitted,
-        }))
+        Ok(Reply::at(
+            wire,
+            match live.commit_states.get(&position).copied() {
+                Some(EffectGroupChildCommitState::CancelDecided) => {
+                    EffectGroupAdmitSemanticResponse::CancelDecided
+                }
+                _ => EffectGroupAdmitSemanticResponse::Admitted,
+            },
+        ))
     }
 
     /// The siblings the §5 barrier still holds `commit_seq` behind: every
@@ -1078,8 +848,10 @@ impl EffectGroupState for EffectGroupStateImpl {
     async fn drain_blockers(
         &self,
         ctx: SharedObjectContext<'_>,
-        Json(request): Json<EffectGroupDrainBlockersRequest>,
-    ) -> HandlerResult<Json<EffectGroupDrainBlockersResponse>> {
+        call: Call<EffectGroupDrainBlockersRequest>,
+    ) -> HandlerResult<Reply<EffectGroupDrainBlockersResponse>> {
+        let (wire, request) = call.open()?;
+        object_state::admit_shared(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
         let response = match load_index_shared(&ctx).await? {
             Some(record) => match record.live() {
                 Ok(live) => {
@@ -1097,24 +869,35 @@ impl EffectGroupState for EffectGroupStateImpl {
             },
             None => EffectGroupDrainBlockersResponse::Admitted,
         };
-        Ok(Json(response))
+        Ok(Reply::at(wire, response))
     }
 
     async fn record_settlement(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupRecordSettlementRequest>,
-    ) -> HandlerResult<Json<EffectGroupRecordSettlementResponse>> {
+        call: Call<EffectGroupRecordSettlementRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRecordSettlementResponse>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let group_key = ctx.key().to_string();
         let Some(mut record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupRecordSettlementResponse::UnknownGroup));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupRecordSettlementResponse::UnknownGroup,
+            ));
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
-            return Ok(Json(EffectGroupRecordSettlementResponse::Retired));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupRecordSettlementResponse::Retired,
+            ));
         }
         let live = record.live_mut()?;
         if request.position >= live.shape.children() {
-            return Ok(Json(EffectGroupRecordSettlementResponse::UnknownChild));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupRecordSettlementResponse::UnknownChild,
+            ));
         }
         // The §4 point is the decision, not the seat: a child whose cancel
         // disposition committed first is refused by name, one whose own
@@ -1135,9 +918,10 @@ impl EffectGroupState for EffectGroupStateImpl {
                             request.position
                         ))
                     })?;
-                return Ok(Json(EffectGroupRecordSettlementResponse::CancelDecided {
-                    rank,
-                }));
+                return Ok(Reply::at(
+                    wire,
+                    EffectGroupRecordSettlementResponse::CancelDecided { rank },
+                ));
             }
             Some(EffectGroupChildCommitState::Committed { .. })
                 if live.settled_positions.contains_key(&request.position) =>
@@ -1162,9 +946,10 @@ impl EffectGroupState for EffectGroupStateImpl {
                     EffectGroupWaitResolution::Rank,
                 )
                 .await?;
-                return Ok(Json(EffectGroupRecordSettlementResponse::Duplicate {
-                    rank,
-                }));
+                return Ok(Reply::at(
+                    wire,
+                    EffectGroupRecordSettlementResponse::Duplicate { rank },
+                ));
             }
             Some(EffectGroupChildCommitState::Committed { .. }) => {}
             None => {
@@ -1192,7 +977,7 @@ impl EffectGroupState for EffectGroupStateImpl {
         live.settled_positions.insert(request.position, rank);
         let wait_scope = live.shape.wait_scope.clone();
         let replay_key = live.shape.replay_key(request.position)?.to_string();
-        store_index(&ctx, record.clone());
+        store_index(&ctx, object.writer, record.clone());
         resolve_group_wait(
             &ctx,
             &self.namespace,
@@ -1225,19 +1010,24 @@ impl EffectGroupState for EffectGroupStateImpl {
             EffectGroupWaitResolution::Settled,
         )
         .await?;
-        Ok(Json(EffectGroupRecordSettlementResponse::Recorded { rank }))
+        Ok(Reply::at(
+            wire,
+            EffectGroupRecordSettlementResponse::Recorded { rank },
+        ))
     }
 
     async fn read_rank(
         &self,
         ctx: SharedObjectContext<'_>,
-        Json(request): Json<EffectGroupReadRankRequest>,
-    ) -> HandlerResult<Json<EffectGroupReadRankResponse>> {
+        call: Call<EffectGroupReadRankRequest>,
+    ) -> HandlerResult<Reply<EffectGroupReadRankResponse>> {
+        let (wire, request) = call.open()?;
+        object_state::admit_shared(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
         let Some(record) = load_index_shared(&ctx).await? else {
-            return Ok(Json(EffectGroupReadRankResponse::UnknownGroup));
+            return Ok(Reply::at(wire, EffectGroupReadRankResponse::UnknownGroup));
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
-            return Ok(Json(EffectGroupReadRankResponse::Retired));
+            return Ok(Reply::at(wire, EffectGroupReadRankResponse::Retired));
         }
         let closed_to_caller = matches!(
             &record.lifecycle,
@@ -1249,7 +1039,7 @@ impl EffectGroupState for EffectGroupStateImpl {
         );
         // A caller is refused its closed group whether or not the rank settled.
         if request.for_caller && closed_to_caller {
-            return Ok(Json(EffectGroupReadRankResponse::Closed));
+            return Ok(Reply::at(wire, EffectGroupReadRankResponse::Closed));
         }
         let settlement = record.live()?.settlements.get(&request.rank).cloned();
         if let Some(settlement) = settlement {
@@ -1258,38 +1048,46 @@ impl EffectGroupState for EffectGroupStateImpl {
                 .shape
                 .replay_key(settlement.position)?
                 .to_string();
-            return Ok(Json(EffectGroupReadRankResponse::Settled {
-                settlement,
-                child_replay_key,
-            }));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupReadRankResponse::Settled {
+                    settlement,
+                    child_replay_key,
+                },
+            ));
         }
         // An unsettled rank of a group closed to its caller answers `Closed`
         // to every reader. A reopened caller parks like a live group: an RTC
         // loser still lands, and a committed child under Cancel seats its
         // rank when the drain finishes (FIG-3481).
-        Ok(Json(if closed_to_caller {
-            EffectGroupReadRankResponse::Closed
-        } else {
-            EffectGroupReadRankResponse::NotSettled
-        }))
+        Ok(Reply::at(
+            wire,
+            if closed_to_caller {
+                EffectGroupReadRankResponse::Closed
+            } else {
+                EffectGroupReadRankResponse::NotSettled
+            },
+        ))
     }
 
     async fn close(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupCloseRequest>,
-    ) -> HandlerResult<Json<EffectGroupCloseResponse>> {
+        call: Call<EffectGroupCloseRequest>,
+    ) -> HandlerResult<Reply<EffectGroupCloseResponse>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let group_key = ctx.key().to_string();
         let Some(mut record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupCloseResponse::UnknownGroup));
+            return Ok(Reply::at(wire, EffectGroupCloseResponse::UnknownGroup));
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
-            return Ok(Json(EffectGroupCloseResponse::Retired));
+            return Ok(Reply::at(wire, EffectGroupCloseResponse::Retired));
         }
         let shape = record.live()?.shape.clone();
         let (declared, addresses, prior) = match &record.lifecycle {
             EffectGroupLifecycle::Preparing { .. } => {
-                return Ok(Json(EffectGroupCloseResponse::NotReady));
+                return Ok(Reply::at(wire, EffectGroupCloseResponse::NotReady));
             }
             EffectGroupLifecycle::Ready { addresses, .. } => {
                 (shape.loser_disposition, addresses.clone(), None)
@@ -1303,21 +1101,21 @@ impl EffectGroupState for EffectGroupStateImpl {
                     EffectGroupCloseDisposition::RunToCompletion => LoserPolicy::RunToCompletion,
                     EffectGroupCloseDisposition::Cancel => LoserPolicy::Cancel,
                     EffectGroupCloseDisposition::Refused { .. } => {
-                        return Ok(Json(EffectGroupCloseResponse::AlreadyClosed));
+                        return Ok(Reply::at(wire, EffectGroupCloseResponse::AlreadyClosed));
                     }
                 };
                 (declared, addresses.clone(), Some(effective.clone()))
             }
             EffectGroupLifecycle::Retired { .. } => {
-                return Ok(Json(EffectGroupCloseResponse::Retired));
+                return Ok(Reply::at(wire, EffectGroupCloseResponse::Retired));
             }
         };
         let effective = match LoserPolicy::resolve_close(declared, request.disposition) {
             Ok(effective) => effective,
-            Err(_) => return Ok(Json(EffectGroupCloseResponse::WidenRefused)),
+            Err(_) => return Ok(Reply::at(wire, EffectGroupCloseResponse::WidenRefused)),
         };
         if prior.as_ref() == Some(&EffectGroupCloseDisposition::from(effective)) {
-            return Ok(Json(EffectGroupCloseResponse::AlreadyClosed));
+            return Ok(Reply::at(wire, EffectGroupCloseResponse::AlreadyClosed));
         }
         let mut decided = Vec::new();
         if effective == LoserPolicy::Cancel {
@@ -1357,7 +1155,7 @@ impl EffectGroupState for EffectGroupStateImpl {
             addresses: addresses.clone(),
             live,
         };
-        store_index(&ctx, record.clone());
+        store_index(&ctx, object.writer, record.clone());
         if effective == LoserPolicy::Cancel {
             let live = record.live()?;
             for position in 0..shape.children() {
@@ -1415,25 +1213,31 @@ impl EffectGroupState for EffectGroupStateImpl {
                 }
             }
         }
-        Ok(Json(EffectGroupCloseResponse::Closed))
+        Ok(Reply::at(wire, EffectGroupCloseResponse::Closed))
     }
 
     async fn retire(
         &self,
         ctx: ObjectContext<'_>,
-    ) -> HandlerResult<Json<EffectGroupRetireResponse>> {
+        call: Call<()>,
+    ) -> HandlerResult<Reply<EffectGroupRetireResponse>> {
+        let (wire, ()) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let Some(mut record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupRetireResponse::UnknownGroup));
+            return Ok(Reply::at(wire, EffectGroupRetireResponse::UnknownGroup));
         };
         if let EffectGroupLifecycle::Retired { cleanup } = &record.lifecycle {
-            return Ok(Json(match cleanup {
-                EffectGroupCleanup::Pending { facts, .. } => {
-                    EffectGroupRetireResponse::AlreadyRetired {
-                        cleanup: facts.clone(),
+            return Ok(Reply::at(
+                wire,
+                match cleanup {
+                    EffectGroupCleanup::Pending { facts, .. } => {
+                        EffectGroupRetireResponse::AlreadyRetired {
+                            cleanup: facts.clone(),
+                        }
                     }
-                }
-                EffectGroupCleanup::Complete => EffectGroupRetireResponse::Tombstone,
-            }));
+                    EffectGroupCleanup::Complete => EffectGroupRetireResponse::Tombstone,
+                },
+            ));
         }
         let (shape, live) = {
             let live = record.live()?;
@@ -1457,13 +1261,13 @@ impl EffectGroupState for EffectGroupStateImpl {
                 // S10), never a name recomputed from this build.
                 let group_key = ctx.key().to_string();
                 let handle = ctx
-                    .request::<Json<EffectGroupDispatchRequest>, Json<()>>(
+                    .request::<Call<EffectGroupDispatchRequest>, Reply<()>>(
                         restate_sdk::context::RequestTarget::workflow(
                             record.dispatch_route.clone(),
                             group_key.clone(),
                             "run",
                         ),
-                        Json(EffectGroupDispatchRequest {
+                        Call::new(EffectGroupDispatchRequest {
                             group_key: group_key.clone(),
                         }),
                     )
@@ -1478,14 +1282,17 @@ impl EffectGroupState for EffectGroupStateImpl {
                 )
             }
             EffectGroupLifecycle::Retired { cleanup } => {
-                return Ok(Json(match cleanup {
-                    EffectGroupCleanup::Pending { facts, .. } => {
-                        EffectGroupRetireResponse::AlreadyRetired {
-                            cleanup: facts.clone(),
+                return Ok(Reply::at(
+                    wire,
+                    match cleanup {
+                        EffectGroupCleanup::Pending { facts, .. } => {
+                            EffectGroupRetireResponse::AlreadyRetired {
+                                cleanup: facts.clone(),
+                            }
                         }
-                    }
-                    EffectGroupCleanup::Complete => EffectGroupRetireResponse::Tombstone,
-                }));
+                        EffectGroupCleanup::Complete => EffectGroupRetireResponse::Tombstone,
+                    },
+                ));
             }
         };
         let cleanup = EffectGroupCleanupFacts {
@@ -1500,16 +1307,25 @@ impl EffectGroupState for EffectGroupStateImpl {
                 live: Box::new(live),
             },
         };
-        store_index(&ctx, record);
-        Ok(Json(EffectGroupRetireResponse::Retired { cleanup }))
+        store_index(&ctx, object.writer, record);
+        Ok(Reply::at(
+            wire,
+            EffectGroupRetireResponse::Retired { cleanup },
+        ))
     }
 
     async fn finish_retirement(
         &self,
         ctx: ObjectContext<'_>,
-    ) -> HandlerResult<Json<EffectGroupFinishRetirementResponse>> {
+        call: Call<()>,
+    ) -> HandlerResult<Reply<EffectGroupFinishRetirementResponse>> {
+        let (wire, ()) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let Some(mut record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupFinishRetirementResponse::UnknownGroup));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupFinishRetirementResponse::UnknownGroup,
+            ));
         };
         let response = match record.lifecycle {
             EffectGroupLifecycle::Retired {
@@ -1518,7 +1334,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                 record.lifecycle = EffectGroupLifecycle::Retired {
                     cleanup: EffectGroupCleanup::Complete,
                 };
-                store_index(&ctx, record);
+                store_index(&ctx, object.writer, record);
                 EffectGroupFinishRetirementResponse::Finished
             }
             EffectGroupLifecycle::Retired {
@@ -1526,16 +1342,22 @@ impl EffectGroupState for EffectGroupStateImpl {
             } => EffectGroupFinishRetirementResponse::AlreadyFinished,
             _ => EffectGroupFinishRetirementResponse::NotRetired,
         };
-        Ok(Json(response))
+        Ok(Reply::at(wire, response))
     }
 
     async fn retirement_cancel(
         &self,
         ctx: ObjectContext<'_>,
-    ) -> HandlerResult<Json<EffectGroupRetirementCancelResponse>> {
+        call: Call<()>,
+    ) -> HandlerResult<Reply<EffectGroupRetirementCancelResponse>> {
+        let (wire, ()) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let group_key = ctx.key().to_string();
         let Some(mut record) = load_index(&ctx).await? else {
-            return Ok(Json(EffectGroupRetirementCancelResponse::UnknownGroup));
+            return Ok(Reply::at(
+                wire,
+                EffectGroupRetirementCancelResponse::UnknownGroup,
+            ));
         };
         let mut decided = Vec::new();
         let (facts, ranks, changed, shape) = {
@@ -1545,8 +1367,18 @@ impl EffectGroupState for EffectGroupStateImpl {
                 } => (facts, live),
                 EffectGroupLifecycle::Retired {
                     cleanup: EffectGroupCleanup::Complete,
-                } => return Ok(Json(EffectGroupRetirementCancelResponse::Tombstone)),
-                _ => return Ok(Json(EffectGroupRetirementCancelResponse::NotRetired)),
+                } => {
+                    return Ok(Reply::at(
+                        wire,
+                        EffectGroupRetirementCancelResponse::Tombstone,
+                    ));
+                }
+                _ => {
+                    return Ok(Reply::at(
+                        wire,
+                        EffectGroupRetirementCancelResponse::NotRetired,
+                    ));
+                }
             };
             let mut changed = false;
             for position in 0..facts.children() {
@@ -1590,7 +1422,7 @@ impl EffectGroupState for EffectGroupStateImpl {
             (facts.clone(), ranks, changed, live.shape.clone())
         };
         seal_cancel_decisions(&ctx, &self.namespace, &group_key, &shape, &decided).await?;
-        store_index(&ctx, record.clone());
+        store_index(&ctx, object.writer, record.clone());
         for (position, rank) in ranks.iter().copied() {
             resolve_group_wait(
                 &ctx,
@@ -1620,11 +1452,14 @@ impl EffectGroupState for EffectGroupStateImpl {
             )
             .await?;
         }
-        Ok(Json(if changed {
-            EffectGroupRetirementCancelResponse::Applied
-        } else {
-            EffectGroupRetirementCancelResponse::AlreadyApplied
-        }))
+        Ok(Reply::at(
+            wire,
+            if changed {
+                EffectGroupRetirementCancelResponse::Applied
+            } else {
+                EffectGroupRetirementCancelResponse::AlreadyApplied
+            },
+        ))
     }
 }
 

@@ -550,18 +550,18 @@ description = "stored format of the record the effect-group state object retains
 manifest = "engine:restate.effect_group_state_format"
 
 [[surface]]
-constant = "EFFECT_GROUP_WIRE_VERSION"
-constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
-upgrade = "coexist"
-description = "Restate effect-group wire: the group handlers' request and response shapes callers exchange with them"
-manifest = "engine:restate.effect_group_wire"
-
-[[surface]]
 constant = "RESTATE_WIRE_VERSION"
 constant_path = "crates/lash-restate/src/compat.rs"
 upgrade = "coexist"
-description = "Restate cross-build handler wire (ADR 0115 §3.1): the frozen Call/Reply envelope every handler another build can serve takes and answers, selected per call from the caller's range"
-outside_manifest = "wire protocol: selected per call between two live builds, not bytes a store parks"
+description = "Restate cross-build handler wire (ADR 0115 §3.1): the frozen Call/Reply envelope every lash handler takes and answers, selected per call from the caller's range; it subsumes the effect-group wire"
+manifest = "engine:restate.wire"
+
+[[surface]]
+constant = "LASH_TURN_OUTCOME_FORMAT_VERSION"
+constant_path = "crates/lash-restate/src/session_driver.rs"
+upgrade = "migrate"
+description = "stored format of the root outcome LashTurn records under its outcome state (ADR 0115 §3.4)"
+manifest = "engine:restate.turn_outcome_format"
 
 [[surface]]
 constant = "EFFECT_GROUP_DISPATCH_JOURNAL_VERSION"

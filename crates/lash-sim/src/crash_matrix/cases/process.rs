@@ -388,9 +388,9 @@ async fn stage_caller_killed(world: CrashWorld) -> Result<Staged, String> {
             PROCESS_WORKFLOW,
             process.as_str(),
             "await_terminal",
-            &lash_restate::RestateProcessAwaitRequest {
+            &lash_restate::Call::new(lash_restate::RestateProcessAwaitRequest {
                 process_id: process.clone(),
-            },
+            }),
         )
         .await
         .map_err(|error| format!("arm the engine waiter: {error}"))?
@@ -474,9 +474,9 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
             PROCESS_WORKFLOW,
             process.as_str(),
             "await_terminal",
-            &lash_restate::RestateProcessAwaitRequest {
+            &lash_restate::Call::new(lash_restate::RestateProcessAwaitRequest {
                 process_id: process.clone(),
-            },
+            }),
         )
         .await
         .map_err(|error| format!("arm the engine waiter: {error}"))?

@@ -23,8 +23,8 @@ use restate_sdk::service::Service;
 use restate_sdk::service::macro_support::ServiceBoxFuture;
 
 use crate::session_driver::{
-    LASH_SESSION_DRIVE_VERSION, LashSession as _, LashSessionImpl, LashTurn as _, LashTurnImpl,
-    RestateSessionDriveRequest, RestateTurnDriveRequest, turn_workflow_key,
+    LashSession as _, LashSessionImpl, LashTurn as _, LashTurnImpl, RestateSessionDriveRequest,
+    RestateTurnDriveRequest, turn_workflow_key,
 };
 
 const MAX_ATTEMPTS: u64 = 3;
@@ -342,14 +342,13 @@ async fn a_session_drive_replayed_under_another_generation_parks_at_its_first_ad
             "LashSession",
             session.as_str(),
             "drive",
-            &RestateSessionDriveRequest {
-                drive_version: LASH_SESSION_DRIVE_VERSION,
+            &crate::Call::new(RestateSessionDriveRequest {
                 request: DriveRequest {
                     session: session.clone(),
                     request: request.clone(),
                     build_generation: lash_core::engine::BuildGeneration::for_test("G_a"),
                 },
-            },
+            }),
             request.as_str(),
         )
         .await
@@ -359,24 +358,24 @@ async fn a_session_drive_replayed_under_another_generation_parks_at_its_first_ad
         &drive_admission_replay_key(&request, 0),
     )
     .await;
-    let outcome: DriveOutcome = swap
+    let outcome: crate::Reply<DriveOutcome> = swap
         .ingress
         .call_object_json_idempotent(
             "LashSession",
             session.as_str(),
             "drive",
-            &RestateSessionDriveRequest {
-                drive_version: LASH_SESSION_DRIVE_VERSION,
+            &crate::Call::new(RestateSessionDriveRequest {
                 request: DriveRequest {
                     session: session.clone(),
                     request: request.clone(),
                     build_generation: lash_core::engine::BuildGeneration::for_test("G_a"),
                 },
-            },
+            }),
             request.as_str(),
         )
         .await
         .expect("the resumed drive's outcome");
+    let outcome = outcome.body;
     assert!(
         matches!(outcome.stop, DriveStop::Idle),
         "the resumed drive answers its recorded admission: {outcome:?}"
@@ -391,6 +390,7 @@ async fn a_root_run_replayed_under_another_generation_parks_at_its_first_step() 
             test_restate_authority_id(),
             generation,
             &crate::services::DEFAULT_NAMESPACE,
+            crate::object_state::FleetView::default(),
         )
         .serve()
     })
@@ -410,12 +410,11 @@ async fn a_root_run_replayed_under_another_generation_parks_at_its_first_step() 
     );
     let key = turn_workflow_key(&session, &root);
     swap.ingress
-        .send_workflow_json(
+        .send_lash_workflow(
             "LashTurn",
             &key,
             "run",
             &RestateTurnDriveRequest {
-                drive_version: LASH_SESSION_DRIVE_VERSION,
                 sender_generation: Some(lash_core::engine::BuildGeneration::for_test("G_a")),
                 admitted,
             },

@@ -123,6 +123,7 @@ impl World {
                     "process-terminal-obligation",
                 ),
                 namespace: crate::RestateNamespace::default(),
+                fleet: crate::object_state::FleetView::default(),
             },
         )
         .build();
@@ -220,7 +221,7 @@ impl World {
         tokio::spawn(async move {
             let key = process_id.to_string();
             ingress
-                .call_workflow_json::<_, ProcessAwaitOutput>(
+                .call_lash_workflow::<_, ProcessAwaitOutput>(
                     &crate::services::DEFAULT_NAMESPACE
                         .stable(crate::LashService::ProcessWorkflow)
                         .name(),

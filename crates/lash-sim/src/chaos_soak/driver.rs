@@ -863,9 +863,9 @@ impl Driver {
                 process::PROCESS_WORKFLOW,
                 process_id.as_str(),
                 "await_terminal",
-                &lash_restate::RestateProcessAwaitRequest {
+                &lash_restate::Call::new(lash_restate::RestateProcessAwaitRequest {
                     process_id: process_id.clone(),
-                },
+                }),
             )
             .await
             .map_err(|error| format!("arm the engine waiter: {error}"))?

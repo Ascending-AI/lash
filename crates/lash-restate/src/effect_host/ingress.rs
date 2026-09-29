@@ -28,7 +28,7 @@ pub(super) async fn resolve_restate_await_event_via_ingress(
     let index_key = durable_wait_index_object_key(&address);
     let outcome = ingress
         .ingress
-        .call_object_json::<_, RestateDurableWaitResolveResponse>(
+        .call_lash_object::<_, RestateDurableWaitResolveResponse>(
             &ingress.service(crate::LashService::DurableWaitRegistry),
             &index_key,
             "resolve",
@@ -53,10 +53,11 @@ pub(super) async fn update_restate_session_waits_via_ingress(
     let handler = if revoke { "revoke_all" } else { "cancel_all" };
     ingress
         .ingress
-        .call_object_empty(
+        .call_lash_object::<_, ()>(
             &ingress.service(crate::LashService::DurableWaitRegistry),
             session_id,
             handler,
+            &(),
         )
         .await
         .map_err(|err| {
@@ -76,7 +77,7 @@ pub(super) async fn restate_index_is_revoked_via_ingress(
 ) -> Result<bool, RuntimeError> {
     ingress
         .ingress
-        .call_object_json::<_, bool>(
+        .call_lash_object::<_, bool>(
             &ingress.service(crate::LashService::DurableWaitRegistry),
             index_key,
             "is_revoked",
@@ -123,10 +124,11 @@ pub(super) async fn update_restate_scope_waits_via_ingress(
     let index_key = durable_wait_index_key_for_scope(scope);
     ingress
         .ingress
-        .call_object_empty(
+        .call_lash_object::<_, ()>(
             &ingress.service(crate::LashService::DurableWaitRegistry),
             &index_key,
             handler,
+            &(),
         )
         .await
         .map_err(|err| {
@@ -150,7 +152,7 @@ pub(super) async fn retire_restate_scope_via_ingress(
     };
     let retired = ingress
         .ingress
-        .call_object_json::<_, bool>(
+        .call_lash_object::<_, bool>(
             &ingress.service(crate::LashService::DurableWaitRegistry),
             &index_key,
             handler,
@@ -201,14 +203,14 @@ pub(super) async fn await_restate_await_event_via_ingress(
     tokio::select! {
         result = async {
             match effect_replay_key {
-                Some(replay_key) => ingress.ingress.call_workflow_json_idempotent::<_, Resolution>(
+                Some(replay_key) => ingress.ingress.call_lash_workflow_idempotent::<_, Resolution>(
                     &ingress.service(crate::LashService::DurableWaitWorkflow),
                     &workflow_key,
                     "await_resolution",
                     &request,
                     replay_key,
                 ).await,
-                None => ingress.ingress.call_workflow_json::<_, Resolution>(
+                None => ingress.ingress.call_lash_workflow::<_, Resolution>(
                     &ingress.service(crate::LashService::DurableWaitWorkflow),
                     &workflow_key,
                     "await_resolution",

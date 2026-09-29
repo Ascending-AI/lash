@@ -127,7 +127,7 @@ fn cancel_resolution_body() -> HttpResponseBody {
     let resolution = lash_core::Resolution::Ok(
         serde_json::to_value(EffectGroupWaitResolution::Cancel).expect("encode the cancel wake"),
     );
-    HttpResponseBody::buffered(serde_json::to_vec(&resolution).expect("encode the resolution"))
+    HttpResponseBody::buffered(crate::wire::reply_json(&resolution))
 }
 
 #[async_trait::async_trait]
