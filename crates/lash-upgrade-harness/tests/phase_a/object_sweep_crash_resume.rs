@@ -208,8 +208,12 @@ fn object_sweep_crash_resume() -> Result<()> {
     n_back.stop()?;
     let status = operator_next.run("drain-status", Some(&n_generation))?;
     ensure!(status["drained"] == true, "N did not drain: {status}");
+    let finalized = case.retire_and_finalize(&operator_next, &n_generation)?;
+    ensure!(
+        finalized["fleet_format"] == 2,
+        "finalize did not move F: {finalized}"
+    );
     operator_next.run("end-drain", Some(&n_generation))?;
-    case.finalize_postgres(2)?;
     // N+1 comes back to read the finalized epoch.
     next_rolled.stop()?;
     next_first.stop()?;

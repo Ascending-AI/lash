@@ -395,11 +395,11 @@ _upgrade-harness-builds artifacts:
 # (the default build) and N+1 (the `synthetic-next` feature), run as separate
 # `lash-upgrade-node` processes over real PostgreSQL, a SQLite store directory
 # and one live `restate-server`. Bazel builds both nodes and lashctl. The
-# operator binary runs the PostgreSQL version, migrate, preflight and drain
-# steps; SQLite migrates on open. Finalize still waits for its lane; the
-# `phase_a` legs run under `just phase-a`. `LASH_POSTGRES_DATABASE_URL` reuses a
-# database the caller provides; otherwise a throwaway pg16 container serves
-# the run. Evidence (the step report and every node's log) lands under the
+# operator binary runs the PostgreSQL version, migrate, preflight, drain,
+# finalize and contract steps, over a database the run creates for itself;
+# SQLite migrates on open. The `phase_a` legs run under `just phase-a`.
+# `LASH_POSTGRES_DATABASE_URL` reuses a server the caller provides; otherwise
+# a throwaway pg16 container serves the run. Evidence (the step report and every node's log) lands under the
 # artifact directory, which `runbooks/rolling-upgrade/` judges.
 e2e-rolling:
   #!/usr/bin/env bash

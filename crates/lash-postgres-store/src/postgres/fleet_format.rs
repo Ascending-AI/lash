@@ -4,7 +4,7 @@
 //! every writer in the fleet emits. The installer seeds it — `lashctl migrate`
 //! at the migrating build's [`FleetFormat::seed`], or a host applying
 //! `schema.sql` — every open reads the recorded generation, and only
-//! `lash admin finalize-upgrade` (FIG-3800) ever moves it. An open never
+//! `lashctl finalize` (FIG-3800) ever moves it. An open never
 //! records `F`: were the first opener to decide it, an N+1 that opened a
 //! freshly migrated store before any N would record its own epoch and skip the
 //! rollback window (ADR 0115 §2.1).
@@ -152,8 +152,8 @@ impl lash_core_execution::FleetFormatStore for crate::PostgresStore {
     /// This is the hook durable writers consult for their writer version:
     /// `self.fleet_format().writer_version(surface_format!(…))` maps a
     /// format's build-newest version onto the generation the fleet agreed to
-    /// write, which is the identity map until `finalize-upgrade` (FIG-3800)
-    /// exists.
+    /// write, which is the identity map until `lashctl finalize` (FIG-3800)
+    /// moves `F`.
     fn fleet_format(&self) -> FleetFormat {
         self.fence.fleet()
     }

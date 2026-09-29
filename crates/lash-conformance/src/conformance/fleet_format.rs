@@ -36,7 +36,7 @@ pub trait FleetFormatDeployment: Send + Sync {
     ) -> Result<FleetFormat, StoreError>;
 
     /// Record `version` in the fleet-format row as an operator or a newer
-    /// build's `finalize-upgrade` would (FIG-3800). The law uses it to stand
+    /// build's `lashctl finalize` would (FIG-3800). The law uses it to stand
     /// up the rollout states the upgrade arc must survive.
     async fn record_fleet_format(&self, version: u32) -> Result<(), StoreError>;
 

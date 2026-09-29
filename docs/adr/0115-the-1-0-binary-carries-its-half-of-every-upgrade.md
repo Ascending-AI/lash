@@ -1049,3 +1049,45 @@ logic, order, names or effects bumps `JOURNAL_LOGIC_EPOCH`. During the pre-1.0
 freeze, shapes change in place. The CI replay check enforcing the same-G
 contract is built and enabled at the 1.0 cut (FIG-4097). Lash-trace reads JSONL
 back, as reflected in the trace row above.
+
+## Amendment (FIG-3800 B and FIG-3817, 2026-09-30)
+
+Sam ruled (2026-09-29) that the upgrade-from-1.0 operations stay in the 1.0
+milestone, so §8 moves `lashctl finalize`, the retired-deployment check, the
+hold flag, and the backfill and contract runner before the cut. They are
+built now and proved against Phase A's synthetic successor; the first real
+successor reuses them unchanged. The decisions the lane took:
+
+- **Retirement is read, never assumed.** Finalize names the retired
+  generation and the Restate admin API. It refuses `generation_not_drained`
+  (exit 5) unless `drain_status(G_N)` reads drained, which needs the drain
+  mark, and `deployments_retained` (exit 3) while the server holds any
+  deployment serving a lane `…_g<G_N>`, in any namespace. A registry that
+  cannot be read fails closed. So the order is drain, retire, finalize,
+  end-drain.
+- **The hold lives on the fleet-format row.** `lash_fleet_format` gains
+  `finalize_hold_reason` and `finalize_held_at_ms`. Finalize reads the row
+  `FOR UPDATE` before it moves `F`, so it reads the hold in the same
+  transaction. The automatic finalize refuses `held` (exit 3), and
+  `--override-hold` finalizes by hand. Setting or clearing the hold is fenced
+  like any writer.
+- **Finalize moves `F` to the finalizing build's `F_self`.** It admits the
+  recorded `F` against that build's writable range first, so a build a newer
+  release fenced cannot finalize. A rerun answers `already_finalized`.
+- **Backfills run at finalize, in batches.** `lash_migrations` gains
+  `backfill_cursor` and `backfill_rows`. A backfill starts in one migration
+  transaction under the exclusive schema lock, taken before the fence as in
+  every migrate step, which runs its `NOT VALID` constraint and records the
+  row `running`. Each batch is one guarded transaction that rewrites the rows
+  after the cursor that are still in the old shape and moves the cursor in
+  the same commit. A backfill is refused `backfill_before_finalize` until `F`
+  reaches the epoch that releases it.
+- **Contract waits for the ledger.** A contract step names its epoch and
+  its backfills. It is refused `contract_before_finalize` or
+  `contract_before_backfills` until both hold, and it raises the component's
+  `min_reader` in its own commit.
+- **SQLite finalizes through the store set.** `SqliteStoreSet::finalize`
+  applies the same drain and retirement checks and moves `F` in all three
+  databases under `BEGIN EXCLUSIVE`, completing a partial set forward. It
+  has no hold, because no fleet-wide automatic finalize reaches a SQLite
+  store.

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 53,
-  "cargo_target_count": 201,
+  "cargo_target_count": 202,
   "feature_lane_units": [
     {
       "features": [],
@@ -19198,6 +19198,20 @@
       "features": [
         "synthetic-next"
       ],
+      "kind": "test",
+      "label": "//crates/lashctl:finalize__test__fv_221bee39",
+      "package": "lashctl"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lashctl:finalize__test__fv_3b98ab47",
+      "package": "lashctl"
+    },
+    {
+      "features": [
+        "synthetic-next"
+      ],
       "kind": "bin",
       "label": "//crates/lashctl:lashctl__fv_221bee39",
       "package": "lashctl"
@@ -19795,7 +19809,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 266,
+  "generated_label_count": 267,
   "packages": [
     {
       "declared_features": [
@@ -22720,6 +22734,12 @@
           "cargo": "operator_json_contract",
           "kind": "test",
           "label": "//crates/lashctl:operator_json_contract__test",
+          "tags": []
+        },
+        {
+          "cargo": "finalize",
+          "kind": "test",
+          "label": "//crates/lashctl:finalize__test",
           "tags": []
         }
       ],

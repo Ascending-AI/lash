@@ -11,6 +11,10 @@ use std::time::Duration;
 
 use lash_core_execution::compat::{CompatRefusal, VersionRange};
 use lash_core_execution::engine::BuildGeneration;
+use lash_core_execution::store::fleet_finalize::{
+    DeploymentRegistry, DeploymentRegistryError, FinalizeError, FinalizeRefusal, FleetEpochFlip,
+    RetainedDeployment,
+};
 use lash_core_execution::{
     FLEET_FORMAT_VERSION, FleetFormat, FleetFormatStore, SessionId, SessionMeta, SessionRelation,
     StoreError, StoreSet, TriggerStore as _,
@@ -134,7 +138,12 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
     }
 
     let next = FLEET_FORMAT_VERSION + 1;
-    crate::compat::finalize(&location, Duration::from_secs(5), next).expect("finalize");
+    crate::compat::finalize(
+        &location,
+        Duration::from_secs(5),
+        VersionRange::new(FLEET_FORMAT_VERSION, next).expect("writable range"),
+    )
+    .expect("finalize");
 
     let core_error = core
         .save_session_meta(session_meta("after-finalize"))
@@ -379,7 +388,13 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
     let next = FLEET_FORMAT_VERSION + 1;
     let finalize = tokio::task::spawn_blocking({
         let location = location.clone();
-        move || crate::compat::finalize(&location, Duration::from_secs(10), next)
+        move || {
+            crate::compat::finalize(
+                &location,
+                Duration::from_secs(10),
+                VersionRange::new(FLEET_FORMAT_VERSION, next).expect("writable range"),
+            )
+        }
     });
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(
@@ -525,4 +540,126 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
     let stored: serde_json::Value = serde_json::from_str(&stored).expect("decode receipt");
     assert_ne!(stored["schema_version"], serde_json::json!(7));
     assert_eq!(store.fleet_format().version(), 2);
+}
+
+/// The engine's deployments, as the SQLite finalize law stands them up.
+#[derive(Default)]
+struct Deployments(std::sync::Mutex<Vec<RetainedDeployment>>);
+
+#[async_trait::async_trait]
+impl DeploymentRegistry for Deployments {
+    async fn deployments_serving(
+        &self,
+        _generation: &BuildGeneration,
+    ) -> Result<Vec<RetainedDeployment>, DeploymentRegistryError> {
+        Ok(self.0.lock().expect("deployments").clone())
+    }
+}
+
+/// The store set's finalize (FIG-3800 B): refused typed while the retired
+/// generation is undrained or still has a deployment, with `F` unchanged in
+/// every database and this build's writers still admitted. Once it moves
+/// `F` past this build's range, a writer of this build in each of the three
+/// databases — through the store's ports and through connections opened
+/// before the finalize — is refused `WriterFenced` and writes nothing. A
+/// rerun finds the set finalized.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stale_writer_is_fenced_after_finalize() {
+    let (_root, set) = file_set().await;
+    let location = set.location().clone();
+    let next = FLEET_FORMAT_VERSION + 1;
+    let successor = VersionRange::new(FLEET_FORMAT_VERSION, next).expect("writable range");
+    let retired = BuildGeneration::for_test("sqlite-finalize-old");
+    let deployments = Deployments::default();
+    let fleet = |database| {
+        raw(&location, database)
+            .query_row("SELECT fleet_format FROM lash_compat", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("read F")
+    };
+
+    match set.finalize_as(&retired, &deployments, 5, successor).await {
+        Err(FinalizeError::Refused(FinalizeRefusal::GenerationNotDrained { .. })) => {}
+        other => panic!("an undrained generation must refuse finalize: {other:?}"),
+    }
+    set.generation_drain()
+        .mark_draining(&retired, 1)
+        .await
+        .expect("mark the retired generation draining");
+    deployments
+        .0
+        .lock()
+        .expect("deployments")
+        .push(RetainedDeployment {
+            id: "dp_old".to_owned(),
+            uri: None,
+        });
+    match set.finalize_as(&retired, &deployments, 5, successor).await {
+        Err(FinalizeError::Refused(FinalizeRefusal::DeploymentsRetained { .. })) => {}
+        other => panic!("a retained deployment must refuse finalize: {other:?}"),
+    }
+    for database in SqliteDatabase::ALL {
+        assert_eq!(
+            fleet(database),
+            i64::from(FLEET_FORMAT_VERSION),
+            "{database:?}"
+        );
+    }
+    let core = set.process_env_store();
+    core.save_session_meta(session_meta("before-finalize"))
+        .await
+        .expect("this build writes while finalize is refused");
+    let mut writers = Vec::new();
+    for database in SqliteDatabase::ALL {
+        writers.push((database, writer(&location, database).await));
+    }
+
+    deployments.0.lock().expect("deployments").clear();
+    let flip = set
+        .finalize_as(&retired, &deployments, 5, successor)
+        .await
+        .expect("finalize");
+    assert_eq!(
+        flip,
+        FleetEpochFlip::Finalized {
+            from: FLEET_FORMAT_VERSION,
+            to: next
+        }
+    );
+    for database in SqliteDatabase::ALL {
+        assert_eq!(fleet(database), i64::from(next), "{database:?}");
+    }
+
+    let sessions = count(&location, SqliteDatabase::DurableCore, "session_meta");
+    let error = core
+        .save_session_meta(session_meta("after-finalize"))
+        .await
+        .expect_err("the durable-core writer is fenced");
+    assert!(is_fenced(&error, next), "{error}");
+    assert_eq!(
+        count(&location, SqliteDatabase::DurableCore, "session_meta"),
+        sessions
+    );
+    let error = set
+        .generation_drain()
+        .mark_draining(&BuildGeneration::for_test("sqlite-stale-mark"), 2)
+        .await
+        .expect_err("the process-registry writer is fenced");
+    assert!(is_fenced(&error, next), "{error}");
+    for (database, (connection, table, sql)) in writers {
+        let before = count(&location, database, table);
+        let error = insert(&connection, sql)
+            .await
+            .expect_err("a writer opened before finalize is fenced");
+        assert!(is_fenced(&error, next), "{database:?}: {error}");
+        assert_eq!(count(&location, database, table), before, "{database:?}");
+    }
+
+    assert_eq!(
+        set.finalize_as(&retired, &deployments, 5, successor)
+            .await
+            .expect("finalize reruns"),
+        FleetEpochFlip::AlreadyFinalized { fleet: next }
+    );
 }

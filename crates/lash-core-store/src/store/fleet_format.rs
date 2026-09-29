@@ -6,7 +6,7 @@
 //! writer consults the value the store reports rather than a version it baked
 //! in. Until the first format upgrade the answer is always
 //! [`FLEET_FORMAT_VERSION`] — the row's presence is what matters now, because
-//! `lash admin finalize-upgrade` (FIG-3800) is the only operation that ever
+//! `lashctl finalize` (FIG-3800) is the only operation that ever
 //! moves it, and a fleet without the row has nowhere for that flip to land.
 //!
 //! The read side deliberately mirrors [`super::StoreReleaseState`]: a store that has
@@ -199,7 +199,7 @@ impl FleetFormat {
     /// While `F` records a generation [`WRITER_PINS`] names for the surface,
     /// the fleet has agreed the surface writes the pinned version, and a
     /// build's newer format knowledge stays unwritten until
-    /// `finalize-upgrade` moves the row (FIG-3800). A surface the fleet's
+    /// `lashctl finalize` moves the row (FIG-3800). A surface the fleet's
     /// generation does not pin writes its build-newest version — the identity
     /// the 1.0 fleet answers for every registered surface.
     pub fn writer_version(self, surface: SurfaceFormat) -> u32 {
@@ -441,7 +441,7 @@ impl SurfaceFormat {
 /// The table is empty while the fleet writes its only generation: an
 /// unpinned surface writes build-newest, and the first format upgrade adds
 /// the rows that hold a superseded surface's writers at the old version until
-/// `finalize-upgrade` moves `F`.
+/// `lashctl finalize` moves `F`.
 #[cfg(not(feature = "synthetic-next"))]
 const WRITER_PINS: &[WriterPin] = &[];
 

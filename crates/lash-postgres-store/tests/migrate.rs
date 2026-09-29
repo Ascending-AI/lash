@@ -1,4 +1,4 @@
-//! `lash migrate` integration proofs (FIG-3816).
+//! `lashctl migrate` integration proofs (FIG-3816, FIG-3817).
 //!
 //! The runner is the operational step that owns what worker open deliberately
 //! refuses to: provisioning a fresh database and carrying a stamped catalog
@@ -14,7 +14,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_postgres_store::{MigrationPhase, PostgresStorage};
+use lash_postgres_store::{MigrateError, MigrationPhase, MigrationRefusal, PostgresStorage};
 use sqlx::{Connection, PgConnection, Row};
 
 #[allow(dead_code)]
@@ -537,7 +537,7 @@ async fn a_component_without_an_expand_step_is_refused() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn later_phases_refuse_before_the_operations_arc() {
+async fn later_phases_refuse_an_uninstalled_catalog_and_wait_for_finalize() {
     let Some(database_url) = support::database_url() else {
         eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
         return;
@@ -546,26 +546,60 @@ async fn later_phases_refuse_before_the_operations_arc() {
     let url = scratch_url(&database_url, &schema);
 
     for phase in [MigrationPhase::Backfill, MigrationPhase::Contract] {
-        let migrate_error = PostgresStorage::migrate(&url, phase)
-            .await
-            .err()
-            .unwrap_or_else(|| panic!("migrate --phase {} must refuse", phase.name()));
-        let plan_error = PostgresStorage::plan_migrations(&url, phase)
-            .await
-            .err()
-            .unwrap_or_else(|| panic!("plan_migrations --phase {} must refuse", phase.name()));
-        for (label, error) in [("migrate", migrate_error), ("plan_migrations", plan_error)] {
-            assert!(
-                error
-                    .to_string()
-                    .contains("not supported before the operations arc (FIG-3817)"),
-                "{label} --phase {} must name the operations-arc refusal: {error}",
-                phase.name()
-            );
+        for (label, outcome) in [
+            ("migrate", PostgresStorage::migrate(&url, phase).await),
+            (
+                "plan_migrations",
+                PostgresStorage::plan_migrations(&url, phase).await,
+            ),
+        ] {
+            match outcome {
+                Err(MigrateError::Refused(MigrationRefusal::Unprovisioned { phase: named })) => {
+                    assert_eq!(named, phase.name(), "{label}");
+                }
+                other => panic!(
+                    "{label} --phase {} on an uninstalled catalog must refuse: {other:?}",
+                    phase.name()
+                ),
+            }
         }
     }
     // And the refusal ran no DDL.
     assert_eq!(scratch_lash_table_count(&database_url, &schema).await, 0);
+
+    PostgresStorage::migrate(&url, MigrationPhase::Expand)
+        .await
+        .expect("expand provisions the catalog");
+    let ledger_before = ledger_rows(&url).await;
+    for phase in [MigrationPhase::Backfill, MigrationPhase::Contract] {
+        let outcome = PostgresStorage::migrate(&url, phase).await;
+        if cfg!(feature = "synthetic-next") {
+            // The synthetic catalog carries a backfill and a contract step,
+            // and `F` still records the release before it: both wait.
+            assert!(
+                matches!(
+                    outcome,
+                    Err(MigrateError::Refused(
+                        MigrationRefusal::BackfillBeforeFinalize { .. }
+                            | MigrationRefusal::ContractBeforeFinalize { .. }
+                    ))
+                ),
+                "--phase {} before finalize must refuse: {outcome:?}",
+                phase.name()
+            );
+        } else {
+            // The 1.0 release carries neither: both run and do nothing.
+            let report = outcome.unwrap_or_else(|error| {
+                panic!("--phase {} on the 1.0 catalog: {error}", phase.name())
+            });
+            assert!(report.executed.is_empty(), "{report:?}");
+        }
+    }
+    assert_eq!(
+        ledger_rows(&url).await,
+        ledger_before,
+        "a later phase that waits records no step"
+    );
     drop_scratch_schema(&database_url, &schema).await;
 }
 

@@ -1,26 +1,40 @@
-//! `lash migrate`: the operational step that provisions and advances the
-//! PostgreSQL component schema (FIG-3816).
+//! `lashctl migrate`: the operational steps that provision, advance and
+//! contract the PostgreSQL component schema (FIG-3816, FIG-3817; ADR 0106
+//! §5).
 //!
 //! Worker opens verify and never run DDL, so something else must own "make the
-//! catalog this build expects exist". This module is that something: it takes
-//! the same advisory lock a verifying open takes — exclusively — applies the
-//! pending expand-phase steps the build declares, and records each applied step
-//! in the `lash_migrations` ledger so a rerun is a no-op and an interrupted run
-//! resumes from the rows that committed.
+//! catalog this build expects exist". This module is that something. It runs
+//! the three phases of the expand/contract discipline and records every step
+//! in the `lash_migrations` ledger, so a rerun is a no-op and an interrupted
+//! run resumes from the rows that committed:
 //!
-//! The phase vocabulary is the operations arc's: `expand` is the only phase
-//! this pre-1.0 build executes; `backfill` and `contract` are refused outright
-//! until FIG-3817 defines them. An expand run on an empty database provisions
-//! the whole schema (the bootstrap step is simply this build's `schema.sql`,
-//! which is idempotent by construction); on a stamped database it walks the
-//! migration catalog from the found stamp forward.
+//! - **Expand** runs before the roll, under the schema advisory lock held
+//!   exclusively. An expand run on an empty database provisions the whole
+//!   schema (the bootstrap step is this build's `schema.sql`, idempotent by
+//!   construction); on a stamped database it walks the catalog from the found
+//!   stamp forward. Each step is one transaction: statements, the stamp, the
+//!   ledger row and the release stamp commit or roll back together.
+//! - **Backfill** rewrites rows the new release reads, and runs only once `F`
+//!   has reached the epoch whose finalize releases it: nothing rewrites a row
+//!   N reads while rollback to N is still promised. `lashctl finalize` runs
+//!   every pending backfill as its last step. A backfill is a sequence of
+//!   batches, each one guarded transaction that rewrites a bounded run of
+//!   rows after the ledger row's cursor and moves the cursor in the same
+//!   commit. So a crash loses at most the batch in flight, which rolls back
+//!   whole, and a resumed run starts from the last committed cursor. Every
+//!   batch statement rewrites only rows still in the old shape, so a batch
+//!   that runs twice changes nothing the second time.
+//! - **Contract** drops or tightens what only the old release needed, raises
+//!   the component's reader floor, and runs only when `F` has reached its
+//!   release's epoch **and** the ledger shows every backfill it names
+//!   `applied` (ADR 0106 §5). A contract step is refused typed until then.
 //!
-//! Every step is one transaction: statements, the version-stamp move, the
-//! ledger row, and the release stamp commit or roll back together, so there is
-//! no half-applied state to inspect — a crash means the step simply runs again.
-//! The ledger row is keyed `(phase, migration)`, and planning skips ids already
-//! recorded, which is what makes reruns and resumes no-ops.
+//! A constraint the new release tightens follows the same order: the
+//! backfill's first batch adds it `NOT VALID`, so new rows obey it at once,
+//! the batches bring the old rows into line, and the contract step validates
+//! it.
 
+use crate::guarded_tx::WriterFence;
 use crate::schema_shape::{Installation, read_search_path, resolve_installation};
 use crate::*;
 
@@ -40,7 +54,12 @@ const MIGRATIONS_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS lash_migrations (
     to_version INTEGER NOT NULL,
     started_at_ms BIGINT NOT NULL,
     finished_at_ms BIGINT,
-    PRIMARY KEY (phase, migration)
+    backfill_cursor TEXT,
+    backfill_rows BIGINT,
+    PRIMARY KEY (phase, migration),
+    CONSTRAINT ck_lash_migrations_backfill_progress
+        CHECK ((phase = 'backfill' AND backfill_rows IS NOT NULL AND backfill_rows >= 0)
+            OR (phase <> 'backfill' AND backfill_cursor IS NULL AND backfill_rows IS NULL))
 );";
 
 /// The DDL that creates `lash_fleet_format`, byte-for-byte the block
@@ -49,7 +68,11 @@ const MIGRATIONS_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS lash_migrations (
 const FLEET_FORMAT_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS lash_fleet_format (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
     format_version INTEGER NOT NULL,
-    CONSTRAINT ck_fleet_format_singleton CHECK (singleton)
+    finalize_hold_reason TEXT,
+    finalize_held_at_ms BIGINT,
+    CONSTRAINT ck_fleet_format_singleton CHECK (singleton),
+    CONSTRAINT ck_fleet_format_finalize_hold
+        CHECK ((finalize_hold_reason IS NULL) = (finalize_held_at_ms IS NULL))
 );";
 
 /// Phase A's single post-cut expand. None of these objects constrains writes
@@ -64,6 +87,43 @@ CREATE TABLE IF NOT EXISTS lash_synthetic_next (
 );
 CREATE INDEX IF NOT EXISTS idx_lash_synthetic_next_note
     ON lash_synthetic_next(note);";
+
+/// Phase A's synthetic backfill constraint: the note the synthetic expand
+/// added may be absent, never empty. The backfill's first batch adds it `NOT
+/// VALID`, so every row written from then on obeys it, and the synthetic
+/// contract validates it once the backfill has filled every old row.
+#[cfg(feature = "synthetic-next")]
+const SYNTHETIC_NEXT_NOTE_CONSTRAINT_DDL: &str = "ALTER TABLE lash_sessions
+    ADD CONSTRAINT ck_lash_sessions_synthetic_next_note
+    CHECK (synthetic_next_note IS NULL OR synthetic_next_note <> '') NOT VALID";
+
+/// One batch of Phase A's synthetic backfill: the sessions after the cursor,
+/// in key order, each given the note the synthetic release derives from its
+/// id. A session that already carries a note keeps it, so a batch that runs
+/// twice rewrites nothing the second time.
+#[cfg(feature = "synthetic-next")]
+const SYNTHETIC_NEXT_NOTE_BATCH: &str = "WITH batch AS (
+    SELECT session_id FROM lash_sessions
+    WHERE $1::TEXT IS NULL OR session_id > $1::TEXT
+    ORDER BY session_id
+    LIMIT $2
+    FOR UPDATE
+), rewritten AS (
+    UPDATE lash_sessions AS sessions
+    SET synthetic_next_note = 'backfilled:' || sessions.session_id
+    FROM batch
+    WHERE sessions.session_id = batch.session_id
+      AND sessions.synthetic_next_note IS NULL
+    RETURNING sessions.session_id
+)
+SELECT (SELECT max(session_id) FROM batch),
+       (SELECT count(*) FROM batch),
+       (SELECT count(*) FROM rewritten)";
+
+/// Phase A's synthetic contract: validate the note's constraint.
+#[cfg(feature = "synthetic-next")]
+const SYNTHETIC_NEXT_CONTRACT_DDL: &str =
+    "ALTER TABLE lash_sessions VALIDATE CONSTRAINT ck_lash_sessions_synthetic_next_note";
 
 /// The 139→140 expand step (FIG-3600 S7): the logical-root family. The
 /// session head gains its closing intent, a park its engine reference and
@@ -204,20 +264,81 @@ static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
     },
 ];
 
-/// The phase a migrate run is asked to execute.
-///
-/// Only [`MigrationPhase::Expand`] does anything: backfill and contract exist
-/// as named phases so operators can spell the full plan today, and both refuse
-/// until the operations arc lands (FIG-3817).
+/// One backfill this build's runner can run after finalize.
+pub(crate) struct BackfillMigration {
+    /// The stable ledger id; recorded, never renamed.
+    id: &'static str,
+    /// The fleet epoch whose finalize releases it. Until `F` reaches it the
+    /// backfill is refused: its rewrites are the new release's shape, which
+    /// the old release must never meet while rollback to it is promised.
+    after_fleet: u32,
+    /// DDL the first batch's transaction runs before any row is rewritten,
+    /// under the schema advisory lock: a constraint the release tightens,
+    /// added `NOT VALID` (ADR 0106 §5). Empty when there is none.
+    prepare: &'static str,
+    /// One batch. `$1` is the ledger's cursor (`NULL` before the first
+    /// batch) and `$2` the batch size. It rewrites only rows still in the old
+    /// shape, and answers the last key it scanned (`NULL` when it scanned
+    /// none), the rows it scanned and the rows it rewrote.
+    batch: &'static str,
+}
+
+/// The backfills this build carries, in the order a run takes them. Newer
+/// releases append; steps are never removed or edited — the ledger names
+/// them permanently. The 1.0 release carries none.
+pub(crate) static BACKFILL_MIGRATIONS: &[BackfillMigration] = &[
+    #[cfg(feature = "synthetic-next")]
+    BackfillMigration {
+        id: "synthetic-next-session-note",
+        after_fleet: 2,
+        prepare: SYNTHETIC_NEXT_NOTE_CONSTRAINT_DDL,
+        batch: SYNTHETIC_NEXT_NOTE_BATCH,
+    },
+];
+
+/// One contract step this build carries.
+struct ContractMigration {
+    /// The stable ledger id; recorded, never renamed.
+    id: &'static str,
+    /// The fleet epoch whose finalize retired every build that still reads
+    /// what this step drops or tightens.
+    after_fleet: u32,
+    /// The backfills the ledger must show `applied` first.
+    after_backfills: &'static [&'static str],
+    /// Its statements, run in the step's single transaction.
+    statements: &'static str,
+    /// The reader floor the step raises the component stamp to: the oldest
+    /// component version that can still read the contracted catalog.
+    min_reader: i32,
+}
+
+/// The contract steps this build carries. The 1.0 release carries none.
+static CONTRACT_MIGRATIONS: &[ContractMigration] = &[
+    #[cfg(feature = "synthetic-next")]
+    ContractMigration {
+        id: "synthetic-next-contract",
+        after_fleet: 2,
+        after_backfills: &["synthetic-next-session-note"],
+        statements: SYNTHETIC_NEXT_CONTRACT_DDL,
+        min_reader: 2,
+    },
+];
+
+/// The rows one backfill batch covers when the operator binary runs it.
+pub(crate) const BACKFILL_BATCH_ROWS: i64 = 500;
+
+/// The phase a migrate run is asked to execute (ADR 0106 §5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MigrationPhase {
     /// Create and alter the objects the new generation reads; safe to run
     /// while old-build workers still serve the catalog.
     Expand,
-    /// Populate columns and rows the expand created; runs after the new
-    /// workers are rolled out.
+    /// Rewrite rows into the new release's shape, in resumable batches; runs
+    /// only after finalize, and `lashctl finalize` runs it as its last step.
     Backfill,
-    /// Drop what only the old generation read; runs after backfill completes.
+    /// Drop or tighten what only the old release needed, and raise the
+    /// reader floor; runs only after finalize and once every backfill it
+    /// names is complete.
     Contract,
 }
 
@@ -231,7 +352,7 @@ impl MigrationPhase {
         }
     }
 
-    /// The phase names `lash migrate --phase` accepts.
+    /// The phase names `lashctl migrate --phase` accepts.
     pub fn parse(text: &str) -> Option<Self> {
         match text {
             "expand" => Some(Self::Expand),
@@ -240,18 +361,109 @@ impl MigrationPhase {
             _ => None,
         }
     }
+}
 
-    /// Phases this build refuses to run, expand being the only one defined
-    /// before the operations arc (FIG-3817).
-    fn unsupported(self) -> Result<(), StoreError> {
+/// A backfill or contract step that must not run yet. Nothing changed.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "refusal", rename_all = "snake_case")]
+pub enum MigrationRefusal {
+    /// Backfill and contract act on an installed catalog only.
+    Unprovisioned { phase: String },
+    /// `F` has not reached the epoch whose finalize releases the backfill.
+    BackfillBeforeFinalize {
+        migration: String,
+        recorded: u32,
+        requires: u32,
+    },
+    /// `F` has not reached the epoch whose finalize retired the builds the
+    /// contract step would exclude.
+    ContractBeforeFinalize {
+        migration: String,
+        recorded: u32,
+        requires: u32,
+    },
+    /// The ledger does not show every backfill the contract step names
+    /// `applied`.
+    ContractBeforeBackfills {
+        migration: String,
+        pending: Vec<String>,
+    },
+}
+
+impl std::fmt::Display for MigrationRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Expand => Ok(()),
-            Self::Backfill | Self::Contract => Err(StoreError::Backend(format!(
-                "`lash migrate --phase {}` is not supported before the operations arc \
-                 (FIG-3817): this build executes expand-phase migrations only",
-                self.name()
-            ))),
+            Self::Unprovisioned { phase } => write!(
+                formatter,
+                "`lashctl migrate --phase {phase}` needs an installed catalog: run \
+                 `lashctl migrate --phase expand` first"
+            ),
+            Self::BackfillBeforeFinalize {
+                migration,
+                recorded,
+                requires,
+            } => write!(
+                formatter,
+                "backfill {migration} runs only after finalize: the store records F={recorded} \
+                 and the backfill needs F={requires}; run `lashctl finalize` first"
+            ),
+            Self::ContractBeforeFinalize {
+                migration,
+                recorded,
+                requires,
+            } => write!(
+                formatter,
+                "contract {migration} runs only after finalize: the store records F={recorded} \
+                 and the step needs F={requires}; run `lashctl finalize` first"
+            ),
+            Self::ContractBeforeBackfills { migration, pending } => write!(
+                formatter,
+                "contract {migration} waits for its backfills: {} not yet applied; run \
+                 `lashctl migrate --phase backfill` to finish them",
+                pending.join(", ")
+            ),
         }
+    }
+}
+
+impl std::error::Error for MigrationRefusal {}
+
+/// Why a migrate run did not complete.
+#[derive(Debug)]
+pub enum MigrateError {
+    /// A step's precondition does not hold; the step changed nothing.
+    Refused(MigrationRefusal),
+    /// The store refused or failed.
+    Store(StoreError),
+}
+
+impl std::fmt::Display for MigrateError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Refused(refusal) => refusal.fmt(formatter),
+            Self::Store(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for MigrateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Refused(refusal) => Some(refusal),
+            Self::Store(error) => Some(error),
+        }
+    }
+}
+
+impl From<StoreError> for MigrateError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
+impl From<MigrationRefusal> for MigrateError {
+    fn from(refusal: MigrationRefusal) -> Self {
+        Self::Refused(refusal)
     }
 }
 
@@ -264,7 +476,9 @@ pub struct MigrationStep {
     pub migration: String,
     /// The release that applied the step; empty while the step is only planned.
     pub release: String,
-    /// `running` or `applied` — a committed expand row is always `applied`.
+    /// `running` or `applied`. Expand and contract rows are always `applied`;
+    /// a backfill is `running` from its first batch until the batch that
+    /// finds nothing left.
     pub state: String,
     /// The stamped version it started from; `None` only for a bootstrap.
     pub from_version: Option<i32>,
@@ -276,6 +490,10 @@ pub struct MigrationStep {
     /// Server-clock instant the step finished; `None` while it is planned or
     /// still running.
     pub finished_at_ms: Option<i64>,
+    /// A backfill's cursor: the key its last committed batch ended at.
+    pub backfill_cursor: Option<String>,
+    /// The rows a backfill has rewritten so far; `None` for other phases.
+    pub backfill_rows: Option<i64>,
 }
 
 /// What a plan or run found on the database and did about it.
@@ -307,6 +525,17 @@ struct MigrationState {
     applied: Vec<MigrationStep>,
     /// The writing release, when the release stamp could still be read.
     writing_release: Option<String>,
+    /// The fleet epoch the store records, when it records one.
+    fleet: Option<u32>,
+}
+
+impl MigrationState {
+    /// Whether the ledger shows `migration` of `phase` applied.
+    fn is_applied(&self, phase: MigrationPhase, migration: &str) -> bool {
+        self.applied.iter().any(|step| {
+            step.phase == phase.name() && step.migration == migration && step.state == "applied"
+        })
+    }
 }
 
 /// One step a plan produced.
@@ -317,8 +546,53 @@ enum PlannedStep<'a> {
     Migration(&'a ExpandMigration),
 }
 
-/// Reads the stamp, the ledger, and the release stamp inside one transaction
-/// snapshot, so a plan describes one instant of the database.
+/// The ledger's columns, in the order every read selects them.
+const LEDGER_COLUMNS: &str = "phase, migration, release, state, from_version, to_version,
+     started_at_ms, finished_at_ms, backfill_cursor, backfill_rows";
+
+type LedgerRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<i32>,
+    i32,
+    i64,
+    Option<i64>,
+    Option<String>,
+    Option<i64>,
+);
+
+fn ledger_step(row: LedgerRow) -> MigrationStep {
+    let (
+        phase,
+        migration,
+        release,
+        state,
+        from_version,
+        to_version,
+        started_at_ms,
+        finished_at_ms,
+        backfill_cursor,
+        backfill_rows,
+    ) = row;
+    MigrationStep {
+        phase,
+        migration,
+        release,
+        state,
+        from_version,
+        to_version,
+        started_at_ms: Some(started_at_ms),
+        finished_at_ms,
+        backfill_cursor,
+        backfill_rows,
+    }
+}
+
+/// Reads the stamp, the ledger, the fleet epoch and the release stamp inside
+/// one transaction snapshot, so a plan describes one instant of the
+/// database.
 async fn read_state(
     tx: &mut sqlx::Transaction<'_, Postgres>,
 ) -> Result<MigrationState, StoreError> {
@@ -329,6 +603,7 @@ async fn read_state(
             ddl_version: None,
             applied: Vec::new(),
             writing_release: None,
+            fleet: None,
         });
     };
     // Probed by OID against the anchored namespace, like every other object
@@ -345,21 +620,8 @@ async fn read_state(
     .await
     .map_err(store_sqlx_error)?;
     let applied = if ledger_present {
-        sqlx::query_as::<
-            _,
-            (
-                String,
-                String,
-                String,
-                String,
-                Option<i32>,
-                i32,
-                i64,
-                Option<i64>,
-            ),
-        >(&format!(
-            "SELECT phase, migration, release, state, from_version, to_version,
-                        started_at_ms, finished_at_ms
+        sqlx::query_as::<_, LedgerRow>(&format!(
+            "SELECT {LEDGER_COLUMNS}
                  FROM {}.lash_migrations ORDER BY started_at_ms, migration",
             installation.quoted_namespace()
         ))
@@ -367,27 +629,7 @@ async fn read_state(
         .await
         .map_err(store_sqlx_error)?
         .into_iter()
-        .map(
-            |(
-                phase,
-                migration,
-                release,
-                state,
-                from_version,
-                to_version,
-                started_at_ms,
-                finished_at_ms,
-            )| MigrationStep {
-                phase,
-                migration,
-                release,
-                state,
-                from_version,
-                to_version,
-                started_at_ms: Some(started_at_ms),
-                finished_at_ms,
-            },
-        )
+        .map(ledger_step)
         .collect()
     } else {
         Vec::new()
@@ -405,6 +647,13 @@ async fn read_state(
     } else {
         applied.iter().map(|step| step.to_version).max()
     };
+    let fleet = match crate::fleet_format::read_state_in_tx(tx)
+        .await
+        .map_err(store_sqlx_error)?
+    {
+        lash_core_execution::FleetFormatState::Recorded(fleet) => Some(fleet.version()),
+        _ => None,
+    };
     // Last: on a catalog that predates the release stamp the read fails,
     // which aborts the snapshot for any statement after it.
     let writing_release = crate::release_stamp::read_release_in_tx(tx).await;
@@ -413,6 +662,7 @@ async fn read_state(
         ddl_version,
         applied,
         writing_release,
+        fleet,
     })
 }
 
@@ -562,10 +812,11 @@ async fn record_step(
 /// all commit or roll back together.
 async fn apply_step(
     connection: &mut sqlx::PgConnection,
+    fence: &WriterFence,
     installation: Option<&Installation>,
     step: &PlannedStep<'_>,
 ) -> Result<MigrationStep, StoreError> {
-    let mut tx = crate::guarded_tx::begin_migration(connection).await?;
+    let mut tx = crate::guarded_tx::begin_migration(connection, fence).await?;
     let started_at_ms = server_clock_ms(&mut tx).await?;
     let (migration, from_version, to_version, ledger) = match step {
         PlannedStep::Bootstrap => {
@@ -639,31 +890,36 @@ async fn apply_step(
         to_version,
         started_at_ms: Some(started_at_ms),
         finished_at_ms,
+        backfill_cursor: None,
+        backfill_rows: None,
     })
 }
 
+/// Phase A's synthetic expand: the one post-cut expand step, moving the
+/// component stamp to `next`, the version the synthetic build writes.
 #[cfg(feature = "synthetic-next")]
 async fn apply_synthetic_expand(
     connection: &mut sqlx::PgConnection,
+    fence: &WriterFence,
+    next: i32,
 ) -> Result<Option<MigrationStep>, StoreError> {
-    let mut tx = crate::guarded_tx::begin_migration(connection).await?;
+    let mut tx = crate::guarded_tx::begin_migration(connection, fence).await?;
     let version: i32 =
         sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
             .bind(SCHEMA_COMPONENT)
             .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-    let descriptor =
-        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
-            .ok_or_else(|| {
-                StoreError::Backend("the build has no descriptor for the PostgreSQL store".into())
-            })?;
-    let next = i32::try_from(descriptor.writes.max())
-        .map_err(|error| StoreError::Backend(error.to_string()))?;
     if version == next {
         return Ok(None);
     }
     if version + 1 != next {
+        let descriptor = lash_core_execution::compat::descriptor(
+            lash_core_execution::compat::ComponentId::POSTGRES,
+        )
+        .ok_or_else(|| {
+            StoreError::Backend("the build has no descriptor for the PostgreSQL store".into())
+        })?;
         return Err(StoreError::Incompatible {
             refusal: lash_core_execution::compat::CompatRefusal::TooOld {
                 component: descriptor.component.as_str().to_owned(),
@@ -708,7 +964,37 @@ async fn apply_synthetic_expand(
         to_version: SCHEMA_VERSION,
         started_at_ms: Some(started_at_ms),
         finished_at_ms,
+        backfill_cursor: None,
+        backfill_rows: None,
     }))
+}
+
+/// The component version the synthetic build's expand writes: its
+/// descriptor's.
+#[cfg(feature = "synthetic-next")]
+fn synthetic_next_component_version() -> Result<i32, StoreError> {
+    let descriptor =
+        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+            .ok_or_else(|| {
+                StoreError::Backend("the build has no descriptor for the PostgreSQL store".into())
+            })?;
+    i32::try_from(descriptor.writes.max()).map_err(|error| StoreError::Backend(error.to_string()))
+}
+
+/// Run Phase A's synthetic expand to component `next` under the exclusive
+/// schema lock, as a build whose fence is `fence`: the laws' way to stand in
+/// N+1's `lashctl migrate` on a store both builds then open with explicit
+/// writable ranges.
+#[cfg(all(test, feature = "synthetic-next"))]
+pub(crate) async fn expand_synthetic_next_for_testing(
+    pool: &PgPool,
+    fence: &WriterFence,
+    next: i32,
+) -> Result<(), StoreError> {
+    let mut connection = lock_connection(pool, false).await?;
+    let result = apply_synthetic_expand(&mut connection, fence, next).await;
+    let _ = sqlx::Connection::close(connection).await;
+    result.map(|_| ())
 }
 
 /// Seeds `F` at this build's [`FleetFormat::seed`] when the store records
@@ -722,11 +1008,14 @@ async fn apply_synthetic_expand(
 /// the seed migrated. A recorded epoch is left alone.
 ///
 /// [`FleetFormat::seed`]: lash_core_execution::FleetFormat::seed
-async fn seed_fleet_format(connection: &mut sqlx::PgConnection) -> Result<(), StoreError> {
-    let mut tx = crate::guarded_tx::begin_migration(connection).await?;
+async fn seed_fleet_format(
+    connection: &mut sqlx::PgConnection,
+    fence: &WriterFence,
+) -> Result<(), StoreError> {
+    let mut tx = crate::guarded_tx::begin_migration(connection, fence).await?;
     crate::fleet_format::seed(
         &mut tx,
-        lash_core_execution::FleetFormat::seed(lash_core_execution::FleetFormat::writable()),
+        lash_core_execution::FleetFormat::seed(fence.writable()),
     )
     .await?;
     tx.commit().await.map_err(store_sqlx_error)
@@ -802,6 +1091,8 @@ fn planned_step(step: &PlannedStep<'_>) -> MigrationStep {
             to_version: SCHEMA_VERSION,
             started_at_ms: None,
             finished_at_ms: None,
+            backfill_cursor: None,
+            backfill_rows: None,
         },
         PlannedStep::Migration(migration) => MigrationStep {
             phase: MigrationPhase::Expand.name().to_string(),
@@ -812,24 +1103,129 @@ fn planned_step(step: &PlannedStep<'_>) -> MigrationStep {
             to_version: migration.to_version,
             started_at_ms: None,
             finished_at_ms: None,
+            backfill_cursor: None,
+            backfill_rows: None,
         },
     }
 }
 
-/// Plans what an expand run owes the database without changing it: the shared
-/// advisory lock and the repeatable-read snapshot are exactly what a verifying
-/// open takes, so the answer cannot describe a half-applied state.
+/// A backfill or contract step not yet recorded, as a plan lists it.
+fn planned_later_step(phase: MigrationPhase, migration: &str) -> MigrationStep {
+    MigrationStep {
+        phase: phase.name().to_string(),
+        migration: migration.to_string(),
+        release: String::new(),
+        state: String::new(),
+        from_version: Some(SCHEMA_VERSION),
+        to_version: SCHEMA_VERSION,
+        started_at_ms: None,
+        finished_at_ms: None,
+        backfill_cursor: None,
+        backfill_rows: (phase == MigrationPhase::Backfill).then_some(0),
+    }
+}
+
+/// The backfills a run still owes the store, refused typed when `F` has not
+/// reached the epoch that releases one.
+fn pending_backfills(
+    state: &MigrationState,
+) -> Result<Vec<&'static BackfillMigration>, MigrationRefusal> {
+    let mut pending = Vec::new();
+    for backfill in BACKFILL_MIGRATIONS {
+        if state.is_applied(MigrationPhase::Backfill, backfill.id) {
+            continue;
+        }
+        let recorded = state.fleet.unwrap_or_default();
+        if recorded < backfill.after_fleet {
+            return Err(MigrationRefusal::BackfillBeforeFinalize {
+                migration: backfill.id.to_owned(),
+                recorded,
+                requires: backfill.after_fleet,
+            });
+        }
+        pending.push(backfill);
+    }
+    Ok(pending)
+}
+
+/// The contract steps a run still owes the store, refused typed until `F`
+/// has reached each one's epoch and the ledger shows its backfills applied.
+fn pending_contracts(
+    state: &MigrationState,
+) -> Result<Vec<&'static ContractMigration>, MigrationRefusal> {
+    let mut pending = Vec::new();
+    for contract in CONTRACT_MIGRATIONS {
+        if state.is_applied(MigrationPhase::Contract, contract.id) {
+            continue;
+        }
+        contract_admitted(contract, state.fleet.unwrap_or_default(), |backfill| {
+            state.is_applied(MigrationPhase::Backfill, backfill)
+        })?;
+        pending.push(contract);
+    }
+    Ok(pending)
+}
+
+/// A contract step's gate (ADR 0106 §5): `F` has reached its epoch, and
+/// every backfill it names is applied.
+fn contract_admitted(
+    contract: &ContractMigration,
+    recorded: u32,
+    applied: impl Fn(&str) -> bool,
+) -> Result<(), MigrationRefusal> {
+    if recorded < contract.after_fleet {
+        return Err(MigrationRefusal::ContractBeforeFinalize {
+            migration: contract.id.to_owned(),
+            recorded,
+            requires: contract.after_fleet,
+        });
+    }
+    let pending: Vec<String> = contract
+        .after_backfills
+        .iter()
+        .filter(|backfill| !applied(backfill))
+        .map(|backfill| (*backfill).to_owned())
+        .collect();
+    if !pending.is_empty() {
+        return Err(MigrationRefusal::ContractBeforeBackfills {
+            migration: contract.id.to_owned(),
+            pending,
+        });
+    }
+    Ok(())
+}
+
+/// Plans what a run of `phase` owes the database without changing it: the
+/// shared advisory lock and the repeatable-read snapshot are exactly what a
+/// verifying open takes, so the answer cannot describe a half-applied state.
+/// A backfill or contract step whose gate is closed is refused, typed, as
+/// the run would refuse it.
 pub(crate) async fn plan_on(
     pool: &PgPool,
     phase: MigrationPhase,
-) -> Result<MigrationReport, StoreError> {
-    phase.unsupported()?;
+) -> Result<MigrationReport, MigrateError> {
     let mut connection = lock_connection(pool, true).await?;
     let result = async {
         let state = read_state_under_lock(&mut connection).await?;
-        let pending = plan(&state)?;
+        let planned = match phase {
+            MigrationPhase::Expand => plan(&state)?.iter().map(planned_step).collect(),
+            MigrationPhase::Backfill | MigrationPhase::Contract if state.installation.is_none() => {
+                return Err(MigrationRefusal::Unprovisioned {
+                    phase: phase.name().to_owned(),
+                }
+                .into());
+            }
+            MigrationPhase::Backfill => pending_backfills(&state)?
+                .into_iter()
+                .map(|backfill| planned_later_step(phase, backfill.id))
+                .collect(),
+            MigrationPhase::Contract => pending_contracts(&state)?
+                .into_iter()
+                .map(|contract| planned_later_step(phase, contract.id))
+                .collect(),
+        };
         let mut planned_report = report(&state, Vec::new());
-        planned_report.planned = pending.iter().map(planned_step).collect();
+        planned_report.planned = planned;
         Ok(planned_report)
     }
     .await;
@@ -837,58 +1233,64 @@ pub(crate) async fn plan_on(
     result
 }
 
+/// Runs `phase` as this build: expand under the exclusive advisory lock,
+/// backfill in batches of [`BACKFILL_BATCH_ROWS`], contract under the
+/// exclusive lock.
+pub(crate) async fn migrate_on(
+    pool: &PgPool,
+    phase: MigrationPhase,
+) -> Result<MigrationReport, MigrateError> {
+    run_phase(
+        pool,
+        phase,
+        &WriterFence::of_this_build(),
+        BACKFILL_BATCH_ROWS,
+    )
+    .await
+}
+
+/// Runs `phase` as the build whose writer fence is `fence`.
+pub(crate) async fn run_phase(
+    pool: &PgPool,
+    phase: MigrationPhase,
+    fence: &WriterFence,
+    batch_rows: i64,
+) -> Result<MigrationReport, MigrateError> {
+    match phase {
+        MigrationPhase::Expand => Ok(expand_on(pool, fence).await?),
+        MigrationPhase::Backfill => backfill_on(pool, fence, batch_rows).await,
+        MigrationPhase::Contract => contract_on(pool, fence).await,
+    }
+}
+
 /// Runs the pending expand migrations under the exclusive advisory lock.
 ///
 /// The lock is the same key every verifying open holds while it reads the
 /// catalog, so a worker can never verify against a half-applied batch and a
-/// second `lash migrate` queues behind rather than racing this one.
-pub(crate) async fn migrate_on(
-    pool: &PgPool,
-    phase: MigrationPhase,
-) -> Result<MigrationReport, StoreError> {
-    phase.unsupported()?;
+/// second `lashctl migrate` queues behind rather than racing this one.
+async fn expand_on(pool: &PgPool, fence: &WriterFence) -> Result<MigrationReport, StoreError> {
     let mut connection = lock_connection(pool, false).await?;
     let result = async {
         let state = read_state_under_lock(&mut connection).await?;
         let pending = plan(&state)?;
         let mut executed = Vec::with_capacity(pending.len());
         for step in &pending {
-            executed.push(apply_step(&mut connection, state.installation.as_ref(), step).await?);
+            executed
+                .push(apply_step(&mut connection, fence, state.installation.as_ref(), step).await?);
         }
         #[cfg(feature = "synthetic-next")]
-        if let Some(step) = apply_synthetic_expand(&mut connection).await? {
+        if let Some(step) =
+            apply_synthetic_expand(&mut connection, fence, synthetic_next_component_version()?)
+                .await?
+        {
             executed.push(step);
         }
-        seed_fleet_format(&mut connection).await?;
-        // A run that changed the catalog proves it before releasing the lock:
-        // the structural check is the same one an open would run, so a
-        // migrated database that cannot open fails here, not at the first
-        // worker's startup. The verification also resolves the namespace a
-        // bootstrap just installed — the pre-run state had none.
+        seed_fleet_format(&mut connection, fence).await?;
         let mut result = report(&state, executed);
         if !result.executed.is_empty() {
-            let verification = verify_schema_shape(&mut connection).await?;
-            #[cfg(not(feature = "synthetic-next"))]
-            let conformant = verification.is_conformant();
-            #[cfg(feature = "synthetic-next")]
-            let conformant = {
-                let mut tx = sqlx::Connection::begin(&mut connection)
-                    .await
-                    .map_err(store_sqlx_error)?;
-                let findings =
-                    crate::schema_shape::synthetic_next_findings(&mut tx, &verification).await?;
-                tx.rollback().await.map_err(store_sqlx_error)?;
-                findings.is_empty()
-            };
-            if !conformant {
-                return Err(StoreError::Backend(format!(
-                    "`lash migrate` applied {} step(s) but the resulting schema is not \
-                     conformant — do not start workers against it: {verification}",
-                    result.executed.len()
-                )));
-            }
+            let namespace = verify_changed_catalog(&mut connection, result.executed.len()).await?;
             if result.namespace.is_none() {
-                result.namespace = verification.schema;
+                result.namespace = namespace;
             }
         }
         Ok(result)
@@ -898,12 +1300,377 @@ pub(crate) async fn migrate_on(
     result
 }
 
-/// Provisions or advances the schema for `database_url` with default pool
-/// settings — what `lash migrate` invokes.
+/// A run that changed the catalog proves it before releasing the lock: the
+/// structural check is the same one an open would run, so a migrated
+/// database that cannot open fails here, not at the first worker's startup.
+/// The verification also resolves the namespace a bootstrap just installed.
+async fn verify_changed_catalog(
+    connection: &mut sqlx::PgConnection,
+    steps: usize,
+) -> Result<Option<String>, StoreError> {
+    let verification = verify_schema_shape(&mut *connection).await?;
+    #[cfg(not(feature = "synthetic-next"))]
+    let conformant = verification.is_conformant();
+    #[cfg(feature = "synthetic-next")]
+    let conformant = {
+        let mut tx = sqlx::Connection::begin(&mut *connection)
+            .await
+            .map_err(store_sqlx_error)?;
+        let findings = crate::schema_shape::synthetic_next_findings(&mut tx, &verification).await?;
+        tx.rollback().await.map_err(store_sqlx_error)?;
+        findings.is_empty()
+    };
+    if !conformant {
+        return Err(StoreError::Backend(format!(
+            "`lashctl migrate` applied {steps} step(s) but the resulting schema is not \
+             conformant — do not start workers against it: {verification}"
+        )));
+    }
+    Ok(verification.schema)
+}
+
+/// What one backfill batch did.
+pub(crate) enum BatchOutcome {
+    /// It rewrote a run of rows; more may follow.
+    Progressed,
+    /// It found nothing left, and recorded the backfill `applied`.
+    Completed,
+}
+
+/// Start `backfill` if its ledger row does not exist yet: the prepare DDL and
+/// the `running` row commit together, under the exclusive schema lock, in a
+/// migration transaction fenced like every other.
+///
+/// The lock comes before the fence here, as it does for every migrate step,
+/// so a backfill that starts never waits on the schema lock while it holds
+/// the fence row.
+pub(crate) async fn start_backfill(
+    pool: &PgPool,
+    fence: &WriterFence,
+    backfill: &BackfillMigration,
+) -> Result<(), MigrateError> {
+    let started: Option<String> = sqlx::query_scalar(
+        "SELECT state FROM lash_migrations WHERE phase = 'backfill' AND migration = $1",
+    )
+    .bind(backfill.id)
+    .fetch_optional(pool)
+    .await
+    .map_err(store_sqlx_error)?;
+    if started.is_some() {
+        return Ok(());
+    }
+    let mut connection = lock_connection(pool, false).await?;
+    let result = async {
+        let mut tx = crate::guarded_tx::begin_migration(&mut connection, fence).await?;
+        let recorded = tx.fleet().version();
+        if recorded < backfill.after_fleet {
+            return Err(MigrationRefusal::BackfillBeforeFinalize {
+                migration: backfill.id.to_owned(),
+                recorded,
+                requires: backfill.after_fleet,
+            }
+            .into());
+        }
+        // Another run may have started it while this one waited for the lock.
+        let started: Option<String> = sqlx::query_scalar(
+            "SELECT state FROM lash_migrations
+             WHERE phase = 'backfill' AND migration = $1
+             FOR UPDATE",
+        )
+        .bind(backfill.id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if started.is_some() {
+            return Ok(());
+        }
+        let started_at_ms = server_clock_ms(&mut tx).await?;
+        if !backfill.prepare.is_empty() {
+            sqlx::raw_sql(backfill.prepare)
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
+        sqlx::query(
+            "INSERT INTO lash_migrations (phase, migration, release, state,
+                 from_version, to_version, started_at_ms, finished_at_ms,
+                 backfill_cursor, backfill_rows)
+             VALUES ('backfill', $1, $2, 'running', $3, $3, $4, NULL, NULL, 0)",
+        )
+        .bind(backfill.id)
+        .bind(crate::release_stamp::BUILD_RELEASE)
+        .bind(SCHEMA_VERSION)
+        .bind(started_at_ms)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(())
+    }
+    .await;
+    let _ = sqlx::Connection::close(connection).await;
+    result
+}
+
+/// One batch of `backfill` in one guarded transaction: the rows after the
+/// ledger's cursor rewritten, and the cursor, the row count and — when the
+/// batch found fewer rows than it asked for — the `applied` state moved in
+/// the same commit. A batch that does not commit changed nothing.
+pub(crate) async fn backfill_batch(
+    pool: &PgPool,
+    fence: &WriterFence,
+    backfill: &BackfillMigration,
+    batch_rows: i64,
+) -> Result<BatchOutcome, MigrateError> {
+    let mut tx = crate::guarded_tx::begin_guarded(pool, fence).await?;
+    let outcome = backfill_batch_in(&mut tx, backfill, batch_rows).await?;
+    tx.commit().await.map_err(store_sqlx_error)?;
+    Ok(outcome)
+}
+
+/// [`backfill_batch`]'s statements, inside the guarded transaction `tx`.
+pub(crate) async fn backfill_batch_in(
+    tx: &mut crate::guarded_tx::GuardedTx<'_>,
+    backfill: &BackfillMigration,
+    batch_rows: i64,
+) -> Result<BatchOutcome, MigrateError> {
+    let recorded = tx.fleet().version();
+    if recorded < backfill.after_fleet {
+        return Err(MigrationRefusal::BackfillBeforeFinalize {
+            migration: backfill.id.to_owned(),
+            recorded,
+            requires: backfill.after_fleet,
+        }
+        .into());
+    }
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT state, backfill_cursor FROM lash_migrations
+         WHERE phase = 'backfill' AND migration = $1
+         FOR UPDATE",
+    )
+    .bind(backfill.id)
+    .fetch_optional(&mut ***tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    let cursor = match row {
+        None => {
+            return Err(StoreError::Backend(format!(
+                "backfill {} has no ledger row to resume from",
+                backfill.id
+            ))
+            .into());
+        }
+        Some((state, _)) if state == "applied" => return Ok(BatchOutcome::Completed),
+        Some((_, cursor)) => cursor,
+    };
+    let (last_key, scanned, rewritten): (Option<String>, i64, i64) = sqlx::query_as(backfill.batch)
+        .bind(cursor.as_deref())
+        .bind(batch_rows)
+        .fetch_one(&mut ***tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let completed = scanned < batch_rows;
+    sqlx::query(
+        "UPDATE lash_migrations
+         SET backfill_cursor = COALESCE($2, backfill_cursor),
+             backfill_rows = backfill_rows + $3,
+             state = CASE WHEN $4 THEN 'applied' ELSE 'running' END,
+             finished_at_ms = CASE WHEN $4
+                 THEN CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT)
+                 ELSE NULL END
+         WHERE phase = 'backfill' AND migration = $1",
+    )
+    .bind(backfill.id)
+    .bind(last_key)
+    .bind(rewritten)
+    .bind(completed)
+    .execute(&mut ***tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(if completed {
+        BatchOutcome::Completed
+    } else {
+        BatchOutcome::Progressed
+    })
+}
+
+/// The ledger row of one step.
+async fn ledger_row(
+    pool: &PgPool,
+    phase: MigrationPhase,
+    migration: &str,
+) -> Result<MigrationStep, StoreError> {
+    sqlx::query_as::<_, LedgerRow>(&format!(
+        "SELECT {LEDGER_COLUMNS} FROM lash_migrations WHERE phase = $1 AND migration = $2"
+    ))
+    .bind(phase.name())
+    .bind(migration)
+    .fetch_one(pool)
+    .await
+    .map(ledger_step)
+    .map_err(store_sqlx_error)
+}
+
+/// Run every backfill this build carries that the ledger does not show
+/// `applied`, each to completion, in batches of `batch_rows`: what
+/// `lashctl finalize` runs as its last step. Each returned step is the
+/// backfill's final ledger row.
+pub(crate) async fn run_backfills(
+    pool: &PgPool,
+    fence: &WriterFence,
+    batch_rows: i64,
+) -> Result<Vec<MigrationStep>, MigrateError> {
+    let mut executed = Vec::new();
+    for backfill in BACKFILL_MIGRATIONS {
+        let recorded: Option<String> = sqlx::query_scalar(
+            "SELECT state FROM lash_migrations WHERE phase = 'backfill' AND migration = $1",
+        )
+        .bind(backfill.id)
+        .fetch_optional(pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        if recorded.as_deref() == Some("applied") {
+            continue;
+        }
+        start_backfill(pool, fence, backfill).await?;
+        while let BatchOutcome::Progressed =
+            backfill_batch(pool, fence, backfill, batch_rows).await?
+        {}
+        executed.push(ledger_row(pool, MigrationPhase::Backfill, backfill.id).await?);
+    }
+    Ok(executed)
+}
+
+/// `lashctl migrate --phase backfill`: every pending backfill, resumed from
+/// its cursor and run to completion.
+async fn backfill_on(
+    pool: &PgPool,
+    fence: &WriterFence,
+    batch_rows: i64,
+) -> Result<MigrationReport, MigrateError> {
+    let state = {
+        let mut connection = lock_connection(pool, true).await?;
+        let state = read_state_under_lock(&mut connection).await;
+        let _ = sqlx::Connection::close(connection).await;
+        state?
+    };
+    if state.installation.is_none() {
+        return Err(MigrationRefusal::Unprovisioned {
+            phase: MigrationPhase::Backfill.name().to_owned(),
+        }
+        .into());
+    }
+    let executed = run_backfills(pool, fence, batch_rows).await?;
+    Ok(report(&state, executed))
+}
+
+/// `lashctl migrate --phase contract`: every pending contract step, each in
+/// one fenced transaction under the exclusive schema lock, refused typed
+/// until `F` has reached its epoch and the ledger shows its backfills
+/// applied. The step raises the component's reader floor in the same commit.
+async fn contract_on(pool: &PgPool, fence: &WriterFence) -> Result<MigrationReport, MigrateError> {
+    let mut connection = lock_connection(pool, false).await?;
+    let result = async {
+        let state = read_state_under_lock(&mut connection).await?;
+        if state.installation.is_none() {
+            return Err(MigrationRefusal::Unprovisioned {
+                phase: MigrationPhase::Contract.name().to_owned(),
+            }
+            .into());
+        }
+        let mut executed = Vec::new();
+        for contract in CONTRACT_MIGRATIONS {
+            if state.is_applied(MigrationPhase::Contract, contract.id) {
+                continue;
+            }
+            executed.push(apply_contract(&mut connection, fence, contract).await?);
+        }
+        let result = report(&state, executed);
+        if !result.executed.is_empty() {
+            verify_changed_catalog(&mut connection, result.executed.len()).await?;
+        }
+        Ok(result)
+    }
+    .await;
+    let _ = sqlx::Connection::close(connection).await;
+    result
+}
+
+/// One contract step, gated inside its own fenced transaction: the `F` the
+/// fence read and the ledger rows it locks are the ones the step commits
+/// against.
+async fn apply_contract(
+    connection: &mut sqlx::PgConnection,
+    fence: &WriterFence,
+    contract: &ContractMigration,
+) -> Result<MigrationStep, MigrateError> {
+    let mut tx = crate::guarded_tx::begin_migration(connection, fence).await?;
+    let applied: Vec<String> = sqlx::query_scalar(
+        "SELECT migration FROM lash_migrations
+         WHERE phase = 'backfill' AND state = 'applied' AND migration = ANY($1)
+         FOR SHARE",
+    )
+    .bind(
+        contract
+            .after_backfills
+            .iter()
+            .map(|backfill| (*backfill).to_owned())
+            .collect::<Vec<_>>(),
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    contract_admitted(contract, tx.fleet().version(), |backfill| {
+        applied.iter().any(|name| name == backfill)
+    })?;
+    let started_at_ms = server_clock_ms(&mut tx).await?;
+    sqlx::raw_sql(contract.statements)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    sqlx::query(
+        "UPDATE lash_schema_versions SET min_reader = GREATEST(min_reader, $1)
+         WHERE component = $2",
+    )
+    .bind(contract.min_reader)
+    .bind(SCHEMA_COMPONENT)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    let (release, state, started_at_ms, finished_at_ms) = record_step(
+        &mut tx,
+        "lash_migrations",
+        MigrationPhase::Contract.name(),
+        contract.id,
+        Some(SCHEMA_VERSION),
+        SCHEMA_VERSION,
+        started_at_ms,
+    )
+    .await?;
+    crate::release_stamp::write(&mut tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    tx.commit().await.map_err(store_sqlx_error)?;
+    Ok(MigrationStep {
+        phase: MigrationPhase::Contract.name().to_string(),
+        migration: contract.id.to_string(),
+        release,
+        state,
+        from_version: Some(SCHEMA_VERSION),
+        to_version: SCHEMA_VERSION,
+        started_at_ms: Some(started_at_ms),
+        finished_at_ms,
+        backfill_cursor: None,
+        backfill_rows: None,
+    })
+}
+
+/// Runs `phase` for `database_url` with default pool settings — what
+/// `lashctl migrate` invokes.
 pub async fn migrate(
     database_url: &str,
     phase: MigrationPhase,
-) -> Result<MigrationReport, StoreError> {
+) -> Result<MigrationReport, MigrateError> {
     let pool = migrate_pool(database_url).await?;
     let result = migrate_on(&pool, phase).await;
     pool.close().await;
@@ -914,7 +1681,7 @@ pub async fn migrate(
 pub async fn plan_migrations(
     database_url: &str,
     phase: MigrationPhase,
-) -> Result<MigrationReport, StoreError> {
+) -> Result<MigrationReport, MigrateError> {
     let pool = migrate_pool(database_url).await?;
     let result = plan_on(&pool, phase).await;
     pool.close().await;
@@ -1039,18 +1806,86 @@ mod tests {
         assert_eq!(MigrationPhase::parse("sideways"), None);
     }
 
-    /// Backfill and contract refuse before the operations arc — the refusal
-    /// names FIG-3817 verbatim so the ticket's operators can find it.
+    /// Every backfill a contract step waits for is one this build carries,
+    /// and every step's epoch is one a finalize can reach: a contract that
+    /// named a backfill no build runs would be refused forever.
     #[test]
-    fn later_phases_refuse_with_the_operations_arc_refusal() {
-        for phase in [MigrationPhase::Backfill, MigrationPhase::Contract] {
-            let error = phase.unsupported().unwrap_err();
-            let message = error.to_string();
+    fn contract_steps_wait_only_for_backfills_this_build_carries() {
+        for contract in CONTRACT_MIGRATIONS {
+            for backfill in contract.after_backfills {
+                let carried = BACKFILL_MIGRATIONS
+                    .iter()
+                    .find(|carried| carried.id == *backfill)
+                    .unwrap_or_else(|| {
+                        panic!("{} waits for unknown backfill {backfill}", contract.id)
+                    });
+                assert!(
+                    carried.after_fleet <= contract.after_fleet,
+                    "{} could contract before {backfill} may run",
+                    contract.id
+                );
+            }
+            assert!(contract.min_reader >= 1, "{}", contract.id);
+        }
+        // `F` is 1 at the cut and moves at every compatibility release's
+        // finalize, so a backfill released at 1 would run before any.
+        for backfill in BACKFILL_MIGRATIONS {
             assert!(
-                message.contains("not supported before the operations arc (FIG-3817)"),
-                "{phase:?} refusal does not name FIG-3817: {message}"
+                backfill.after_fleet > 1,
+                "{} would run before any finalize",
+                backfill.id
             );
         }
-        assert!(MigrationPhase::Expand.unsupported().is_ok());
+    }
+
+    /// A contract step is refused until `F` reaches its epoch, then until
+    /// every backfill it names is applied, and each refusal names its remedy.
+    #[test]
+    fn a_contract_gate_refuses_before_finalize_and_before_its_backfills() {
+        let contract = ContractMigration {
+            id: "gate-contract",
+            after_fleet: 2,
+            after_backfills: &["gate-backfill"],
+            statements: "",
+            min_reader: 2,
+        };
+        let before_finalize = contract_admitted(&contract, 1, |_| true).unwrap_err();
+        assert_eq!(
+            before_finalize,
+            MigrationRefusal::ContractBeforeFinalize {
+                migration: "gate-contract".to_owned(),
+                recorded: 1,
+                requires: 2,
+            }
+        );
+        assert!(before_finalize.to_string().contains("lashctl finalize"));
+        let before_backfills = contract_admitted(&contract, 2, |_| false).unwrap_err();
+        assert_eq!(
+            before_backfills,
+            MigrationRefusal::ContractBeforeBackfills {
+                migration: "gate-contract".to_owned(),
+                pending: vec!["gate-backfill".to_owned()],
+            }
+        );
+        assert!(
+            before_backfills
+                .to_string()
+                .contains("lashctl migrate --phase backfill")
+        );
+        contract_admitted(&contract, 2, |backfill| backfill == "gate-backfill")
+            .expect("finalized and backfilled");
+    }
+
+    #[test]
+    fn migration_refusals_serialize_tagged() {
+        assert_eq!(
+            serde_json::to_value(MigrationRefusal::BackfillBeforeFinalize {
+                migration: "b".to_owned(),
+                recorded: 1,
+                requires: 2,
+            })
+            .expect("serialize"),
+            serde_json::json!({"refusal":"backfill_before_finalize","migration":"b","recorded":1,"requires":2})
+        );
     }
 }

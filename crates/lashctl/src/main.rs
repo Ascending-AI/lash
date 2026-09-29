@@ -1,4 +1,5 @@
-//! Operator commands for migrations, generation drains and compatibility checks.
+//! Operator commands for migrations, generation drains, finalize and
+//! compatibility checks.
 
 // This binary reads argv and the environment on behalf of the operator.
 #![allow(clippy::disallowed_methods)]
@@ -6,14 +7,18 @@
 use lash_core_execution::ClockWallTime;
 use lash_core_execution::engine::BuildGeneration;
 use lash_core_execution::store::generation_drain::GenerationDrainStatus;
-use lash_core_store::compat::{CompatRefusal, DESCRIPTORS};
+use lash_core_store::compat::DESCRIPTORS;
+use lash_core_store::store::fleet_finalize::{
+    FinalizeError, FinalizeHold, FinalizeMode, FinalizeRefusal,
+};
 use lash_core_store::store::{
     FLEET_WRITABLE_RANGE, FleetFormatState, StorePreflight, StoreReleaseState, StoreSchemaOutcome,
     StoreSchemaVerdict,
 };
 use lash_core_store::store::{ObligationKey, ObligationKind, StalledObligation, StoreError};
 use lash_postgres_store::{
-    MigrationPhase, MigrationReport, MigrationStep, PostgresStorage, PostgresStorePreflight,
+    FinalizeReport, MigrateError, MigrationPhase, MigrationReport, MigrationStep, PostgresStorage,
+    PostgresStorePreflight,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -22,7 +27,7 @@ const LASHCTL_JSON_SCHEMA_VERSION: u32 = 1;
 /// The most stalled obligations `drain-status` lists per kind, first by id;
 /// `stalled_obligations` still counts every one.
 const STALLED_LISTED_PER_KIND: std::num::NonZeroUsize = std::num::NonZeroUsize::new(100).unwrap();
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> | end-drain <generation> | preflight | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | preflight | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -50,7 +55,9 @@ impl Exit {
 struct CliError {
     exit: Exit,
     message: String,
-    refusal: Option<CompatRefusal>,
+    /// The typed refusal, as its tagged JSON: a store's `CompatRefusal`, or
+    /// a finalize or migration precondition.
+    refusal: Option<Value>,
 }
 
 impl CliError {
@@ -62,19 +69,54 @@ impl CliError {
         }
     }
 
+    fn refused(exit: Exit, message: String, refusal: &impl Serialize) -> Self {
+        Self {
+            exit,
+            message,
+            refusal: serde_json::to_value(refusal).ok(),
+        }
+    }
+
     fn store(error: StoreError) -> Self {
         let exit = match &error {
             StoreError::Incompatible { .. } | StoreError::WriterFenced { .. } => Exit::Incompatible,
             _ => Exit::Unexpected,
         };
         let refusal = match &error {
-            StoreError::Incompatible { refusal } => Some(refusal.clone()),
+            StoreError::Incompatible { refusal } => serde_json::to_value(refusal).ok(),
             _ => None,
         };
         Self {
             exit,
             message: error.to_string(),
             refusal,
+        }
+    }
+
+    /// A refused migration step is a refused precondition, exit 3.
+    fn migrate(error: MigrateError) -> Self {
+        match error {
+            MigrateError::Refused(refusal) => {
+                Self::refused(Exit::Refused, refusal.to_string(), &refusal)
+            }
+            MigrateError::Store(error) => Self::store(error),
+        }
+    }
+
+    /// An undrained generation is a drain still pending, exit 5; a retained
+    /// deployment or an operator hold is a refused precondition, exit 3. A
+    /// deployment registry that cannot be read fails closed.
+    fn finalize(error: FinalizeError) -> Self {
+        match error {
+            FinalizeError::Refused(refusal) => {
+                let exit = match &refusal {
+                    FinalizeRefusal::GenerationNotDrained { .. } => Exit::NotYet,
+                    _ => Exit::Refused,
+                };
+                Self::refused(exit, refusal.to_string(), &refusal)
+            }
+            FinalizeError::Registry(error) => Self::new(Exit::Unexpected, error.to_string()),
+            FinalizeError::Store(error) => Self::store(error),
         }
     }
 }
@@ -93,8 +135,20 @@ enum Command {
     EndDrain {
         generation: BuildGeneration,
     },
+    Finalize {
+        retired: BuildGeneration,
+        restate_admin_url: String,
+        mode: FinalizeMode,
+    },
+    FinalizeHold(HoldAction),
     Preflight,
     Version,
+}
+
+enum HoldAction {
+    Show,
+    Set { reason: String },
+    Clear,
 }
 
 impl Command {
@@ -104,6 +158,8 @@ impl Command {
             Self::Drain { .. } => "drain",
             Self::DrainStatus { .. } => "drain-status",
             Self::EndDrain { .. } => "end-drain",
+            Self::Finalize { .. } => "finalize",
+            Self::FinalizeHold(_) => "finalize-hold",
             Self::Preflight => "preflight",
             Self::Version => "version",
         }
@@ -163,6 +219,49 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
                 _ => Command::EndDrain { generation },
             }
         }
+        "finalize" if !rest.is_empty() => {
+            let retired = BuildGeneration::parse(&rest[0])
+                .map_err(|_| CliError::new(Exit::Usage, "invalid build generation"))?;
+            let mut restate_admin_url = None;
+            let mut mode = FinalizeMode::Automatic;
+            let mut index = 1;
+            while index < rest.len() {
+                match rest[index].as_str() {
+                    "--restate-admin-url"
+                        if index + 1 < rest.len() && restate_admin_url.is_none() =>
+                    {
+                        restate_admin_url = Some(rest[index + 1].clone());
+                        index += 2;
+                    }
+                    "--override-hold" if mode == FinalizeMode::Automatic => {
+                        mode = FinalizeMode::OverrideHold;
+                        index += 1;
+                    }
+                    _ => return Err(CliError::new(Exit::Usage, USAGE)),
+                }
+            }
+            let restate_admin_url = restate_admin_url.ok_or_else(|| {
+                CliError::new(
+                    Exit::Usage,
+                    "finalize needs --restate-admin-url: retirement is read from the engine's deployments",
+                )
+            })?;
+            Command::Finalize {
+                retired,
+                restate_admin_url,
+                mode,
+            }
+        }
+        "finalize-hold" => match rest.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+            ["show"] => Command::FinalizeHold(HoldAction::Show),
+            ["clear"] => Command::FinalizeHold(HoldAction::Clear),
+            ["set", "--reason", reason] if !reason.trim().is_empty() => {
+                Command::FinalizeHold(HoldAction::Set {
+                    reason: reason.to_owned(),
+                })
+            }
+            _ => return Err(CliError::new(Exit::Usage, USAGE)),
+        },
         "preflight" if rest.is_empty() => Command::Preflight,
         "version" if rest.is_empty() => Command::Version,
         _ => return Err(CliError::new(Exit::Usage, USAGE)),
@@ -180,6 +279,8 @@ struct StepDto<'a> {
     to_version: i32,
     started_at_ms: Option<i64>,
     finished_at_ms: Option<i64>,
+    backfill_cursor: Option<&'a str>,
+    backfill_rows: Option<i64>,
 }
 
 impl<'a> From<&'a MigrationStep> for StepDto<'a> {
@@ -193,8 +294,27 @@ impl<'a> From<&'a MigrationStep> for StepDto<'a> {
             to_version: step.to_version,
             started_at_ms: step.started_at_ms,
             finished_at_ms: step.finished_at_ms,
+            backfill_cursor: step.backfill_cursor.as_deref(),
+            backfill_rows: step.backfill_rows,
         }
     }
+}
+
+fn finalize_result(report: &FinalizeReport) -> Value {
+    json!({
+        "retired_generation": report.drain.generation.as_str(),
+        "flip": report.flip,
+        "fleet_format": report.flip.fleet(),
+        "backfills": report.backfills.iter().map(StepDto::from).collect::<Vec<_>>(),
+    })
+}
+
+fn hold_result(hold: Option<&FinalizeHold>) -> Value {
+    json!({
+        "held": hold.is_some(),
+        "reason": hold.map(|hold| hold.reason.as_str()),
+        "held_at_ms": hold.map(|hold| hold.held_at_ms),
+    })
 }
 
 fn migration_result(report: &MigrationReport, dry_run: bool) -> Value {
@@ -314,22 +434,67 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             (version_result(&generations), Exit::Done)
         }
         Command::Migrate { phase, dry_run } => {
-            if *phase != MigrationPhase::Expand {
-                return Err(CliError::new(
-                    Exit::Refused,
-                    format!(
-                        "{} migrations are not supported by this build",
-                        phase.name()
-                    ),
-                ));
-            }
             let report = if *dry_run {
                 PostgresStorage::plan_migrations(&url, *phase).await
             } else {
                 PostgresStorage::migrate(&url, *phase).await
             }
-            .map_err(CliError::store)?;
+            .map_err(CliError::migrate)?;
             (migration_result(&report, *dry_run), Exit::Done)
+        }
+        Command::Finalize {
+            retired,
+            restate_admin_url,
+            mode,
+        } => {
+            let storage = PostgresStorage::connect(&url)
+                .await
+                .map_err(CliError::store)?;
+            let registry = lash_restate::RestateDeploymentRegistry::new(
+                lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(
+                    restate_admin_url.clone(),
+                )),
+            );
+            let report = storage
+                .finalize(
+                    retired,
+                    &registry,
+                    *mode,
+                    lash_core_execution::facade_support::SystemClock.timestamp_ms(),
+                )
+                .await
+                .map_err(CliError::finalize)?;
+            (finalize_result(&report), Exit::Done)
+        }
+        Command::FinalizeHold(action) => {
+            let storage = PostgresStorage::connect(&url)
+                .await
+                .map_err(CliError::store)?;
+            let result = match action {
+                HoldAction::Show => hold_result(
+                    storage
+                        .finalize_hold()
+                        .await
+                        .map_err(CliError::store)?
+                        .as_ref(),
+                ),
+                HoldAction::Set { reason } => hold_result(Some(
+                    &storage
+                        .set_finalize_hold(reason)
+                        .await
+                        .map_err(CliError::store)?,
+                )),
+                HoldAction::Clear => {
+                    let cleared = storage
+                        .clear_finalize_hold()
+                        .await
+                        .map_err(CliError::store)?;
+                    let mut result = hold_result(None);
+                    result["cleared"] = hold_result(cleared.as_ref());
+                    result
+                }
+            };
+            (result, Exit::Done)
         }
         Command::Preflight => {
             let probe = PostgresStorePreflight::for_database_url(&url).map_err(CliError::store)?;
@@ -536,6 +701,7 @@ async fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_core_store::compat::CompatRefusal;
 
     #[test]
     fn incompatible_store_error_keeps_the_typed_refusal() {
@@ -572,6 +738,107 @@ mod tests {
             "{}",
             error.message
         );
+    }
+
+    fn words(args: &[&str]) -> Vec<String> {
+        args.iter().map(|arg| (*arg).to_owned()).collect()
+    }
+
+    #[test]
+    fn finalize_names_its_retired_generation_the_engine_and_the_hold_override() {
+        let parsed = parse(words(&[
+            "finalize",
+            "0123456789ab",
+            "--restate-admin-url",
+            "http://admin",
+            "--override-hold",
+        ]))
+        .unwrap_or_else(|error| panic!("{}", error.message));
+        match parsed.command {
+            Command::Finalize {
+                retired,
+                restate_admin_url,
+                mode,
+            } => {
+                assert_eq!(retired.as_str(), "0123456789ab");
+                assert_eq!(restate_admin_url, "http://admin");
+                assert_eq!(mode, FinalizeMode::OverrideHold);
+            }
+            _ => panic!("finalize parses to Finalize"),
+        }
+        let automatic = parse(words(&[
+            "finalize",
+            "0123456789ab",
+            "--restate-admin-url",
+            "http://admin",
+        ]))
+        .unwrap_or_else(|error| panic!("{}", error.message));
+        assert!(matches!(
+            automatic.command,
+            Command::Finalize {
+                mode: FinalizeMode::Automatic,
+                ..
+            }
+        ));
+        for refused in [
+            words(&["finalize"]),
+            words(&["finalize", "0123456789ab"]),
+            words(&["finalize", "0123456789ab", "--restate-admin-url"]),
+            words(&[
+                "finalize",
+                "0123456789ab",
+                "--restate-admin-url",
+                "a",
+                "--restate-admin-url",
+                "b",
+            ]),
+            words(&["finalize-hold"]),
+            words(&["finalize-hold", "set", "--reason"]),
+            words(&["finalize-hold", "clear", "now"]),
+        ] {
+            let Err(error) = parse(refused.clone()) else {
+                panic!("{refused:?} must be a usage error");
+            };
+            assert_eq!(error.exit as u8, 2, "{refused:?}");
+        }
+        assert!(matches!(
+            parse(words(&["finalize-hold", "set", "--reason", "watch"]))
+                .unwrap_or_else(|error| panic!("{}", error.message))
+                .command,
+            Command::FinalizeHold(HoldAction::Set { reason }) if reason == "watch"
+        ));
+    }
+
+    /// An undrained generation is a drain still pending (exit 5); a retained
+    /// deployment and a hold are refused preconditions (exit 3); an engine
+    /// that cannot be read fails closed (exit 1). Each keeps its typed
+    /// refusal.
+    #[test]
+    fn finalize_refusals_keep_their_exit_codes_and_types() {
+        use lash_core_store::store::fleet_finalize::DeploymentRegistryError;
+        let held = CliError::finalize(FinalizeError::Refused(FinalizeRefusal::Held {
+            hold: FinalizeHold {
+                reason: "watch".to_owned(),
+                held_at_ms: 3,
+            },
+        }));
+        assert_eq!(held.exit as u8, 3);
+        assert_eq!(
+            error_json(&held)["refusal"],
+            json!({"refusal":"held","hold":{"reason":"watch","held_at_ms":3}})
+        );
+        let retained = CliError::finalize(FinalizeError::Refused(
+            FinalizeRefusal::DeploymentsRetained {
+                generation: BuildGeneration::for_test("lashctl-retained"),
+                deployments: Vec::new(),
+            },
+        ));
+        assert_eq!(retained.exit as u8, 3);
+        let registry = CliError::finalize(FinalizeError::Registry(DeploymentRegistryError {
+            detail: "connection refused".to_owned(),
+        }));
+        assert_eq!(registry.exit as u8, 1);
+        assert_eq!(error_json(&registry)["refusal"], Value::Null);
     }
 
     #[test]

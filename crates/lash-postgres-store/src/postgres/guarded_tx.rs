@@ -100,6 +100,19 @@ impl WriterFence {
         self.format_for(self.state.observed.load(Ordering::Acquire))
     }
 
+    /// `[F_prev, F_self]` of the build that opened the storage: the epochs
+    /// it writes under, and the one its finalize moves `F` to (`F_self`).
+    pub(crate) fn writable(&self) -> VersionRange {
+        self.state.writable
+    }
+
+    /// The fence of this build as the migrate runner and the operator binary
+    /// stand: its own writable range, opened under its newest epoch until a
+    /// fence reads the row.
+    pub(crate) fn of_this_build() -> Self {
+        Self::new(FleetFormat::writable(), FleetFormat::current())
+    }
+
     fn format_for(&self, version: u32) -> FleetFormat {
         if version == self.state.opened.version() {
             self.state.opened
@@ -108,7 +121,7 @@ impl WriterFence {
         }
     }
 
-    fn observe(&self, version: u32) {
+    pub(crate) fn observe(&self, version: u32) {
         self.state.observed.fetch_max(version, Ordering::AcqRel);
     }
 
@@ -279,8 +292,8 @@ where
 /// under this build's own epoch.
 pub(crate) async fn begin_migration<'c>(
     connection: &'c mut PgConnection,
+    fence: &WriterFence,
 ) -> Result<GuardedTx<'c>, StoreError> {
-    let fence = WriterFence::new(FleetFormat::writable(), FleetFormat::current());
     let mut tx = Acquire::begin(connection).await.map_err(store_sqlx_error)?;
     let recordable: bool = sqlx::query_scalar(session_sql().fleet_format.select_is_present.sql())
         .fetch_one(&mut *tx)
@@ -296,6 +309,66 @@ pub(crate) async fn begin_migration<'c>(
         None => FleetFormat::current(),
     };
     Ok(GuardedTx { tx, fleet })
+}
+
+/// The fleet-format row locked for an update: finalize's side of the fence
+/// (§2.2), and the operator hold's.
+///
+/// `BEGIN`, then the row read `FOR UPDATE` as the transaction's only lock.
+/// It waits behind every writer holding the row `FOR SHARE`, and every
+/// writer that fences after it waits until it commits and then reads what it
+/// wrote. The recorded epoch is admitted against the fence's writable range
+/// like any writer's: a build that a newer release fenced out can neither
+/// finalize nor move the hold.
+pub(crate) struct FleetRowTx {
+    tx: Transaction<'static, Postgres>,
+    /// The epoch the row records.
+    pub(crate) recorded: u32,
+    /// The operator's hold on the automatic finalize, if one stands.
+    pub(crate) hold: Option<lash_core_execution::store::fleet_finalize::FinalizeHold>,
+}
+
+impl FleetRowTx {
+    pub(crate) fn connection(&mut self) -> &mut PgConnection {
+        &mut self.tx
+    }
+
+    pub(crate) async fn commit(self) -> Result<(), StoreError> {
+        self.tx.commit().await.map_err(store_sqlx_error)
+    }
+}
+
+/// Lock the fleet-format row for an update ([`FleetRowTx`]).
+pub(crate) async fn begin_fleet_row(
+    pool: &PgPool,
+    fence: &WriterFence,
+) -> Result<FleetRowTx, StoreError> {
+    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    let row: Option<(i32, Option<String>, Option<i64>)> =
+        sqlx::query_as(session_sql().fleet_format.select_for_update.sql())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    let Some((recorded, reason, held_at_ms)) = row else {
+        return Err(missing_fence_row("the fleet-format row is absent"));
+    };
+    let recorded = u32::try_from(recorded).map_err(|_| {
+        missing_fence_row(&format!(
+            "lash_fleet_format.format_version is not an epoch: {recorded}"
+        ))
+    })?;
+    FleetFormat::fence(recorded, fence.state.writable)?;
+    fence.observe(recorded);
+    let hold = match (reason, held_at_ms) {
+        (Some(reason), Some(held_at_ms)) => {
+            Some(lash_core_execution::store::fleet_finalize::FinalizeHold {
+                reason,
+                held_at_ms: u64::try_from(held_at_ms).unwrap_or_default(),
+            })
+        }
+        _ => None,
+    };
+    Ok(FleetRowTx { tx, recorded, hold })
 }
 
 /// The body [`guarded`] runs inside each attempt's transaction.

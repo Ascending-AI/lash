@@ -124,6 +124,8 @@ table lash_draining_generations
   column marked_at_ms bigint not-null
   primary-key (generation)
 table lash_fleet_format
+  column finalize_held_at_ms bigint nullable
+  column finalize_hold_reason text nullable
   column format_version integer not-null
   column singleton boolean not-null default
   primary-key (singleton)
@@ -150,6 +152,8 @@ table lash_lashlang_artifacts
   column namespace text not-null
   primary-key (namespace, artifact_ref)
 table lash_migrations
+  column backfill_cursor text nullable
+  column backfill_rows bigint nullable
   column finished_at_ms bigint nullable
   column from_version integer nullable
   column migration text not-null

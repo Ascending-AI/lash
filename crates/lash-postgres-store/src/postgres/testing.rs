@@ -150,37 +150,50 @@ impl FencePause {
 }
 
 /// Finalize's side of the fence, for tests that race it (ADR 0115 §2.2):
-/// read the fleet-format row `FOR UPDATE`, move it to `epoch`, and hold the
-/// transaction open until [`HeldFinalize::commit`].
-///
-/// FIG-3800 B ships the operator's finalize; until then this is the one
-/// place that moves `F` the way finalize will.
+/// the production flip — the fleet-format row read `FOR UPDATE` and moved to
+/// `epoch` — held open until [`HeldFinalize::commit`]. It skips the drain,
+/// the retirement check and the hold, which a race does not exercise; the
+/// operator's finalize is [`PostgresStorage::finalize`](crate::PostgresStorage::finalize).
 pub struct HeldFinalize {
-    tx: sqlx::Transaction<'static, sqlx::Postgres>,
+    flip: crate::finalize::PendingFlip,
+    fence: crate::guarded_tx::WriterFence,
 }
 
 impl HeldFinalize {
-    /// Begin finalize: waits behind every writer holding the row `FOR SHARE`.
-    pub async fn begin(pool: &sqlx::PgPool, epoch: u32) -> Result<Self, sqlx::Error> {
-        let mut tx = pool.begin().await?;
-        sqlx::query("SELECT format_version FROM lash_fleet_format WHERE singleton FOR UPDATE")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("UPDATE lash_fleet_format SET format_version = $1 WHERE singleton")
-            .bind(i32::try_from(epoch).unwrap_or(i32::MAX))
-            .execute(&mut *tx)
-            .await?;
-        Ok(Self { tx })
+    /// Begin finalize as a build whose writable range is `[1, epoch]`: waits
+    /// behind every writer holding the row `FOR SHARE`.
+    pub async fn begin(
+        pool: &sqlx::PgPool,
+        epoch: u32,
+    ) -> Result<Self, lash_core_execution::StoreError> {
+        use lash_core_execution::StoreError;
+        use lash_core_execution::store::fleet_finalize::{FinalizeError, FinalizeMode};
+        let writable = lash_core_execution::compat::VersionRange::new(1, epoch)
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let fence = crate::guarded_tx::WriterFence::new(
+            writable,
+            lash_core_execution::FleetFormat::from_version(epoch),
+        );
+        let flip = crate::finalize::begin_flip(pool, &fence, epoch, FinalizeMode::OverrideHold)
+            .await
+            .map_err(|error| match error {
+                FinalizeError::Store(error) => error,
+                other => StoreError::Backend(other.to_string()),
+            })?;
+        Ok(Self { flip, fence })
     }
 
     /// Commit the move.
-    pub async fn commit(self) -> Result<(), sqlx::Error> {
-        self.tx.commit().await
+    pub async fn commit(self) -> Result<(), lash_core_execution::StoreError> {
+        self.flip.commit(&self.fence).await.map(|_| ())
     }
 }
 
 /// Finalize `F` to `epoch` in one transaction (see [`HeldFinalize`]).
-pub async fn finalize_fleet_epoch(pool: &sqlx::PgPool, epoch: u32) -> Result<(), sqlx::Error> {
+pub async fn finalize_fleet_epoch(
+    pool: &sqlx::PgPool,
+    epoch: u32,
+) -> Result<(), lash_core_execution::StoreError> {
     HeldFinalize::begin(pool, epoch).await?.commit().await
 }
 

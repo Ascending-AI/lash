@@ -22,13 +22,16 @@ CREATE TABLE IF NOT EXISTS lash_schema_versions (
         CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version)
 );
 
--- The migration ledger (FIG-3816): `lash migrate` records each applied step
--- here so a rerun is a no-op and an interrupted run resumes from the rows
--- that committed. Runtime code never reads or writes it — it is the
--- operational record, and the migrate runner is its only writer. An expand
--- step commits atomically, so `applied` is the only state a committed row can
--- carry today; `running` is admitted for the operations arc's multi-transaction
--- phases (FIG-3817).
+-- The migration ledger (FIG-3816, FIG-3817): `lashctl migrate` and
+-- `lashctl finalize` record each step here so a rerun is a no-op and an
+-- interrupted run resumes from the rows that committed. Runtime code never
+-- reads or writes it — it is the operational record, and the migrate runner
+-- is its only writer. Expand and contract steps commit atomically, so their
+-- rows are always `applied`. A backfill runs in batches after finalize: its
+-- row is `running` from its first batch, carries the key its last committed
+-- batch ended at and the rows the backfill has rewritten, and becomes
+-- `applied` with the batch that finds nothing left. Contract waits for every
+-- backfill of its release to read `applied`.
 CREATE TABLE IF NOT EXISTS lash_migrations (
     phase TEXT NOT NULL
         CONSTRAINT ck_lash_migrations_phase
@@ -42,18 +45,29 @@ CREATE TABLE IF NOT EXISTS lash_migrations (
     to_version INTEGER NOT NULL,
     started_at_ms BIGINT NOT NULL,
     finished_at_ms BIGINT,
-    PRIMARY KEY (phase, migration)
+    backfill_cursor TEXT,
+    backfill_rows BIGINT,
+    PRIMARY KEY (phase, migration),
+    CONSTRAINT ck_lash_migrations_backfill_progress
+        CHECK ((phase = 'backfill' AND backfill_rows IS NOT NULL AND backfill_rows >= 0)
+            OR (phase <> 'backfill' AND backfill_cursor IS NULL AND backfill_rows IS NULL))
 );
 
 -- The durable-format generation every writer in the fleet emits (ADR 0106
 -- §1 `F`). The installer seeds the row below; opens read the recorded
--- generation, never record one, and keep writing it until `finalize-upgrade`
--- (FIG-3800) moves it. One row, like the other deployment-scoped singletons in
--- this schema.
+-- generation, never record one, and keep writing it until `lashctl finalize`
+-- (FIG-3800) moves it. The same row carries the operator's hold on the
+-- automatic finalize, so the finalize that locks the row to move it reads the
+-- hold in the same transaction. One row, like the other deployment-scoped
+-- singletons in this schema.
 CREATE TABLE IF NOT EXISTS lash_fleet_format (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
     format_version INTEGER NOT NULL,
-    CONSTRAINT ck_fleet_format_singleton CHECK (singleton)
+    finalize_hold_reason TEXT,
+    finalize_held_at_ms BIGINT,
+    CONSTRAINT ck_fleet_format_singleton CHECK (singleton),
+    CONSTRAINT ck_fleet_format_finalize_hold
+        CHECK ((finalize_hold_reason IS NULL) = (finalize_held_at_ms IS NULL))
 );
 
 CREATE TABLE IF NOT EXISTS lash_blobs (

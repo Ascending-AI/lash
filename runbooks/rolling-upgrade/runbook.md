@@ -10,7 +10,8 @@ it runs beside a newer build during a roll, and it can be rolled back to
 ([ADR 0115](../../docs/adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
 §6, FIG-3805 phase A). The rollout follows the choreography of
 [ADR 0106](../../docs/adr/0106-durable-formats-upgrade-by-migration-or-drain.md)
-§6: migrate, half roll, rollback, roll, drain, retire, finalize.
+§6: migrate, half roll, rollback, roll, drain, retire, finalize, and then
+the backfill and contract that finalize releases (FIG-3800 B, FIG-3817).
 
 **Execution class.** Deterministic-only. It is listed under `deterministic_only`
 in `parity-matrix.toml`. Every model reply comes from the node's scripted
@@ -43,11 +44,12 @@ reports the CLI build; the fleet generation comes from each node's ready file.
 
 `just e2e-rolling` builds both node and operator binaries into `<artifacts>/bin/n/` and
 `<artifacts>/bin/n+1/`. It starts one pinned `restate-server`, plus a pg16
-container unless `LASH_POSTGRES_DATABASE_URL` names a database. Then it runs
+container unless `LASH_POSTGRES_DATABASE_URL` names a server. Then it runs
 `roll_and_rollback_smoke` in `crates/lash-upgrade-harness/tests/rolling/`.
-The smoke rolls twice: once over PostgreSQL and once over a fresh SQLite store
-directory. Each roll has its own Restate namespace and authority, and all of
-its turns go to one session, so each build reads what the other wrote.
+The smoke rolls twice: once over a fresh PostgreSQL database of its own, and
+once over a fresh SQLite store directory. Each roll has its own Restate
+namespace and authority, and all of its turns go to one session, so each
+build reads what the other wrote.
 
 | Step | Nodes serving afterwards | Turns | Driver the run requires |
 |---|---|---|---|
@@ -56,15 +58,34 @@ its turns go to one session, so each build reads what the other wrote.
 | rollback | N (URI 3) | host N | N |
 | roll | N+1 (URI 4) | host N+1 | N+1 |
 
+On PostgreSQL the half roll also starts the forward drain of N's
+generation, and the rollback happens mid-drain: the forward drain ends, N+1's
+generation drains in reverse, and N comes back. The roll then drains N's
+generation again, and finalize runs before the roll's turn:
+
+| Finalize step (PostgreSQL) | What the run requires |
+|---|---|
+| `finalize` while N's stopped deployments are still registered | exit 3, refusal `deployments_retained`; `F` unchanged |
+| remove every deployment serving N's generation lanes | at least one removed |
+| `finalize-hold set`, then `finalize` | exit 3, refusal `held` |
+| `migrate --phase contract` before finalize | exit 3, refusal `contract_before_finalize` |
+| `finalize-hold clear`, then `finalize` | `F` moves from 1 to 2; every backfill `applied` |
+| `end-drain` of N's generation, then `migrate --phase contract` | the contract step runs |
+| N probes the store | refused `reader_floor_above` (floor 2) |
+
 Every deployment registers at a fresh URI; no build ever re-registers over
 another build's URI (ADR 0115 §3.5). A node that stops is killed the way a
 pod dies. A node that has exited by itself before it is stopped fails the
-run, because that exit means it refused something.
+run, because that exit means it refused something. After the last turn of
+each roll, the run requires every turn answered and each turn's model call
+recorded exactly once in the case's effects log: nothing lost, nothing
+duplicated.
 
-**Not yet run.** Finalize waits for FIG-3800 B. The eight `phase_a` legs in
-`crates/lash-upgrade-harness/tests/phase_a/` are listed there, each ignored
-with the lane it waits for. The runbook grows a phase for each one as it
-lands.
+The eight `phase_a` legs in `crates/lash-upgrade-harness/tests/phase_a/` run
+under `just phase-a`. The legs that finalize (`history_after_finalize`,
+`object_sweep_crash_resume`) retire N's deployments and run `lashctl
+finalize` the same way; `finalize_races_every_writer` races writers against
+the production flip itself.
 
 ## Operator commands
 
@@ -81,9 +102,12 @@ set to the PostgreSQL test database. Every command uses the Bazel-built
 | `lashctl drain` | reverse drain before N+1 retires in rollback | no PostgreSQL generation drain | `lashctl drain "$NEW_GENERATION" --json` |
 | `lashctl drain-status` | require drained after N+1 retires | no PostgreSQL generation drain | `lashctl drain-status "$NEW_GENERATION" --json` |
 | `lashctl end-drain` | clear reverse drain after N+1 retires | no PostgreSQL generation drain | `lashctl end-drain "$NEW_GENERATION" --json` |
-| `lashctl drain` | forward drain before N retires in roll | no PostgreSQL generation drain | `lashctl drain "$OLD_GENERATION" --json` |
+| `lashctl drain` | forward drain at the half roll, ended by the rollback, and again before N retires in roll | no PostgreSQL generation drain | `lashctl drain "$OLD_GENERATION" --json` |
 | `lashctl drain-status` | require drained after N retires | no PostgreSQL generation drain | `lashctl drain-status "$OLD_GENERATION" --json` |
-| `lashctl end-drain` | clear forward drain after N retires | no PostgreSQL generation drain | `lashctl end-drain "$OLD_GENERATION" --json` |
+| `lashctl finalize` | refused while N's deployments are registered and while held, then finalizes after they are removed | SQLite finalize is `SqliteStoreSet::finalize`, not a `lashctl` verb | `lashctl finalize "$OLD_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json` |
+| `lashctl finalize-hold` | set before finalize to prove the hold, then cleared | no SQLite hold | `lashctl finalize-hold set --reason <text> --json`, `lashctl finalize-hold clear --json` |
+| `lashctl end-drain` | clear forward drain after finalize | no PostgreSQL generation drain | `lashctl end-drain "$OLD_GENERATION" --json` |
+| `lashctl migrate` | contract: refused before finalize, runs after the backfills | migrates on open | `lashctl migrate --phase contract --json` |
 
 The N+1 operator binary runs N+1's migrate, preflight, version and drain
 commands. `OLD_GENERATION` and `NEW_GENERATION` are the node ready-file values.
@@ -127,5 +151,10 @@ The judge answers each item from the bundle and cites the file:
 5. **No refusal.** No node log holds an error, a panic, or a typed store
    refusal (`Incompatible`, `WriterFenced`, `SchemaVersionOutOfRange`,
    `FleetFormatOutsideWritableRange`).
+6. **Finalize.** The E2E log shows, in order: `lashctl finalize` refused
+   `deployments_retained`, then refused `held`; `lashctl migrate --phase
+   contract` refused `contract_before_finalize`; `lashctl finalize` answering
+   `{"outcome":"finalized","from":1,"to":2}` with every backfill `applied`;
+   and `lashctl migrate --phase contract` executing its step.
 
 Any failed item is an Abort/RCA under [../RULES.md](../RULES.md).

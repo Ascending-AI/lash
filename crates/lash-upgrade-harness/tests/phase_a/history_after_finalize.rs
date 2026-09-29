@@ -104,16 +104,23 @@ fn history_after_finalize() -> Result<()> {
     n_node.stop()?;
     let status = operator_next.run("drain-status", Some(&n_generation))?;
     ensure!(status["drained"] == true, "N did not drain: {status}");
+    let finalized = case.retire_and_finalize(&operator_next, &n_generation)?;
+    ensure!(
+        finalized["fleet_format"] == 2,
+        "finalize did not move F: {finalized}"
+    );
     operator_next.run("end-drain", Some(&n_generation))?;
-    case.finalize_postgres(2)?;
     next_rolled.stop()?;
 
-    // N is fenced out of the finalized fleet.
+    // N is fenced out of the finalized fleet: `F` is past its writable
+    // range, and the backfill finalize ran added a constraint N's tolerant
+    // shape check refuses, whichever N's open meets first.
     let refusal = n.probe_refusal(&case)?;
     ensure!(
         matches!(
             refusal,
             CompatRefusal::FleetOutsideWritable { recorded: 2, .. }
+                | CompatRefusal::ShapeRefused { .. }
         ),
         "N opened the finalized store with {refusal:?}"
     );

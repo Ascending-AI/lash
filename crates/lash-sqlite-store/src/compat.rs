@@ -3,6 +3,7 @@
 use lash_core_execution::compat::{
     self, CompatAdmission, CompatRefusal, CompatStamp, StampRead, VersionRange,
 };
+use lash_core_execution::store::fleet_finalize::FleetEpochFlip;
 use lash_core_execution::{FleetFormat, FleetFormatState, StoreError};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -189,7 +190,6 @@ pub(crate) fn fence(
 }
 
 /// One step of [`advance_set`], as its observer sees it.
-#[cfg(any(test, feature = "testing"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AdvanceStep {
     /// `BEGIN EXCLUSIVE` holds this database.
@@ -207,7 +207,6 @@ pub(crate) enum AdvanceStep {
 /// that was already past its fence finishes first under the old row. A crash
 /// between two commits leaves the databases disagreeing, and the next set
 /// open refuses that as `PartiallyAdvanced` ([`check_set`]).
-#[cfg(any(test, feature = "testing"))]
 pub(crate) fn advance_set(
     location: &SqliteLocation,
     busy_timeout: std::time::Duration,
@@ -217,7 +216,6 @@ pub(crate) fn advance_set(
 }
 
 /// [`advance_set`], reporting each lock and commit to `observe` as it happens.
-#[cfg(any(test, feature = "testing"))]
 pub(crate) fn advance_set_observed(
     location: &SqliteLocation,
     busy_timeout: std::time::Duration,
@@ -251,27 +249,43 @@ pub(crate) fn advance_set_observed(
     Ok(())
 }
 
-/// Finalize: move `F` to `fleet` in every database of the store, as one
-/// [`advance_set`]. Every writer whose writable range excludes `fleet` is
+/// Finalize: move `F` in every database of the store to `writable.max()`,
+/// the finalizing build's `F_self`, as one [`advance_set`] (ADR 0106 §2, ADR
+/// 0115 §2.2). Every writer whose writable range excludes the new `F` is
 /// fenced from its next transaction on.
-#[cfg(any(test, feature = "testing"))]
+///
+/// Each database's row passes the writer fence first, under the exclusive
+/// lock: its stamp is re-admitted, and a recorded `F` outside `writable` is
+/// `WriterFenced`, so a build a newer release already fenced cannot finalize.
+/// A database already at `F_self` is left as it is, which completes forward
+/// a set a crash left partially finalized. The answer is `Finalized` from
+/// the lowest epoch any database recorded, or `AlreadyFinalized` when every
+/// database already records `F_self`.
 pub(crate) fn finalize(
     location: &SqliteLocation,
     busy_timeout: std::time::Duration,
-    fleet: u32,
-) -> rusqlite::Result<()> {
+    writable: VersionRange,
+) -> rusqlite::Result<FleetEpochFlip> {
+    let target = writable.max();
+    let mut lowest = target;
     advance_set(location, busy_timeout, |database, tx| {
-        if tx.execute(
+        let recorded = fence(tx, database, writable)?.version();
+        lowest = lowest.min(recorded);
+        if recorded == target {
+            return Ok(());
+        }
+        tx.execute(
             "UPDATE lash_compat SET fleet_format = ?1 WHERE singleton = 1",
-            [i64::from(fleet)],
-        )? == 1
-        {
-            Ok(())
-        } else {
-            Err(incompatible(CompatRefusal::Unstamped {
-                component: database.component().as_str().to_owned(),
-                writing_release: writing_release(tx, database),
-            }))
+            [i64::from(target)],
+        )?;
+        Ok(())
+    })?;
+    Ok(if lowest == target {
+        FleetEpochFlip::AlreadyFinalized { fleet: target }
+    } else {
+        FleetEpochFlip::Finalized {
+            from: lowest,
+            to: target,
         }
     })
 }

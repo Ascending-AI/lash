@@ -34,9 +34,9 @@ The JSON envelope has `schema_version`, `command`, `result` and `error`.
 `result.cli_build_generation` is the CLI binary's own drain generation `G`.
 `result.fleet_generations` lists generations with pinned work or a drain mark
 in the PostgreSQL store. Each entry has `generation`, `draining`, and
-`source: "postgres"`. The CLI does not have a Restate admin endpoint, so this
+`source: "postgres"`. `version` does not read the Restate admin API, so this
 list cannot show a registered deployment that has no store work and no drain
-mark. Use `fleet_generations` to find the generation to drain, and confirm the
+mark; `finalize` reads it. Use `fleet_generations` to find the generation to drain, and confirm the
 serving node's generation before retiring its deployment. The result also
 reports the release, fleet epoch `F`'s writable range, each component's
 `reads` and `writes` ranges, and the remote and Restate wire ranges.
@@ -136,13 +136,105 @@ state while investigating either refusal.
    build can decode, with the listing, in the release record.
 
 4. Retire N's Restate deployment only after the drain and the host's pinned
-   invocation check both pass. Close the generation drain after retirement:
+   invocation check both pass: remove every deployment that serves N's
+   generation lanes (`…_g$OLD_GENERATION`) from the Restate server. Then
+   finalize (next section) while N's drain mark still stands, and close the
+   generation drain after it:
 
    ```sh
    lashctl end-drain "$OLD_GENERATION" --json
    ```
 
-   Record the drain status and retirement evidence with the release record.
+   Record the drain status, the retirement evidence and the finalize result
+   with the release record.
+
+## Finalize the release
+
+Finalize ends the rollback window. It is the last step of N's drain, and it
+is irreversible: it moves the fleet epoch `F` to N+1's, every writer whose
+writable range excludes the new `F` stops with `WriterFenced` at its next
+transaction, and N no longer opens the store. Run it with N+1's `lashctl`,
+the build whose epoch it moves to, and name N's generation and the Restate
+admin API the deployments are registered with:
+
+```sh
+lashctl finalize "$OLD_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json
+```
+
+Finalize changes nothing, and refuses typed, until all of these hold:
+
+| Refusal | Exit | Meaning and action |
+| --- | --- | --- |
+| `generation_not_drained` | 5 | N's generation is not marked draining, or it still holds a live or parked process, a parked or in-flight turn, or a closing session. The refusal carries the drain status; keep polling `drain-status`. |
+| `deployments_retained` | 3 | The Restate server still holds a deployment serving N's generation lanes, in any namespace. The refusal lists each by id and URI. Remove them once their pinned invocations have drained. |
+| `held` | 3 | An operator holds the automatic finalize. The refusal carries the hold's reason and when it was set. |
+
+Retirement is read from the Restate server's deployment listing and the
+store's own drain records, never from worker heartbeats: a registered
+deployment that is asleep still counts. A Restate admin API that cannot be
+read fails closed with exit 1.
+
+The host's rollout runs `lashctl finalize` as the drain's automatic last
+step. An operator who wants to keep the rollback window open, for example to
+watch N+1 under production traffic, holds it first:
+
+```sh
+lashctl finalize-hold set --reason "watch N+1 for a day" --json
+lashctl finalize-hold show --json
+lashctl finalize-hold clear --json
+```
+
+The hold lives on the fleet-format row, which finalize locks to move `F`, so
+a hold set while a rollout finalizes is either seen by that finalize or set
+after it committed. While the hold stands, the automatic finalize refuses
+`held`, and an operator can still finalize by hand:
+
+```sh
+lashctl finalize "$OLD_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --override-hold --json
+```
+
+Finalizing by hand leaves the hold set; clear it separately.
+
+After it moves `F`, finalize runs every backfill N+1 carries to completion.
+A backfill rewrites rows into N+1's shape in batches. Each batch is one
+transaction that rewrites a bounded run of rows after the backfill's cursor
+and moves the cursor in the same commit, so an interruption loses at most the
+batch in flight, and rows already in the new shape are left as they are. The
+`lash_migrations` ledger records each backfill's `running` or `applied`
+state, its cursor and its rewritten-row count, and the result lists every
+backfill finalize completed. If finalize is interrupted after it moved `F`,
+run it again before `end-drain`: it checks retirement again, reports
+`already_finalized` and resumes the backfills from their cursors. The
+backfills alone can also be resumed, at any time after finalize:
+
+```sh
+lashctl migrate --phase backfill --json
+```
+
+A backfill that runs before finalize is refused
+`backfill_before_finalize`: nothing rewrites a row N reads while rollback to
+N is promised. A constraint the release tightens is added `NOT VALID` by the
+backfill, so new rows obey it at once, and validated by contract.
+
+Contract drops or tightens what only N needed and raises the schema's reader
+floor, so N refuses the store with `reader_floor_above` from then on. It
+waits for finalize and for the ledger to show every backfill it names
+`applied`:
+
+```sh
+lashctl migrate --phase contract --dry-run --json
+lashctl migrate --phase contract --json
+```
+
+Before finalize it is refused `contract_before_finalize`; before its
+backfills are done, `contract_before_backfills`, naming each pending one.
+Both are exit 3, and the dry run refuses the same way the run does.
+
+A SQLite store is not reached by `lashctl`. The host that owns it finalizes
+with `SqliteStoreSet::finalize`, which applies the same drain and retirement
+checks, moves `F` in all three databases under exclusive locks, and completes
+forward a set a crash left partially finalized. A SQLite store has no
+operator hold.
 
 ## Roll back before finalize
 
@@ -163,13 +255,11 @@ rollback must not delete that deployment or its state. If either build reports
 a typed incompatibility, stop traffic to that build and resolve the recorded
 version or route before resuming.
 
-**After 1.0:** `lashctl finalize`, its retired-deployment check and hold flag
-arrive before the first real N-to-N+1 finalize. Finalize moves `F` only after
-N has drained and its deployment is removed. That move fences N's writers and
-ends rollback to N; recovery then rolls forward. Object upgrade handlers and
-their sweep, backfill and contract also arrive after 1.0. They run after the
-irreversible boundary, with contract waiting for the backfill ledger. The
-1.0 binary does not serve these commands or steps.
+Rollback is safe until finalize, and only until then. Finalize moves `F`
+only after N has drained and its deployments are removed, and that move
+fences N's writers; recovery then rolls forward. Restate object upgrade
+handlers and their sweep arrive with the first release that changes an
+object format; they also run after finalize.
 
 ## Client and server version skew
 

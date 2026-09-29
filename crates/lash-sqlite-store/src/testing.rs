@@ -133,24 +133,22 @@ pub fn read_rows_for_testing(
     Ok(read)
 }
 
-/// Finalize the store at `location`: move the fleet epoch `F` to `fleet` in
-/// every database, under `BEGIN EXCLUSIVE` taken in [`SqliteDatabase::ALL`]
-/// order and committed in the same order (ADR 0115 §2.2). A writer that
-/// passed its fence first commits under the old `F`; every later writer
-/// whose writable range excludes `fleet` is refused `WriterFenced`.
-///
-/// Phase A's synthetic finalize; the operator verb is FIG-3800 B's.
-///
-/// [`SqliteDatabase::ALL`]: crate::SqliteDatabase
+/// Finalize the store at `location` as a build whose writable range is
+/// `[1, fleet]`: the production flip of [`crate::SqliteStoreSet::finalize`],
+/// without its drain and retirement checks, for a test that races writers
+/// against it or stands in for a build other than the linked one.
 pub fn finalize_fleet_format(
     location: &crate::SqliteLocation,
     fleet: u32,
 ) -> Result<(), lash_core_execution::StoreError> {
+    let writable = lash_core_execution::compat::VersionRange::new(1, fleet)
+        .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
     crate::compat::finalize(
         location,
         std::time::Duration::from_millis(u64::from(crate::conn::BUSY_TIMEOUT_MS)),
-        fleet,
+        writable,
     )
+    .map(|_| ())
     .map_err(crate::sqlite_error)
 }
 

@@ -5,10 +5,11 @@
 //! default build, whose writable range is `[1,1]`. The lash node binary has
 //! no entry that pauses a transaction, and the `AfterFence` seam is a
 //! library fault point, so the races run in process rather than through
-//! `lash-upgrade-node`. N+1's finalize is the synthetic one every leg uses
-//! until `lashctl finalize` (FIG-3800 B): the fleet-format row read `FOR
-//! UPDATE` and moved on PostgreSQL, every database's `lash_compat` row
-//! rewritten under `BEGIN EXCLUSIVE` on SQLite.
+//! `lash-upgrade-node`. N+1's finalize is the production flip that
+//! `lashctl finalize` and `SqliteStoreSet::finalize` run, without their drain
+//! and retirement checks, which a race does not exercise: the fleet-format
+//! row read `FOR UPDATE` and moved on PostgreSQL, every database's
+//! `lash_compat` row rewritten under `BEGIN EXCLUSIVE` on SQLite.
 //!
 //! On each backend:
 //!

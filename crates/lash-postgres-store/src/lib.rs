@@ -552,7 +552,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // fleet-format row of ADR 0106 §1: the durable-format generation every writer
 // in the fleet emits. `lash migrate` carries a component-135 catalog forward
 // by creating the table; the first open provisions the row, and durable
-// writers consult it until `finalize-upgrade` (FIG-3800) moves it.
+// writers consult it until `lashctl finalize` (FIG-3800) moves it.
 //
 // Version 137 (FIG-3814) swaps `engine_effect_group_protocol_retired` for
 // `engine_object_state_format_unsupported` in the durable runtime-error
@@ -639,6 +639,18 @@ const SCHEMA_VERSION: i32 = 141;
 /// the range. For the 1.0 cut the range is the single current version — a
 /// compatibility release widens the floor when it is declared, never silently.
 const MIN_SUPPORTED_SCHEMA_VERSION: i32 = SCHEMA_VERSION;
+
+/// What [`PostgresStorage::finalize`] found and did.
+#[derive(Clone, Debug)]
+pub struct FinalizeReport {
+    /// The retired generation's drain status the finalize admitted.
+    pub drain: lash_core_execution::store::generation_drain::GenerationDrainStatus,
+    /// The move of `F`, or the finding that it had already moved.
+    pub flip: lash_core_execution::store::fleet_finalize::FleetEpochFlip,
+    /// The backfills this finalize ran to completion, each as its final
+    /// ledger row. Empty when none was pending.
+    pub backfills: Vec<MigrationStep>,
+}
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -851,16 +863,18 @@ impl PostgresStorage {
         })
     }
 
-    /// Provision or advance the schema for `database_url`: `lash migrate`'s
-    /// engine (FIG-3816).
+    /// Run one phase of the schema's expand/backfill/contract discipline for
+    /// `database_url`: `lashctl migrate`'s engine (FIG-3816, FIG-3817).
     ///
     /// This is the separate operational step the open path deliberately is
-    /// not: it takes the schema advisory lock exclusively, applies the pending
-    /// expand-phase migrations this build declares — or provisions an
-    /// unprovisioned database outright — and records each applied step in the
-    /// `lash_migrations` ledger. Rerunning it is a no-op. `phase` selects the
-    /// operations-arc phase; [`MigrationPhase::Backfill`] and
-    /// [`MigrationPhase::Contract`] are refused until FIG-3817.
+    /// not. [`MigrationPhase::Expand`] takes the schema advisory lock
+    /// exclusively, applies the pending expand migrations this build declares
+    /// — or provisions an unprovisioned database outright — and records each
+    /// applied step in the `lash_migrations` ledger.
+    /// [`MigrationPhase::Backfill`] resumes every pending backfill from its
+    /// ledger cursor and runs it to completion, and is refused typed before
+    /// finalize. [`MigrationPhase::Contract`] is refused typed until finalize
+    /// and every backfill it names are done. Rerunning any phase is a no-op.
     ///
     /// Workers must not call it: an open verifies the schema and never runs
     /// DDL, so a database that needs this is one that has not been provisioned
@@ -868,7 +882,7 @@ impl PostgresStorage {
     pub async fn migrate(
         database_url: &str,
         phase: MigrationPhase,
-    ) -> Result<MigrationReport, StoreError> {
+    ) -> Result<MigrationReport, MigrateError> {
         migrate::migrate(database_url, phase).await
     }
 
@@ -876,12 +890,103 @@ impl PostgresStorage {
     ///
     /// The dry-run reads the installation under the shared advisory lock with
     /// the same snapshot discipline an open's verification uses, so its answer
-    /// cannot describe a half-applied state.
+    /// cannot describe a half-applied state. A backfill or contract step whose
+    /// gate is closed is refused as the run would refuse it.
     pub async fn plan_migrations(
         database_url: &str,
         phase: MigrationPhase,
-    ) -> Result<MigrationReport, StoreError> {
+    ) -> Result<MigrationReport, MigrateError> {
         migrate::plan_migrations(database_url, phase).await
+    }
+
+    /// Finalize the release this build belongs to (ADR 0106 §2, ADR 0115
+    /// §2.1 and §3.5): the last step of `retired`'s drain.
+    ///
+    /// It reads `retired`'s drain status from this store and the deployments
+    /// `registry` still holds, and refuses typed unless the generation reads
+    /// drained and no deployment serves it. It then moves `F` to this build's
+    /// `F_self` in one transaction on the fleet-format row — refused while an
+    /// operator hold stands, when `mode` is [`FinalizeMode::Automatic`] — and
+    /// from that commit every writer whose writable range excludes the new
+    /// `F` is fenced. Last, it runs every pending backfill to completion.
+    /// Rerunning it after `F` has moved finds it finalized and resumes the
+    /// backfills, so an interrupted finalize is finished by running it again.
+    ///
+    /// [`FinalizeMode::Automatic`]: lash_core_execution::store::fleet_finalize::FinalizeMode::Automatic
+    pub async fn finalize(
+        &self,
+        retired: &lash_core_execution::engine::BuildGeneration,
+        registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
+        mode: lash_core_execution::store::fleet_finalize::FinalizeMode,
+        now_ms: u64,
+    ) -> Result<FinalizeReport, lash_core_execution::store::fleet_finalize::FinalizeError> {
+        self.finalize_with(
+            retired,
+            registry,
+            mode,
+            now_ms,
+            migrate::BACKFILL_BATCH_ROWS,
+        )
+        .await
+    }
+
+    /// [`Self::finalize`] with backfill batches of `batch_rows`.
+    async fn finalize_with(
+        &self,
+        retired: &lash_core_execution::engine::BuildGeneration,
+        registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
+        mode: lash_core_execution::store::fleet_finalize::FinalizeMode,
+        now_ms: u64,
+        batch_rows: i64,
+    ) -> Result<FinalizeReport, lash_core_execution::store::fleet_finalize::FinalizeError> {
+        use lash_core_execution::store::fleet_finalize::{FinalizeError, require_retired};
+        let drain = lash_core_execution::store::generation_drain::GenerationDrainStatus::collect(
+            self.generation_drain().as_ref(),
+            self.session_delete_ledger().as_ref(),
+            |kind| self.obligation_ledger(kind),
+            retired,
+            now_ms,
+        )
+        .await?;
+        require_retired(&drain, registry).await?;
+        let flip = finalize::flip(&self.pool, &self.fence, mode).await?;
+        let backfills = migrate::run_backfills(&self.pool, &self.fence, batch_rows)
+            .await
+            .map_err(|error| match error {
+                MigrateError::Store(error) => FinalizeError::Store(error),
+                MigrateError::Refused(refusal) => FinalizeError::Store(StoreError::Backend(
+                    format!("finalize moved F to {}, and then {refusal}", flip.fleet()),
+                )),
+            })?;
+        Ok(FinalizeReport {
+            drain,
+            flip,
+            backfills,
+        })
+    }
+
+    /// The operator's hold on the automatic finalize, if one stands.
+    pub async fn finalize_hold(
+        &self,
+    ) -> Result<Option<lash_core_execution::store::fleet_finalize::FinalizeHold>, StoreError> {
+        finalize::read_hold(&self.pool).await
+    }
+
+    /// Hold the automatic finalize, with the operator's `reason`. The hold
+    /// keeps the rollback window open: an automatic finalize is refused typed
+    /// until it is cleared, and an operator can still finalize by hand.
+    pub async fn set_finalize_hold(
+        &self,
+        reason: &str,
+    ) -> Result<lash_core_execution::store::fleet_finalize::FinalizeHold, StoreError> {
+        finalize::set_hold(&self.pool, &self.fence, reason).await
+    }
+
+    /// Clear the hold, answering the one that stood.
+    pub async fn clear_finalize_hold(
+        &self,
+    ) -> Result<Option<lash_core_execution::store::fleet_finalize::FinalizeHold>, StoreError> {
+        finalize::clear_hold(&self.pool, &self.fence).await
     }
 
     /// Build storage over an already-constructed pool.
@@ -1440,6 +1545,8 @@ mod blobs;
 mod connection_sql;
 #[path = "postgres/evidence_retention.rs"]
 mod evidence_retention;
+#[path = "postgres/finalize.rs"]
+mod finalize;
 #[path = "postgres/fleet_format.rs"]
 mod fleet_format;
 #[path = "postgres/generation_drain.rs"]
@@ -1520,7 +1627,7 @@ mod turn_ingress;
 
 pub use backend::PostgresStoreSet;
 use guarded_tx::begin_guarded;
-pub use migrate::{MigrationPhase, MigrationReport, MigrationStep};
+pub use migrate::{MigrateError, MigrationPhase, MigrationRefusal, MigrationReport, MigrationStep};
 pub use preflight::PostgresStorePreflight;
 pub use process_definitions::PostgresProcessDefinitionRegistry;
 use schema_shape::verify_schema_shape;

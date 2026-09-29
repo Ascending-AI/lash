@@ -744,11 +744,39 @@ lash_store_sql::statements! {
 
 lash_store_sql::statements! {
     /// `fleet_format` statements. The installer seeds the row, every open
-    /// reads the recorded generation, and only `finalize-upgrade` (FIG-3800)
-    /// ever moves it (ADR 0106 §1, ADR 0115 §2.1).
+    /// reads the recorded generation, and only `lashctl finalize` (FIG-3800)
+    /// ever moves it (ADR 0106 §1, ADR 0115 §2.1). The row also carries the
+    /// operator's hold on the automatic finalize.
     pub(crate) struct FleetFormatStatements @ "fleet_format" {
         /// The recorded fleet format.
         select_fleet_format = "SELECT format_version FROM fleet_format WHERE singleton = TRUE";
+
+        /// The operator's hold on the automatic finalize, read without a lock.
+        select_hold = "SELECT finalize_hold_reason, finalize_held_at_ms FROM fleet_format
+             WHERE singleton = TRUE";
+
+        /// Finalize's side of the fence, and the hold's: the row locked for
+        /// update, waiting behind every writer that holds it `FOR SHARE`.
+        select_for_update = "SELECT format_version, finalize_hold_reason, finalize_held_at_ms
+             FROM fleet_format
+             WHERE singleton = TRUE
+             FOR UPDATE";
+
+        /// Finalize's move of `F`, under the row lock `select_for_update` took.
+        update_format_version = "UPDATE fleet_format SET format_version = ?1
+             WHERE singleton = TRUE";
+
+        /// Set the operator's hold, stamped by the server clock.
+        update_set_hold = "UPDATE fleet_format
+             SET finalize_hold_reason = ?1,
+                 finalize_held_at_ms = (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+             WHERE singleton = TRUE
+             RETURNING finalize_held_at_ms";
+
+        /// Clear the operator's hold.
+        update_clear_hold = "UPDATE fleet_format
+             SET finalize_hold_reason = NULL, finalize_held_at_ms = NULL
+             WHERE singleton = TRUE";
 
         /// The writer fence: the first statement of every mutating
         /// transaction (ADR 0115 §2.2). The share lock is what orders a

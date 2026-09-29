@@ -64,6 +64,17 @@ fn operator_json_contract() {
             vec!["drain-status", "0123456789ab", "--json"],
         ),
         ("end-drain", vec!["end-drain", "0123456789ab", "--json"]),
+        (
+            "finalize",
+            vec![
+                "finalize",
+                "0123456789ab",
+                "--restate-admin-url",
+                "http://127.0.0.1:1",
+                "--json",
+            ],
+        ),
+        ("finalize-hold", vec!["finalize-hold", "show", "--json"]),
         ("preflight", vec!["preflight", "--json"]),
         ("version", vec!["version", "--json"]),
     ];
@@ -77,13 +88,23 @@ fn operator_json_contract() {
         );
     }
 
-    let (code, refused) = run(
-        &["migrate", "--phase", "contract", "--json"],
-        Some("postgres://unused/unused"),
-    );
-    assert_eq!(code, 3);
-    assert_envelope(&refused, "migrate", false, true);
-    assert_eq!(refused["error"]["code"], "refused_precondition");
+    // Finalize reads retirement from the engine, so it names the engine.
+    for args in [
+        vec!["finalize", "0123456789ab", "--json"],
+        vec![
+            "finalize",
+            "not-a-generation",
+            "--restate-admin-url",
+            "http://x",
+            "--json",
+        ],
+        vec!["finalize-hold", "set", "--json"],
+        vec!["finalize-hold", "set", "--reason", " ", "--json"],
+    ] {
+        let (code, usage) = run(&args, Some("postgres://unused/unused"));
+        assert_eq!(code, 2, "{args:?}");
+        assert_eq!(usage["error"]["code"], "usage", "{args:?}");
+    }
 
     let (code, failed) = run(&["migrate", "--dry-run", "--json"], Some("invalid-url"));
     assert_eq!(code, 1);
@@ -140,6 +161,22 @@ async fn operator_json_contract_postgres() {
             .expect("steps")
             .is_empty()
     );
+
+    // The 1.0 release carries no backfill and no contract step: both phases
+    // run and find nothing to do.
+    for phase in ["backfill", "contract"] {
+        for dry_run in [true, false] {
+            let mut args = vec!["migrate", "--phase", phase, "--json"];
+            if dry_run {
+                args.push("--dry-run");
+            }
+            let (code, body) = run(&args, Some(&scratch_url));
+            assert_eq!(code, 0, "{args:?}: {body}");
+            assert_envelope(&body, "migrate", true, false);
+            assert_eq!(body["result"]["executed"], json!([]));
+            assert_eq!(body["result"]["planned"], json!([]));
+        }
+    }
 
     let (code, preflight) = run(&["preflight", "--json"], Some(&scratch_url));
     assert_eq!(code, 0);

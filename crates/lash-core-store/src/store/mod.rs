@@ -21,6 +21,7 @@ mod error;
 pub mod fencing;
 #[cfg(test)]
 mod fencing_tests;
+pub mod fleet_finalize;
 mod fleet_format;
 mod fork_plan;
 pub mod generation_drain;
@@ -1698,7 +1699,7 @@ pub trait StoreMaintenance: Send + Sync {
 /// [`FleetFormat::writer_version`] rather than stamping the build's own
 /// constants: while a mixed-version fleet runs, `F` names the generation
 /// every worker in the fleet can still read, and a build's newer format
-/// knowledge stays unwritten until `finalize-upgrade` moves the row
+/// knowledge stays unwritten until `lashctl finalize` moves the row
 /// (FIG-3800). A store bound to a session answers the `F` its backend
 /// admitted at open; a store with no recorded row — an in-memory fake or a
 /// pre-`F` store — answers [`FleetFormat::current`], the only generation such

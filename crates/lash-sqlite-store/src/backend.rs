@@ -264,6 +264,78 @@ impl SqliteStoreSet {
         &self.inner.location
     }
 
+    /// Finalize the release this build belongs to over this store set (ADR
+    /// 0106 §2, ADR 0115 §2.2): the last step of `retired`'s drain.
+    ///
+    /// It is refused typed unless `retired` reads drained in this store and
+    /// `registry` holds no deployment serving it. It then moves `F` in each
+    /// of the three databases to this build's `F_self`, holding all three
+    /// exclusively, and every writer whose writable range excludes the new
+    /// `F` is fenced from its next transaction on. A crash between the three
+    /// commits leaves the set partially finalized; finalizing again completes
+    /// it forward.
+    ///
+    /// A SQLite store has no operator hold: the hold stops the fleet's
+    /// automatic finalize, `lashctl finalize` over PostgreSQL, and a host
+    /// that owns a SQLite store finalizes exactly when it calls this.
+    pub async fn finalize(
+        &self,
+        retired: &lash_core_execution::engine::BuildGeneration,
+        registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
+        now_ms: u64,
+    ) -> Result<
+        lash_core_execution::store::fleet_finalize::FleetEpochFlip,
+        lash_core_execution::store::fleet_finalize::FinalizeError,
+    > {
+        self.finalize_as(
+            retired,
+            registry,
+            now_ms,
+            lash_core_execution::FleetFormat::writable(),
+        )
+        .await
+    }
+
+    /// [`Self::finalize`] as a build whose writable range is `writable`.
+    pub(crate) async fn finalize_as(
+        &self,
+        retired: &lash_core_execution::engine::BuildGeneration,
+        registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
+        now_ms: u64,
+        writable: lash_core_execution::compat::VersionRange,
+    ) -> Result<
+        lash_core_execution::store::fleet_finalize::FleetEpochFlip,
+        lash_core_execution::store::fleet_finalize::FinalizeError,
+    > {
+        use lash_core_execution::StoreSet as _;
+        use lash_core_execution::store::fleet_finalize::{FinalizeError, require_retired};
+        let drain = lash_core_execution::store::generation_drain::GenerationDrainStatus::collect(
+            self.generation_drain().as_ref(),
+            self.session_delete_ledger().as_ref(),
+            |kind| self.obligation_ledger(kind),
+            retired,
+            now_ms,
+        )
+        .await?;
+        require_retired(&drain, registry).await?;
+        let location = self.inner.location.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::compat::finalize(
+                &location,
+                std::time::Duration::from_millis(u64::from(crate::conn::BUSY_TIMEOUT_MS)),
+                writable,
+            )
+            .map_err(crate::sqlite_error)
+        })
+        .await
+        .map_err(|error| {
+            FinalizeError::Store(lash_core_execution::StoreError::Backend(format!(
+                "the SQLite finalize task ended: {error}"
+            )))
+        })?
+        .map_err(FinalizeError::Store)
+    }
+
     /// `sqlite:<canonical durable-core.db path>` or `sqlite-memory:<id>`.
     pub fn identity(&self) -> &str {
         &self.inner.identity

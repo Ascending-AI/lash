@@ -82,6 +82,7 @@
 
 mod compat;
 mod controller;
+mod deployment_registry;
 mod durable_wait;
 mod effect_group;
 mod effect_host;
@@ -113,6 +114,7 @@ pub use controller::{
     EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
     RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
 };
+pub use deployment_registry::RestateDeploymentRegistry;
 pub use durable_wait::{
     DURABLE_WAIT_REGISTRY_FORMAT_VERSION, DURABLE_WAIT_REQUEST_VERSION, RestateDurableWaitAddress,
     RestateDurableWaitAwaitInput, RestateDurableWaitAwaitRequest,

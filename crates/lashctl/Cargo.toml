@@ -44,3 +44,7 @@ path = "src/main.rs"
 [[test]]
 name = "operator_json_contract"
 path = "tests/operator_json_contract.rs"
+
+[[test]]
+name = "finalize"
+path = "tests/finalize.rs"

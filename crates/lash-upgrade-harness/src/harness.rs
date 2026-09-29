@@ -698,7 +698,25 @@ impl Operator {
     }
 
     pub fn run(&self, verb: &str, generation: Option<&str>) -> Result<serde_json::Value> {
-        let (code, body) = self.answer(verb, generation)?;
+        self.run_args(&Self::words(verb, generation))
+    }
+
+    /// Run `verb` and answer its pinned exit code and its whole `--json`
+    /// body, whether it succeeded or refused.
+    pub fn answer(&self, verb: &str, generation: Option<&str>) -> Result<(i32, serde_json::Value)> {
+        self.answer_args(&Self::words(verb, generation))
+    }
+
+    fn words<'a>(verb: &'a str, generation: Option<&'a str>) -> Vec<&'a str> {
+        let mut words = vec![verb];
+        words.extend(generation);
+        words
+    }
+
+    /// Run the command `args` names and require it to succeed.
+    pub fn run_args(&self, args: &[&str]) -> Result<serde_json::Value> {
+        let (code, body) = self.answer_args(args)?;
+        let verb = args.first().copied().unwrap_or_default();
         ensure!(code == 0, "lashctl {verb} failed (exit {code}): {body}");
         ensure!(
             body["error"].is_null(),
@@ -707,18 +725,14 @@ impl Operator {
         Ok(body["result"].clone())
     }
 
-    /// Run `verb` and answer its pinned exit code and its whole `--json`
-    /// body, whether it succeeded or refused.
-    pub fn answer(&self, verb: &str, generation: Option<&str>) -> Result<(i32, serde_json::Value)> {
-        let mut command = Command::new(&self.path);
-        command
-            .arg(verb)
-            .env("LASH_POSTGRES_DATABASE_URL", &self.postgres_url);
-        if let Some(generation) = generation {
-            command.arg(generation);
-        }
-        command.arg("--json");
-        let output = command
+    /// Run the command `args` names and answer its pinned exit code and its
+    /// whole `--json` body, whether it succeeded or refused.
+    pub fn answer_args(&self, args: &[&str]) -> Result<(i32, serde_json::Value)> {
+        let verb = args.first().copied().unwrap_or_default();
+        let output = Command::new(&self.path)
+            .args(args)
+            .arg("--json")
+            .env("LASH_POSTGRES_DATABASE_URL", &self.postgres_url)
             .output()
             .with_context(|| format!("run lashctl {verb}"))?;
         let body: serde_json::Value =
@@ -728,10 +742,7 @@ impl Operator {
                     String::from_utf8_lossy(&output.stderr)
                 )
             })?;
-        println!(
-            "lashctl {verb} {}--json: {body}",
-            generation.map_or(String::new(), |value| format!("{value} "))
-        );
+        println!("lashctl {} --json: {body}", args.join(" "));
         ensure!(
             body["schema_version"] == 1 && body["command"] == verb,
             "invalid lashctl {verb} result: {body}"
@@ -1048,30 +1059,41 @@ impl Case {
         std::fs::write(&release, gate).with_context(|| format!("release gate {gate}"))
     }
 
-    /// Move the case's recorded fleet epoch to `version`: the synthetic
-    /// finalize (ADR 0115 §2). `lashctl finalize` is FIG-3800 B's, after
-    /// 1.0; the row it would move is the one moved here.
-    pub fn finalize_postgres(&self, version: u32) -> Result<()> {
-        let url = self
-            .postgres_url()
-            .ok_or_else(|| anyhow!("{} is not a PostgreSQL case", self.name))?
-            .to_owned();
-        let version = i32::try_from(version).context("an epoch")?;
+    /// Retire `generation`: remove every deployment the server holds that
+    /// serves its lanes, answering how many there were. The drain must have
+    /// read drained first; this is the host's half of retirement.
+    pub fn retire_generation(&self, generation: &str) -> Result<usize> {
+        let view = self.view()?;
         block_on(async move {
-            use sqlx::Connection as _;
-            let mut connection = sqlx::PgConnection::connect(&url)
-                .await
-                .with_context(|| format!("connect to {url}"))?;
-            let moved = sqlx::query("UPDATE lash_fleet_format SET format_version = $1")
-                .bind(version)
-                .execute(&mut connection)
-                .await
-                .context("move the fleet epoch")?
-                .rows_affected();
-            ensure!(moved == 1, "the fleet-format row moved {moved} rows");
-            connection.close().await.ok();
-            Ok(())
+            let retained = view.deployments_of_generation(generation).await?;
+            for deployment in &retained {
+                view.remove_deployment(&deployment.id).await?;
+            }
+            Ok(retained.len())
         })
+    }
+
+    /// The `lashctl finalize` arguments that retire `generation` against
+    /// this case's Restate server.
+    pub fn finalize_args<'a>(&'a self, generation: &'a str) -> [&'a str; 4] {
+        [
+            "finalize",
+            generation,
+            "--restate-admin-url",
+            self.services.admin_url.as_str(),
+        ]
+    }
+
+    /// The last step of `generation`'s drain: retire its deployments, then
+    /// finalize with the operator binary `operator` (FIG-3800 B). Answers
+    /// `lashctl finalize`'s result.
+    pub fn retire_and_finalize(
+        &self,
+        operator: &Operator,
+        generation: &str,
+    ) -> Result<serde_json::Value> {
+        self.retire_generation(generation)?;
+        operator.run_args(&self.finalize_args(generation))
     }
 
     fn next_ordinal(&self) -> u32 {

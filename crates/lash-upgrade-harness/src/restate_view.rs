@@ -15,6 +15,8 @@ pub struct Deployment {
     pub id: String,
     /// The URI it was registered at.
     pub endpoint: String,
+    /// The service names it serves, in every namespace.
+    pub services: Vec<String>,
 }
 
 /// One invocation of a handler, as `sys_invocation` reports it.
@@ -206,6 +208,12 @@ impl RestateView {
             id: String,
             #[serde(default)]
             uri: Option<String>,
+            #[serde(default)]
+            services: Vec<ListedService>,
+        }
+        #[derive(Deserialize)]
+        struct ListedService {
+            name: String,
         }
         let url = format!("{}/deployments", self.admin_url);
         let listing: Listing = self
@@ -225,9 +233,49 @@ impl RestateView {
                 listed.uri.map(|endpoint| Deployment {
                     id: listed.id,
                     endpoint,
+                    services: listed
+                        .services
+                        .into_iter()
+                        .map(|service| service.name)
+                        .collect(),
                 })
             })
             .collect())
+    }
+
+    /// Every deployment serving a generation lane of `generation`
+    /// (`…_g<G>`), in any namespace: what finalize counts as retained.
+    pub async fn deployments_of_generation(&self, generation: &str) -> Result<Vec<Deployment>> {
+        let lane = format!("_g{generation}");
+        Ok(self
+            .deployments()
+            .await?
+            .into_iter()
+            .filter(|deployment| {
+                deployment
+                    .services
+                    .iter()
+                    .any(|service| service.ends_with(&lane))
+            })
+            .collect())
+    }
+
+    /// Remove the deployment `id` from the server, as an operator retires a
+    /// drained build: its pinned journals can no longer run.
+    pub async fn remove_deployment(&self, id: &str) -> Result<()> {
+        let url = format!("{}/deployments/{id}?force=true", self.admin_url);
+        let response = self
+            .http
+            .delete(&url)
+            .send()
+            .await
+            .with_context(|| format!("DELETE {url}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            bail!("removing deployment {id} answered {status}: {body}");
+        }
+        Ok(())
     }
 
     /// The deployment registered at `uri`.

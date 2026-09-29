@@ -290,6 +290,28 @@ impl std::str::FromStr for RestateNamespace {
     }
 }
 
+/// The build generation whose lane a registered service name serves, in any
+/// namespace: `<Service>_g<G>` or `<namespace>.<Service>_g<G>` for a pinned
+/// lash service. `None` for a stable name, a shared service, or a name that
+/// is no lash service.
+///
+/// Finalize reads it over every deployment the server holds, whatever
+/// namespace registered it: a retired generation's deployment left in some
+/// other namespace still carries that build's pinned journals, so it counts
+/// as retained (ADR 0115 §3.5).
+pub(crate) fn generation_lane_of(name: &str) -> Option<BuildGeneration> {
+    let local = name.rsplit_once('.').map_or(name, |(_, local)| local);
+    LASH_SERVICES.iter().find_map(|&service| {
+        if service.lane_class() != LaneClass::Pinned {
+            return None;
+        }
+        let suffix = local
+            .strip_prefix(service.base_name())?
+            .strip_prefix("_g")?;
+        BuildGeneration::parse(suffix).ok()
+    })
+}
+
 /// Whether a lash service is split by build generation (FIG-3795).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LaneClass {

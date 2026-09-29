@@ -153,12 +153,20 @@ pub(crate) async fn expanded_findings(
 
 /// The synthetic next build's native catalog contains precisely its declared
 /// expansion on top of the N shape. A component-2 stamp alone is insufficient.
+///
+/// After finalize, the synthetic backfill adds the note's constraint `NOT
+/// VALID` and the synthetic contract validates it: the synthetic build
+/// declares that constraint too, so it is no finding for this build, while
+/// N's tolerant check still refuses it.
 #[cfg(feature = "synthetic-next")]
 pub(crate) async fn synthetic_next_findings(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     report: &SchemaReport,
 ) -> Result<Vec<String>, crate::StoreError> {
     let mut findings = expanded_findings(tx, report).await?;
+    findings.retain(|finding| {
+        finding != "added CHECK constraint lash_sessions.ck_lash_sessions_synthetic_next_note"
+    });
     let mut column_found = false;
     for finding in &report.findings {
         if let SchemaFinding::UnexpectedColumn { table, found } = finding {
