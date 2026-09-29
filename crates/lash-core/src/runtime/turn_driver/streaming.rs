@@ -618,6 +618,9 @@ impl RuntimeTurnDriver<'_> {
 
         // Everything the stream loop still holds persists before the step
         // returns, so the partial covers everything published.
+        if let Ok(response) = &result {
+            host_forwarder.capture_response_tool_calls(&response.parts);
+        }
         host_forwarder.flush().await;
         let capture = host_forwarder
             .finish()

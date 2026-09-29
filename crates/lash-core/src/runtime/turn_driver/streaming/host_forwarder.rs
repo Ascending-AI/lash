@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::*;
 use crate::runtime::turn_driver::capture_writer::CaptureWriter;
 use crate::store::CaptureFrame;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 // Tool-argument wire fragments reach this module only as capture frames:
 // hosts see a call once it is whole, as a semantic `Part(ToolCall)`.
 pub(super) enum ProviderDeltaClass {
@@ -89,6 +89,11 @@ pub(super) struct ProviderHostForwarder<'a> {
     held: Vec<crate::engine::ObservedEvent>,
     calls: BTreeMap<u64, StreamedCall>,
     unstreamed_calls: u64,
+    /// Blocks the capture has opened this attempt. A provider may stream a
+    /// block's deltas without announcing it; its capture opens it anyway.
+    open_blocks: BTreeSet<(ProviderDeltaClass, String)>,
+    /// Calls whose parse the capture has recorded this attempt.
+    parsed_calls: BTreeSet<String>,
     fault: Option<crate::store::StoreError>,
 }
 
@@ -105,6 +110,8 @@ impl<'a> ProviderHostForwarder<'a> {
             held: Vec::new(),
             calls: BTreeMap::new(),
             unstreamed_calls: 0,
+            open_blocks: BTreeSet::new(),
+            parsed_calls: BTreeSet::new(),
             fault: None,
         }
     }
@@ -117,6 +124,22 @@ impl<'a> ProviderHostForwarder<'a> {
             self.held.push(event);
         } else {
             self.cursor.observe(self.event_tx, event);
+        }
+    }
+
+    /// Opens `block` in the capture unless it already is, keyed as the
+    /// reducer keys it.
+    fn open_capture_block(&mut self, class: ProviderDeltaClass, block: &StreamBlockIdentity) {
+        if self.capture.is_none() {
+            return;
+        }
+        let key = if block.id.is_empty() {
+            format!("#{}", block.ordinal)
+        } else {
+            block.id.clone()
+        };
+        if self.open_blocks.insert((class, key)) {
+            self.capture_frame(class.start_frame(block.clone()));
         }
     }
 
@@ -135,6 +158,7 @@ impl<'a> ProviderHostForwarder<'a> {
         if content.is_empty() {
             return;
         }
+        self.open_capture_block(class, &block);
         self.capture_frame(class.delta_frame(block.clone(), content.clone()));
         if self.event_tx.is_closed() {
             return;
@@ -156,7 +180,7 @@ impl<'a> ProviderHostForwarder<'a> {
         class: ProviderDeltaClass,
         block: StreamBlockIdentity,
     ) {
-        self.capture_frame(class.start_frame(block.clone()));
+        self.open_capture_block(class, &block);
         let kind = class.block_kind();
         self.observe(crate::engine::ObservedEvent::Session(
             SessionStreamEvent::StreamBlockStarted {
@@ -177,6 +201,7 @@ impl<'a> ProviderHostForwarder<'a> {
         block: StreamBlockIdentity,
         text: String,
     ) {
+        self.open_capture_block(class, &block);
         self.capture_frame(class.end_frame(block.clone(), text.clone()));
         let kind = class.block_kind();
         self.observe(crate::engine::ObservedEvent::Session(
@@ -262,7 +287,7 @@ impl<'a> ProviderHostForwarder<'a> {
     /// (ADR 0114 §1.2). A call whose arguments the adapter never streamed is
     /// captured whole, as a start and an end, before its verdict.
     pub(super) fn capture_tool_call(&mut self, call_id: &str, tool_name: &str, input_json: &str) {
-        if self.capture.is_none() {
+        if self.capture.is_none() || !self.parsed_calls.insert(call_id.to_string()) {
             return;
         }
         let streamed = self
@@ -304,6 +329,22 @@ impl<'a> ProviderHostForwarder<'a> {
         self.capture_frame(frame);
     }
 
+    /// The completed response's calls the stream never delivered as parts:
+    /// captured so the tool steps that run them attach to a parsed call.
+    pub(super) fn capture_response_tool_calls(&mut self, parts: &[LlmOutputPart]) {
+        for part in parts {
+            if let LlmOutputPart::ToolCall {
+                call_id,
+                tool_name,
+                input_json,
+                ..
+            } = part
+            {
+                self.capture_tool_call(call_id, tool_name, input_json);
+            }
+        }
+    }
+
     /// Persist every staged frame, then release the observations held behind
     /// them, in order. Returns `false` once the capture has failed.
     pub(super) async fn flush(&mut self) -> bool {
@@ -331,6 +372,8 @@ impl<'a> ProviderHostForwarder<'a> {
         }
         self.calls.clear();
         self.unstreamed_calls = 0;
+        self.open_blocks.clear();
+        self.parsed_calls.clear();
         if let Some(capture) = self.capture.as_mut()
             && let Err(error) = capture.reset_attempt().await
         {
