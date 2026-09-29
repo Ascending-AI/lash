@@ -371,7 +371,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             )
         });
         for referrer in &frame_locks {
-            crate::artifact_store::lock_referrer_tx(&mut *tx, referrer)
+            crate::artifact_store::lock_referrer_tx(&mut tx, referrer)
                 .await
                 .map_err(store_sqlx_error)?;
         }
@@ -1135,7 +1135,7 @@ async fn fence_deleted_session_frames_tx(
     });
     let now = crate::support::postgres_transaction_epoch_ms(tx).await?;
     for referrer in referrers {
-        crate::artifact_store::lock_referrer_tx(&mut **tx, &referrer)
+        crate::artifact_store::lock_referrer_tx(tx, &referrer)
             .await
             .map_err(store_sqlx_error)?;
         sqlx::query(
@@ -1151,7 +1151,7 @@ async fn fence_deleted_session_frames_tx(
         .await
         .map_err(store_sqlx_error)?;
         crate::obligation_ledger::arm_cleanup_tx(
-            &mut **tx,
+            tx,
             &lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), None),
             now,
         )

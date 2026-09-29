@@ -42,7 +42,7 @@ pub(super) async fn prune_process_rows_tx(
 
     for process_id in process_ids {
         let referrer = ArtifactReferrer::ProcessRecord(process_id.clone());
-        crate::artifact_store::lock_referrer_tx(&mut **tx, &referrer)
+        crate::artifact_store::lock_referrer_tx(tx, &referrer)
             .await
             .map_err(plugin_sqlx_error)?;
         sqlx::query(
@@ -58,7 +58,7 @@ pub(super) async fn prune_process_rows_tx(
         .await
         .map_err(plugin_sqlx_error)?;
         crate::obligation_ledger::arm_cleanup_tx(
-            &mut **tx,
+            tx,
             &ArtifactCleanup::ended(referrer, Vec::new(), None),
             cleanup_due_at_ms,
         )

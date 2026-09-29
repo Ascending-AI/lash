@@ -18,7 +18,7 @@ async fn apply_frame_transition_tx(
         )
     });
     for referrer in &referrers {
-        crate::artifact_store::lock_referrer_tx(&mut **tx, referrer)
+        crate::artifact_store::lock_referrer_tx(tx, referrer)
             .await
             .map_err(store_sqlx_error)?;
     }
@@ -95,8 +95,7 @@ async fn apply_frame_transition_tx(
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    crate::obligation_ledger::arm_cleanup_tx(&mut **tx, &transition.ended_cleanup(), now_ms)
-        .await?;
+    crate::obligation_ledger::arm_cleanup_tx(tx, &transition.ended_cleanup(), now_ms).await?;
     Ok(())
 }
 
