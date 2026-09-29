@@ -765,6 +765,29 @@ macro_rules! attachment_condemnation_recovery_tests {
     };
 }
 
+/// Register the stalled attachment-delete retry laws with a shared store clock.
+#[macro_export]
+macro_rules! attachment_stalled_retry_tests {
+    ($fixture:block) => {
+        $crate::attachment_stalled_retry_tests!(@catalogue $fixture; [
+            (persistently_failing_delete_stalls_typed, "attachment-condemnation-delete-stall"),
+            (stalled_delete_recovers_after_backoff, "attachment-stalled-delete-recovery"),
+            (delete_retry_backoff_is_capped_and_never_early, "attachment-delete-retry-backoff"),
+            (concurrent_stalled_retry_deletes_once, "attachment-stalled-retry-fence"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_guard, factory, make_bytes, clock) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(factory, make_bytes, clock).await;
+            }
+        )*
+    };
+}
+
 #[macro_export]
 macro_rules! attachment_adoption_tests {
     ($fixture:block) => {
@@ -772,7 +795,6 @@ macro_rules! attachment_adoption_tests {
             bytes [
                 (cross_owner_attachment_adoption_conformance, "cross-owner-attachment-adoption"),
                 (concurrent_adoption_deletes_once, "attachment-condemnation-concurrent-adoption"),
-                (persistently_failing_delete_stalls_typed, "attachment-condemnation-delete-stall"),
             ]
             roots [
                 (attachment_condemnation_enumeration_conformance, "attachment-condemnation-enumeration"),

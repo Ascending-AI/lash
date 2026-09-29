@@ -312,17 +312,17 @@ pub struct AttachmentCondemnationRecord {
     pub delete_attempts: u32,
     /// The most recent failed delete's error, when one failed.
     pub last_delete_error: Option<String>,
-    /// Why no sweep retries the delete any more, when it stalled.
+    /// Why the delete stalled. Kept while later sweeps retry it with backoff.
     pub stalled: Option<AttachmentDeleteStallReason>,
 }
 
-/// Why a condemned digest's physical delete stopped being retried.
+/// Why a condemned digest's physical delete stalled before later retries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AttachmentDeleteStallReason {
     /// Retryable failures reached [`MAX_ATTACHMENT_DELETE_ATTEMPTS`].
     AttemptsExhausted,
-    /// The backend refused the delete with a failure retrying cannot change:
-    /// credentials, authorization, or a terminal or contract failure.
+    /// The backend refused the delete because of credentials, authorization,
+    /// or a terminal or contract failure. Later retries can observe recovery.
     Refused,
 }
 
@@ -339,7 +339,9 @@ impl AttachmentDeleteStallReason {
         }
     }
 
-    fn from_label(label: &str) -> Option<Self> {
+    /// Decode a stored stall label, rejecting unknown reasons.
+    #[must_use]
+    pub fn from_label(label: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|reason| reason.as_str() == label)
@@ -400,6 +402,8 @@ pub struct AdoptedAttachmentCondemnation {
     pub phase: AttachmentCondemnationPhase,
     /// Failed deletes recorded before adoption.
     pub delete_attempts: u32,
+    /// Existing stall, retained while its retry is in flight.
+    pub stalled: Option<AttachmentDeleteStallReason>,
 }
 
 /// What adoption found among the sweep-owned condemnations of older
@@ -410,7 +414,9 @@ pub struct AttachmentCondemnationAdoption {
     pub adopted: Vec<AdoptedAttachmentCondemnation>,
     /// Rows whose pass is still live: left to that pass.
     pub held_by_live_pass: Vec<crate::AttachmentId>,
-    /// Rows whose delete stalled: listed, never retried.
+    /// Rows whose retry is not due yet and whose delete has not stalled.
+    pub backing_off: Vec<crate::AttachmentId>,
+    /// Stalled rows left waiting for backoff or a live pass.
     pub stalled: Vec<crate::AttachmentId>,
 }
 
@@ -425,7 +431,8 @@ pub enum AttachmentCondemnationSettlement {
     Spared,
     /// The final `HEAD` or the physical delete failed: `Deleting ->
     /// Condemned`, one more failed attempt, and `error` recorded. With `stall`
-    /// the row stops being adopted; without it the next sweep retries.
+    /// the row stays listed as stalled. Every failure schedules a later retry
+    /// with capped backoff on the store clock.
     Failed {
         stall: Option<AttachmentDeleteStallReason>,
         error: String,
@@ -526,8 +533,7 @@ pub fn decode_attachment_condemnation_record(
         })
         .transpose()?;
     if (delete_attempts == 0) != last_delete_error.is_none()
-        || (stalled.is_some()
-            && (delete_attempts == 0 || phase != AttachmentCondemnationPhase::Condemned))
+        || (stalled.is_some() && delete_attempts == 0)
     {
         return Err(corrupt(format!(
             "attachment `{digest}` has inconsistent delete failure state: phase `{phase:?}`, {delete_attempts} attempts, error present {}, stall {stalled:?}",
@@ -600,8 +606,8 @@ mod condemnation_record_decode_tests {
                 ..failed(None)
             },
             StoredAttachmentCondemnation {
-                phase: "deleting".to_owned(),
-                ..failed(Some("refused"))
+                stall_reason: Some("refused".to_owned()),
+                ..row("condemned")
             },
         ] {
             assert!(matches!(
@@ -609,6 +615,12 @@ mod condemnation_record_decode_tests {
                 Err(StoreError::StoredDataCorrupt { .. })
             ));
         }
+        let retrying = decode_attachment_condemnation_record(StoredAttachmentCondemnation {
+            phase: "deleting".to_owned(),
+            ..failed(Some("refused"))
+        })
+        .expect("an armed retry retains its stall");
+        assert_eq!(retrying.stalled, Some(AttachmentDeleteStallReason::Refused));
         let stalled = decode_attachment_condemnation_record(failed(Some("attempts_exhausted")))
             .expect("a stalled condemnation decodes");
         assert_eq!(

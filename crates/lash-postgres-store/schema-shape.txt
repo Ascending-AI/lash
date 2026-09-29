@@ -55,6 +55,7 @@ table lash_attachment_condemnations
   column attachment_id text not-null
   column delete_attempts integer not-null default
   column last_delete_error text nullable
+  column next_delete_at_ms bigint not-null default
   column phase text not-null
   column stall_reason text nullable
   column sweep_generation bigint not-null

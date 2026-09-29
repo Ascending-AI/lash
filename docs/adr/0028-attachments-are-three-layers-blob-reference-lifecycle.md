@@ -77,8 +77,9 @@ re-reading closes that. The sweep closes it with a clockless CAS state machine i
 the lash-owned root authority — the same durable store the manifest lives in, so
 the two sides meet inside one transaction rather than across two reads.
 
-Per digest the state is `Free`, `Condemned`, or `Deleting`, and every transition
-is a conditional mutation with no timestamp anywhere in it. The writer's `put`
+Per digest the state is `Free`, `Condemned`, or `Deleting`, and ownership
+transitions are conditional mutations. A failed delete records a retry deadline
+on the store clock; that deadline grants no ownership. The writer's `put`
 goes through `AttachmentManifest::begin_attachment_write`, which mints a fresh
 `write_id` for the attempt, records the write-ahead intent under it, *and*
 resolves the condemnation in one mutation: it claims a `Condemned` digest with
@@ -115,8 +116,8 @@ carrying its `write_id`, and a stale permit settles nothing at all. It preserves
 `Condemned` unless the same intent became a committed root while the claim was
 held; that newer root supersedes the old unarmed condemnation before the older
 sweep can arm it. A failed delete returns `Deleting` to `Condemned`, where a
-writer may reclaim the digest and the next sweep retries it; a delete that
-keeps failing stalls with a typed reason (ADR 0067 §6).
+writer may reclaim the digest and later sweeps retry it with capped backoff; a delete that
+keeps failing stays listed with a typed stall until success (ADR 0067 §6).
 Whoever loses a CAS
 yields: a writer parks and retries, and a sweep that meets a peer's condemnation
 defers the digest to the next sweep. Nothing waits on a
@@ -124,9 +125,10 @@ lease or a TTL, and no SQL/blob-store atomicity is needed, because the
 authority's state machine — not the backend — decides whether bytes may die. A
 parked writer does pace its re-acquires with a bounded backoff rather than
 spinning, since a physical delete against remote storage takes real time; that
-delay is politeness between CAS attempts, and it is the *only* place time
-appears. No transition, and above all no reclamation, is ever authorized by
-elapsed time.
+delay paces CAS attempts. Amended 2026-09-29 (FIG-4139): failed sweep
+deletes also use a durable retry deadline on the store clock, with capped
+backoff. Elapsed time makes a retry eligible; it never proves a sweep owner
+dead, revokes a fence, or expires a row.
 Amended 2026-09-29 (FIG-4100): clearing a condemnation left behind by a
 sweeper that died mid-delete is no longer host policy, and the host lever
 `AttachmentRootSet::release_attachment_condemnation` is deleted. Attachment GC

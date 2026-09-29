@@ -379,9 +379,11 @@ pub(crate) async fn adopt_attachment_condemnations(
     fence: &crate::guarded_tx::WriterFence,
     catalog_id: &str,
     generation: &lash_core_execution::AttachmentSweepGeneration,
+    now: u64,
 ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, StoreError> {
     let mine = sweep_generation_sql(generation)?;
-    let rows = sqlx::query_as::<_, (String, i64, String, i32, Option<String>)>(
+    let now = i64::try_from(now).unwrap_or(i64::MAX);
+    let rows = sqlx::query_as::<_, (String, i64, String, i32, Option<String>, i64)>(
         attachment_sql().condemnation.select_adoptable.sql(),
     )
     .bind(mine)
@@ -390,10 +392,24 @@ pub(crate) async fn adopt_attachment_condemnations(
     .map_err(store_sqlx_error)?;
     let mut dead = std::collections::BTreeMap::new();
     let mut adoption = lash_core_execution::AttachmentCondemnationAdoption::default();
-    for (digest, owner, phase, delete_attempts, stall_reason) in rows {
+    for (digest, owner, phase, delete_attempts, stall_reason, next_delete_at_ms) in rows {
         let id = attachment_id_from_sql("attachment condemnation", "attachment_id", digest)?;
-        if stall_reason.is_some() {
-            adoption.stalled.push(id);
+        let stalled = stall_reason
+            .map(|label| {
+                lash_core_execution::AttachmentDeleteStallReason::from_label(&label).ok_or_else(
+                    || StoreError::StoredDataCorrupt {
+                        record_kind: "attachment condemnation",
+                        message: format!("attachment `{id}` has unknown stall reason `{label}`"),
+                    },
+                )
+            })
+            .transpose()?;
+        if phase != "deleting" && next_delete_at_ms > now {
+            if stalled.is_some() {
+                adoption.stalled.push(id);
+            } else {
+                adoption.backing_off.push(id);
+            }
             continue;
         }
         let owner_dead = match dead.get(&owner) {
@@ -405,6 +421,9 @@ pub(crate) async fn adopt_attachment_condemnations(
             }
         };
         if !owner_dead {
+            if stalled.is_some() {
+                adoption.stalled.push(id.clone());
+            }
             adoption.held_by_live_pass.push(id);
             continue;
         }
@@ -414,6 +433,7 @@ pub(crate) async fn adopt_attachment_condemnations(
             .bind(id.as_str())
             .bind(mine)
             .bind(owner)
+            .bind(now)
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
@@ -443,6 +463,7 @@ pub(crate) async fn adopt_attachment_condemnations(
                     digest: id,
                     phase,
                     delete_attempts,
+                    stalled,
                 });
         }
     }
@@ -457,6 +478,7 @@ pub(crate) async fn settle_attachment_condemnation(
     attachment_id: &str,
     generation: &lash_core_execution::AttachmentSweepGeneration,
     settlement: lash_core_execution::AttachmentCondemnationSettlement,
+    now: u64,
 ) -> Result<lash_core_execution::AttachmentSettlementOutcome, StoreError> {
     let generation = sweep_generation_sql(generation)?;
     let mut tx = crate::begin_guarded(pool, fence).await?;
@@ -483,6 +505,11 @@ pub(crate) async fn settle_attachment_condemnation(
                 .bind(generation)
                 .bind(error)
                 .bind(stall.map(|reason| reason.as_str()))
+                .bind(
+                    i64::try_from(now)
+                        .unwrap_or(i64::MAX)
+                        .min(i64::MAX - 900_000),
+                )
                 .execute(&mut **tx)
                 .await
         }

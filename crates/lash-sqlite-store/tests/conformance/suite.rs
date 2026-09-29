@@ -1126,3 +1126,12 @@ lash_conformance::retention_tests!({
     let factory = backend.store().await as Arc<dyn DeploymentStore>;
     (backend, factory)
 });
+
+lash_conformance::attachment_stalled_retry_tests!({
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
+    let backend = TestBackend::open_with_clock(SUBSTRATE, clock.clone()).await;
+    let factory = backend.store().await;
+    let bytes_root = tempfile::tempdir().expect("attachment bytes root");
+    let make_bytes = crate::backend_fixture::attachment_bytes(&bytes_root);
+    ((backend, bytes_root), factory, make_bytes, clock)
+});

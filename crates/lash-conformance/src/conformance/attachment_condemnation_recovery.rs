@@ -457,8 +457,8 @@ pub async fn concurrent_adoption_deletes_once(
 
 /// A delete that keeps failing is retried by later sweeps, one attempt each,
 /// then stalls with a typed reason in the condemnation listing. It never
-/// drops the row while the bytes remain, and a stalled row is not retried. A
-/// failure retrying cannot change stalls at once.
+/// drops the row while the bytes remain. An early sweep waits for backoff. A
+/// refused failure stalls at once.
 #[expect(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -467,6 +467,7 @@ pub async fn concurrent_adoption_deletes_once(
 pub async fn persistently_failing_delete_stalls_typed(
     f: Arc<dyn DeploymentStore>,
     make_bytes: AttachmentBytesFactory,
+    clock: Arc<testing::TestClock>,
 ) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("failing-delete-{namespace}"));
@@ -514,10 +515,12 @@ pub async fn persistently_failing_delete_stalls_typed(
             "attempt {attempt}"
         );
         assert!(backend.get(&reference.id).await.is_ok(), "the bytes remain");
+        if attempt < MAX_ATTACHMENT_DELETE_ATTEMPTS {
+            clock.advance(900_000);
+        }
     }
-    // A stalled row is listed and reported, never retried: the sweep that
-    // follows issues no delete and records no attempt, even once the backend
-    // would accept it.
+    // A stalled row remains listed before its retry is due, even once the
+    // backend would accept the delete.
     backend.fail_delete(false);
     let log = DeleteLog::over(backend.clone() as Arc<dyn AttachmentStore>);
     let report = reclaim_unreferenced_attachments(f.as_ref(), &log, authorize_all())
@@ -530,7 +533,10 @@ pub async fn persistently_failing_delete_stalls_typed(
         MaintenanceSweep::Incomplete,
         "a stalled delete keeps the sweep incomplete"
     );
-    assert!(log.deleted().is_empty(), "a stalled row is never retried");
+    assert!(
+        log.deleted().is_empty(),
+        "a stalled row is not retried before its backoff"
+    );
     assert_eq!(
         f.list_condemnations().await.unwrap()[0].delete_attempts,
         MAX_ATTACHMENT_DELETE_ATTEMPTS
@@ -543,6 +549,7 @@ pub async fn persistently_failing_delete_stalls_typed(
     // A failure retrying cannot change stalls on the first attempt.
     let refused = Arc::new(RefusingDeleteStore {
         inner: make_bytes(),
+        refused: std::sync::atomic::AtomicBool::new(true),
     });
     let refused_reference = refused
         .put(
@@ -568,6 +575,7 @@ pub async fn persistently_failing_delete_stalls_typed(
 /// A backend whose deletes fail for want of authorization.
 struct RefusingDeleteStore {
     inner: Arc<dyn AttachmentStore>,
+    refused: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -584,7 +592,10 @@ impl AttachmentStore for RefusingDeleteStore {
         self.inner.get(id).await
     }
 
-    async fn delete(&self, _id: &AttachmentId) -> Result<(), AttachmentStoreError> {
+    async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
+        if !self.refused.load(std::sync::atomic::Ordering::SeqCst) {
+            return self.inner.delete(id).await;
+        }
         Err(AttachmentStoreError::Backend {
             operation: "delete",
             class: AttachmentStoreFailureClass::Credentials,
@@ -599,4 +610,269 @@ impl AttachmentStore for RefusingDeleteStore {
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
         self.inner.head(id).await
     }
+}
+
+/// Seed a stalled row using only sweeps, advancing the store clock between
+/// attempts. The backend keeps its bytes throughout.
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "conformance-law fixture"
+)]
+async fn stalled_delete(
+    f: &Arc<dyn DeploymentStore>,
+    backend: &FaultingAttachmentStore,
+    clock: &testing::TestClock,
+) -> AttachmentId {
+    create(f, &format!("stalled-retry-{}", uuid::Uuid::new_v4())).await;
+    let reference = backend
+        .put(uuid::Uuid::new_v4().as_bytes().to_vec(), image_meta())
+        .await
+        .unwrap();
+    backend.fail_delete(true);
+    for attempt in 1..=MAX_ATTACHMENT_DELETE_ATTEMPTS {
+        let report = reclaim_unreferenced_attachments(f.as_ref(), backend, authorize_all())
+            .await
+            .expect("the completed sweep reports its failed delete");
+        assert_eq!(report.failed_ids, vec![reference.id.clone()]);
+        let listed = f.list_condemnations().await.unwrap();
+        assert_eq!(listed[0].delete_attempts, attempt);
+        assert!(backend.get(&reference.id).await.is_ok());
+        if attempt < MAX_ATTACHMENT_DELETE_ATTEMPTS {
+            clock.advance(900_000);
+        }
+    }
+    assert_eq!(
+        f.list_condemnations().await.unwrap()[0].stalled,
+        Some(AttachmentDeleteStallReason::AttemptsExhausted)
+    );
+    reference.id
+}
+
+/// A healed backend needs no re-put or host intervention: a due stalled row
+/// is adopted, its bytes deleted, and its listing retired.
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "conformance-law fixture"
+)]
+pub async fn stalled_delete_recovers_after_backoff(
+    f: Arc<dyn DeploymentStore>,
+    make_bytes: AttachmentBytesFactory,
+    clock: Arc<testing::TestClock>,
+) {
+    let backend = FaultingAttachmentStore::over(make_bytes());
+    let id = stalled_delete(&f, &backend, &clock).await;
+    backend.fail_delete(false);
+    clock.advance(900_000);
+    let report = reclaim_unreferenced_attachments(f.as_ref(), &backend, authorize_all())
+        .await
+        .unwrap();
+    assert_eq!(
+        report.reclaimed_count, 1,
+        "a healed stalled delete must recover"
+    );
+    assert!(report.stalled_ids.is_empty());
+    assert!(backend.head(&id).await.unwrap().is_none());
+    assert!(f.list_condemnations().await.unwrap().is_empty());
+
+    // Rotated credentials can recover a refused stall too. A transient
+    // failure after rotation keeps the original typed reason until success.
+    let transient = Arc::new(FaultingAttachmentStore::over(make_bytes()));
+    let refused = RefusingDeleteStore {
+        inner: transient.clone(),
+        refused: std::sync::atomic::AtomicBool::new(true),
+    };
+    let id = refused
+        .put(vec![4, 1, 3, 9], image_meta())
+        .await
+        .unwrap()
+        .id;
+    reclaim_unreferenced_attachments(f.as_ref(), &refused, authorize_all())
+        .await
+        .expect("the completed sweep reports the refused delete");
+    refused
+        .refused
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    transient.fail_delete(true);
+    clock.advance(1_000);
+    let report = reclaim_unreferenced_attachments(f.as_ref(), &refused, authorize_all())
+        .await
+        .expect("the completed sweep reports the transient failure");
+    assert_eq!(report.stalled_ids, vec![id.clone()]);
+    let listed = f.list_condemnations().await.unwrap();
+    assert_eq!(listed[0].delete_attempts, 2);
+    assert_eq!(
+        listed[0].stalled,
+        Some(AttachmentDeleteStallReason::Refused)
+    );
+    transient.fail_delete(false);
+    clock.advance(2_000);
+    let report = reclaim_unreferenced_attachments(f.as_ref(), &refused, authorize_all())
+        .await
+        .unwrap();
+    assert_eq!(report.reclaimed_count, 1);
+    assert!(refused.head(&id).await.unwrap().is_none());
+    assert!(f.list_condemnations().await.unwrap().is_empty());
+}
+
+/// Every failure doubles the delay from one second, capped at fifteen
+/// minutes. Repeated early sweeps neither issue a delete nor move its deadline.
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "conformance-law fixture"
+)]
+pub async fn delete_retry_backoff_is_capped_and_never_early(
+    f: Arc<dyn DeploymentStore>,
+    make_bytes: AttachmentBytesFactory,
+    clock: Arc<testing::TestClock>,
+) {
+    create(&f, &format!("retry-backoff-{}", uuid::Uuid::new_v4())).await;
+    let backend = FaultingAttachmentStore::over(make_bytes());
+    let reference = backend
+        .put(vec![1, 4, 1, 3, 9], image_meta())
+        .await
+        .unwrap();
+    backend.fail_delete(true);
+    for (index, delay) in [
+        1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000, 256_000, 512_000, 900_000,
+        900_000,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let attempt = u32::try_from(index + 1).unwrap();
+        let report = reclaim_unreferenced_attachments(f.as_ref(), &backend, authorize_all())
+            .await
+            .expect("one due delete fails inside a completed sweep");
+        assert_eq!(report.failed_ids, vec![reference.id.clone()]);
+        let listed = f.list_condemnations().await.unwrap();
+        assert_eq!(listed[0].delete_attempts, attempt);
+        assert_eq!(
+            listed[0].stalled,
+            (attempt >= MAX_ATTACHMENT_DELETE_ATTEMPTS)
+                .then_some(AttachmentDeleteStallReason::AttemptsExhausted)
+        );
+        for advance in [0, delay - 1] {
+            clock.advance(advance);
+            let report = reclaim_unreferenced_attachments(f.as_ref(), &backend, authorize_all())
+                .await
+                .expect("a sweep before eligibility makes no delete attempt");
+            assert!(report.failed_ids.is_empty());
+            assert_eq!(
+                f.list_condemnations().await.unwrap(),
+                listed,
+                "early sweeps cannot change attempts or stall state"
+            );
+        }
+        clock.advance(1);
+    }
+    backend.fail_delete(false);
+    let report = reclaim_unreferenced_attachments(f.as_ref(), &backend, authorize_all())
+        .await
+        .unwrap();
+    assert_eq!(report.reclaimed_count, 1);
+    assert!(f.list_condemnations().await.unwrap().is_empty());
+}
+
+/// Keep the retrying pass live at its final HEAD, so a second sweeper must
+/// observe that ownership rather than issue another delete.
+struct PausedRetryStore {
+    inner: DeleteLog,
+    reached: tokio::sync::Notify,
+    resume: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl AttachmentStore for PausedRetryStore {
+    async fn put(
+        &self,
+        bytes: Vec<u8>,
+        meta: AttachmentCreateMeta,
+    ) -> Result<AttachmentRef, AttachmentStoreError> {
+        self.inner.put(bytes, meta).await
+    }
+    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+        self.inner.get(id).await
+    }
+    async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
+        self.inner.delete(id).await
+    }
+    async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
+        self.inner.list().await
+    }
+    async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
+        self.reached.notify_one();
+        self.resume.notified().await;
+        self.inner.head(id).await
+    }
+}
+
+/// Two sweepers of a due stalled row share the adoption CAS and the live
+/// generation fence. The stall remains listed even while its retry is armed.
+#[expect(clippy::unwrap_used, reason = "conformance-law fixture")]
+pub async fn concurrent_stalled_retry_deletes_once(
+    f: Arc<dyn DeploymentStore>,
+    make_bytes: AttachmentBytesFactory,
+    clock: Arc<testing::TestClock>,
+) {
+    let backend = Arc::new(FaultingAttachmentStore::over(make_bytes()));
+    let id = stalled_delete(&f, backend.as_ref(), &clock).await;
+    backend.fail_delete(false);
+    clock.advance(900_000);
+    let paused = Arc::new(PausedRetryStore {
+        inner: DeleteLog::over(backend.clone()),
+        reached: tokio::sync::Notify::new(),
+        resume: tokio::sync::Notify::new(),
+    });
+    let root = Arc::clone(&f);
+    let retry_backend = Arc::clone(&paused);
+    let mut first = tokio::spawn(async move {
+        reclaim_unreferenced_attachments(root.as_ref(), retry_backend.as_ref(), authorize_all())
+            .await
+    });
+    tokio::select! {
+        _ = paused.reached.notified() => {},
+        result = &mut first => panic!("a due stalled row must reach its retry: {result:?}"),
+    }
+    let listed = f.list_condemnations().await.unwrap();
+    assert_eq!(listed[0].phase, AttachmentCondemnationPhase::Deleting);
+    assert_eq!(listed[0].delete_attempts, MAX_ATTACHMENT_DELETE_ATTEMPTS);
+    assert_eq!(
+        listed[0].stalled,
+        Some(AttachmentDeleteStallReason::AttemptsExhausted)
+    );
+    let second_log = DeleteLog::over(backend.clone());
+    let second = reclaim_unreferenced_attachments(f.as_ref(), &second_log, authorize_all())
+        .await
+        .unwrap();
+    assert_eq!(second.condemn_deferred_ids, vec![id.clone()]);
+    assert_eq!(second.stalled_ids, vec![id.clone()]);
+    assert!(second_log.deleted().is_empty());
+    paused.resume.notify_one();
+    assert_eq!(first.await.unwrap().unwrap().reclaimed_count, 1);
+    assert_eq!(paused.inner.deleted(), vec![id]);
+    assert!(f.list_condemnations().await.unwrap().is_empty());
+
+    // Also start both adopters together to exercise the ownership CAS race.
+    let backend = FaultingAttachmentStore::over(make_bytes());
+    let id = stalled_delete(&f, &backend, &clock).await;
+    backend.fail_delete(false);
+    clock.advance(900_000);
+    let shared: Arc<dyn AttachmentStore> = Arc::new(backend);
+    let first_log = DeleteLog::over(Arc::clone(&shared));
+    let second_log = DeleteLog::over(Arc::clone(&shared));
+    let (first, second) = tokio::join!(
+        reclaim_unreferenced_attachments(f.as_ref(), &first_log, authorize_all()),
+        reclaim_unreferenced_attachments(f.as_ref(), &second_log, authorize_all()),
+    );
+    assert_eq!(
+        first.unwrap().adopted_count + second.unwrap().adopted_count,
+        1
+    );
+    let mut deleted = first_log.deleted();
+    deleted.extend(second_log.deleted());
+    assert_eq!(deleted, vec![id]);
+    assert!(f.list_condemnations().await.unwrap().is_empty());
 }

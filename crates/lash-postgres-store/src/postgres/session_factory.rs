@@ -940,6 +940,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
             &self.fence,
             &self.catalog_id,
             generation,
+            self.clock.timestamp_ms(),
         )
         .await
     }
@@ -1060,6 +1061,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
             id.as_str(),
             generation,
             settlement,
+            self.clock.timestamp_ms(),
         )
         .await
     }

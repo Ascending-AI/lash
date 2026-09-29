@@ -427,13 +427,13 @@ pub trait AttachmentRootSet: Send + Sync {
     ///
     /// Each adoption is one conditional mutation per row — stamp `generation`
     /// where the row still carries the older generation it was read with, no
-    /// restoring writer holds it, its delete is not stalled, and the owning
+    /// restoring writer holds it, its retry backoff has elapsed, and the owning
     /// pass is proven dead — so two sweepers adopting at once claim each row
     /// exactly once. A row whose pass is still live is reported in
     /// [`AttachmentCondemnationAdoption::held_by_live_pass`] and left alone; a
     /// stalled row is reported in [`AttachmentCondemnationAdoption::stalled`]
-    /// and never retried. A restoring writer's row belongs to that writer and
-    /// is not reported.
+    /// until its retry is due. A restoring writer's row belongs to that writer
+    /// and is not reported.
     async fn adopt_attachment_condemnations(
         &self,
         generation: &AttachmentSweepGeneration,
@@ -514,8 +514,8 @@ pub trait AttachmentRootSet: Send + Sync {
     /// unclaimed `Condemned` or `Deleting` row without a delete.
     /// [`Failed`](AttachmentCondemnationSettlement::Failed) returns `Deleting`
     /// to `Condemned` with one more failed attempt, so writers can reclaim the
-    /// digest and the next sweep retries it, or stalls it when the settlement
-    /// says so.
+    /// digest. Later sweeps retry once backoff on the store clock has elapsed,
+    /// retaining any typed stall until success.
     ///
     /// Every settlement is conditional on `generation` still owning the row: a
     /// settlement that finds a restoring writer's claim, another generation,
@@ -626,16 +626,14 @@ pub struct AttachmentReclamationReport {
     pub deleted_while_referenced: Vec<AttachmentId>,
     /// Whether this sweep's deletes were fenced against concurrent writers.
     pub fence: AttachmentGcFence,
-    /// Digests this sweep deferred on contention rather than waiting: a live
-    /// peer sweep or a restoring writer already held the condemnation, or a
-    /// writer revoked it before the delete could be armed. These are ordinary
-    /// outcomes — the digest is simply left for the next sweep.
-    ///
-    /// A condemnation left behind by a sweeper that died is never deferred:
-    /// the next sweep adopts it and finishes the delete first (ADR 0067 §6).
+    /// Digests deferred because a live peer or restoring writer holds the
+    /// condemnation, a writer revoked it before arming, or a failed delete's
+    /// backoff has not elapsed. A due condemnation whose pass died is adopted
+    /// and finished before new work (ADR 0067 §6).
     pub condemn_deferred_ids: Vec<AttachmentId>,
     /// Condemned digests whose delete is stalled
-    /// ([`AttachmentDeleteStallReason`]): the sweeps stopped retrying them.
+    /// ([`AttachmentDeleteStallReason`]), waiting for backoff or a live pass,
+    /// or whose retry in this sweep failed again.
     /// [`AttachmentRootSet::list_condemnations`] names each one's reason,
     /// attempt count and last error.
     pub stalled_ids: Vec<AttachmentId>,
@@ -775,11 +773,12 @@ pub struct AttachmentReclamationPolicy {
 ///
 /// A failed final `HEAD` or physical delete keeps the row: it returns to
 /// `Condemned`, so a writer can still reclaim the digest, with one more
-/// failed attempt recorded, and the next sweep adopts and retries it. A
-/// failure retrying cannot change (credentials, authorization, a terminal or
-/// contract failure) stalls the row at once, and a retryable one stalls once
+/// failed attempt recorded. Later sweeps retry after a delay starting at one
+/// second and doubling to a fifteen-minute cap, using the store clock. A
+/// refusal (credentials, authorization, a terminal or contract failure) stalls
+/// the row at once, and a retryable one stalls once
 /// [`MAX_ATTACHMENT_DELETE_ATTEMPTS`] deletes have failed. A stalled row is
-/// never retried and never dropped while its bytes may remain: it is reported
+/// retried by later sweeps with capped backoff and stays listed until success
 /// in [`AttachmentReclamationReport::stalled_ids`] and, with its typed reason,
 /// in [`AttachmentRootSet::list_condemnations`].
 ///
@@ -867,11 +866,14 @@ where
         let AttachmentCondemnationAdoption {
             adopted,
             held_by_live_pass,
+            backing_off,
             stalled,
         } = adoption;
         settled.extend(held_by_live_pass.iter().cloned());
+        settled.extend(backing_off.iter().cloned());
         settled.extend(stalled.iter().cloned());
         report.condemn_deferred_ids.extend(held_by_live_pass);
+        report.condemn_deferred_ids.extend(backing_off);
         report.stalled_ids.extend(stalled);
         report.adopted_count = adopted.len();
         for condemnation in adopted {
@@ -884,6 +886,7 @@ where
                     id: &condemnation.digest,
                     phase: condemnation.phase,
                     delete_attempts: condemnation.delete_attempts,
+                    stalled: condemnation.stalled,
                 },
                 grace_period_ms,
                 &mut report,
@@ -1006,6 +1009,7 @@ where
                             id: &blob.id,
                             phase: AttachmentCondemnationPhase::Condemned,
                             delete_attempts: 0,
+                            stalled: None,
                         },
                         grace_period_ms,
                         &mut report,
@@ -1163,6 +1167,7 @@ struct Candidate<'a> {
     phase: AttachmentCondemnationPhase,
     /// Failed deletes recorded before this pass.
     delete_attempts: u32,
+    stalled: Option<AttachmentDeleteStallReason>,
 }
 
 /// Arm (when still `Condemned`), re-stat, delete, and settle one condemnation
@@ -1285,13 +1290,15 @@ async fn record_failed_delete<R>(
     R: AttachmentRootSet + ?Sized,
 {
     let attempts = candidate.delete_attempts.saturating_add(1);
-    let stall = if !error.is_retryable() {
-        Some(AttachmentDeleteStallReason::Refused)
-    } else if attempts >= MAX_ATTACHMENT_DELETE_ATTEMPTS {
-        Some(AttachmentDeleteStallReason::AttemptsExhausted)
-    } else {
-        None
-    };
+    let stall = candidate.stalled.or_else(|| {
+        if !error.is_retryable() {
+            Some(AttachmentDeleteStallReason::Refused)
+        } else if attempts >= MAX_ATTACHMENT_DELETE_ATTEMPTS {
+            Some(AttachmentDeleteStallReason::AttemptsExhausted)
+        } else {
+            None
+        }
+    });
     let message = error.to_string();
     record_reclamation_failure(report, candidate.id.clone(), error);
     match root_set
@@ -1313,7 +1320,7 @@ async fn record_failed_delete<R>(
                     reason = reason.as_str(),
                     error = %message,
                     "attachment GC stalled a condemned digest whose delete keeps failing; \
-                     no sweep retries it and its bytes remain"
+                     later sweeps retry it with capped backoff and its bytes remain"
                 );
                 report.stalled_ids.push(candidate.id.clone());
             }

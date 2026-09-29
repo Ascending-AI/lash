@@ -2,10 +2,11 @@
 
 ## Status
 
-Amended 2026-09-29 (FIG-4100): section 6 is implemented as described there.
+Amended 2026-09-29 (FIG-4100, FIG-4139): section 6 is implemented as described
+there.
 A sweep adopts and finishes crashed condemnations first, a delete that keeps
-failing stalls typed, and the host lever `release_attachment_condemnation` is
-deleted.
+failing stalls typed and retries with capped backoff, and the host lever
+`release_attachment_condemnation` is deleted.
 
 Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
 passages are historical under
@@ -397,9 +398,9 @@ writer put back.
 
 **Adopt, then complete, then condemn.** The obligation is exact: **complete
 each adopted condemnation before starting new work.** Adoption is one CAS per
-row — stamp the new generation where the row still carries the generation it
-was read with, no restoring writer holds it, and its delete is not stalled —
-so two sweepers adopting at once claim each row exactly once and delete its
+row: stamp the new generation where the row still carries the generation it
+was read with, no restoring writer holds it, and its retry is due.
+Two sweepers adopting at once claim each row exactly once and delete its
 bytes once. For each adopted row the pass arms a `Condemned` row, re-stats the
 blob through the same witness the sweep uses everywhere else, deletes it if
 present, and retires the row. "The backend says the blob is gone" and "the
@@ -412,13 +413,23 @@ A restoring writer's row belongs to that writer and is never adopted; ADR
 **A delete that keeps failing stalls, typed.** A failed final `HEAD` or
 physical delete keeps the row: it returns from `Deleting` to `Condemned`, so a
 writer can still reclaim the digest, with its failed-attempt count raised and
-the error recorded, and the next sweep adopts and retries it, one attempt per
-sweep. A failure retrying cannot change (credentials, authorization, a
+the error recorded, and later sweeps adopt and retry it, one attempt per
+sweep once its backoff has elapsed. A refusal (credentials, authorization, a
 terminal or contract failure) stalls the row at once as `refused`; a
 retryable failure stalls it as `attempts_exhausted` once
-`MAX_ATTACHMENT_DELETE_ATTEMPTS` (5) deletes have failed. A stalled row is
-never retried, so the sweep never spins, and it is never dropped while its
-bytes may remain. Each sweep reports stalled digests in
+`MAX_ATTACHMENT_DELETE_ATTEMPTS` (5) deletes have failed.
+
+A stall is not final. Every failure records `next_delete_at_ms` using the
+store clock and a capped exponential delay: 1 second after the first failure,
+doubling per failed attempt to a 15-minute cap, the obligation relay's default
+backoff values. An early sweep leaves the row and its deadline alone. A due
+stalled row is adopted only after the predecessor is proven dead, through the
+same generation CAS and liveness fence as crashed condemnations. Its attempt
+count keeps rising, saturating at the shared signed 32-bit storage bound; every
+further failure moves the deadline and preserves the original typed stall.
+The stall stays listed even while the retry is `Deleting`, and a success drops
+the row and the stall together. No operator re-arm API exists. Each sweep
+reports stalled digests in
 `AttachmentReclamationReport::stalled_ids`, which keeps it `Incomplete`. A
 completed delete retires its condemnation row outright (FIG-2795): the same
 fenced condemnation already deleted every manifest row for the digest, so the
@@ -427,7 +438,8 @@ rather than a phase that has to be kept. A fresh put claims a surviving
 `Condemned` row, stalled or not, with an opaque token while recording the new
 write intent, restores the bytes, and clears the phase only after success;
 failure releases its token. FIG-1510's stuck-forever state becomes
-unreachable, with no timer anywhere.
+unreachable. Retry deadlines pace attempts; they never prove owner death or
+expire rows.
 
 `list_condemnations()` is the enumeration surface (FIG-1510), and its stated
 purpose is operator inspection: "what is stuck right now" must be answerable
@@ -436,8 +448,8 @@ carries its phase, provenance, failed-attempt count, last delete error and
 typed stall reason.
 
 **This supersedes ADR 0028's condemnation-recovery rule.** 0028 keeps its
-state machine timestamp-free — that is unchanged and load-bearing — but it
-made clearing a condemnation left by a sweeper that died mid-delete *host
+ownership transitions fenced by CAS, but its earlier rule made clearing a
+condemnation left by a sweeper that died mid-delete *host
 policy*, with the host calling `release_attachment_condemnation` after deciding
 the sweeper was gone. That recovery is now automatic and structural: the next
 sweep adopts the row under a generation whose predecessor is proven dead, and
@@ -506,7 +518,7 @@ it never consulted, which section 2 forbids.
   rather than gaining better ones, and multi-referenced classes converge on one
   edges-backed predicate instead of the hand-copied liveness SQL.
 * This ADR supersedes ADR 0028's condemnation recovery (adoption is automatic
-  and generation-fenced, the host lever is deleted, and the timestamp-free
+  and generation-fenced, the host lever is deleted, and the CAS-fenced
   state machine survives) and leaves ADR 0023 intact — terminality arms
   eligibility, the host's `RetentionBound` and watermark still bound execution.
 

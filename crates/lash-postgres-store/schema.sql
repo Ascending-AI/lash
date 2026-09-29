@@ -612,16 +612,17 @@ CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_owner
 CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_written
     ON lash_attachment_manifest(attachment_id, written_at_ms);
 
--- Attachment GC fence state, one row per condemned digest. Deliberately
--- timestampless: the protocol is CAS transitions only, never an expiry.
+-- Attachment GC fence state, one row per condemned digest.
+-- Ownership uses CAS transitions, never an expiry.
 -- `sweep_generation` is the sweep pass that owns the row; a later pass adopts
 -- it only once that pass is dead (ADR 0067 §6). A failed delete counts in
--- `delete_attempts`, and a stalled one is never adopted again.
+-- `delete_attempts`; `next_delete_at_ms` paces retries, including stalled rows.
 CREATE TABLE IF NOT EXISTS lash_attachment_condemnations (
     attachment_id TEXT PRIMARY KEY,
     phase TEXT NOT NULL CONSTRAINT ck_attachment_condemnations_phase CHECK (phase IN ('condemned', 'deleting')),
     write_token TEXT,
     write_session_id TEXT,
+    next_delete_at_ms BIGINT NOT NULL DEFAULT 0 CONSTRAINT ck_attachment_condemnations_next_delete CHECK (next_delete_at_ms >= 0),
     sweep_generation BIGINT NOT NULL,
     delete_attempts INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_attachment_condemnations_delete_attempts CHECK (delete_attempts >= 0),
     last_delete_error TEXT,
@@ -629,7 +630,7 @@ CREATE TABLE IF NOT EXISTS lash_attachment_condemnations (
     CONSTRAINT ck_attachment_condemnations_write_token_pairing CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
     CONSTRAINT ck_attachment_condemnations_write_token_phase CHECK (write_token IS NULL OR phase = 'condemned'),
     CONSTRAINT ck_attachment_condemnations_failure_pairing CHECK ((delete_attempts = 0) = (last_delete_error IS NULL)),
-    CONSTRAINT ck_attachment_condemnations_stall_phase CHECK (stall_reason IS NULL OR (phase = 'condemned' AND delete_attempts > 0))
+    CONSTRAINT ck_attachment_condemnations_stall_attempts CHECK (stall_reason IS NULL OR delete_attempts > 0)
 );
 
 -- The counter every attachment sweep pass mints its generation from.

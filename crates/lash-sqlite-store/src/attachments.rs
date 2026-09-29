@@ -428,6 +428,7 @@ impl SqliteStore {
     ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, StoreError> {
         let mine = sweep_generation_sql(generation)?;
         let catalog = self.sweep_catalog_key();
+        let now = crate::clamp_epoch_ms(self.clock.timestamp_ms());
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<_, StoreError> = (|| {
@@ -443,6 +444,7 @@ impl SqliteStore {
                                     row.get::<_, String>(2)?,
                                     row.get::<_, i64>(3)?,
                                     row.get::<_, Option<String>>(4)?,
+                                    row.get::<_, i64>(5)?,
                                 ))
                             })
                             .map_err(sqlite_error)?
@@ -451,25 +453,41 @@ impl SqliteStore {
                     };
                     let mut adoption =
                         lash_core_execution::AttachmentCondemnationAdoption::default();
-                    for (digest, owner, phase, delete_attempts, stall_reason) in rows {
+                    for (digest, owner, phase, delete_attempts, stall_reason, next_delete_at_ms)
+                        in rows
+                    {
                         let id = AttachmentId::parse(&digest).map_err(|error| {
                             stored_data_corrupt(
                                 "attachment condemnation",
                                 format!("attachment_id is not a valid attachment id: {error}"),
                             )
                         })?;
-                        if stall_reason.is_some() {
-                            adoption.stalled.push(id);
-                            continue;
-                        }
-                        if LiveSweep::is_live(&catalog, owner) {
-                            adoption.held_by_live_pass.push(id);
+                        let stalled = stall_reason
+                            .map(|label| {
+                                lash_core_execution::AttachmentDeleteStallReason::from_label(&label)
+                                    .ok_or_else(|| stored_data_corrupt(
+                                        "attachment condemnation",
+                                        format!("attachment `{id}` has unknown stall reason `{label}`"),
+                                    ))
+                            })
+                            .transpose()?;
+                        let live = LiveSweep::is_live(&catalog, owner);
+                        let backing_off = phase != "deleting" && next_delete_at_ms > now;
+                        if live || backing_off {
+                            if stalled.is_some() {
+                                adoption.stalled.push(id.clone());
+                            }
+                            if live {
+                                adoption.held_by_live_pass.push(id);
+                            } else if stalled.is_none() {
+                                adoption.backing_off.push(id);
+                            }
                             continue;
                         }
                         let adopted = crate::conn::cached_execute(
                             tx,
                             attachment_sql().condemnation.adopt.sql(),
-                            params![digest, mine, owner],
+                            params![digest, mine, owner, now],
                         )
                         .map_err(sqlite_error)?;
                         if adopted == 1 {
@@ -477,6 +495,7 @@ impl SqliteStore {
                                 id,
                                 &phase,
                                 delete_attempts,
+                                stalled,
                             )?);
                         }
                     }
@@ -603,6 +622,7 @@ impl SqliteStore {
     ) -> Result<lash_core_execution::AttachmentSettlementOutcome, StoreError> {
         let generation = sweep_generation_sql(generation)?;
         let attachment_id = attachment_id.as_str().to_string();
+        let now = crate::clamp_epoch_ms(self.clock.timestamp_ms()).min(i64::MAX - 900_000);
         let settled = self
             .conn
             .write(move |tx| match settlement {
@@ -628,7 +648,8 @@ impl SqliteStore {
                             attachment_id,
                             generation,
                             error,
-                            stall.map(|reason| reason.as_str())
+                            stall.map(|reason| reason.as_str()),
+                            now
                         ],
                     )
                 }
@@ -750,6 +771,7 @@ fn adopted_condemnation(
     digest: AttachmentId,
     phase: &str,
     delete_attempts: i64,
+    stalled: Option<lash_core_execution::AttachmentDeleteStallReason>,
 ) -> Result<lash_core_execution::AdoptedAttachmentCondemnation, StoreError> {
     let phase = match phase {
         "condemned" => lash_core_execution::AttachmentCondemnationPhase::Condemned,
@@ -771,6 +793,7 @@ fn adopted_condemnation(
         digest,
         phase,
         delete_attempts,
+        stalled,
     })
 }
 
