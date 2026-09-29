@@ -31,11 +31,17 @@ async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
         .await
         .expect("provider failure is represented as a stopped turn");
     assert!(
+        output.errors.iter().any(|error| {
+            error.terminal_reason == Some(lash::direct::LlmTerminalReason::ProviderError)
+        }),
+        "the provider failure must reach the turn result as a typed provider error"
+    );
+    assert!(
         output
             .errors
             .iter()
-            .any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),
-        "the real provider diagnostic must reach the internal turn result"
+            .all(|error| !error.message.contains(INTERNAL_PROVIDER_FAILURE)),
+        "provider free text must not reach the committed turn result"
     );
     crate::restate::record_turn_output(
         &state,

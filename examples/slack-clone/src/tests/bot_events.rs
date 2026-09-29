@@ -1442,9 +1442,8 @@ async fn an_empty_model_answer_is_absorbed_rather_than_posted() {
 async fn a_provider_rejection_surfaces_as_typed_provider_error() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
-    let script = Script::provider_error(
-        "cannot materialize attachment MIME `application/x-unknown`; providers accepting this MIME/source: none",
-    );
+    const PROVIDER_TEXT: &str = "cannot materialize attachment MIME `application/x-unknown`; providers accepting this MIME/source: none";
+    let script = Script::provider_error(PROVIDER_TEXT);
     let host = BotHost::open(&bot_dir(scratch.path())).await;
     let bot = host.start(&platform, &script).await;
 
@@ -1461,14 +1460,21 @@ async fn a_provider_rejection_surfaces_as_typed_provider_error() {
     let Disposition::ProviderError { failure, .. } = disposition else {
         panic!("a provider rejection must surface as ProviderError, got {disposition:?}");
     };
+    let ProviderFailure {
+        kind,
+        code,
+        message,
+        retryable,
+    } = &failure;
+    assert_eq!(*kind, lash::provider::ProviderFailureKind::Validation);
     assert_eq!(
-        failure,
-        ProviderFailure {
-            kind: lash::provider::ProviderFailureKind::Validation,
-            code: Some("provider:unsupported_attachment_capability".to_string()),
-            message: "LLM error: cannot materialize attachment MIME `application/x-unknown`; providers accepting this MIME/source: none".to_string(),
-            retryable: false,
-        }
+        code.as_deref(),
+        Some("provider:unsupported_attachment_capability")
+    );
+    assert!(!retryable);
+    assert!(
+        !message.contains(PROVIDER_TEXT),
+        "provider free text must not reach the committed turn report: {message:?}"
     );
     let record = bot
         .ledger()
