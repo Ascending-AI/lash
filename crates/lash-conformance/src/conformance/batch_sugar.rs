@@ -733,7 +733,29 @@ pub async fn batch_admission_and_identity_contract(
         "{context}: a wrapper succeeds even when rows fail"
     );
     assert_eq!(rows(mixed[1]), vec![(0, "echo".to_string(), true)]);
-    assert_eq!(record(&turn, "same").len(), 2);
+    // ADR 0117 §8: a provider id repeated within one response is repaired at
+    // the boundary. The first call keeps it, the later one takes a
+    // deterministic correlation id, and both are recorded.
+    let same = ["native-1", "native-2"].map(|value| {
+        let calls = turn
+            .tool_calls
+            .iter()
+            .filter(|record| record.tool == "echo" && record.args["value"] == value)
+            .collect::<Vec<_>>();
+        assert_eq!(calls.len(), 1, "{context}: `{value}` is recorded once");
+        calls[0].call_id.clone()
+    });
+    assert_eq!(
+        same[0].as_deref(),
+        Some("same"),
+        "{context}: the first call keeps its provider id"
+    );
+    assert!(
+        same[1]
+            .as_deref()
+            .is_some_and(|call_id| call_id.starts_with("lashcall_")),
+        "{context}: the repeated provider id is repaired to a correlation id: {same:?}"
+    );
     assert_no_member_is_a_call(&context, &turn);
 
     // Withheld, `batch` is an unknown tool: nothing expands, nothing runs.

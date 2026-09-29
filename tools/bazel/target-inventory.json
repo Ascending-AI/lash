@@ -20607,8 +20607,7 @@
         "serde_json",
         "tokio",
         "tokio-tungstenite",
-        "tracing",
-        "uuid"
+        "tracing"
       ],
       "doc": "//crates/lash-provider-openai:lash-provider-openai__doc",
       "manifest": "crates/lash-provider-openai/Cargo.toml",
