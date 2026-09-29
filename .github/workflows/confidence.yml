@@ -513,8 +513,8 @@ jobs:
           path: target/confidence/stages/mutation-authority/**
           if-no-files-found: error
 
-  confidence-mutation-packages:
-    name: Confidence mutation-packages-${{ matrix.package }}-${{ matrix.shard }}
+  confidence-mutation-packages-rotating:
+    name: Confidence mutation-packages-rotating-${{ matrix.package }}-${{ matrix.shard }}
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
@@ -524,7 +524,9 @@ jobs:
     # cap), so each leg judges a bounded slice whose index rotates per run.
     # `shards` is the leg count for the package; `shard` is this leg's index.
     # See MUTATION_PACKAGES_* in scripts/confidence-gate.sh for the slice
-    # arithmetic and per-package leg counts.
+    # arithmetic and per-package leg counts. The job is named rotating because
+    # that is the evidence it produces: one bounded slice of the package's
+    # mutant space at this revision, never a complete union.
     timeout-minutes: 100
     strategy:
       fail-fast: false
@@ -609,11 +611,11 @@ jobs:
           mkdir -p "$HOME/.cargo/bin"
           cp target/confidence-tools/* "$HOME/.cargo/bin/"
 
-      - name: Run mutation-packages
+      - name: Run mutation-packages-rotating
         env:
-          LASH_CONFIDENCE_STAGE: mutation-packages
+          LASH_CONFIDENCE_STAGE: mutation-packages-rotating
           LASH_CONFIDENCE_PACKAGE: ${{ matrix.package }}
-          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/mutation-packages-${{ matrix.package }}-${{ matrix.shard }}
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/mutation-packages-rotating-${{ matrix.package }}-${{ matrix.shard }}
           # This leg is shard index `shard` of the package's `shards` legs;
           # the gate turns the coordinate plus the run number into the
           # mutant slice the leg judges. run_number is constant across retry
@@ -622,12 +624,12 @@ jobs:
           LASH_MUTATION_RUN_INDEX: ${{ github.run_number }}
         run: bash scripts/confidence-gate.sh full
 
-      - name: Upload mutation-packages evidence
+      - name: Upload mutation-packages-rotating evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: confidence-mutation-packages-${{ matrix.package }}-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
-          path: target/confidence/stages/mutation-packages-${{ matrix.package }}-${{ matrix.shard }}/**
+          name: confidence-mutation-packages-rotating-${{ matrix.package }}-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/mutation-packages-rotating-${{ matrix.package }}-${{ matrix.shard }}/**
           if-no-files-found: error
 
   sim-search:
@@ -687,9 +689,25 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [confidence, confidence-build, confidence-harnesses, confidence-generated, confidence-minimizer, confidence-backends, confidence-coverage, confidence-mutation-core, confidence-mutation-sim, confidence-mutation-authority, confidence-mutation-packages, sim-search]
+    needs: [confidence, confidence-build, confidence-harnesses, confidence-generated, confidence-minimizer, confidence-backends, confidence-coverage, confidence-mutation-core, confidence-mutation-sim, confidence-mutation-authority, confidence-mutation-packages-rotating, sim-search]
     steps:
       - *checkout
+
+      - name: Record evidence scope in the run summary
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+        env:
+          CONFIDENCE_SELECTOR: ${{ github.event_name == 'workflow_dispatch' && inputs.lane || 'full' }}
+        run: |
+          # shellcheck disable=SC2016
+          {
+            printf 'Confidence selector `%s` at revision `%s` (run %s, attempt %s).\n\n' \
+              "${CONFIDENCE_SELECTOR}" "${GITHUB_SHA}" "${GITHUB_RUN_NUMBER}" "${GITHUB_RUN_ATTEMPT}"
+            echo 'The `mutation-packages-rotating` stage judges bounded rotating slices of each'
+            echo "package's mutant space: the slice index derives from the leg coordinate and the"
+            echo 'run number, so successive scheduled runs sweep the space. A green run is not a'
+            echo 'complete mutant union at one revision; only an unsharded local'
+            echo '`scripts/confidence-gate.sh full` produces that evidence.'
+          } >>"${GITHUB_STEP_SUMMARY}"
 
       - name: Validate every confidence producer and consumer
         env:

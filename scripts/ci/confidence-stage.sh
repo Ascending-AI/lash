@@ -49,7 +49,7 @@ case "$LASH_CONFIDENCE_STAGE" in
     test "$mutation_commands_run" -gt 0
     test "$mutation_failures" -eq 0
     ;;
-  mutation-packages)
+  mutation-packages-rotating)
     case "${LASH_CONFIDENCE_PACKAGE:-}" in
       lash-internal-core|lash-internal-lashlang|lash-internal-protocol-rlm|lash-internal-protocol-standard|lash-internal-sqlite-store|lash-internal-postgres-store) ;;
       *) echo 'Unknown full mutation package' >&2; exit 2 ;;
@@ -60,6 +60,9 @@ case "$LASH_CONFIDENCE_STAGE" in
     # MUTATION_PACKAGES_* in scripts/confidence-gate.sh). The workflow's
     # matrix legs hand their coordinate down as LASH_MUTATION_PACKAGES_SHARD
     # and the slice index rotates across runs via LASH_MUTATION_RUN_INDEX.
+    # The stage is named rotating because that is what the evidence covers:
+    # a green leg is one bounded slice at one revision, never a complete
+    # mutant union.
     LASH_MUTATION_PACKAGES_BOUNDED=1
     run_mutation_smoke
     run_mutation_full

@@ -290,7 +290,7 @@ fn durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence() {
     }
 }
 
-/// The Confidence `coverage` and `mutation-packages` stages export
+/// The Confidence `coverage` and `mutation-packages-rotating` stages export
 /// `LASH_CONFIDENCE_STAGE`, and `scripts/confidence-gate.sh` sources
 /// `scripts/ci/confidence-stage.sh` whenever it is set; that file exits 2 for
 /// any selector but `full`. This probe runs `fast:<shard>`, so an inherited

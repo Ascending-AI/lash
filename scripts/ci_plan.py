@@ -425,7 +425,7 @@ CONFIDENCE_JOB_POLICY = {
     "confidence-mutation-core": "full-consumer",
     "confidence-mutation-sim": "full-consumer",
     "confidence-mutation-authority": "full-consumer",
-    "confidence-mutation-packages": "full-consumer",
+    "confidence-mutation-packages-rotating": "full-consumer",
     "sim-search": "full-consumer",
 }
 

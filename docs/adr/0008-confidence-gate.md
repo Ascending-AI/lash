@@ -33,7 +33,14 @@ The gate has explicit lanes instead of an implicit pile of local commands:
   mutation. It is not a true full confidence claim.
 - `full`: true full confidence. It includes broad semantics and full
   cargo-mutants over the same critical crates; the lane refuses non-full
-  mutation scopes.
+  mutation scopes. In the weekly workflow the per-package mutation stage is
+  `mutation-packages-rotating`: each leg judges a bounded slice of its
+  package's mutant space (a smoke canary plus one `--shard` slice), and the
+  slice index rotates with the run number so successive scheduled runs sweep
+  the space. A green weekly is therefore rotating evidence — the manifest,
+  stage name, and run summary record which slice ran at which revision — and
+  never a complete mutant union at one revision. That union exists only in an
+  unsharded local `full` run.
 
 Coverage is not a percentage goal. The gate writes LCOV, missing-line text, and
 summary JSON under `target/confidence/<lane>/coverage/` so uncovered source is
@@ -42,7 +49,11 @@ reviewed as a blind-spot map.
 Mutation testing is required for lanes that claim it. `cargo-mutants` absence
 fails `default`, `broad`, and `full` unless `LASH_CONFIDENCE_BOOTSTRAP=1`
 installs the pinned tool version. Mutation success is never faked as a skipped
-pass, and a targeted bounded run is never labeled as `full`.
+pass, and a targeted bounded run is never labeled as `full`. A bounded
+rotating leg is labeled `bounded_rotating` in its manifest, sidecars, stage
+name, and the run summary — with its leg coordinate, run index, and revision —
+never as a complete union; the `full` label is reserved for a verified
+complete mutant union at one revision.
 
 ### Failure evidence and quarantine policy
 
@@ -79,7 +90,9 @@ CI and local development the same language for confidence.
   `target/confidence`, preserving its artifact contract; the variable remains
   an explicit override elsewhere.
 - The `Confidence` workflow runs `full` on a weekly schedule and supports
-  manual `default`/`broad`/`full` dispatch.
+  manual `default`/`broad`/`full` dispatch. The weekly run's per-package
+  mutation legs are bounded rotating slices, so its mutation evidence is a
+  sweep across runs, not a complete union at one revision.
 - Releases require the latest scheduled `Confidence` run on main to succeed,
   finish within eight days (inclusive), and certify an ancestor of the release
   SHA or the SHA itself. Age uses the latest job completion timestamp, rather
@@ -110,3 +123,16 @@ G2: [ADR 0044](0044-tests-must-be-independent-of-what-they-test.md) supersedes
 the deterministic-simulation claim for lash-sim. Its randomised runs use virtual
 skipped time and dump full history on checker failure; seeds alone do not
 reproduce scheduling.
+
+## Amendment (FIG-4153, 2026-09-29)
+
+The weekly `full` run's per-package mutation evidence is bounded and rotating:
+each `mutation-packages-rotating` leg judges the smoke canary plus one `--shard`
+slice whose index derives from the leg coordinate and the run number. The
+evidence artifacts — `mutation-evidence.json`, `confidence-summary.json`,
+`mutation-shard.json`, and the run summary — record the leg, slice, run index,
+and revision, and report `bounded_rotating` scope rather than `full`. `full`
+remains reserved for an unsharded complete mutant union at one revision, which
+only a local `scripts/confidence-gate.sh full` run produces; the rotating mode
+was already in place and this amendment aligns the labels with it rather than
+adding a mode.

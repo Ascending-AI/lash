@@ -210,8 +210,8 @@ SIM_SEARCH_FULL_SEEDS=243
 SIM_SEARCH_JOB_CAP_SECONDS=6000
 SIM_SEARCH_SETUP_SECONDS=1500
 
-# Per-leg mutant budgets for the mutation-packages stage. The stage's full
-# pass is unsharded and cannot fit the 100-minute job cap: run 35117123483
+# Per-leg mutant budgets for the mutation-packages-rotating stage. The stage's
+# full pass is unsharded and cannot fit the 100-minute job cap: run 35117123483
 # measured 1,641 mutants for protocol-rlm, 1,663 for postgres-store, and
 # ~7,400 for lashlang (its 1/64 smoke shard alone is 116 mutants, more than
 # a leg can judge), and all three legs were cancelled at exactly 100 minutes
@@ -867,21 +867,39 @@ run_mutants_recorded() {
   "name": "${name}",
   "status": "${status}",
   "exit_code": ${exit_code},
-  "scope": "${mutation_scope}"
+  "scope": "$(mutation_recorded_scope)"
 }
 EOF
-  # Bounded legs record which shard of the mutant space they judged and what
-  # it cost, so MUTATION_PACKAGES_* budgets are re-pinned from measurement.
+  # Bounded legs record which shard of the mutant space they judged, at which
+  # revision, and what it cost, so MUTATION_PACKAGES_* budgets are re-pinned
+  # from measurement and a rotating leg can never read as a complete union.
   if [ -n "${MUTATION_RECORDED_SHARD:-}" ]; then
+    local bounded_rotation="null"
+    if [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
+      bounded_rotation="$(bounded_rotation_json)"
+    fi
     cat >"${artifact}/mutation-shard.json" <<EOF
 {
   "schema": "lash.confidence.mutation-shard.v1",
   "name": "${name}",
   "shard": "${MUTATION_RECORDED_SHARD}",
+  "bounded_rotation": ${bounded_rotation},
   "mutants_found": ${MUTATION_RECORDED_MUTANTS_FOUND:-null},
   "run_seconds": ${run_seconds}
 }
 EOF
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+      if [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
+        printf -- '- `%s`: bounded rotating slice `%s` (leg %s, run index %s) at revision `%s` — %s\n' \
+          "$name" "$MUTATION_RECORDED_SHARD" "${LASH_MUTATION_PACKAGES_SHARD:-1/1}" \
+          "${LASH_MUTATION_RUN_INDEX:-unset}" "$(confidence_revision)" "$status" \
+          >>"$GITHUB_STEP_SUMMARY"
+      else
+        printf -- '- `%s`: fixed shard `%s` at revision `%s` — %s\n' \
+          "$name" "$MUTATION_RECORDED_SHARD" "$(confidence_revision)" "$status" \
+          >>"$GITHUB_STEP_SUMMARY"
+      fi
+    fi
   fi
 }
 
@@ -2209,9 +2227,9 @@ Lashlang, protocol, and durable-store code.
 EOF
 }
 
-# The mutation-packages stage judges a bounded slice of a package's mutant
-# space per leg (LASH_MUTATION_PACKAGES_BOUNDED, set by the stage). The slice
-# is `budget` mutants wide, counted once per leg via `cargo mutants --list`
+# The mutation-packages-rotating stage judges a bounded slice of a package's
+# mutant space per leg (LASH_MUTATION_PACKAGES_BOUNDED, set by the stage). A
+# slice is `budget` mutants wide, counted once per leg via `cargo mutants --list`
 # (a source scan, no build), so the shard count tracks the space as it grows.
 # `rotate` picks the leg's slice from its LASH_MUTATION_PACKAGES_SHARD
 # "leg/legs" coordinate and LASH_MUTATION_RUN_INDEX: leg `leg` of run `run`
@@ -2246,6 +2264,32 @@ mutation_packages_shard() {
   fi
   mutation_packages_mutants_found="$count"
   mutation_packages_shard_result="$index/$denom"
+}
+
+# The revision the evidence was produced at. "unknown" outside a git checkout
+# keeps the artifact honest instead of failing the lane on a label.
+confidence_revision() {
+  git rev-parse HEAD 2>/dev/null || printf 'unknown\n'
+}
+
+# A bounded rotating leg's coordinates as a JSON object: which leg of the
+# package's legs ran, which run indexed the rotation, at which revision, and
+# that the judged slice is not a complete mutant union.
+bounded_rotation_json() {
+  printf '{"leg":"%s","run_index":"%s","revision":"%s","complete_mutant_union":false}' \
+    "${LASH_MUTATION_PACKAGES_SHARD:-1/1}" \
+    "${LASH_MUTATION_RUN_INDEX:-unset}" \
+    "$(confidence_revision)"
+}
+
+# What the run's mutation evidence actually covers. A bounded rotating leg's
+# scope is its slice of the mutant space, never the configured full scope.
+mutation_recorded_scope() {
+  if [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
+    printf 'bounded_rotating\n'
+  else
+    printf '%s\n' "$mutation_scope"
+  fi
 }
 
 run_mutation_smoke() {
@@ -2559,6 +2603,12 @@ full_mutation_suites_complete() {
 }
 
 full_mutation_status() {
+  if [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
+    # A bounded rotating leg judges one slice of the mutant space; the
+    # complete union is out of scope for the leg, not pending inside it.
+    echo "bounded_rotating_slice"
+    return
+  fi
   if [ "$lane" = "full" ] && [ "$mutation_scope" = "full" ]; then
     if full_mutation_suites_complete; then
       echo "run"
@@ -2587,7 +2637,8 @@ mutation_evidence_status() {
     echo "required_not_run"
     return
   fi
-  if [ "$lane" = "full" ] \
+  if [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" != "1" ] \
+    && [ "$lane" = "full" ] \
     && [ "$mutation_scope" = "full" ] \
     && ! full_mutation_suites_complete; then
     echo "incomplete_full_mutation_suites"
@@ -2649,10 +2700,12 @@ write_mutation_evidence_summary() {
     return
   fi
   local path="${out_dir}/$(artifact_path mutation_evidence)"
-  local evidence_status mutation_semantics
+  local evidence_status mutation_semantics bounded_rotation
   evidence_status="$(mutation_evidence_status)"
+  bounded_rotation="null"
   if [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
-    mutation_semantics="bounded per-leg evidence: the smoke canary plus one rotating shard of the package's full mutant space, recorded per artifact in mutation-shard.json"
+    bounded_rotation="$(bounded_rotation_json)"
+    mutation_semantics="bounded rotating per-leg evidence: the smoke canary plus one rotating shard of the package's full mutant space, indexed by leg coordinate and run number at the recorded revision; a leg never claims a complete mutant union, recorded per artifact in mutation-shard.json"
   elif [ "$lane" = "full" ] && [ "$area" = "all" ]; then
     mutation_semantics="true full lane requires targeted, smoke, and full critical-package cargo-mutants artifacts; not_run shards are never counted as passed"
   elif [ "$lane" = "full" ]; then
@@ -2666,8 +2719,9 @@ write_mutation_evidence_summary() {
   "schema": "lash.confidence.mutation-evidence.v1",
   "lane": "${lane}",
   "status": "${evidence_status}",
-  "scope": "${mutation_scope}",
+  "scope": "$(mutation_recorded_scope)",
   "area": "${area}",
+  "bounded_rotation": ${bounded_rotation},
   "semantics": "${mutation_semantics}",
   "targeted_regressions": [
     $(mutation_artifact_json "lash-core direct provider/direct request survivors" "${out_dir}/mutants-lash-core-direct-targeted"),
@@ -2735,6 +2789,10 @@ EOF
 }
 
 confidence_class() {
+  if [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
+    echo "bounded_rotating_mutation_leg"
+    return
+  fi
   case "$lane:$area" in
     broad:all) echo "bounded_broad" ;;
     broad:*) echo "area_scoped_bounded_broad" ;;
@@ -2747,8 +2805,35 @@ confidence_class() {
   esac
 }
 
+# The `mutation_testing` summary field, stated once. A bounded rotating leg
+# names its slice coordinates and revision instead of any full-scope wording:
+# `full` is reserved for an unsharded complete mutant union at one revision.
+mutation_testing_label() {
+  if [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
+    printf 'bounded_rotating_leg_%s_run_%s_at_%s_not_a_complete_mutant_union\n' \
+      "${LASH_MUTATION_PACKAGES_SHARD:-1/1}" \
+      "${LASH_MUTATION_RUN_INDEX:-unset}" \
+      "$(confidence_revision)"
+    return
+  fi
+  if [ "$area" != "all" ]; then
+    echo "area_${area}_configured_${mutation_scope}_scope_explicitly_scoped_mutation"
+    return
+  fi
+  case "$lane" in
+    fast) echo "not_in_fast_lane" ;;
+    default) echo "configured_${mutation_scope}_scope_lash_core_direct_model_and_lash_sim_scheduler_oracle_targets" ;;
+    broad) echo "bounded_broad_configured_${mutation_scope}_scope_targeted_regressions_without_full_mutation_claim" ;;
+    full) echo "true_full_configured_full_scope_targeted_smoke_and_full_mutation" ;;
+  esac
+}
+
 write_confidence_summary() {
   local status="${1:-passed}"
+  local bounded_rotation="null"
+  if [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
+    bounded_rotation="$(bounded_rotation_json)"
+  fi
   cat >"${out_dir}/confidence-summary.json" <<EOF
 {
   "schema": "lash.confidence.summary.v1",
@@ -2756,12 +2841,13 @@ write_confidence_summary() {
   "selector": "${requested_selector}",
   "area": "${area}",
   "status": "${status}",
+  "bounded_rotation": ${bounded_rotation},
   "sim_summary": "$(scheduled_artifact_path sim_summary not_in_selected_schedule)",
   "env_gated_lanes": "$(scheduled_artifact_path env_gated_lanes not_in_selected_schedule)",
   "full_lane_prerequisites": "$(scheduled_artifact_path full_lane_prerequisites not_in_selected_schedule)",
   "failing_minimizer_fixtures": "$(scheduled_artifact_path failing_minimizer_fixtures not_in_selected_schedule)",
   "confidence_class": "$(confidence_class)",
-  "global_full_confidence_claim": "$([ "$lane" = "full" ] && [ "$area" = "all" ] && echo "true" || echo "false")",
+  "global_full_confidence_claim": "$([ "$lane" = "full" ] && [ "$area" = "all" ] && [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" != "1" ] && echo "true" || echo "false")",
   "coverage_summary": "$(scheduled_existing_artifact_path coverage_summary not_run)",
   "coverage_scope": "${coverage_scope}",
   "coverage_evidence_status": "$(coverage_evidence_status)",
@@ -2781,12 +2867,12 @@ write_confidence_summary() {
     "full_lane": {
       "confidence_class": "$(confidence_class)",
       "selected_area": "${area}",
-      "global_full_confidence_claim": "$([ "$area" = "all" ] && echo "true" || echo "false")",
+      "global_full_confidence_claim": "$([ "$area" = "all" ] && [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" != "1" ] && echo "true" || echo "false")",
       "required_coverage_scope": "run",
       "effective_coverage_scope": "${coverage_scope}",
       "coverage_evidence_status": "$(coverage_evidence_status)",
       "required_mutation_scope": "full",
-      "effective_mutation_scope": "${mutation_scope}",
+      "effective_mutation_scope": "$(mutation_recorded_scope)",
       "mutation_evidence": "$(mutation_evidence_path)",
       "mutation_evidence_status": "$(mutation_evidence_status)",
       "full_mutation_status": "$(full_mutation_status)",
@@ -2806,7 +2892,7 @@ write_confidence_summary() {
       "full_confidence_claim": "false"
     }
   },
-  "mutation_testing": "$(if [ "$area" != "all" ]; then echo "area_${area}_configured_${mutation_scope}_scope_explicitly_scoped_mutation"; else case "$lane" in fast) echo "not_in_fast_lane" ;; default) echo "configured_${mutation_scope}_scope_lash_core_direct_model_and_lash_sim_scheduler_oracle_targets" ;; broad) echo "bounded_broad_configured_${mutation_scope}_scope_targeted_regressions_without_full_mutation_claim" ;; full) echo "true_full_configured_full_scope_targeted_smoke_and_full_mutation" ;; esac; fi)",
+  "mutation_testing": "$(mutation_testing_label)",
   "true_full_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full",
   "bounded_broad_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} scripts/confidence-gate.sh broad",
   "artifacts_root": "${out_dir}"

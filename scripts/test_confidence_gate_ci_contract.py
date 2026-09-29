@@ -216,7 +216,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         consumers = {"confidence-harnesses", "confidence-generated", "confidence-minimizer",
                      "confidence-backends", "confidence-coverage",
                      "confidence-mutation-core", "confidence-mutation-sim",
-                     "confidence-mutation-authority", "confidence-mutation-packages", "sim-search"}
+                     "confidence-mutation-authority", "confidence-mutation-packages-rotating",
+                     "sim-search"}
         self.assertEqual(consumers | {"confidence", "confidence-build", "confidence-conclusion"}, set(jobs))
         artifact = "confidence-build-${{ github.sha }}-${{ github.run_attempt }}"
         producer = jobs["confidence-build"]
@@ -258,7 +259,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "mutation-core": ["run_lash_core_direct_model_mutation_evidence"],
             "mutation-sim": ["run_lash_sim_runtime_completion_mutation_evidence"],
             "mutation-authority": ["run_authority_rebind_mutation_evidence"],
-            "mutation-packages": ["run_mutation_smoke", "run_mutation_full", "finalize_mutation_gate"],
+            "mutation-packages-rotating": ["run_mutation_smoke", "run_mutation_full", "finalize_mutation_gate"],
         }
         all_functions = {f for fs in functions.values() for f in fs}
         stubs = "\n".join(f"{f}() {{ echo {f}; }}" for f in all_functions)
@@ -878,7 +879,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             f"target/confidence/stages/{stage}/**"
             for stage in ("harnesses", "generated-${{ matrix.shard }}", "minimizer", "backends",
                            "coverage", "mutation-core", "mutation-sim", "mutation-authority",
-                           "mutation-packages-${{ matrix.package }}-${{ matrix.shard }}")
+                           "mutation-packages-rotating-${{ matrix.package }}-${{ matrix.shard }}")
         )
         self.assertCountEqual(consumed_paths, expected_consumed_paths)
 
@@ -1193,13 +1194,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         gate = GATE.read_text(encoding="utf-8")
         stage = (ROOT / "scripts/ci/confidence-stage.sh").read_text(encoding="utf-8")
         confidence = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())
-        job = confidence["jobs"]["confidence-mutation-packages"]
+        job = confidence["jobs"]["confidence-mutation-packages-rotating"]
 
         # Every leg is bounded: the stage opts in, the matrix hands each leg a
         # shard coordinate, and the run number rotates the judged slice.
         self.assertIn("LASH_MUTATION_PACKAGES_BOUNDED=1", stage)
         run_step = next(
-            s for s in job["steps"] if s.get("name") == "Run mutation-packages"
+            s for s in job["steps"] if s.get("name") == "Run mutation-packages-rotating"
         )
         self.assertEqual(
             "${{ matrix.shard }}/${{ matrix.shards }}",
@@ -1398,6 +1399,265 @@ run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("--shard 3/7 ", result.stdout)
+
+    def test_weekly_full_claim_requires_complete_mutant_union(self) -> None:
+        """A rotating mutation leg's evidence says rotating, never full.
+
+        The weekly Confidence run selects `full`, but its
+        mutation-packages-rotating stage judges one bounded slice per leg,
+        indexed by leg coordinate and run number. Reserving `full` for a
+        verified complete mutant union at one revision means every artifact
+        that leg writes -- the mutation evidence manifest, the confidence
+        summary, and the per-command shard sidecars -- records the slice and
+        the revision instead of claiming full scope. The unsharded local
+        `full` lane is the only mode that may still claim it, so the control
+        run below keeps that label pinned.
+        """
+        gate = GATE.read_text(encoding="utf-8")
+        stage = (ROOT / "scripts/ci/confidence-stage.sh").read_text(encoding="utf-8")
+        confidence_source = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
+        confidence = yaml.safe_load(confidence_source)
+        revision = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip()
+
+        # The stage, the job, and the run summary all name the rotation.
+        self.assertIn("mutation-packages-rotating)", stage)
+        self.assertLess(
+            stage.index("mutation-packages-rotating)"),
+            stage.index("LASH_MUTATION_PACKAGES_BOUNDED=1"),
+        )
+        job = confidence["jobs"]["confidence-mutation-packages-rotating"]
+        self.assertIn("rotating", job["name"])
+        self.assertNotIn("confidence-mutation-packages:", confidence_source)
+        self.assertIn(
+            "LASH_CONFIDENCE_STAGE: mutation-packages-rotating", confidence_source
+        )
+        conclusion = workflow_job_block(confidence_source, "confidence-conclusion")
+        self.assertIn("GITHUB_STEP_SUMMARY", conclusion)
+        self.assertIn("rotating", conclusion)
+        self.assertIn(
+            "GITHUB_STEP_SUMMARY", shell_function_body(gate, "run_mutants_recorded")
+        )
+
+        artifact_paths = (
+            "declare -A confidence_artifact_paths=(\n"
+            + gate.split("declare -A confidence_artifact_paths=(\n", 1)[1].split(
+                "\n)\n", 1
+            )[0]
+            + "\n)"
+        )
+        schedule_table = (
+            "confidence_schedule_table=(\n"
+            + gate.split("confidence_schedule_table=(\n", 1)[1].split("\n)\n", 1)[0]
+            + "\n)"
+        )
+        # shell_function_body, not _definition: the summary writers' heredocs
+        # carry a column-0 `}` (the JSON close), which the definition regex
+        # would read as the function's end.
+        functions = "\n".join(
+            f"{name}() {{\n{shell_function_body(gate, name)}"
+            for name in (
+                "schedule_selector",
+                "schedule_row_matches_area",
+                "schedule_has_area",
+                "schedule_lane_fallback_reason",
+                "artifact_path",
+                "schedule_has_artifact",
+                "scheduled_artifact_path",
+                "existing_artifact_path",
+                "scheduled_existing_artifact_path",
+                "confidence_revision",
+                "bounded_rotation_json",
+                "mutation_recorded_scope",
+                "mutation_testing_label",
+                "mutation_packages_shard",
+                "run_mutation_smoke",
+                "run_mutation_full",
+                "run_mutants_recorded",
+                "mutation_count",
+                "mutation_artifact_json",
+                "full_mutation_suites_complete",
+                "full_mutation_status",
+                "mutation_evidence_status",
+                "coverage_evidence_status",
+                "mutation_evidence_path",
+                "restate_postgres_workers_e2e_status",
+                "write_mutation_evidence_summary",
+                "confidence_class",
+                "write_confidence_summary",
+                "finalize_mutation_gate",
+            )
+        )
+        harness = f"""\
+set -euo pipefail
+{artifact_paths}
+{schedule_table}
+{functions}
+step() {{ :; }}
+require_tool() {{ :; }}
+cargo() {{
+  if [[ "$*" == *--list* ]]; then seq 1 23; return 0; fi
+  return 0
+}}
+lane=full
+area=all
+requested_selector=full
+fast_shard=all
+sim_search_shard=
+mutation_scope=full
+coverage_scope=run
+selected_packages=(pkg-x)
+area_mutation_file_args=()
+out_dir="$1"
+out_root="$1"
+mutation_jobs=2
+mutation_failures=0
+mutation_commands_run=0
+MUTATION_PACKAGES_SMOKE_MUTANTS=12
+MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT=4
+declare -A MUTATION_PACKAGES_FULL_MUTANTS=([pkg-x]="5")
+MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'
+run_mutation_smoke
+run_mutation_full
+finalize_mutation_gate
+write_confidence_summary passed
+cp "${{out_dir}}/confidence-summary.json" "${{out_dir}}/confidence-summary-passed.json"
+write_confidence_summary failed
+"""
+        base_env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("LASH_") and key != "GITHUB_STEP_SUMMARY"
+        }
+
+        # 23 mutants, smoke budget 12 -> 2 slices, full budget 5 -> 5 slices.
+        # Leg 2/4 of run 7 judges slice ((7-1)*4+1)%denom+1.
+        expected_smoke_shard = f"{(6 * 4 + 1) % 2 + 1}/2"
+        expected_full_shard = f"{(6 * 4 + 1) % 5 + 1}/5"
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = pathlib.Path(directory) / "leg"
+            step_summary = pathlib.Path(directory) / "step-summary.md"
+            step_summary.touch()
+            env = dict(
+                base_env,
+                LASH_MUTATION_PACKAGES_BOUNDED="1",
+                LASH_MUTATION_PACKAGES_SHARD="2/4",
+                LASH_MUTATION_RUN_INDEX="7",
+                GITHUB_STEP_SUMMARY=str(step_summary),
+            )
+            result = subprocess.run(
+                ["bash", "-c", harness, "rotating-leg", str(out_dir)],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+
+            smoke_sidecar = json.loads(
+                (out_dir / "mutants-pkg-x-smoke" / "mutation-shard.json").read_text()
+            )
+            full_sidecar = json.loads(
+                (out_dir / "mutants-pkg-x-full" / "mutation-shard.json").read_text()
+            )
+            self.assertEqual(expected_smoke_shard, smoke_sidecar["shard"])
+            self.assertEqual(expected_full_shard, full_sidecar["shard"])
+            for sidecar in (smoke_sidecar, full_sidecar):
+                rotation = sidecar["bounded_rotation"]
+                self.assertEqual("2/4", rotation["leg"])
+                self.assertEqual("7", rotation["run_index"])
+                self.assertEqual(revision, rotation["revision"])
+                self.assertIs(False, rotation["complete_mutant_union"])
+
+            command_status = json.loads(
+                (out_dir / "mutants-pkg-x-full" / "confidence-status.json").read_text()
+            )
+            self.assertEqual("bounded_rotating", command_status["scope"])
+
+            evidence = json.loads(
+                (out_dir / "mutation-evidence.json").read_text()
+            )
+            self.assertEqual("bounded_rotating", evidence["scope"])
+            self.assertEqual("passed", evidence["status"])
+            self.assertEqual("bounded_rotating_slice", evidence["full_mutation_status"])
+            self.assertEqual("2/4", evidence["bounded_rotation"]["leg"])
+            self.assertEqual(revision, evidence["bounded_rotation"]["revision"])
+            self.assertIs(
+                False, evidence["bounded_rotation"]["complete_mutant_union"]
+            )
+            self.assertIn("rotating", evidence["semantics"])
+            self.assertNotIn("true_full", evidence["semantics"])
+            full_suites = {
+                row["name"]: row for row in evidence["full_mutation_suites"]
+            }
+            self.assertEqual(
+                expected_full_shard, full_suites["pkg-x full mutation"]["shard"]
+            )
+
+            for name in ("confidence-summary-passed.json", "confidence-summary.json"):
+                summary = json.loads((out_dir / name).read_text())
+                with self.subTest(manifest=name):
+                    self.assertEqual(
+                        "bounded_rotating_mutation_leg", summary["confidence_class"]
+                    )
+                    self.assertEqual(
+                        "false", summary["global_full_confidence_claim"]
+                    )
+                    self.assertIn("rotating", summary["mutation_testing"])
+                    self.assertNotIn("true_full", summary["mutation_testing"])
+                    self.assertEqual(
+                        "bounded_rotating_slice", summary["full_mutation_status"]
+                    )
+                    self.assertIs(
+                        False, summary["bounded_rotation"]["complete_mutant_union"]
+                    )
+                    contract = summary["artifact_contract"]["full_lane"]
+                    self.assertEqual(
+                        "bounded_rotating_mutation_leg",
+                        contract["confidence_class"],
+                    )
+                    self.assertEqual(
+                        "false", contract["global_full_confidence_claim"]
+                    )
+                    self.assertEqual(
+                        "bounded_rotating", contract["effective_mutation_scope"]
+                    )
+
+            summary_text = step_summary.read_text(encoding="utf-8")
+            self.assertIn("bounded rotating slice `2/2`", summary_text)
+            self.assertIn("bounded rotating slice `1/5`", summary_text)
+            self.assertIn("leg 2/4, run index 7", summary_text)
+            self.assertIn(revision, summary_text)
+
+        # The unsharded lane is the one place a complete mutant union exists,
+        # so its manifest keeps the true_full labels a rotating leg dropped.
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = pathlib.Path(directory) / "unbounded"
+            step_summary = pathlib.Path(directory) / "step-summary.md"
+            step_summary.touch()
+            env = dict(base_env, GITHUB_STEP_SUMMARY=str(step_summary))
+            result = subprocess.run(
+                ["bash", "-c", harness, "unbounded", str(out_dir)],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            evidence = json.loads(
+                (out_dir / "mutation-evidence.json").read_text()
+            )
+            self.assertEqual("full", evidence["scope"])
+            self.assertIsNone(evidence["bounded_rotation"])
+            self.assertEqual("run", evidence["full_mutation_status"])
+            summary = json.loads(
+                (out_dir / "confidence-summary-passed.json").read_text()
+            )
+            self.assertEqual("true_full", summary["confidence_class"])
+            self.assertEqual("true", summary["global_full_confidence_claim"])
+            self.assertIn("true_full", summary["mutation_testing"])
+            self.assertIsNone(summary["bounded_rotation"])
 
     def test_mutation_package_loops_skip_the_real_cargo_fault_matrix_probes(self) -> None:
         """The fault-matrix chunk tests fork a real `cargo test` each and alone
@@ -1818,7 +2078,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             '"effective_coverage_scope": "${coverage_scope}"',
             '"coverage_evidence_status": "$(coverage_evidence_status)"',
             '"required_mutation_scope": "full"',
-            '"effective_mutation_scope": "${mutation_scope}"',
+            '"effective_mutation_scope": "$(mutation_recorded_scope)"',
             '"mutation_evidence": "$(mutation_evidence_path)"',
             '"mutation_evidence_status": "$(mutation_evidence_status)"',
             '"full_mutation_status": "$(full_mutation_status)"',
@@ -2885,7 +3145,7 @@ class MutationRequestTests(unittest.TestCase):
         for job in (
             "confidence-mutation-core",
             "confidence-mutation-sim",
-            "confidence-mutation-packages",
+            "confidence-mutation-packages-rotating",
         ):
             self.assertIn(job, confidence["jobs"])
         gate = GATE.read_text()
