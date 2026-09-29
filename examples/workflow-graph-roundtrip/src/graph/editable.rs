@@ -211,7 +211,7 @@ pub(super) fn editable_fields(
             .collect();
     }
     match &expression {
-        Expr::SleepFor(value) | Expr::SleepUntil(value) => {
+        Expr::SleepFor(value) => {
             BTreeMap::from([("duration".to_string(), EditableValue::from_expr(value))])
         }
         Expr::WaitSignal { name } => BTreeMap::from([(
@@ -237,7 +237,7 @@ pub(super) fn apply_fields(
         return Ok(());
     }
     match expression {
-        Expr::SleepFor(value) | Expr::SleepUntil(value) => {
+        Expr::SleepFor(value) => {
             if let Some(duration) = fields.get("duration") {
                 **value = duration.to_expr(node_id, "fields.duration", scope)?;
             }
@@ -589,7 +589,7 @@ pub(super) fn parse_effect_kind(
         "wait_signal" => Ok(WorkflowEffectKind::WaitSignal),
         "sleep" => Ok(WorkflowEffectKind::SleepFor),
         "print" => Ok(WorkflowEffectKind::Print),
-        "yield" => Ok(WorkflowEffectKind::Yield),
+
         "break" => Ok(WorkflowEffectKind::Break),
         "continue" => Ok(WorkflowEffectKind::Continue),
         _ => Err(RenderErrorResponse::invalid_node_payload(

@@ -2,44 +2,38 @@
 //! instructions plus the supporting compile-time tables (slot maps, format
 //! templates, schema cache).
 //!
-//! All compile-time-only helpers live here too: `is_pure_expr` /
-//! `contains_type_literal` (used to decide whether an expression can be
-//! evaluated without entering the VM) and the `fold_type` /
-//! `interned_scalar_schema` machinery (used to
-//! convert `TypeExpr` AST nodes into JSON-Schema-shaped `Value` literals
-//! at compile time).
+//! Compile-time-only helpers live here too: `is_pure_expr` decides whether an
+//! expression can be evaluated without entering the VM.
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::artifact::CompiledModuleContext;
 use crate::ast::{
-    AssignPathStep, AssignTarget, AstPath, BinaryOp, Declaration, Expr, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, LabelMetadata, ListComprehensionClause, MethodKey,
-    Program, TypeExpr, UnaryOp,
+    AssignPathStep, AssignTarget, AstPath, Declaration, Expr, FunctionExpr, JavaScriptBinaryOp,
+    JavaScriptLogicalOp, LabelMetadata, MethodKey, Program,
 };
 use crate::span::Span;
 use crate::tracking::{LashlangExecutionContext, LashlangExecutionSite};
 use crate::workflow_graph::WorkflowOwnership;
 
 use super::record::{Symbol, intern_symbol, lookup_symbol, record_with_capacity, symbol_name};
-use super::schema::{SchemaScalarKind, ValidationPlan, compile_schema_value};
+use super::schema::{ValidationPlan, compile_schema_value};
 use super::{
-    AggregateConsumer, Chunk, ClosureParameterModel, CompileStats, CompiledAggregateAwaitShape,
+    AggregateConsumer, Chunk, ClosureParameterModel, CompiledAggregateAwaitShape,
     CompiledAssignPath, CompiledAssignPathStep, CompiledFormatTemplate, CompiledFunction,
-    CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf,
-    CompiledResourceOperationListBatch, EMPTY_HANDLER_CHAIN_DIGEST, HandlerScopeExtent,
-    Instruction, IntrinsicOp, JavaScriptUriCodec, LASH_HOST_REQUIREMENTS_REF_KEY,
-    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
-    LASH_TYPE_KEY, Name, Value, as_number, compile_format_template, eval_binary_values,
+    CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf, EMPTY_HANDLER_CHAIN_DIGEST,
+    HandlerScopeExtent, Instruction, IntrinsicOp, JavaScriptUriCodec,
+    LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,
+    LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, Name, Value, compile_format_template,
     eval_javascript_binary, eval_javascript_unary, execute_integer_div_builtin, execute_len_direct,
-    execute_range_builtin, extend_handler_chain_digest, inline_inherited_builtin,
-    is_comparison_binary_op, is_numeric_binary_op, is_truthy, javascript_to_string,
-    read_javascript_field_direct, read_javascript_index_direct, transient_name, unwrap_type_value,
+    execute_range_builtin, extend_handler_chain_digest, inline_inherited_builtin, is_truthy,
+    javascript_to_string, read_javascript_field_direct, read_javascript_index_direct,
+    transient_name, unwrap_type_value,
 };
 
 pub(crate) struct Compiler {
@@ -60,8 +54,6 @@ pub(crate) struct Compiler {
     compiled_schemas: Vec<ValidationPlan>,
     assign_paths: Vec<CompiledAssignPath>,
     resource_operation_batches: Vec<CompiledResourceOperationBatch>,
-    resource_operation_list_batches: Vec<CompiledResourceOperationListBatch>,
-    compile_stats: Rc<RefCell<CompileStats>>,
     const_slots: Vec<Option<Value>>,
     loop_contexts: Vec<LoopContext>,
     handler_scopes: Vec<HandlerScope>,

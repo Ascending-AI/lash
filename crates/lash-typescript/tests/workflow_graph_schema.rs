@@ -1,19 +1,7 @@
 use std::collections::BTreeSet;
 
-use lash_typescript::workflow_graph::{parse_typescript_expression, workflow_graph_from_source};
-use lashlang::{
-    WorkflowContainer, WorkflowDeclaration, WorkflowListComprehensionClause, WorkflowNode,
-    WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowSubgraph,
-};
-
-fn ir(text: &str) -> lashlang::Expr {
-    let globals = ["child", "tools", "value", "values"]
-        .into_iter()
-        .map(str::to_string)
-        .collect::<BTreeSet<_>>();
-    parse_typescript_expression(text, &globals, &BTreeSet::new())
-        .expect("fixture expression parses")
-}
+use lash_typescript::workflow_graph::workflow_graph_from_source;
+use lashlang::{WorkflowContainer, WorkflowDeclaration, WorkflowNodeKind};
 
 #[test]
 fn published_schema_accepts_real_graph_with_every_node_and_container_kind() {
@@ -44,27 +32,7 @@ try {
 }
 finish(values);
 "#;
-    let mut graph = workflow_graph_from_source(source).expect("fixture projects");
-    graph.main.nodes.push(WorkflowNode {
-        id: WorkflowNodeId::new("fixture:list-comprehension".to_string()),
-        name: "list comprehension".to_string(),
-        description: None,
-        name_source: WorkflowNodeNameSource::Derived,
-        kind: WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-            binding: None,
-            clauses: vec![WorkflowListComprehensionClause::For {
-                binding: "item".to_string(),
-                iterable: ir("values"),
-            }],
-            element: Box::new(WorkflowSubgraph::default()),
-        }),
-        available_variables: Vec::new(),
-        type_facets: None,
-        outputs: Vec::new(),
-        execution_sites: Vec::new(),
-        source_span: None,
-    });
-
+    let graph = workflow_graph_from_source(source).expect("fixture projects");
     let kinds = graph
         .nodes()
         .map(|node| match &node.kind {
@@ -77,9 +45,6 @@ finish(values);
             WorkflowNodeKind::Container(WorkflowContainer::If { .. }) => "if",
             WorkflowNodeKind::Container(WorkflowContainer::For { .. }) => "for",
             WorkflowNodeKind::Container(WorkflowContainer::While { .. }) => "while",
-            WorkflowNodeKind::Container(WorkflowContainer::ListComprehension { .. }) => {
-                "list_comprehension"
-            }
             WorkflowNodeKind::Opaque { .. } => "opaque",
         })
         .collect::<BTreeSet<_>>();
@@ -95,7 +60,6 @@ finish(values);
             "if",
             "for",
             "while",
-            "list_comprehension",
             "opaque",
         ])
     );
@@ -107,7 +71,7 @@ finish(values);
     );
 
     let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/host/workflow-graph/v20.schema.json"
+        "../../../schemas/host/workflow-graph/v21.schema.json"
     ))
     .expect("published graph schema parses");
     let validator = jsonschema::JSONSchema::compile(&schema).expect("graph schema compiles");

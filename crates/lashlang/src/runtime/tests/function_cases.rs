@@ -46,22 +46,22 @@ fn format_call(template: &str, args: Vec<Expr>) -> Expr {
 fn factorial_program(n: f64) -> Program {
     let recursive = call(
         variable("factorial"),
-        vec![Expr::Binary {
+        vec![Expr::JavaScriptBinary {
             left: Box::new(variable("n")),
-            op: BinaryOp::Subtract,
+            op: JavaScriptBinaryOp::Subtract,
             right: Box::new(Expr::Number(1.0)),
         }],
     );
     let body = Expr::If {
-        condition: Box::new(Expr::Binary {
+        condition: Box::new(Expr::JavaScriptBinary {
             left: Box::new(variable("n")),
-            op: BinaryOp::LessEqual,
+            op: JavaScriptBinaryOp::LessEqual,
             right: Box::new(Expr::Number(1.0)),
         }),
         then_block: Box::new(Expr::Number(1.0)),
-        else_block: Box::new(Expr::Binary {
+        else_block: Box::new(Expr::JavaScriptBinary {
             left: Box::new(variable("n")),
-            op: BinaryOp::Multiply,
+            op: JavaScriptBinaryOp::Multiply,
             right: Box::new(recursive),
         }),
     };
@@ -81,12 +81,12 @@ async fn user_function_closure_capture_is_deep_by_value_and_recursion_is_stackle
                 None,
                 &["value"],
                 &["captured"],
-                Expr::Binary {
+                Expr::JavaScriptBinary {
                     left: Box::new(Expr::Index {
                         target: Box::new(variable("captured")),
                         index: Box::new(Expr::Number(0.0)),
                     }),
-                    op: BinaryOp::Add,
+                    op: JavaScriptBinaryOp::Add,
                     right: Box::new(variable("value")),
                 },
             ),
@@ -123,9 +123,9 @@ async fn builtin_map_reenters_the_flat_vm_and_rejects_effectful_callbacks() {
                 None,
                 &["value"],
                 &[],
-                Expr::Binary {
+                Expr::JavaScriptBinary {
                     left: Box::new(variable("value")),
-                    op: BinaryOp::Multiply,
+                    op: JavaScriptBinaryOp::Multiply,
                     right: Box::new(Expr::Number(2.0)),
                 },
             ),
@@ -267,12 +267,12 @@ async fn suspended_caller_and_callee_preserve_heap_arguments_and_locals() {
             "local_record",
             Expr::Record(vec![("record".into(), variable("record_arg"))]),
         ),
-        assign("local_tuple", Expr::Tuple(vec![variable("tuple_arg")])),
+        assign("local_nested", Expr::List(vec![variable("nested_arg")])),
         Expr::Print(Box::new(Expr::Number(1.0))),
-        Expr::Tuple(vec![
+        Expr::List(vec![
             variable("local_list"),
             variable("local_record"),
-            variable("local_tuple"),
+            variable("local_nested"),
         ]),
     ]);
     let caller_body = Expr::Block(vec![
@@ -285,7 +285,7 @@ async fn suspended_caller_and_callee_preserve_heap_arguments_and_locals() {
             vec![
                 Expr::List(vec![Expr::Number(1.0)]),
                 Expr::Record(vec![("value".into(), Expr::Number(2.0))]),
-                Expr::Tuple(vec![Expr::Number(3.0)]),
+                Expr::List(vec![Expr::Number(3.0)]),
             ],
         ),
     ]);
@@ -294,7 +294,7 @@ async fn suspended_caller_and_callee_preserve_heap_arguments_and_locals() {
             "callee",
             function(
                 None,
-                &["list_arg", "record_arg", "tuple_arg"],
+                &["list_arg", "record_arg", "nested_arg"],
                 &[],
                 callee_body,
             ),
@@ -319,7 +319,7 @@ async fn suspended_caller_and_callee_preserve_heap_arguments_and_locals() {
     assert_eq!(continuation.frame_stack.len(), 2);
     assert_eq!(
         round_trip_and_resume(&program, continuation).await,
-        ExecutionOutcome::Finished(Value::Tuple(
+        ExecutionOutcome::Finished(Value::List(
             vec![
                 Value::List(vec![Value::List(vec![Value::Number(1.0)].into())].into()),
                 Value::Record(std::sync::Arc::new({
@@ -334,7 +334,7 @@ async fn suspended_caller_and_callee_preserve_heap_arguments_and_locals() {
                     );
                     record
                 })),
-                Value::Tuple(vec![Value::Tuple(vec![Value::Number(3.0)].into())].into()),
+                Value::List(vec![Value::List(vec![Value::Number(3.0)].into())].into()),
             ]
             .into()
         ))
@@ -821,7 +821,7 @@ async fn closures_obey_the_complete_host_boundary_matrix() {
                 name: "validate".into(),
                 args: vec![
                     variable("f"),
-                    Expr::TypeLiteral(Box::new(crate::ast::TypeExpr::Any)),
+                    builders::type_literal(crate::ast::TypeExpr::Any),
                 ],
             },
         ),
@@ -831,22 +831,6 @@ async fn closures_obey_the_complete_host_boundary_matrix() {
         assert!(
             matches!(
                 execute_compiled(&program, &mut State::new(), &Host).await,
-                Err(RuntimeError::FunctionValueAtHostBoundary)
-            ),
-            "{boundary} must reject a closure before it reaches the host"
-        );
-    }
-
-    for (boundary, expr) in [("yield", Expr::Yield(Box::new(variable("f"))))] {
-        let program = compile_program_internal(&Program::block(vec![assign("f", closure()), expr]));
-        assert!(
-            matches!(
-                execute_compiled_process(
-                    &program,
-                    &mut State::new(),
-                    &RecordingProcessHost::default()
-                )
-                .await,
                 Err(RuntimeError::FunctionValueAtHostBoundary)
             ),
             "{boundary} must reject a closure before it reaches the host"
@@ -1010,9 +994,9 @@ async fn builtin_callback_continuation_preserves_reentry_and_occurrence_counters
                     None,
                     &["value"],
                     &[],
-                    Expr::Binary {
+                    Expr::JavaScriptBinary {
                         left: Box::new(variable("value")),
-                        op: BinaryOp::Add,
+                        op: JavaScriptBinaryOp::Add,
                         right: Box::new(Expr::Number(1.0)),
                     },
                 ),
@@ -1076,9 +1060,9 @@ async fn filter_shaped_callback_parks_inside_the_shared_driver_and_resumes() {
         &["value"],
         &[],
         Expr::If {
-            condition: Box::new(Expr::Binary {
+            condition: Box::new(Expr::JavaScriptBinary {
                 left: Box::new(variable("value")),
-                op: BinaryOp::Greater,
+                op: JavaScriptBinaryOp::Greater,
                 right: Box::new(Expr::Number(1.0)),
             }),
             then_block: Box::new(Expr::List(vec![variable("value")])),

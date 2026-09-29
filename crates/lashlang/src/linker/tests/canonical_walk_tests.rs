@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::{AstPath, UnaryOp};
+use crate::ast::{AstPath, JavaScriptUnaryOp};
 
 /// `process scan(tick: timer.Tick) { finish tick.fired_at }`
 fn scan_tick_process() -> Declaration {
@@ -135,7 +135,7 @@ fn canonical_walk_visits_index_and_unary_operands_for_link_and_facets() {
         ),
         (
             "value = -missing",
-            builders::unary(UnaryOp::Negate, builders::var("missing")),
+            builders::unary(JavaScriptUnaryOp::Negate, builders::var("missing")),
         ),
     ];
     for (source, operand) in witnesses {

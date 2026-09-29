@@ -1,12 +1,12 @@
 use super::*;
 
 #[derive(Default)]
-struct ComprehensionBatchHost {
+struct AggregateBatchHost {
     batches: Mutex<Vec<Vec<String>>>,
     singles: AtomicUsize,
 }
 
-impl ComprehensionBatchHost {
+impl AggregateBatchHost {
     fn perform_operation(operation: ResourceOperation) -> Result<Value, ExecutionHostError> {
         match operation.operation.as_str() {
             "order" => {
@@ -53,7 +53,7 @@ impl ComprehensionBatchHost {
     }
 }
 
-impl ExecutionHost for ComprehensionBatchHost {
+impl ExecutionHost for AggregateBatchHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
@@ -87,7 +87,7 @@ impl ExecutionHost for ComprehensionBatchHost {
             }
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
             other => Err(ExecutionHostError::new(format!(
-                "unexpected host ability in comprehension await test: {other:?}"
+                "unexpected host ability in aggregate await test: {other:?}"
             ))),
         }
     }
@@ -157,7 +157,7 @@ impl ExecutionHost for AggregateProcessHost {
 /// `echo` is the process the aggregate cases start; the module operations are
 /// the leaves they settle. Callers pass the top-level expressions, so the
 /// declaration list stays in one place.
-fn comprehension_module(expressions: Vec<Expr>) -> Program {
+fn aggregate_module(expressions: Vec<Expr>) -> Program {
     builders::module(
         vec![builders::process(
             "echo",
@@ -185,7 +185,7 @@ fn op(module: &str, operation: &str, args: Vec<(&str, Expr)>) -> Expr {
     ))
 }
 
-fn comprehension_compile(program: Program) -> CompiledProgram {
+fn aggregate_compile(program: Program) -> CompiledProgram {
     let mut catalog = crate::LashlangHostCatalog::new();
     for (module, operation) in [
         ("tools", "echo"),
@@ -213,8 +213,8 @@ fn comprehension_compile(program: Program) -> CompiledProgram {
     crate::testing::harness::compile_linked_main(&linked)
 }
 
-async fn comprehension_finish(host: &ComprehensionBatchHost, program: Program) -> Value {
-    let compiled = comprehension_compile(program);
+async fn aggregate_finish(host: &AggregateBatchHost, program: Program) -> Value {
+    let compiled = aggregate_compile(program);
     let mut state = State::new();
     match execute_compiled(&compiled, &mut state, host)
         .await
@@ -226,7 +226,7 @@ async fn comprehension_finish(host: &ComprehensionBatchHost, program: Program) -
 }
 
 async fn aggregate_process_finish(host: &AggregateProcessHost, program: Program) -> Value {
-    let compiled = comprehension_compile(program);
+    let compiled = aggregate_compile(program);
     let mut state = State::new();
     match execute_compiled(&compiled, &mut state, host)
         .await
@@ -248,7 +248,7 @@ async fn aggregate_process_finish(host: &AggregateProcessHost, program: Program)
 #[tokio::test(flavor = "current_thread")]
 async fn a_literal_process_handle_element_is_refused_before_the_process_seam() {
     let host = AggregateProcessHost::default();
-    let compiled = comprehension_compile(comprehension_module(vec![
+    let compiled = aggregate_compile(aggregate_module(vec![
         started_handle(),
         builders::finish(builders::await_expr(builders::list(vec![
             builders::var("h"),
@@ -274,7 +274,7 @@ async fn a_handle_nested_inside_a_literal_element_is_carried_through() {
     let host = AggregateProcessHost::default();
     let value = aggregate_process_finish(
         &host,
-        comprehension_module(vec![
+        aggregate_module(vec![
             started_handle(),
             builders::finish(builders::await_expr(builders::list(vec![
                 builders::list(vec![builders::var("h")]),
@@ -307,7 +307,7 @@ async fn bound_process_containers_are_carried_through_unsettled() {
     // Each case binds a container to `hs`/`hr`, then awaits a literal whose
     // first element is that bound name: only element positions settle.
     let awaited = |bound: &str, container: Expr| {
-        comprehension_module(vec![
+        aggregate_module(vec![
             started_handle(),
             builders::assign(bound, container),
             builders::finish(builders::await_expr(builders::list(vec![
@@ -371,7 +371,7 @@ async fn a_rejecting_leaf_rejects_the_aggregate_beside_a_carried_handle() {
         reject_await: true,
         ..AggregateProcessHost::default()
     };
-    let compiled = comprehension_compile(comprehension_module(vec![
+    let compiled = aggregate_compile(aggregate_module(vec![
         started_handle(),
         builders::assign("hs", builders::list(vec![builders::var("h")])),
         builders::finish(builders::await_expr(builders::list(vec![
@@ -388,8 +388,10 @@ async fn a_rejecting_leaf_rejects_the_aggregate_beside_a_carried_handle() {
 
 #[test]
 fn awaiting_a_settled_literal_is_a_link_diagnostic() {
+    // A literal container of plain values is refused at link: the await can
+    // never produce a pending leaf. Non-literal operands (`await (1 + 2)`) are
+    // legal TypeScript and link fine, so they are not in the table.
     let pair = || builders::list(vec![builders::num(1.0), builders::num(2.0)]);
-    let sum = || builders::binary(builders::num(1.0), BinaryOp::Add, builders::num(2.0));
     for (source, awaited, kind) in [
         ("finish await [1, 2]", pair(), "list"),
         (
@@ -397,22 +399,7 @@ fn awaiting_a_settled_literal_is_a_link_diagnostic() {
             builders::record(vec![("a", builders::num(1.0))]),
             "record",
         ),
-        (
-            "finish await [x for x in [1, 2]]",
-            builders::comprehension(
-                builders::var("x"),
-                vec![builders::comprehension_for("x", pair())],
-            ),
-            "list",
-        ),
         ("finish await 1", builders::num(1.0), "number"),
-        ("finish await (1 + 2)", sum(), "number"),
-        ("finish await [1 + 2]", builders::list(vec![sum()]), "list"),
-        (
-            "finish await { a: 1 + 2 }",
-            builders::record(vec![("a", sum())]),
-            "record",
-        ),
     ] {
         let program = builders::program(vec![builders::finish(builders::await_expr(awaited))]);
         let diagnostic = link_diagnostic(program, source);
@@ -421,7 +408,7 @@ fn awaiting_a_settled_literal_is_a_link_diagnostic() {
             "{source}: {diagnostic}"
         );
         assert!(
-            diagnostic.contains("await [m.op({ id: x })? for x in xs]"),
+            diagnostic.contains("await Promise.all("),
             "{source}: {diagnostic}"
         );
     }
@@ -453,100 +440,85 @@ fn a_bare_handle_field_is_an_ordinary_record_and_awaiting_it_is_visibly_settled(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn nested_comprehension_aggregates_match_literal_expansion() {
-    // `echo_for(x)` is the leaf a comprehension produces per element; the
-    // literal column spells the same leaves out by hand.
-    let echo_of = |value: Expr| op("tools", "echo", vec![("value", value)]);
-    let echo_num = |value: f64| echo_of(builders::num(value));
-    // `[m.op({ value: x })? for x in <items>]`
-    let comp_over = |items: Expr| {
-        builders::comprehension(
-            echo_of(builders::var("x")),
-            vec![builders::comprehension_for("x", items)],
+async fn mapped_aggregates_match_literal_expansion() {
+    // `xs.map(x => m.op({ value: x }))` is the leaf shape TypeScript emits per
+    // element; the literal column spells the same pending calls out by hand.
+    // Both sides are `Promise.allSettled` aggregates, so every pending leaf is
+    // one batch and nothing settles singly.
+    let pending_echo = |value: Expr| {
+        builders::builtin(
+            "__typescript_pending_tool",
+            vec![builders::receiver_call(
+                builders::resource(&["tools"]),
+                "echo",
+                vec![builders::record(vec![("value", value)])],
+            )],
         )
     };
+    let pending_num = |value: f64| pending_echo(builders::num(value));
+    let map_over = |items: Expr| builders::map(items, "x", pending_echo(builders::var("x")));
     let one_two = || builders::list(vec![builders::num(1.0), builders::num(2.0)]);
-    let finish_await =
-        |expr: Expr| comprehension_module(vec![builders::finish(builders::await_expr(expr))]);
+    let finish_all = |expr: Expr| {
+        aggregate_module(vec![builders::finish(builders::builtin(
+            "__typescript_await_array",
+            vec![expr, builders::string("allSettled")],
+        ))])
+    };
 
     for (label, nested, literal) in [
         (
-            "comprehension inside an awaited tuple",
-            finish_await(builders::tuple(vec![
-                comp_over(one_two()),
-                builders::num(7.0),
-            ])),
-            finish_await(builders::tuple(vec![
-                builders::list(vec![echo_num(1.0), echo_num(2.0)]),
-                builders::num(7.0),
-            ])),
+            "map over a literal list",
+            finish_all(map_over(one_two())),
+            finish_all(builders::list(vec![pending_num(1.0), pending_num(2.0)])),
         ),
         (
-            "comprehension inside an awaited record field",
-            finish_await(builders::record(vec![("orders", comp_over(one_two()))])),
-            finish_await(builders::record(vec![(
-                "orders",
-                builders::list(vec![echo_num(1.0), echo_num(2.0)]),
-            )])),
-        ),
-        (
-            "comprehension nested under a list, record and tuple",
-            finish_await(builders::list(vec![builders::tuple(vec![
-                builders::list(vec![builders::record(vec![(
-                    "orders",
-                    comp_over(one_two()),
-                )])]),
-                echo_num(3.0),
-            ])])),
-            finish_await(builders::list(vec![builders::tuple(vec![
-                builders::list(vec![builders::record(vec![(
-                    "orders",
-                    builders::list(vec![echo_num(1.0), echo_num(2.0)]),
-                )])]),
-                echo_num(3.0),
-            ])])),
-        ),
-        (
-            "comprehension over a bound list of rows, including an empty row",
-            comprehension_module(vec![
+            "map over a bound list",
+            aggregate_module(vec![
                 builders::assign(
-                    "rows",
+                    "inputs",
                     builders::list(vec![
-                        one_two(),
-                        builders::list(Vec::new()),
-                        builders::list(vec![builders::num(3.0)]),
+                        builders::num(1.0),
+                        builders::num(2.0),
+                        builders::num(3.0),
                     ]),
                 ),
-                builders::finish(builders::await_expr(builders::comprehension(
-                    comp_over(builders::var("row")),
-                    vec![builders::comprehension_for("row", builders::var("rows"))],
-                ))),
+                builders::finish(builders::builtin(
+                    "__typescript_await_array",
+                    vec![
+                        builders::map(
+                            builders::var("inputs"),
+                            "x",
+                            pending_echo(builders::var("x")),
+                        ),
+                        builders::string("allSettled"),
+                    ],
+                )),
             ]),
-            finish_await(builders::list(vec![
-                builders::list(vec![echo_num(1.0), echo_num(2.0)]),
-                builders::list(Vec::new()),
-                builders::list(vec![echo_num(3.0)]),
+            finish_all(builders::list(vec![
+                pending_num(1.0),
+                pending_num(2.0),
+                pending_num(3.0),
             ])),
         ),
         (
-            "empty comprehension between two settled leaves",
-            finish_await(builders::record(vec![
-                ("before", echo_num(0.0)),
-                ("orders", comp_over(builders::list(Vec::new()))),
-                ("after", echo_num(3.0)),
+            "empty map between two settled leaves",
+            finish_all(builders::list(vec![
+                pending_num(0.0),
+                map_over(builders::list(Vec::new())),
+                pending_num(3.0),
             ])),
-            finish_await(builders::record(vec![
-                ("before", echo_num(0.0)),
-                ("orders", builders::list(Vec::new())),
-                ("after", echo_num(3.0)),
+            finish_all(builders::list(vec![
+                pending_num(0.0),
+                builders::list(Vec::new()),
+                pending_num(3.0),
             ])),
         ),
     ] {
-        let nested_host = ComprehensionBatchHost::default();
-        let literal_host = ComprehensionBatchHost::default();
-        let expected = comprehension_finish(&literal_host, literal).await;
+        let nested_host = AggregateBatchHost::default();
+        let literal_host = AggregateBatchHost::default();
+        let expected = aggregate_finish(&literal_host, literal).await;
         assert_eq!(
-            comprehension_finish(&nested_host, nested).await,
+            aggregate_finish(&nested_host, nested).await,
             expected,
             "{label}"
         );
@@ -557,25 +529,16 @@ async fn nested_comprehension_aggregates_match_literal_expansion() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn nested_comprehension_rejections_follow_written_order() {
-    let host = ComprehensionBatchHost::default();
-    let compiled = comprehension_compile(comprehension_module(vec![builders::finish(
+async fn nested_aggregate_rejections_follow_written_order() {
+    let host = AggregateBatchHost::default();
+    let compiled = aggregate_compile(aggregate_module(vec![builders::finish(
         builders::await_expr(builders::record(vec![
             (
                 "orders",
-                builders::comprehension(
-                    builders::comprehension(
-                        op("tools", "err", vec![("value", builders::var("x"))]),
-                        vec![builders::comprehension_for("x", builders::var("row"))],
-                    ),
-                    vec![builders::comprehension_for(
-                        "row",
-                        builders::list(vec![builders::list(vec![
-                            builders::string("first"),
-                            builders::string("second"),
-                        ])]),
-                    )],
-                ),
+                builders::list(vec![
+                    op("tools", "err", vec![("value", builders::string("first"))]),
+                    op("tools", "err", vec![("value", builders::string("second"))]),
+                ]),
             ),
             (
                 "last",
@@ -603,8 +566,8 @@ async fn nested_comprehension_rejections_follow_written_order() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn dynamic_settled_await_names_the_value_and_nested_path() {
-    let host = ComprehensionBatchHost::default();
-    let compiled = comprehension_compile(comprehension_module(vec![
+    let host = AggregateBatchHost::default();
+    let compiled = aggregate_compile(aggregate_module(vec![
         builders::assign(
             "value",
             op(

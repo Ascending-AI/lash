@@ -356,7 +356,7 @@
     },
     "module_ref": "lashlang:v2:blake3:d3bab32a87815b8dcbad510edc940d1a7ea2440f478e7dd53b6621df27ac91f7"
   },
-  "compiled_program_debug": "CompiledProgram { instruction_count: 21, compile_stats: CompileStats { type_literals_total: 0, type_literals_const_folded: 0, type_literals_dynamic: 0, type_ref_sites: 0 } }",
+  "compiled_program_debug": "CompiledProgram { instruction_count: 21 }",
   "exports": {
     "processes": {
       "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf": {

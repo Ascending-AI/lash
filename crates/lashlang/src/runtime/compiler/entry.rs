@@ -7,38 +7,15 @@ pub(super) struct LoopBody<'a> {
     body: &'a Expr,
 }
 
-/// What an awaited-comprehension loop appends per accepted element.
-#[derive(Clone)]
-pub(super) enum ListComprehensionElement<'a> {
-    /// The ordinary comprehension: evaluate the element and append its value.
-    Value(&'a Expr),
-    /// The aggregate-await comprehension: evaluate the call's receiver and
-    /// arguments, append them as one `(receiver, args...)` tuple, and let the
-    /// list batch after the loop start every call together.
-    DeferredCall {
-        receiver: &'a Expr,
-        args: &'a [Expr],
-        /// The [`AstPath`] of the receiver-call node `receiver`/`args` belong
-        /// to, so deferred compilation still resolves their source spans.
-        call_path: AstPath,
-    },
-}
-
 impl Compiler {
     #[cfg(test)]
-    pub(crate) fn compile_program(program: &Program) -> (Chunk, CompileStats) {
-        let stats = Rc::new(RefCell::new(CompileStats::default()));
-        let mut compiler = Self::with_slots_and_stats(
-            None,
-            Rc::new(RefCell::new(SlotTable::default())),
-            stats.clone(),
-        );
+    pub(crate) fn compile_program(program: &Program) -> Chunk {
+        let mut compiler = Self::with_slots(None, Rc::new(RefCell::new(SlotTable::default())));
         compiler.expression_source_spans = expression_source_spans(program);
         compiler.compile_program_block(program);
         let mut chunk = compiler.finish();
         chunk.mark_private_slots(&program.private_bindings);
-        let compile_stats = *stats.borrow();
-        (chunk, compile_stats)
+        chunk
     }
 
     pub(crate) fn compile_linked_program(
@@ -46,12 +23,10 @@ impl Compiler {
         source_spans: FxHashMap<AstPath, Span>,
         module_context: CompiledModuleContext,
         lashlang_execution_context: LashlangExecutionContext,
-    ) -> (Chunk, CompileStats) {
-        let stats = Rc::new(RefCell::new(CompileStats::default()));
-        let mut compiler = Self::with_slots_and_stats(
+    ) -> Chunk {
+        let mut compiler = Self::with_slots(
             Some(module_context),
             Rc::new(RefCell::new(SlotTable::default())),
-            stats.clone(),
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
@@ -63,8 +38,7 @@ impl Compiler {
         compiler.compile_program_block(program);
         let mut chunk = compiler.finish();
         chunk.mark_private_slots(&program.private_bindings);
-        let compile_stats = *stats.borrow();
-        (chunk, compile_stats)
+        chunk
     }
 
     pub(crate) fn compile_linked_process_program(
@@ -72,12 +46,10 @@ impl Compiler {
         source_spans: FxHashMap<AstPath, Span>,
         module_context: CompiledModuleContext,
         lashlang_execution_context: LashlangExecutionContext,
-    ) -> (Chunk, CompileStats) {
-        let stats = Rc::new(RefCell::new(CompileStats::default()));
-        let mut compiler = Self::with_slots_and_stats(
+    ) -> Chunk {
+        let mut compiler = Self::with_slots(
             Some(module_context),
             Rc::new(RefCell::new(SlotTable::default())),
-            stats.clone(),
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
@@ -90,15 +62,12 @@ impl Compiler {
         });
         compiler.expression_source_spans = source_spans;
         compiler.compile_program_block(program);
-        let chunk = compiler.finish();
-        let compile_stats = *stats.borrow();
-        (chunk, compile_stats)
+        compiler.finish()
     }
 
-    fn with_slots_and_stats(
+    fn with_slots(
         module_context: Option<CompiledModuleContext>,
         slots: Rc<RefCell<SlotTable>>,
-        compile_stats: Rc<RefCell<CompileStats>>,
     ) -> Self {
         Self {
             module_context,
@@ -115,8 +84,6 @@ impl Compiler {
             compiled_schemas: Vec::new(),
             assign_paths: Vec::new(),
             resource_operation_batches: Vec::new(),
-            resource_operation_list_batches: Vec::new(),
-            compile_stats,
             const_slots: Vec::new(),
             loop_contexts: Vec::new(),
             handler_scopes: Vec::new(),
@@ -153,7 +120,6 @@ impl Compiler {
             compiled_schemas: self.compiled_schemas,
             assign_paths: self.assign_paths,
             resource_operation_batches: self.resource_operation_batches,
-            resource_operation_list_batches: self.resource_operation_list_batches,
             functions: self.functions,
             handler_chain_digests: self.handler_chain_digests,
             handler_scopes: {
@@ -340,15 +306,6 @@ impl Compiler {
     ) -> usize {
         let index = self.resource_operation_batches.len();
         self.resource_operation_batches.push(batch);
-        index
-    }
-
-    pub(super) fn push_resource_operation_list_batch(
-        &mut self,
-        batch: CompiledResourceOperationListBatch,
-    ) -> usize {
-        let index = self.resource_operation_list_batches.len();
-        self.resource_operation_list_batches.push(batch);
         index
     }
 
@@ -713,47 +670,6 @@ impl Compiler {
             let name = &target.root;
             let slot = self.push_slot(name);
 
-            if let Expr::Binary {
-                left,
-                op: BinaryOp::Add,
-                right,
-            } = expr
-                && matches!(left.as_ref(), Expr::Variable(var) if var == name)
-            {
-                if let Expr::List(items) = right.as_ref()
-                    && items.len() == 1
-                {
-                    // The optimized single-item concat is an insertion like any
-                    // other: the entering item is isolated before it joins the
-                    // accumulator.
-                    self.compile_expr(&items[0], &value_path().child(1).child(0));
-                    self.code.push(Instruction::AppendAssign(slot));
-                    self.set_const_slot(slot, None);
-                    self.push_null_if(leave_value);
-                    return;
-                }
-                if let Some(Value::Number(right)) = self.fold_compile_time_expr(right) {
-                    self.code.push(Instruction::AddAssignNumber { slot, right });
-                    self.set_const_slot(slot, None);
-                    self.push_null_if(leave_value);
-                    return;
-                }
-                if let Expr::Variable(right_name) = right.as_ref() {
-                    let right = self.push_slot(right_name);
-                    self.code.push(Instruction::AddAssignSlot { slot, right });
-                    self.set_const_slot(slot, None);
-                    self.push_null_if(leave_value);
-                    return;
-                }
-                // A general concat copies the right operand's members into the
-                // accumulator. The copy happens per member at the insertion
-                // itself, so the operand does not need isolating as a whole.
-                self.compile_expr(right, &value_path().child(1));
-                self.code.push(Instruction::AddAssign(slot));
-                self.set_const_slot(slot, None);
-                self.push_null_if(leave_value);
-                return;
-            }
             if let Expr::JavaScriptBinary {
                 left,
                 op: JavaScriptBinaryOp::Add,
@@ -796,34 +712,6 @@ impl Compiler {
         }
 
         let slot = self.push_slot(&target.root);
-        if let [AssignPathStep::Index(index)] = target.steps.as_slice()
-            && is_pure_expr(index)
-            && let Expr::Binary {
-                left,
-                op: BinaryOp::Add,
-                right,
-            } = expr
-            && let Expr::Index {
-                target: left_target,
-                index: left_index,
-            } = left.as_ref()
-            && matches!(left_target.as_ref(), Expr::Variable(name) if name == &target.root)
-            && left_index.as_ref() == index
-            && let Some(Value::Number(right)) = self.fold_compile_time_expr(right)
-        {
-            if let Expr::Variable(index_name) = index {
-                let index = self.push_slot(index_name);
-                self.code
-                    .push(Instruction::AddAssignIndexSlotNumber { slot, index, right });
-            } else {
-                self.compile_expr(index, &path.child(0));
-                self.code
-                    .push(Instruction::AddAssignIndexNumber { slot, right });
-            }
-            self.set_const_slot(slot, None);
-            self.push_null_if(leave_value);
-            return;
-        }
         let mut index_child = 0usize;
         for step in &target.steps {
             if let AssignPathStep::Index(index) = step {
@@ -909,144 +797,6 @@ impl Compiler {
         self.clear_const_slots();
     }
 
-    /// `path` is the comprehension node's path. In `children()` order the
-    /// clause expressions come first (`For` contributes its iterable, `If`
-    /// its condition) and the element is last.
-    pub(super) fn compile_list_comprehension(
-        &mut self,
-        element: ListComprehensionElement<'_>,
-        clauses: &[ListComprehensionClause],
-        path: &AstPath,
-    ) {
-        let element_path = path.child(clauses.len() as u32);
-        self.compile_list_comprehension_with(
-            &mut |compiler| match &element {
-                ListComprehensionElement::Value(element) => {
-                    compiler.compile_expr(element, &element_path)
-                }
-                ListComprehensionElement::DeferredCall {
-                    receiver,
-                    args,
-                    call_path,
-                } => {
-                    compiler.compile_expr(receiver, &call_path.child(0));
-                    for (index, arg) in args.iter().enumerate() {
-                        compiler.compile_expr(arg, &call_path.child(index as u32 + 1));
-                    }
-                    compiler.code.push(Instruction::BuildTuple(args.len() + 1));
-                }
-            },
-            clauses,
-            path,
-        );
-    }
-
-    pub(super) fn compile_list_comprehension_with(
-        &mut self,
-        element: &mut dyn FnMut(&mut Self),
-        clauses: &[ListComprehensionClause],
-        path: &AstPath,
-    ) {
-        self.code.push(Instruction::BuildList(0));
-        self.compile_list_comprehension_clause(element, clauses, 0, path);
-        self.clear_const_slots();
-    }
-
-    fn compile_list_comprehension_clause(
-        &mut self,
-        element: &mut dyn FnMut(&mut Self),
-        clauses: &[ListComprehensionClause],
-        index: usize,
-        path: &AstPath,
-    ) {
-        let Some(clause) = clauses.get(index) else {
-            element(self);
-            self.code.push(Instruction::ListAppend);
-            return;
-        };
-
-        let clause_path = path.child(index as u32);
-        match clause {
-            ListComprehensionClause::For { binding, iterable } => {
-                self.compile_list_comprehension_for(
-                    binding,
-                    iterable,
-                    element,
-                    clauses,
-                    index + 1,
-                    path,
-                    &clause_path,
-                );
-            }
-            ListComprehensionClause::If { condition } => {
-                let jump_to_next_iteration =
-                    self.compile_condition_jump_if_false(condition, &clause_path);
-                self.clear_const_slots();
-                self.compile_list_comprehension_clause(element, clauses, index + 1, path);
-                self.patch_jump(jump_to_next_iteration, self.code.len());
-                self.clear_const_slots();
-            }
-        }
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "comprehension compilation carries its loop state through the recursion"
-    )]
-    fn compile_list_comprehension_for(
-        &mut self,
-        binding: &str,
-        iterable: &Expr,
-        element: &mut dyn FnMut(&mut Self),
-        clauses: &[ListComprehensionClause],
-        next_clause: usize,
-        path: &AstPath,
-        iterable_path: &AstPath,
-    ) {
-        let binding = self.push_slot(binding);
-        if let Expr::BuiltinCall { name, args } = iterable
-            && name.as_str() == "range"
-        {
-            for (index, arg) in args.iter().enumerate() {
-                self.compile_expr(arg, &iterable_path.child(index as u32));
-            }
-            self.clear_const_slots();
-            self.set_const_slot(binding, None);
-            self.code.push(Instruction::BeginRangeIter {
-                binding,
-                argc: args.len(),
-            });
-            self.compile_list_comprehension_for_body(element, clauses, next_clause, path);
-            return;
-        }
-
-        self.compile_expr(iterable, iterable_path);
-        self.clear_const_slots();
-        self.set_const_slot(binding, None);
-        self.code.push(Instruction::BeginIter(binding));
-        self.compile_list_comprehension_for_body(element, clauses, next_clause, path);
-    }
-
-    fn compile_list_comprehension_for_body(
-        &mut self,
-        element: &mut dyn FnMut(&mut Self),
-        clauses: &[ListComprehensionClause],
-        next_clause: usize,
-        path: &AstPath,
-    ) {
-        let loop_start = self.code.len();
-        let iter_next = self.code.len();
-        self.code.push(Instruction::IterNext {
-            jump_to: usize::MAX,
-        });
-        self.compile_list_comprehension_clause(element, clauses, next_clause, path);
-        self.code.push(Instruction::Jump(loop_start));
-        let loop_end = self.code.len();
-        self.code.push(Instruction::EndIter);
-        self.patch_jump(iter_next, loop_end);
-        self.clear_const_slots();
-    }
-
     #[expect(
         clippy::expect_used,
         reason = "the loop context pushed a few lines above is popped exactly once at the end of the body"
@@ -1102,13 +852,6 @@ impl Compiler {
             }
             Expr::ProcessRef { .. } | Expr::HostDescriptorConstructor { .. } => None,
             Expr::Variable(name) => self.const_for_name(name),
-            Expr::Tuple(items) => Some(Value::Tuple(
-                items
-                    .iter()
-                    .map(|item| self.fold_compile_time_expr(item))
-                    .collect::<Option<Vec<_>>>()?
-                    .into(),
-            )),
             Expr::List(items) => Some(Value::List(
                 items
                     .iter()
@@ -1116,7 +859,6 @@ impl Compiler {
                     .collect::<Option<Vec<_>>>()?
                     .into(),
             )),
-            Expr::ListComprehension { .. } => None,
             Expr::Record(entries) => {
                 let mut record = record_with_capacity(entries.len());
                 for (key, value) in entries {
@@ -1174,13 +916,6 @@ impl Compiler {
                 }
                 read_javascript_index_direct(target, index).ok()
             }
-            Expr::Unary { op, expr } => {
-                let value = self.fold_compile_time_expr(expr)?;
-                match op {
-                    UnaryOp::Negate => Some(Value::Number(-as_number(&value).ok()?)),
-                    UnaryOp::Not => Some(Value::Bool(!is_truthy(&value).ok()?)),
-                }
-            }
             Expr::If {
                 condition,
                 then_block,
@@ -1192,33 +927,6 @@ impl Compiler {
                     self.fold_compile_time_expr(else_block)
                 }
             }
-            Expr::Binary { left, op, right } => match op {
-                BinaryOp::And => {
-                    let left = self.fold_compile_time_expr(left)?;
-                    if !is_truthy(&left).ok()? {
-                        Some(Value::Bool(false))
-                    } else {
-                        Some(Value::Bool(
-                            is_truthy(&self.fold_compile_time_expr(right)?).ok()?,
-                        ))
-                    }
-                }
-                BinaryOp::Or => {
-                    let left = self.fold_compile_time_expr(left)?;
-                    if is_truthy(&left).ok()? {
-                        Some(Value::Bool(true))
-                    } else {
-                        Some(Value::Bool(
-                            is_truthy(&self.fold_compile_time_expr(right)?).ok()?,
-                        ))
-                    }
-                }
-                _ => {
-                    let left = self.fold_compile_time_expr(left)?;
-                    let right = self.fold_compile_time_expr(right)?;
-                    eval_binary_values(left, *op, right).ok()
-                }
-            },
             Expr::JavaScriptUnary { op, expr } => {
                 eval_javascript_unary(self.fold_compile_time_expr(expr)?, *op).ok()
             }
@@ -1242,7 +950,6 @@ impl Compiler {
                     Some(left)
                 }
             }
-            Expr::TypeLiteral(ty) => self.fold_type_expr(ty).map(wrap_type_schema_value),
             Expr::Block(_)
             | Expr::Function(_)
             | Expr::Call { .. }
@@ -1261,11 +968,9 @@ impl Compiler {
             | Expr::ReceiverCall { .. }
             | Expr::Await(_)
             | Expr::SleepFor(_)
-            | Expr::SleepUntil(_)
             | Expr::WaitSignal { .. }
             | Expr::ResultUnwrap(_)
             | Expr::Print(_)
-            | Expr::Yield(_)
             | Expr::Finish(_)
             | Expr::Fail(_) => None,
         }

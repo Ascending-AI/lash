@@ -20,13 +20,13 @@ mod requirements;
 mod write_helpers;
 use requirements::RequirementsCollector;
 use write_helpers::{
-    write_binary_op, write_label_metadata, write_process_origin, write_resource_ref,
-    write_structural_role, write_unary_expr, write_unary_op,
+    write_label_metadata, write_process_origin, write_resource_ref, write_structural_role,
+    write_unary_expr,
 };
 
 use crate::ast::{
-    AssignPathStep, BinaryOp, Declaration, Expr, LabelMetadata, ListComprehensionClause, MethodKey,
-    ProcessDecl, Program, ResourceRefExpr, TypeExpr, UnaryOp,
+    AssignPathStep, Declaration, Expr, LabelMetadata, MethodKey, ProcessDecl, Program,
+    ResourceRefExpr, TypeExpr,
 };
 use crate::linker::{
     LashlangAbilities, LashlangHostCatalog, LashlangLanguageFeatures, ResourceOperationBinding,
@@ -276,26 +276,10 @@ impl ModuleArtifact {
             .find_map(|(name, candidate)| (candidate == process_ref).then_some(name.as_str()))
     }
 
-    /// Resolves aliases and host named-data references using this artifact's
-    /// immutable requirements snapshot.
+    /// Resolves host named-data references using this artifact's immutable
+    /// requirements snapshot.
     pub fn resolve_type(&self, ty: &TypeExpr) -> TypeExpr {
-        let aliases = self
-            .ir
-            .declarations
-            .iter()
-            .filter_map(|declaration| match declaration {
-                Declaration::Type(declaration) => {
-                    Some((declaration.name.to_string(), declaration.ty.clone()))
-                }
-                Declaration::Process(_) | Declaration::Function(_) => None,
-            })
-            .collect::<BTreeMap<_, _>>();
-        resolve_artifact_type(
-            ty,
-            &aliases,
-            &self.host_requirements.resources,
-            &mut BTreeSet::new(),
-        )
+        resolve_artifact_type(ty, &self.host_requirements.resources, &mut BTreeSet::new())
     }
 
     pub fn process_type(&self, process_name: &str) -> Option<TypeExpr> {
@@ -395,31 +379,29 @@ impl ModuleArtifact {
 )]
 fn resolve_artifact_type(
     ty: &TypeExpr,
-    aliases: &BTreeMap<String, TypeExpr>,
     resources: &LashlangHostCatalog,
     seen: &mut BTreeSet<String>,
 ) -> TypeExpr {
     match ty {
         TypeExpr::Ref(name) if seen.insert(name.to_string()) => {
-            let resolved = if let Some(ty) = aliases.get(name.as_str()) {
-                resolve_artifact_type(ty, aliases, resources, seen)
-            } else if let Some(data_type) = resources.resolve_named_data_type(name.as_str()) {
-                resolve_artifact_type(data_type.ty(), aliases, resources, seen)
+            let resolved = if let Some(data_type) = resources.resolve_named_data_type(name.as_str())
+            {
+                resolve_artifact_type(data_type.ty(), resources, seen)
             } else {
                 ty.clone()
             };
             seen.remove(name.as_str());
             resolved
         }
-        TypeExpr::List(item) => TypeExpr::List(Box::new(resolve_artifact_type(
-            item, aliases, resources, seen,
-        ))),
+        TypeExpr::List(item) => {
+            TypeExpr::List(Box::new(resolve_artifact_type(item, resources, seen)))
+        }
         TypeExpr::Object(fields) => TypeExpr::Object(
             fields
                 .iter()
                 .map(|field| crate::TypeField {
                     name: field.name.clone(),
-                    ty: resolve_artifact_type(&field.ty, aliases, resources, seen),
+                    ty: resolve_artifact_type(&field.ty, resources, seen),
                     optional: field.optional,
                 })
                 .collect(),
@@ -427,7 +409,7 @@ fn resolve_artifact_type(
         TypeExpr::Union(items) => TypeExpr::union(
             items
                 .iter()
-                .map(|item| resolve_artifact_type(item, aliases, resources, seen))
+                .map(|item| resolve_artifact_type(item, resources, seen))
                 .collect(),
         ),
         TypeExpr::Process(process) => match process.as_signature() {
@@ -439,17 +421,17 @@ fn resolve_artifact_type(
                         .iter()
                         .map(|param| crate::ProcessParam {
                             name: param.name.clone(),
-                            ty: resolve_artifact_type(&param.ty, aliases, resources, seen),
+                            ty: resolve_artifact_type(&param.ty, resources, seen),
                         })
                         .collect(),
-                    resolve_artifact_type(signature.output(), aliases, resources, seen),
+                    resolve_artifact_type(signature.output(), resources, seen),
                 )
                 .expect("resolved checked process signature remains valid"),
             )),
         },
-        TypeExpr::TriggerHandle(event) => TypeExpr::TriggerHandle(Box::new(resolve_artifact_type(
-            event, aliases, resources, seen,
-        ))),
+        TypeExpr::TriggerHandle(event) => {
+            TypeExpr::TriggerHandle(Box::new(resolve_artifact_type(event, resources, seen)))
+        }
         _ => ty.clone(),
     }
 }
@@ -1026,11 +1008,6 @@ fn write_program(writer: &mut HashWriter, program: &Program) {
 
 fn write_declaration(writer: &mut HashWriter, declaration: &Declaration) {
     match declaration {
-        Declaration::Type(type_decl) => {
-            writer.atom("type-decl");
-            writer.atom(type_decl.name.as_str());
-            write_type(writer, &type_decl.ty);
-        }
         Declaration::Process(process) => write_process(writer, process),
         Declaration::Function(function) => write_function(writer, function),
     }
@@ -1190,37 +1167,12 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
             writer.atom("variable");
             write_name(writer, name.as_str());
         }
-        Expr::Tuple(items) => {
-            writer.atom("tuple");
-            writer.usize(items.len());
-            for item in items {
-                write_expr(writer, item);
-            }
-        }
         Expr::List(items) => {
             writer.atom("list");
             writer.usize(items.len());
             for item in items {
                 write_expr(writer, item);
             }
-        }
-        Expr::ListComprehension { element, clauses } => {
-            writer.atom("list-comprehension");
-            writer.usize(clauses.len());
-            for clause in clauses {
-                match clause {
-                    ListComprehensionClause::For { binding, iterable } => {
-                        writer.atom("for");
-                        write_name(writer, binding.as_str());
-                        write_expr(writer, iterable);
-                    }
-                    ListComprehensionClause::If { condition } => {
-                        writer.atom("if");
-                        write_expr(writer, condition);
-                    }
-                }
-            }
-            write_expr(writer, element);
         }
         Expr::Record(entries) => {
             writer.atom("record");
@@ -1316,14 +1268,12 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
         }
         Expr::Await(expr) => write_unary_expr(writer, "await", expr),
         Expr::SleepFor(expr) => write_unary_expr(writer, "sleep-for", expr),
-        Expr::SleepUntil(expr) => write_unary_expr(writer, "sleep-until", expr),
         Expr::WaitSignal { name } => {
             writer.atom("wait-signal");
             writer.atom(name.as_str());
         }
         Expr::ResultUnwrap(expr) => write_unary_expr(writer, "unwrap", expr),
         Expr::Print(expr) => write_unary_expr(writer, "print", expr),
-        Expr::Yield(expr) => write_unary_expr(writer, "yield", expr),
         Expr::Finish(expr) => write_unary_expr(writer, "finish", expr),
         Expr::Fail(expr) => write_unary_expr(writer, "fail", expr),
         Expr::BuiltinCall { name, args } => {
@@ -1450,17 +1400,6 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
             write_expr(writer, target);
             write_expr(writer, index);
         }
-        Expr::Unary { op, expr } => {
-            writer.atom("unary");
-            write_unary_op(writer, *op);
-            write_expr(writer, expr);
-        }
-        Expr::Binary { left, op, right } => {
-            writer.atom("binary");
-            write_binary_op(writer, *op);
-            write_expr(writer, left);
-            write_expr(writer, right);
-        }
         Expr::JavaScriptUnary { op, expr } => {
             writer.atom("javascript:unary");
             writer.atom(&format!("{op:?}"));
@@ -1477,10 +1416,6 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
             writer.atom(&format!("{op:?}"));
             write_expr(writer, left);
             write_expr(writer, right);
-        }
-        Expr::TypeLiteral(ty) => {
-            writer.atom("type-literal");
-            write_type(writer, ty);
         }
     }
 }

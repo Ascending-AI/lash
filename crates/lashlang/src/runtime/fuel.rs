@@ -2,8 +2,6 @@
 //! the instruction counter: each unit is a byte of text read or written, a
 //! collection member scanned or produced, or a heap object walked.
 
-use crate::ast::BinaryOp;
-
 use super::Value;
 
 pub(crate) fn sorting_work(items: usize) -> usize {
@@ -44,28 +42,6 @@ pub(crate) fn deep_proportional_units(value: &Value) -> usize {
                 .saturating_add(key.len())
                 .saturating_add(deep_proportional_units(value))
         }),
-        _ => 0,
-    }
-}
-
-/// The proportional work `eval_binary_values` or `eval_compare_values`
-/// performs for `op` on these operands: `+` copies its whole result, `in`
-/// scans the haystack, `==`/`!=` reads both sides' members, and an ordering
-/// reads until the texts differ — each unit a byte or an element as
-/// [`proportional_units`] counts.
-pub(crate) fn binary_op_work_units(left: &Value, op: BinaryOp, right: &Value) -> usize {
-    match op {
-        BinaryOp::Add => proportional_units(left).saturating_add(proportional_units(right)),
-        BinaryOp::Equal | BinaryOp::NotEqual => {
-            deep_proportional_units(left).saturating_add(deep_proportional_units(right))
-        }
-        BinaryOp::In => deep_proportional_units(right),
-        BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
-            match (left, right) {
-                (Value::String(left), Value::String(right)) => left.len().min(right.len()),
-                _ => 0,
-            }
-        }
         _ => 0,
     }
 }

@@ -113,7 +113,17 @@ async fn optimized_concat_insertion_shares_the_appended_binding() {
     run(
         &mut state,
         a::program(vec![
-            a::assign("acc", a::add(a::var("acc"), a::list(vec![a::var("x")]))),
+            a::assign(
+                "acc",
+                a::call(
+                    "__typescript_stdlib",
+                    vec![
+                        a::string("concat"),
+                        a::var("acc"),
+                        a::list(vec![a::var("x")]),
+                    ],
+                ),
+            ),
             a::finish(a::number(0.0)),
         ]),
     )
@@ -133,13 +143,15 @@ async fn optimized_concat_insertion_shares_the_appended_binding() {
     assert_eq!(value, list(vec![list(vec![number(1.0), number(2.0)])]));
 }
 
-/// The general concat form copies the right operand's members too.
+/// The general concat form copies the outer list but, like JavaScript's
+/// `concat`, shares the operand's member objects: a later mutation of `x`
+/// shows through `acc`.
 #[tokio::test(flavor = "current_thread")]
-async fn general_concat_copies_the_right_operand_members() {
+async fn general_concat_shares_the_right_operand_members() {
     // x = [1]
     // b = [x, x]
     // acc = []
-    // acc = acc + b
+    // acc = acc.concat(b)
     // x = push(x, 2)
     // finish acc
     let value = run(
@@ -148,7 +160,13 @@ async fn general_concat_copies_the_right_operand_members() {
             a::assign("x", a::list(vec![a::number(1.0)])),
             a::assign("b", a::list(vec![a::var("x"), a::var("x")])),
             a::assign("acc", a::list(Vec::new())),
-            a::assign("acc", a::add(a::var("acc"), a::var("b"))),
+            a::assign(
+                "acc",
+                a::call(
+                    "__typescript_stdlib",
+                    vec![a::string("concat"), a::var("acc"), a::var("b")],
+                ),
+            ),
             a::assign("x", push(a::var("x"), a::number(2.0))),
             a::finish(a::var("acc")),
         ]),
@@ -157,18 +175,22 @@ async fn general_concat_copies_the_right_operand_members() {
 
     assert_eq!(
         value,
-        list(vec![list(vec![number(1.0)]), list(vec![number(1.0)])])
+        list(vec![
+            list(vec![number(1.0), number(2.0)]),
+            list(vec![number(1.0), number(2.0)])
+        ])
     );
 }
 
-/// The same concat where the right operand is a bare variable, which lowers to
-/// the fused slot form rather than through the operand stack.
+/// The same concat where the right operand is a bare variable: the outer copy
+/// is still independent of `b`, while the shared member `x` keeps observing
+/// later mutation.
 #[tokio::test(flavor = "current_thread")]
-async fn slot_concat_copies_the_right_operand_members() {
+async fn variable_concat_copies_the_list_but_shares_its_members() {
     // x = [1]
     // b = [x]
     // acc = []
-    // acc = acc + b
+    // acc = acc.concat(b)
     // b = push(b, 9)
     // x = push(x, 2)
     // finish acc
@@ -178,7 +200,13 @@ async fn slot_concat_copies_the_right_operand_members() {
             a::assign("x", a::list(vec![a::number(1.0)])),
             a::assign("b", a::list(vec![a::var("x")])),
             a::assign("acc", a::list(Vec::new())),
-            a::assign("acc", a::add(a::var("acc"), a::var("b"))),
+            a::assign(
+                "acc",
+                a::call(
+                    "__typescript_stdlib",
+                    vec![a::string("concat"), a::var("acc"), a::var("b")],
+                ),
+            ),
             a::assign("b", push(a::var("b"), a::number(9.0))),
             a::assign("x", push(a::var("x"), a::number(2.0))),
             a::finish(a::var("acc")),
@@ -186,7 +214,7 @@ async fn slot_concat_copies_the_right_operand_members() {
     )
     .await;
 
-    assert_eq!(value, list(vec![list(vec![number(1.0)])]));
+    assert_eq!(value, list(vec![list(vec![number(1.0), number(2.0)])]));
 }
 
 /// Sol probe 2: a root holding a nested container, then aliased.
@@ -206,7 +234,7 @@ async fn aliased_root_with_a_nested_container_round_trips() {
         &mut state,
         a::program(vec![
             a::assign("child", a::list(vec![a::number(1.0)])),
-            a::assign("pair", a::tuple(vec![a::var("child")])),
+            a::assign("pair", a::list(vec![a::var("child")])),
             a::assign("alias", a::var("pair")),
             a::finish(a::number(0.0)),
         ]),
@@ -228,7 +256,7 @@ async fn aliased_root_with_a_nested_container_round_trips() {
     )
     .await;
 
-    let pair = Value::Tuple(vec![list(vec![number(1.0), number(2.0)])].into());
+    let pair = list(vec![list(vec![number(1.0), number(2.0)])]);
     assert_eq!(
         value,
         list(vec![
@@ -430,10 +458,10 @@ async fn multi_root_program_state_always_decodes() {
     // alias = base
     // pair = (base, alias)
     // record = { left: base, right: pair }
-    // rows = [item for item in base]
-    // joined = base + alias
+    // rows = base.concat([])
+    // joined = base.concat(alias)
     // appended = []
-    // appended = appended + [record]
+    // appended = push(appended, record)
     // finish 0
     run(
         &mut state,
@@ -446,20 +474,29 @@ async fn multi_root_program_state_always_decodes() {
                 ]),
             ),
             a::assign("alias", a::var("base")),
-            a::assign("pair", a::tuple(vec![a::var("base"), a::var("alias")])),
+            a::assign("pair", a::list(vec![a::var("base"), a::var("alias")])),
             a::assign(
                 "record",
                 a::record(vec![("left", a::var("base")), ("right", a::var("pair"))]),
             ),
             a::assign(
                 "rows",
-                a::comprehension(a::var("item"), "item", a::var("base")),
+                a::call(
+                    "__typescript_stdlib",
+                    vec![a::string("concat"), a::var("base"), a::list(Vec::new())],
+                ),
             ),
-            a::assign("joined", a::add(a::var("base"), a::var("alias"))),
+            a::assign(
+                "joined",
+                a::call(
+                    "__typescript_stdlib",
+                    vec![a::string("concat"), a::var("base"), a::var("alias")],
+                ),
+            ),
             a::assign("appended", a::list(Vec::new())),
             a::assign(
                 "appended",
-                a::add(a::var("appended"), a::list(vec![a::var("record")])),
+                a::call("push", vec![a::var("appended"), a::var("record")]),
             ),
             a::finish(a::number(0.0)),
         ]),
@@ -573,9 +610,16 @@ async fn snapshot_equality_survives_a_round_trip_after_temporaries() {
 #[tokio::test(flavor = "current_thread")]
 async fn formatting_a_container_binding_renders_it() {
     let mut state = State::new();
+    // A tuple survives in restored snapshot state; the AST can't spell one, so
+    // it is seeded as a global.
+    state
+        .insert_global(
+            "tup",
+            Value::Tuple(vec![Value::Number(1.0), Value::Number(2.0)].into()),
+        )
+        .expect("tuple global seeds");
     // xs = [1, 2]
     // rec = { a: 1 }
-    // tup = (1, 2)
     // built = []
     // for n in range(0, 3) { built = push(built, n) }
     // finish [
@@ -590,7 +634,6 @@ async fn formatting_a_container_binding_renders_it() {
         a::program(vec![
             a::assign("xs", a::list(vec![a::number(1.0), a::number(2.0)])),
             a::assign("rec", a::record(vec![("a", a::number(1.0))])),
-            a::assign("tup", a::tuple(vec![a::number(1.0), a::number(2.0)])),
             a::assign("built", a::list(Vec::new())),
             a::for_range(
                 "n",
@@ -635,21 +678,18 @@ async fn formatting_a_container_binding_renders_it() {
 /// A type error against a container binding names the container's type, not the
 /// internal representation it happens to be stored in.
 #[tokio::test(flavor = "current_thread")]
-async fn arithmetic_on_a_container_binding_names_the_container_type() {
+async fn integer_division_on_a_container_binding_names_the_container_type() {
     let mut state = State::new();
     // xs = [1, 2]
-    // finish format("{0}", xs + 1)
+    // finish floor_div(xs, 2)
     let compiled = lashlang_compile_program(&a::program(vec![
         a::assign("xs", a::list(vec![a::number(1.0), a::number(2.0)])),
-        a::finish(a::call(
-            "format",
-            vec![a::string("{0}"), a::add(a::var("xs"), a::number(1.0))],
-        )),
+        a::finish(a::call("floor_div", vec![a::var("xs"), a::number(2.0)])),
     ]))
     .expect("program should compile");
     let error = execute(&compiled, &mut state, &ProbeHost)
         .await
-        .expect_err("adding a number to a list should fail");
+        .expect_err("integer division on a list should fail");
 
     let message = error.to_string();
     assert!(

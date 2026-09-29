@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/workflow-type-facets/v3",
+  "$id": "https://lash.dev/schemas/workflow-type-facets/v4",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "ProcessParamWire": {
@@ -280,7 +280,6 @@
         "process_lifecycle_outside_process",
         "opaque_host_descriptor_access",
         "unknown_object_field",
-        "incompatible_binary_operands",
         "incompatible_builtin_operands",
         "incompatible_iteration_target",
         "module_hash",
@@ -445,6 +444,6 @@
   },
   "title": "WorkflowNodeTypeFacets",
   "type": "object",
-  "x-lash-schema-version": 3,
+  "x-lash-schema-version": 4,
   "x-lash-version-constant": "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
 }

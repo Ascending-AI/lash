@@ -211,7 +211,6 @@ pub fn validate_ast(program: &Program) -> Result<(), InvalidAst> {
             // A declared function compiles to a real call frame, so `return`
             // is legal in its body while `break`/`continue` still need a loop.
             Declaration::Function(function) => check_function_loop_control(&function.body)?,
-            Declaration::Type(_) => {}
         }
     }
     Ok(())
@@ -220,7 +219,6 @@ pub fn validate_ast(program: &Program) -> Result<(), InvalidAst> {
 fn check_program_process_types(program: &Program) -> Result<(), InvalidAst> {
     for declaration in &program.declarations {
         match declaration {
-            Declaration::Type(declaration) => check_process_type(&declaration.ty)?,
             Declaration::Process(process) => {
                 ProcessSignature::validate_params(&process.params)?;
                 for param in &process.params {
@@ -252,9 +250,6 @@ fn check_program_process_types(program: &Program) -> Result<(), InvalidAst> {
 }
 
 fn check_expr_process_types(expr: &Expr) -> Result<(), InvalidAst> {
-    if let Expr::TypeLiteral(ty) = expr {
-        check_process_type(ty)?;
-    }
     for child in expr.children() {
         check_expr_process_types(child)?;
     }
@@ -366,7 +361,6 @@ pub fn check_ast_nesting_depth(program: &Program) -> Result<(), NestingTooDeep> 
         match declaration {
             Declaration::Process(process) => pending.push((&process.body, 1)),
             Declaration::Function(function) => pending.push((&function.body, 1)),
-            Declaration::Type(_) => {}
         }
     }
     while let Some((expr, depth)) = pending.pop() {
@@ -413,15 +407,8 @@ impl PartialEq for Program {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Declaration {
-    Type(TypeDecl),
     Process(ProcessDecl),
     Function(FunctionDecl),
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct TypeDecl {
-    pub name: AstString,
-    pub ty: TypeExpr,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -532,12 +519,7 @@ pub enum Expr {
     ),
     String(AstString),
     Variable(AstString),
-    Tuple(Vec<Expr>),
     List(Vec<Expr>),
-    ListComprehension {
-        element: Box<Expr>,
-        clauses: Vec<ListComprehensionClause>,
-    },
     Record(Vec<(AstString, Expr)>),
     Assign {
         target: AssignTarget,
@@ -591,13 +573,11 @@ pub enum Expr {
     },
     Await(Box<Expr>),
     SleepFor(Box<Expr>),
-    SleepUntil(Box<Expr>),
     WaitSignal {
         name: AstString,
     },
     ResultUnwrap(Box<Expr>),
     Print(Box<Expr>),
-    Yield(Box<Expr>),
     Finish(Box<Expr>),
     Fail(Box<Expr>),
     BuiltinCall {
@@ -671,15 +651,6 @@ pub enum Expr {
         target: Box<Expr>,
         index: Box<Expr>,
     },
-    Unary {
-        op: UnaryOp,
-        expr: Box<Expr>,
-    },
-    Binary {
-        left: Box<Expr>,
-        op: BinaryOp,
-        right: Box<Expr>,
-    },
     /// An ECMA-262 unary operation whose coercion differs from Lashlang.
     JavaScriptUnary {
         op: JavaScriptUnaryOp,
@@ -697,7 +668,6 @@ pub enum Expr {
         op: JavaScriptLogicalOp,
         right: Box<Expr>,
     },
-    TypeLiteral(Box<TypeExpr>),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -765,20 +735,13 @@ pub struct CatchClause {
     pub body: Box<Expr>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub enum ListComprehensionClause {
-    For { binding: AstString, iterable: Expr },
-    If { condition: Expr },
-}
-
 impl Expr {
     /// This is the single structural-traversal primitive: any pass that only
     /// needs to recurse into the sub-expressions of a node (without caring
     /// about the node's own kind) can fold over `children()` instead of
     /// re-spelling the full `match`. Leaf nodes (`Null`, `Bool`, `Number`,
     /// `String`, `Variable`, `Break`, `Continue`, `WaitSignal`,
-    /// `ResourceRef`, `ProcessRef`, `HostDescriptorConstructor` metadata, and
-    /// `TypeLiteral`) yield nothing.
+    /// `ResourceRef`, and `ProcessRef`) yield nothing.
     ///
     /// `Assign` includes any dynamic index expressions in its `target` path
     /// (in path order) before the assigned value, matching the order in which
@@ -796,19 +759,9 @@ impl Expr {
             | Expr::Continue
             | Expr::WaitSignal { .. }
             | Expr::ProcessRef { .. }
-            | Expr::ResourceRef(_)
-            | Expr::TypeLiteral(_) => {}
-            Expr::Block(expressions) | Expr::Tuple(expressions) | Expr::List(expressions) => {
+            | Expr::ResourceRef(_) => {}
+            Expr::Block(expressions) | Expr::List(expressions) => {
                 buffer.extend(expressions.iter());
-            }
-            Expr::ListComprehension { element, clauses } => {
-                for clause in clauses {
-                    match clause {
-                        ListComprehensionClause::For { iterable, .. } => buffer.push(iterable),
-                        ListComprehensionClause::If { condition } => buffer.push(condition),
-                    }
-                }
-                buffer.push(element);
             }
             Expr::LabelAnnotated { expr, .. } => buffer.push(expr),
             Expr::Record(entries) => buffer.extend(entries.iter().map(|(_, value)| value)),
@@ -853,12 +806,9 @@ impl Expr {
             }
             Expr::Await(expr)
             | Expr::SleepFor(expr)
-            | Expr::SleepUntil(expr)
             | Expr::ResultUnwrap(expr)
             | Expr::Print(expr)
-            | Expr::Yield(expr)
             | Expr::Fail(expr)
-            | Expr::Unary { expr, .. }
             | Expr::JavaScriptUnary { expr, .. }
             | Expr::Return(expr) => buffer.push(expr),
             Expr::Finish(expr) => buffer.push(expr),
@@ -910,8 +860,7 @@ impl Expr {
                 buffer.push(target);
                 buffer.push(index);
             }
-            Expr::Binary { left, right, .. }
-            | Expr::JavaScriptBinary { left, right, .. }
+            Expr::JavaScriptBinary { left, right, .. }
             | Expr::JavaScriptLogical { left, right, .. } => {
                 buffer.push(left);
                 buffer.push(right);
@@ -942,19 +891,9 @@ impl Expr {
             | Expr::Continue
             | Expr::WaitSignal { .. }
             | Expr::ProcessRef { .. }
-            | Expr::ResourceRef(_)
-            | Expr::TypeLiteral(_) => {}
-            Expr::Block(expressions) | Expr::Tuple(expressions) | Expr::List(expressions) => {
+            | Expr::ResourceRef(_) => {}
+            Expr::Block(expressions) | Expr::List(expressions) => {
                 buffer.extend(expressions.iter_mut());
-            }
-            Expr::ListComprehension { element, clauses } => {
-                for clause in clauses {
-                    match clause {
-                        ListComprehensionClause::For { iterable, .. } => buffer.push(iterable),
-                        ListComprehensionClause::If { condition } => buffer.push(condition),
-                    }
-                }
-                buffer.push(element);
             }
             Expr::LabelAnnotated { expr, .. } => buffer.push(expr),
             Expr::Record(entries) => buffer.extend(entries.iter_mut().map(|(_, value)| value)),
@@ -999,12 +938,9 @@ impl Expr {
             }
             Expr::Await(expr)
             | Expr::SleepFor(expr)
-            | Expr::SleepUntil(expr)
             | Expr::ResultUnwrap(expr)
             | Expr::Print(expr)
-            | Expr::Yield(expr)
             | Expr::Fail(expr)
-            | Expr::Unary { expr, .. }
             | Expr::JavaScriptUnary { expr, .. }
             | Expr::Return(expr) => buffer.push(expr),
             Expr::Finish(expr) => buffer.push(expr),
@@ -1056,8 +992,7 @@ impl Expr {
                 buffer.push(target);
                 buffer.push(index);
             }
-            Expr::Binary { left, right, .. }
-            | Expr::JavaScriptBinary { left, right, .. }
+            Expr::JavaScriptBinary { left, right, .. }
             | Expr::JavaScriptLogical { left, right, .. } => {
                 buffer.push(left);
                 buffer.push(right);
@@ -1575,12 +1510,6 @@ impl ResourceRefExpr {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum UnaryOp {
-    Negate,
-    Not,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum JavaScriptUnaryOp {
     Plus,
     Negate,
@@ -1634,24 +1563,6 @@ pub enum JavaScriptLogicalOp {
     And,
     Or,
     NullishCoalesce,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum BinaryOp {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    Modulo,
-    Equal,
-    NotEqual,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    In,
-    And,
-    Or,
 }
 
 #[cfg(test)]

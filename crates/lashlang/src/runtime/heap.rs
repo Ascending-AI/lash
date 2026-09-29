@@ -13,7 +13,6 @@ mod object;
 mod partition;
 mod projections;
 mod reference_assignment;
-mod structural_eq;
 mod summary;
 mod url_objects;
 mod validation;
@@ -23,10 +22,7 @@ use object::COLLECTION_ENTRY_BYTES;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use object::HEAP_OBJECT_KINDS;
 pub(crate) use object::HeapObject;
-use object::{
-    OBJECT_HEADER_BYTES, RECORD_FIELD_BYTES, VALUE_SLOT_BYTES, compound_identity,
-    value_logical_bytes,
-};
+use object::{OBJECT_HEADER_BYTES, VALUE_SLOT_BYTES, compound_identity, value_logical_bytes};
 pub(crate) use reference_assignment::restricted_function_property;
 
 pub use id::HeapId;
@@ -48,7 +44,7 @@ pub(crate) use crate::ecma_stdlib::{BuiltinFunction, BuiltinPrototype};
 
 use super::{
     CompiledAssignPath, CompiledAssignPathStep, CompiledFunction, Name, Record, RuntimeError,
-    Value, add_values, coerce_string, record_with_capacity, resolve_existing_list_assignment_index,
+    Value, record_with_capacity,
 };
 
 /// Which byte-charge schedule a persisted heap's `live_logical_bytes` was
@@ -1302,232 +1298,6 @@ impl Heap {
         self.invalidate_materialized_reaching(*id);
         self.debug_assert_byte_accounting();
         Ok(Value::Ref(*id))
-    }
-
-    /// `acc = acc + other` builds a new list in the language, but under
-    /// exclusive ownership nothing else can observe `acc`'s object, so the new
-    /// list can be the old one extended. That turns a per-iteration cost
-    /// proportional to the accumulator into one proportional to what is being
-    /// appended. The members are copied, not moved: `other` is a binding of its
-    /// own and keeps what it holds.
-    /// The `expect` stays: isolation staging reserved one id per object
-    /// collected above, so every staged slot is filled (each site's message
-    /// states it).
-    #[expect(clippy::expect_used, reason = "isolation staging reserved every slot")]
-    pub(crate) fn extend_list(
-        &mut self,
-        target: &Value,
-        source: &Value,
-    ) -> Result<Value, RuntimeError> {
-        let Value::Ref(id) = target else {
-            return Err(RuntimeError::PushUnsupported);
-        };
-        let members = match source {
-            Value::Ref(source_id) => {
-                let HeapObject::List(values) = self.get(*source_id)? else {
-                    return Err(RuntimeError::PushUnsupported);
-                };
-                values.clone()
-            }
-            Value::List(values) => values.iter().cloned().collect::<Vec<_>>(),
-            _ => return Err(RuntimeError::PushUnsupported),
-        };
-        self.get(*id)?;
-
-        // The whole extension is staged before any of it is committed. Copying
-        // and appending one member at a time meant a bound trip partway through
-        // left the accumulator holding some of the appended elements — a
-        // half-applied concatenation, durably, since the state that survives the
-        // failure is the one that gets persisted.
-        let mut staging = IsolationStaging {
-            base: self.next_id,
-            objects: Vec::new(),
-            mapping: FxHashMap::default(),
-        };
-        let mut copies = Vec::with_capacity(members.len());
-        for member in &members {
-            copies.push(self.stage_isolation(member, &mut staging)?);
-        }
-        let objects = staging
-            .objects
-            .into_iter()
-            .map(|object| object.expect("every reserved isolation ID is filled"))
-            .collect::<Vec<_>>();
-        let object_bytes = objects.iter().fold(0_u64, |total, object| {
-            total.saturating_add(object.logical_bytes())
-        });
-        let member_bytes = copies.iter().fold(0_u64, |total, value| {
-            total.saturating_add(value_logical_bytes(value))
-        });
-        let attempted = self
-            .live_logical_bytes
-            .saturating_add(object_bytes)
-            .saturating_add(member_bytes);
-        if attempted > self.logical_byte_limit {
-            return Err(RuntimeError::MemoryLimitExceeded {
-                limit: self.logical_byte_limit,
-                attempted,
-            });
-        }
-
-        for (offset, object) in objects.into_iter().enumerate() {
-            let logical_bytes = object.logical_bytes();
-            let committed = self.commit_precharged_object(object, logical_bytes);
-            debug_assert_eq!(
-                committed,
-                Value::Ref(HeapId::from_counter(staging.base + offset as u64))
-            );
-        }
-
-        let children = copies.iter().flat_map(value_refs).collect::<Vec<_>>();
-        let entry = self.entry_mut(*id)?;
-        let HeapObject::List(values) = &mut entry.object else {
-            return Err(RuntimeError::PushUnsupported);
-        };
-        values.extend(copies);
-        entry.logical_bytes = entry.logical_bytes.saturating_add(member_bytes);
-        self.live_logical_bytes = self.live_logical_bytes.saturating_add(member_bytes);
-        for child in children {
-            let parents = self.parents.entry(child).or_default();
-            if !parents.contains(id) {
-                parents.push(*id);
-            }
-        }
-        self.invalidate_materialized_reaching(*id);
-        self.debug_assert_byte_accounting();
-        Ok(Value::Ref(*id))
-    }
-
-    pub(crate) fn add_assign_index_number(
-        &mut self,
-        target: &Value,
-        index: &Value,
-        right: f64,
-    ) -> Result<Value, RuntimeError> {
-        let Value::Ref(id) = target else {
-            return Err(RuntimeError::CannotAssignIndex {
-                actual: super::value_type_name(target).to_string(),
-            });
-        };
-        enum Target {
-            List {
-                index: usize,
-                old_member_bytes: u64,
-            },
-            Record {
-                key: compact_str::CompactString,
-                old_member_bytes: u64,
-            },
-        }
-        let (target_kind, current) = match &self
-            .entries
-            .get(id)
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?
-            .object
-        {
-            HeapObject::List(values) => {
-                let index = resolve_existing_list_assignment_index(index, values.len())?;
-                let current = values[index].clone();
-                (
-                    Target::List {
-                        index,
-                        old_member_bytes: value_logical_bytes(&current),
-                    },
-                    current,
-                )
-            }
-            HeapObject::Record(record) => {
-                let key = match index {
-                    Value::String(key) => key.to_compact_string(),
-                    _ => compact_str::CompactString::from(coerce_string(index)?.as_ref()),
-                };
-                let stored = record.get(key.as_str()).cloned();
-                let old_member_bytes = stored.as_ref().map_or(0, |value| {
-                    RECORD_FIELD_BYTES
-                        .saturating_add(key.len() as u64)
-                        .saturating_add(value_logical_bytes(value))
-                });
-                (
-                    Target::Record {
-                        key,
-                        old_member_bytes,
-                    },
-                    stored.unwrap_or(Value::Number(0.0)),
-                )
-            }
-            HeapObject::Tuple(_) => return Err(RuntimeError::ImmutableTupleIndexes),
-            object @ (HeapObject::Closure { .. }
-            | HeapObject::BuiltinFunction(_)
-            | HeapObject::RegExp(_)
-            | HeapObject::RegExpMatch(_)
-            | HeapObject::Map(_)
-            | HeapObject::Set(_)
-            | HeapObject::Date(_)
-            | HeapObject::Error(_)
-            | HeapObject::Url(_)
-            | HeapObject::UrlSearchParams(_)
-            | HeapObject::Cell(_)) => {
-                return Err(reference_assignment::unwritable_member(
-                    object,
-                    &coerce_string(index)?,
-                ));
-            }
-        };
-        let current_member = current.clone();
-        let value = match current {
-            Value::Number(left) => Value::Number(left + right),
-            left => add_values(left, Value::Number(right))?,
-        };
-        let (old_member_bytes, new_member_bytes) = match &target_kind {
-            Target::List {
-                old_member_bytes, ..
-            } => (*old_member_bytes, value_logical_bytes(&value)),
-            Target::Record {
-                key,
-                old_member_bytes,
-            } => (
-                *old_member_bytes,
-                RECORD_FIELD_BYTES
-                    .saturating_add(key.len() as u64)
-                    .saturating_add(value_logical_bytes(&value)),
-            ),
-        };
-        let entry_bytes = self
-            .entries
-            .get(id)
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?
-            .logical_bytes
-            .saturating_sub(old_member_bytes)
-            .saturating_add(new_member_bytes);
-        let next_live = self
-            .live_logical_bytes
-            .saturating_sub(old_member_bytes)
-            .saturating_add(new_member_bytes);
-        if next_live > self.logical_byte_limit {
-            return Err(RuntimeError::MemoryLimitExceeded {
-                limit: self.logical_byte_limit,
-                attempted: next_live,
-            });
-        }
-        let mut replaced_children = Vec::new();
-        collect_value_refs(&current_member, &mut replaced_children);
-        let mut added_children = Vec::new();
-        collect_value_refs(&value, &mut added_children);
-        match (&mut self.entry_mut(*id)?.object, target_kind) {
-            (HeapObject::List(values), Target::List { index, .. }) => {
-                values[index] = value.clone();
-            }
-            (HeapObject::Record(record), Target::Record { key, .. }) => {
-                record.insert_str(key.as_str(), value.clone());
-            }
-            _ => unreachable!("object kind was checked"),
-        }
-        self.retarget_parent_edges(*id, &replaced_children, &added_children);
-        self.entry_mut(*id)?.logical_bytes = entry_bytes;
-        self.live_logical_bytes = next_live;
-        self.invalidate_materialized_reaching(*id);
-        self.debug_assert_byte_accounting();
-        Ok(value)
     }
 
     pub(crate) fn collect<'a>(&mut self, roots: impl IntoIterator<Item = &'a Value>) {

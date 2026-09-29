@@ -1,12 +1,9 @@
 use super::*;
 
-/// `Type { declared: str }`
+/// `{ declared: "str" }` — the record-shorthand output schema TypeScript
+/// programs write.
 fn declared_str_witness() -> Expr {
-    builders::type_literal(TypeExpr::Object(vec![builders::type_field(
-        "declared",
-        TypeExpr::Str,
-        false,
-    )]))
+    builders::record(vec![("declared", builders::string("str"))])
 }
 
 /// `{ task: "inspect", output: <witness> }`
@@ -155,43 +152,33 @@ fn closed_type_literals_type_outputs_in_lowering_and_validation() {
 }
 
 #[test]
-fn literal_type_defensively_degrades_type_literals_to_any() {
+fn literal_type_defensively_degrades_non_literal_expressions_to_any() {
     assert_eq!(
-        literal_type(&Expr::TypeLiteral(Box::new(TypeExpr::Str))),
+        literal_type(&Expr::Variable("opaque".into())),
         TypeExpr::Any
     );
 }
 
 #[test]
-fn declared_aliases_make_nested_type_literal_witnesses_closed() {
-    // type Inner = { value: str }
-    // result = (await agents.spawn({ task: "inspect", output: Type { nested: Inner } }))?
+fn nested_record_shorthand_witnesses_are_open() {
+    // result = (await agents.spawn({ task: "inspect", output: { nested: "record" } }))?
     // result.nested.value
-    let program = builders::module(
-        vec![builders::type_decl(
-            "Inner",
-            TypeExpr::Object(vec![builders::type_field("value", TypeExpr::Str, false)]),
-        )],
-        vec![
-            builders::assign(
-                "result",
-                builders::module_call(
-                    &["agents"],
-                    "spawn",
-                    vec![inspect_request(builders::type_literal(TypeExpr::Object(
-                        vec![builders::type_field(
-                            "nested",
-                            TypeExpr::Ref("Inner".into()),
-                            false,
-                        )],
-                    )))],
-                ),
+    let program = builders::program(vec![
+        builders::assign(
+            "result",
+            builders::module_call(
+                &["agents"],
+                "spawn",
+                vec![inspect_request(builders::record(vec![(
+                    "nested",
+                    builders::string("record"),
+                )]))],
             ),
-            builders::field(builders::field(builders::var("result"), "nested"), "value"),
-        ],
-    );
+        ),
+        builders::field(builders::field(builders::var("result"), "nested"), "value"),
+    ]);
     LinkedModule::link(program, typed_output_host_environment())
-        .expect("declared aliases should close a schema witness");
+        .expect("an open record witness should leave nested fields open");
 }
 
 #[test]

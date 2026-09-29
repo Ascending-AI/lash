@@ -45,7 +45,6 @@ pub enum WorkflowBodySlot {
     Then,
     Else,
     LoopBody,
-    ComprehensionElement,
 }
 
 /// One visible statement, in authored order.
@@ -291,16 +290,6 @@ fn collect_statement<'a>(
             Some(WorkflowBodySlot::LoopBody),
             paths,
         )),
-        Expr::ListComprehension { element, clauses } => {
-            let index = clauses.len() as u32;
-            bodies.push(collect_body(
-                element,
-                &value_ast.child(index),
-                &child_path(&value_path, index),
-                Some(WorkflowBodySlot::ComprehensionElement),
-                paths,
-            ));
-        }
         _ => {}
     }
     WorkflowStatement {

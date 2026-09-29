@@ -10,7 +10,6 @@
 // the conservative default, and there is no third list to forget.
 
 use super::Instruction;
-use crate::ast::BinaryOp;
 use crate::runtime::{Chunk, IntrinsicOp, RuntimeError};
 
 /// How much of the operand stack an instruction needs exported to tree values.
@@ -90,9 +89,7 @@ pub(super) fn instruction_heap_plan(
         // Isolation and in-place container mutation consume heap references as
         // they are: exporting them would be the copy these opcodes exist to
         // avoid.
-        I::AppendAssign(_)
-        | I::ListAppend
-        | I::Intrinsic(IntrinsicOp::PushAssign(_))
+        I::Intrinsic(IntrinsicOp::PushAssign(_))
         | I::MakeClosure { .. }
         | I::Call { .. }
         | I::CallMethod { .. }
@@ -102,10 +99,7 @@ pub(super) fn instruction_heap_plan(
         | I::AsyncMap
         | I::Return
         | I::Throw
-        | I::BuildTuple(_)
-        | I::BuildList(_)
         | I::BuildHeapList(_)
-        | I::BuildRecord(_)
         | I::BuildHeapRecord(_)
         | I::Duplicate
         | I::JavaScriptUnary(_)
@@ -131,13 +125,6 @@ pub(super) fn instruction_heap_plan(
         | I::IsNullish => InstructionHeapPlan::heap_native(),
         I::StoreName(_) => InstructionHeapPlan::heap_native(),
         I::HeapPathAssign { .. } => InstructionHeapPlan::heap_native(),
-        // These export the operands they need through the heap themselves.
-        I::AddAssignIndexNumber { .. } | I::AddAssignIndexSlotNumber { .. } => {
-            InstructionHeapPlan::heap_native()
-        }
-        // Structural equality compares heap objects by walking them.
-        I::Binary(BinaryOp::Equal | BinaryOp::NotEqual) => InstructionHeapPlan::heap_native(),
-
         // Pure pushes and jumps read nothing from the stack.
         I::PushConst(_)
         | I::PushNull
@@ -162,13 +149,10 @@ pub(super) fn instruction_heap_plan(
         | I::ToBool
         | I::JumpIfFalse(_)
         | I::JumpIfTrue(_)
-        | I::Unary(_)
         | I::BeginIter(_) => InstructionHeapPlan::stack(Top(1)),
 
         // Two-operand opcodes.
-        I::Index | I::Binary(_) | I::JumpIfCompareFalse { .. } => {
-            InstructionHeapPlan::stack(Top(2))
-        }
+        I::Index => InstructionHeapPlan::stack(Top(2)),
 
         // Opcodes whose operand count is carried in the instruction, or in the
         // table the instruction points at.
@@ -179,19 +163,15 @@ pub(super) fn instruction_heap_plan(
         I::ResourceOperationBatch(batch) => InstructionHeapPlan::stack(Top(chunk
             .resource_operation_batches[batch]
             .stack_value_count)),
-        I::ResourceOperationListBatch(_) => InstructionHeapPlan::stack(Top(1)),
         I::PendingTimer => InstructionHeapPlan::stack(Top(1)),
         I::AwaitArray { .. }
         | I::AwaitPending
         | I::Print
         | I::Finish
         | I::SleepFor
-        | I::SleepUntil
         | I::AwaitHandle
         | I::AwaitHandleUnwrap
-        | I::WrapTypeLiteral
         | I::WrapHostDescriptor(_)
-        | I::ProcessYield
         | I::ProcessFail => InstructionHeapPlan::stack(Top(1)),
         I::ProcessWaitSignal { .. } => InstructionHeapPlan::stack(Top(0)),
 
@@ -200,16 +180,7 @@ pub(super) fn instruction_heap_plan(
         // exactly like the arithmetic readers below.
         I::LoadField { slot, .. }
         | I::LoadFieldUnwrap { slot, .. }
-        | I::ResolveTypeRef(slot)
-        | I::Intrinsic(IntrinsicOp::FormatCompiledSlotNumber { slot, .. })
-        | I::Intrinsic(IntrinsicOp::FormatCompiledSlotNumberBinary { slot, .. }) => {
-            InstructionHeapPlan::stack(Top(0)).with_read_slot(slot)
-        }
-        I::SlotNumberBinary { slot, .. }
-        | I::SlotNumberCompare { slot, .. }
-        | I::SlotNumberBinaryCompare { slot, .. }
-        | I::JumpIfSlotNumberCompareFalse { slot, .. }
-        | I::JumpIfSlotNumberBinaryCompareFalse { slot, .. } => {
+        | I::Intrinsic(IntrinsicOp::FormatCompiledSlotNumber { slot, .. }) => {
             InstructionHeapPlan::stack(Top(0)).with_read_slot(slot)
         }
 
@@ -221,14 +192,6 @@ pub(super) fn instruction_heap_plan(
             InstructionHeapPlan::stack(Top(1 + chunk.assign_paths[path].dynamic_index_count))
                 .with_mutable_slot(slot)
         }
-        // A compound assignment extends its accumulator in place when both
-        // sides are lists, so neither the operand nor the slot is exported up
-        // front; the fallback path materializes what it needs.
-        I::AddAssign(_) => InstructionHeapPlan::heap_native(),
-        I::AddAssignNumber { slot, .. } => {
-            InstructionHeapPlan::stack(Top(0)).with_mutable_slot(slot)
-        }
-        I::AddAssignSlot { .. } => InstructionHeapPlan::heap_native(),
         // Same shape as `JavaScriptBinary`: the operands are consumed as-is
         // and the coercion exports what it needs inside the opcode.
         I::JavaScriptAddAssign(_) => InstructionHeapPlan::heap_native(),
@@ -284,7 +247,6 @@ pub(super) fn instruction_keeps_vm_state_heapified(
         | I::Jump(_)
         | I::JumpIfFalse(_)
         | I::JumpIfTrue(_)
-        | I::JumpIfCompareFalse { .. }
         | I::ToBool
         | I::IsNullish
         | I::ObserveStep

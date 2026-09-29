@@ -77,12 +77,12 @@ fn typescript_lowering_and_the_stated_ir_share_vm_behavior() {
     let stated = lashlang::testing::harness::try_compile_program(&b::program(vec![
         b::assign(
             "value",
-            b::binary(b::num(1.0), lashlang::BinaryOp::Add, b::num(2.0)),
+            b::binary(b::num(1.0), lashlang::JavaScriptBinaryOp::Add, b::num(2.0)),
         ),
         b::print(b::var("value")),
         b::finish(b::binary(
             b::var("value"),
-            lashlang::BinaryOp::Equal,
+            lashlang::JavaScriptBinaryOp::StrictEqual,
             b::num(3.0),
         )),
     ]))

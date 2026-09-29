@@ -24,25 +24,12 @@ where
             label,
             expr: Box::new(folder.fold_expr(*expr)),
         },
-        Expr::Tuple(items) => Expr::Tuple(
-            items
-                .into_iter()
-                .map(|expr| folder.fold_expr(expr))
-                .collect(),
-        ),
         Expr::List(items) => Expr::List(
             items
                 .into_iter()
                 .map(|expr| folder.fold_expr(expr))
                 .collect(),
         ),
-        Expr::ListComprehension { element, clauses } => Expr::ListComprehension {
-            element: Box::new(folder.fold_expr(*element)),
-            clauses: clauses
-                .into_iter()
-                .map(|clause| fold_list_comprehension_clause(folder, clause))
-                .collect(),
-        },
         Expr::Record(entries) => Expr::Record(
             entries
                 .into_iter()
@@ -100,10 +87,8 @@ where
         },
         Expr::Await(expr) => Expr::Await(Box::new(folder.fold_expr(*expr))),
         Expr::SleepFor(expr) => Expr::SleepFor(Box::new(folder.fold_expr(*expr))),
-        Expr::SleepUntil(expr) => Expr::SleepUntil(Box::new(folder.fold_expr(*expr))),
         Expr::ResultUnwrap(expr) => Expr::ResultUnwrap(Box::new(folder.fold_expr(*expr))),
         Expr::Print(expr) => Expr::Print(Box::new(folder.fold_expr(*expr))),
-        Expr::Yield(expr) => Expr::Yield(Box::new(folder.fold_expr(*expr))),
         Expr::Finish(expr) => Expr::Finish(Box::new(folder.fold_expr(*expr))),
         Expr::Fail(expr) => Expr::Fail(Box::new(folder.fold_expr(*expr))),
         Expr::BuiltinCall { name, args } => Expr::BuiltinCall {
@@ -191,15 +176,6 @@ where
             target: Box::new(folder.fold_expr(*target)),
             index: Box::new(folder.fold_expr(*index)),
         },
-        Expr::Unary { op, expr } => Expr::Unary {
-            op,
-            expr: Box::new(folder.fold_expr(*expr)),
-        },
-        Expr::Binary { left, op, right } => Expr::Binary {
-            left: Box::new(folder.fold_expr(*left)),
-            op,
-            right: Box::new(folder.fold_expr(*right)),
-        },
         Expr::JavaScriptUnary { op, expr } => Expr::JavaScriptUnary {
             op,
             expr: Box::new(folder.fold_expr(*expr)),
@@ -223,26 +199,7 @@ where
         | Expr::Break
         | Expr::Continue
         | Expr::ResourceRef(_)
-        | Expr::WaitSignal { .. }
-        | Expr::TypeLiteral(_)) => leaf,
-    }
-}
-
-fn fold_list_comprehension_clause<F>(
-    folder: &mut F,
-    clause: ListComprehensionClause,
-) -> ListComprehensionClause
-where
-    F: ExprFolder + ?Sized,
-{
-    match clause {
-        ListComprehensionClause::For { binding, iterable } => ListComprehensionClause::For {
-            binding,
-            iterable: folder.fold_expr(iterable),
-        },
-        ListComprehensionClause::If { condition } => ListComprehensionClause::If {
-            condition: folder.fold_expr(condition),
-        },
+        | Expr::WaitSignal { .. }) => leaf,
     }
 }
 

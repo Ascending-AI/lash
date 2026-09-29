@@ -9,13 +9,13 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crate::ast::{BinaryOp, JavaScriptBinaryOp, JavaScriptUnaryOp, UnaryOp};
+use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
 use crate::span::Span;
 use crate::tracking::LashlangExecutionSite;
 
 use super::record::{Symbol, intern_symbol, symbol_name};
 use super::schema::ValidationPlan;
-use super::{CompileStats, FormatError, ProfileReport, ProfileStat, Value};
+use super::{FormatError, ProfileReport, ProfileStat, Value};
 
 #[derive(Clone)]
 pub(crate) struct Chunk {
@@ -34,7 +34,6 @@ pub(crate) struct Chunk {
     pub(crate) compiled_schemas: Vec<ValidationPlan>,
     pub(crate) assign_paths: Vec<CompiledAssignPath>,
     pub(crate) resource_operation_batches: Vec<CompiledResourceOperationBatch>,
-    pub(crate) resource_operation_list_batches: Vec<CompiledResourceOperationListBatch>,
     pub(crate) functions: Vec<CompiledFunction>,
     /// Every structured-exception scope the compiler emitted a `PushHandler`
     /// for, sorted by handler target. It is what makes an impossible durable
@@ -242,30 +241,10 @@ pub(crate) struct CompiledResourceOperationBatchLeaf {
     pub(crate) source_span: Option<Span>,
 }
 
-/// The batch behind an awaited list comprehension of module operations,
-/// `await [op(x)? for x in xs]`. Every leaf shares the comprehension element's
-/// operation, arity and `?`, so only the leaf count is decided at run time: the
-/// comprehension leaves one `(receiver, args...)` tuple per accepted element in
-/// a list on the stack, and this batch starts all of them together.
-#[derive(Clone)]
-pub(crate) struct CompiledResourceOperationListBatch {
-    pub(crate) operation: usize,
-    pub(crate) argc: usize,
-    pub(crate) unwrap: bool,
-    pub(crate) aggregate_unwrap: bool,
-    pub(crate) site: Option<LashlangExecutionSite>,
-    pub(crate) source_span: Option<Span>,
-}
-
 #[derive(Clone)]
 pub(crate) enum CompiledAggregateAwaitShape {
-    Comprehension {
-        stack_index: usize,
-        template: Box<CompiledResourceOperationBatch>,
-    },
     BatchLeaf(usize),
     Value(usize),
-    Tuple(Box<[CompiledAggregateAwaitShape]>),
     List(Box<[CompiledAggregateAwaitShape]>),
     Record {
         keys: usize,
@@ -306,11 +285,7 @@ pub(crate) enum Instruction {
     LoadName(usize),
     Duplicate,
     StoreName(usize),
-    BuildTuple(usize),
-    BuildList(usize),
     BuildHeapList(usize),
-    ListAppend,
-    BuildRecord(usize),
     BuildHeapRecord(usize),
     LoadField {
         slot: usize,
@@ -331,52 +306,12 @@ pub(crate) enum Instruction {
         path: usize,
     },
     ResultUnwrap,
-    Unary(UnaryOp),
-    Binary(BinaryOp),
     JavaScriptUnary(JavaScriptUnaryOp),
     JavaScriptBinary(JavaScriptBinaryOp),
     IsNullish,
-    // Retained after measurement: large_data/loop_control/type_system_stress
-    // regressed when these numeric slot ops were routed through generic stack
-    // dispatch.
-    SlotNumberBinary {
-        slot: usize,
-        op: BinaryOp,
-        right: f64,
-    },
-    SlotNumberCompare {
-        slot: usize,
-        op: BinaryOp,
-        right: f64,
-    },
-    SlotNumberBinaryCompare {
-        slot: usize,
-        binary_op: BinaryOp,
-        binary_right: f64,
-        compare_op: BinaryOp,
-        compare_right: f64,
-    },
     ToBool,
     Jump(usize),
     JumpIfFalse(usize),
-    JumpIfCompareFalse {
-        op: BinaryOp,
-        target: usize,
-    },
-    JumpIfSlotNumberCompareFalse {
-        slot: usize,
-        op: BinaryOp,
-        right: f64,
-        target: usize,
-    },
-    JumpIfSlotNumberBinaryCompareFalse {
-        slot: usize,
-        binary_op: BinaryOp,
-        binary_right: f64,
-        compare_op: BinaryOp,
-        compare_right: f64,
-        target: usize,
-    },
     JumpIfTrue(usize),
     ResourceCall {
         operation: usize,
@@ -398,10 +333,8 @@ pub(crate) enum Instruction {
     },
     AwaitPending,
     ResourceOperationBatch(usize),
-    ResourceOperationListBatch(usize),
     AwaitHandle,
     SleepFor,
-    SleepUntil,
     ProcessWaitSignal {
         name: usize,
     },
@@ -446,34 +379,12 @@ pub(crate) enum Instruction {
     /// was evaluated before the `finally` body was left.
     AbandonFinallyKeepValue,
     Throw,
-    AddAssign(usize),
-    // Retained after measurement: indexed_assignment/large_data regress when
-    // numeric add-assign paths route through generic stack/path assignment.
-    AddAssignNumber {
-        slot: usize,
-        right: f64,
-    },
-    AddAssignSlot {
-        slot: usize,
-        right: usize,
-    },
-    AddAssignIndexNumber {
-        slot: usize,
-        right: f64,
-    },
-    AddAssignIndexSlotNumber {
-        slot: usize,
-        index: usize,
-        right: f64,
-    },
-    AppendAssign(usize),
     /// `s = s + rhs` under ECMA-262 `+` rules: the operand stack carries
     /// `JavaScriptBinary`'s pair — the accumulator read, then the right
     /// operand — and the instruction fuses the store, so a uniquely owned
     /// accumulator appends in place.
     JavaScriptAddAssign(usize),
     Print,
-    ProcessYield,
     Finish,
     ProcessFail,
     ObserveStep,
@@ -487,8 +398,6 @@ pub(crate) enum Instruction {
         jump_to: usize,
     },
     EndIter,
-    ResolveTypeRef(usize),
-    WrapTypeLiteral,
     WrapHostDescriptor(usize),
 }
 
@@ -570,12 +479,6 @@ pub(crate) enum IntrinsicOp {
         template: usize,
         slot: usize,
     },
-    FormatCompiledSlotNumberBinary {
-        template: usize,
-        slot: usize,
-        op: BinaryOp,
-        right: f64,
-    },
 }
 
 impl Instruction {
@@ -590,33 +493,18 @@ impl Instruction {
             Instruction::StoreName(_)
             | Instruction::PathAssign { .. }
             | Instruction::HeapPathAssign { .. } => InstructionProfileTag::StoreName,
-            Instruction::BuildTuple(_) => InstructionProfileTag::BuildTuple,
-            Instruction::BuildList(_) | Instruction::BuildHeapList(_) => {
-                InstructionProfileTag::BuildList
-            }
-            Instruction::ListAppend => InstructionProfileTag::AppendAssign,
-            Instruction::BuildRecord(_) | Instruction::BuildHeapRecord(_) => {
-                InstructionProfileTag::BuildRecord
-            }
+            Instruction::BuildHeapList(_) => InstructionProfileTag::BuildList,
+            Instruction::BuildHeapRecord(_) => InstructionProfileTag::BuildRecord,
             Instruction::LoadField { .. } | Instruction::Field(_) => InstructionProfileTag::Field,
             Instruction::Index => InstructionProfileTag::Index,
             Instruction::ResultUnwrap | Instruction::LoadFieldUnwrap { .. } => {
                 InstructionProfileTag::ResultUnwrap
             }
-            Instruction::Unary(_) | Instruction::JavaScriptUnary(_) => InstructionProfileTag::Unary,
-            Instruction::Binary(_)
-            | Instruction::JavaScriptBinary(_)
-            | Instruction::SlotNumberBinary { .. }
-            | Instruction::SlotNumberCompare { .. }
-            | Instruction::SlotNumberBinaryCompare { .. } => InstructionProfileTag::Binary,
+            Instruction::JavaScriptUnary(_) => InstructionProfileTag::Unary,
+            Instruction::JavaScriptBinary(_) => InstructionProfileTag::Binary,
             Instruction::ToBool | Instruction::IsNullish => InstructionProfileTag::ToBool,
             Instruction::Jump(_) => InstructionProfileTag::Jump,
-            Instruction::JumpIfFalse(_)
-            | Instruction::JumpIfCompareFalse { .. }
-            | Instruction::JumpIfSlotNumberCompareFalse { .. }
-            | Instruction::JumpIfSlotNumberBinaryCompareFalse { .. } => {
-                InstructionProfileTag::JumpIfFalse
-            }
+            Instruction::JumpIfFalse(_) => InstructionProfileTag::JumpIfFalse,
             Instruction::JumpIfTrue(_) => InstructionProfileTag::JumpIfTrue,
             Instruction::ResourceCall { .. } | Instruction::ResourceCallUnwrap { .. } => {
                 InstructionProfileTag::ResourceCall
@@ -625,12 +513,11 @@ impl Instruction {
             | Instruction::PendingTimer
             | Instruction::AwaitArray { .. }
             | Instruction::AwaitPending
-            | Instruction::ResourceOperationBatch(_)
-            | Instruction::ResourceOperationListBatch(_) => InstructionProfileTag::ResourceCall,
+            | Instruction::ResourceOperationBatch(_) => InstructionProfileTag::ResourceCall,
             Instruction::AwaitHandle
             | Instruction::AwaitHandleUnwrap
             | Instruction::ProcessWaitSignal { .. } => InstructionProfileTag::AwaitHandle,
-            Instruction::SleepFor | Instruction::SleepUntil => InstructionProfileTag::Sleep,
+            Instruction::SleepFor => InstructionProfileTag::Sleep,
             Instruction::Intrinsic(_) => InstructionProfileTag::Intrinsic,
             Instruction::MakeClosure { .. } => InstructionProfileTag::MakeClosure,
             Instruction::Call { .. }
@@ -646,18 +533,10 @@ impl Instruction {
             | Instruction::AbandonFinally
             | Instruction::AbandonFinallyKeepValue
             | Instruction::Throw => InstructionProfileTag::Exception,
-            Instruction::AddAssign(_)
-            | Instruction::AddAssignNumber { .. }
-            | Instruction::AddAssignSlot { .. }
-            | Instruction::AddAssignIndexNumber { .. }
-            | Instruction::AddAssignIndexSlotNumber { .. }
-            | Instruction::JavaScriptAddAssign(_) => InstructionProfileTag::AddAssign,
-            Instruction::AppendAssign(_) => InstructionProfileTag::AppendAssign,
+            Instruction::JavaScriptAddAssign(_) => InstructionProfileTag::AddAssign,
             Instruction::Print => InstructionProfileTag::Print,
             Instruction::Finish => InstructionProfileTag::Finish,
-            Instruction::ProcessYield | Instruction::ProcessFail => {
-                InstructionProfileTag::SessionProcessAdmin
-            }
+            Instruction::ProcessFail => InstructionProfileTag::SessionProcessAdmin,
             Instruction::ObserveStep => InstructionProfileTag::ObserveStep,
             Instruction::Pop => InstructionProfileTag::Pop,
             Instruction::BeginIter(_) | Instruction::BeginRangeIter { .. } => {
@@ -665,10 +544,7 @@ impl Instruction {
             }
             Instruction::IterNext { .. } => InstructionProfileTag::IterNext,
             Instruction::EndIter => InstructionProfileTag::EndIter,
-            Instruction::ResolveTypeRef(_) => InstructionProfileTag::ResolveTypeRef,
-            Instruction::WrapTypeLiteral | Instruction::WrapHostDescriptor(_) => {
-                InstructionProfileTag::WrapTypeLiteral
-            }
+            Instruction::WrapHostDescriptor(_) => InstructionProfileTag::WrapHostDescriptor,
         }
     }
 }
@@ -727,9 +603,9 @@ impl IntrinsicOp {
             | IntrinsicOp::JavaScriptRegExp(argc)
             | IntrinsicOp::InvalidArity { argc, .. }
             | IntrinsicOp::Unknown { argc, .. } => argc,
-            IntrinsicOp::FormatCompiled(_)
-            | IntrinsicOp::FormatCompiledSlotNumber { .. }
-            | IntrinsicOp::FormatCompiledSlotNumberBinary { .. } => return None,
+            IntrinsicOp::FormatCompiled(_) | IntrinsicOp::FormatCompiledSlotNumber { .. } => {
+                return None;
+            }
         })
     }
 
@@ -769,8 +645,7 @@ impl IntrinsicOp {
             IntrinsicOp::JsonParse => BuiltinProfileTag::JsonParse,
             IntrinsicOp::Format(_)
             | IntrinsicOp::FormatCompiled(_)
-            | IntrinsicOp::FormatCompiledSlotNumber { .. }
-            | IntrinsicOp::FormatCompiledSlotNumberBinary { .. } => BuiltinProfileTag::Format,
+            | IntrinsicOp::FormatCompiledSlotNumber { .. } => BuiltinProfileTag::Format,
             IntrinsicOp::Validate | IntrinsicOp::ValidateCompiled(_) => BuiltinProfileTag::Validate,
             IntrinsicOp::Range(_) => BuiltinProfileTag::Range,
             IntrinsicOp::CeilDiv => BuiltinProfileTag::CeilDiv,
@@ -799,7 +674,6 @@ pub(crate) enum InstructionProfileTag {
     PushConst,
     LoadName,
     StoreName,
-    BuildTuple,
     BuildList,
     BuildRecord,
     Field,
@@ -815,7 +689,6 @@ pub(crate) enum InstructionProfileTag {
     AwaitHandle,
     Intrinsic,
     AddAssign,
-    AppendAssign,
     Print,
     Finish,
     Sleep,
@@ -825,8 +698,7 @@ pub(crate) enum InstructionProfileTag {
     BeginIter,
     IterNext,
     EndIter,
-    ResolveTypeRef,
-    WrapTypeLiteral,
+    WrapHostDescriptor,
     MakeClosure,
     Call,
     Callback,
@@ -909,7 +781,6 @@ impl ProfileAccumulator {
                 &self.builtin_counts,
                 &self.builtin_times,
             ),
-            compile_stats: CompileStats::default(),
         }
     }
 }
@@ -918,7 +789,6 @@ const INSTRUCTION_PROFILE_NAMES: [&str; INSTRUCTION_PROFILE_COUNT] = [
     "push_const",
     "load_name",
     "store_name",
-    "build_tuple",
     "build_list",
     "build_record",
     "field",
@@ -934,7 +804,6 @@ const INSTRUCTION_PROFILE_NAMES: [&str; INSTRUCTION_PROFILE_COUNT] = [
     "await_handle",
     "intrinsic",
     "add_assign",
-    "append_assign",
     "print",
     "finish",
     "sleep",
@@ -944,8 +813,7 @@ const INSTRUCTION_PROFILE_NAMES: [&str; INSTRUCTION_PROFILE_COUNT] = [
     "begin_iter",
     "iter_next",
     "end_iter",
-    "resolve_type_ref",
-    "wrap_type_literal",
+    "wrap_host_descriptor",
     "make_closure",
     "call",
     "callback",

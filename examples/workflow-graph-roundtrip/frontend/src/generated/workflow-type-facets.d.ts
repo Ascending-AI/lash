@@ -96,7 +96,6 @@ export type WorkflowDiagnosticKind =
   | 'process_lifecycle_outside_process'
   | 'opaque_host_descriptor_access'
   | 'unknown_object_field'
-  | 'incompatible_binary_operands'
   | 'incompatible_builtin_operands'
   | 'incompatible_iteration_target'
   | 'module_hash'

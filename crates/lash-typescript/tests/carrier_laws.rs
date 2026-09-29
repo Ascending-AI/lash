@@ -155,7 +155,6 @@ fn private_binders(program: &Program) -> BTreeSet<String> {
         match declaration {
             Declaration::Process(process) => bound_in_functions(&process.body, false, &mut local),
             Declaration::Function(function) => bound_in_functions(&function.body, true, &mut local),
-            Declaration::Type(_) => {}
         }
     }
     private.extend(local.difference(&top).cloned());
@@ -198,7 +197,6 @@ fn alpha_rename(program: &Program, private: &BTreeSet<String>) -> Program {
         match declaration {
             Declaration::Process(process) => walk(&mut process.body, &rename),
             Declaration::Function(function) => walk(&mut function.body, &rename),
-            Declaration::Type(_) => {}
         }
     }
     renamed.private_bindings = renamed

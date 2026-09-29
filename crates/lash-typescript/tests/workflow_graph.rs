@@ -21,10 +21,10 @@ use lashlang::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
     WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticClass,
     WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowExpectedArgument,
-    WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide,
-    WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
-    WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowSlotPath, WorkflowSlotPathSegment,
-    WorkflowSubgraph, WorkflowTypeDiagnostic, reconcile, workflow_call_to_ir, workflow_slot_value,
+    WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide, WorkflowNode,
+    WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodeTypeFacets,
+    WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTypeDiagnostic, reconcile,
+    workflow_call_to_ir, workflow_slot_value,
 };
 
 /// The language-neutral IR projection, with TypeScript opaque-statement text.
@@ -456,7 +456,17 @@ fn a_draft_claims_no_runtime_identity_and_identity_never_depends_on_printing() {
     assert_eq!(draft.source_identity, None);
 
     let artifact = lashlang::ModuleArtifact::from_program(lashlang::Program::block(vec![
-        lashlang::Expr::SleepUntil(Box::new(lashlang::Expr::String("tomorrow".into()))),
+        lashlang::Expr::Map {
+            items: Box::new(lashlang::Expr::List(vec![])),
+            function: Box::new(lashlang::Expr::Function(Box::new(lashlang::FunctionExpr {
+                name: None,
+                js_name: None,
+                receiver: None,
+                params: vec!["item".into()],
+                captures: vec![],
+                body: Box::new(lashlang::Expr::Variable("item".into())),
+            }))),
+        },
     ]))
     .expect("a non-sourceable program still forms an artifact");
     assert!(typescript_program_source(artifact.ir()).is_err());
@@ -562,7 +572,7 @@ fn reconcile_suppresses_pairs_for_ids_duplicated_at_unmatched_locations() {
 #[test]
 fn workflow_graph_ir_json_golden_is_exact() {
     let graph = workflow_graph_from_source(goldens::IR_JSON).expect("fixture projects");
-    assert_eq!(graph.schema_version, 20);
+    assert_eq!(graph.schema_version, 21);
     let kinds = serde_json::Value::Array(
         graph
             .main
@@ -658,15 +668,17 @@ fn workflow_graph_refuses_unknown_type_expr_variant() {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
         source_identity: Some("fixture".to_string()),
         facet_schema_version: None,
-        declarations: vec![WorkflowDeclaration::Type(lashlang::TypeDecl {
-            name: "Name".into(),
-            ty: TypeExpr::Str,
+        declarations: vec![WorkflowDeclaration::Function(lashlang::FunctionDecl {
+            name: "name".into(),
+            params: vec![],
+            return_ty: TypeExpr::Str,
+            body: lashlang::Expr::String("result".into()),
         })],
         main: WorkflowSubgraph::default(),
     };
     let mut value = serde_json::to_value(graph).expect("graph serializes");
-    assert_eq!(value["declarations"][0]["ty"], "Str");
-    value["declarations"][0]["ty"] = serde_json::json!("FutureType");
+    assert_eq!(value["declarations"][0]["return_ty"], "Str");
+    value["declarations"][0]["return_ty"] = serde_json::json!("FutureType");
 
     let error = serde_json::from_value::<WorkflowGraph>(value)
         .expect_err("an unknown TypeExpr variant must be refused");
@@ -696,18 +708,20 @@ fn workflow_graph_refuses_unknown_fields_inside_type_expr_payloads() {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
         source_identity: Some("fixture".to_string()),
         facet_schema_version: None,
-        declarations: vec![WorkflowDeclaration::Type(lashlang::TypeDecl {
-            name: "Record".into(),
-            ty: TypeExpr::Object(vec![TypeField {
+        declarations: vec![WorkflowDeclaration::Function(lashlang::FunctionDecl {
+            name: "record".into(),
+            params: vec![],
+            return_ty: TypeExpr::Object(vec![TypeField {
                 name: "value".into(),
                 ty: TypeExpr::Str,
                 optional: false,
             }]),
+            body: lashlang::Expr::String("result".into()),
         })],
         main: WorkflowSubgraph::default(),
     };
     let mut value = serde_json::to_value(graph).expect("graph serializes");
-    value["declarations"][0]["ty"]["Object"][0]["future"] = serde_json::json!(true);
+    value["declarations"][0]["return_ty"]["Object"][0]["future"] = serde_json::json!(true);
 
     let error = serde_json::from_value::<WorkflowGraph>(value)
         .expect_err("an unknown TypeField member must be refused inside the graph carrier");
@@ -941,17 +955,6 @@ fn missing_and_null_container_children_fail_at_decode() {
                 body: empty(),
             },
             "body",
-        ),
-        (
-            WorkflowContainer::ListComprehension {
-                binding: None,
-                clauses: vec![WorkflowListComprehensionClause::For {
-                    binding: "item".to_string(),
-                    iterable: ir("[]"),
-                }],
-                element: empty(),
-            },
-            "element",
         ),
     ];
 

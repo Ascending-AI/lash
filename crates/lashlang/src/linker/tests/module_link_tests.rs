@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::BinaryOp;
+use crate::ast::JavaScriptBinaryOp;
 
 #[test]
 fn linked_module_accepts_restate_board_process_with_imported_schemas() {
@@ -69,13 +69,13 @@ fn linked_module_accepts_restate_board_process_with_imported_schemas() {
                     ))),
                 ),
                 builders::if_else(
-                    builders::binary(
+                    builders::logical(
                         builders::binary(
                             builders::field(builders::var("state"), "turn"),
-                            BinaryOp::Equal,
+                            JavaScriptBinaryOp::StrictEqual,
                             builders::string("O"),
                         ),
-                        BinaryOp::And,
+                        crate::ast::JavaScriptLogicalOp::And,
                         builders::builtin(
                             "contains",
                             vec![

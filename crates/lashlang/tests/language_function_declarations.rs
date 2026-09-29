@@ -16,7 +16,8 @@
 use super::*;
 use crate::ast_support::{call, finish, number, string};
 use lashlang::{
-    BinaryOp, Declaration, Expr, FunctionDecl, FunctionParam, LinkError, Program, TypeExpr,
+    Declaration, Expr, FunctionDecl, FunctionParam, JavaScriptBinaryOp, LinkError, Program,
+    TypeExpr,
 };
 
 fn param(name: &str, ty: TypeExpr) -> FunctionParam {
@@ -50,8 +51,8 @@ fn var(name: &str) -> Expr {
     Expr::Variable(name.into())
 }
 
-fn binary(left: Expr, op: BinaryOp, right: Expr) -> Expr {
-    Expr::Binary {
+fn binary(left: Expr, op: JavaScriptBinaryOp, right: Expr) -> Expr {
+    Expr::JavaScriptBinary {
         left: Box::new(left),
         op,
         right: Box::new(right),
@@ -113,7 +114,7 @@ async fn a_function_is_callable_like_a_builtin() {
             "double",
             vec![param("n", TypeExpr::Int)],
             TypeExpr::Float,
-            binary(var("n"), BinaryOp::Multiply, number(2.0)),
+            binary(var("n"), JavaScriptBinaryOp::Multiply, number(2.0)),
         )],
         vec![finish(call("double", vec![number(21.0)]))],
     ))
@@ -170,11 +171,11 @@ async fn a_function_may_call_itself() {
             vec![param("n", TypeExpr::Float)],
             TypeExpr::Str,
             if_else(
-                binary(var("n"), BinaryOp::LessEqual, number(0.0)),
+                binary(var("n"), JavaScriptBinaryOp::LessEqual, number(0.0)),
                 string("done"),
                 call(
                     "countdown",
-                    vec![binary(var("n"), BinaryOp::Subtract, number(1.0))],
+                    vec![binary(var("n"), JavaScriptBinaryOp::Subtract, number(1.0))],
                 ),
             ),
         )],
@@ -196,11 +197,11 @@ async fn functions_may_call_each_other_in_either_direction() {
             vec![param("n", TypeExpr::Float)],
             TypeExpr::Bool,
             if_else(
-                binary(var("n"), BinaryOp::Equal, number(0.0)),
+                binary(var("n"), JavaScriptBinaryOp::StrictEqual, number(0.0)),
                 Expr::Bool(at_zero),
                 call(
                     other,
-                    vec![binary(var("n"), BinaryOp::Subtract, number(1.0))],
+                    vec![binary(var("n"), JavaScriptBinaryOp::Subtract, number(1.0))],
                 ),
             ),
         )
@@ -257,7 +258,7 @@ async fn a_function_body_sees_only_its_parameters() {
             "read_outer",
             vec![param("n", TypeExpr::Int)],
             TypeExpr::Float,
-            binary(var("n"), BinaryOp::Add, var("outer")),
+            binary(var("n"), JavaScriptBinaryOp::Add, var("outer")),
         )],
         vec![
             assign("outer", number(1.0)),
@@ -278,7 +279,7 @@ async fn a_call_is_checked_against_the_declared_arity() {
             "add",
             vec![param("a", TypeExpr::Int), param("b", TypeExpr::Int)],
             TypeExpr::Float,
-            binary(var("a"), BinaryOp::Add, var("b")),
+            binary(var("a"), JavaScriptBinaryOp::Add, var("b")),
         )],
         vec![finish(call("add", vec![number(1.0)]))],
     ));
@@ -373,7 +374,7 @@ async fn a_function_name_is_not_a_value() {
             "double",
             vec![param("n", TypeExpr::Int)],
             TypeExpr::Float,
-            binary(var("n"), BinaryOp::Multiply, number(2.0)),
+            binary(var("n"), JavaScriptBinaryOp::Multiply, number(2.0)),
         )],
         vec![finish(var("double"))],
     ));
@@ -394,7 +395,7 @@ async fn a_function_name_cannot_be_bound_as_a_variable() {
             "double",
             vec![param("n", TypeExpr::Int)],
             TypeExpr::Float,
-            binary(var("n"), BinaryOp::Multiply, number(2.0)),
+            binary(var("n"), JavaScriptBinaryOp::Multiply, number(2.0)),
         )],
         vec![
             assign("double", number(3.0)),
@@ -478,12 +479,13 @@ async fn a_function_cannot_repeat_a_parameter_name() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_function_may_use_a_declared_type() {
+async fn a_function_may_take_a_structured_type() {
     let value = finish_value(module(
-        vec![
-            Declaration::Type(lashlang::TypeDecl {
-                name: "Point".into(),
-                ty: TypeExpr::Object(vec![
+        vec![function(
+            "total",
+            vec![param(
+                "point",
+                TypeExpr::Object(vec![
                     lashlang::TypeField {
                         name: "x".into(),
                         ty: TypeExpr::Int,
@@ -495,24 +497,20 @@ async fn a_function_may_use_a_declared_type() {
                         optional: false,
                     },
                 ]),
-            }),
-            function(
-                "total",
-                vec![param("point", TypeExpr::Ref("Point".into()))],
-                TypeExpr::Float,
-                binary(
-                    Expr::Field {
-                        target: Box::new(var("point")),
-                        field: "x".into(),
-                    },
-                    BinaryOp::Add,
-                    Expr::Field {
-                        target: Box::new(var("point")),
-                        field: "y".into(),
-                    },
-                ),
+            )],
+            TypeExpr::Float,
+            binary(
+                Expr::Field {
+                    target: Box::new(var("point")),
+                    field: "x".into(),
+                },
+                JavaScriptBinaryOp::Add,
+                Expr::Field {
+                    target: Box::new(var("point")),
+                    field: "y".into(),
+                },
             ),
-        ],
+        )],
         vec![finish(call(
             "total",
             vec![Expr::Record(vec![
@@ -615,10 +613,8 @@ async fn every_effectful_construct_is_rejected_in_a_function() {
         (files_read(string("a.txt")), "a module operation call"),
         (Expr::Print(Box::new(number(1.0))), "print"),
         (Expr::SleepFor(Box::new(string("1s"))), "sleep for"),
-        (Expr::SleepUntil(Box::new(string("1s"))), "sleep until"),
         (finish(number(1.0)), "finish"),
         (Expr::WaitSignal { name: "go".into() }, "wait_signal"),
-        (Expr::Yield(Box::new(Expr::Null)), "yield"),
         (Expr::Fail(Box::new(Expr::Null)), "fail"),
         (
             // A label names a step in the workflow graph; a pure body
@@ -673,7 +669,7 @@ async fn an_effect_nested_deep_in_a_function_is_still_rejected() {
                 body: Box::new(Expr::Block(vec![if_else(
                     binary(
                         call("len", vec![var("path")]),
-                        BinaryOp::Greater,
+                        JavaScriptBinaryOp::Greater,
                         number(0.0),
                     ),
                     Expr::Block(vec![assign(

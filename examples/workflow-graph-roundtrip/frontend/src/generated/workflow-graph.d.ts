@@ -2,12 +2,6 @@
 
 export type WorkflowDeclaration =
   | {
-      kind: 'type';
-      name: string;
-      ty: TypeExpr;
-      [k: string]: unknown;
-    }
-  | {
       body: WorkflowSubgraph;
       description?: string | null;
       display_name: string;
@@ -31,48 +25,6 @@ export type WorkflowDeclaration =
       return_ty: TypeExpr;
       [k: string]: unknown;
     };
-/**
- * A serialized value-type expression.
- *
- * Host decoders must refuse unknown variants. `TypeExpr` is decoded only after its graph or facet carrier version is accepted; adding a variant therefore requires the owning carrier version to advance.
- */
-export type TypeExpr =
-  | ('Any' | 'Str' | 'Int' | 'Float' | 'Bool' | 'Dict')
-  | 'Null'
-  | {
-      Enum: string[];
-    }
-  | {
-      List: TypeExpr;
-    }
-  | {
-      Object: TypeField[];
-    }
-  | {
-      Ref: string;
-    }
-  | {
-      Process: ProcessType;
-    }
-  | {
-      TriggerHandle: TypeExpr;
-    }
-  | {
-      Union: UnionMembers;
-    };
-export type ProcessType =
-  | {
-      kind: 'unknown';
-    }
-  | {
-      kind: 'known';
-      output: TypeExpr;
-      params: ProcessParamWire[];
-    };
-/**
- * @minItems 2
- */
-export type UnionMembers = [TypeExpr, TypeExpr, ...TypeExpr[]];
 export type WorkflowEdgeKind =
   | {
       kind: 'data_dependency';
@@ -160,13 +112,6 @@ export type WorkflowNodeKind =
       kind: 'container';
     }
   | {
-      binding?: AssignTarget | null;
-      clauses: WorkflowListComprehensionClause[];
-      container_kind: 'list_comprehension';
-      element: WorkflowSubgraph;
-      kind: 'container';
-    }
-  | {
       kind: 'opaque';
       source: string;
     };
@@ -203,17 +148,7 @@ export type Expr =
       Variable: string;
     }
   | {
-      Tuple: Expr[];
-    }
-  | {
       List: Expr[];
-    }
-  | {
-      ListComprehension: {
-        clauses: ListComprehensionClause[];
-        element: Expr;
-        [k: string]: unknown;
-      };
     }
   | {
       Record: [string, Expr][];
@@ -287,9 +222,6 @@ export type Expr =
       SleepFor: Expr;
     }
   | {
-      SleepUntil: Expr;
-    }
-  | {
       WaitSignal: {
         name: string;
         [k: string]: unknown;
@@ -300,9 +232,6 @@ export type Expr =
     }
   | {
       Print: Expr;
-    }
-  | {
-      Yield: Expr;
     }
   | {
       Finish: Expr;
@@ -384,21 +313,6 @@ export type Expr =
       };
     }
   | {
-      Unary: {
-        expr: Expr;
-        op: UnaryOp;
-        [k: string]: unknown;
-      };
-    }
-  | {
-      Binary: {
-        left: Expr;
-        op: BinaryOp;
-        right: Expr;
-        [k: string]: unknown;
-      };
-    }
-  | {
       JavaScriptUnary: {
         expr: Expr;
         op: JavaScriptUnaryOp;
@@ -420,9 +334,6 @@ export type Expr =
         right: Expr;
         [k: string]: unknown;
       };
-    }
-  | {
-      TypeLiteral: TypeExpr;
     };
 /**
  * The stored form of an IR number literal.
@@ -432,20 +343,6 @@ export type IrNumber = number | NonFiniteNumber;
  * A non-finite number literal's stored spelling.
  */
 export type NonFiniteNumber = 'NaN' | 'Infinity' | '-Infinity';
-export type ListComprehensionClause =
-  | {
-      For: {
-        binding: string;
-        iterable: Expr;
-        [k: string]: unknown;
-      };
-    }
-  | {
-      If: {
-        condition: Expr;
-        [k: string]: unknown;
-      };
-    };
 /**
  * The structural roles a front end marks its generated IR with.
  *
@@ -469,6 +366,48 @@ export type StructuralRole =
       kind: 'process_wrapper';
     };
 /**
+ * A serialized value-type expression.
+ *
+ * Host decoders must refuse unknown variants. `TypeExpr` is decoded only after its graph or facet carrier version is accepted; adding a variant therefore requires the owning carrier version to advance.
+ */
+export type TypeExpr =
+  | ('Any' | 'Str' | 'Int' | 'Float' | 'Bool' | 'Dict')
+  | 'Null'
+  | {
+      Enum: string[];
+    }
+  | {
+      List: TypeExpr;
+    }
+  | {
+      Object: TypeField[];
+    }
+  | {
+      Ref: string;
+    }
+  | {
+      Process: ProcessType;
+    }
+  | {
+      TriggerHandle: TypeExpr;
+    }
+  | {
+      Union: UnionMembers;
+    };
+export type ProcessType =
+  | {
+      kind: 'unknown';
+    }
+  | {
+      kind: 'known';
+      output: TypeExpr;
+      params: ProcessParamWire[];
+    };
+/**
+ * @minItems 2
+ */
+export type UnionMembers = [TypeExpr, TypeExpr, ...TypeExpr[]];
+/**
  * The member an [`Expr::MethodCall`] reads its callee from.
  */
 export type MethodKey =
@@ -478,22 +417,6 @@ export type MethodKey =
   | {
       Index: Expr;
     };
-export type UnaryOp = 'Negate' | 'Not';
-export type BinaryOp =
-  | 'Add'
-  | 'Subtract'
-  | 'Multiply'
-  | 'Divide'
-  | 'Modulo'
-  | 'Equal'
-  | 'NotEqual'
-  | 'Less'
-  | 'LessEqual'
-  | 'Greater'
-  | 'GreaterEqual'
-  | 'In'
-  | 'And'
-  | 'Or';
 export type JavaScriptUnaryOp = ('Plus' | 'Negate' | 'Not' | 'TypeOf' | 'BitNot') | 'ToString';
 export type JavaScriptBinaryOp =
   | 'Add'
@@ -534,26 +457,12 @@ export type WorkflowArgument =
  * Ordered wrappers around a call or effect, from the operation outwards.
  */
 export type WorkflowResultStep = 'await' | 'unwrap_result';
-export type WorkflowEffectKind =
-  'await_join' | 'wait_signal' | 'sleep_for' | 'sleep_until' | 'print' | 'yield' | 'break' | 'continue';
+export type WorkflowEffectKind = 'await_join' | 'wait_signal' | 'sleep_for' | 'print' | 'break' | 'continue';
 /**
  * An arithmetic operator a compound attribute assignment applies to the attribute's current value. Named neutrally: a front end's IR decides whether the operation is Lashlang's or ECMA-262's.
  */
 export type UpdateOperator = 'add' | 'subtract' | 'multiply' | 'divide' | 'remainder';
 export type WorkflowTerminalKind = 'finish' | 'fail';
-/**
- * One editable list-comprehension clause.
- */
-export type WorkflowListComprehensionClause =
-  | {
-      binding: string;
-      iterable: Expr;
-      kind: 'for';
-    }
-  | {
-      condition: Expr;
-      kind: 'if';
-    };
 export type WorkflowNodeNameSource = 'label' | 'derived';
 /**
  * Whether a diagnostic blocks save under ADR 0073's gradual typing rule.
@@ -609,7 +518,6 @@ export type WorkflowDiagnosticKind =
   | 'process_lifecycle_outside_process'
   | 'opaque_host_descriptor_access'
   | 'unknown_object_field'
-  | 'incompatible_binary_operands'
   | 'incompatible_builtin_operands'
   | 'incompatible_iteration_target'
   | 'module_hash'
@@ -658,20 +566,11 @@ export interface WorkflowGraph {
   declarations?: WorkflowDeclaration[];
   facet_schema_version?: number | null;
   main: WorkflowSubgraph;
-  schema_version: 20;
+  schema_version: 21;
   /**
    * The definition identity of the admitted module artifact this graph projects ([`crate::ModuleArtifact::source_identity`]), which the module's traces carry too. A draft projected from source that has not been admitted claims no runtime identity and carries `None`. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts.
    */
   source_identity?: string | null;
-}
-export interface TypeField {
-  name: string;
-  optional: boolean;
-  ty: TypeExpr;
-}
-export interface ProcessParamWire {
-  name: string;
-  ty: TypeExpr;
 }
 export interface WorkflowSubgraph {
   edges?: WorkflowEdge[];
@@ -760,6 +659,15 @@ export interface ProcessParam {
   name: string;
   ty: TypeExpr;
   [k: string]: unknown;
+}
+export interface TypeField {
+  name: string;
+  optional: boolean;
+  ty: TypeExpr;
+}
+export interface ProcessParamWire {
+  name: string;
+  ty: TypeExpr;
 }
 export interface TryExpr {
   body: Expr;

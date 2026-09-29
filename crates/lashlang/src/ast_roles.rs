@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 use super::{
-    AssignPathStep, AstPath, AstString, BinaryOp, CatchClause, Declaration, Expr, InvalidAst,
+    AssignPathStep, AstPath, AstString, CatchClause, Declaration, Expr, InvalidAst,
     JavaScriptBinaryOp, Program, TryExpr,
 };
 
@@ -89,7 +89,6 @@ pub(super) fn check_program_roles(program: &Program) -> Result<(), InvalidAst> {
         match declaration {
             Declaration::Process(process) => pending.push(&process.body),
             Declaration::Function(function) => pending.push(&function.body),
-            Declaration::Type(_) => {}
         }
     }
     while let Some(expr) = pending.pop() {
@@ -192,17 +191,6 @@ impl UpdateOperator {
         })
     }
 
-    fn of_lashlang(op: BinaryOp) -> Option<Self> {
-        Some(match op {
-            BinaryOp::Add => Self::Add,
-            BinaryOp::Subtract => Self::Subtract,
-            BinaryOp::Multiply => Self::Multiply,
-            BinaryOp::Divide => Self::Divide,
-            BinaryOp::Modulo => Self::Remainder,
-            _ => return None,
-        })
-    }
-
     /// The ECMA-262 operator this update applies.
     pub fn javascript_op(self) -> JavaScriptBinaryOp {
         match self {
@@ -290,12 +278,6 @@ impl<'a> AttributeAssignParts<'a> {
         let update = match value.as_ref() {
             Expr::JavaScriptBinary { left, op, right } if reads_current(left) => {
                 UpdateOperator::of_javascript(*op).map(|operator| AttributeUpdate {
-                    operator,
-                    operand: right.as_ref(),
-                })
-            }
-            Expr::Binary { left, op, right } if reads_current(left) => {
-                UpdateOperator::of_lashlang(*op).map(|operator| AttributeUpdate {
                     operator,
                     operand: right.as_ref(),
                 })
@@ -479,7 +461,6 @@ pub(crate) fn check_unique_declarations(program: &Program) -> Result<(), Invalid
     let mut names = BTreeSet::new();
     for declaration in &program.declarations {
         let name = match declaration {
-            Declaration::Type(declaration) => ("type", declaration.name.as_str()),
             Declaration::Process(declaration) => ("process", declaration.name.as_str()),
             Declaration::Function(declaration) => ("function", declaration.name.as_str()),
         };

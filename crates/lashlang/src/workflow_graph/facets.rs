@@ -5,8 +5,11 @@ use super::{Span, WorkflowNodeId};
 use crate::ast::{AstPath, AstString, Expr, TypeExpr};
 use crate::linker::{LinkError, WorkflowLinkAnalysis};
 
-/// Version of the optional, derived workflow type-facet contract.
-pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 3;
+/// Version of the optional, derived workflow type-facet contract. Version 4
+/// (FIG-4038) drops `incompatible_binary_operands`: the retired surface
+/// dialect's operand check has no JavaScript equivalent; v3 facet documents
+/// are refused.
+pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowNodeTypeFacets {
@@ -129,7 +132,7 @@ pub fn workflow_slot_value<'a>(expression: &'a Expr, path: &WorkflowSlotPath) ->
             (WorkflowSlotPathSegment::Field(field), Expr::Record(entries)) => entries
                 .iter()
                 .find_map(|(name, value)| (name == field).then_some(value))?,
-            (WorkflowSlotPathSegment::Index(index), Expr::List(items) | Expr::Tuple(items)) => {
+            (WorkflowSlotPathSegment::Index(index), Expr::List(items)) => {
                 items.get(*index as usize)?
             }
             _ => return None,
@@ -217,7 +220,6 @@ pub enum WorkflowDiagnosticKind {
     ProcessLifecycleOutsideProcess,
     OpaqueHostDescriptorAccess,
     UnknownObjectField,
-    IncompatibleBinaryOperands,
     IncompatibleBuiltinOperands,
     IncompatibleIterationTarget,
     ModuleHash,
@@ -225,7 +227,7 @@ pub enum WorkflowDiagnosticKind {
 }
 
 impl WorkflowDiagnosticKind {
-    pub const ALL: [Self; 51] = [
+    pub const ALL: [Self; 50] = [
         Self::DuplicateDeclaration,
         Self::DuplicateProcessParam,
         Self::DuplicateProcessSignal,
@@ -272,7 +274,6 @@ impl WorkflowDiagnosticKind {
         Self::ProcessLifecycleOutsideProcess,
         Self::OpaqueHostDescriptorAccess,
         Self::UnknownObjectField,
-        Self::IncompatibleBinaryOperands,
         Self::IncompatibleBuiltinOperands,
         Self::IncompatibleIterationTarget,
         Self::ModuleHash,
@@ -331,7 +332,6 @@ impl WorkflowDiagnosticKind {
             Self::ProcessLifecycleOutsideProcess => "process_lifecycle_outside_process",
             Self::OpaqueHostDescriptorAccess => "opaque_host_descriptor_access",
             Self::UnknownObjectField => "unknown_object_field",
-            Self::IncompatibleBinaryOperands => "incompatible_binary_operands",
             Self::IncompatibleBuiltinOperands => "incompatible_builtin_operands",
             Self::IncompatibleIterationTarget => "incompatible_iteration_target",
             Self::ModuleHash => "module_hash",
@@ -391,7 +391,6 @@ impl WorkflowDiagnosticKind {
             }
             LinkError::OpaqueHostDescriptorAccess { .. } => Self::OpaqueHostDescriptorAccess,
             LinkError::UnknownObjectField { .. } => Self::UnknownObjectField,
-            LinkError::IncompatibleBinaryOperands { .. } => Self::IncompatibleBinaryOperands,
             LinkError::IncompatibleBuiltinOperands { .. } => Self::IncompatibleBuiltinOperands,
             LinkError::IncompatibleIterationTarget { .. } => Self::IncompatibleIterationTarget,
             LinkError::ModuleHash { .. } => Self::ModuleHash,
@@ -471,12 +470,12 @@ mod tests {
 
     #[test]
     fn diagnostic_kind_vocabulary_is_closed_over_current_link_errors() {
-        assert_eq!(WorkflowDiagnosticKind::ALL.len(), 51);
+        assert_eq!(WorkflowDiagnosticKind::ALL.len(), 50);
         let spellings = WorkflowDiagnosticKind::ALL
             .into_iter()
             .map(|kind| kind.as_str())
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(spellings.len(), 51);
+        assert_eq!(spellings.len(), 50);
         assert!(
             WorkflowDiagnosticKind::ALL
                 .into_iter()

@@ -215,19 +215,6 @@ impl Heap {
         Ok(())
     }
 
-    /// Whether this value is a list, whether it is held in the heap or still a
-    /// tree. RegExp match arrays extend the JavaScript list identity here.
-    pub(crate) fn is_list(&self, value: &Value) -> bool {
-        match value {
-            Value::List(_) => true,
-            Value::Ref(id) => matches!(
-                self.get(*id),
-                Ok(HeapObject::List(_) | HeapObject::RegExpMatch(_))
-            ),
-            _ => false,
-        }
-    }
-
     pub(crate) fn allocate_regexp(
         &mut self,
         pattern: String,

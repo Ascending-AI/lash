@@ -82,7 +82,7 @@ pub fn compile(
                 private_bindings: Default::default(),
                 spans: BTreeMap::new(),
             };
-            let (chunk, compile_stats) = Compiler::compile_linked_process_program(
+            let chunk = Compiler::compile_linked_process_program(
                 &process_program,
                 spans,
                 artifact.into(),
@@ -90,7 +90,6 @@ pub fn compile(
             );
             Ok(CompiledProgram {
                 chunk,
-                compile_stats,
                 executable: super::ExecutableIdentity::of(artifact.module_ref(), entry),
             })
         }
@@ -112,7 +111,7 @@ pub(crate) fn compile_main(
                 .collect()
         })
         .unwrap_or_default();
-    let (chunk, compile_stats) = Compiler::compile_linked_program(
+    let chunk = Compiler::compile_linked_program(
         artifact.ir(),
         spans,
         artifact.into(),
@@ -120,7 +119,6 @@ pub(crate) fn compile_main(
     );
     CompiledProgram {
         chunk,
-        compile_stats,
         executable: super::ExecutableIdentity::of(artifact.module_ref(), Entry::Main),
     }
 }
@@ -136,10 +134,9 @@ pub(crate) fn compile_ast(program: &Program) -> Result<CompiledProgram, crate::a
 
 #[cfg(test)]
 pub(crate) fn compile_program_internal(program: &Program) -> CompiledProgram {
-    let (chunk, compile_stats) = Compiler::compile_program(program);
+    let chunk = Compiler::compile_program(program);
     CompiledProgram {
         chunk,
-        compile_stats,
         executable: super::ExecutableIdentity::unlinked(),
     }
 }
@@ -216,7 +213,7 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         );
         let mut vm = Vm::new(program, slots, host, Some(scratch), host.execution_mode());
         vm.install_heap(heap);
-        let result = run_vm(program, host, &mut vm).await;
+        let result = run_vm(host, &mut vm).await;
         let (runtime_globals, heap) = vm.recycle_into_state_parts(scratch)?;
         state.install_runtime(runtime_globals, heap)?;
         result
@@ -233,7 +230,7 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         );
         let mut vm = Vm::new(program, slots, host, None, host.execution_mode());
         vm.install_heap(heap);
-        let result = run_vm(program, host, &mut vm).await;
+        let result = run_vm(host, &mut vm).await;
         let (runtime_globals, heap) = vm.into_state_parts()?;
         state.install_runtime(runtime_globals, heap)?;
         result
@@ -241,7 +238,6 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
 }
 
 async fn run_vm<H: ExecutionHost>(
-    program: &CompiledProgram,
     host: &H,
     vm: &mut Vm<'_, H>,
 ) -> Result<ExecutionOutcome, RuntimeError> {
@@ -260,9 +256,7 @@ async fn run_vm<H: ExecutionHost>(
     };
 
     if host.profile_execution() {
-        let mut profile = vm.take_profile();
-        profile.compile_stats = program.compile_stats;
-        host.observe_profile(profile);
+        host.observe_profile(vm.take_profile());
     }
 
     result

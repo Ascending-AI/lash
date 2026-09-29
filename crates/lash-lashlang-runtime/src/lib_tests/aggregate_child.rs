@@ -60,7 +60,7 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
             b::assign("second", b::start("echo", Vec::new())),
             b::assign(
                 "both",
-                b::await_expr(b::tuple(vec![b::var("first"), b::var("second")])),
+                b::await_expr(b::list(vec![b::var("first"), b::var("second")])),
             ),
             b::finish(b::var("both")),
         ],

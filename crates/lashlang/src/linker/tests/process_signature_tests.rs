@@ -81,11 +81,10 @@ fn trigger_list_accepts_same_signature_alias_branch_targets() {
     // }
     let program = builders::module(
         vec![
-            builders::type_decl("Handler", handler_type("event")),
             scan_process(),
             builders::process_returning(
                 "install",
-                vec![builders::param("handler", TypeExpr::Ref("Handler".into()))],
+                vec![builders::param("handler", handler_type("event"))],
                 TypeExpr::Bool,
                 builders::block(vec![
                     builders::assign("selected", builders::var("handler")),

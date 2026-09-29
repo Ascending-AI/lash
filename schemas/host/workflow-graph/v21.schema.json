@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/workflow-graph/v20",
+  "$id": "https://lash.dev/schemas/workflow-graph/v21",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -92,25 +92,6 @@
           "type": "object"
         }
       ]
-    },
-    "BinaryOp": {
-      "enum": [
-        "Add",
-        "Subtract",
-        "Multiply",
-        "Divide",
-        "Modulo",
-        "Equal",
-        "NotEqual",
-        "Less",
-        "LessEqual",
-        "Greater",
-        "GreaterEqual",
-        "In",
-        "And",
-        "Or"
-      ],
-      "type": "string"
     },
     "CatchClause": {
       "properties": {
@@ -250,21 +231,6 @@
         {
           "additionalProperties": false,
           "properties": {
-            "Tuple": {
-              "items": {
-                "$ref": "#/definitions/Expr"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "Tuple"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
             "List": {
               "items": {
                 "$ref": "#/definitions/Expr"
@@ -274,33 +240,6 @@
           },
           "required": [
             "List"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "ListComprehension": {
-              "properties": {
-                "clauses": {
-                  "items": {
-                    "$ref": "#/definitions/ListComprehensionClause"
-                  },
-                  "type": "array"
-                },
-                "element": {
-                  "$ref": "#/definitions/Expr"
-                }
-              },
-              "required": [
-                "clauses",
-                "element"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "ListComprehension"
           ],
           "type": "object"
         },
@@ -583,18 +522,6 @@
         {
           "additionalProperties": false,
           "properties": {
-            "SleepUntil": {
-              "$ref": "#/definitions/Expr"
-            }
-          },
-          "required": [
-            "SleepUntil"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
             "WaitSignal": {
               "properties": {
                 "name": {
@@ -633,18 +560,6 @@
           },
           "required": [
             "Print"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "Yield": {
-              "$ref": "#/definitions/Expr"
-            }
-          },
-          "required": [
-            "Yield"
           ],
           "type": "object"
         },
@@ -958,58 +873,6 @@
         },
         {
           "additionalProperties": false,
-          "properties": {
-            "Unary": {
-              "properties": {
-                "expr": {
-                  "$ref": "#/definitions/Expr"
-                },
-                "op": {
-                  "$ref": "#/definitions/UnaryOp"
-                }
-              },
-              "required": [
-                "expr",
-                "op"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "Unary"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "Binary": {
-              "properties": {
-                "left": {
-                  "$ref": "#/definitions/Expr"
-                },
-                "op": {
-                  "$ref": "#/definitions/BinaryOp"
-                },
-                "right": {
-                  "$ref": "#/definitions/Expr"
-                }
-              },
-              "required": [
-                "left",
-                "op",
-                "right"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "Binary"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
           "description": "An ECMA-262 unary operation whose coercion differs from Lashlang.",
           "properties": {
             "JavaScriptUnary": {
@@ -1088,18 +951,6 @@
           },
           "required": [
             "JavaScriptLogical"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "TypeLiteral": {
-              "$ref": "#/definitions/TypeExpr"
-            }
-          },
-          "required": [
-            "TypeLiteral"
           ],
           "type": "object"
         }
@@ -1244,54 +1095,6 @@
         "title"
       ],
       "type": "object"
-    },
-    "ListComprehensionClause": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "For": {
-              "properties": {
-                "binding": {
-                  "type": "string"
-                },
-                "iterable": {
-                  "$ref": "#/definitions/Expr"
-                }
-              },
-              "required": [
-                "binding",
-                "iterable"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "For"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "If": {
-              "properties": {
-                "condition": {
-                  "$ref": "#/definitions/Expr"
-                }
-              },
-              "required": [
-                "condition"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "If"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "MethodKey": {
       "description": "The member an [`Expr::MethodCall`] reads its callee from.",
@@ -1789,13 +1592,6 @@
       ],
       "type": "object"
     },
-    "UnaryOp": {
-      "enum": [
-        "Negate",
-        "Not"
-      ],
-      "type": "string"
-    },
     "UnionMembers": {
       "items": {
         "$ref": "#/definitions/TypeExpr"
@@ -1890,28 +1686,6 @@
     },
     "WorkflowDeclaration": {
       "oneOf": [
-        {
-          "properties": {
-            "kind": {
-              "enum": [
-                "type"
-              ],
-              "type": "string"
-            },
-            "name": {
-              "type": "string"
-            },
-            "ty": {
-              "$ref": "#/definitions/TypeExpr"
-            }
-          },
-          "required": [
-            "kind",
-            "name",
-            "ty"
-          ],
-          "type": "object"
-        },
         {
           "additionalProperties": false,
           "description": "A named process is a container with its own child subgraph.",
@@ -2078,7 +1852,6 @@
         "process_lifecycle_outside_process",
         "opaque_host_descriptor_access",
         "unknown_object_field",
-        "incompatible_binary_operands",
         "incompatible_builtin_operands",
         "incompatible_iteration_target",
         "module_hash",
@@ -2159,9 +1932,7 @@
         "await_join",
         "wait_signal",
         "sleep_for",
-        "sleep_until",
         "print",
-        "yield",
         "break",
         "continue"
       ],
@@ -2213,53 +1984,6 @@
         "ty"
       ],
       "type": "object"
-    },
-    "WorkflowListComprehensionClause": {
-      "description": "One editable list-comprehension clause.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "binding": {
-              "type": "string"
-            },
-            "iterable": {
-              "$ref": "#/definitions/Expr"
-            },
-            "kind": {
-              "enum": [
-                "for"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "binding",
-            "iterable",
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "condition": {
-              "$ref": "#/definitions/Expr"
-            },
-            "kind": {
-              "enum": [
-                "if"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "condition",
-            "kind"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "WorkflowNode": {
       "additionalProperties": false,
@@ -2672,49 +2396,6 @@
         {
           "additionalProperties": false,
           "properties": {
-            "binding": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/AssignTarget"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "clauses": {
-              "items": {
-                "$ref": "#/definitions/WorkflowListComprehensionClause"
-              },
-              "type": "array"
-            },
-            "container_kind": {
-              "enum": [
-                "list_comprehension"
-              ],
-              "type": "string"
-            },
-            "element": {
-              "$ref": "#/definitions/WorkflowSubgraph"
-            },
-            "kind": {
-              "enum": [
-                "container"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "clauses",
-            "container_kind",
-            "element",
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
             "kind": {
               "enum": [
                 "opaque"
@@ -2937,7 +2618,7 @@
     },
     "schema_version": {
       "enum": [
-        20
+        21
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -2957,6 +2638,6 @@
   ],
   "title": "WorkflowGraph",
   "type": "object",
-  "x-lash-schema-version": 20,
+  "x-lash-schema-version": 21,
   "x-lash-version-constant": "WORKFLOW_GRAPH_SCHEMA_VERSION"
 }

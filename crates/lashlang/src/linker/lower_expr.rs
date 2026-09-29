@@ -118,16 +118,7 @@ impl<'module> Linker<'module> {
             | Expr::String(_)
             | Expr::Break
             | Expr::Continue => Ok((expr.clone(), Binding::Value(literal_type(expr)))),
-            Expr::TypeLiteral(_) => Ok((
-                expr.clone(),
-                self.closed_schema_witness_binding(expr)
-                    .unwrap_or_else(any_binding),
-            )),
-            Expr::Tuple(items) => self.lower_tuple(items, path, scope, expected),
             Expr::List(items) => self.lower_list(items, path, scope, expected),
-            Expr::ListComprehension { element, clauses } => {
-                self.lower_list_comprehension(element, clauses, path, scope)
-            }
             Expr::Record(entries) => self.lower_record(entries, path, scope, expected),
             Expr::Assign { target, expr } => self.lower_assign(target, expr, path, scope),
             Expr::If {
@@ -156,11 +147,9 @@ impl<'module> Linker<'module> {
             } => self.lower_receiver_call(receiver, operation, args, path, scope),
             Expr::Await(inner) => self.lower_await(inner, path, scope, expected),
             Expr::SleepFor(inner) => self.lower_sleep_for(inner, path, scope),
-            Expr::SleepUntil(inner) => self.lower_sleep_until(inner, path, scope),
             Expr::WaitSignal { name } => self.lower_wait_signal(name, scope, expected),
             Expr::ResultUnwrap(inner) => self.lower_result_unwrap(inner, path, scope, expected),
             Expr::Print(inner) => self.lower_print(inner, path, scope),
-            Expr::Yield(inner) => self.lower_yield(inner, path, scope),
             Expr::Finish(inner) => self.lower_finish(path, inner, scope),
             Expr::Fail(inner) => self.lower_fail(path, inner, scope),
             Expr::BuiltinCall { name, args } => self.lower_builtin_call(name, args, path, scope),
@@ -190,8 +179,6 @@ impl<'module> Linker<'module> {
             Expr::Return(value) => self.lower_return_expr(value, path, scope),
             Expr::Field { target, field } => self.lower_field(target, field, path, scope),
             Expr::Index { target, index } => self.lower_index(target, index, path, scope),
-            Expr::Unary { op, expr } => self.lower_unary(op, expr, path, scope),
-            Expr::Binary { left, op, right } => self.lower_binary(left, op, right, path, scope),
             Expr::JavaScriptUnary { op, expr } => {
                 self.lower_javascript_unary(op, expr, path, scope)
             }
@@ -337,36 +324,6 @@ impl<'module> Linker<'module> {
         })
     }
 
-    pub(super) fn lower_tuple(
-        &self,
-        items: &[Expr],
-        path: &AstPath,
-        scope: &mut Scope,
-        expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Binding), LinkError> {
-        let mut lowered = Vec::with_capacity(items.len());
-        let mut item_types = Vec::with_capacity(items.len());
-        let expected_item =
-            expected.and_then(|expected| match self.resolve_type_aliases(expected) {
-                TypeExpr::List(item) => Some(*item),
-                _ => None,
-            });
-        for (index, item) in items.iter().enumerate() {
-            let (item, binding) = self.lower_expr_expected(
-                item,
-                &path.child(index as u32),
-                scope,
-                expected_item.as_ref(),
-            )?;
-            lowered.push(item);
-            item_types.push(binding_type(&binding));
-        }
-        Ok((
-            Expr::Tuple(lowered),
-            Binding::Value(TypeExpr::List(Box::new(union_type(item_types)))),
-        ))
-    }
-
     pub(super) fn lower_list(
         &self,
         items: &[Expr],
@@ -394,54 +351,6 @@ impl<'module> Linker<'module> {
         Ok((
             Expr::List(lowered),
             Binding::Value(TypeExpr::List(Box::new(union_type(item_types)))),
-        ))
-    }
-
-    pub(super) fn lower_list_comprehension(
-        &self,
-        element: &Expr,
-        clauses: &[ListComprehensionClause],
-        path: &AstPath,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        let mut lowered_clauses = Vec::with_capacity(clauses.len());
-        let mut previous_bindings = Vec::new();
-        for (index, clause) in clauses.iter().enumerate() {
-            match clause {
-                ListComprehensionClause::For { binding, iterable } => {
-                    self.reject_function_name_binding(binding.as_str(), scope.span)?;
-                    let (iterable, iterable_binding) =
-                        self.lower_expr(iterable, &path.child(index as u32), scope)?;
-                    let item_ty =
-                        self.iterable_item_type(&binding_type(&iterable_binding), scope.span)?;
-                    previous_bindings.push((
-                        binding.to_string(),
-                        scope.bind(binding.as_str(), self.binding_for_type(&item_ty)),
-                    ));
-                    lowered_clauses.push(ListComprehensionClause::For {
-                        binding: binding.clone(),
-                        iterable,
-                    });
-                }
-                ListComprehensionClause::If { condition } => {
-                    let condition = self
-                        .lower_expr(condition, &path.child(index as u32), scope)?
-                        .0;
-                    lowered_clauses.push(ListComprehensionClause::If { condition });
-                }
-            }
-        }
-        let (element, binding) =
-            self.lower_expr(element, &path.child(clauses.len() as u32), scope)?;
-        for (name, previous) in previous_bindings.into_iter().rev() {
-            scope.restore(name.as_str(), previous);
-        }
-        Ok((
-            Expr::ListComprehension {
-                element: Box::new(element),
-                clauses: lowered_clauses,
-            },
-            Binding::Value(TypeExpr::List(Box::new(binding_type(&binding)))),
         ))
     }
 
@@ -1066,19 +975,6 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    pub(super) fn lower_sleep_until(
-        &self,
-        inner: &Expr,
-        path: &AstPath,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        self.ensure_feature(self.surface.abilities.sleep, "sleep", scope.span)?;
-        Ok((
-            Expr::SleepUntil(Box::new(self.lower_expr(inner, &path.child(0), scope)?.0)),
-            Binding::Value(TypeExpr::Null),
-        ))
-    }
-
     pub(super) fn lower_wait_signal(
         &self,
         name: &AstString,
@@ -1157,18 +1053,6 @@ impl<'module> Linker<'module> {
     ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Print(Box::new(self.lower_expr(inner, &path.child(0), scope)?.0)),
-            Binding::Value(TypeExpr::Null),
-        ))
-    }
-
-    pub(super) fn lower_yield(
-        &self,
-        inner: &Expr,
-        path: &AstPath,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        Ok((
-            Expr::Yield(Box::new(self.lower_expr(inner, &path.child(0), scope)?.0)),
             Binding::Value(TypeExpr::Null),
         ))
     }
@@ -1351,51 +1235,6 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    pub(super) fn lower_unary(
-        &self,
-        op: &crate::ast::UnaryOp,
-        expr: &Expr,
-        path: &AstPath,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        Ok((
-            Expr::Unary {
-                op: *op,
-                expr: Box::new(self.lower_expr(expr, &path.child(0), scope)?.0),
-            },
-            Binding::Value(match op {
-                crate::ast::UnaryOp::Not => TypeExpr::Bool,
-                crate::ast::UnaryOp::Negate => TypeExpr::Float,
-            }),
-        ))
-    }
-
-    pub(super) fn lower_binary(
-        &self,
-        left: &Expr,
-        op: &crate::ast::BinaryOp,
-        right: &Expr,
-        path: &AstPath,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        let (left, left_binding) = self.lower_expr(left, &path.child(0), scope)?;
-        let (right, right_binding) = self.lower_expr(right, &path.child(1), scope)?;
-        self.validate_binary_operands(
-            *op,
-            &binding_type(&left_binding),
-            &binding_type(&right_binding),
-            scope.span,
-        )?;
-        Ok((
-            Expr::Binary {
-                left: Box::new(left),
-                op: *op,
-                right: Box::new(right),
-            },
-            Binding::Value(binary_return_type(*op)),
-        ))
-    }
-
     pub(super) fn lower_try_expr(
         &self,
         exception: &crate::ast::TryExpr,
@@ -1468,7 +1307,7 @@ impl<'module> Linker<'module> {
 }
 
 /// The kind of a literal that can never hold a handle - a scalar literal, or a
-/// list/tuple/record/comprehension built only from such literals. Awaiting one
+/// list or record built only from such literals. Awaiting one
 /// is a shape error visible at link time. Inferred types cover computed
 /// expressions separately; uncertain shapes are left to the runtime check.
 fn settled_literal_kind(expr: &Expr) -> Option<&'static str> {
@@ -1482,18 +1321,11 @@ fn settled_literal_kind(expr: &Expr) -> Option<&'static str> {
             .iter()
             .all(|item| settled_literal_kind(item).is_some())
             .then_some("list"),
-        Expr::Tuple(items) => items
-            .iter()
-            .all(|item| settled_literal_kind(item).is_some())
-            .then_some("tuple"),
         Expr::Record(entries) => (!is_handle_shape(entries.iter().map(|(name, _)| name.as_str()))
             && entries
                 .iter()
                 .all(|(_, value)| settled_literal_kind(value).is_some()))
         .then_some("record"),
-        Expr::ListComprehension { element, .. } => {
-            settled_literal_kind(element).is_some().then_some("list")
-        }
         Expr::LabelAnnotated { expr, .. } => settled_literal_kind(expr),
         _ => None,
     }

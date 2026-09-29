@@ -53,50 +53,6 @@
       ],
       "type": "object"
     },
-    "EditableComprehensionClause": {
-      "oneOf": [
-        {
-          "properties": {
-            "binding": {
-              "type": "string"
-            },
-            "iterable": {
-              "type": "string"
-            },
-            "kind": {
-              "enum": [
-                "for"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "binding",
-            "iterable",
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "condition": {
-              "type": "string"
-            },
-            "kind": {
-              "enum": [
-                "if"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "condition",
-            "kind"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "EditableProcessField": {
       "properties": {
         "name": {
@@ -262,12 +218,6 @@
         "children": {
           "items": {
             "$ref": "#/definitions/ChildGroup"
-          },
-          "type": "array"
-        },
-        "clauses": {
-          "items": {
-            "$ref": "#/definitions/EditableComprehensionClause"
           },
           "type": "array"
         },

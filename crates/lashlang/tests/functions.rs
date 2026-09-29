@@ -30,9 +30,9 @@ async fn public_ast_constructs_and_calls_a_capturing_function() {
                 receiver: None,
                 params: vec!["value".into()],
                 captures: vec!["captured".into()],
-                body: Box::new(Expr::Binary {
+                body: Box::new(Expr::JavaScriptBinary {
                     left: Box::new(Expr::Variable("captured".into())),
-                    op: lashlang::BinaryOp::Add,
+                    op: lashlang::JavaScriptBinaryOp::Add,
                     right: Box::new(Expr::Variable("value".into())),
                 }),
             })),

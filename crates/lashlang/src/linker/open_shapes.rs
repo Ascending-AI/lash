@@ -54,7 +54,6 @@ impl OpenPlaces {
             match declaration {
                 Declaration::Process(process) => work.push((&process.body, true)),
                 Declaration::Function(function) => work.push((&function.body, true)),
-                Declaration::Type(_) => {}
             }
         }
         // A work list rather than recursion: the program may nest as deep as
@@ -125,19 +124,10 @@ impl OpenPlaces {
             Expr::JavaScriptLogical { left, right, .. } => {
                 work.extend([(&**left, escapes), (&**right, escapes)]);
             }
-            Expr::Binary { left, op, right } => {
-                let operands_escape = match op {
-                    crate::ast::BinaryOp::And | crate::ast::BinaryOp::Or => escapes,
-                    // List concatenation shares the operands' elements.
-                    crate::ast::BinaryOp::Add => true,
-                    _ => false,
-                };
-                work.extend([(&**left, operands_escape), (&**right, operands_escape)]);
-            }
             Expr::JavaScriptBinary { left, right, .. } => {
                 work.extend([(&**left, false), (&**right, false)]);
             }
-            Expr::Unary { expr, .. } | Expr::JavaScriptUnary { expr, .. } | Expr::Print(expr) => {
+            Expr::JavaScriptUnary { expr, .. } | Expr::Print(expr) => {
                 work.push((&**expr, false));
             }
             Expr::While { condition, body } => {

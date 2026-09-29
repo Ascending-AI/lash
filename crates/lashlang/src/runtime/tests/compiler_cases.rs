@@ -151,89 +151,6 @@ fn aggregate_await_record_of_resource_calls_emits_batch_instruction() {
     );
 }
 
-#[test]
-fn aggregate_await_list_comprehension_of_resource_calls_emits_list_batch_instruction() {
-    // `results = await [tools.echo({ value: id })? for id in ["a", "b"] if id != "c"]`
-    // / `finish results`
-    let compiled = compile_program_for_tests(builders::program(vec![
-        builders::assign(
-            "results",
-            builders::await_expr(builders::comprehension(
-                echo_unwrap(builders::var("id")),
-                vec![
-                    builders::comprehension_for(
-                        "id",
-                        builders::list(vec![builders::string("a"), builders::string("b")]),
-                    ),
-                    builders::comprehension_if(builders::binary(
-                        builders::var("id"),
-                        BinaryOp::NotEqual,
-                        builders::string("c"),
-                    )),
-                ],
-            )),
-        ),
-        builders::finish(builders::var("results")),
-    ]));
-    let listing = compiled_instruction_listing(&compiled);
-    assert_eq!(
-        compiled
-            .chunk
-            .code
-            .iter()
-            .filter(|instruction| matches!(instruction, Instruction::ResourceOperationListBatch(_)))
-            .count(),
-        1,
-        "an awaited comprehension of calls compiles to one list-batch instruction:\n{listing}"
-    );
-    assert!(
-        !compiled.chunk.code.iter().any(|instruction| matches!(
-            instruction,
-            Instruction::ResourceCall { .. }
-                | Instruction::ResourceCallUnwrap { .. }
-                | Instruction::AwaitHandle
-                | Instruction::AwaitHandleUnwrap
-        )),
-        "the comprehension leaves must not run as sequential calls or a bare await:\n{listing}"
-    );
-    assert!(
-        listing.contains("resource_operation_list_batch echo argc=1 unwrap=true"),
-        "the list batch carries the leaf operation and its `?`:\n{listing}"
-    );
-
-    // `results = [await tools.echo({ value: id })? for id in ["a", "b"]]`
-    // / `finish results`
-    let sequential = compile_program_for_tests(builders::program(vec![
-        builders::assign(
-            "results",
-            builders::comprehension(
-                await_echo_unwrap(builders::var("id")),
-                vec![builders::comprehension_for(
-                    "id",
-                    builders::list(vec![builders::string("a"), builders::string("b")]),
-                )],
-            ),
-        ),
-        builders::finish(builders::var("results")),
-    ]));
-    let listing = compiled_instruction_listing(&sequential);
-    assert!(
-        sequential
-            .chunk
-            .code
-            .iter()
-            .any(|instruction| matches!(instruction, Instruction::ResourceCallUnwrap { .. })),
-        "`[await op(x)? for x in xs]` stays a sequential unwrapped call:\n{listing}"
-    );
-    assert!(
-        !sequential.chunk.code.iter().any(|instruction| matches!(
-            instruction,
-            Instruction::ResourceOperationListBatch(_) | Instruction::ResourceOperationBatch(_)
-        )),
-        "the sequential form must not batch:\n{listing}"
-    );
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn aggregate_await_nested_resource_calls_reconstructs_shape() {
     // `result = await { outer: [ tools.echo({ value: "a" })?,`
@@ -268,14 +185,14 @@ async fn aggregate_await_nested_resource_calls_reconstructs_shape() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn aggregate_await_tuple_of_resource_calls_batches_and_reconstructs_tuple() {
-    // `result = await (tools.echo({ value: "left" })?, tools.echo({ value: "right" })?)`
+async fn aggregate_await_list_of_resource_calls_batches_and_reconstructs_list() {
+    // `result = await [tools.echo({ value: "left" })?, tools.echo({ value: "right" })?]`
     // / `finish result`
     let program = || {
         builders::program(vec![
             builders::assign(
                 "result",
-                builders::await_expr(builders::tuple(vec![
+                builders::await_expr(builders::list(vec![
                     echo_unwrap(builders::string("left")),
                     echo_unwrap(builders::string("right")),
                 ])),
@@ -291,12 +208,12 @@ async fn aggregate_await_tuple_of_resource_calls_batches_and_reconstructs_tuple(
             .code
             .iter()
             .any(|instruction| matches!(instruction, Instruction::ResourceOperationBatch(_))),
-        "aggregate tuple await should compile to one batch instruction:\n{listing}"
+        "aggregate list await should compile to one batch instruction:\n{listing}"
     );
 
     let value = exec(program()).await.expect("program should run");
-    let Value::Tuple(items) = value else {
-        panic!("expected tuple result");
+    let Value::List(items) = value else {
+        panic!("expected list result");
     };
     assert_eq!(
         &items[..],
@@ -632,18 +549,30 @@ async fn generic_iterator_loops_cover_range_list_keys_nested_control_and_mutatio
             builders::builtin("range", vec![builders::num(0.0), builders::num(5.0)]),
             builders::block(vec![
                 builders::if_else(
-                    builders::binary(builders::var("i"), BinaryOp::Equal, builders::num(1.0)),
+                    builders::binary(
+                        builders::var("i"),
+                        JavaScriptBinaryOp::StrictEqual,
+                        builders::num(1.0),
+                    ),
                     builders::block(vec![Expr::Continue]),
                     builders::block(Vec::new()),
                 ),
                 builders::if_else(
-                    builders::binary(builders::var("i"), BinaryOp::Equal, builders::num(4.0)),
+                    builders::binary(
+                        builders::var("i"),
+                        JavaScriptBinaryOp::StrictEqual,
+                        builders::num(4.0),
+                    ),
                     builders::block(vec![Expr::Break]),
                     builders::block(Vec::new()),
                 ),
                 builders::assign(
                     "total",
-                    builders::binary(builders::var("total"), BinaryOp::Add, builders::var("i")),
+                    builders::binary(
+                        builders::var("total"),
+                        JavaScriptBinaryOp::Add,
+                        builders::var("i"),
+                    ),
                 ),
             ]),
         ),
@@ -655,8 +584,12 @@ async fn generic_iterator_loops_cover_range_list_keys_nested_control_and_mutatio
                     "counts",
                     vec![builders::index_step(builders::var("item"))],
                     builders::binary(
-                        builders::index(builders::var("counts"), builders::var("item")),
-                        BinaryOp::Add,
+                        builders::logical(
+                            builders::index(builders::var("counts"), builders::var("item")),
+                            crate::ast::JavaScriptLogicalOp::NullishCoalesce,
+                            builders::num(0.0),
+                        ),
+                        JavaScriptBinaryOp::Add,
                         builders::num(1.0),
                     ),
                 ),
@@ -694,17 +627,19 @@ async fn generic_iterator_loops_cover_range_list_keys_nested_control_and_mutatio
                 ),
                 builders::block(vec![builders::assign(
                     "pairs",
-                    builders::binary(
-                        builders::var("pairs"),
-                        BinaryOp::Add,
-                        builders::list(vec![builders::builtin(
-                            "format",
-                            vec![
-                                builders::string("{}{}"),
-                                builders::var("key"),
-                                builders::var("n"),
-                            ],
-                        )]),
+                    builders::builtin(
+                        "push",
+                        vec![
+                            builders::var("pairs"),
+                            builders::builtin(
+                                "format",
+                                vec![
+                                    builders::string("{}{}"),
+                                    builders::var("key"),
+                                    builders::var("n"),
+                                ],
+                            ),
+                        ],
                     ),
                 )]),
             )]),
@@ -753,45 +688,6 @@ async fn generic_iterator_loops_cover_range_list_keys_nested_control_and_mutatio
     assert_eq!(pairs.len(), 3);
 }
 
-#[test]
-fn list_comprehension_compiles_to_iterator_and_append_bytecode() {
-    // `finish [n * 2 for n in range(0, 4) if n % 2 == 0]`
-    let compiled = compile_program_for_tests(builders::program(vec![builders::finish(
-        builders::comprehension(
-            builders::binary(builders::var("n"), BinaryOp::Multiply, builders::num(2.0)),
-            vec![
-                builders::comprehension_for(
-                    "n",
-                    builders::builtin("range", vec![builders::num(0.0), builders::num(4.0)]),
-                ),
-                builders::comprehension_if(builders::binary(
-                    builders::binary(builders::var("n"), BinaryOp::Modulo, builders::num(2.0)),
-                    BinaryOp::Equal,
-                    builders::num(0.0),
-                )),
-            ],
-        ),
-    )]));
-    let listing = compiled_instruction_listing(&compiled);
-
-    assert!(
-        compiled
-            .chunk
-            .code
-            .iter()
-            .any(|instruction| matches!(instruction, Instruction::BeginRangeIter { .. })),
-        "range comprehension should use iterator bytecode:\n{listing}"
-    );
-    assert!(
-        compiled
-            .chunk
-            .code
-            .iter()
-            .any(|instruction| matches!(instruction, Instruction::ListAppend)),
-        "comprehension should append into the result list directly:\n{listing}"
-    );
-}
-
 // `every_container_insertion_lowering_emits_value_isolation` was deleted with
 // the Lashlang value-isolation opcodes it pinned (`DeepCopy`,
 // `DeepCopyLoopBinding`). TypeScript is the sole RLM dialect (ADR 0096), so
@@ -835,7 +731,11 @@ async fn constant_propagation_does_not_cross_control_flow_boundaries() {
         ),
         builders::assign(
             "y",
-            builders::binary(builders::var("x"), BinaryOp::Add, builders::num(1.0)),
+            builders::binary(
+                builders::var("x"),
+                JavaScriptBinaryOp::Add,
+                builders::num(1.0),
+            ),
         ),
         builders::finish(builders::var("y")),
     ]))
@@ -864,7 +764,11 @@ async fn reusable_execution_scratch_preserves_results_across_runs() {
             builders::var("items"),
             builders::block(vec![builders::assign(
                 "total",
-                builders::binary(builders::var("total"), BinaryOp::Add, builders::var("item")),
+                builders::binary(
+                    builders::var("total"),
+                    JavaScriptBinaryOp::Add,
+                    builders::var("item"),
+                ),
             )]),
         ),
         builders::finish(builders::var("total")),
@@ -1253,17 +1157,17 @@ async fn field_index_unary_and_boolean_paths_are_covered() {
         ),
         builders::assign(
             "ok",
-            builders::binary(
+            builders::logical(
                 builders::bool_lit(false),
-                BinaryOp::And,
+                JavaScriptLogicalOp::And,
                 builders::var("missing"),
             ),
         ),
         builders::assign(
             "alt",
-            builders::binary(
+            builders::logical(
                 builders::bool_lit(true),
-                BinaryOp::Or,
+                JavaScriptLogicalOp::Or,
                 builders::var("missing"),
             ),
         ),
@@ -1271,9 +1175,15 @@ async fn field_index_unary_and_boolean_paths_are_covered() {
             builders::field(builders::field(builders::var("rec"), "nested"), "name"),
             builders::index(builders::var("xs"), builders::num(1.0)),
             builders::index(builders::string("abc"), builders::num(2.0)),
-            builders::unary(crate::ast::UnaryOp::Negate, builders::num(1.0)),
-            builders::unary(crate::ast::UnaryOp::Not, builders::bool_lit(false)),
-            builders::unary(crate::ast::UnaryOp::Not, builders::bool_lit(false)),
+            builders::unary(crate::ast::JavaScriptUnaryOp::Negate, builders::num(1.0)),
+            builders::unary(
+                crate::ast::JavaScriptUnaryOp::Not,
+                builders::bool_lit(false),
+            ),
+            builders::unary(
+                crate::ast::JavaScriptUnaryOp::Not,
+                builders::bool_lit(false),
+            ),
             builders::var("ok"),
             builders::var("alt"),
         ])),
@@ -1299,9 +1209,9 @@ async fn field_index_unary_and_boolean_paths_are_covered() {
     );
 
     // `finish true and false`
-    let value = exec(finish_binary(
+    let value = exec(finish_logical(
         builders::bool_lit(true),
-        BinaryOp::And,
+        JavaScriptLogicalOp::And,
         builders::bool_lit(false),
     ))
     .await
@@ -1309,9 +1219,9 @@ async fn field_index_unary_and_boolean_paths_are_covered() {
     assert_eq!(value, Value::Bool(false));
 
     // `finish false or true`
-    let value = exec(finish_binary(
+    let value = exec(finish_logical(
         builders::bool_lit(false),
-        BinaryOp::Or,
+        JavaScriptLogicalOp::Or,
         builders::bool_lit(true),
     ))
     .await
@@ -1375,14 +1285,14 @@ async fn field_index_and_type_errors_are_covered() {
             "finish [1][-1]",
             finish_program(builders::index(
                 builders::list(vec![builders::num(1.0)]),
-                builders::unary(crate::ast::UnaryOp::Negate, builders::num(1.0)),
+                builders::unary(crate::ast::JavaScriptUnaryOp::Negate, builders::num(1.0)),
             )),
             Value::Undefined,
         ),
         (
             "finish not 1",
             finish_program(builders::unary(
-                crate::ast::UnaryOp::Not,
+                crate::ast::JavaScriptUnaryOp::Not,
                 builders::num(1.0),
             )),
             Value::Bool(false),
@@ -1390,7 +1300,7 @@ async fn field_index_and_type_errors_are_covered() {
         (
             "finish not 0",
             finish_program(builders::unary(
-                crate::ast::UnaryOp::Not,
+                crate::ast::JavaScriptUnaryOp::Not,
                 builders::num(0.0),
             )),
             Value::Bool(true),
@@ -1497,68 +1407,36 @@ fn existing_execution_site_ids_are_unchanged() {
 
 #[test]
 fn aggregate_resource_sites_share_their_structural_node() {
-    // `result = await (tools.echo({ value: "left" })?, tools.echo({ value: "right" })?)`
+    // `result = await [tools.echo({ value: "left" })?, tools.echo({ value: "right" })?]`
     // / `finish result`
-    let tuple = compile_labeled_program(builders::program(vec![
+    let list = compile_labeled_program(builders::program(vec![
         builders::assign(
             "result",
-            builders::await_expr(builders::tuple(vec![
+            builders::await_expr(builders::list(vec![
                 echo_unwrap(builders::string("left")),
                 echo_unwrap(builders::string("right")),
             ])),
         ),
         builders::finish(builders::var("result")),
     ]));
-    let tuple_sites = tuple.chunk.resource_operation_batches[0]
+    let list_sites = list.chunk.resource_operation_batches[0]
         .leaves
         .iter()
-        .map(|leaf| leaf.site.as_ref().expect("tuple batch leaf site"))
+        .map(|leaf| leaf.site.as_ref().expect("list batch leaf site"))
         .collect::<Vec<_>>();
     assert_eq!(
-        tuple_sites
+        list_sites
             .iter()
             .map(|site| site.workflow_site.path.clone())
             .collect::<Vec<_>>(),
         [vec![0], vec![0]]
     );
-    assert!(tuple_sites.iter().all(|site| {
+    assert!(list_sites.iter().all(|site| {
         site.node_kind == lash_sansio::ExecutionNodeKind::ResourceOperation && site.label == "echo"
     }));
     assert_eq!(
-        tuple_sites[0].node_id, tuple_sites[1].node_id,
+        list_sites[0].node_id, list_sites[1].node_id,
         "aggregate leaves are occurrences of one authored workflow node"
-    );
-
-    // `results = await [tools.echo({ value: id })? for id in ["a", "b"] if id != "c"]`
-    // / `finish results`
-    let list = compile_labeled_program(builders::program(vec![
-        builders::assign(
-            "results",
-            builders::await_expr(builders::comprehension(
-                echo_unwrap(builders::var("id")),
-                vec![
-                    builders::comprehension_for(
-                        "id",
-                        builders::list(vec![builders::string("a"), builders::string("b")]),
-                    ),
-                    builders::comprehension_if(builders::binary(
-                        builders::var("id"),
-                        BinaryOp::NotEqual,
-                        builders::string("c"),
-                    )),
-                ],
-            )),
-        ),
-        builders::finish(builders::var("results")),
-    ]));
-    let list_site = list.chunk.resource_operation_list_batches[0]
-        .site
-        .as_ref()
-        .expect("list batch site");
-    assert_eq!(list_site.workflow_site.path, [0]);
-    assert_eq!(
-        (list_site.node_kind.as_str(), list_site.label.as_str()),
-        ("resource_operation", "echo")
     );
 }
 
@@ -1602,7 +1480,7 @@ fn compile_labeled_program_with_historical_context(
     let mut historical_context = crate::artifact::CompiledModuleContext::from(&linked.artifact);
     historical_context.module_ref = historical_module_ref(historical_module_hash);
     let historical_context_module_ref = historical_context.module_ref.clone();
-    let (chunk, compile_stats) = Compiler::compile_linked_program(
+    let chunk = Compiler::compile_linked_program(
         linked.artifact.ir(),
         Default::default(),
         historical_context,
@@ -1610,7 +1488,6 @@ fn compile_labeled_program_with_historical_context(
     );
     let historical = CompiledProgram {
         chunk,
-        compile_stats,
         executable: crate::ExecutableIdentity::of(
             &historical_context_module_ref,
             crate::Entry::Main,
@@ -1653,7 +1530,7 @@ fn compile_labeled_process_with_historical_context(
             historical_process_position,
         ),
     );
-    let (chunk, compile_stats) = Compiler::compile_linked_process_program(
+    let chunk = Compiler::compile_linked_process_program(
         &process_program,
         Default::default(),
         historical_context,
@@ -1661,7 +1538,6 @@ fn compile_labeled_process_with_historical_context(
     );
     let historical = CompiledProgram {
         chunk,
-        compile_stats,
         executable: crate::ExecutableIdentity::of(
             &historical_context_module_ref,
             crate::Entry::Main,

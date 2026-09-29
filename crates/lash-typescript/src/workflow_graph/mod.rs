@@ -17,12 +17,11 @@
 use std::collections::BTreeSet;
 
 use lashlang::{
-    AssignTarget, Declaration, Expr, LabelMetadata, LashlangHostEnvironment,
-    ListComprehensionClause, ProcessDecl, Program, WORKFLOW_GRAPH_SCHEMA_VERSION,
-    WorkflowContainer, WorkflowDeclaration, WorkflowGraph, WorkflowGraphProjector,
-    WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
-    WorkflowNodeNameSource, WorkflowProcess, WorkflowStatementText, WorkflowSubgraph,
-    WorkflowTerminalKind, analyze_workflow_program, workflow_call_to_ir, workflow_effect_to_ir,
+    AssignTarget, Declaration, Expr, LabelMetadata, LashlangHostEnvironment, ProcessDecl, Program,
+    WORKFLOW_GRAPH_SCHEMA_VERSION, WorkflowContainer, WorkflowDeclaration, WorkflowGraph,
+    WorkflowGraphProjector, WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource,
+    WorkflowProcess, WorkflowStatementText, WorkflowSubgraph, WorkflowTerminalKind,
+    analyze_workflow_program, workflow_call_to_ir, workflow_effect_to_ir,
 };
 use thiserror::Error;
 
@@ -235,7 +234,6 @@ fn expr_at<'p>(program: &'p Program, path: &lashlang::AstPath) -> Option<&'p Exp
         lashlang::AstRoot::Declaration(index) => match program.declarations.get(index as usize)? {
             Declaration::Process(process) => &process.body,
             Declaration::Function(function) => &function.body,
-            Declaration::Type(_) => return None,
         },
     };
     for step in &path.steps {
@@ -601,65 +599,45 @@ fn validate_node(
             validate_subgraph(child, all_ids)?;
         }
     }
-    match &node.kind {
-        WorkflowNodeKind::Container(WorkflowContainer::If {
-            then_is_block,
-            else_is_block,
-            then_graph,
-            else_graph,
-            ..
-        }) => {
-            let (then_graph, else_graph) = (then_graph.as_ref(), else_graph.as_ref());
-            if !then_is_block && *else_is_block {
-                return invalid_payload(
-                    node,
-                    "expression if cannot have a statement-block else branch",
-                );
-            }
-            if !then_is_block && (then_graph.nodes.len() != 1 || else_graph.nodes.len() != 1) {
-                return invalid_payload(
-                    node,
-                    "expression-if branches must contain exactly one value node",
-                );
-            }
-            if *then_is_block && !else_is_block {
-                let is_direct_else_if = matches!(
-                    else_graph.nodes.as_slice(),
-                    [WorkflowNode {
-                        kind: WorkflowNodeKind::Container(WorkflowContainer::If {
-                            then_is_block: true,
-                            ..
-                        }),
+    if let WorkflowNodeKind::Container(WorkflowContainer::If {
+        then_is_block,
+        else_is_block,
+        then_graph,
+        else_graph,
+        ..
+    }) = &node.kind
+    {
+        let (then_graph, else_graph) = (then_graph.as_ref(), else_graph.as_ref());
+        if !then_is_block && *else_is_block {
+            return invalid_payload(
+                node,
+                "expression if cannot have a statement-block else branch",
+            );
+        }
+        if !then_is_block && (then_graph.nodes.len() != 1 || else_graph.nodes.len() != 1) {
+            return invalid_payload(
+                node,
+                "expression-if branches must contain exactly one value node",
+            );
+        }
+        if *then_is_block && !else_is_block {
+            let is_direct_else_if = matches!(
+                else_graph.nodes.as_slice(),
+                [WorkflowNode {
+                    kind: WorkflowNodeKind::Container(WorkflowContainer::If {
+                        then_is_block: true,
                         ..
-                    }]
-                );
-                if !is_direct_else_if {
-                    return invalid_payload(
-                        node,
-                        "non-block statement-if else branch must be a direct else if",
-                    );
-                }
-            }
-        }
-        WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-            clauses,
-            element,
-            ..
-        }) => {
-            if clauses.is_empty() {
+                    }),
+                    ..
+                }]
+            );
+            if !is_direct_else_if {
                 return invalid_payload(
                     node,
-                    "list-comprehension container requires at least one clause",
-                );
-            }
-            if element.nodes.len() != 1 {
-                return invalid_payload(
-                    node,
-                    "list-comprehension element must contain exactly one node",
+                    "non-block statement-if else branch must be a direct else if",
                 );
             }
         }
-        _ => {}
     }
     Ok(())
 }
@@ -687,7 +665,6 @@ fn graph_to_program(
     let mut lifted: Vec<&WorkflowProcess> = Vec::new();
     for declaration in &graph.declarations {
         declarations.push(match declaration {
-            WorkflowDeclaration::Type(ty) => Declaration::Type(ty.clone()),
             WorkflowDeclaration::Function(function) => Declaration::Function(function.clone()),
             WorkflowDeclaration::Process(process) => {
                 // A lifted literal is not a module declaration: its authored
@@ -1001,158 +978,135 @@ fn subgraph_to_block(
 }
 
 fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr, GraphRenderError> {
-    let expression = match &node.kind {
-        WorkflowNodeKind::Data {
-            binding,
-            expression,
-        } => {
-            if !lashlang::is_pure_expr(expression) && !matches!(expression, Expr::TypeLiteral(_)) {
-                return invalid_payload(node, "data expression is effectful");
+    let expression =
+        match &node.kind {
+            WorkflowNodeKind::Data {
+                binding,
+                expression,
+            } => {
+                if !lashlang::is_pure_expr(expression) {
+                    return invalid_payload(node, "data expression is effectful");
+                }
+                with_assignment_ir(binding, expression.clone())
             }
-            with_assignment_ir(binding, expression.clone())
-        }
-        WorkflowNodeKind::Call {
-            binding,
-            receiver,
-            operation,
-            arguments,
-            result_steps,
-        } => {
-            let expression = workflow_call_to_ir(receiver, operation, arguments, result_steps);
-            with_assignment_ir(binding, expression)
-        }
-        WorkflowNodeKind::Effect {
-            binding,
-            effect,
-            arguments,
-            result_steps,
-        } => {
-            let expression =
-                workflow_effect_to_ir(*effect, arguments, result_steps).ok_or_else(|| {
-                    GraphRenderError::InvalidNodePayload {
+            WorkflowNodeKind::Call {
+                binding,
+                receiver,
+                operation,
+                arguments,
+                result_steps,
+            } => {
+                let expression = workflow_call_to_ir(receiver, operation, arguments, result_steps);
+                with_assignment_ir(binding, expression)
+            }
+            WorkflowNodeKind::Effect {
+                binding,
+                effect,
+                arguments,
+                result_steps,
+            } => {
+                let expression = workflow_effect_to_ir(*effect, arguments, result_steps)
+                    .ok_or_else(|| GraphRenderError::InvalidNodePayload {
                         node_id: node.id.to_string(),
                         message: "effect arguments do not match its kind".to_string(),
-                    }
-                })?;
-            with_assignment_ir(binding, expression)
-        }
-        WorkflowNodeKind::Computation {
-            binding,
-            expression,
-        } => with_assignment_ir(binding, expression.clone()),
-        WorkflowNodeKind::StateUpdate {
-            target,
-            expression,
-            update,
-        } => {
-            let [output] = node.outputs.as_slice() else {
-                return invalid_payload(node, "state update must have exactly one output");
-            };
-            if target.root.as_str() != output.variable {
-                return invalid_payload(node, "state-update target root must match its output");
+                    })?;
+                with_assignment_ir(binding, expression)
             }
-            match update {
-                Some(operator) => {
-                    let Some(role) =
-                        crate::lower::attribute_update(target, *operator, expression.clone())
-                    else {
-                        return invalid_payload(
-                            node,
-                            "an update's target is one member step of a variable",
-                        );
-                    };
-                    role
-                }
-                None => Expr::Assign {
-                    target: target.clone(),
-                    expr: Box::new(expression.clone()),
-                },
-            }
-        }
-        WorkflowNodeKind::Terminal {
-            terminal,
-            expression,
-        } => {
-            let valid = matches!(
-                (terminal, &expression),
-                (
-                    WorkflowTerminalKind::Finish,
-                    Expr::Finish(_) | Expr::Return(_)
-                ) | (WorkflowTerminalKind::Fail, Expr::Fail(_))
-            );
-            if !valid {
-                return invalid_payload(node, "terminal kind does not match its expression");
-            }
-            expression.clone()
-        }
-        WorkflowNodeKind::Container(container) => match container {
-            WorkflowContainer::If {
+            WorkflowNodeKind::Computation {
                 binding,
-                condition,
-                then_is_block,
-                else_is_block,
-                then_graph,
-                else_graph,
-            } => with_assignment_ir(
-                binding,
-                Expr::If {
-                    condition: Box::new(condition.clone()),
-                    then_block: Box::new(subgraph_to_branch(
-                        node,
-                        then_graph,
-                        context,
-                        *then_is_block,
-                        "then_graph",
-                    )?),
-                    else_block: Box::new(subgraph_to_branch(
-                        node,
-                        else_graph,
-                        context,
-                        *else_is_block,
-                        "else_graph",
-                    )?),
-                },
-            ),
-            WorkflowContainer::For {
-                binding,
-                iterable,
-                bind,
-                body,
-            } => Expr::For {
-                binding: binding.clone().into(),
-                iterable: Box::new(iterable.clone()),
-                bind: bind.clone().map(Box::new),
-                body: Box::new(subgraph_to_block(body, context)?),
-            },
-            WorkflowContainer::While { condition, body } => Expr::While {
-                condition: Box::new(condition.clone()),
-                body: Box::new(subgraph_to_block(body, context)?),
-            },
-            WorkflowContainer::ListComprehension {
-                binding,
-                clauses,
-                element,
+                expression,
+            } => with_assignment_ir(binding, expression.clone()),
+            WorkflowNodeKind::StateUpdate {
+                target,
+                expression,
+                update,
             } => {
-                let Expr::Block(mut expressions) = subgraph_to_block(element, context)? else {
-                    unreachable!("subgraph rendering always returns a block")
+                let [output] = node.outputs.as_slice() else {
+                    return invalid_payload(node, "state update must have exactly one output");
                 };
-                if expressions.len() != 1 {
-                    return invalid_payload(
-                        node,
-                        "list-comprehension element must contain exactly one node",
-                    );
+                if target.root.as_str() != output.variable {
+                    return invalid_payload(node, "state-update target root must match its output");
                 }
-                with_assignment_ir(
-                    binding,
-                    Expr::ListComprehension {
-                        element: Box::new(expressions.remove(0)),
-                        clauses: clauses.iter().map(workflow_clause_to_ir).collect(),
+                match update {
+                    Some(operator) => {
+                        let Some(role) =
+                            crate::lower::attribute_update(target, *operator, expression.clone())
+                        else {
+                            return invalid_payload(
+                                node,
+                                "an update's target is one member step of a variable",
+                            );
+                        };
+                        role
+                    }
+                    None => Expr::Assign {
+                        target: target.clone(),
+                        expr: Box::new(expression.clone()),
                     },
-                )
+                }
             }
-        },
-        WorkflowNodeKind::Opaque { source } => parse_opaque_statement(node, source, context)?,
-    };
+            WorkflowNodeKind::Terminal {
+                terminal,
+                expression,
+            } => {
+                let valid = matches!(
+                    (terminal, &expression),
+                    (
+                        WorkflowTerminalKind::Finish,
+                        Expr::Finish(_) | Expr::Return(_)
+                    ) | (WorkflowTerminalKind::Fail, Expr::Fail(_))
+                );
+                if !valid {
+                    return invalid_payload(node, "terminal kind does not match its expression");
+                }
+                expression.clone()
+            }
+            WorkflowNodeKind::Container(container) => match container {
+                WorkflowContainer::If {
+                    binding,
+                    condition,
+                    then_is_block,
+                    else_is_block,
+                    then_graph,
+                    else_graph,
+                } => with_assignment_ir(
+                    binding,
+                    Expr::If {
+                        condition: Box::new(condition.clone()),
+                        then_block: Box::new(subgraph_to_branch(
+                            node,
+                            then_graph,
+                            context,
+                            *then_is_block,
+                            "then_graph",
+                        )?),
+                        else_block: Box::new(subgraph_to_branch(
+                            node,
+                            else_graph,
+                            context,
+                            *else_is_block,
+                            "else_graph",
+                        )?),
+                    },
+                ),
+                WorkflowContainer::For {
+                    binding,
+                    iterable,
+                    bind,
+                    body,
+                } => Expr::For {
+                    binding: binding.clone().into(),
+                    iterable: Box::new(iterable.clone()),
+                    bind: bind.clone().map(Box::new),
+                    body: Box::new(subgraph_to_block(body, context)?),
+                },
+                WorkflowContainer::While { condition, body } => Expr::While {
+                    condition: Box::new(condition.clone()),
+                    body: Box::new(subgraph_to_block(body, context)?),
+                },
+            },
+            WorkflowNodeKind::Opaque { source } => parse_opaque_statement(node, source, context)?,
+        };
     Ok(if node.name_source == WorkflowNodeNameSource::Label {
         Expr::LabelAnnotated {
             label: LabelMetadata {
@@ -1213,20 +1167,6 @@ fn parse_opaque_statement(
     )]
     let expression = expressions.into_iter().next().expect("one expression");
     Ok(expression.clone())
-}
-
-fn workflow_clause_to_ir(clause: &WorkflowListComprehensionClause) -> ListComprehensionClause {
-    match clause {
-        WorkflowListComprehensionClause::For { binding, iterable } => {
-            ListComprehensionClause::For {
-                binding: binding.clone().into(),
-                iterable: iterable.clone(),
-            }
-        }
-        WorkflowListComprehensionClause::If { condition } => ListComprehensionClause::If {
-            condition: condition.clone(),
-        },
-    }
 }
 
 fn with_assignment_ir(binding: &Option<AssignTarget>, expression: Expr) -> Expr {
