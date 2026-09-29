@@ -111,6 +111,19 @@ impl History {
         self
     }
 
+    /// When the last claim this history ends holding lapses: the latest
+    /// `due_at_ms` of a `claimed` obligation, which is its claim's expiry
+    /// (ADR 0109 §1.1). `None` when no obligation is claimed.
+    #[must_use]
+    pub fn last_claim_lapse_ms(&self) -> Option<u64> {
+        self.stores
+            .iter()
+            .flat_map(|store| &store.obligations)
+            .filter(|row| row.state.as_deref() == Some("claimed"))
+            .filter_map(|row| row.due_at_ms)
+            .max()
+    }
+
     /// Append `fact` to the trace.
     pub fn push(&mut self, fact: Fact) {
         let at = self.records.len();
@@ -653,10 +666,11 @@ pub async fn capture_engines<'a>(
 }
 
 /// The global invariants over a crash-matrix or soak world whose end state
-/// held: its final store after one more recovery pass, judged under
-/// `scenario` and the world's seed. Each
-/// failing violation is one rendered line; quarantined ones are printed. A
-/// world on a live engine has no store this can read, and is not judged.
+/// held: its final store after one more recovery pass, and after every claim
+/// that store still held has lapsed and been retaken, judged under
+/// `scenario` and the world's seed. Each failing violation is one rendered
+/// line; quarantined ones are printed. A world on a live engine has no store
+/// this can read, and is not judged.
 pub async fn check_crash_world(
     world: &crate::crash_matrix::world::CrashWorld,
     scenario: &str,
@@ -669,19 +683,56 @@ pub async fn check_crash_world(
     // A pass that fails leaves the history judged as one no pass ended.
     let relayed = world.tick().await.is_ok();
     world.quiesce().await;
-    let mut history = History::new(scenario, world.seed());
-    history.extend_from(world.history());
-    history.relay_ran = relayed;
-    history.now_ms = Some(world.now_ms());
-    if let Err(error) = history
-        .capture_store_with_transcripts("engine", double.stores())
-        .await
+    let mut history = match capture_crash_world(world, double, scenario, relayed).await {
+        Ok(history) => history,
+        Err(error) => return vec![error],
+    };
+    // A claim still held once every pass has quiesced is a dead claimant's:
+    // its deployment died inside the pass that took it. Nobody may retake it
+    // before it lapses (ADR 0109 §1.4), so the history ends only after the
+    // recovery pass past the last lapse, which retakes it; what that pass
+    // leaves claimed is judged.
+    if let Some(lapse_ms) = history
+        .last_claim_lapse_ms()
+        .filter(|lapse_ms| *lapse_ms > world.now_ms())
     {
-        return vec![format!(
-            "capture the history for the global invariants: {error}"
-        )];
+        // A tick moves the clock at least 90 % of `TICK`.
+        let tick_ms = crate::crash_matrix::TICK.as_millis() as u64;
+        let ticks = lapse_ms
+            .saturating_sub(world.now_ms())
+            .div_ceil(tick_ms - tick_ms / 10);
+        let mut relayed = relayed;
+        for _ in 0..ticks {
+            if world.now_ms() >= lapse_ms {
+                break;
+            }
+            relayed = world.tick().await.is_ok();
+        }
+        world.quiesce().await;
+        history = match capture_crash_world(world, double, scenario, relayed).await {
+            Ok(history) => history,
+            Err(error) => return vec![error],
+        };
     }
     let report = check(&history);
     report.print_quarantined();
     report.rendered[..report.violations.len()].to_vec()
+}
+
+/// `world`'s stores as they stand now, as a history of `scenario`.
+async fn capture_crash_world(
+    world: &crate::crash_matrix::world::CrashWorld,
+    double: &lash_restate_test::RestateTestBackend,
+    scenario: &str,
+    relayed: bool,
+) -> Result<History, String> {
+    let mut history = History::new(scenario, world.seed());
+    history.extend_from(world.history());
+    history.relay_ran = relayed;
+    history.now_ms = Some(world.now_ms());
+    history
+        .capture_store_with_transcripts("engine", double.stores())
+        .await
+        .map_err(|error| format!("capture the history for the global invariants: {error}"))?;
+    Ok(history)
 }
