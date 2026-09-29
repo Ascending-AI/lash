@@ -619,9 +619,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // queued-work head is admitted as an ordinary root (FIG-3927, changed in
 // place under the version freeze). A catalog provisioned before the change
 // fails the open-time shape check and is recreated.
-// Version 142 (FIG-4057) admits process-definition and trigger registration
-// in the tool-intent submission ledger's kind constraint.
-const SCHEMA_VERSION: i32 = 142;
+//
+// Version 141 also admits process-definition and trigger registration in the
+// tool-intent submission ledger's kind constraint (FIG-4057, changed in place
+// under the version freeze). A catalog provisioned before the change rejects
+// both kinds; recreate it.
+const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///

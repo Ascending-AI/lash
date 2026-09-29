@@ -1029,10 +1029,11 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// session; the queued-run ledger is gone and a queued-work head is admitted
 /// as an ordinary root (FIG-3927). A database written before these changes
 /// has the old shape; recreate it.
-/// Bumped to 100 for FIG-4057: tool-intent submissions admit process-definition
-/// and trigger registration. A pre-100 catalog's check constraint rejects both
-/// kinds, so the durable-core database must be recreated before opening.
-pub(crate) const SCHEMA_VERSION: i32 = 100;
+/// Version 99 also lets tool-intent submissions record process-definition
+/// and trigger registration (FIG-4057, changed in place under the version
+/// freeze): a catalog whose kind CHECK predates them rejects both kinds, so
+/// recreate it.
+pub(crate) const SCHEMA_VERSION: i32 = 99;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS lash_compat (

@@ -145,9 +145,7 @@ struct ExpandMigration {
 /// expand step, so nothing chains from 138: a 133–138 catalog plans to the
 /// typed recreate refusal. The sixth step adds the logical-root family and
 /// carries 139 to 140 (FIG-3600); the seventh restamps 140 to 141 when the
-/// journaled effect envelope gains the session close (FIG-3600). The eighth
-/// widens the tool-intent kind constraint for the two registration intents
-/// and carries 141 to 142 (FIG-4057).
+/// journaled effect envelope gains the session close (FIG-3600).
 static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
     ExpandMigration {
         id: "0134-migrations-ledger",
@@ -190,18 +188,6 @@ static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
         from_version: 140,
         to_version: 141,
         statements: "-- component 141 (FIG-3600): envelope-vocabulary-only change; nothing to apply.",
-    },
-    ExpandMigration {
-        id: "0142-register-tool-intents",
-        from_version: 141,
-        to_version: 142,
-        statements: "ALTER TABLE lash_tool_intent_submissions
-            DROP CONSTRAINT IF EXISTS ck_tool_intent_submissions_kind;
-            ALTER TABLE lash_tool_intent_submissions
-            ADD CONSTRAINT ck_tool_intent_submissions_kind
-            CHECK (kind IN ('start_process', 'signal_process', 'cancel_process',
-                'emit_process_event', 'emit_trigger', 'register_process_definition',
-                'register_trigger'))",
     },
 ];
 
