@@ -140,6 +140,7 @@ fn script(producer: &crate::ToolBatchProducer) -> Vec<crate::LlmResponse> {
             .collect(),
         via: crate::ToolBatchEntry::Direct,
         relay_tool: String::new(),
+        idle_tools: Vec::new(),
     };
     let mut script = (producer.script)(&plan);
     script.push(crate::LlmResponse {

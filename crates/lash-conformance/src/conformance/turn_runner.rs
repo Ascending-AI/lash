@@ -215,6 +215,13 @@ pub trait ConformanceTurnRunner: Send + Sync {
         panic!("this tier's turn runner cannot crash a turn from outside its attempt");
     }
 
+    /// The law finished one scenario and reads nothing of it again. A tier
+    /// that retains per-scenario weight it no longer needs — a server
+    /// double's journals of completed invocations — sheds it here, so a law
+    /// of many scenarios costs the largest scenario, not their sum
+    /// (FIG-4068). Nothing a later scenario observes may change.
+    async fn scenario_finished(&self) {}
+
     /// The replay keys of every effect the tier journaled for `scope`'s
     /// turn, or `None` when this runner cannot read them. A law finds the
     /// key of a [`JournalCut`] here, from a probe run of the same turn.

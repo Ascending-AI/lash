@@ -84,7 +84,8 @@ mod restate_double {
     /// The tier's [`lash_conformance::ConformanceTurnRunner`]:
     /// `run_in_handler` lends the attempt the scoped controller the
     /// invocation's journal owns — the double's answer to the in-process
-    /// `HostTurnRunner`. The suite asks for `run_turn` and `process_work`;
+    /// `HostTurnRunner`. The suite asks for `run_turn`, `process_work` and
+    /// `scenario_finished`;
     /// the crash, cut and segment-recovery routes keep the trait's panicking
     /// defaults.
     struct DoubleTurnRunner {
@@ -111,6 +112,12 @@ mod restate_double {
 
     #[async_trait::async_trait]
     impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
+        /// The double keeps every journal it records; a finished scenario's
+        /// completed ones are dead weight to the next.
+        async fn scenario_finished(&self) {
+            self.backend.server().drop_completed_journals();
+        }
+
         async fn run_turn(
             &self,
             admitted: lash_core::AdmittedScope,
@@ -213,4 +220,45 @@ mod restate_double {
                 as Arc<dyn lash_conformance::ConformanceTurnRunner>,
         )
     });
+
+    /// The perf guard (FIG-4068): a width-64 batch of native parallel calls
+    /// on the double costs linear time and peak RSS in its width, held to
+    /// `scripts/perf_guard_budgets.json`.
+    #[test]
+    fn tool_batch_scales_linearly() {
+        lash_conformance::assert_tool_batch_scales_linearly(
+            "restate-double/parallel-model-tool-calls",
+            module_path!(),
+            "tool_batch_scaling_child",
+            lash_conformance::ToolBatchScalingBudget::from_perf_guard_budgets(include_str!(
+                "../../../scripts/perf_guard_budgets.json"
+            )),
+        );
+    }
+
+    /// One width of [`tool_batch_scales_linearly`], on a fresh double in a
+    /// process of its own.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    #[ignore = "a width child of tool_batch_scales_linearly: only its re-execution runs it"]
+    async fn tool_batch_scaling_child() {
+        let child = lash_conformance::tool_batch_scaling_child()
+            .expect("the parent names the width to measure");
+        let double =
+            lash_restate_test::backend(0x7001_ba7c, lash_restate_test::ServerConfig::default())
+                .await
+                .expect("start the Restate server double");
+        let host = double.lash_backend().effect_host() as Arc<dyn EffectHost>;
+        let stores = Arc::clone(double.engine_stores());
+        lash_conformance::run_tool_batch_scaling_child(
+            "scaling",
+            host,
+            stores,
+            Arc::new(DoubleTurnRunner { backend: double })
+                as Arc<dyn lash_conformance::ConformanceTurnRunner>,
+            &lash_conformance::parallel_model_tool_calls_producer(),
+            child.width,
+            child.catalog,
+        )
+        .await;
+    }
 }

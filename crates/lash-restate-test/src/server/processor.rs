@@ -461,11 +461,18 @@ impl State {
         let protocol = sh.config.protocol;
         let always_replay = sh.config.always_replay;
         let now_ms = self.now_ms;
-        let state_map = self.state_snapshot(key);
-        let invocation = &mut self.invocations[key.0];
         // A plain service has no state: restate-server marks its (empty)
-        // eager map partial, and a keyed target gets its whole state.
-        let partial_state = !invocation.spec.kind.is_keyed();
+        // eager map partial. A keyed target gets its whole state, unless its
+        // deployment asked for lazy state: then the map is empty and partial,
+        // and every read the SDK issues is a lazy state command.
+        let lazy = self.invocations[key.0].spec.lazy_state;
+        let state_map = if lazy {
+            Vec::new()
+        } else {
+            self.state_snapshot(key)
+        };
+        let invocation = &mut self.invocations[key.0];
+        let partial_state = !invocation.spec.kind.is_keyed() || lazy;
         invocation.attempts += 1;
         // Only this attempt's own runs count as in flight: a replay need not
         // reach a run an earlier attempt left open.
@@ -1400,6 +1407,23 @@ impl State {
         self.invocations[key.0].journal.clear();
         self.touch(key);
         true
+    }
+
+    /// Drop the journal of every completed invocation and return how many
+    /// it dropped. A completed invocation never replays, so its journal is
+    /// read only by a journal query; its id, outcome, idempotency record and
+    /// its key's state all stay, and nothing a later invocation observes
+    /// changes. A law calls it between scenarios so the server does not
+    /// carry every scenario's journals into the next (FIG-4068).
+    pub fn drop_completed_journals(&mut self) -> usize {
+        let mut dropped = 0;
+        for invocation in &mut self.invocations {
+            if invocation.status.is_completed() && !invocation.journal.is_empty() {
+                invocation.journal = Vec::new();
+                dropped += 1;
+            }
+        }
+        dropped
     }
 
     /// Whether `key` is still retained: an invocation stays addressable by

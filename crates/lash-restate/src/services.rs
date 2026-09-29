@@ -863,11 +863,14 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
                     claimed(),
                     &wire,
                 ),
+                // Lazy, so each index handler loads only the keys it reads:
+                // a width-n group runs O(n) handlers, and none of the
+                // per-child ones reads the retained membership (FIG-4068).
                 LashService::EffectGroupState => bind_as(
                     builder,
                     EffectGroupStateImpl::new(namespace.clone(), fleet.clone()).serve(),
                     &name,
-                    claimed(),
+                    claimed().enable_lazy_state(true),
                     &wire,
                 ),
                 LashService::EffectGroupPayload => bind_as(

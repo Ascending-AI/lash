@@ -52,3 +52,39 @@ lash_conformance::tool_batch_crash_redrive_tests!({
         runner,
     )
 });
+
+/// The perf guard (FIG-4068): a width-64 batch of native parallel calls on
+/// the endpoint double costs linear time and peak RSS in its width, held to
+/// `scripts/perf_guard_budgets.json`.
+#[test]
+fn tool_batch_scales_linearly() {
+    lash_conformance::assert_tool_batch_scales_linearly(
+        "restate-endpoint-double/parallel-model-tool-calls",
+        module_path!(),
+        "tool_batch_scaling_child",
+        lash_conformance::ToolBatchScalingBudget::from_perf_guard_budgets(include_str!(
+            "../../../../scripts/perf_guard_budgets.json"
+        )),
+    );
+}
+
+/// One width of [`tool_batch_scales_linearly`], on a fresh endpoint double
+/// in a process of its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "a width child of tool_batch_scales_linearly: only its re-execution runs it"]
+async fn tool_batch_scaling_child() {
+    let child = lash_conformance::tool_batch_scaling_child()
+        .expect("the parent names the width to measure");
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    lash_conformance::run_tool_batch_scaling_child(
+        "scaling",
+        harness.endpoint_host(),
+        harness.law_stores(),
+        harness.turn_runner(),
+        &lash_conformance::parallel_model_tool_calls_producer(),
+        child.width,
+        child.catalog,
+    )
+    .await;
+}

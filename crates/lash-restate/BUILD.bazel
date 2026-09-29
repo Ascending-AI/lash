@@ -50,7 +50,9 @@ lash_rust_unit_test(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-restate", "lash_restate", "//crates/lash-restate:lash-restate__unit_test"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//:perf_guard_budgets",
+    ],
     manifest_dir = "crates/lash-restate",
     package_name = "lash-internal-restate",
     tags = [],

@@ -760,7 +760,7 @@ where
         group.validate_execution_scope(opener.scope())?;
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);
-        let shape = EffectGroupShape::from_group(&group, opener)?;
+        let (shape, membership) = EffectGroupShape::from_group(&group, opener)?;
         // The route the dispatch is sent under is data (FIG-3795 S10): the
         // opener declares its own build's lane to the index, which retains
         // it, and the submit below goes to the recorded route the open
@@ -777,6 +777,7 @@ where
             .into_owned();
         let open_request = EffectGroupOpenRequest {
             shape,
+            membership,
             dispatch_route: dispatch_route.clone(),
             content_checked: group.reopen() == lash_core::GroupReopen::RetainedContent,
         };

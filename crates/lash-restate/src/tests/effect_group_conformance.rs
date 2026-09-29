@@ -34,9 +34,9 @@ use crate::effect_group::{
 use crate::process::{LashProcessWorkflowImpl, RestateProcessRunner};
 use crate::{
     EffectGroupAdoptRequest, EffectGroupCleanupFacts, EffectGroupDispatchRequest,
-    EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadPutRequest,
-    EffectGroupPayloadPutResponse, EffectGroupProbeAdoptResponse, EffectGroupReadRankRequest,
-    EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
+    EffectGroupMembership, EffectGroupOpenRequest, EffectGroupOpenResponse,
+    EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse, EffectGroupProbeAdoptResponse,
+    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
     EffectGroupRecordDispatchResponse, EffectGroupRecordSettlementRequest,
     EffectGroupRecordSettlementResponse, EffectGroupRetireResponse, EffectGroupSettlementTerminal,
     EffectGroupShape, EffectGroupWaitResolution, RestateDurableWaitAddress,
@@ -1012,6 +1012,7 @@ impl LiveConformanceHarness {
                 "open",
                 &EffectGroupOpenRequest {
                     shape,
+                    membership: witness_membership(std::slice::from_ref(&child)),
                     dispatch_route: "EffectGroupDispatch".to_string(),
                     content_checked: false,
                 },
@@ -1166,6 +1167,7 @@ impl LiveConformanceHarness {
                 "open",
                 &EffectGroupOpenRequest {
                     shape: shape.clone(),
+                    membership: witness_membership(std::slice::from_ref(&child)),
                     dispatch_route: "EffectGroupDispatch".to_string(),
                     content_checked: false,
                 },
@@ -1375,6 +1377,7 @@ impl LiveConformanceHarness {
                 "open",
                 &EffectGroupOpenRequest {
                     shape: shape.clone(),
+                    membership: witness_membership(&children),
                     dispatch_route: "EffectGroupDispatch".to_string(),
                     content_checked: false,
                 },
@@ -1671,6 +1674,7 @@ async fn run_design_witnesses(
             "open",
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
+                membership: witness_membership(std::slice::from_ref(&child)),
                 dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
@@ -1730,6 +1734,7 @@ async fn run_design_witnesses(
             "open",
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
+                membership: witness_membership(std::slice::from_ref(&child)),
                 dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
@@ -1822,6 +1827,7 @@ async fn run_design_witnesses(
             "open",
             &EffectGroupOpenRequest {
                 shape: admission_shape.clone(),
+                membership: witness_membership(std::slice::from_ref(&admission_child)),
                 dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
@@ -1943,6 +1949,7 @@ async fn run_design_witnesses(
             "open",
             &EffectGroupOpenRequest {
                 shape: gap_shape.clone(),
+                membership: witness_membership(std::slice::from_ref(&gap_child)),
                 dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
@@ -2007,6 +2014,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
             "open",
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
+                membership: witness_membership(&children),
                 dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
@@ -2088,6 +2096,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
             "open",
             &EffectGroupOpenRequest {
                 shape: stale_shape.clone(),
+                membership: witness_membership(std::slice::from_ref(&stale_child)),
                 dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
@@ -2098,7 +2107,9 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     // envelope left it: the same record with no format stamp, and no
     // `_compat` record, which the index refuses first (ADR 0115).
     let stale_state = serde_json::json!({
-        "shape_digest": stale_shape.digest().expect("witness shape digest"),
+        "shape_digest": stale_shape
+            .digest(&witness_membership(std::slice::from_ref(&stale_child)))
+            .expect("witness shape digest"),
         "lifecycle": {"type": "retired", "cleanup": {"type": "complete"}},
     });
     overwrite_index_state(admin, &stale_group, &stale_state).await;
@@ -2215,10 +2226,6 @@ fn witness_shape(group_key: &str, children: &[RuntimeEffectEnvelope]) -> EffectG
             .map(|child| child.invocation.replay_key().to_owned())
             .collect(),
         wait_scope: ExecutionScope::runtime_operation(group_key),
-        membership: children
-            .iter()
-            .map(|child| serde_json::to_string(child).expect("witness child serializes"))
-            .collect(),
         // The opener is the admission the wait and timer children's
         // envelopes are scope-checked against inside
         // `EffectGroupDispatch::child`: production's
@@ -2229,6 +2236,15 @@ fn witness_shape(group_key: &str, children: &[RuntimeEffectEnvelope]) -> EffectG
         // wait, racing any close that was meant to release it.
         opener: lash_core::AdmittedScope::runtime_operation(group_key),
     }
+}
+
+fn witness_membership(children: &[RuntimeEffectEnvelope]) -> EffectGroupMembership {
+    EffectGroupMembership(
+        children
+            .iter()
+            .map(|child| serde_json::to_string(child).expect("witness child serializes"))
+            .collect(),
+    )
 }
 
 async fn await_group_wait(

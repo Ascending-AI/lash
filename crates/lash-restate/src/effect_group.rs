@@ -41,6 +41,10 @@ use crate::durable_wait::{
 use crate::object_state::{self, FleetView, ObjectFamily, StoredValueFormats};
 
 const INDEX_STATE_KEY: &str = "effect-group/v1/state";
+/// The group's accepted membership, apart from the index record every
+/// per-child handler reads (FIG-4068): written once at open, read only where
+/// children are rebuilt, and cleared when retirement completes.
+const MEMBERSHIP_STATE_KEY: &str = "effect-group/v1/membership";
 
 mod drain_barrier;
 mod group_waits;
@@ -54,7 +58,7 @@ pub(crate) use protocol::EFFECT_GROUP_STATE_FAMILY;
 #[cfg(test)]
 pub(crate) use protocol::EFFECT_GROUP_STATE_FORMATS;
 pub use protocol::{EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_STATE_FORMAT_VERSION};
-use protocol::{load_index, load_index_shared};
+use protocol::{load_index, load_index_shared, load_membership};
 pub(crate) use reopen::{content_checked_shape_mismatch, content_mismatch};
 pub(crate) use wire::btree_map_as_pairs;
 pub use wire::{
@@ -63,7 +67,7 @@ pub use wire::{
 };
 
 mod shape;
-pub use shape::EffectGroupShape;
+pub use shape::{EffectGroupMembership, EffectGroupShape};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -213,6 +217,14 @@ fn store_index(
     record: EffectGroupStateRecord,
 ) {
     object_state::set_stamped(ctx, INDEX_STATE_KEY, writer, record);
+}
+
+fn store_membership(
+    ctx: &ObjectContext<'_>,
+    writer: object_state::StoredValueWriter,
+    membership: EffectGroupMembership,
+) {
+    object_state::set_stamped(ctx, MEMBERSHIP_STATE_KEY, writer, membership);
 }
 
 /// Declares [`EffectGroupState`] with every handler all builds serve, plus
@@ -385,7 +397,7 @@ impl EffectGroupState for EffectGroupStateImpl {
     ) -> HandlerResult<Reply<EffectGroupOpenResponse>> {
         let (wire, request) = call.open()?;
         let object = self.admit(&ctx).await?;
-        request.shape.validate_wire()?;
+        request.shape.validate_membership(&request.membership)?;
         // The route is recorded verbatim, so it must name a dispatcher lane
         // a deployment binds (FIG-3795): an opener cannot declare a route
         // no dispatch could ever run under.
@@ -403,8 +415,9 @@ impl EffectGroupState for EffectGroupStateImpl {
             .into());
         }
         let Some(mut record) = load_index(&ctx).await? else {
-            let shape_digest = request.shape.digest()?;
+            let shape_digest = request.shape.digest(&request.membership)?;
             let dispatch_route = request.dispatch_route.clone();
+            store_membership(&ctx, object.writer, request.membership);
             store_index(
                 &ctx,
                 object.writer,
@@ -443,12 +456,11 @@ impl EffectGroupState for EffectGroupStateImpl {
         // child is not the retained one: the aggregate is addressed by its
         // issue ordinal, so a redrive with different leaves reaches this key.
         if request.content_checked
-            && let Some(position) = record
-                .live()?
-                .shape
-                .membership
+            && let Some(position) = load_membership(&ctx)
+                .await?
+                .0
                 .iter()
-                .zip(&request.shape.membership)
+                .zip(&request.membership.0)
                 .position(|(retained, offered)| retained != offered)
         {
             return Ok(Reply::at(
@@ -501,8 +513,8 @@ impl EffectGroupState for EffectGroupStateImpl {
             return Ok(Reply::at(wire, EffectGroupProbeAdoptResponse::Retired));
         }
         // Read before the mutable match below: the adopting dispatcher gets
-        // the recorded shape so its children are always the retained
-        // membership, never the envelopes a reopen offered.
+        // the recorded shape and membership so its children are always the
+        // retained membership, never the envelopes a reopen offered.
         let shape = record.live()?.shape.clone();
         let response = match &mut record.lifecycle {
             EffectGroupLifecycle::Preparing { dispatch, .. } => match dispatch {
@@ -512,10 +524,16 @@ impl EffectGroupState for EffectGroupStateImpl {
                         dispatched: BTreeMap::new(),
                     };
                     store_index(&ctx, object.writer, record);
-                    EffectGroupProbeAdoptResponse::Adopted { shape }
+                    EffectGroupProbeAdoptResponse::Adopted {
+                        shape,
+                        membership: load_membership(&ctx).await?,
+                    }
                 }
                 EffectGroupDispatchState::Adopted { id, .. } if id == &request.invocation_id => {
-                    EffectGroupProbeAdoptResponse::AlreadyAdopted { shape }
+                    EffectGroupProbeAdoptResponse::AlreadyAdopted {
+                        shape,
+                        membership: load_membership(&ctx).await?,
+                    }
                 }
                 EffectGroupDispatchState::Adopted { .. } => {
                     EffectGroupProbeAdoptResponse::DifferentDispatcher
@@ -1188,7 +1206,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                 live.settled_positions.insert(position, rank);
             }
         }
-        seal_cancel_decisions(&ctx, &self.namespace, &group_key, &shape, &decided).await?;
+        seal_cancel_decisions(&ctx, &self.namespace, &group_key, &decided).await?;
         let live = record.live()?.clone();
         record.lifecycle = EffectGroupLifecycle::Closed {
             effective: effective.into(),
@@ -1376,6 +1394,8 @@ impl EffectGroupState for EffectGroupStateImpl {
                     cleanup: EffectGroupCleanup::Complete,
                 };
                 store_index(&ctx, object.writer, record);
+                // Nothing rebuilds a child of a tombstone.
+                ctx.clear(MEMBERSHIP_STATE_KEY);
                 EffectGroupFinishRetirementResponse::Finished
             }
             EffectGroupLifecycle::Retired {
@@ -1401,7 +1421,7 @@ impl EffectGroupState for EffectGroupStateImpl {
             ));
         };
         let mut decided = Vec::new();
-        let (facts, ranks, changed, shape) = {
+        let (facts, ranks, changed) = {
             let (facts, live) = match &mut record.lifecycle {
                 EffectGroupLifecycle::Retired {
                     cleanup: EffectGroupCleanup::Pending { facts, live },
@@ -1460,9 +1480,9 @@ impl EffectGroupState for EffectGroupStateImpl {
                         .map(|rank| (position, rank))
                 })
                 .collect::<Vec<_>>();
-            (facts.clone(), ranks, changed, live.shape.clone())
+            (facts.clone(), ranks, changed)
         };
-        seal_cancel_decisions(&ctx, &self.namespace, &group_key, &shape, &decided).await?;
+        seal_cancel_decisions(&ctx, &self.namespace, &group_key, &decided).await?;
         store_index(&ctx, object.writer, record.clone());
         for (position, rank) in ranks.iter().copied() {
             resolve_group_wait(
