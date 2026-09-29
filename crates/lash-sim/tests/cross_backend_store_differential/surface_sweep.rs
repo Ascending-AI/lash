@@ -875,11 +875,9 @@ impl BackendRunner {
                 )
             }
             SurfaceMethod::CaptureAppend => {
-                let lease = self
-                    .surface
-                    .capture_first
-                    .as_ref()
-                    .expect("capture first lease");
+                let lease = self.surface.capture_first.as_ref().ok_or_else(|| {
+                    StoreError::Backend("the case opens its capture writer first".into())
+                })?;
                 let block = lash_sansio::llm::types::StreamBlockIdentity::new("message", 0);
                 let ack = store
                     .append_capture_batch(&lash_core::store::CaptureBatch {
@@ -903,11 +901,9 @@ impl BackendRunner {
                 format!("first={} last={}", ack.first_sequence, ack.last_sequence)
             }
             SurfaceMethod::CaptureResetInherited => {
-                let lease = self
-                    .surface
-                    .capture_first
-                    .as_ref()
-                    .expect("capture first lease");
+                let lease = self.surface.capture_first.as_ref().ok_or_else(|| {
+                    StoreError::Backend("the case opens its capture writer first".into())
+                })?;
                 let resumed = store
                     .persist_attempt_reset(&lash_core::store::CaptureAttemptReset {
                         lease: lease.lease_ref(),

@@ -215,9 +215,15 @@ impl CaptureBatch {
         })
     }
 
-    /// Refuses a batch over either bound with `CaptureBatchTooLarge`. A
-    /// batch of one frame is within the byte bound whatever its size.
+    /// Refuses an empty batch with `CaptureBatchEmpty`, and a batch over
+    /// either bound with `CaptureBatchTooLarge`. A batch of one frame is
+    /// within the byte bound whatever its size.
     pub fn validate_bounds(&self) -> Result<(), StoreError> {
+        if self.frames.is_empty() {
+            return Err(StoreError::CaptureBatchEmpty {
+                batch_ordinal: self.batch_ordinal,
+            });
+        }
         let bytes = self.encoded_bytes()?;
         if self.frames.len() > CAPTURE_BATCH_MAX_FRAMES
             || (self.frames.len() > 1 && bytes > CAPTURE_BATCH_MAX_BYTES)

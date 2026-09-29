@@ -792,6 +792,11 @@ pub enum StoreError {
         max_frames: usize,
         max_bytes: u64,
     },
+    /// A capture batch held no frames. A batch is never empty: an empty
+    /// ordinal could not replay idempotently from the frames alone. Nothing
+    /// was stored and the ordinal stays unconsumed.
+    #[error("capture batch {batch_ordinal} holds no frames")]
+    CaptureBatchEmpty { batch_ordinal: u64 },
     /// A batch ordinal already stored a different body under the same
     /// writer.
     #[error(
@@ -1019,6 +1024,7 @@ impl StoreError {
             Self::CaptureWriterFenced { .. } => "CaptureWriterFenced",
             Self::CaptureSealed { .. } => "CaptureSealed",
             Self::CaptureBatchTooLarge { .. } => "CaptureBatchTooLarge",
+            Self::CaptureBatchEmpty { .. } => "CaptureBatchEmpty",
             Self::CaptureBatchConflict { .. } => "CaptureBatchConflict",
             Self::CaptureBaseStale { .. } => "CaptureBaseStale",
             Self::CaptureSealBelowWatermark { .. } => "CaptureSealBelowWatermark",

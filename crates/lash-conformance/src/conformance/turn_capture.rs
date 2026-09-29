@@ -111,6 +111,45 @@ pub async fn capture_batch_replay_and_conflict(factory: Arc<dyn SessionStoreFact
     ));
 }
 
+/// A capture batch is never empty: the store refuses one before it writes
+/// anything, so the ordinal stays free for the writer's next real batch.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_empty_batch_is_refused(factory: Arc<dyn SessionStoreFactory>, label: &str) {
+    let (store, turn) = fixture(factory, label).await;
+    let lease = writer(store.as_ref(), &turn).await;
+    let empty = CaptureBatch {
+        lease: lease.lease_ref(),
+        batch_ordinal: 0,
+        frames: Vec::new(),
+    };
+    assert!(matches!(
+        store.append_capture_batch(&empty).await,
+        Err(StoreError::CaptureBatchEmpty { batch_ordinal: 0 })
+    ));
+    assert!(
+        matches!(
+            store.append_capture_batch(&empty).await,
+            Err(StoreError::CaptureBatchEmpty { batch_ordinal: 0 })
+        ),
+        "a retried empty batch is refused the same way"
+    );
+    let first = store
+        .append_capture_batch(&CaptureBatch {
+            frames: text_frames(),
+            ..empty
+        })
+        .await
+        .expect("the ordinal is still free");
+    assert_eq!(
+        (first.first_sequence, first.last_sequence),
+        (1, 3),
+        "the refusal stored nothing"
+    );
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance assertions require fixture setup"
