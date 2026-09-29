@@ -13,7 +13,8 @@ use lash_sansio::{
 
 const SEED: u64 = 0x5_0114;
 const STREAMED: &str = "the answer so far";
-const PROGRESS: &str = "first line of output\n";
+const UNSTREAMED: &str = "let me look that up";
+const PROGRESS: [&str; 2] = ["first line of output\n", "second line of output\n"];
 
 struct StopHarness {
     runtime: LashRuntime,
@@ -95,7 +96,33 @@ fn tool_calling_provider() -> TestProvider {
         .build()
 }
 
-/// Reports one progress chunk through its attempt context, then runs until
+/// Answers the first call with prose it never streams, then one `echo_tool`
+/// call: the driver publishes the prose from the completed response.
+fn unstreamed_text_then_tool_provider() -> TestProvider {
+    TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(|_request| async move {
+            Ok(LlmResponse {
+                parts: vec![
+                    LlmOutputPart::Text {
+                        text: UNSTREAMED.to_string(),
+                        response_meta: None,
+                    },
+                    LlmOutputPart::ToolCall {
+                        call_id: "call-1".to_string(),
+                        tool_name: "echo_tool".to_string(),
+                        input_json: serde_json::json!({"value": "call-1"}).to_string(),
+                        replay: None,
+                    },
+                ],
+                ..LlmResponse::default()
+            })
+        })
+        .build()
+}
+
+/// Reports each progress chunk through its attempt context, then runs until
 /// the turn is aborted.
 #[derive(Clone, Default)]
 struct ProgressThenHoldTool {
@@ -113,15 +140,17 @@ impl lash_core::ToolProvider for ProgressThenHoldTool {
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if let Err(refused) = call
-            .context
-            .progress()
-            .report(ToolOutputChunk {
-                text: PROGRESS.to_string(),
-            })
-            .await
-        {
-            *self.refused.lock_recover() = Some(refused.to_string());
+        for text in PROGRESS {
+            if let Err(refused) = call
+                .context
+                .progress()
+                .report(ToolOutputChunk {
+                    text: text.to_string(),
+                })
+                .await
+            {
+                *self.refused.lock_recover() = Some(refused.to_string());
+            }
         }
         std::future::pending::<lash_core::ToolAttemptOutcome>().await
     }
@@ -300,11 +329,12 @@ async fn a_stop_after_deltas_without_a_block_start_still_seals_them() {
 
 /// A tool reports progress through its attempt context, and the host sees
 /// each chunk only once it persisted. An immediate stop cancels the running
-/// call: the iteration's checkpoint commits the call with its cancelled
-/// result, and so advances the capture base past it (ADR 0114 §3.1). The
-/// sealed tail is empty, like an after-step stop's.
+/// call, and the iteration's checkpoint commits it with its cancelled result,
+/// as it always did. That checkpoint keeps the capture tail (ADR 0114, Lane G
+/// amendment): the stop's partial holds the call as running, its outcome
+/// unknown, with every chunk the host received.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_stop_mid_tool_commits_the_cancelled_call_and_seals_an_empty_tail() {
+async fn a_stop_mid_tool_seals_every_progress_chunk_the_host_saw() {
     let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
     let tool = ProgressThenHoldTool::default();
     let harness = Box::pin(stop_harness(
@@ -317,30 +347,96 @@ async fn a_stop_mid_tool_commits_the_cancelled_call_and_seals_an_empty_tail() {
         &double,
         harness,
         "stop-mid-tool",
-        "the tool's progress",
-        |event| matches!(event, TurnEvent::ToolOutputProgress { chunk, .. } if chunk.text == PROGRESS),
+        "the tool's last progress chunk",
+        |event| matches!(event, TurnEvent::ToolOutputProgress { chunk, .. } if chunk.text == PROGRESS[1]),
     ))
     .await;
 
     assert_eq!(
         *tool.refused.lock_recover(),
         None,
-        "the capture accepted the chunk"
+        "the capture accepted every chunk"
     );
     let [record] = turn.tool_calls.as_slice() else {
         panic!("expected the one call, got {:?}", turn.tool_calls);
     };
     assert_eq!(record.call_id.as_deref(), Some("call-1"));
-    assert!(matches!(
-        record.output.outcome,
-        lash_sansio::ToolCallOutcome::Cancelled(_)
-    ));
-    let partial = sealed_partial(&turn);
-    assert_eq!(partial.id.base, lash_sansio::CaptureBase(1));
-    assert!(partial.items.is_empty(), "{:?}", partial.items);
-    assert_eq!(
-        partial.eligibility(),
-        lash_sansio::ResubmissionEligibility::Empty
+    assert!(
+        matches!(
+            record.output.outcome,
+            lash_sansio::ToolCallOutcome::Cancelled(_)
+        ),
+        "the committed transcript keeps today's cancelled result"
     );
+    let partial = sealed_partial(&turn);
+    assert_eq!(partial.id.base, lash_sansio::CaptureBase(0));
+    let [
+        PartialItem::ToolCall {
+            call, execution, ..
+        },
+    ] = partial.items.as_slice()
+    else {
+        panic!("expected the one call, got {:?}", partial.items);
+    };
+    assert_eq!(call.call_id, "call-1");
+    assert_eq!(call.tool_name, "echo_tool");
+    let lash_sansio::ToolExecutionState::Running(running) = execution else {
+        panic!("the stop interrupted the call, got {execution:?}");
+    };
+    assert_eq!(
+        running.outcome,
+        lash_sansio::InterruptedToolOutcome::OutcomeUnknown
+    );
+    assert_eq!(
+        running.output,
+        lash_sansio::ToolOutputCapture::Captured {
+            chunks: PROGRESS
+                .iter()
+                .map(|text| ToolOutputChunk {
+                    text: text.to_string(),
+                })
+                .collect(),
+            omitted_bytes: 0,
+        },
+        "every chunk the host received is in the partial"
+    );
+    assert!(partial.cut_mid_tool_call());
+    assert!(partial.tool_outcome_unknown());
+    assert_announced_after_outcome(&events, partial);
+}
+
+/// A response whose prose never streamed is published from the completed
+/// response, and its capture records that prose as the host is sent it
+/// (ADR 0114, Lane G amendment): the partial holds it beside the call, as it
+/// holds a call the adapter never streamed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_keeps_response_text_that_was_never_streamed() {
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let harness = Box::pin(stop_harness(
+        &double,
+        Arc::new(ProgressThenHoldTool::default()),
+        unstreamed_text_then_tool_provider(),
+    ))
+    .await;
+    let (turn, events) = Box::pin(stop_after(
+        &double,
+        harness,
+        "stop-after-unstreamed-text",
+        "the tool's last progress chunk",
+        |event| matches!(event, TurnEvent::ToolOutputProgress { chunk, .. } if chunk.text == PROGRESS[1]),
+    ))
+    .await;
+
+    let partial = sealed_partial(&turn);
+    let [
+        PartialItem::Text { state, text, .. },
+        PartialItem::ToolCall { call, .. },
+    ] = partial.items.as_slice()
+    else {
+        panic!("expected the prose, then the call, got {:?}", partial.items);
+    };
+    assert_eq!(text, UNSTREAMED, "the partial holds the prose the host saw");
+    assert_eq!(*state, CutState::Complete);
+    assert_eq!(call.call_id, "call-1");
     assert_announced_after_outcome(&events, partial);
 }

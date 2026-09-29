@@ -329,6 +329,28 @@ impl<'a> ProviderHostForwarder<'a> {
         self.capture_frame(frame);
     }
 
+    /// A completed response block the stream never delivered, which the
+    /// driver publishes after the step returns: captured delta-first, as a
+    /// block streamed without a start is, so the partial holds the text the
+    /// host is sent (ADR 0114, Lane G amendment).
+    pub(super) fn capture_unstreamed_block(
+        &mut self,
+        kind: StreamBlockKind,
+        block: StreamBlockIdentity,
+        text: String,
+    ) {
+        if self.capture.is_none() || text.is_empty() {
+            return;
+        }
+        let class = match kind {
+            StreamBlockKind::AssistantText => ProviderDeltaClass::AssistantProse,
+            StreamBlockKind::Reasoning => ProviderDeltaClass::Reasoning,
+        };
+        self.open_capture_block(class, &block);
+        self.capture_frame(class.delta_frame(block.clone(), text.clone()));
+        self.capture_frame(class.end_frame(block, text));
+    }
+
     /// The completed response's calls the stream never delivered as parts:
     /// captured so the tool steps that run them attach to a parsed call.
     pub(super) fn capture_response_tool_calls(&mut self, parts: &[LlmOutputPart]) {

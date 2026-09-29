@@ -130,6 +130,9 @@ impl RuntimeTurnDriver<'_> {
                 results[source_index] = Some(completed.completed);
             }
         }
+        // A group wait that lost to the turn's gate is a recorded fact: the
+        // checkpoint after this batch keeps the capture tail for the stop.
+        self.stop_observed |= prepare_context.turn_cancel_observed();
         drop(prepare_context);
         results
             .into_iter()

@@ -515,15 +515,23 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
     };
     let mut capture_watermark = None;
     if let Some(turn_capture) = turn_capture {
-        if let crate::ToolAttemptLaunch::Done { record, .. } = &launch {
-            turn_capture
-                .settled(&call_id, &record.output)
-                .await
-                .map_err(|refused| {
-                    crate::RuntimeEffectControllerError::turn_capture_write_failed(format!(
-                        "tool settlement capture failed: {refused}"
-                    ))
-                })?;
+        // A cancelled attempt is the stop's own consequence, not a result
+        // before the cutoff: the capture keeps the call running, with the
+        // chunks it reported, as a call whose outcome is unknown. A seal that
+        // already fenced the writer keeps the partial as it was sealed.
+        if let crate::ToolAttemptLaunch::Done { record, .. } = &launch
+            && !matches!(record.output.outcome, crate::ToolCallOutcome::Cancelled(_))
+        {
+            match turn_capture.settled(&call_id, &record.output).await {
+                Ok(()) | Err(crate::ProgressRefused::Fenced) => {}
+                Err(refused) => {
+                    return Err(
+                        crate::RuntimeEffectControllerError::turn_capture_write_failed(format!(
+                            "tool settlement capture failed: {refused}"
+                        )),
+                    );
+                }
+            }
         }
         capture_watermark = turn_capture.watermark();
     }

@@ -1019,6 +1019,13 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.turn_cancel.note();
     }
 
+    /// Whether a recorded outcome this execution received cancelled its
+    /// turn, or the turn had honoured its cancellation before it: recorded
+    /// facts only, never a live read of the execution's token.
+    pub fn turn_cancel_observed(&self) -> bool {
+        self.turn_cancel.is_observed()
+    }
+
     /// Execution-side only: run one recorded step body that this execution
     /// issues in process (a tool attempt) under a cooperative stop that fires
     /// when the turn's gate pair asks it to stop now (FIG-3672 P9). The body

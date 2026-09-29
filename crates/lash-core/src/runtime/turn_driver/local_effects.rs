@@ -130,11 +130,15 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     .await;
                 // What the turn produced before this checkpoint commits with
                 // it, so the capture tail restarts here; a recorded outcome
-                // implies the advance (ADR 0114 §3.1).
+                // implies the advance (ADR 0114 §3.1). A turn that observed
+                // its stop keeps the tail: the checkpoint commits its
+                // cancelled calls, and the partial the stop seals holds what
+                // the host saw of them (Lane G amendment).
                 if matches!(
                     &outcome,
                     RuntimeEffectOutcome::Checkpoint { result: Ok(_), .. }
-                ) {
+                ) && !runner.driver.holds_capture_tail()
+                {
                     runner.driver.advance_capture_base().await?;
                 }
                 Ok(outcome)
@@ -244,6 +248,7 @@ pub(super) fn turn_effect_executor(
         // body and driver emissions on colliding {key}#{ordinal} ids.
         turn_observations: body_observation_cursor(body_replay_key),
         capture_base: driver.capture_base,
+        stop_observed: driver.stop_observed,
     };
     crate::RuntimeEffectLocalExecutor::owned_runner(
         Box::new(LocalTurnEffectRunner {

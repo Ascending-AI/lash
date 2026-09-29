@@ -619,6 +619,20 @@ impl RuntimeTurnDriver<'_> {
         // Everything the stream loop still holds persists before the step
         // returns, so the partial covers everything published.
         if let Ok(response) = &result {
+            // What the driver publishes for a response that never streamed
+            // its text is captured here, where the call's writer is open.
+            if !text_streamed {
+                let prose_projector = self.session.plugins().assistant_prose_projector();
+                for super::events::SemanticResponseBlock { kind, block, text } in
+                    super::events::semantic_response_blocks(
+                        response,
+                        prose_projector.as_deref(),
+                        &reasoning_publication,
+                    )
+                {
+                    host_forwarder.capture_unstreamed_block(kind, block, text);
+                }
+            }
             host_forwarder.capture_response_tool_calls(&response.parts);
         }
         host_forwarder.flush().await;

@@ -107,6 +107,11 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// checkpoint's body advances to (ADR 0114 §3.1). Counted where the
     /// checkpoint is issued, so a replay counts the same.
     pub(super) capture_base: u32,
+    /// A tool batch's recorded outcome lost to the turn's stop: the
+    /// checkpoint that commits its cancelled calls leaves the capture base
+    /// where it is, so the partial the stop seals keeps what the host saw of
+    /// them (ADR 0114, Lane G amendment).
+    pub(super) stop_observed: bool,
 }
 
 impl RuntimeTurnDriver<'_> {
@@ -115,5 +120,12 @@ impl RuntimeTurnDriver<'_> {
     pub(super) fn record_turn_cancel(&mut self, evidence: crate::TurnCancellationEvidence) {
         self.turn_cancel = Some(evidence);
         self.children_stop.cancel();
+    }
+
+    /// Whether the turn has observed its stop from a recorded fact. From
+    /// then on the uncommitted tail is the stop's partial, and no checkpoint
+    /// moves the capture base past it.
+    pub(super) fn holds_capture_tail(&self) -> bool {
+        self.turn_cancel.is_some() || self.stop_observed
     }
 }
