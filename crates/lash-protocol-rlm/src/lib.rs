@@ -3,7 +3,6 @@
 //! paired `<typescript>` blocks are executed, `print` yields observations, and
 //! `finish` yields the final value.
 
-mod cell_outcome;
 mod cell_scan;
 mod control_tools;
 mod dialect;

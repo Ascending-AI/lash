@@ -433,7 +433,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 }
                 match outcome {
                     CellOutcome::Running => {}
-                    outcome => *state.outcome = outcome,
+                    outcome => state.outcome = outcome,
                 }
                 if let Some(outcome) = terminal_outcome {
                     actions.push(DriverAction::AppendEvents(trajectory_events(
@@ -452,7 +452,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 }
             }
             Err(error) => {
-                *state.outcome = CellOutcome::Failed(lash_core::CellFailure::new(
+                state.outcome = CellOutcome::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Host,
                     error,
                 ));
@@ -805,7 +805,7 @@ fn trajectory_entry(
     // A step the driver adjudicated on the spot (schema-mismatch failure,
     // validated finish) names its outcome explicitly; otherwise the entry
     // records the state's failure, and a pending finish never leaks in.
-    let outcome = entry_outcome.unwrap_or_else(|| match &*state.outcome {
+    let outcome = entry_outcome.unwrap_or_else(|| match &state.outcome {
         CellOutcome::Failed(failure) => {
             CellOutcome::Failed(crate::feedback::render(failure, vocabulary.cell_noun))
         }

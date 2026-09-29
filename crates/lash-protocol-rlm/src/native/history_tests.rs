@@ -420,3 +420,42 @@ fn many_step_projection_matches_bytes_with_one_transport_pass_and_decode() {
         );
     }
 }
+
+#[test]
+fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
+    let mut entry = step("null-finish", None, false);
+    entry.code = "finish(null)".into();
+    entry.outcome = CellOutcome::Finished(serde_json::Value::Null);
+    let events = pair(entry);
+    let mut reloaded =
+        serde_json::from_str::<Vec<SessionHistoryRecord>>(&serde_json::to_string(&events).unwrap())
+            .unwrap();
+    let SessionHistoryRecord::Protocol(event) = &reloaded[1] else {
+        panic!("trajectory event")
+    };
+    let Some(RlmProtocolEvent::RlmTrajectoryEntry(restored)) =
+        crate::projection::decode_rlm_protocol_event(event)
+    else {
+        panic!("decoded trajectory")
+    };
+    assert_eq!(
+        restored.outcome.terminal_value(),
+        Some(&serde_json::Value::Null)
+    );
+    assert_eq!(ids(&render(&reloaded)).0, ["null-finish"]);
+    reloaded.push(SessionHistoryRecord::Conversation(
+        lash_core::session_model::ConversationRecord::from_message(lash_core::Message {
+            id: "answer".into(),
+            role: lash_core::MessageRole::Assistant,
+            parts: vec![Part::prose("answer.p0".into(), "null".into(), None)].into(),
+            origin: Some(lash_core::MessageOrigin::TurnOutput {
+                turn_id: TurnId::from("turn"),
+                source: lash_core::TurnOutputSource::Runtime,
+            }),
+        }),
+    ));
+    assert!(
+        ids(&render(&reloaded)).0.is_empty(),
+        "terminal exchange is suppressed after transcript commit"
+    );
+}

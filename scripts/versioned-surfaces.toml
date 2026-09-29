@@ -511,7 +511,7 @@ manifest = "ModuleArtifact"
 constant = "NATIVE_DRIVER_STATE_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/native/state.rs"
 upgrade = "migrate"
-description = "native RLM parked driver state"
+description = "native RLM parked driver state with a directly tagged cell outcome; pre-1.0 ambiguous optional-pair states are recreated"
 manifest = "NativeRlmDriverState"
 
 [[surface]]
