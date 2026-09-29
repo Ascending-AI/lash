@@ -1412,7 +1412,6 @@ fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegis
         lash_core::Lifetime::Detached,
     )
     .with_start_key(Some(lash_core::StartKey::for_host(
-        lash_core::StartKeyOwner::HOST,
         WAITING_PROCESS_START_KEY,
     )))
     .with_execution_env_ref(Some(env_ref))

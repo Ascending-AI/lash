@@ -1450,10 +1450,7 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
 
     let first = prepare_lashlang_process_start(
         artifact_store.clone(),
-        Some(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            "parent:root",
-        )),
+        Some("parent:root"),
         test_process_start(&output, site.clone(), "."),
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,
@@ -1462,10 +1459,7 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
     .expect("first start prepares");
     let replayed = prepare_lashlang_process_start(
         artifact_store.clone(),
-        Some(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            "parent:root",
-        )),
+        Some("parent:root"),
         test_process_start(&output, site.clone(), "."),
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,
@@ -1474,10 +1468,7 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
     .expect("replayed start prepares");
     let sibling = prepare_lashlang_process_start(
         artifact_store.clone(),
-        Some(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            "parent:root:2",
-        )),
+        Some("parent:root:2"),
         test_process_start(&output, test_start_site("child_process:scan", 2), "."),
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,
@@ -1485,9 +1476,9 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
     .await
     .expect("sibling start prepares");
 
-    assert_eq!(first.request.start_key, replayed.request.start_key);
+    assert_eq!(first.request.start_key(), replayed.request.start_key());
     assert_eq!(first.request.identity, replayed.request.identity);
-    assert_ne!(first.request.start_key, sibling.request.start_key);
+    assert_ne!(first.request.start_key(), sibling.request.start_key());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1543,10 +1534,7 @@ process scan(root: str) -> str {
         }
         let error = prepare_lashlang_process_start(
             store.clone(),
-            Some(lash_core::StartKey::for_host(
-                lash_core::StartKeyOwner::HOST,
-                "parent:four-shape",
-            )),
+            Some("parent:four-shape"),
             bad_start,
             lash_core::ProcessOriginator::host(),
             lash_core::LifetimeDecision::Detached,
@@ -1597,10 +1585,7 @@ process scan(root: str) -> str {
 
     prepare_lashlang_process_start(
         store.clone(),
-        Some(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            "parent:four-shape",
-        )),
+        Some("parent:four-shape"),
         start,
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,
@@ -1775,10 +1760,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
 
     prepare_lashlang_process_start(
         artifact_store.clone(),
-        Some(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            "parent:root",
-        )),
+        Some("parent:root"),
         start_with(
             lashlang::ProcessDefinitionIdentity::from_artifact_export(
                 &matching.artifact,
@@ -1794,10 +1776,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
 
     let error = prepare_lashlang_process_start(
         artifact_store.clone(),
-        Some(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            "parent:root",
-        )),
+        Some("parent:root"),
         start_with(
             lashlang::ProcessDefinitionIdentity::from_artifact_export(
                 &mismatching.artifact,
@@ -1837,10 +1816,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     ] {
         let error = prepare_lashlang_process_start(
             artifact_store.clone(),
-            Some(lash_core::StartKey::for_host(
-                lash_core::StartKeyOwner::HOST,
-                "parent:root",
-            )),
+            Some("parent:root"),
             start_with(definition),
             lash_core::ProcessOriginator::host(),
             lash_core::LifetimeDecision::Detached,
@@ -1865,10 +1841,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     );
     let error = prepare_lashlang_process_start(
         artifact_store.clone(),
-        Some(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            "parent:root",
-        )),
+        Some("parent:root"),
         start_with(wrong_ref),
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,
@@ -1930,10 +1903,7 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
 
     prepare_lashlang_process_start(
         artifact_store,
-        Some(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            "parent:root",
-        )),
+        Some("parent:root"),
         start,
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,

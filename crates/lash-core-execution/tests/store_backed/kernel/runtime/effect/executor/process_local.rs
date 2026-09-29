@@ -51,10 +51,7 @@ mod tests {
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
         )
-        .with_start_key(Some(crate::StartKey::for_host(
-            crate::StartKeyOwner::HOST,
-            key,
-        )))
+        .with_start_key(Some(crate::StartKey::for_host(key)))
     }
 
     fn started_record(outcome: crate::RuntimeEffectOutcome) -> crate::ProcessRecord {
@@ -177,10 +174,7 @@ mod tests {
             .expect("read registered process")
             .expect("registered process remains live");
 
-        let start = crate::ArtifactReferrer::Start(crate::StartKey::for_host(
-            crate::StartKeyOwner::HOST,
-            key,
-        ));
+        let start = crate::ArtifactReferrer::Start(crate::StartKey::for_host(key));
         let process = crate::ArtifactReferrer::ProcessRecord(record.id.clone());
         env_store
             .end_process_env_referrer(&carry_env(start, process.clone(), &env_ref))
@@ -282,10 +276,7 @@ mod tests {
             .expect("publish the subscription environment");
         let env_store = Arc::new(FenceStartBeforeFirstAcquire {
             inner: Arc::clone(&inner),
-            start: crate::ArtifactReferrer::Start(crate::StartKey::for_host(
-                crate::StartKeyOwner::HOST,
-                key,
-            )),
+            start: crate::ArtifactReferrer::Start(crate::StartKey::for_host(key)),
             interleavings: AtomicUsize::new(0),
         });
         let envelope = crate::RuntimeEffectEnvelope::new(
@@ -383,6 +374,7 @@ mod tests {
         let retry_ref = retry_env.stable_ref().expect("retry environment reference");
         assert_ne!(first_ref, retry_ref, "the retry submits different content");
         let key = crate::StartKey::for_tool_intent(
+            crate::StartKeyDerivation::LASH_START_PATHS,
             &crate::derive_tool_intent_identity(
                 &crate::SessionId::from("session"),
                 "runtime",
@@ -613,8 +605,13 @@ mod tests {
     #[tokio::test]
     async fn a_changed_content_retry_reclaims_its_unadopted_start_artifact() {
         let key = "changed-content-start";
-        let start_key =
-            crate::StartKey::for_trigger_delivery(key, "subscription", "incarnation", 1);
+        let start_key = crate::StartKey::for_trigger_delivery(
+            crate::StartKeyDerivation::LASH_START_PATHS,
+            key,
+            "subscription",
+            "incarnation",
+            1,
+        );
         let keyed =
             |marker: &str| tool_registration(key, marker).with_start_key(Some(start_key.clone()));
         let double =

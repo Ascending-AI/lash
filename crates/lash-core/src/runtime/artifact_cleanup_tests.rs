@@ -16,10 +16,10 @@ fn journal(id: &str) -> lash_sansio::EffectJournalIdentity {
 }
 
 fn start_key() -> StartKey {
-    StartKey::parse(&format!(
-        "process-start-key:v1:intent:blake3:{}",
-        "b".repeat(64)
-    ))
+    StartKey::parse(
+        crate::core_internal::StartKeyDerivation::LASH_START_PATHS,
+        &format!("process-start-key:v1:intent:blake3:{}", "b".repeat(64)),
+    )
     .expect("a rendered start key")
 }
 

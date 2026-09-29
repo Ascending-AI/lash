@@ -526,7 +526,7 @@ where
 /// The start key of a generated process slot: re-registering a retained run
 /// returns it, and a slot whose run was pruned starts a new one.
 fn slot_start_key(slot: u8) -> crate::StartKey {
-    crate::StartKey::for_host(crate::StartKeyOwner::HOST, format!("prop-process-{slot}"))
+    crate::StartKey::for_host(format!("prop-process-{slot}"))
 }
 
 /// The id an operation names before its slot was ever registered.
@@ -1773,10 +1773,7 @@ async fn assert_prune_reregister_wake_fence(
     handles: &StoreContractHandles,
 ) -> Result<(), TestCaseError> {
     let session = SessionId::from("law-prune-wake");
-    let start_key = crate::StartKey::for_host(
-        crate::StartKeyOwner::HOST,
-        "law-prune-reregister-wake-process",
-    );
+    let start_key = crate::StartKey::for_host("law-prune-reregister-wake-process");
     let process = handles
         .registry
         .register_process(
@@ -2062,7 +2059,7 @@ async fn assert_prune_tombstone_watermark_safety(
 async fn assert_prune_reregister_registry_state_is_fresh(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
-    let start_key = crate::StartKey::for_host(crate::StartKeyOwner::HOST, "law-prune-reregister");
+    let start_key = crate::StartKey::for_host("law-prune-reregister");
     let id = registry
         .register_process(
             registration(

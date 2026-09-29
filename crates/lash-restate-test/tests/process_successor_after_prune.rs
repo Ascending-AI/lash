@@ -219,10 +219,7 @@ fn start_request(start_key: &str, payload: serde_json::Value) -> lash_core::Proc
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_start_key(Some(lash_core::StartKey::for_host(
-        lash_core::StartKeyOwner::HOST,
-        start_key,
-    )))
+    .with_host_start_key(start_key)
     .with_env_spec(process_env_spec())
 }
 

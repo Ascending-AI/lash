@@ -203,7 +203,7 @@ impl ArtifactReferrer {
                 )
             }
             ArtifactReferrerKind::Start => Self::Start(
-                StartKey::parse(id).map_err(|error| malformed(kind, error.to_string()))?,
+                StartKey::parse_rendered(id).map_err(|error| malformed(kind, error.to_string()))?,
             ),
             ArtifactReferrerKind::Execution => {
                 Self::Execution(decode_journal_identity(id).map_err(|detail| {
@@ -824,7 +824,7 @@ mod tests {
     }
 
     fn start_key() -> StartKey {
-        StartKey::parse(&format!(
+        StartKey::parse_rendered(&format!(
             "process-start-key:v1:intent:blake3:{}",
             "a".repeat(64)
         ))

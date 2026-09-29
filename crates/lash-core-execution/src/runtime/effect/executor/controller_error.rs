@@ -23,6 +23,9 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::ParentEnded { .. } => {
                 Self::new(RuntimeErrorCode::ProcessParentEnded, err.to_string())
             }
+            err @ PluginError::StartKeyConflict { .. } => {
+                Self::new(RuntimeErrorCode::ProcessStartKeyConflict, err.to_string())
+            }
             err @ PluginError::ProcessCancelConflict { .. } => {
                 Self::new(RuntimeErrorCode::ProcessCancelConflict, err.to_string())
             }
@@ -41,10 +44,7 @@ mod tests {
     #[test]
     fn parent_ended_refusal_stays_typed_and_terminal_through_effect_controller() {
         let error = PluginError::ParentEnded {
-            start_key: Some(crate::StartKey::for_host(
-                crate::StartKeyOwner::HOST,
-                "late-child",
-            )),
+            start_key: Some(crate::StartKey::for_host("late-child")),
             parent: crate::ScopeId::process(crate::process_id_for_test("ended-parent")),
         };
         assert!(error.is_terminal());

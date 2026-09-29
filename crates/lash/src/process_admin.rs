@@ -327,6 +327,17 @@ impl Processes {
         command: lash_core::ProcessCommand,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEffectOutcome> {
+        self.execute_command(command, scoped_effect_controller)
+            .await
+            .map_err(|err| EmbedError::Plugin(lash_core::PluginError::Session(err.to_string())))
+    }
+
+    async fn execute_command(
+        &self,
+        command: lash_core::ProcessCommand,
+        scoped_effect_controller: ScopedEffectController<'_>,
+    ) -> std::result::Result<lash_core::ProcessEffectOutcome, lash_core::RuntimeEffectControllerError>
+    {
         let registry = self.registry();
         let process_work = Arc::clone(self.core.substrate_slot.ports().await.process.port());
         let invocation =
@@ -349,13 +360,14 @@ impl Processes {
                     ))
                     .with_process_engines(self.core.host_process_engines.clone()),
             )
-            .await
-            .map_err(|err| EmbedError::Plugin(lash_core::PluginError::Session(err.to_string())))?;
+            .await?;
         match outcome {
             lash_core::RuntimeEffectOutcome::Process { result } => Ok(result),
-            _ => Err(EmbedError::Plugin(lash_core::PluginError::Session(
-                "process effect returned non-process outcome".to_string(),
-            ))),
+            _ => Err(lash_core::RuntimeEffectControllerError::from(
+                lash_core::PluginError::Session(
+                    "process effect returned non-process outcome".to_string(),
+                ),
+            )),
         }
     }
 
@@ -430,9 +442,13 @@ impl Processes {
         let env_spec = request.env_spec.clone();
         let observers = request.observers.clone();
         // The registrar mints the id; the key only makes the start idempotent.
+        // A host mints only host keys: a key of a family lash derives for its
+        // own start paths is refused, never adopted (ADR 0107).
         let registration = request
             .keyed_in(&scoped_effect_controller)
+            .map_err(EmbedError::Plugin)?
             .into_registration(None);
+        let start_key = registration.start_key.clone();
         let command = lash_core::ProcessCommand::Start {
             registration,
             observers,
@@ -440,8 +456,15 @@ impl Processes {
             execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
         };
         let outcome = self
-            .run_command(command, scoped_effect_controller.clone())
-            .await?;
+            .execute_command(command, scoped_effect_controller.clone())
+            .await
+            .map_err(|error| {
+                EmbedError::Plugin(host_start_refusal(
+                    start_key.as_ref(),
+                    error.code.clone(),
+                    error.to_string(),
+                ))
+            })?;
         let lash_core::ProcessEffectOutcome::Start {
             record,
             disposition,
@@ -946,6 +969,30 @@ impl Processes {
     ) -> Result<lash_core::facade_support::WakeDeliveryDriveReport> {
         let ports = self.core.substrate_slot.ports().await;
         ports.queued.drive_wake().await.map_err(Into::into)
+    }
+}
+/// A host start's refusal as a host rail answers it (ADR 0107): a start under
+/// a host key that meets another start under it — retained in the registry, or
+/// issued earlier in the same scope, whose journal then holds a different
+/// envelope at the key's effect — is the typed [`StartKeyConflict`], naming
+/// the key and nothing else. Every other refusal keeps its message.
+///
+/// [`StartKeyConflict`]: lash_core::PluginError::StartKeyConflict
+pub(crate) fn host_start_refusal(
+    start_key: Option<&lash_core::StartKey>,
+    code: lash_core::RuntimeErrorCode,
+    message: String,
+) -> lash_core::PluginError {
+    match start_key {
+        Some(start_key)
+            if code == lash_core::RuntimeErrorCode::ProcessStartKeyConflict
+                || (start_key.is_host_supplied() && code.is_replay_mismatch()) =>
+        {
+            lash_core::PluginError::StartKeyConflict {
+                start_key: start_key.clone(),
+            }
+        }
+        _ => lash_core::PluginError::Session(message),
     }
 }
 

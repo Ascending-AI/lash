@@ -20,7 +20,7 @@ pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
     registry: Arc<dyn crate::ProcessRegistry>,
     _effect_host: Arc<dyn crate::EffectHost>,
 ) {
-    let key = crate::StartKey::for_host(crate::StartKeyOwner::HOST, "successor-after-prune");
+    let key = crate::StartKey::for_host("successor-after-prune");
     let start = || {
         process_registry::registration("successor-after-prune").with_start_key(Some(key.clone()))
     };

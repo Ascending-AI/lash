@@ -132,6 +132,9 @@ pub struct CrashWorld {
     quiesce_ms: std::sync::atomic::AtomicU64,
     /// The drive requests the session work saw.
     drives: Arc<DriveLog>,
+    /// The facts the host's own handlers recorded, for the global
+    /// invariants.
+    history: crate::invariants::HistoryRecorder,
 }
 
 impl std::fmt::Debug for CrashWorld {
@@ -234,6 +237,7 @@ impl CrashWorld {
             ticks_run: std::sync::atomic::AtomicUsize::new(0),
             quiesce_ms: std::sync::atomic::AtomicU64::new(2_000),
             drives,
+            history: crate::invariants::HistoryRecorder::default(),
         })
     }
 
@@ -242,6 +246,29 @@ impl CrashWorld {
     #[must_use]
     pub fn drives(&self) -> &DriveLog {
         &self.drives
+    }
+
+    /// The facts the host's own handlers recorded.
+    #[must_use]
+    pub fn history(&self) -> &crate::invariants::HistoryRecorder {
+        &self.history
+    }
+
+    /// Record `receipt`, the answer to a host start requested under
+    /// `requested`, with the originator of the process it answered.
+    pub async fn record_start_answered(
+        &self,
+        requested: &lash_core::ProcessOriginator,
+        receipt: &lash_core::ProcessStartReceipt,
+    ) {
+        if let Ok(Some(answered)) = self
+            .backend
+            .process_registry()
+            .get_process(&receipt.process_id)
+            .await
+        {
+            crate::invariants::record_start_answered(&self.history, requested, receipt, &answered);
+        }
     }
 
     #[must_use]

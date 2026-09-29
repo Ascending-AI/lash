@@ -358,6 +358,7 @@ pub fn derived_trigger_subscription_key(
 /// delivery, the first and every recovery, presents the same key.
 pub fn trigger_delivery_start_key(reservation: &TriggerDeliveryReservation) -> crate::StartKey {
     crate::StartKey::for_trigger_delivery(
+        crate::StartKeyDerivation::LASH_START_PATHS,
         &reservation.occurrence.occurrence_id,
         &reservation.subscription.subscription_id,
         &reservation.subscription.incarnation,

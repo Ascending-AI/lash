@@ -488,10 +488,8 @@ async fn a_session_close_ends_the_scopes_of_its_roots_on_restate() {
 #[tokio::test]
 async fn a_process_end_cancels_its_cancel_children_on_restate() {
     let world = Arc::new(World::start("process-cancel").await);
-    let parent_key = lash_core::StartKey::for_host(
-        lash_core::StartKeyOwner::HOST,
-        format!("process-cancel-parent-{}", world.nonce),
-    );
+    let parent_key =
+        lash_core::StartKey::for_host(format!("process-cancel-parent-{}", world.nonce));
     let registration = lash_core::ProcessRegistration::new(
         lash_core::ProcessInput::Engine {
             kind: "test-engine".to_string(),

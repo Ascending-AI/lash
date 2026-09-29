@@ -17,10 +17,8 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
     // The child starts under a key, so a replay of its start after the
     // parent ended returns the retained child instead of starting a new one.
     let child = crate::started_until_starter(
-        registration("lifecycle-child").with_start_key(Some(crate::StartKey::for_host(
-            crate::StartKeyOwner::HOST,
-            "lifecycle-child",
-        ))),
+        registration("lifecycle-child")
+            .with_start_key(Some(crate::StartKey::for_host("lifecycle-child"))),
         parent_scope.clone(),
     );
     let admitted = registry

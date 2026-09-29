@@ -841,10 +841,8 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
-    let registration = external_registration().with_start_key(Some(lash_core::StartKey::for_host(
-        lash_core::StartKeyOwner::HOST,
-        "background-start",
-    )));
+    let registration = external_registration()
+        .with_start_key(Some(lash_core::StartKey::for_host("background-start")));
     let outcome = host
         .execute_effect(
             RuntimeEffectEnvelope::new(
@@ -918,10 +916,7 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
             .iter()
             .map(|registration| registration.start_key.clone())
             .collect::<Vec<_>>(),
-        vec![Some(lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            "background-start"
-        ))]
+        vec![Some(lash_core::StartKey::for_host("background-start"))]
     );
     // The start journals its frontier marker (FIG-3779), its registration
     // (ADR 0107) and, after the send, its external reference: each a run of
@@ -1241,10 +1236,7 @@ fn start_recovery_effect(
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_start_key(Some(lash_core::StartKey::for_host(
-        lash_core::StartKeyOwner::HOST,
-        start_key,
-    )));
+    .with_start_key(Some(lash_core::StartKey::for_host(start_key)));
     RuntimeEffectEnvelope::new(
         runtime_invocation(RuntimeEffectKind::Process, start_key),
         RuntimeEffectCommand::process(ProcessCommand::Start {
@@ -1280,12 +1272,8 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "process-start-replay"),
             RuntimeEffectCommand::process(ProcessCommand::Start {
-                registration: external_registration().with_start_key(Some(
-                    lash_core::StartKey::for_host(
-                        lash_core::StartKeyOwner::HOST,
-                        "process-start-replay",
-                    ),
-                )),
+                registration: external_registration()
+                    .with_start_key(Some(lash_core::StartKey::for_host("process-start-replay"))),
                 observers: Vec::new(),
                 env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
@@ -1479,12 +1467,8 @@ pub(super) async fn restate_controller_start_after_prune_sends_a_new_workflow() 
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, effect_id),
             RuntimeEffectCommand::process(ProcessCommand::Start {
-                registration: external_registration().with_start_key(Some(
-                    lash_core::StartKey::for_host(
-                        lash_core::StartKeyOwner::HOST,
-                        "restart-after-prune",
-                    ),
-                )),
+                registration: external_registration()
+                    .with_start_key(Some(lash_core::StartKey::for_host("restart-after-prune"))),
                 observers: Vec::new(),
                 env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
@@ -1541,7 +1525,6 @@ pub(super) async fn restate_controller_start_emits_send_when_external_ref_alread
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
     let registration = external_registration().with_start_key(Some(lash_core::StartKey::for_host(
-        lash_core::StartKeyOwner::HOST,
         "process-start-existing-ref",
     )));
     let process_id = registry
@@ -1597,12 +1580,8 @@ pub(super) async fn run_parent_shaped_start_await_suspend_flow(
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "parent-flow-start-child"),
                 RuntimeEffectCommand::process(ProcessCommand::Start {
-                    registration: external_registration().with_start_key(Some(
-                        lash_core::StartKey::for_host(
-                            lash_core::StartKeyOwner::HOST,
-                            "parent-flow-child",
-                        ),
-                    )),
+                    registration: external_registration()
+                        .with_start_key(Some(lash_core::StartKey::for_host("parent-flow-child"))),
                     observers: Vec::new(),
                     env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),

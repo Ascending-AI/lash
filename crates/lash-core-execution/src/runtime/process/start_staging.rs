@@ -303,6 +303,14 @@ pub async fn register_process_start(
 /// End `Start(key)` after a terminal refusal, unless a process already holds
 /// the key: then the registered row is the start's outcome, and its guard
 /// carries onto it.
+///
+/// A key is global, so another start may be staged under `Start(key)` while
+/// this one is refused (FIG-4111). Its row can commit between the read below
+/// and the end: `Start(key)` then carries nothing onto it. Either that start
+/// meets the fence once its row commits and holds its own content under
+/// `ProcessRecord` ([`stage_and_register`]), or it looked before the fence
+/// existed, and then the read after the end finds its row and holds the row's
+/// content here.
 async fn abandon_start(
     stores: &ProcessStartStores<'_>,
     start_key: StartKey,
@@ -318,7 +326,47 @@ async fn abandon_start(
     {
         return Ok(());
     }
-    ports.end(ArtifactReferrer::Start(start_key)).await?;
+    ports
+        .end(ArtifactReferrer::Start(start_key.clone()))
+        .await?;
+    if let Some(retained) = stores.registry.get_process_by_start_key(&start_key).await?
+        && let Err(error) = hold_retained_start(stores, ports, &retained).await
+    {
+        // This start's refusal stands either way; the row is another start's.
+        tracing::warn!(
+            process_id = %retained.id,
+            %error,
+            "could not hold a concurrent start's content after abandoning its key"
+        );
+    }
+    Ok(())
+}
+
+/// Hold `retained`'s environment and engine artifacts under its
+/// `ProcessRecord`: what `Start(key)`'s guard would have carried onto it.
+async fn hold_retained_start(
+    stores: &ProcessStartStores<'_>,
+    ports: &ArtifactReferrerPorts,
+    retained: &ProcessRecord,
+) -> Result<(), RuntimeEffectControllerError> {
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(retained.id.clone()))
+        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    if let (Some(env_store), Some(env_ref)) = (stores.env_store, retained.env_ref.as_ref()) {
+        let env = StagedEnv {
+            env_ref: env_ref.clone(),
+            bytes: None,
+            staged: false,
+        };
+        acquire_env(env_store.as_ref(), &claim, &env).await?;
+    }
+    if let (Some(engines), ProcessInput::Engine { kind, payload }) =
+        (stores.engines, retained.input.as_ref())
+    {
+        let names = engines.require(kind)?.start_artifacts(payload)?;
+        if !names.is_empty() {
+            ports.acquire(engines, &claim, &names).await?;
+        }
+    }
     Ok(())
 }
 
@@ -350,15 +398,23 @@ async fn stage_and_register(
     let process_claim =
         ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(record.id.clone()))
             .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let adopts_env = created || record.env_ref == submitted_env_ref;
+    let adopts_engine = created || record.input == submitted_input;
+    // A key is global, so another start's terminal refusal can end
+    // `Start(key)` after this start staged there and before its row committed
+    // (`abandon_start`, FIG-4111). The guard then carries nothing onto the
+    // row: this start holds what it staged under `ProcessRecord` itself.
+    let start_ended = (adopts_env || adopts_engine)
+        && start_ended_after_staging(stores, &claim, env.as_ref(), engine.as_ref()).await?;
     if let (Some(env_store), Some(env)) = (stores.env_store, env.as_ref())
-        && !env.staged
-        && (created || record.env_ref == submitted_env_ref)
+        && (!env.staged || start_ended)
+        && adopts_env
     {
         acquire_env(env_store.as_ref(), &process_claim, env).await?;
     }
     if let Some(engine) = engine.as_ref()
-        && !engine.staged
-        && (created || record.input == submitted_input)
+        && (!engine.staged || start_ended)
+        && adopts_engine
     {
         engine
             .ports
@@ -370,6 +426,39 @@ async fn stage_and_register(
         disposition,
         env_ref: submitted_env_ref,
     })
+}
+
+/// Whether `Start(key)` was fenced after this start staged under it: one
+/// staged name acquired again under `claim` meets the fence. `false` when
+/// nothing was staged there.
+async fn start_ended_after_staging(
+    stores: &ProcessStartStores<'_>,
+    claim: &ReferrerClaim,
+    env: Option<&StagedEnv>,
+    engine: Option<&StagedEngine<'_>>,
+) -> Result<bool, RuntimeEffectControllerError> {
+    if let (Some(env_store), Some(env)) = (stores.env_store, env)
+        && env.staged
+    {
+        // The bytes are stored: acquire the reference, publish nothing.
+        let probe = StagedEnv {
+            env_ref: env.env_ref.clone(),
+            bytes: None,
+            staged: true,
+        };
+        return Ok(!acquire_env(env_store.as_ref(), claim, &probe).await?);
+    }
+    if let Some(engine) = engine
+        && engine.staged
+        && let Some(name) = engine.names.first()
+    {
+        let acquired = engine
+            .ports
+            .acquire(engine.engines, claim, std::slice::from_ref(name))
+            .await?;
+        return Ok(acquired == ReferrerAcquisition::Ended);
+    }
+    Ok(false)
 }
 
 async fn acquire_env(

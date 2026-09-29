@@ -29,6 +29,7 @@ pub async fn start_process(
     let live = world.live_core();
     let restate = world.engine().clone();
     let operation = operation.to_owned();
+    let requested = request.originator.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let ran = world
         .host_op(async move {
@@ -45,7 +46,6 @@ pub async fn start_process(
                                     .processes()
                                     .start(request, scoped)
                                     .await
-                                    .map(|receipt| receipt.process_id)
                                     .map_err(|error| error.to_string()),
                                 Err(error) => Err(error),
                             };
@@ -56,7 +56,14 @@ pub async fn start_process(
                 .await
         })
         .await;
-    answer(ran, rx.try_recv().ok())
+    let answered = rx.try_recv().ok();
+    if let Some(Ok(receipt)) = &answered {
+        world.record_start_answered(&requested, receipt).await;
+    }
+    answer(
+        ran,
+        answered.map(|started| started.map(|receipt| receipt.process_id)),
+    )
 }
 
 /// A deletion's handler execution: the live deployment's administration over

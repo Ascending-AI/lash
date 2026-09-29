@@ -1,0 +1,22 @@
+error[E0433]: cannot find `ProcessIdRegistrar` in `process`
+ --> tests/ui/process_id_minting_is_sealed.rs:5:28
+  |
+5 |     let _ = lash::process::ProcessIdRegistrar::REGISTRAR;
+  |                            ^^^^^^^^^^^^^^^^^^ could not find `ProcessIdRegistrar` in `process`
+  |
+help: a trait with a similar name exists
+  |
+5 -     let _ = lash::process::ProcessIdRegistrar::REGISTRAR;
+5 +     let _ = lash::process::ProcessRegistrar::REGISTRAR;
+  |
+
+error[E0624]: associated function `from_minted` is private
+ --> tests/ui/process_id_minting_is_sealed.rs:4:30
+  |
+4 |     let _ = lash::ProcessId::from_minted(0x0192_0000_0000_7000_8000_0000_0000_0001);
+  |                              ^^^^^^^^^^^ private associated function
+  |
+ ::: $WORKSPACE/crates/lash-sansio/src/identity.rs
+  |
+  |     pub(crate) fn from_minted(uuid_v7: u128) -> Self {
+  |     ------------------------------------------------ private associated function defined here

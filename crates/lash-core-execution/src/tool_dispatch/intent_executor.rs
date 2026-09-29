@@ -846,6 +846,7 @@ fn error_code(error: &crate::PluginError) -> String {
         crate::PluginError::ProcessNotVisible { .. } => "process_not_visible".to_string(),
         crate::PluginError::ProcessAlreadyTerminal { .. } => "process_already_terminal".to_string(),
         crate::PluginError::ParentEnded { .. } => "process_parent_ended".to_string(),
+        crate::PluginError::StartKeyConflict { .. } => "process_start_key_conflict".to_string(),
         crate::PluginError::ProcessCancelConflict { .. } => "process_cancel_conflict".to_string(),
         crate::PluginError::ProcessNoLongerRetained { .. } => {
             "process_no_longer_retained".to_string()

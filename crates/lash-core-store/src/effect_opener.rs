@@ -288,11 +288,11 @@ pub enum EffectOpenerError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn process(n: u128) -> crate::ProcessId {
-        crate::ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | n)
+    fn process(n: u64) -> crate::ProcessId {
+        crate::process_identity::ProcessIdMint::sequential_id_for_testing(n)
     }
 
-    fn process_opener(n: u128) -> EffectOpener {
+    fn process_opener(n: u64) -> EffectOpener {
         EffectOpener::process(process(n))
     }
 

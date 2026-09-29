@@ -370,7 +370,7 @@ async fn start_marker_key(
         .take(5)
         .collect::<Vec<_>>()
         .join(":");
-    let probe_key = crate::StartKey::parse(&probe_key_text)
+    let probe_key = crate::StartKey::parse(crate::DERIVED_START_KEYS, &probe_key_text)
         .unwrap_or_else(|error| panic!("the marker's start key parses: {error}"));
     // A cell's leaf call id is `lashlang:v2:{opener}:{len}:{execution}:{ordinal}`
     // (`LashlangHostIdentities::call_id`), and the cell's execution key leads
@@ -399,7 +399,7 @@ async fn start_marker_key(
             minting_emission_replay_key: Some(format!("{call_key}:attempt:1")),
         })
         .expect("a declared start's intent identity derives");
-        crate::StartKey::for_tool_intent(&identity)
+        crate::StartKey::for_tool_intent(crate::DERIVED_START_KEYS, &identity)
     };
     let segments = call_key.split(':').collect::<Vec<_>>();
     let (execution, ordinal) = (1..=segments.len())

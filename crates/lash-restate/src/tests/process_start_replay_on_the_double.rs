@@ -99,6 +99,7 @@ pub(super) async fn a_parent_replay_after_its_child_was_pruned_returns_the_recor
     let started: StartedIds = Arc::default();
     let registration = || {
         external_registration().with_start_key(Some(lash_core::StartKey::for_tool_intent(
+            lash_core::core_internal::StartKeyDerivation::LASH_START_PATHS,
             &lash_core::derive_tool_intent_identity(
                 &lash_core::SessionId::from("session"),
                 "turn",
@@ -198,6 +199,7 @@ pub(super) async fn a_keyless_host_start_replays_to_the_process_it_started(seed:
             lash_core::Lifetime::Detached,
         )
         .keyed_in(scoped)
+        .expect("a keyless host start is keyed in its scope")
         .into_registration(None)
     };
     let attempt = |crash: bool| -> lash_restate_test::HandlerAttempt {
@@ -244,6 +246,133 @@ pub(super) async fn a_keyless_host_start_replays_to_the_process_it_started(seed:
     );
 }
 
+/// ADR 0107 (FIG-4111): a replayed host start binds the process its journal
+/// recorded, even once a host key is global and another originator holds it.
+///
+/// The crashing attempt starts A's process under a host key, completes and
+/// prunes it, and then originator B registers the same bytes: a new process
+/// under the now-free key. The attempt dies there. The redrive replays A's
+/// start: it answers the recorded id and disposition, never B's process and
+/// never a binding to it. A live start of A's request under another scope,
+/// which has no recorded answer, meets B's process under the global key and
+/// is refused as the typed, content-free conflict.
+pub(super) async fn a_replayed_host_start_binds_its_recorded_process(seed: u64) {
+    let backend = lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate test backend");
+    let registry = backend.lash_backend().process_registry();
+    let started: StartedIds = Arc::default();
+    let host_key = format!("replayed-host-start-{seed:x}");
+    let under = |originator: &str| {
+        let mut registration =
+            external_registration().with_start_key(Some(lash_core::StartKey::for_host(&host_key)));
+        registration.provenance =
+            lash_core::ProcessProvenance::session(lash_core::SessionScope::new(originator));
+        registration
+    };
+    let taken_by_b: Arc<Mutex<Option<ProcessId>>> = Arc::default();
+    let crashing: lash_restate_test::HandlerAttempt = {
+        let registry = Arc::clone(&registry);
+        let started = Arc::clone(&started);
+        let taken_by_b = Arc::clone(&taken_by_b);
+        let (a, b) = (under("originator-a"), under("originator-b"));
+        Arc::new(move |scoped| {
+            let registry = Arc::clone(&registry);
+            let started = Arc::clone(&started);
+            let taken_by_b = Arc::clone(&taken_by_b);
+            let (a, b) = (a.clone(), b.clone());
+            Box::pin(async move {
+                let process = start_and_record(&scoped, &registry, a, &started).await;
+                registry
+                    .complete_process(
+                        &process,
+                        process_success(serde_json::json!({ "a": "done" })),
+                        lash_core::ProcessCompletionAuthority::external_owner(),
+                    )
+                    .await
+                    .expect("A's process finishes");
+                registry
+                    .prune_terminal_processes(
+                        u64::MAX,
+                        None,
+                        lash_core::ProjectionWatermark::NoProjector,
+                    )
+                    .await
+                    .expect("retention prunes A's process");
+                let b = registry
+                    .register_process_reporting_disposition(b, &[])
+                    .await
+                    .expect("B starts under the freed key");
+                assert_eq!(
+                    b.disposition,
+                    lash_core::ProcessRegistrationDisposition::Created
+                );
+                *taken_by_b.lock().unwrap() = Some(b.record.id);
+                panic!("A's handler dies after B took the key");
+            })
+        })
+    };
+    let redrive: lash_restate_test::HandlerAttempt = {
+        let registry = Arc::clone(&registry);
+        let started = Arc::clone(&started);
+        let a = under("originator-a");
+        Arc::new(move |scoped| {
+            let registry = Arc::clone(&registry);
+            let started = Arc::clone(&started);
+            let a = a.clone();
+            Box::pin(async move {
+                start_and_record(&scoped, &registry, a, &started).await;
+            })
+        })
+    };
+    backend
+        .run_crashed_then_redriven(
+            lash_core::AdmittedScope::runtime_operation(format!("replayed-host-start-{seed:x}")),
+            crashing,
+            redrive,
+        )
+        .await
+        .expect("the replayed handler completes without a journal mismatch");
+
+    let started = started.lock().unwrap().clone();
+    let taken_by_b = taken_by_b.lock().unwrap().clone().expect("B took the key");
+    assert_eq!(
+        started.len(),
+        2,
+        "each attempt ran the start once: {started:?}"
+    );
+    assert_eq!(
+        started[1], started[0],
+        "the replay answers the recorded id and disposition"
+    );
+    assert_ne!(
+        started[1].0, taken_by_b,
+        "the replay never binds B's process"
+    );
+    assert_eq!(
+        retained_processes(&registry).await,
+        vec![taken_by_b.clone()],
+        "the replay registers nothing beside B's process"
+    );
+
+    let live = registry
+        .register_process_reporting_disposition(under("originator-a"), &[])
+        .await
+        .expect_err("a live start of A's request meets B's process under the key");
+    assert!(
+        matches!(
+            &live,
+            lash_core::PluginError::StartKeyConflict { start_key }
+                if *start_key == lash_core::StartKey::for_host(&host_key)
+        ),
+        "the refusal is the typed start-key conflict: {live:?}"
+    );
+    assert!(
+        !live.to_string().contains(taken_by_b.as_str()),
+        "the conflict names no process: {live}"
+    );
+}
+
 /// Twenty seeds per law (lane rule for laws on the double).
 const SEEDS: std::ops::Range<u64> = 0x3607_0000..0x3607_0014;
 
@@ -258,5 +387,12 @@ async fn a_parent_replay_after_its_child_was_pruned_returns_the_recorded_id_on_t
 async fn a_keyless_host_start_replays_to_the_process_it_started_on_the_double() {
     for seed in SEEDS {
         a_keyless_host_start_replays_to_the_process_it_started(seed).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_replayed_host_start_binds_its_recorded_process_on_the_double() {
+    for seed in SEEDS {
+        a_replayed_host_start_binds_its_recorded_process(seed).await;
     }
 }

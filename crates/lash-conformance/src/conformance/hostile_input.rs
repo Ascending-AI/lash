@@ -235,10 +235,7 @@ pub async fn process_namespace(registry: Arc<dyn crate::ConformanceProcessRegist
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )
-        .with_start_key(Some(crate::StartKey::for_host(
-            crate::StartKeyOwner::HOST,
-            raw,
-        )))
+        .with_start_key(Some(crate::StartKey::for_host(raw)))
     };
     let hostile = ["canary", "../canary", "'; DROP TABLE lash_processes; --"];
     let mut ids = std::collections::BTreeMap::new();

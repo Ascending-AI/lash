@@ -107,7 +107,7 @@ impl ProcessStartDeclaration {
     /// The only way a declaration becomes a request: every realization route
     /// passes `StartKey::for_tool_intent(identity)` here, so every redrive of
     /// one declaration starts the same process by construction.
-    pub fn into_request(self, start_key: crate::StartKey) -> ProcessStartRequest {
+    pub(crate) fn into_request(self, start_key: crate::StartKey) -> ProcessStartRequest {
         ProcessStartRequest {
             start_key: Some(start_key),
             input: self.input,
@@ -123,11 +123,16 @@ impl ProcessStartDeclaration {
 }
 
 /// Public host-facing request for starting a visible process handle.
+///
+/// A host keys it only with [`Self::with_host_start_key`]: the key is private,
+/// so no host, tool or plugin code sets a key of a family lash derives for its
+/// own start paths, and a host rail refuses one that arrives deserialized
+/// ([`Self::keyed_in`]).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessStartRequest {
     /// The start's idempotency key; `None` starts a new process every time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_key: Option<crate::StartKey>,
+    start_key: Option<crate::StartKey>,
     pub input: ProcessInput,
     /// What ends the process. A host start is a root: `Detached`, or `Until`
     /// a session the host looked up.
@@ -150,7 +155,7 @@ impl ProcessStartRequest {
     /// persisting and coordinating durable process execution.
     ///
     /// The request carries no process id: the registrar mints one. An
-    /// idempotent start adds a key with [`Self::with_start_key`].
+    /// idempotent host start adds a key with [`Self::with_host_start_key`].
     pub fn new(
         input: ProcessInput,
         originator: super::ProcessOriginator,
@@ -179,19 +184,26 @@ impl ProcessStartRequest {
         Self::new(ProcessInput::External { metadata }, originator, lifetime)
     }
 
-    /// Sets the start's idempotency key.
-    pub fn with_start_key(mut self, start_key: Option<crate::StartKey>) -> Self {
+    /// The start's idempotency key, if it has one.
+    pub fn start_key(&self) -> Option<&crate::StartKey> {
+        self.start_key.as_ref()
+    }
+
+    /// Sets the start's idempotency key. Only lash's own start paths key a
+    /// request with a key they derived; a host uses
+    /// [`Self::with_host_start_key`].
+    pub(crate) fn with_start_key(mut self, start_key: Option<crate::StartKey>) -> Self {
         self.start_key = start_key;
         self
     }
 
-    /// Keys the start with a host-supplied key, scoped to the request's
-    /// originator: the same key from two sessions starts two processes
-    /// (ADR 0107).
+    /// Keys the start with a host-supplied key. Lash mixes nothing into it:
+    /// the same bytes are one key across the store set, whoever presents them,
+    /// and a start under a retained key returns that process only when it is
+    /// the same start (ADR 0107).
     #[must_use]
     pub fn with_host_start_key(self, key: impl AsRef<[u8]>) -> Self {
-        let start_key = crate::StartKey::for_host(self.originator.start_key_owner(), key);
-        self.with_start_key(Some(start_key))
+        self.with_start_key(Some(crate::StartKey::for_host(key)))
     }
 
     /// A host start as the host rails realize it under `scope`: the host's
@@ -199,13 +211,28 @@ impl ProcessStartRequest {
     /// a keyless start is always new, keyed by the scope and its ordinal
     /// among the run's keyless starts, so a durable handler's replay re-issues
     /// the same key (ADR 0107).
-    #[must_use]
-    pub fn keyed_in(self, scope: &crate::ScopedEffectController<'_>) -> Self {
-        if self.start_key.is_some() {
-            self
-        } else {
-            let start_key = scope.next_keyless_start_key();
-            self.with_start_key(Some(start_key))
+    ///
+    /// # Errors
+    ///
+    /// `start_key_family_refused` for a request that carries a key of a
+    /// family lash derives for its own start paths: a host mints only host
+    /// keys, so a host rail never adopts a tool intent's or a trigger
+    /// delivery's process.
+    pub fn keyed_in(
+        self,
+        scope: &crate::ScopedEffectController<'_>,
+    ) -> Result<Self, crate::PluginError> {
+        match &self.start_key {
+            Some(start_key) if start_key.is_host_supplied() => Ok(self),
+            Some(_) => Err(crate::PluginError::Runtime(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::StartKeyFamilyRefused,
+                "a host start carries only a host start key; this key is of a family lash \
+                 derives for its own start paths",
+            ))),
+            None => {
+                let start_key = scope.next_keyless_start_key();
+                Ok(self.with_start_key(Some(start_key)))
+            }
         }
     }
 

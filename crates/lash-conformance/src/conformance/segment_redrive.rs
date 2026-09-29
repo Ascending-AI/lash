@@ -717,10 +717,7 @@ async fn run_scenario(
     let scenario = Scenario {
         kind,
         case,
-        child_start_key: crate::StartKey::for_host(
-            crate::StartKeyOwner::HOST,
-            format!("{prefix}-{name}-child"),
-        ),
+        child_start_key: crate::StartKey::for_host(format!("{prefix}-{name}-child")),
         child_id: Arc::new(Mutex::new(None)),
         process_id,
         registry: Arc::clone(&registry),

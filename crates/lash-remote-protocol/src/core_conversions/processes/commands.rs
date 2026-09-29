@@ -1,5 +1,9 @@
 use super::*;
 
+/// The remote protocol reads a record's rendered key back; it derives none.
+pub(super) const START_KEY_DECODING: lash_core::core_internal::StartKeyDerivation =
+    lash_core::core_internal::StartKeyDerivation::LASH_START_PATHS;
+
 impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
     type Error = RemoteProtocolError;
 
@@ -21,15 +25,15 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             originator.try_into()?,
             lash_core::LifetimeDecision::from(lifetime),
         );
-        // A remote caller's key lands in the host namespace, scoped to the
-        // start's originator, where no key lash derives for its own starts
-        // can reach (ADR 0107).
+        // A remote caller's key lands in the host namespace, where no key lash
+        // derives for its own starts can reach: the same bytes are one key
+        // whoever sends them (ADR 0107).
         if let Some(start_key) = start_key {
             // A record reports its key's digest (`start_key_digest`), never a
             // caller's key. A caller that echoes that digest back as its key
             // would have it hashed again into a different key and silently
             // start a second process, so the digest spelling is refused.
-            if lash_core::StartKey::parse(&start_key).is_ok() {
+            if lash_core::StartKey::parse(START_KEY_DECODING, &start_key).is_ok() {
                 return Err(RemoteProtocolError::InvalidEnvelope {
                     type_name: "RemoteProcessStartRequest",
                     message: "start_key is a derived start-key digest (a record's \
@@ -55,8 +59,17 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
     type Error = RemoteProtocolError;
 
     fn try_from(value: lash_core::ProcessStartRequest) -> Result<Self, Self::Error> {
+        // A core key is already derived: its host bytes cannot be recovered,
+        // and a derived key must never cross as a caller's key.
+        if value.start_key().is_some() {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessStartRequest",
+                message:
+                    "a derived start key cannot cross the wire; a remote caller sends its own key"
+                        .to_string(),
+            });
+        }
         let lash_core::ProcessStartRequest {
-            start_key,
             input,
             lifetime,
             env_spec,
@@ -65,17 +78,8 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             wake_session_id,
             observers,
             event_types,
+            ..
         } = value;
-        // A core key is already derived: its host bytes cannot be recovered,
-        // and a derived key must never cross as a caller's key.
-        if start_key.is_some() {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteProcessStartRequest",
-                message:
-                    "a derived start key cannot cross the wire; a remote caller sends its own key"
-                        .to_string(),
-            });
-        }
         Ok(Self {
             start_key: None,
             input: input.try_into()?,
@@ -132,7 +136,7 @@ impl TryFrom<RemoteProcessStartReceipt> for lash_core::ProcessStartReceipt {
         } = value;
         let start_key = start_key_digest
             .map(|digest| {
-                lash_core::StartKey::parse(&digest).map_err(|error| {
+                lash_core::StartKey::parse(START_KEY_DECODING, &digest).map_err(|error| {
                     RemoteProtocolError::InvalidEnvelope {
                         type_name: "RemoteProcessStartReceipt",
                         message: error.to_string(),

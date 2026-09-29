@@ -480,17 +480,6 @@ impl ProcessOriginator {
         }
     }
 
-    /// The owner a host-supplied start key is scoped to: the host scope, or
-    /// the originating session (never its frame).
-    pub fn start_key_owner(&self) -> StartKeyOwner<'_> {
-        match self {
-            Self::Host { scope } => StartKeyOwner::Host {
-                scope: scope.as_deref(),
-            },
-            Self::Session { session_id, .. } => StartKeyOwner::Session { session_id },
-        }
-    }
-
     pub(crate) fn id(&self) -> String {
         match self {
             Self::Host { scope } => scope

@@ -73,8 +73,8 @@ pub use model::{
     ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt,
     ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone,
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
-    SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StartKeyOwner, StoreRealization,
-    WaitKind, WaitState, artifact_referrer_ended, artifact_store_plugin_error, lifetime,
+    SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StoreRealization, WaitKind,
+    WaitState, artifact_referrer_ended, artifact_store_plugin_error, lifetime,
     load_process_execution_env, mint_process_id, process_child_session_id,
     process_runtime_session_ids, publish_process_execution_env,
 };

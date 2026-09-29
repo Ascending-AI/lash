@@ -16,8 +16,10 @@ mod registration;
 pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
 pub use observer_transfer::a_failed_observer_transfer_leaves_no_partial_mutation;
 pub use registration::{
-    a_host_start_key_is_scoped_to_its_owner_and_fences_its_content,
-    a_start_key_after_prune_starts_a_new_process,
+    a_host_retry_with_another_wake_target_conflicts,
+    a_host_start_key_after_prune_starts_new_for_any_originator,
+    a_host_start_key_is_global_and_fences_its_originator,
+    a_start_key_after_prune_starts_a_new_process, a_start_key_conflict_names_no_retained_process,
     a_start_key_reports_created_then_existing_and_is_trusted,
     concurrent_starts_under_one_key_register_one_process, keyless_starts_are_always_new,
     process_registry_fresh_instances, registration_and_observers_are_atomic,

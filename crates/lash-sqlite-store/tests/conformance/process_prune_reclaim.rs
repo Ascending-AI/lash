@@ -24,6 +24,18 @@ lash_conformance::process_prune_reclaim_tests!({
     (backend, "sqlite", factory, registry, probe)
 });
 
+lash_conformance::process_start_staging_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
+    let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
+        lash_core_execution::StoreSet::module_artifacts(&*backend),
+        backend.process_env_store(),
+        lash_core_execution::StoreSet::artifact_cleanup(&*backend),
+        Arc::new(lash_core_execution::facade_support::SystemClock),
+    );
+    (backend, registry, ports)
+});
+
 lash_conformance::process_prune_start_staging_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;

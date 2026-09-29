@@ -232,12 +232,12 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
         } = value;
         let start_key = start_key_digest
             .map(|start_key| {
-                lash_core::StartKey::parse(&start_key).map_err(|error| {
-                    RemoteProtocolError::InvalidEnvelope {
+                lash_core::StartKey::parse(super::commands::START_KEY_DECODING, &start_key).map_err(
+                    |error| RemoteProtocolError::InvalidEnvelope {
                         type_name: "RemoteProcessRecord",
                         message: error.to_string(),
-                    }
-                })
+                    },
+                )
             })
             .transpose()?;
         let mut registration =

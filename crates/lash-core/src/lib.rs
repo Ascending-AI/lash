@@ -763,7 +763,7 @@ pub use runtime::{
     SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
     SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionStoreFactory,
     SessionSummary, SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey,
-    StartKeyOwner, StoreRealization, TokenLedgerEntry, ToolAttemptLaunch, ToolIntentOutcomeSink,
+    StoreRealization, TokenLedgerEntry, ToolAttemptLaunch, ToolIntentOutcomeSink,
     ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity, TurnActivityId,
     TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
     TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
@@ -853,7 +853,8 @@ pub use tool_provider::{
 pub mod core_internal {
     pub use crate::runtime::RuntimeSessionServices;
     pub use lash_core_execution::core_internal::{
-        attach_process_invocation_correlation, clear_process_invocation_correlation,
+        StartKeyDerivation, attach_process_invocation_correlation,
+        clear_process_invocation_correlation,
     };
 }
 

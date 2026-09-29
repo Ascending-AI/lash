@@ -244,12 +244,17 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         // While the process minted for a key is retained, a start under the
         // same key returns that process untouched (ADR 0107); a host's key
-        // must also present its content.
+        // must also present its start, wake target included.
         if let Some(start_key) = start_key.as_ref()
             && let Some(existing) = load_process_by_start_key_tx(&mut tx, start_key).await?
         {
+            let existing_wake = wake_session_id_tx(&mut tx, &existing.id).await?;
             tx.commit().await.map_err(plugin_sqlx_error)?;
-            lash_core_execution::runtime::check_retained_start(&registration, &existing)?;
+            lash_core_execution::runtime::check_retained_start(
+                &registration,
+                &existing,
+                existing_wake.as_ref(),
+            )?;
             return Ok(lash_core_execution::ProcessRegistrationOutcome::existing(
                 existing,
             ));
@@ -363,6 +368,10 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                 Some(start_key) => load_process_by_start_key_tx(&mut tx, start_key).await?,
                 None => None,
             };
+            let winner_wake = match winner.as_ref() {
+                Some(winner) => wake_session_id_tx(&mut tx, &winner.id).await?,
+                None => None,
+            };
             tx.rollback().await.map_err(plugin_sqlx_error)?;
             let Some(winner) = winner else {
                 return Err(PluginError::Session(format!(
@@ -370,7 +379,11 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                     record.id
                 )));
             };
-            lash_core_execution::runtime::check_retained_start(&unprepared, &winner)?;
+            lash_core_execution::runtime::check_retained_start(
+                &unprepared,
+                &winner,
+                winner_wake.as_ref(),
+            )?;
             return Ok(lash_core_execution::ProcessRegistrationOutcome::existing(
                 winner,
             ));

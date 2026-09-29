@@ -133,3 +133,49 @@ retention gap is closed for declared starts: registration writes a consumer
 hold on the process row, prune refuses a held row, and the hold is released
 only after the parked call's settlement is incorporated or its opener's scope
 closes ([ADR 0116](0116-tools-are-opaque.md) §3.6).
+
+## Amendment (FIG-4111, 2026-09-29): host keys are global and fence their start
+
+Replaces §2 items 4–5 and "the key is **trusted**". Since
+[ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md) the
+originator is provenance only, and a process's lifetime is an explicit
+`Until`/`Detached` decision with its grant. So lash mixes nothing into a host
+key: `StartKey::for_host(bytes)` takes the bytes alone, and the same bytes are
+one key across the **store set**. Key uniqueness is the registry's start-key
+index, so deployment namespaces that share a store
+([ADR 0111](0111-a-deployment-namespace-prefixes-every-restate-name.md))
+share keys; partitioning keys between tenants is the host's job.
+
+Derived keys (tool intent, trigger delivery) stay trusted. A host key, whether
+supplied or keyless, fences its start. A retry returns the retained process
+only if its input, lifetime decision, ancestry, session capability, identity,
+event types, originator, wake target and environment all match. Otherwise it
+is refused as `PluginError::StartKeyConflict { start_key }`
+(`process_start_key_conflict`), which names the key and nothing of the
+retained process: not its id, its originator or its input. The same holds for
+a second start in one scope under one host key: it shares the scope's start
+effect, and a different start there is the same conflict, never a replay
+divergence. Lash never decides whether a caller may use a key
+([ADR 0014](0014-operational-policy-stays-with-the-host.md),
+[ADR 0046](0046-process-transitions-are-events-record-is-a-fold.md)).
+
+Only the host rails mint host keys: `ProcessStartRequest::with_host_start_key`
+(the facade's `start`) and the remote start conversion. A request's key is
+private, and a host rail refuses a request that carries any other family as
+`start_key_family_refused`. The derived families (`for_tool_intent`,
+`for_trigger_delivery`, `for_keyless_host`) and `StartKey::parse` take a
+`StartKeyDerivation` that no facade exports, so host, plugin and
+model-written code cannot build or submit a key in them. A keyless host start
+keeps its scope-plus-ordinal key (not a random one, as §2 item 5 said) so
+replay reissues it. After prune a key starts a new process with a new id for
+any caller, and the pruned id refuses as `ProcessNoLongerRetained`. Minting a
+`ProcessId` takes the registrar's `ProcessIdRegistrar`; tests name processes
+they never registered with `ProcessId::fixture`.
+
+A global key lets two originators' starts meet under one `Start(key)` referrer
+([ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) §3.3).
+A terminal refusal that ends `Start(key)` never strands a concurrent start
+staged there. After its row commits, a start that staged under `Start(key)`
+checks for the fence and, if it finds one, holds its content under
+`ProcessRecord(id)` itself. The refusing start reads the registry again after
+ending the key, and holds the content of a row it finds.

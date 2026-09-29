@@ -966,16 +966,6 @@ pub fn prepare_process_registration(
     Ok(registration)
 }
 
-/// Decides whether a start that found `retained` under its key may be
-/// returned it (ADR 0107).
-///
-/// A key lash derives from an admitted operation is trusted: the retained
-/// process is returned whatever the start submitted. A host's key (one it
-/// supplied, or its keyless start's derived key) is the host's claim that the
-/// two starts are one, so a start under it with different content is a
-/// [`durable_identity_conflict`](crate::durable_identity_conflict) rather than
-/// a silent return of another start's process.
-///
 /// The refusal of a start whose consuming call was abandoned: the call's
 /// consumer hold `key` was marked, so the opener that cancelled the call has
 /// already drained what the hold owed (ADR 0116 §3.4). It carries the group
@@ -991,12 +981,29 @@ pub fn abandoned_consumer_refusal(start_key: Option<&crate::StartKey>, key: &str
     ))
 }
 
+/// Decides whether a start that found `retained` under its key may be
+/// returned it (ADR 0107).
+///
+/// A key lash derives from an admitted operation is trusted: the retained
+/// process is returned whatever the start submitted. A host's key (one it
+/// supplied, or its keyless start's derived key) fences its start: the
+/// retained process is returned only to a start that presents the same
+/// input, lifetime decision, ancestry, originator, wake target and
+/// environment. A host key is global, so the retained process may be another
+/// originator's; any other start under it is a
+/// [`PluginError::StartKeyConflict`] that names the key and nothing of the
+/// process it is bound to.
+///
+/// `retained_wake_session_id` is the retained row's wake target, which the
+/// registrar stores beside the record rather than in it.
+///
 /// # Errors
 ///
 /// A registration that does not validate, or the conflict.
 pub fn check_retained_start(
     registration: &ProcessRegistration,
     retained: &ProcessRecord,
+    retained_wake_session_id: Option<&SessionId>,
 ) -> Result<(), PluginError> {
     let Some(start_key) = registration.start_key.as_ref() else {
         return Ok(());
@@ -1012,14 +1019,14 @@ pub fn check_retained_start(
         && submitted.identity == retained.identity
         && submitted.event_types == retained.event_types
         && submitted.provenance == retained.provenance
+        && submitted.wake_session_id.as_ref() == retained_wake_session_id
         && submitted.env_ref == retained.env_ref;
     if same {
         Ok(())
     } else {
-        Err(crate::durable_identity_conflict(format!(
-            "process start key `{start_key}` is bound to process `{}`, which was started with different content",
-            retained.id
-        )))
+        Err(PluginError::StartKeyConflict {
+            start_key: start_key.clone(),
+        })
     }
 }
 

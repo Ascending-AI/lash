@@ -791,12 +791,36 @@ impl SessionAdmin {
                 runtime.process_service()?,
             )
         };
-        let request = request.keyed_in(&scoped_effect_controller);
+        let request = request
+            .keyed_in(&scoped_effect_controller)
+            .map_err(EmbedError::Plugin)?;
+        let start_key = request.start_key().cloned();
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         let summary = processes
             .start_from_request(&session_id, request, scope)
             .await
-            .map_err(EmbedError::Plugin)?;
+            .map_err(|error| {
+                let code = match &error {
+                    lash_core::PluginError::Runtime(runtime) => Some(runtime.code.clone()),
+                    lash_core::PluginError::RuntimeEffectController(controller) => {
+                        Some(controller.code.clone())
+                    }
+                    _ => None,
+                };
+                EmbedError::Plugin(match code {
+                    Some(code) if start_key.is_some() => {
+                        match crate::process_admin::host_start_refusal(
+                            start_key.as_ref(),
+                            code,
+                            error.to_string(),
+                        ) {
+                            conflict @ lash_core::PluginError::StartKeyConflict { .. } => conflict,
+                            _ => error,
+                        }
+                    }
+                    _ => error,
+                })
+            })?;
         Ok(summary)
     }
 

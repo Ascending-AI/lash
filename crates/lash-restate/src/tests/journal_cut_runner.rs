@@ -429,10 +429,7 @@ mod served_only_outside_a_run {
         let nonce = harness.run_nonce();
         let session_id = SessionId::from(format!("served-only-{nonce}"));
         let turn_id = TurnId::from("served-only-turn");
-        let start_key = lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            format!("served-only-probe-{nonce}"),
-        );
+        let start_key = lash_core::StartKey::for_host(format!("served-only-probe-{nonce}"));
         let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel::<Answers>();
         harness
             .turn_runner()
@@ -482,10 +479,7 @@ mod served_only_outside_a_run {
         let nonce = harness.run_nonce();
         let session_id = SessionId::from(format!("served-recorded-{nonce}"));
         let turn_id = TurnId::from("served-recorded-turn");
-        let start_key = lash_core::StartKey::for_host(
-            lash_core::StartKeyOwner::HOST,
-            format!("served-recorded-probe-{nonce}"),
-        );
+        let start_key = lash_core::StartKey::for_host(format!("served-recorded-probe-{nonce}"));
         let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel::<Answers>();
         harness
             .turn_runner()
