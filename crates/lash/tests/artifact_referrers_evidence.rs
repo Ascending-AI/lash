@@ -213,6 +213,11 @@ async fn cold_reopen_globals_across_turns() {
         .expect("frame edge")
         .id
         .clone();
+    let settled = wait_edges(&double, |edges| {
+        edges.len() == 1 && edges[0].kind == "frame_environment" && edges[0].id == frame_id
+    })
+    .await;
+    assert_eq!(settled.len(), 1, "the settled first turn holds no edge");
     drop(first_session);
     drop(first_core);
 
