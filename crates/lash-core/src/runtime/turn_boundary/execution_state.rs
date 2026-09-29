@@ -10,7 +10,12 @@ use super::RuntimeSessionState;
 pub(super) enum ExecutionStateUpdate {
     Clean,
     Replace(crate::plugin::ExecutionStateSnapshot),
-    Clear,
+    /// The execution state is wiped. On a committed frame switch `carries`
+    /// names the artifacts the switch hands to the successor frame
+    /// (ADR 0113 §3.1); every other clear carries none.
+    Clear {
+        carries: Vec<crate::ArtifactName>,
+    },
 }
 
 impl ExecutionStateUpdate {
@@ -18,10 +23,73 @@ impl ExecutionStateUpdate {
         match self {
             Self::Clean => {}
             Self::Replace(snapshot) => state.set_execution_state_components(snapshot)?,
-            Self::Clear => state.set_execution_state_snapshot(None),
+            Self::Clear { .. } => state.set_execution_state_snapshot(None),
         }
         Ok(())
     }
+
+    /// The artifacts a clear carries into the successor frame.
+    pub(super) fn carries(&self) -> &[crate::ArtifactName] {
+        match self {
+            Self::Clear { carries } => carries,
+            Self::Clean | Self::Replace(_) => &[],
+        }
+    }
+}
+
+/// The clear a committed frame switch makes: the frame's globals are wiped,
+/// and only the artifacts the code executor finds in the switch's seed
+/// `initial_nodes` are carried into the successor frame (ADR 0113 §3.1).
+pub(super) async fn frame_switch_execution_state_update(
+    session: &mut Session,
+    initial_nodes: &[crate::SessionAppendNode],
+) -> Result<ExecutionStateUpdate, SessionError> {
+    let Some(code_executor) = session.plugins().code_executor() else {
+        return Ok(ExecutionStateUpdate::Clear {
+            carries: Vec::new(),
+        });
+    };
+    let session_id = session.session_id().to_string();
+    let carries = code_executor
+        .frame_switch_carries(
+            crate::plugin::ProtocolSessionContext::new(session, &SessionId::from(session_id)),
+            initial_nodes,
+        )
+        .await?;
+    Ok(ExecutionStateUpdate::Clear { carries })
+}
+
+/// The artifact half of a commit that moves the session from frame `ended`
+/// to the state's current frame (ADR 0113 §3.1), gated on `committing`: the
+/// one execution that can still read what `ended` held. `None` when the
+/// commit opens no frame, or when there was no frame to end.
+///
+/// # Errors
+///
+/// A committing scope with no journal identity.
+pub(in crate::runtime) fn committed_frame_transition(
+    state: &RuntimeSessionState,
+    ended: Option<crate::FrameNodeId>,
+    carries: Vec<crate::ArtifactName>,
+    committing: &crate::ExecutionScope,
+) -> Result<Option<crate::store::FrameTransition>, StoreError> {
+    let (Some(ended), Some(successor)) = (ended, state.current_frame_node_id.clone()) else {
+        return Ok(None);
+    };
+    if ended == successor {
+        return Ok(None);
+    }
+    let gate = committing.journal_identity().map_err(|error| {
+        StoreError::Backend(format!(
+            "a frame switch commit needs its execution's journal identity: {error}"
+        ))
+    })?;
+    Ok(Some(crate::store::FrameTransition {
+        ended: crate::FrameEnvironmentId::new(state.session_id.clone(), ended),
+        successor: crate::FrameEnvironmentId::new(state.session_id.clone(), successor),
+        carries,
+        gate,
+    }))
 }
 
 /// Take the turn's one execution-state capture. Called only from the final
@@ -46,7 +114,9 @@ pub(super) async fn capture_execution_state_update(
     Ok(if snapshot.root.is_some() {
         ExecutionStateUpdate::Replace(snapshot)
     } else {
-        ExecutionStateUpdate::Clear
+        ExecutionStateUpdate::Clear {
+            carries: Vec::new(),
+        }
     })
 }
 

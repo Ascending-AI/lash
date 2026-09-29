@@ -21,6 +21,7 @@ use materialize::*;
 mod accepted_commit;
 pub(super) use accepted_commit::AcceptedTurnCommit;
 mod execution_state;
+pub(in crate::runtime) use execution_state::committed_frame_transition;
 use execution_state::*;
 mod final_commit_input;
 use final_commit_input::FinalCommitInput;
@@ -74,6 +75,15 @@ pub(super) struct TurnBoundary {
     /// The logical root the turn runs under, whose park the final commit
     /// clears (FIG-3600 S7, D2 §1.3 P3).
     park_root: Option<crate::TurnId>,
+}
+
+/// The frame switch a final commit makes: the frame the turn was admitted on
+/// ends, and `carries` cross into the frame the switch opens (ADR 0113 §3.1).
+/// The committing turn is the switch's gate.
+pub(super) struct FrameSwitchCommit {
+    ended: Option<crate::FrameNodeId>,
+    carries: Vec<crate::ArtifactName>,
+    committing: crate::ExecutionScope,
 }
 
 /// A final commit's drive fence, and the terminal evidence it writes.
@@ -385,7 +395,14 @@ impl TurnBoundary {
             Some(session) => {
                 let store = session.history_store();
                 let execution_state_update = if agent_frame_switch_materializes {
-                    ExecutionStateUpdate::Clear
+                    let initial_nodes = self
+                        .graph_appends
+                        .pending_frame_switch()
+                        .map(|recorded| recorded.initial_nodes().to_vec())
+                        .unwrap_or_default();
+                    frame_switch_execution_state_update(session, &initial_nodes)
+                        .await
+                        .map_err(accepted_commit::execution_state_capture_error)?
                 } else {
                     capture_execution_state_update(session)
                         .await
@@ -585,6 +602,10 @@ impl TurnBoundary {
         if let Some(plugins) = plugins {
             state.capture_plugin_states(plugins);
         }
+        // The frame the turn was admitted on, which a switch this commit
+        // opens ends (ADR 0113 §3.1), and what the switch carries out of it.
+        let admitted_frame = state.current_frame_node_id.clone();
+        let frame_carries = execution_state_update.carries().to_vec();
         execution_state_update.apply(state)?;
         materialize_terminal_output(
             state,
@@ -621,6 +642,11 @@ impl TurnBoundary {
         let commit_budget = self.commit_budget;
         let drive_commit = self.drive_commit.clone();
         let park_root = self.park_root.clone();
+        let frame_switch = agent_frame_switch_materializes.then(|| FrameSwitchCommit {
+            ended: admitted_frame,
+            carries: frame_carries,
+            committing: self.operation_scope.clone(),
+        });
         let state = self.final_state_mut();
 
         if let Some(store) = store {
@@ -659,6 +685,7 @@ impl TurnBoundary {
                 session_execution_lease_completion,
                 drive_commit,
                 park_root,
+                frame_switch,
             )
             .await
         } else {
@@ -700,6 +727,7 @@ impl TurnBoundary {
         _session_execution_lease_completion: Option<crate::ClaimAuthority>,
         drive_commit: Option<DriveCommit>,
         park_root: Option<TurnId>,
+        frame_switch: Option<FrameSwitchCommit>,
     ) -> FinalCommitResult {
         let session_id = state.session_id.clone();
         let node_id_mapping = graph.derive_node_ids(&session_id, &operation)?;
@@ -715,6 +743,26 @@ impl TurnBoundary {
                 .expect("derived graph node identities are non-empty");
         }
         state.agent_frames = state.session_graph.agent_frame_records(&session_id);
+        let frame_transition = match frame_switch {
+            Some(FrameSwitchCommit {
+                ended,
+                carries,
+                committing,
+            }) => {
+                let ended = ended.map(|ended| {
+                    node_id_mapping
+                        .iter()
+                        .find(|(draft, _)| draft == ended.as_str())
+                        .map(|(_, derived)| {
+                            crate::FrameNodeId::new(derived.clone())
+                                .expect("derived graph node identities are non-empty")
+                        })
+                        .unwrap_or(ended)
+                });
+                committed_frame_transition(state, ended, carries, &committing)?
+            }
+            None => None,
+        };
         let persisted_node_ids = graph
             .nodes()
             .iter()
@@ -750,6 +798,7 @@ impl TurnBoundary {
             commit.root_terminal = root_terminal.map(Box::new);
         }
         commit.park_root = park_root;
+        commit.frame_transition = frame_transition;
         // Cancellation-intent retries are progress-fenced: every refusal
         // proves a newer durable intent revision. Refresh only that snapshot:
         // the settlement and materialized cancellation evidence are already

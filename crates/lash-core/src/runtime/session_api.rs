@@ -789,6 +789,10 @@ impl LashRuntime {
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         let services = self.runtime_session_services()?;
         let compaction_boundary = scoped_effect_controller.scope_id().to_string();
+        // The frame a compaction switch ends, and the execution that commits
+        // the switch and gates its cleanup (ADR 0113 §3.1).
+        let compacted_frame = self.state.current_frame_node_id.clone();
+        let compaction_scope = scoped_effect_controller.execution_scope().clone();
         let Some(session) = self.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(
                 "runtime session not available".to_string(),
@@ -860,7 +864,11 @@ impl LashRuntime {
         // a successful frame switch: a compaction that produced no summary or
         // failed outright can still have staged billed usage into the shared
         // ledger, and this boundary is the only place it persists.
-        let settlement = Box::pin(self.settle_pending_compaction_usage()).await;
+        let frame_switch = matches!(outcome, Ok(true)).then_some(CompactionFrameSwitch {
+            ended: compacted_frame,
+            committing: compaction_scope,
+        });
+        let settlement = Box::pin(self.settle_pending_compaction_usage(frame_switch)).await;
         match (outcome, settlement) {
             (Ok(opened), Ok(())) => Ok(opened),
             (Ok(_), Err(err)) | (Err(err), Ok(())) => Err(err),
@@ -942,7 +950,10 @@ impl LashRuntime {
     /// state persists at this explicit boundary with the same content-derived
     /// operation, so a retried compact_context reuses byte-identical row
     /// identities.
-    async fn settle_pending_compaction_usage(&mut self) -> Result<(), PluginOperationInvokeError> {
+    async fn settle_pending_compaction_usage(
+        &mut self,
+        frame_switch: Option<CompactionFrameSwitch>,
+    ) -> Result<(), PluginOperationInvokeError> {
         let Some(store) = self.services.store.clone() else {
             return Ok(());
         };
@@ -975,7 +986,7 @@ impl LashRuntime {
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         }
         let fleet_format = self.fleet_format();
-        let (commit, persisted_node_ids) =
+        let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
                 &mut self.state,
                 staged.deltas(),
@@ -984,6 +995,19 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        // A compaction that opened a frame ends the one it left, with no
+        // carries: the open cleared execution state, and only `continue_as`
+        // carries values (ADR 0113 §3.1).
+        let switched = frame_switch.is_some();
+        if let Some(CompactionFrameSwitch { ended, committing }) = frame_switch {
+            commit.frame_transition = super::turn_boundary::committed_frame_transition(
+                &self.state,
+                ended,
+                Vec::new(),
+                &committing,
+            )
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        }
         let commit_result = commit_runtime_state_without_session_lease(
             store,
             commit,
@@ -1020,6 +1044,38 @@ impl LashRuntime {
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         self.state.apply_persisted_commit_result(commit_result);
         self.state.mark_node_ids_persisted(persisted_node_ids);
+        if switched {
+            self.restore_code_executor_after_frame_switch().await?;
+        }
+        Ok(())
+    }
+
+    /// Restore the live protocol session from the committed state after a
+    /// frame switch, so the live globals match the durable ones: the switch
+    /// cleared execution state, and the executor must not keep the ended
+    /// frame's values (ADR 0113 §3.1).
+    async fn restore_code_executor_after_frame_switch(
+        &mut self,
+    ) -> Result<(), PluginOperationInvokeError> {
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        let protocol_session = Arc::clone(session.plugins().protocol_session());
+        let session_id = self.state.session_id.clone();
+        let view = crate::plugin::ProtocolSessionRestoreView::new(&self.state)
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        let restored = protocol_session
+            .restore_session(
+                crate::plugin::ProtocolSessionContext::new(session, &session_id),
+                view,
+            )
+            .await;
+        if let Err(err) = restored {
+            self.invalidate_resident_session_state();
+            return Err(PluginOperationInvokeError::Unknown(format!(
+                "failed to restore the protocol session after a compaction frame switch: {err}"
+            )));
+        }
         Ok(())
     }
 
@@ -1644,6 +1700,14 @@ pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
         RuntimeErrorCode::StoreCommitFailed,
         "queued turn input requires a persistent runtime store",
     )
+}
+
+/// The frame switch an administrative compaction commits (ADR 0113 §3.1):
+/// the frame it left, and the compaction's own execution, which gates the
+/// ended frame's cleanup.
+struct CompactionFrameSwitch {
+    ended: Option<crate::FrameNodeId>,
+    committing: crate::ExecutionScope,
 }
 
 #[cfg(test)]

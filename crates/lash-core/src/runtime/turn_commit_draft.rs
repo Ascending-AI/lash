@@ -40,6 +40,13 @@ pub(in crate::runtime) struct RecordedFrameSwitch {
     outcome: crate::OpenAgentFrameResult,
 }
 
+impl RecordedFrameSwitch {
+    /// The nodes the switch's fresh frame starts with.
+    pub(in crate::runtime) fn initial_nodes(&self) -> &[crate::SessionAppendNode] {
+        &self.request.initial_nodes
+    }
+}
+
 #[derive(Debug)]
 struct TurnGraphAppendDraftInner {
     /// Node ids on the resident active path when the turn began, plus every

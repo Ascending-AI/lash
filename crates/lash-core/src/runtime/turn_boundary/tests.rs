@@ -179,7 +179,9 @@ fn frame_switch_commit_input<'a>(
         tool_calls: &[],
         omitted: None,
         plugins: None,
-        execution_state_update: ExecutionStateUpdate::Clear,
+        execution_state_update: ExecutionStateUpdate::Clear {
+            carries: Vec::new(),
+        },
         agent_frame_switch_materializes: true,
         store: Some(store),
         usage_deltas: &[],
@@ -888,7 +890,9 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             tool_calls: &[],
             omitted: None,
             plugins: None,
-            execution_state_update: ExecutionStateUpdate::Clear,
+            execution_state_update: ExecutionStateUpdate::Clear {
+                carries: Vec::new(),
+            },
             agent_frame_switch_materializes: true,
             store: Some(&store),
             usage_deltas: &[],

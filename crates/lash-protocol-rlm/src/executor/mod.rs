@@ -164,6 +164,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     // unboxed context held across the cell would size every caller's future.
     let seal_ctx = Box::new(ctx.clone());
     let prints = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let frame_artifact_store = artifact_store.clone();
     let mut response = Box::pin(execute_code_inner(
         dialect,
         state,
@@ -181,6 +182,20 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
         Arc::clone(&prints),
     ))
     .await;
+    // Every module a global of this frame references is held by the frame
+    // (I-frame, ADR 0113 §3.1): a value the cell bound or a tool returned
+    // outlives the execution that published its module.
+    if !seal_ctx.is_cancelled() {
+        let _phase = seal_ctx.named_phase("rlm_lashlang.hold_frame_modules");
+        if let Err(err) = hold_global_modules(state, &seal_ctx, &frame_artifact_store).await
+            && response.error.is_none()
+        {
+            response.error = Some(lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Host,
+                format!("failed to keep lashlang module artifacts for this frame: {err}"),
+            ));
+        }
+    }
     if let Ok(cell) = cell.as_ref()
         && !seal_ctx.is_cancelled()
         && !seal_ctx.has_nested_effect_error()
@@ -633,16 +648,10 @@ async fn execute_code_inner(
     if let Ok(cell) = cell.as_ref() {
         cell.ran_module(linked_module.artifact.module_ref().to_string());
     }
-    if !linked_module.artifact.exports().processes.is_empty()
-        && !state
-            .stored_lashlang_modules
-            .contains(linked_module.artifact.module_ref())
-    {
+    if !linked_module.artifact.exports().processes.is_empty() {
         let stored = {
             let _phase = ctx.named_phase("rlm_lashlang.store_module_artifact");
-            artifact_store
-                .publish_module_artifact(&ctx.artifact_owner(), &linked_module.artifact)
-                .await
+            publish_cell_module(state, &ctx, &artifact_store, &linked_module.artifact).await
         };
         if let Err(err) = stored {
             return exec_setup_failure_or_stop(
@@ -652,9 +661,6 @@ async fn execute_code_inner(
                 format!("failed to store lashlang module artifact: {err}"),
             );
         }
-        state
-            .stored_lashlang_modules
-            .insert(linked_module.artifact.module_ref().clone());
     }
     let compiled = cached_program.compiled_program();
 
@@ -759,6 +765,123 @@ async fn execute_code_inner(
         }
     };
     exec_response_from(host.into_collected(), None, terminal_finish)
+}
+
+/// The environment of the frame this execution was admitted on: the
+/// referrer that holds every module the frame's globals reference.
+fn frame_environment(ctx: &RuntimeExecutionContext<'_>) -> Option<lash_core::FrameEnvironmentId> {
+    let scope = ctx.session_scope();
+    Some(lash_core::FrameEnvironmentId::new(
+        scope.session_id,
+        scope.agent_frame_id?,
+    ))
+}
+
+/// Why a frame could not hold a module.
+enum FrameHoldError {
+    /// The frame has ended: only a replay of the turn that switched away
+    /// from it runs here, and the frame's globals are gone, so no reader
+    /// needs the edge (ADR 0113 §4.1).
+    Ended,
+    Store(lash_core::ArtifactStoreError),
+}
+
+/// Add the frame's edge to a stored module.
+async fn acquire_frame_edge(
+    frame: &lash_core::FrameEnvironmentId,
+    artifact_store: &lashlang::LashlangArtifacts,
+    module_ref: &lashlang::ModuleRef,
+) -> Result<(), FrameHoldError> {
+    let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::FrameEnvironment(
+        frame.clone(),
+    ))
+    .map_err(|error| {
+        FrameHoldError::Store(lash_core::ArtifactStoreError::Backend(error.to_string()))
+    })?;
+    match artifact_store
+        .acquire_module_artifact(&claim, module_ref)
+        .await
+    {
+        Ok(()) => Ok(()),
+        Err(lash_core::ArtifactStoreError::ReferrerEnded { .. }) => Err(FrameHoldError::Ended),
+        Err(error) => Err(FrameHoldError::Store(error)),
+    }
+}
+
+/// Publish a cell's module under the cell's execution, then hold it in the
+/// frame (ADR 0113 §3.1). The execution edge protects the bytes while the
+/// cell's journal may replay; the frame edge keeps them for the globals that
+/// name them. A module the frame already holds is not published again.
+async fn publish_cell_module(
+    state: &mut RlmExecutionState,
+    ctx: &RuntimeExecutionContext<'_>,
+    artifact_store: &lashlang::LashlangArtifacts,
+    artifact: &lashlang::ModuleArtifact,
+) -> Result<(), String> {
+    let frame = frame_environment(ctx);
+    let module_ref = artifact.module_ref();
+    if frame
+        .as_ref()
+        .is_some_and(|frame| state.frame_holds(frame, module_ref))
+    {
+        return Ok(());
+    }
+    let claim = ctx.execution_claim().map_err(|error| error.to_string())?;
+    artifact_store
+        .publish_module_artifact(&claim, artifact)
+        .await
+        .map_err(|error| error.to_string())?;
+    let Some(frame) = frame else {
+        return Ok(());
+    };
+    match acquire_frame_edge(&frame, artifact_store, module_ref).await {
+        Ok(()) => {
+            state.record_frame_hold(&frame, module_ref.clone());
+            Ok(())
+        }
+        Err(FrameHoldError::Ended) => Ok(()),
+        Err(FrameHoldError::Store(error)) => Err(error.to_string()),
+    }
+}
+
+/// Hold in the frame every module a global references (ADR 0113 §3.1). It
+/// covers the definitions a cell bound, and the ones a tool returned into a
+/// global. A module the frame already holds is skipped, so after the first
+/// cell of a process lifetime this reads the globals and writes nothing.
+///
+/// A module no store holds is left alone: a value naming bytes that were
+/// never published, or were reclaimed, cannot be revived by an edge, and a
+/// start from it refuses typed.
+async fn hold_global_modules(
+    state: &mut RlmExecutionState,
+    ctx: &RuntimeExecutionContext<'_>,
+    artifact_store: &lashlang::LashlangArtifacts,
+) -> Result<(), String> {
+    let Some(frame) = frame_environment(ctx) else {
+        return Ok(());
+    };
+    let referenced = state
+        .rlm
+        .globals()
+        .iter()
+        .flat_map(|(_, value)| lashlang::referenced_module_refs(value))
+        .collect::<BTreeSet<_>>();
+    for module_ref in referenced {
+        if state.frame_holds(&frame, &module_ref) {
+            continue;
+        }
+        match acquire_frame_edge(&frame, artifact_store, &module_ref).await {
+            Ok(())
+            | Err(FrameHoldError::Store(lash_core::ArtifactStoreError::ArtifactMissing {
+                ..
+            })) => {
+                state.record_frame_hold(&frame, module_ref);
+            }
+            Err(FrameHoldError::Ended) => return Ok(()),
+            Err(FrameHoldError::Store(error)) => return Err(error.to_string()),
+        }
+    }
+    Ok(())
 }
 
 fn process_handle_names(globals: &lashlang::Record) -> BTreeSet<String> {

@@ -354,6 +354,14 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
         self.state.execution_state_dirty()
     }
 
+    async fn frame_switch_carries(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+        initial_nodes: &[lash_core::SessionAppendNode],
+    ) -> Result<Vec<lash_core::ArtifactName>, SessionError> {
+        Ok(frame_switch_carries(initial_nodes))
+    }
+
     fn executable_generation(&self) -> Option<lash_core::ExecutableGeneration> {
         Some(lash_lashlang_runtime::lashlang_cell_generation())
     }
@@ -409,6 +417,38 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
     ) -> Result<(), SessionError> {
         self.state.settle_code_execution(disposition).await
     }
+}
+
+/// The module artifacts a frame switch carries (ADR 0113 §3.1): every module
+/// a value in the switch's seed and globals events references. Only these
+/// survive into the successor frame; the ended frame's other modules are
+/// severed once the switching turn settles.
+fn frame_switch_carries(nodes: &[lash_core::SessionAppendNode]) -> Vec<lash_core::ArtifactName> {
+    let mut modules = BTreeSet::new();
+    for node in nodes {
+        let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node else {
+            continue;
+        };
+        let values = match decode_rlm_protocol_event(event) {
+            Some(RlmProtocolEvent::RlmSeed(seed)) => serde_json::to_value(&seed),
+            Some(RlmProtocolEvent::RlmGlobalsPatch(patch)) => serde_json::to_value(&patch),
+            _ => continue,
+        };
+        // Both bodies are JSON maps, so encoding them cannot fail; a body
+        // that did would carry nothing.
+        if let Ok(values) = values {
+            modules.extend(lashlang::referenced_module_refs(
+                &crate::projection::json_to_flow_value(values),
+            ));
+        }
+    }
+    modules
+        .into_iter()
+        .map(|module_ref| lash_core::ArtifactName {
+            store: lash_core::ArtifactStoreId::LashlangModule,
+            artifact_ref: module_ref.to_string(),
+        })
+        .collect()
 }
 
 pub(crate) fn reject_reserved_projected_binding_names(
