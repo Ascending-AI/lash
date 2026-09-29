@@ -450,10 +450,7 @@ fn read_view_snapshot_projects_frame_identity_from_the_graph() {
     state.ensure_agent_frame_initialized();
     assert!(state.current_frame_node_id.is_some());
 
-    let projected = state
-        .read_view()
-        .expect("runtime frame scope resolves")
-        .to_snapshot();
+    let projected = state.read_view().to_snapshot();
 
     assert_eq!(
         projected.current_frame_node_id, state.current_frame_node_id,
@@ -759,21 +756,21 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
 
     // A failed settlement leaves only the in-memory execution view. A
     // subsequent head reload and recorded replay must still commit the head.
-    let head = crate::store::SessionHead {
-        session_id: state.session_id.clone(),
-        head_revision: 1,
-        current_frame_node_id: None,
-        pending_follow_on: None,
-        graph: state.session_graph.clone(),
-        config: sticky.clone(),
-        checkpoint_ref: None,
-        token_ledger: vec![],
-    };
+    let head = crate::store::SessionWindowRead::new(
+        state.session_id.clone(),
+        1,
+        sticky.clone(),
+        None,
+        crate::SessionGraph::default(),
+        None,
+        None,
+        crate::SessionUsageTotals::default(),
+    )
+    .expect("head window");
     let live_owned = LiveOwnedSessionFacts::of(&state.policy);
     adopt_durable_head(
         &mut state,
-        &head,
-        None,
+        head.clone(),
         live_owned,
         crate::store::FleetFormat::current(),
     )
@@ -790,8 +787,7 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
     let live_owned = LiveOwnedSessionFacts::of(&state.policy);
     adopt_durable_head(
         &mut state,
-        &head,
-        None,
+        head.clone(),
         live_owned,
         crate::store::FleetFormat::current(),
     )

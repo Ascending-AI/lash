@@ -491,16 +491,6 @@ pub struct PersistedTurnState {
 }
 
 #[derive(Clone, Debug)]
-pub struct SessionMessageTreeNode {
-    pub node_id: NodeId,
-    pub parent_message_node_id: Option<NodeId>,
-    pub message: Message,
-    pub timestamp: String,
-    pub children: Vec<SessionMessageTreeNode>,
-    pub active: bool,
-}
-
-#[derive(Clone, Debug)]
 pub struct ActiveReadReplacement {
     pub(crate) leaf_node_id: Option<NodeId>,
     pub(crate) new_tail_nodes: Vec<SessionNodeRecord>,
@@ -522,18 +512,6 @@ pub struct SessionReadModel {
     pub active_events: Arc<Vec<SessionHistoryRecord>>,
     pub messages: Arc<Vec<Message>>,
     pub prompt_render_cache: Arc<BaseRenderCache>,
-}
-
-/// Failure to resolve an explicitly requested frame on the active session path.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum SessionGraphScopeError {
-    /// The requested identity does not name a frame on the active path.
-    #[error("frame `{frame_node_id}` was not found on the active session path")]
-    FrameNotFound {
-        /// Requested durable frame identity.
-        frame_node_id: crate::FrameNodeId,
-    },
 }
 
 /// The resident-id universe an append builder checks draft ids against.
@@ -1218,27 +1196,15 @@ impl SessionGraph {
             .collect())
     }
 
-    /// `None` is the only unscoped representation. A requested frame must name
-    /// a `FrameOpen` node on the active path.
-    pub fn read_model(
-        &self,
-        frame_node_id: Option<&crate::FrameNodeId>,
-    ) -> Result<SessionReadModel, SessionGraphScopeError> {
-        let cache = self.cache();
-        let Some(frame_node_id) = frame_node_id else {
-            return Ok(cache.active_read_model());
-        };
-        let frame_exists_on_active_path = cache.active_path_indices.iter().any(|index| {
-            let node = &self.nodes[*index];
-            node.node_id == frame_node_id.as_str()
-                && matches!(node.payload, SessionNodePayload::FrameOpen { .. })
-        });
-        if !frame_exists_on_active_path {
-            return Err(SessionGraphScopeError::FrameNotFound {
-                frame_node_id: frame_node_id.clone(),
-            });
-        }
-        Ok(cache.scoped_read_model(self, frame_node_id))
+    /// The one shared projection of the active path, from the nearest
+    /// `FrameOpen` ancestor of the leaf (the current frame, whether it is the
+    /// window base or a later pending `FrameOpen`) to the leaf. A graph with
+    /// no `FrameOpen` on its active path projects the whole path.
+    ///
+    /// Two calls with no append between them hand out the same `Arc`s
+    /// (ADR 0112 §9).
+    pub fn read_model(&self) -> SessionReadModel {
+        self.cache().active_read_model()
     }
 
     /// Resolve the canonical current frame for `leaf_node_id`.
@@ -1301,7 +1267,10 @@ impl SessionGraph {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<crate::AgentFrameRecord>, crate::StoreError> {
-        let mut previous_frame_node_id = None;
+        // A window's base continues the frame below it (ADR 0112 §9).
+        let mut previous_frame_node_id = self
+            .anchor()
+            .and_then(|anchor| anchor.previous_frame_node_id.clone());
         let mut frames = Vec::new();
         for node in self.try_active_path_nodes()? {
             let Some((reason, assignment, protocol_turn_options)) = node.frame_open() else {
@@ -1457,36 +1426,6 @@ impl SessionGraph {
         Ok(cache.active_path_indices.contains(&node_index))
     }
 
-    /// This is a memory-residency trim. It does not create a durable fork or
-    /// move a persisted session head. The caller must have validated the source graph.
-    pub fn trim_to_active_path(&self) -> SessionGraph {
-        let indices = &self.cache().active_path_indices;
-        // Selecting the ancestry of a validated graph preserves unique ids, complete parents, and
-        // the existing leaf, so repeating the full validation on this hot read projection is
-        // unnecessary. The trimmed graph shares the source's immutable records.
-        SessionGraph::from_shared_validated_parts(
-            indices
-                .iter()
-                .map(|index| Arc::clone(&self.nodes[*index]))
-                .collect(),
-            self.leaf_node_id.clone(),
-            self.anchor.clone(),
-        )
-    }
-
-    pub fn try_trim_to_active_path(&self) -> Result<SessionGraph, crate::StoreError> {
-        let by_id = graph_node_indices(self)?;
-        let mut path = ancestry_indices(self, &by_id, self.leaf_node_id.as_deref())?;
-        path.reverse();
-        SessionGraph::from_shared_anchored_nodes(
-            path.into_iter()
-                .map(|index| Arc::clone(&self.nodes[index]))
-                .collect(),
-            self.leaf_node_id.clone(),
-            self.anchor.clone(),
-        )
-    }
-
     pub fn find_node(&self, node_id: &str) -> Option<&SessionNodeRecord> {
         self.cache()
             .by_id
@@ -1494,38 +1433,24 @@ impl SessionGraph {
             .map(|idx| self.nodes[idx].as_ref())
     }
 
-    /// Rewrites the active readable tail and moves the resident leaf while retaining historical
-    /// branches and excluding transient replacement messages.
+    /// Rewrites the current frame's readable tail and moves the resident leaf
+    /// while retaining historical branches and excluding transient
+    /// replacement messages.
+    ///
+    /// The rewrite covers the active path from the nearest `FrameOpen`
+    /// ancestor of the leaf, the same span [`Self::read_model`] projects, so
+    /// its cost is proportional to the current frame.
     ///
     /// The resulting graph is a read projection. It must never be committed against an existing
     /// session head because the rewritten tail is not parented from that durable head.
-    /// Rewrites either the whole active readable tail or one requested frame.
-    ///
-    /// Resolution happens before mutation, so a missing requested frame leaves
-    /// the graph unchanged.
-    pub fn rewrite_active_read_tail(
-        &mut self,
-        frame_node_id: Option<&crate::FrameNodeId>,
-        messages: &[Message],
-    ) -> Result<(), SessionGraphScopeError> {
+    pub fn rewrite_active_read_tail(&mut self, messages: &[Message]) {
         let active_path = self.active_path_nodes();
-        let current_nodes = match frame_node_id {
-            None => active_path.as_slice(),
-            Some(frame_node_id) => {
-                let index = active_path
-                    .iter()
-                    .position(|node| {
-                        node.node_id == frame_node_id.as_str()
-                            && matches!(node.payload, SessionNodePayload::FrameOpen { .. })
-                    })
-                    .ok_or_else(|| SessionGraphScopeError::FrameNotFound {
-                        frame_node_id: frame_node_id.clone(),
-                    })?;
-                &active_path[index..]
-            }
-        };
+        let frame_start = active_path
+            .iter()
+            .rposition(|node| matches!(node.payload, SessionNodePayload::FrameOpen { .. }))
+            .unwrap_or(0);
         let replacement = build_active_read_replacement(
-            current_nodes.iter().copied(),
+            active_path[frame_start..].iter().copied(),
             self.append_builder_in_namespace(format!(
                 "unscoped-replacement:{}",
                 self.leaf_node_id.as_deref().unwrap_or("root")
@@ -1537,58 +1462,12 @@ impl SessionGraph {
         data.leaf_node_id = replacement.leaf_node_id;
         data.nodes
             .extend(replacement.new_tail_nodes.into_iter().map(Arc::new));
-        Ok(())
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "frame resolution can only fail for a scoped rewrite, and this one passes `None` as the frame"
-    )]
     pub fn from_active_read_state(messages: &[Message]) -> Self {
         let mut graph = Self::default();
+        graph.rewrite_active_read_tail(messages);
         graph
-            .rewrite_active_read_tail(None, messages)
-            .expect("unscoped replacement cannot fail frame resolution");
-        graph
-    }
-
-    /// Sibling order is the graph's own node order — the durable generation
-    /// order for store-loaded graphs and append order otherwise. Timestamps
-    /// are informational only and never reorder siblings.
-    pub fn message_tree(&self) -> Vec<SessionMessageTreeNode> {
-        let active_node_ids = self
-            .active_path_nodes()
-            .into_iter()
-            .filter(|node| node.message().is_some())
-            .map(|node| node.node_id.clone())
-            .collect::<HashSet<_>>();
-
-        let message_nodes = self
-            .nodes
-            .iter()
-            .filter_map(|node| {
-                let message = node.message()?.clone();
-                let parent_message_node_id =
-                    self.nearest_message_ancestor(node.parent_node_id.as_deref());
-                Some(SessionMessageTreeNode {
-                    node_id: node.node_id.clone(),
-                    parent_message_node_id,
-                    message,
-                    timestamp: node.timestamp.clone(),
-                    children: Vec::new(),
-                    active: active_node_ids.contains(&node.node_id),
-                })
-            })
-            .collect::<Vec<_>>();
-
-        build_tree(message_nodes)
-    }
-
-    fn nearest_message_ancestor(&self, node_id: Option<&str>) -> Option<NodeId> {
-        let idx = self
-            .nearest_ancestor_index(node_id, |node| node.message().is_some())
-            .ok()??;
-        Some(self.nodes[idx].node_id.clone())
     }
 
     fn nearest_ancestor_index(
@@ -1641,28 +1520,6 @@ fn nearest_ancestor_index(
             .and_then(|parent| resolve_index(parent.as_str()));
     }
     Ok(None)
-}
-
-fn build_tree(mut nodes: Vec<SessionMessageTreeNode>) -> Vec<SessionMessageTreeNode> {
-    let mut children_by_parent = HashMap::<Option<NodeId>, Vec<SessionMessageTreeNode>>::new();
-    for node in nodes.drain(..) {
-        children_by_parent
-            .entry(node.parent_message_node_id.clone())
-            .or_default()
-            .push(node);
-    }
-    build_tree_children(None, &mut children_by_parent)
-}
-
-fn build_tree_children(
-    parent_id: Option<NodeId>,
-    children_by_parent: &mut HashMap<Option<NodeId>, Vec<SessionMessageTreeNode>>,
-) -> Vec<SessionMessageTreeNode> {
-    let mut children = children_by_parent.remove(&parent_id).unwrap_or_default();
-    for child in &mut children {
-        child.children = build_tree_children(Some(child.node_id.clone()), children_by_parent);
-    }
-    children
 }
 
 pub fn build_active_read_replacement<'a>(

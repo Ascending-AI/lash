@@ -202,21 +202,8 @@ fn committed_prompt_cold_loads_into_the_runtime_policy() {
         SESSION_HEAD_META_SCHEMA_VERSION,
     )
     .expect("decode committed session head");
-    let restored = persisted_session_state_from_head(
-        SessionHead {
-            session_id: decoded.session_id,
-            head_revision: 7,
-            current_frame_node_id: decoded.current_frame_node_id,
-            pending_follow_on: None,
-            graph: crate::SessionGraph::default(),
-            config: decoded.config,
-            checkpoint_ref: None,
-            token_ledger: Vec::new(),
-        },
-        None,
-        crate::store::FleetFormat::current(),
-    )
-    .expect("cold-load committed session");
+    let restored = persisted_session_state_from_head(decoded.session_id, 7, decoded.config, None)
+        .expect("cold-load committed session");
 
     assert_eq!(restored.policy.prompt, expected_prompt);
 }
@@ -251,21 +238,8 @@ fn committed_generation_cold_loads_into_the_runtime_policy() {
         SESSION_HEAD_META_SCHEMA_VERSION,
     )
     .expect("decode committed session head");
-    let restored = persisted_session_state_from_head(
-        SessionHead {
-            session_id: decoded.session_id,
-            head_revision: 7,
-            current_frame_node_id: decoded.current_frame_node_id,
-            pending_follow_on: None,
-            graph: crate::SessionGraph::default(),
-            config: decoded.config,
-            checkpoint_ref: None,
-            token_ledger: Vec::new(),
-        },
-        None,
-        crate::store::FleetFormat::current(),
-    )
-    .expect("cold-load committed generation");
+    let restored = persisted_session_state_from_head(decoded.session_id, 7, decoded.config, None)
+        .expect("cold-load committed generation");
 
     assert_eq!(restored.policy.generation, expected_generation);
 }

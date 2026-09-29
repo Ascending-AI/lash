@@ -117,12 +117,12 @@ pub struct ProtocolSessionRestoreView {
 }
 
 impl ProtocolSessionRestoreView {
-    pub fn new(state: &RuntimeSessionState) -> Result<Self, crate::SessionGraphScopeError> {
-        Ok(Self {
+    pub fn new(state: &RuntimeSessionState) -> Self {
+        Self {
             current_frame_node_id: state.current_frame_node_id.clone(),
             execution_state: state.execution_state_hydration(),
-            active_events: state.read_view()?.active_events().to_vec(),
-        })
+            active_events: state.read_model().active_events.to_vec(),
+        }
     }
 }
 

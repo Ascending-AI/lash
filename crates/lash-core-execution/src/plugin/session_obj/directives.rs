@@ -221,10 +221,7 @@ impl PluginSession {
                 }
                 AfterTurnPluginDirective::EnqueueMessages(directive) => {
                     if updated_messages.is_none() {
-                        let read_view = turn
-                            .state
-                            .read_view()
-                            .map_err(|error| PluginError::Session(error.to_string()))?;
+                        let read_view = turn.state.read_view();
                         updated_messages = Some(crate::MessageSequence::from_base(
                             read_view.messages().to_vec().into(),
                         ));
@@ -246,9 +243,7 @@ impl PluginSession {
             }
         }
         if let Some(messages) = updated_messages.as_ref() {
-            turn.state
-                .replace_active_read_state(messages.as_slice())
-                .map_err(|error| PluginError::Session(error.to_string()))?;
+            turn.state.replace_active_read_state(messages.as_slice());
         }
 
         if self.has_runtime_event_hooks()

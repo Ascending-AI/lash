@@ -175,7 +175,7 @@ pub trait RuntimeStoreTestDriveExt: crate::RuntimeStore {
     async fn seal_drive_epoch_for_test(
         &self,
         session_id: &SessionId,
-        _owner: &crate::LeaseOwnerIdentity,
+        _owner: &crate::store::LeaseOwnerIdentity,
         _executor_id: &str,
         _old_lease_ttl_ms: u64,
     ) -> Result<DriveSealTestOutcome, StoreError> {

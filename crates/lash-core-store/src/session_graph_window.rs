@@ -114,6 +114,102 @@ impl SessionGraph {
         )
     }
 
+    /// Drop the durable nodes below the current frame and re-anchor the
+    /// graph at the current `FrameOpen` (ADR 0112 §9). Returns the dropped
+    /// ids, or `None` when nothing is dropped.
+    ///
+    /// The current frame is the last `FrameOpen` on the active path. The new
+    /// anchor is derived from the old one (or, for a graph built in memory,
+    /// from its root at generation 0): the generation plus the path offset,
+    /// the `FrameOpen`'s parent, and the frame of that parent. A node is
+    /// dropped only when it is in `durable` and is not the `FrameOpen` or a
+    /// descendant of it. Nothing is dropped while the `FrameOpen` itself is
+    /// pending, while a kept node would name a dropped parent, or when the
+    /// parent's frame cannot be resolved from the graph.
+    pub(crate) fn retire_below_current_frame(
+        &mut self,
+        durable: &HashSet<NodeId>,
+    ) -> Option<Vec<NodeId>> {
+        let path = crate::facade_support::SessionGraphFacadeOps::active_path_nodes(self);
+        let frame_offset = path.iter().rposition(|node| node.frame_open().is_some())?;
+        if frame_offset == 0 {
+            return None;
+        }
+        let frame = path[frame_offset];
+        if !durable.contains(&frame.node_id) {
+            return None;
+        }
+        let root = path.first()?;
+        let base_generation = match self.anchor() {
+            Some(anchor) => anchor.generation,
+            None if root.parent_node_id.is_none() => 0,
+            None => return None,
+        };
+        let previous_offset = path[..frame_offset]
+            .iter()
+            .rposition(|node| node.frame_open().is_some())?;
+        let previous_frame_node_id =
+            crate::FrameNodeId::new(path[previous_offset].node_id.as_str()).ok()?;
+        let frame_node_id = crate::FrameNodeId::new(frame.node_id.as_str()).ok()?;
+        let external_parent = frame.parent_node_id.clone()?;
+        let mut kept_ids = HashSet::new();
+        kept_ids.insert(frame.node_id.as_str());
+        for node in &path[frame_offset + 1..] {
+            kept_ids.insert(node.node_id.as_str());
+        }
+        let below = path[..frame_offset]
+            .iter()
+            .map(|node| node.node_id.as_str())
+            .collect::<HashSet<_>>();
+        // Off-path nodes: a durable one below the frame goes, a pending one
+        // stays, and so does anything that descends from a kept node.
+        let mut dropped = Vec::new();
+        for node in self.nodes.iter() {
+            let id = node.node_id.as_str();
+            if kept_ids.contains(id) {
+                continue;
+            }
+            if below.contains(id) || durable.contains(&node.node_id) {
+                if durable.contains(&node.node_id) {
+                    dropped.push(node.node_id.clone());
+                } else {
+                    return None;
+                }
+            } else {
+                kept_ids.insert(id);
+            }
+        }
+        if dropped.is_empty() {
+            return None;
+        }
+        let dropped_ids = dropped.iter().map(NodeId::as_str).collect::<HashSet<_>>();
+        let kept = self
+            .nodes
+            .iter()
+            .filter(|node| !dropped_ids.contains(node.node_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if kept.iter().any(|node| {
+            node.node_id != frame.node_id
+                && node
+                    .parent_node_id
+                    .as_deref()
+                    .is_some_and(|parent| dropped_ids.contains(parent))
+        }) {
+            return None;
+        }
+        let anchor = WindowAnchor {
+            frame_node_id,
+            generation: base_generation + frame_offset as u64,
+            external_parent: Some(external_parent),
+            previous_frame_node_id: Some(previous_frame_node_id),
+        };
+        let leaf_node_id = self.leaf_node_id.clone();
+        let rebuilt = Self::from_shared_anchored_nodes(kept, leaf_node_id, Some(anchor)).ok()?;
+        *self = rebuilt;
+        Some(dropped)
+    }
+
     /// The window anchor of a store-read graph, `None` for a graph built in
     /// memory with no store.
     pub fn anchor(&self) -> Option<&WindowAnchor> {

@@ -607,8 +607,9 @@ pub struct SessionSnapshot {
     /// a snapshot does not write this field; the resident component set wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_state_ref: Option<crate::store::BlobRef>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub token_ledger: Vec<crate::TokenLedgerEntry>,
+    /// The session's usage totals (ADR 0112 §8).
+    #[serde(default)]
+    pub usage: crate::SessionUsageTotals,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_ref: Option<crate::store::BlobRef>,
 }
@@ -630,33 +631,26 @@ impl SessionSnapshot {
             plugin_state_ref: None,
             plugin_state_generations: Default::default(),
             execution_state_ref: None,
-            token_ledger: Vec::new(),
+            usage: crate::SessionUsageTotals::default(),
             checkpoint_ref: None,
         }
     }
 }
 impl SessionSnapshot {
-    pub fn read_model(
-        &self,
-    ) -> Result<crate::session_graph::SessionReadModel, crate::SessionGraphScopeError> {
-        self.session_graph
-            .read_model(self.current_frame_node_id.as_ref())
+    pub fn read_model(&self) -> crate::session_graph::SessionReadModel {
+        self.session_graph.read_model()
     }
 
     /// Exposes read view to store and durable-substrate implementors while snapshotting or
     /// restoring durable session state.
-    pub fn read_view(&self) -> Result<crate::SessionReadView, crate::SessionGraphScopeError> {
+    pub fn read_view(&self) -> crate::SessionReadView {
         crate::SessionReadView::from_snapshot(self)
     }
 
-    /// Replaces the active frame's readable message tail for store implementors restoring a
+    /// Replaces the current frame's readable message tail for store implementors restoring a
     /// snapshot; transient messages are not inserted into the graph.
-    pub fn replace_active_read_state(
-        &mut self,
-        messages: &[crate::Message],
-    ) -> Result<(), crate::SessionGraphScopeError> {
-        self.session_graph
-            .rewrite_active_read_tail(self.current_frame_node_id.as_ref(), messages)?;
+    pub fn replace_active_read_state(&mut self, messages: &[crate::Message]) {
+        self.session_graph.rewrite_active_read_tail(messages);
         self.current_frame_node_id = self
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
@@ -665,7 +659,6 @@ impl SessionSnapshot {
                     .expect("a graph node identity selected as a frame is non-empty")
             });
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
-        Ok(())
     }
 
     /// Appends non-transient messages after the active leaf for store implementors applying a

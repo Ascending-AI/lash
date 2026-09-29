@@ -60,15 +60,3 @@ pub fn merge_token_ledger_entry_checked(
     existing.usage = merged;
     Ok(())
 }
-
-/// Folds durable token-ledger rows through the same checked merge used by the
-/// runtime's staging and final-commit paths.
-pub fn merge_token_ledger_entries_checked(
-    entries: Vec<crate::TokenLedgerEntry>,
-) -> Result<Vec<crate::TokenLedgerEntry>, StoreError> {
-    let mut merged = Vec::new();
-    for entry in entries {
-        merge_token_ledger_entry_checked(&mut merged, entry)?;
-    }
-    Ok(merged)
-}

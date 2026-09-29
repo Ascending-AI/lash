@@ -10,8 +10,6 @@ use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
 use crate::session_model::{Message, SessionPolicy, TokenUsage, plugin_message_to_message};
 use crate::{PersistedTurnState, SessionSnapshot};
 
-use super::usage::TokenLedgerEntry;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 enum CheckpointComponentCompleteness {
     Complete,
@@ -664,12 +662,13 @@ pub struct RuntimeSessionState {
     pub authority: Box<RuntimeSessionAuthority>,
     #[serde(skip, default)]
     pub checkpoint_components: RuntimeCheckpointComponents,
-    /// Cost-accounting ledger. Every LLM call (parent turns, subagent
-    /// children, compaction, observers, background helpers) contributes an
-    /// entry keyed by `(source, model)`. Separate from `token_usage`
-    /// which tracks context-window accounting only.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub token_ledger: Vec<TokenLedgerEntry>,
+    /// Cost-accounting totals. Every LLM call (parent turns, subagent
+    /// children, compaction, observers, background helpers) folds into one
+    /// row per `(source, model)`, plus the holes still owed usage (ADR 0112
+    /// §8). Separate from `token_usage`, which tracks context-window
+    /// accounting only.
+    #[serde(default)]
+    pub usage: crate::SessionUsageTotals,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_ref: Option<crate::store::BlobRef>,
     /// Store head revision observed by the runtime. Revision zero is the
@@ -713,7 +712,7 @@ impl RuntimeSessionState {
             protocol_turn_options: crate::ProtocolTurnOptions::default(),
             authority: Box::default(),
             checkpoint_components: RuntimeCheckpointComponents::complete_empty(),
-            token_ledger: Vec::new(),
+            usage: crate::SessionUsageTotals::default(),
             checkpoint_ref: None,
             head_revision: 0,
             config_revision: 0,
@@ -755,7 +754,7 @@ impl RuntimeSessionState {
             protocol_turn_options: snapshot.protocol_turn_options,
             authority: Box::default(),
             checkpoint_components,
-            token_ledger: snapshot.token_ledger,
+            usage: snapshot.usage,
             checkpoint_ref: snapshot.checkpoint_ref,
             head_revision: 0,
             config_revision: 0,
@@ -788,7 +787,7 @@ impl RuntimeSessionState {
                 .cloned()
                 .unwrap_or_default(),
             execution_state_ref: self.execution_state_ref().cloned(),
-            token_ledger: self.token_ledger.clone(),
+            usage: self.usage.clone(),
             checkpoint_ref: self.checkpoint_ref.clone(),
         }
     }
@@ -807,34 +806,27 @@ impl RuntimeSessionState {
         self.token_usage = snapshot.token_usage.clone();
         self.last_prompt_usage = snapshot.last_prompt_usage.clone();
         self.protocol_turn_options = snapshot.protocol_turn_options.clone();
-        self.token_ledger = snapshot.token_ledger.clone();
+        self.usage = snapshot.usage.clone();
         self.checkpoint_ref = snapshot.checkpoint_ref.clone();
     }
 
-    /// Folds durable token-ledger entries into a per-source report for protocol and administration
-    /// embedders without mutating the ledger.
+    /// The per-source report over the session's usage totals, for protocol and administration
+    /// embedders.
     pub fn usage_report(&self) -> super::usage::SessionUsageReport {
-        super::usage::SessionUsageReport::from_entries(&self.token_ledger)
+        self.usage.report()
     }
 
-    pub fn read_model(
-        &self,
-    ) -> Result<crate::session_graph::SessionReadModel, crate::SessionGraphScopeError> {
-        self.session_graph
-            .read_model(self.current_frame_node_id.as_ref())
+    /// The current frame's shared projection (ADR 0112 §9).
+    pub fn read_model(&self) -> crate::session_graph::SessionReadModel {
+        self.session_graph.read_model()
     }
 
     /// Replaces the current frame's readable message tail for protocol implementors restoring
     /// state; transient messages are excluded and the frame projection is refreshed.
-    pub fn replace_active_read_state(
-        &mut self,
-        messages: &[Message],
-    ) -> Result<(), crate::SessionGraphScopeError> {
+    pub fn replace_active_read_state(&mut self, messages: &[Message]) {
         self.ensure_agent_frame_initialized();
-        self.session_graph
-            .rewrite_active_read_tail(self.current_frame_node_id.as_ref(), messages)?;
+        self.session_graph.rewrite_active_read_tail(messages);
         self.refresh_current_frame_projection();
-        Ok(())
     }
 
     pub fn append_active_read_delta(&mut self, messages: &[Message]) {
@@ -860,7 +852,7 @@ impl RuntimeSessionState {
         self.refresh_current_frame_projection();
     }
 
-    pub fn read_view(&self) -> Result<crate::SessionReadView, crate::SessionGraphScopeError> {
+    pub fn read_view(&self) -> crate::SessionReadView {
         crate::SessionReadView::from_persisted_state(self)
     }
 
@@ -965,11 +957,38 @@ impl RuntimeSessionState {
         }
     }
 
+    /// Record the nodes an accepted commit receipt made durable, then retire
+    /// the durable nodes below the current frame
+    /// ([`Self::retire_below_current_frame`]).
     pub fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
     where
         I: IntoIterator<Item = crate::NodeId>,
     {
         self.persisted_node_ids.extend(node_ids);
+        self.retire_below_current_frame();
+    }
+
+    /// Keep the resident graph to the current frame (ADR 0112 §9).
+    ///
+    /// When the current `FrameOpen` is not the window base, the graph is
+    /// rebuilt from the base's records at and after that `FrameOpen`, under
+    /// an anchor derived from the old one: the base generation plus the path
+    /// offset, the `FrameOpen`'s parent, and that parent's frame. Only nodes
+    /// that are both durable and below the current `FrameOpen` are dropped;
+    /// a pending node stays until it is durable, and the trim waits while a
+    /// pending node still hangs off a node it would drop. When the base is
+    /// already current, this does nothing.
+    pub fn retire_below_current_frame(&mut self) {
+        let Some(retired) = self
+            .session_graph
+            .retire_below_current_frame(&self.persisted_node_ids)
+        else {
+            return;
+        };
+        for node_id in &retired {
+            self.persisted_node_ids.remove(node_id);
+        }
+        self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
     /// Clears in-memory tool, plugin, and execution-state snapshots for protocol implementors after
@@ -1510,43 +1529,59 @@ impl LiveOwnedSessionFacts {
     }
 }
 
-/// Adopt a durable session head (and its checkpoint) as one total operation.
+/// Adopt a durable session window (ADR 0112 §5) as one total operation.
 ///
 /// This is the single home of the head→state mapping (FIG-1875, ruled
 /// head-authoritative): on any adoption the durable head wins for every fact
-/// it carries — graph, frames, config, protocol turn options, checkpoint
-/// progress, authority, and ledger. No resident copy of a durable fact is
+/// it carries — the current frame's window, frames, config, protocol turn
+/// options, checkpoint progress, authority, and usage totals. The resident
+/// graph becomes exactly the window, so residency starts proportional to the
+/// current frame (§9). No resident copy of a durable fact is
 /// preserved; the only survivors are the caller-supplied
 /// [`LiveOwnedSessionFacts`] plus whatever the target state carries for facts
 /// the head does not represent (for example the live-policy flags
 /// `autonomous` and `no_progress_budget`).
 pub fn adopt_durable_head(
     state: &mut RuntimeSessionState,
-    head: &crate::store::SessionHead,
-    checkpoint: Option<crate::store::HydratedSessionCheckpoint>,
+    head: crate::store::SessionWindowRead,
     live_owned: LiveOwnedSessionFacts,
     fleet_format: crate::store::FleetFormat,
 ) -> Result<(), crate::StoreError> {
-    state.session_id = head.session_id.clone();
-    state.session_graph = head.graph.clone();
-    state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
-    state.current_frame_node_id = head.current_frame_node_id.clone();
-    state.pending_follow_on = head.pending_follow_on.clone().map(Box::new);
-    state.checkpoint_ref = head.checkpoint_ref.clone();
-    state.token_ledger = head.token_ledger.clone();
-    state.checkpoint_components = if head.checkpoint_ref.is_some() {
-        RuntimeCheckpointComponents::unproven()
-    } else {
-        RuntimeCheckpointComponents::complete_empty()
-    };
-    state.head_revision = head.head_revision;
-    state.persisted_node_ids = head
-        .graph
+    // Defend against third-party stores that hand back an unvalidated
+    // window; `SessionGraph::from_window` enforces the anchored rules.
+    head.window.validate_resident_integrity()?;
+    let crate::store::SessionWindowRead {
+        session_id,
+        head_revision,
+        config,
+        current_frame_node_id,
+        pending_follow_on,
+        window,
+        checkpoint_ref,
+        checkpoint,
+        usage,
+    } = head;
+    state.session_id = session_id;
+    state.persisted_node_ids = window
         .nodes
         .iter()
         .map(|node| node.node_id.clone())
         .collect();
-    adopt_session_config(state, &head.config);
+    state.session_graph = window;
+    state.agent_frames = state
+        .session_graph
+        .try_agent_frame_records(&state.session_id)?;
+    state.current_frame_node_id = current_frame_node_id;
+    state.pending_follow_on = pending_follow_on.map(Box::new);
+    state.checkpoint_components = if checkpoint_ref.is_some() {
+        RuntimeCheckpointComponents::unproven()
+    } else {
+        RuntimeCheckpointComponents::complete_empty()
+    };
+    state.checkpoint_ref = checkpoint_ref;
+    state.usage = usage;
+    state.head_revision = head_revision;
+    adopt_session_config(state, &config);
     state.authority.committed_config = None;
     state.authority.root_snapshot = None;
     state.authority.resolved_run = None;
@@ -1559,7 +1594,7 @@ pub fn adopt_durable_head(
     // turn-state copy; `None` is a pre-v6-content head, which keeps the
     // checkpoint fallback). FIG-2479.
     apply_session_checkpoint(state, checkpoint, fleet_format)?;
-    if let Some(options) = head.config.protocol_turn_options.as_ref() {
+    if let Some(options) = config.protocol_turn_options.as_ref() {
         state.protocol_turn_options = options.clone();
     }
     Ok(())

@@ -3,28 +3,20 @@ use super::*;
 #[test]
 fn persisted_state_hydrates_provider_id_without_live_provider_rebinding() {
     let state = persisted_session_state_from_head(
-        SessionHead {
-            session_id: SessionId::from("stored"),
-            head_revision: 7,
-            current_frame_node_id: None,
-            pending_follow_on: None,
-            graph: crate::SessionGraph::default(),
-            config: crate::PersistedSessionConfig {
-                provider_id: "stored-provider".to_string(),
-                model: crate::ModelSpec::default(),
-                turn_budget: crate::TurnBudget::Unbounded,
-                prompt: Some(crate::PromptLayer::new()),
-                generation: crate::GenerationOptions::default(),
-                tool_access: crate::SessionToolAccess::default(),
-                subagent: None,
-                protocol_turn_options: None,
-                config_revision: 0,
-            },
-            checkpoint_ref: None,
-            token_ledger: Vec::new(),
+        SessionId::from("stored"),
+        7,
+        crate::PersistedSessionConfig {
+            provider_id: "stored-provider".to_string(),
+            model: crate::ModelSpec::default(),
+            turn_budget: crate::TurnBudget::Unbounded,
+            prompt: Some(crate::PromptLayer::new()),
+            generation: crate::GenerationOptions::default(),
+            tool_access: crate::SessionToolAccess::default(),
+            subagent: None,
+            protocol_turn_options: None,
+            config_revision: 0,
         },
         None,
-        crate::store::FleetFormat::current(),
     )
     .expect("valid persisted state");
 
@@ -184,21 +176,12 @@ fn options(payload: serde_json::Value) -> crate::ProtocolTurnOptions {
     crate::ProtocolTurnOptions::from_payload(payload)
 }
 
-fn head_with_protocol_turn_options(
+fn head_config_with_protocol_turn_options(
     config_options: Option<crate::ProtocolTurnOptions>,
-) -> SessionHead {
+) -> crate::PersistedSessionConfig {
     let mut config = crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
     config.protocol_turn_options = config_options;
-    SessionHead {
-        session_id: SessionId::from("stored"),
-        head_revision: 3,
-        current_frame_node_id: None,
-        pending_follow_on: None,
-        graph: crate::SessionGraph::default(),
-        config,
-        checkpoint_ref: None,
-        token_ledger: Vec::new(),
-    }
+    config
 }
 
 fn checkpoint_with_protocol_turn_options(
@@ -222,9 +205,10 @@ fn head_protocol_turn_options_override_the_checkpoint_copy_on_load() {
         serde_json::json!({"dialect": "stale-checkpoint-copy"}),
     ));
     let state = persisted_session_state_from_head(
-        head_with_protocol_turn_options(Some(head_options.clone())),
+        SessionId::from("stored"),
+        3,
+        head_config_with_protocol_turn_options(Some(head_options.clone())),
         Some(checkpoint),
-        crate::store::FleetFormat::current(),
     )
     .expect("valid persisted state");
     assert_eq!(state.protocol_turn_options, head_options);
@@ -237,9 +221,10 @@ fn absent_head_protocol_turn_options_fall_back_to_the_checkpoint_copy() {
     let checkpoint_options = options(serde_json::json!({"dialect": "checkpoint-copy"}));
     let checkpoint = checkpoint_with_protocol_turn_options(checkpoint_options.clone());
     let state = persisted_session_state_from_head(
-        head_with_protocol_turn_options(None),
+        SessionId::from("stored"),
+        3,
+        head_config_with_protocol_turn_options(None),
         Some(checkpoint),
-        crate::store::FleetFormat::current(),
     )
     .expect("valid persisted state");
     assert_eq!(state.protocol_turn_options, checkpoint_options);

@@ -27,57 +27,61 @@ impl SessionReadView {
                 prompt_render_cache: Arc::new(crate::BaseRenderCache::new()),
             },
             chronological_projection: OnceLock::new(),
-            turn_failure_settlements: Arc::new(Vec::new()),
         }))
     }
 
     /// Builds a `SessionReadView` from snapshot data for store, effect-host, and protocol
     /// implementors while materializing, executing, or persisting a session turn.
-    pub fn from_snapshot(
-        snapshot: &SessionSnapshot,
-    ) -> Result<Self, crate::SessionGraphScopeError> {
-        let read_model = snapshot.read_model()?;
-        Ok(Self(Arc::new(SessionReadState {
+    pub fn from_snapshot(snapshot: &SessionSnapshot) -> Self {
+        let read_model = snapshot.read_model();
+        Self(Arc::new(SessionReadState {
             meta: SessionReadMeta::from_snapshot_ref(snapshot),
             graph: SessionReadGraph::Owned(snapshot.session_graph.clone()),
             read_model,
             chronological_projection: OnceLock::new(),
-            turn_failure_settlements: Arc::new(Vec::new()),
-        })))
+        }))
     }
 
     /// Builds a `SessionReadView` from persisted state data for store and durable-substrate
     /// implementors while validating and applying durable session transitions.
-    pub fn from_persisted_state(
-        state: &RuntimeSessionState,
-    ) -> Result<Self, crate::SessionGraphScopeError> {
-        let graph = state.session_graph.clone();
-        let read_model = state.read_model()?;
-        Ok(Self(Arc::new(SessionReadState {
+    pub fn from_persisted_state(state: &RuntimeSessionState) -> Self {
+        Self(Arc::new(SessionReadState {
             meta: SessionReadMeta::from_persisted_ref(state),
-            graph: SessionReadGraph::Owned(graph),
-            read_model,
+            graph: SessionReadGraph::Owned(state.session_graph.clone()),
+            read_model: state.read_model(),
             chronological_projection: OnceLock::new(),
-            turn_failure_settlements: Arc::new(Vec::new()),
-        })))
+        }))
+    }
+
+    /// [`Self::from_persisted_state`] carrying the session's durable
+    /// relation, for a view built from a store read.
+    pub fn from_persisted_state_with_relation(
+        state: &RuntimeSessionState,
+        relation: crate::SessionRelation,
+    ) -> Self {
+        let mut meta = SessionReadMeta::from_persisted_ref(state);
+        meta.durable_relation = Some(relation);
+        Self(Arc::new(SessionReadState {
+            meta,
+            graph: SessionReadGraph::Owned(state.session_graph.clone()),
+            read_model: state.read_model(),
+            chronological_projection: OnceLock::new(),
+        }))
     }
 
     pub fn from_runtime_state(
         state: &RuntimeSessionState,
         policy: SessionPolicy,
         protocol_turn_options: crate::ProtocolTurnOptions,
-    ) -> Result<Self, crate::SessionGraphScopeError> {
-        let graph = state.session_graph.clone();
-        let read_model = state.read_model()?;
-        Ok(Self(Arc::new(SessionReadState {
+    ) -> Self {
+        Self(Arc::new(SessionReadState {
             meta: SessionReadMeta::from_persisted_ref(state)
                 .with_policy(policy)
                 .with_protocol_turn_options(protocol_turn_options),
-            graph: SessionReadGraph::Owned(graph),
-            read_model,
+            graph: SessionReadGraph::Owned(state.session_graph.clone()),
+            read_model: state.read_model(),
             chronological_projection: OnceLock::new(),
-            turn_failure_settlements: Arc::new(Vec::new()),
-        })))
+        }))
     }
 
     pub fn derived_from_persisted_state(
@@ -87,11 +91,9 @@ impl SessionReadView {
         protocol_turn_options: crate::ProtocolTurnOptions,
         base_graph: Arc<crate::SessionGraph>,
         messages: crate::MessageSequence,
-    ) -> Result<Self, crate::SessionGraphScopeError> {
-        let active_events = base_graph
-            .read_model(state.current_frame_node_id.as_ref())?
-            .active_events;
-        Ok(Self::from_graph_message_sequence_meta(
+    ) -> Self {
+        let active_events = base_graph.read_model().active_events;
+        Self::from_graph_message_sequence_meta(
             SessionReadMeta::from_persisted_ref(state)
                 .with_policy(policy)
                 .with_turn_index(turn_index)
@@ -99,28 +101,21 @@ impl SessionReadView {
             base_graph,
             messages,
             active_events,
-        ))
+        )
     }
 
     /// Exposes session graph to store and durable-substrate implementors while validating and
     /// applying durable session transitions.
+    ///
+    /// A derived view rewrites its base's current-frame tail on first use.
+    /// The base is a resident graph, which holds the current frame and its
+    /// pending suffix (ADR 0112 §9), so the rewrite costs O(frame).
     pub fn session_graph(&self) -> &crate::SessionGraph {
         match &self.0.graph {
             SessionReadGraph::Owned(graph) => graph,
             SessionReadGraph::Derived { cache, base_graph } => cache.get_or_init(|| {
                 let mut graph = (**base_graph).clone();
-                let frame_node_id = base_graph
-                    .nearest_frame_node_id(base_graph.leaf_node_id.as_deref())
-                    .map(|frame_node_id| {
-                        crate::FrameNodeId::new(frame_node_id)
-                            .expect("a graph node identity selected as a frame is non-empty")
-                    });
-                graph
-                    .rewrite_active_read_tail(
-                        frame_node_id.as_ref(),
-                        self.0.read_model.messages.as_slice(),
-                    )
-                    .expect("derived frame must resolve in its source session graph");
+                graph.rewrite_active_read_tail(self.0.read_model.messages.as_slice());
                 graph
             }),
         }
@@ -138,14 +133,6 @@ impl SessionReadView {
     /// therefore return `None`.
     pub fn durable_relation(&self) -> Option<&crate::SessionRelation> {
         self.0.meta.durable_relation.as_ref()
-    }
-
-    /// Durable failure evidence owned by settled turn records.
-    ///
-    /// This collection is structurally separate from messages, protocol
-    /// events, and prompt contributions. Reading it cannot alter model context.
-    pub fn turn_failure_settlements(&self) -> &[crate::TurnFailureSettlement] {
-        self.0.turn_failure_settlements.as_slice()
     }
 
     pub fn policy(&self) -> &SessionPolicy {
@@ -174,12 +161,6 @@ impl SessionReadView {
                 &self.0.read_model,
             ))
         }))
-    }
-
-    /// Projects all message nodes, including inactive branches, for protocol and conformance
-    /// embedders that need the session's branch structure.
-    pub fn message_tree(&self) -> Vec<crate::SessionMessageTreeNode> {
-        self.session_graph().message_tree()
     }
 
     pub fn turn_index(&self) -> usize {
@@ -216,7 +197,6 @@ pub struct SessionReadState {
     graph: SessionReadGraph,
     read_model: crate::session_graph::SessionReadModel,
     chronological_projection: OnceLock<Arc<crate::ChronologicalProjection>>,
-    turn_failure_settlements: Arc<Vec<crate::TurnFailureSettlement>>,
 }
 #[derive(Clone, Debug)]
 pub struct SessionReadMeta {
@@ -311,7 +291,7 @@ impl SessionReadMeta {
             plugin_state_ref: None,
             plugin_state_generations: Default::default(),
             execution_state_ref: None,
-            token_ledger: Vec::new(),
+            usage: crate::SessionUsageTotals::default(),
             checkpoint_ref: None,
         }
     }

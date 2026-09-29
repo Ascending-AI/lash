@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use crate::session_graph::facade_ops::SessionNodeProjection;
@@ -63,8 +63,8 @@ impl NodeIdIndex {
     }
 }
 
-/// The unscoped read model: materialized `Arc<Vec>`s readers hold, plus the
-/// owned tail appended nodes push into.
+/// The read model of the current frame: materialized `Arc<Vec>`s readers
+/// hold, plus the owned tail appended nodes push into.
 ///
 /// Appends never clone the shared vecs — the next read folds the tail into
 /// fresh materialized vecs once, so a turn pays the read-model copy at read
@@ -83,19 +83,17 @@ struct ActiveReadModel {
 pub(crate) struct SessionGraphCache {
     pub(crate) by_id: NodeIdIndex,
     pub(crate) active_path_indices: Vec<usize>,
+    /// The one memoized projection, of the active path from its last
+    /// `FrameOpen` (ADR 0112 §9).
+    ///
+    /// Identity is the point, not only the saved work: the turn projection
+    /// decides prefix agreement by comparing the `Arc` a read model handed
+    /// out (`TurnGraphEditor::message_delta_if_current_preserved`), so every
+    /// reader of one resident graph shares these `Arc`s.
+    ///
     /// Behind a mutex because `read_model` materializes through `&self`
     /// while `append_node` pushes through `&mut self`.
     active_read: StdMutex<ActiveReadModel>,
-    /// Memoized scoped read-model answers, keyed by the frame each was
-    /// projected for.
-    ///
-    /// Identity is the point, not the saved work: the turn projection decides
-    /// prefix agreement by comparing the `Arc` a read model handed out
-    /// (`TurnGraphEditor::message_delta_if_current_preserved`), so a frame
-    /// projection rebuilt per call would hand the turn's two readers two
-    /// equal-but-distinct `Arc`s and force the whole-window reconciliation on
-    /// every boundary. Cleared whenever the active path moves.
-    frame_read_model: StdMutex<BTreeMap<String, SessionReadModel>>,
 }
 
 impl Clone for SessionGraphCache {
@@ -105,12 +103,6 @@ impl Clone for SessionGraphCache {
             active_path_indices: self.active_path_indices.clone(),
             active_read: StdMutex::new(
                 self.active_read
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .clone(),
-            ),
-            frame_read_model: StdMutex::new(
-                self.frame_read_model
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .clone(),
@@ -136,25 +128,34 @@ impl SessionGraphCache {
                 pending_events: Vec::new(),
                 pending_messages: Vec::new(),
             }),
-            frame_read_model: StdMutex::new(BTreeMap::new()),
         };
         cache.rebuild_read_model(graph);
         Ok(cache)
     }
 
     pub(crate) fn rebuild_read_model(&mut self, graph: &SessionGraph) {
-        let mut active_messages = Vec::with_capacity(self.active_path_indices.len());
-        let mut active_events = Vec::with_capacity(self.active_path_indices.len());
-        for idx in &self.active_path_indices {
+        let frame_start = self
+            .active_path_indices
+            .iter()
+            .rposition(|idx| {
+                matches!(
+                    graph.nodes[*idx].payload,
+                    SessionNodePayload::FrameOpen { .. }
+                )
+            })
+            .unwrap_or(0);
+        let frame_path = &self.active_path_indices[frame_start..];
+        let mut active_messages = Vec::with_capacity(frame_path.len());
+        let mut active_events = Vec::with_capacity(frame_path.len());
+        for idx in frame_path {
             let node = &graph.nodes[*idx];
             if let Some(event) = node.event() {
                 active_events.push(event.clone());
             }
-            if let Some(message) = node.message() {
-                if !message.is_transient() {
-                    active_messages.push(message);
-                }
-                continue;
+            if let Some(message) = node.message()
+                && !message.is_transient()
+            {
+                active_messages.push(message);
             }
         }
         *self
@@ -167,10 +168,9 @@ impl SessionGraphCache {
             pending_events: Vec::new(),
             pending_messages: Vec::new(),
         };
-        self.frame_read_model = StdMutex::new(BTreeMap::new());
     }
 
-    /// The current unscoped read model, materializing pending appends once.
+    /// The current frame's read model, materializing pending appends once.
     ///
     /// Each pending tail folds independently: an event-only append neither
     /// copies nor replaces the message vec or the render cache built on it,
@@ -195,58 +195,6 @@ impl SessionGraphCache {
         }
     }
 
-    pub(crate) fn scoped_read_model(
-        &self,
-        graph: &SessionGraph,
-        frame_node_id: &crate::FrameNodeId,
-    ) -> SessionReadModel {
-        let mut memoized = self
-            .frame_read_model
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(read_model) = memoized.get(frame_node_id.as_str()) {
-            return read_model.clone();
-        }
-        let read_model = self.project_scoped_read_model(graph, frame_node_id);
-        memoized.insert(frame_node_id.to_string(), read_model.clone());
-        read_model
-    }
-
-    fn project_scoped_read_model(
-        &self,
-        graph: &SessionGraph,
-        frame_node_id: &crate::FrameNodeId,
-    ) -> SessionReadModel {
-        let mut active_messages = Vec::with_capacity(self.active_path_indices.len());
-        let mut active_events = Vec::with_capacity(self.active_path_indices.len());
-        let mut in_frame = false;
-        for idx in &self.active_path_indices {
-            let node = &graph.nodes[*idx];
-            if node.node_id == frame_node_id.as_str() {
-                in_frame = true;
-            } else if in_frame && matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
-                break;
-            }
-            if !in_frame {
-                continue;
-            }
-            if let Some(event) = node.event() {
-                active_events.push(event.clone());
-            }
-            if let Some(message) = node.message() {
-                if !message.is_transient() {
-                    active_messages.push(message);
-                }
-                continue;
-            }
-        }
-        SessionReadModel {
-            active_events: Arc::new(active_events),
-            messages: Arc::new(active_messages),
-            prompt_render_cache: Arc::new(BaseRenderCache::new()),
-        }
-    }
-
     pub(crate) fn append_node(
         &mut self,
         node_index: usize,
@@ -258,12 +206,22 @@ impl SessionGraphCache {
         if !parent_matches_leaf {
             return;
         }
-        self.frame_read_model = StdMutex::new(BTreeMap::new());
         self.active_path_indices.push(node_index);
         let read = self
             .active_read
             .get_mut()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
+            // A pending `FrameOpen` moves the projection's start to the new
+            // frame before its commit (ADR 0112 §9).
+            *read = ActiveReadModel {
+                active_events: Arc::new(Vec::new()),
+                active_messages: Arc::new(Vec::new()),
+                prompt_render_cache: Arc::new(BaseRenderCache::new()),
+                pending_events: Vec::new(),
+                pending_messages: Vec::new(),
+            };
+        }
         if let Some(event) = node.event() {
             read.pending_events.push(event.clone());
         }

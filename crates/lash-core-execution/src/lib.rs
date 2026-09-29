@@ -366,7 +366,6 @@ pub mod facade_support {
     pub use crate::session_model::context::PreparedContext;
     pub use crate::store::LeaseTimings;
     pub use crate::store::LeaseTimingsError;
-    pub use crate::store::SessionHead;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_intent::legacy_tool_intent_v1_lookup_key;
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
@@ -836,7 +835,7 @@ pub use session::{
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
-    SessionGraphScopeError, SessionNodePayload, SessionNodeRecord,
+    SessionNodePayload, SessionNodeRecord,
 };
 pub(crate) use session_model::RuntimeSessionPolicy;
 

@@ -104,11 +104,13 @@ pub(crate) use session_graph::{
 };
 pub(crate) use store::{
     AppendRequestIdentity, AttachmentManifestEntry, AttachmentOwner, AttachmentWriteToken, BlobRef,
-    CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent, LeaseOwnerIdentity,
-    OperationId, RuntimeStore, SessionMeta, StoreError,
+    CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent, OperationId,
+    RuntimeStore, SessionMeta, StoreError,
 };
 pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlement};
-pub(crate) use usage::{LedgerUsageDisposition, TokenLedgerEntry, UnreportedLedgerAttempt};
+pub(crate) use usage::{
+    LedgerUsageDisposition, SessionUsageTotals, TokenLedgerEntry, UnreportedLedgerAttempt,
+};
 
 pub(crate) use execution_state::{
     ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState, PluginOptions,
@@ -154,7 +156,6 @@ pub(crate) use effect_identity::{RuntimeEffectKind, RuntimeInvocation};
 pub(crate) use lash_sansio::ToolIntentIdentity;
 pub(crate) use message_projection::plugin_message_to_message;
 pub(crate) use process_identity::{ProcessWakeDelivery, WakeDeliveryState};
-pub(crate) use session_graph::SessionGraphScopeError;
 pub(crate) use store::queued_work::QueuedWorkClass;
 pub(crate) use turn_input_vocabulary::TurnInputCheckpointBoundary;
 pub(crate) use turn_input_vocabulary::{InputItem, TurnContext, TurnInput};
@@ -201,7 +202,7 @@ pub(crate) use lash_sansio::llm::types::LlmCallRecord;
 pub(crate) use lash_sansio::session_model::prompt::{PromptSlot, PromptTemplate};
 pub(crate) use process_identity::process_wake_turn_cause;
 pub(crate) use runtime_error::RuntimeEffectReplayMismatchReport;
-pub(crate) use session_graph::SessionMessageTreeNode;
+
 pub(crate) use session_identity::{
     OpenAgentFrameRequest, OpenAgentFrameResult, SessionStoreCreateRequest,
 };

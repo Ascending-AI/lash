@@ -59,6 +59,7 @@ mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
 mod usage;
+mod window_load;
 
 use record_schema_version::record_schema_version;
 pub use record_schema_version::{
@@ -188,7 +189,11 @@ pub use testing::{
     ConformanceStore, DecodedRowCounts, GraphRowCorruption, StoreTestSupport,
     append_request_commit_with_clock_for_testing,
 };
-pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};
+pub use usage::merge_token_ledger_entry_checked;
+pub use window_load::{
+    LoadedSessionWindow, load_session_read_view, load_session_window_state, refresh_session_window,
+    window_state,
+};
 
 fn default_root_session_id() -> SessionId {
     SessionId::from("root")
@@ -321,25 +326,6 @@ impl From<String> for BlobRef {
     fn from(value: String) -> Self {
         Self(value)
     }
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct SessionHead {
-    #[serde(default = "default_root_session_id")]
-    pub session_id: SessionId,
-    #[serde(skip)]
-    pub head_revision: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_frame_node_id: Option<crate::FrameNodeId>,
-    /// The follow-on the head owes (ADR 0101 §3); its own head column.
-    #[serde(skip)]
-    pub pending_follow_on: Option<PendingFollowOn>,
-    pub graph: crate::SessionGraph,
-    pub config: crate::PersistedSessionConfig,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub checkpoint_ref: Option<BlobRef>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub token_ledger: Vec<crate::TokenLedgerEntry>,
 }
 
 /// JSON-owned fields persisted in a session head's `head_json` column.
@@ -919,38 +905,43 @@ fn remap_optional_node_id(
     }
 }
 
-/// Adopt a durable head onto a default state. Only the head-adoption tests
-/// call it until the window loaders (ADR 0112 §12) adopt through it.
+/// Adopt an empty-window head onto a default state, for the head-adoption
+/// tests.
 #[cfg(test)]
 fn persisted_session_state_from_head(
-    head: SessionHead,
+    session_id: SessionId,
+    head_revision: u64,
+    config: crate::PersistedSessionConfig,
     checkpoint: Option<HydratedSessionCheckpoint>,
-    fleet: FleetFormat,
 ) -> Result<crate::RuntimeSessionState, StoreError> {
-    // A cold load adopts the head onto a default state: every durable fact
-    // comes from the head (adoption is head-authoritative, FIG-1875), and the
-    // live-owned runtime-lease facts start from their defaults — the head's
-    // turn budget, and no live session-id binding yet.
-    let mut state =
-        crate::RuntimeSessionState::new(crate::SessionPolicy::new(head.config.turn_budget));
-    let live_owned = crate::runtime::state::LiveOwnedSessionFacts::of(&state.policy);
-    crate::runtime::state::adopt_durable_head(&mut state, &head, checkpoint, live_owned, fleet)?;
-    Ok(state)
+    let read = SessionWindowRead::new(
+        session_id,
+        head_revision,
+        config,
+        None,
+        crate::SessionGraph::default(),
+        None,
+        checkpoint,
+        crate::SessionUsageTotals::default(),
+    )?;
+    window_state(read, FleetFormat::current()).map(|loaded| loaded.state)
 }
 
-#[cfg(any(test, feature = "testing"))]
-impl Default for SessionHead {
-    fn default() -> Self {
-        Self {
-            session_id: default_root_session_id(),
-            head_revision: 0,
-            current_frame_node_id: None,
-            pending_follow_on: None,
-            graph: crate::SessionGraph::default(),
-            config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
-            checkpoint_ref: None,
-            token_ledger: Vec::new(),
-        }
+/// Refuse a window read that names another session than the one asked for.
+fn validate_window_session(
+    session_id: &SessionId,
+    read: &SessionWindowRead,
+) -> Result<(), StoreError> {
+    if read.session_id == *session_id {
+        Ok(())
+    } else {
+        Err(StoreError::StoredDataCorrupt {
+            record_kind: "SessionWindowRead",
+            message: format!(
+                "a window read for session `{session_id}` names session `{}`",
+                read.session_id
+            ),
+        })
     }
 }
 

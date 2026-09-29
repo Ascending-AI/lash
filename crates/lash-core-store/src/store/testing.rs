@@ -18,6 +18,22 @@ pub enum GraphRowCorruption {
     SetParent(Option<NodeId>),
     SetFramePointer(NodeId),
     SetBodyBytes(u64),
+    /// Rewrite the row to a valid `Plugin` payload,
+    /// [`GraphRowCorruption::plugin_payload`], and set `body_bytes` to the
+    /// new body's JSON length. The node id, parent, generation and frame
+    /// pointer are preserved, so a window base becomes a non-`FrameOpen` row.
+    SetPayloadKindToPlugin,
+}
+
+impl GraphRowCorruption {
+    /// The payload [`Self::SetPayloadKindToPlugin`] writes: one fixed,
+    /// decodable plugin payload, so every backend injects the same row.
+    pub fn plugin_payload() -> crate::SessionNodePayload {
+        crate::SessionNodePayload::Plugin {
+            plugin_type: "lash-conformance/corrupt-anchor".to_string(),
+            body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
+        }
+    }
 }
 
 /// Test-only probes and fault-injection seams on a runtime store handle.

@@ -106,7 +106,7 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
     )]);
     let resident_leaf = graph.leaf_node_id.clone().expect("resident leaf");
     let before_graph = serde_json::to_value(&graph).expect("serialize graph preimage");
-    let before_read = graph.read_model(None).expect("read resident graph");
+    let before_read = graph.read_model();
     let node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
         node_id: node_id.to_string().into(),
         parent_node_id: Some(parent_node_id.to_string().into()),
@@ -160,7 +160,7 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
         serde_json::to_value(&graph).expect("serialize graph after refusals"),
         before_graph
     );
-    let after_read = graph.read_model(None).expect("read graph after refusals");
+    let after_read = graph.read_model();
     assert!(std::sync::Arc::ptr_eq(
         &before_read.active_events,
         &after_read.active_events
@@ -438,7 +438,7 @@ fn read_model_preserves_distinct_nodes_with_identical_messages() {
     let second = graph.append_message(message);
 
     assert_ne!(first, second);
-    let read = graph.read_model(None).unwrap();
+    let read = graph.read_model();
     assert_eq!(read.messages.len(), 2);
     assert_eq!(read.messages[0].id, "same-message-id");
     assert_eq!(read.messages[1].id, "same-message-id");
@@ -697,79 +697,6 @@ fn nearest_frame_is_derived_from_ancestry() {
 }
 
 #[test]
-fn message_tree_marks_active_nodes_without_using_message_identity() {
-    let mut graph = SessionGraph::default();
-    let message = text_message("same-message-id", MessageRole::User, "same content");
-    let root = graph.append_message(message.clone());
-    let inactive = graph.append_message(message.clone());
-    graph = SessionGraph::from_shared_nodes(graph.nodes.clone(), Some(root))
-        .expect("the selected branch leaf resolves");
-    let active = graph.append_message(message);
-
-    let tree = graph.message_tree();
-    assert_eq!(tree.len(), 1);
-    assert!(tree[0].active);
-    assert_eq!(tree[0].children.len(), 2);
-    assert_eq!(tree[0].children[0].node_id, inactive);
-    assert!(!tree[0].children[0].active);
-    assert_eq!(tree[0].children[1].node_id, active);
-    assert!(tree[0].children[1].active);
-}
-
-/// FIG-1641 witness: sibling order is authoritative history order, not a
-/// timestamp sort. Two message siblings are separated in the graph by a plugin
-/// node, and their timestamps are skewed against generation order — a
-/// timestamp sort would invert them, so generation order must win.
-#[test]
-fn message_tree_orders_siblings_by_graph_position_not_timestamp() {
-    let mut graph = SessionGraph::default();
-    let parent = graph
-        .append_node_drafts_at(
-            "witness-parent",
-            [SessionNodeDraft::message(text_message(
-                "parent",
-                MessageRole::User,
-                "shared parent",
-            ))],
-            "2026-09-12T00:00:00Z".to_string(),
-        )
-        .remove(0);
-    let older_sibling = graph
-        .append_node_drafts_at(
-            "witness-older-sibling",
-            [SessionNodeDraft::message(text_message(
-                "older",
-                MessageRole::User,
-                "appended first, stamped late",
-            ))],
-            "2026-09-12T00:00:02Z".to_string(),
-        )
-        .remove(0);
-    graph.append_plugin("witness-plugin", serde_json::json!({"separates": true}));
-    graph = SessionGraph::from_shared_nodes(graph.nodes.clone(), Some(parent))
-        .expect("reselect the shared parent as leaf");
-    let younger_sibling = graph
-        .append_node_drafts_at(
-            "witness-younger-sibling",
-            [SessionNodeDraft::message(text_message(
-                "younger",
-                MessageRole::User,
-                "appended last, stamped early",
-            ))],
-            "2026-09-12T00:00:01Z".to_string(),
-        )
-        .remove(0);
-
-    let tree = graph.message_tree();
-    assert_eq!(tree.len(), 1);
-    let children = &tree[0].children;
-    assert_eq!(children.len(), 2);
-    assert_eq!(children[0].node_id, older_sibling);
-    assert_eq!(children[1].node_id, younger_sibling);
-    assert!(children[0].timestamp > children[1].timestamp);
-}
-
-#[test]
 fn active_read_replacement_persists_messages_only() {
     let message = text_message("m1", MessageRole::User, "hello");
     let graph = SessionGraph::from_active_read_state(&[message]);
@@ -804,16 +731,11 @@ fn active_read_rewrite_preserves_draft_node_id_sequence() {
     graph = SessionGraph::from_shared_nodes(nodes, Some(leaf_node_id))
         .expect("pre-existing draft branches are structurally valid");
 
-    graph
-        .rewrite_active_read_tail(
-            None,
-            &[
-                first,
-                text_message("m2", MessageRole::Assistant, "second"),
-                text_message("m3", MessageRole::User, "third"),
-            ],
-        )
-        .unwrap();
+    graph.rewrite_active_read_tail(&[
+        first,
+        text_message("m2", MessageRole::Assistant, "second"),
+        text_message("m3", MessageRole::User, "third"),
+    ]);
 
     let emitted_ids = graph
         .nodes
@@ -929,168 +851,229 @@ fn graph_writers_keep_payload_kind_out_of_draft_identity() {
 /// projection per call is what forced the projection onto its whole-window
 /// fallback on every turn boundary (FIG-1637).
 #[test]
-fn a_frame_read_model_is_shared_by_identity_until_the_active_path_moves() {
-    let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-    ));
-    let mut graph = SessionGraph::default();
-    let frame_key =
-        crate::FrameKey::from_caller_material("frame").expect("non-empty frame material");
-    let frame = frame_node_id(&SessionId::from("session"), frame_key.as_str());
-    assert!(graph.append_frame_open_with_id_at(
-        frame.clone(),
-        frame_key,
-        crate::AgentFrameReason::initial(),
-        assignment,
-        crate::ProtocolTurnOptions::default(),
-        "2026-08-19T00:00:00Z".to_string(),
-    ));
-    graph.append_message(text_message("m1", MessageRole::User, "first"));
-
-    let first = graph.read_model(Some(&frame)).unwrap();
-    let second = graph.read_model(Some(&frame)).unwrap();
-    assert!(
-        Arc::ptr_eq(&first.messages, &second.messages),
-        "repeated reads of one frame share the projected messages by identity"
-    );
-    assert!(Arc::ptr_eq(&first.active_events, &second.active_events));
-
-    graph.append_message(text_message("m2", MessageRole::User, "second"));
-    let after_append = graph.read_model(Some(&frame)).unwrap();
-    assert!(
-        !Arc::ptr_eq(&first.messages, &after_append.messages),
-        "an append to the active path retires the memoized projection"
-    );
-    assert_eq!(after_append.messages.len(), 2);
-}
-
-/// A read for frame B after frame A must return B's model, not the first
-/// memoized answer.
-#[test]
-fn frame_read_models_are_memoized_per_frame() {
-    let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-    ));
+fn the_frame_read_model_is_shared_by_identity_until_an_append() {
     let mut graph = SessionGraph::default();
     let session = SessionId::from("session");
-    for (index, key) in ["frame-a", "frame-b"].into_iter().enumerate() {
-        let frame_key = crate::FrameKey::from_caller_material(key).expect("non-empty material");
-        let frame = frame_node_id(&session, frame_key.as_str());
-        let reason = if index == 0 {
-            crate::AgentFrameReason::initial()
-        } else {
-            crate::AgentFrameReason::continue_as()
-        };
-        assert!(graph.append_frame_open_with_id_at(
-            frame,
-            frame_key,
-            reason,
-            assignment.clone(),
-            crate::ProtocolTurnOptions::default(),
-            "2026-09-16T00:00:00Z".to_string(),
-        ));
-        graph.append_message(text_message(key, MessageRole::User, key));
-    }
+    open_test_frame(
+        &mut graph,
+        &session,
+        "frame",
+        crate::AgentFrameReason::initial(),
+    );
+    graph.append_message(text_message("m1", MessageRole::User, "first"));
 
-    let frame_a = frame_node_id(
-        &session,
-        crate::FrameKey::from_caller_material("frame-a")
-            .expect("non-empty material")
-            .as_str(),
+    let first = graph.read_model();
+    let second = graph.read_model();
+    assert!(
+        Arc::ptr_eq(&first.messages, &second.messages),
+        "repeated reads share the projected messages by identity"
     );
-    let frame_b = frame_node_id(
-        &session,
-        crate::FrameKey::from_caller_material("frame-b")
-            .expect("non-empty material")
-            .as_str(),
+    assert!(Arc::ptr_eq(&first.active_events, &second.active_events));
+    assert!(Arc::ptr_eq(
+        &first.prompt_render_cache,
+        &second.prompt_render_cache
+    ));
+
+    graph.append_message(text_message("m2", MessageRole::User, "second"));
+    let after_append = graph.read_model();
+    assert!(
+        !Arc::ptr_eq(&first.messages, &after_append.messages),
+        "an append to the active path folds into a new projection"
     );
-    let a = graph.read_model(Some(&frame_a)).unwrap();
-    let b = graph.read_model(Some(&frame_b)).unwrap();
-    assert_eq!(a.messages.len(), 1, "frame A's model stops at B's open");
-    assert_eq!(a.messages[0].id, "frame-a");
-    assert_eq!(b.messages.len(), 1);
-    assert_eq!(b.messages[0].id, "frame-b");
-    let a_again = graph.read_model(Some(&frame_a)).unwrap();
-    assert!(Arc::ptr_eq(&a.messages, &a_again.messages));
+    assert_eq!(after_append.messages.len(), 2);
+    let again = graph.read_model();
+    assert!(
+        Arc::ptr_eq(&after_append.messages, &again.messages),
+        "an append folds once"
+    );
 }
 
+/// ADR 0112 §9: the one projection starts at the current frame, and a
+/// pending `FrameOpen` moves its start before the frame is committed.
 #[test]
-fn root_frame_and_unscoped_reads_are_equivalent() {
+fn a_pending_frame_open_moves_the_projection_to_the_new_frame() {
+    let mut graph = SessionGraph::default();
+    let session = SessionId::from("session");
+    open_test_frame(
+        &mut graph,
+        &session,
+        "frame-a",
+        crate::AgentFrameReason::initial(),
+    );
+    graph.append_message(text_message("frame-a", MessageRole::User, "a"));
+    assert_eq!(graph.read_model().messages.len(), 1);
+
+    open_test_frame(
+        &mut graph,
+        &session,
+        "frame-b",
+        crate::AgentFrameReason::continue_as(),
+    );
+    assert!(
+        graph.read_model().messages.is_empty(),
+        "the new frame starts an empty projection"
+    );
+    graph.append_message(text_message("frame-b", MessageRole::User, "b"));
+    let b = graph.read_model();
+    assert_eq!(b.messages.len(), 1);
+    assert_eq!(b.messages[0].id, "frame-b");
+
+    // A cold cache projects the same span.
+    let cold = SessionGraph::from_shared_nodes(graph.nodes.clone(), graph.leaf_node_id.clone())
+        .expect("valid graph");
+    let cold_read = cold.read_model();
+    assert_eq!(cold_read.messages.len(), 1);
+    assert_eq!(cold_read.messages[0].id, "frame-b");
+}
+
+/// The tail rewrite covers the current frame only, like the projection.
+#[test]
+fn the_tail_rewrite_covers_only_the_current_frame() {
+    let mut graph = SessionGraph::default();
+    let session = SessionId::from("session");
+    open_test_frame(
+        &mut graph,
+        &session,
+        "frame-a",
+        crate::AgentFrameReason::initial(),
+    );
+    graph.append_message(text_message("a", MessageRole::User, "a"));
+    open_test_frame(
+        &mut graph,
+        &session,
+        "frame-b",
+        crate::AgentFrameReason::continue_as(),
+    );
+    let b1 = text_message("b1", MessageRole::User, "b1");
+    graph.append_message(b1.clone());
+
+    graph.rewrite_active_read_tail(&[b1, text_message("b2", MessageRole::Assistant, "b2")]);
+    let read = graph.read_model();
+    assert_eq!(
+        read.messages
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect::<Vec<_>>(),
+        ["b1", "b2"]
+    );
+    assert!(
+        graph
+            .active_path_nodes()
+            .iter()
+            .any(|node| node.message_id() == Some("a")),
+        "the earlier frame stays on the active path"
+    );
+}
+
+fn open_test_frame(
+    graph: &mut SessionGraph,
+    session: &SessionId,
+    key: &str,
+    reason: crate::AgentFrameReason,
+) -> crate::FrameNodeId {
     let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
     ));
-    let mut graph = SessionGraph::default();
-    let frame_key =
-        crate::FrameKey::from_caller_material("root-frame").expect("non-empty frame material");
-    let frame = frame_node_id(&SessionId::from("session"), frame_key.as_str());
+    let frame_key = crate::FrameKey::from_caller_material(key).expect("non-empty material");
+    let frame = frame_node_id(session, frame_key.as_str());
     assert!(graph.append_frame_open_with_id_at(
         frame.clone(),
         frame_key,
-        crate::AgentFrameReason::initial(),
+        reason,
         assignment,
         crate::ProtocolTurnOptions::default(),
-        "2026-09-12T00:00:00Z".to_string(),
+        "2026-09-29T00:00:00Z".to_string(),
     ));
-    graph.append_message(text_message("m1", MessageRole::User, "first"));
-    graph.append_message(text_message("m2", MessageRole::Assistant, "second"));
-
-    let unscoped = graph.read_model(None).unwrap();
-    let root_scoped = graph.read_model(Some(&frame)).unwrap();
-    assert_eq!(
-        serde_json::to_value(root_scoped.messages.as_ref()).unwrap(),
-        serde_json::to_value(unscoped.messages.as_ref()).unwrap()
-    );
-    assert_eq!(
-        serde_json::to_value(root_scoped.active_events.as_ref()).unwrap(),
-        serde_json::to_value(unscoped.active_events.as_ref()).unwrap()
-    );
+    frame
 }
 
+/// ADR 0112 §9: after a frame switch is durable, the resident graph keeps
+/// only the new frame, anchored at its `FrameOpen`, and the frame records
+/// continue from the old frame.
 #[test]
-fn missing_frame_read_and_rewrite_return_the_same_error_without_mutation() {
-    let mut graph =
-        SessionGraph::from_active_read_state(&[text_message("m1", MessageRole::User, "unchanged")]);
-    let missing = crate::FrameNodeId::new("frame-node/v3/missing").unwrap();
-    let before = serde_json::to_value(&graph).unwrap();
+fn retiring_below_the_current_frame_re_anchors_the_graph() {
+    let mut graph = SessionGraph::default();
+    let session = SessionId::from("session");
+    let frame_a = open_test_frame(
+        &mut graph,
+        &session,
+        "frame-a",
+        crate::AgentFrameReason::initial(),
+    );
+    graph.append_message(text_message("a1", MessageRole::User, "a1"));
+    graph.append_message(text_message("a2", MessageRole::Assistant, "a2"));
+    let a_leaf = graph.leaf_node_id.clone().expect("leaf");
+    let frame_b = open_test_frame(
+        &mut graph,
+        &session,
+        "frame-b",
+        crate::AgentFrameReason::continue_as(),
+    );
+    graph.append_message(text_message("b1", MessageRole::User, "b1"));
+    let pending = graph.leaf_node_id.clone().expect("leaf");
 
-    let read_error = graph
-        .read_model(Some(&missing))
-        .expect_err("a missing requested frame must fail the read");
-    let rewrite_error = graph
-        .rewrite_active_read_tail(
-            Some(&missing),
-            &[text_message("m2", MessageRole::Assistant, "replacement")],
-        )
-        .expect_err("a missing requested frame must fail the rewrite");
+    let mut durable = graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .filter(|node_id| *node_id != pending)
+        .collect::<HashSet<_>>();
+    let retired = graph
+        .retire_below_current_frame(&durable)
+        .expect("the durable frame switch retires the old frame");
+    assert_eq!(retired.len(), 3);
+    for node_id in &retired {
+        durable.remove(node_id);
+    }
+    assert_eq!(
+        graph.nodes.len(),
+        2,
+        "the new FrameOpen and its pending child"
+    );
+    assert_eq!(graph.leaf_node_id.as_ref(), Some(&pending));
+    let anchor = graph.anchor().expect("re-anchored").clone();
+    assert_eq!(anchor.frame_node_id, frame_b);
+    assert_eq!(anchor.generation, 3);
+    assert_eq!(anchor.external_parent.as_ref(), Some(&a_leaf));
+    assert_eq!(anchor.previous_frame_node_id.as_ref(), Some(&frame_a));
+    graph
+        .validate_resident_integrity()
+        .expect("anchored graph is valid");
+    let frames = graph.agent_frame_records(&session);
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].previous_frame_node_id.as_ref(), Some(&frame_a));
+    assert_eq!(graph.read_model().messages.len(), 1);
 
-    assert_eq!(read_error, rewrite_error);
-    assert_eq!(serde_json::to_value(&graph).unwrap(), before);
+    // The base is current now: a second trim does nothing.
+    assert!(graph.retire_below_current_frame(&durable).is_none());
 }
 
+/// A pending `FrameOpen` keeps everything below it until it is durable.
 #[test]
-fn public_read_views_return_missing_frame_errors() {
-    let missing = crate::FrameNodeId::new("frame-node/v3/missing").unwrap();
-    let mut snapshot =
-        crate::SessionSnapshot::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
-    snapshot.current_frame_node_id = Some(missing.clone());
-    let snapshot_error = snapshot
-        .read_view()
-        .expect_err("an invalid public snapshot must return its missing-frame error");
-
-    let mut runtime =
-        crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
-    runtime.current_frame_node_id = Some(missing.clone());
-    let runtime_error = runtime
-        .read_view()
-        .expect_err("an invalid public runtime state must return its missing-frame error");
-
-    assert_eq!(
-        snapshot_error,
-        SessionGraphScopeError::FrameNotFound {
-            frame_node_id: missing
-        }
+fn a_pending_frame_switch_retires_nothing() {
+    let mut graph = SessionGraph::default();
+    let session = SessionId::from("session");
+    open_test_frame(
+        &mut graph,
+        &session,
+        "frame-a",
+        crate::AgentFrameReason::initial(),
     );
-    assert_eq!(runtime_error, snapshot_error);
+    graph.append_message(text_message("a1", MessageRole::User, "a1"));
+    let durable = graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<HashSet<_>>();
+    open_test_frame(
+        &mut graph,
+        &session,
+        "frame-b",
+        crate::AgentFrameReason::continue_as(),
+    );
+    assert!(graph.retire_below_current_frame(&durable).is_none());
+    assert_eq!(graph.nodes.len(), 3);
+    assert!(graph.anchor().is_none());
 }
 
 #[test]
@@ -1337,10 +1320,10 @@ fn shared_records_serialize_with_the_unchanged_durable_shape() {
 fn event_only_appends_preserve_the_message_vec_and_render_cache() {
     let mut graph = SessionGraph::default();
     graph.append_message(text_message("m1", MessageRole::User, "hello"));
-    let before = graph.read_model(None).expect("warm read model");
+    let before = graph.read_model();
 
     graph.append_protocol_event(protocol_event());
-    let after = graph.read_model(None).expect("read after event append");
+    let after = graph.read_model();
 
     assert!(Arc::ptr_eq(&before.messages, &after.messages));
     assert!(Arc::ptr_eq(
@@ -1357,16 +1340,16 @@ fn held_readers_isolate_folded_pending_tails() {
     let mut graph = SessionGraph::default();
     graph.append_message(text_message("m1", MessageRole::User, "hello"));
     graph.append_protocol_event(protocol_event());
-    let held = graph.read_model(None).expect("held reader");
+    let held = graph.read_model();
 
     graph.append_protocol_event(protocol_event());
-    let latest = graph.read_model(None).expect("read after second event");
+    let latest = graph.read_model();
 
     assert_eq!(latest.active_events.len(), held.active_events.len() + 1);
     assert!(!Arc::ptr_eq(&held.active_events, &latest.active_events));
 
     graph.append_message(text_message("m2", MessageRole::Assistant, "reply"));
-    let with_message = graph.read_model(None).expect("read after message append");
+    let with_message = graph.read_model();
     assert_eq!(with_message.messages.len(), 2);
     assert!(!Arc::ptr_eq(
         &with_message.prompt_render_cache,
