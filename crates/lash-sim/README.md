@@ -244,7 +244,9 @@ The checkers run on every generated seed, as the run-only oracle
 epoch once its end state holds, after one more recovery pass; on the
 pending-tool scenario on the Restate server double; and on the
 `logical_turn` scenarios. A violation fails the run and prints its seed,
-invariant, a minimal trace excerpt and the store rows it names. A violation a
+invariant, the trace records and the store rows it names. The seed names the
+run's inputs, not its interleaving, so the printed history is the triage
+evidence. A violation a
 known runtime defect causes is an entry in `invariants::quarantine::QUARANTINE`:
 it still prints, under the entry's name, and no longer fails the run; the fix
 deletes the entry. `invariants/tests.rs` breaks a real history once per

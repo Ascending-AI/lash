@@ -33,6 +33,10 @@
 //! crash-matrix cell and seed once its end state holds, every chaos-soak
 //! epoch, and the pending-tool scenario on the Restate server double.
 //!
+//! A violation prints its seed, its invariant, the trace records and the store
+//! rows that show it. The seed names the run's inputs; it does not reproduce
+//! the run's interleaving, so the printed history is what a triage reads.
+//!
 //! A violation a known runtime defect causes is [`quarantine`]d by name: it is
 //! still printed with its seed and excerpt, and it no longer fails the run.
 
@@ -62,7 +66,7 @@ pub use snapshot::{
 /// The oracle a generated run reports its global-invariant verdict under.
 pub const GLOBAL_INVARIANTS_ORACLE: &str = "sim.oracle.global-invariants.v1";
 
-/// How many trace records an excerpt shows around a violation, at most.
+/// How many of its session's last records a violation that names none shows.
 const EXCERPT_RECORDS: usize = 12;
 
 /// A finished simulated run.
@@ -501,9 +505,10 @@ pub fn check_with(history: &History, checkers: &[&dyn HistoryChecker]) -> Report
     }
 }
 
-/// A violation with its seed, invariant and minimal trace excerpt: the
-/// records it names, or, when it names none, the last records of its
-/// session; then the store rows it names.
+/// A violation with its seed, invariant and trace excerpt: every record it
+/// names, or, when it names none, the last records of its session; then the
+/// store rows it names. A seed reproduces a run's inputs, not its
+/// interleavings, so what this prints is the evidence a triage works from.
 #[must_use]
 pub fn render(history: &History, violation: &Violation) -> String {
     let mut out = format!(
@@ -534,7 +539,7 @@ pub fn render(history: &History, violation: &Violation) -> String {
             None => Vec::new(),
         }
     } else {
-        named.into_iter().take(EXCERPT_RECORDS).collect()
+        named
     };
     if !excerpt.is_empty() {
         out.push_str("  trace excerpt:\n");
