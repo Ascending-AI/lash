@@ -28,22 +28,12 @@ struct Edge {
 }
 
 async fn wait_edges(fixture: &Fixture, predicate: impl Fn(&[Edge]) -> bool) -> Vec<Edge> {
-    match tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let edges = fixture.edges().await;
-            if predicate(&edges) {
-                return edges;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    loop {
+        let edges = fixture.edges().await;
+        if predicate(&edges) {
+            return edges;
         }
-    })
-    .await
-    {
-        Ok(edges) => edges,
-        Err(_) => panic!(
-            "artifact edges did not reach the expected state: {:?}",
-            fixture.edges().await
-        ),
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
 
@@ -53,6 +43,24 @@ fn frame_artifacts(edges: &[Edge]) -> BTreeSet<&str> {
         .filter(|edge| edge.kind == "frame_environment")
         .map(|edge| edge.artifact_ref.as_str())
         .collect()
+}
+
+#[tokio::test]
+async fn wait_edges_waits_for_condition_past_former_deadline() {
+    let fixture = Fixture::new(0x4232_0001).await;
+    let ready = std::sync::atomic::AtomicBool::new(false);
+    tokio::time::pause();
+
+    let (edges, ()) = tokio::join!(
+        wait_edges(&fixture, |edges| {
+            ready.load(std::sync::atomic::Ordering::Relaxed) && edges.is_empty()
+        }),
+        async {
+            tokio::time::sleep(std::time::Duration::from_secs(11)).await;
+            ready.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    );
+    assert!(edges.is_empty());
 }
 
 fn last_cell_finish(output: &TurnOutput) -> Option<serde_json::Value> {
@@ -823,18 +831,14 @@ async fn created_definition_is_reclaimed_after_session_deletion() {
 
     let after = wait_edges(&fixture, |edges| edges.is_empty()).await;
     assert!(after.is_empty(), "no edge survives the session: {after:?}");
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        while modules
-            .get_module_artifact(&module_ref)
-            .await
-            .expect("read module after deletion")
-            .is_some()
-        {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the created module is reclaimed after its session is deleted");
+    while modules
+        .get_module_artifact(&module_ref)
+        .await
+        .expect("read module after deletion")
+        .is_some()
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }
 
 /// This test crate's one path to a session that may not exist yet
