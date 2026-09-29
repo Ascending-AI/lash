@@ -764,9 +764,6 @@ impl OpenAiCompatibleProvider {
                     terminal_reason_from_chat_finish_reason(finish_reason, state.terminal_reason);
             }
             let Some(delta) = choice.delta else {
-                if choice.finish_reason.is_some() {
-                    state.finish_tool_inputs();
-                }
                 continue;
             };
             if let Some(content) = delta.content.as_ref() {
@@ -788,9 +785,6 @@ impl OpenAiCompatibleProvider {
             }
             if let Some(details) = delta.reasoning_details.as_ref() {
                 state.apply_reasoning_details(details);
-            }
-            if choice.finish_reason.is_some() {
-                state.finish_tool_inputs();
             }
         }
         Ok(())
@@ -850,8 +844,6 @@ struct ChatSseDelta<'a> {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ChatStreamingToolCall {
-    pub(crate) ordinal: Option<u64>,
-    pub(crate) ended: bool,
     pub(crate) call_id: String,
     pub(crate) tool_name: String,
     pub(crate) input_json: String,
@@ -890,7 +882,6 @@ pub(crate) struct ChatStreamState {
     /// the driver after each SSE event. Chat Completions has no native block
     /// notion, so blocks get deterministic per-response ordinals.
     pub(crate) block_events: Vec<LlmStreamEvent>,
-    next_tool_ordinal: u64,
     next_block_ordinal: u64,
     /// Open reasoning/text blocks and the text accumulated under each so the
     /// block end can carry authoritative text.
@@ -1052,7 +1043,6 @@ impl ChatStreamState {
     pub(crate) fn update_tool_call_delta(&mut self, value: &Value) {
         let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
         let tool_call = self.tool_calls.entry(index).or_default();
-        let started = tool_call.ordinal.is_none();
         if let Some(id) = value.get("id").and_then(Value::as_str)
             && !id.is_empty()
         {
@@ -1068,60 +1058,6 @@ impl ChatStreamState {
                 && !arguments.is_empty()
             {
                 tool_call.input_json.push_str(arguments);
-            }
-        }
-        if started {
-            tool_call.ordinal = Some(self.next_tool_ordinal);
-            self.next_tool_ordinal += 1;
-            if let Some(call) = Self::tool_input_identity(tool_call) {
-                self.block_events
-                    .push(LlmStreamEvent::ToolInputStart { call });
-            }
-        }
-        if let Some(arguments) = value
-            .get("function")
-            .and_then(|function| function.get("arguments"))
-            .and_then(Value::as_str)
-            && !arguments.is_empty()
-            && let Some(call) = Self::tool_input_identity(tool_call)
-        {
-            self.block_events.push(LlmStreamEvent::ToolInputDelta {
-                call,
-                text: arguments.to_string(),
-            });
-        }
-    }
-
-    fn tool_input_identity(call: &ChatStreamingToolCall) -> Option<lash_sansio::ToolInputIdentity> {
-        Some(lash_sansio::ToolInputIdentity {
-            ordinal: call.ordinal?,
-            call_id: (!call.call_id.is_empty()).then(|| call.call_id.clone()),
-            tool_name: (!call.tool_name.is_empty()).then(|| call.tool_name.clone()),
-            item_id: None,
-        })
-    }
-
-    fn finish_tool_inputs(&mut self) {
-        let mut indices = self.tool_calls.keys().copied().collect::<Vec<_>>();
-        indices.sort_by_key(|index| self.tool_calls[index].ordinal);
-        for index in indices {
-            let Some(call) = self.tool_calls.get_mut(&index) else {
-                continue;
-            };
-            if call.ended {
-                continue;
-            }
-            call.ended = true;
-            let raw_arguments = if call.input_json.is_empty() {
-                "{}".to_string()
-            } else {
-                call.input_json.clone()
-            };
-            if let Some(call) = Self::tool_input_identity(call) {
-                self.block_events.push(LlmStreamEvent::ToolInputEnd {
-                    call,
-                    raw_arguments,
-                });
             }
         }
     }
@@ -1160,8 +1096,7 @@ impl ChatStreamState {
             let Some(tool_call) = self.tool_calls.get_mut(&index) else {
                 continue;
             };
-            if !tool_call.ended
-                || tool_call.tool_name.is_empty()
+            if tool_call.tool_name.is_empty()
                 || (require_complete_json
                     && (tool_call.input_json.is_empty()
                         || !matches!(
@@ -1255,71 +1190,5 @@ impl ChatStreamState {
             );
         }
         parts
-    }
-}
-
-#[cfg(test)]
-mod tool_input_tests {
-    use super::*;
-
-    #[test]
-    fn interleaved_chat_arguments_close_only_on_choice_finish() {
-        let mut state = ChatStreamState::default();
-        let wire = [
-            serde_json::json!({"choices":[{"delta":{"tool_calls":[{"index":3,"id":"a","function":{"name":"lookup","arguments":"{\"path\":\"READ"}}]}}]}),
-            serde_json::json!({"choices":[{"delta":{"tool_calls":[{"index":8,"id":"b","function":{"name":"lookup","arguments":"{\"q\":"}}]}}]}),
-            serde_json::json!({"choices":[{"delta":{"tool_calls":[{"index":8,"function":{"arguments":"\"x\"}"}}]}}]}),
-        ];
-        let mut events = Vec::new();
-        for event in wire {
-            OpenAiCompatibleProvider::process_chat_sse_event(&event.to_string(), &mut state)
-                .expect("recorded Chat event parses");
-            events.extend(state.take_block_events());
-        }
-        assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputDelta { call, text } if call.ordinal == 0 && text == "{\"path\":\"READ")));
-        assert!(
-            !events
-                .iter()
-                .any(|event| matches!(event, LlmStreamEvent::ToolInputEnd { .. }))
-        );
-        OpenAiCompatibleProvider::process_chat_sse_event(
-            &serde_json::json!({"choices":[{"delta":{},"finish_reason":"tool_calls"}]}).to_string(),
-            &mut state,
-        )
-        .expect("recorded Chat finish parses");
-        events.extend(state.take_block_events());
-        let ends = events
-            .iter()
-            .filter_map(|event| match event {
-                LlmStreamEvent::ToolInputEnd {
-                    call,
-                    raw_arguments,
-                } => Some((call.ordinal, raw_arguments.as_str())),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(ends, [(0, "{\"path\":\"READ"), (1, "{\"q\":\"x\"}")]);
-    }
-
-    #[test]
-    fn one_chunk_call_closes_before_its_part() {
-        let mut state = ChatStreamState::default();
-        for event in [
-            serde_json::json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"whole","function":{"name":"lookup","arguments":"{\"q\":\"x\"}"}}]}}]}),
-            serde_json::json!({"choices":[{"delta":{},"finish_reason":"tool_calls"}]}),
-        ] {
-            OpenAiCompatibleProvider::process_chat_sse_event(&event.to_string(), &mut state)
-                .expect("recorded whole Chat call parses");
-        }
-        let mut events = state.take_block_events();
-        events.extend(
-            state
-                .take_completed_tool_call_parts()
-                .into_iter()
-                .map(LlmStreamEvent::Part),
-        );
-        assert!(
-            matches!(&events[..], [LlmStreamEvent::ToolInputStart { .. }, LlmStreamEvent::ToolInputDelta { text, .. }, LlmStreamEvent::ToolInputEnd { raw_arguments, .. }, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })] if text == raw_arguments && raw_arguments == "{\"q\":\"x\"}")
-        );
     }
 }

@@ -2330,12 +2330,12 @@ async fn chat_stream_ending_without_finish_reason_is_retryable_truncation_with_p
             .iter()
             .any(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
     );
-    let events = events.lock_recover();
-    assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputDelta { text, .. } if text == "{\"q\":\"x\"}")));
-    assert!(!events.iter().any(|event| matches!(
-        event,
-        LlmStreamEvent::ToolInputEnd { .. } | LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })
-    )));
+    assert!(
+        events
+            .lock_recover()
+            .iter()
+            .any(|event| matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })))
+    );
 }
 
 #[tokio::test]

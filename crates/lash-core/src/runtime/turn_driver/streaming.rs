@@ -1417,9 +1417,6 @@ impl RuntimeTurnDriver<'_> {
                     envelope: None,
                 });
             }
-            LlmStreamEvent::ToolInputStart { .. }
-            | LlmStreamEvent::ToolInputDelta { .. }
-            | LlmStreamEvent::ToolInputEnd { .. } => {}
         }
         Ok(())
     }

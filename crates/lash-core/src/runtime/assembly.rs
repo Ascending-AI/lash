@@ -716,11 +716,6 @@ pub(super) fn fold_llm_stream_event(
         LlmStreamEvent::Usage(streamed) => *usage = streamed.clone(),
         LlmStreamEvent::Evidence(_) => {}
         LlmStreamEvent::RetryStatus { .. } => {}
-        // Argument streaming is capture evidence only: the semantic response
-        // takes the call whole from `Part(ToolCall)` (ADR 0114 §2.1).
-        LlmStreamEvent::ToolInputStart { .. }
-        | LlmStreamEvent::ToolInputDelta { .. }
-        | LlmStreamEvent::ToolInputEnd { .. } => {}
     }
 }
 

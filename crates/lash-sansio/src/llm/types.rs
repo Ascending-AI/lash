@@ -1269,14 +1269,8 @@ impl StreamBlockIdentity {
     }
 }
 
-/// Attempt-local identity of one streamed tool call's arguments.
-///
-/// For each call in an attempt an adapter emits exactly one
-/// [`LlmStreamEvent::ToolInputStart`], then zero or more
-/// [`LlmStreamEvent::ToolInputDelta`], then one [`LlmStreamEvent::ToolInputEnd`],
-/// and then the existing `Part(LlmOutputPart::ToolCall)`, every event carrying
-/// the same `ordinal`. A call cut by a stop or an error ends without
-/// `ToolInputEnd`. `AttemptReset` restarts the ordinals.
+/// Attempt-local identity of one tool call's arguments in a turn capture
+/// frame.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ToolInputIdentity {
     /// Attempt-local, dense from 0, in order of first appearance. It is the
@@ -1324,21 +1318,6 @@ pub enum LlmStreamEvent {
     ReasoningBlockEnd {
         block: StreamBlockIdentity,
         text: String,
-    },
-    /// A tool call's arguments started streaming in this attempt.
-    ToolInputStart {
-        call: ToolInputIdentity,
-    },
-    /// A suffix of the call's raw argument text, never cumulative.
-    ToolInputDelta {
-        call: ToolInputIdentity,
-        text: String,
-    },
-    /// The provider closed the arguments. `raw_arguments` is authoritative, like
-    /// `TextBlockEnd::text`.
-    ToolInputEnd {
-        call: ToolInputIdentity,
-        raw_arguments: String,
     },
     /// Structured provider output state. Text parts reconcile final response
     /// state and replay metadata; they are not live-visible text deltas.
