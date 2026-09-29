@@ -17,8 +17,10 @@ pub const TABLE: &str = "artifact_referrer_edges";
 /// Every column, in insert order. The whole row is its primary key.
 pub const INSERT_COLUMNS: &str = "namespace, artifact_ref, referrer_kind, referrer_id";
 
-/// The columns a referrer's edge listing reads, in its order.
-pub const REFERRER_EDGE_COLUMNS: &str = "namespace, artifact_ref";
+/// The columns a referrer's edge listing reads, in its order: the whole
+/// row, so every read decodes the stored pair and refuses a malformed one as
+/// `StoredDataCorrupt` (ADR 0113 §1).
+pub const REFERRER_EDGE_COLUMNS: &str = "namespace, artifact_ref, referrer_kind, referrer_id";
 
 /// The columns an artifact's edge listing reads, in its order.
 pub const ARTIFACT_EDGE_COLUMNS: &str = "referrer_kind, referrer_id";
@@ -42,13 +44,14 @@ crate::statements! {
         /// Every edge referrer `?1`/`?2` holds, in every namespace, in
         /// `(namespace, artifact_ref)` order: what an end-referrer severs and
         /// then reclaims.
-        select_referrer_edges = "SELECT namespace, artifact_ref FROM artifact_referrer_edges
+        select_referrer_edges = "SELECT namespace, artifact_ref, referrer_kind, referrer_id
+             FROM artifact_referrer_edges
              WHERE referrer_kind = ?1 AND referrer_id = ?2
              ORDER BY namespace, artifact_ref";
 
         /// Every edge referrer `?2`/`?3` holds in namespace `?1`, in
         /// `artifact_ref` order: one store's share of an end-referrer.
-        select_referrer_edges_in_namespace = "SELECT namespace, artifact_ref
+        select_referrer_edges_in_namespace = "SELECT namespace, artifact_ref, referrer_kind, referrer_id
              FROM artifact_referrer_edges
              WHERE namespace = ?1 AND referrer_kind = ?2 AND referrer_id = ?3
              ORDER BY artifact_ref";
