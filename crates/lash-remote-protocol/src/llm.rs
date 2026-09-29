@@ -216,6 +216,8 @@ pub struct RemoteGenerationReceipt {
     #[serde(default)]
     pub reasoning: RemoteGenerationOptionOutcome,
     #[serde(default)]
+    pub reasoning_retention: RemoteGenerationOptionOutcome,
+    #[serde(default)]
     pub parallel_tool_calls: RemoteGenerationOptionOutcome,
     #[serde(default)]
     pub thinking_summary: RemoteGenerationOptionOutcome,

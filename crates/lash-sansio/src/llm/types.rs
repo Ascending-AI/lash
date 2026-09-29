@@ -837,6 +837,9 @@ pub struct GenerationReceipt {
     /// The model spec's reasoning selection; `ProviderDefault` is not a request.
     #[serde(default)]
     pub reasoning: GenerationOptionOutcome,
+    /// The model spec's reasoning-history retention selection.
+    #[serde(default)]
+    pub reasoning_retention: GenerationOptionOutcome,
     #[serde(default)]
     pub parallel_tool_calls: GenerationOptionOutcome,
     /// `expose_thinking`'s wire half: a reasoning summary requested from the
@@ -851,7 +854,7 @@ pub struct GenerationReceipt {
 }
 
 impl GenerationReceipt {
-    fn rows(&self) -> [GenerationOptionOutcome; 10] {
+    fn rows(&self) -> [GenerationOptionOutcome; 11] {
         [
             self.output_token_cap,
             self.temperature,
@@ -859,6 +862,7 @@ impl GenerationReceipt {
             self.stop_sequences,
             self.cache,
             self.reasoning,
+            self.reasoning_retention,
             self.parallel_tool_calls,
             self.thinking_summary,
             self.thinking_visibility,

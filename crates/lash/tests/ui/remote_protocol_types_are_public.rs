@@ -143,6 +143,7 @@ fn main() {
         stop_sequences: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
         cache: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
         reasoning: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
+        reasoning_retention: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
         parallel_tool_calls: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
         thinking_summary: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
         thinking_visibility: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,

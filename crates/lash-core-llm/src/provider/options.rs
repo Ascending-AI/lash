@@ -1,4 +1,5 @@
 use super::support::*;
+use lash_sansio::llm::capability::ReasoningRetentionSelection;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
@@ -260,6 +261,8 @@ pub struct GenerationEmission {
     pub stop_sequences: bool,
     pub parallel_tool_calls: bool,
     pub reasoning: bool,
+    /// A native retention field was emitted, or client-side history was projected.
+    pub reasoning_retention: bool,
     pub thinking_summary: bool,
     /// The adapter emitted its prompt-cache directive.
     pub cache: bool,
@@ -419,6 +422,13 @@ impl ResolvedGenerationPolicy {
             ),
             cache: Outcome::from_emission(cache_requested, emission.cache),
             reasoning: Outcome::from_emission(self.reasoning.is_some(), emission.reasoning),
+            reasoning_retention: Outcome::from_emission(
+                !matches!(
+                    request.model_capability.reasoning_retention.selection,
+                    ReasoningRetentionSelection::ProviderDefault
+                ),
+                emission.reasoning_retention,
+            ),
             parallel_tool_calls: Outcome::from_emission(
                 self.parallel_tool_calls.is_some(),
                 emission.parallel_tool_calls,

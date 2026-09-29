@@ -588,6 +588,7 @@ impl AnthropicProvider {
                     "keep": keep,
                 }],
             });
+            emission.reasoning_retention = true;
         }
 
         if let Some(system_value) = system_value {

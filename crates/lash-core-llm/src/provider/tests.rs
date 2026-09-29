@@ -1802,6 +1802,7 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
             "output_token_cap": "not_requested",
             "temperature": "applied",
             "reasoning": "not_requested",
+            "reasoning_retention": "not_requested",
             "parallel_tool_calls": "not_requested",
             "thinking_summary": "not_requested",
             "thinking_visibility": "not_requested",

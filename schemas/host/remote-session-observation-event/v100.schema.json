@@ -750,6 +750,14 @@
           ],
           "default": "not_requested"
         },
+        "reasoning_retention": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        },
         "seed": {
           "allOf": [
             {

@@ -339,6 +339,7 @@ impl CodexProvider {
             req.model_capability.reasoning_retention.selection
         {
             reasoning_object(&mut body)["context"] = json!(context.as_str());
+            emission.reasoning_retention = true;
         }
         if policy.request_thinking_summary {
             reasoning_object(&mut body)["summary"] = json!("auto");

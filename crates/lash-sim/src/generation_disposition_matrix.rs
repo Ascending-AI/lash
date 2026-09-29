@@ -559,6 +559,11 @@ async fn unset_controls_invent_no_generation_fields() {
             );
         }
         assert_eq!(receipt.reasoning, Outcome::NotRequested, "{dialect:?}");
+        assert_eq!(
+            receipt.reasoning_retention,
+            Outcome::NotRequested,
+            "{dialect:?}"
+        );
         assert!(body.pointer("/reasoning/effort").is_none(), "{dialect:?}");
         assert!(body.pointer("/reasoning_effort").is_none(), "{dialect:?}");
     }
@@ -959,6 +964,14 @@ async fn websocket_generation_settings_have_the_same_dispositions_as_sse() {
 async fn retention_is_projected_or_refused_before_io() {
     for dialect in HTTP_DIALECTS {
         let cap = matches!(dialect, Dialect::Anthropic).then_some(4096);
+        let (result, calls) = run(dialect, dialect.request(), cap).await;
+        let (_, receipt) = result.unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
+        assert_eq!(calls, 1, "{dialect:?}");
+        assert_eq!(
+            receipt.reasoning_retention,
+            Outcome::NotRequested,
+            "{dialect:?} default retention"
+        );
         let mut unsupported = dialect.request();
         *unsupported.model_capability.reasoning_retention = if matches!(dialect, Dialect::Anthropic)
         {
@@ -1024,8 +1037,9 @@ async fn retention_is_projected_or_refused_before_io() {
             }
         };
         let (result, calls) = run(dialect, supported, cap).await;
-        let (body, _) = result.unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
+        let (body, receipt) = result.unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
         assert_eq!(calls, 1, "{dialect:?}");
+        assert_eq!(receipt.reasoning_retention, Outcome::Applied, "{dialect:?}");
         if let Some((path, value)) = expected {
             assert_eq!(body.pointer(path), Some(&value), "{dialect:?}: {body}");
         } else {
@@ -1058,7 +1072,7 @@ async fn generation_disposition_matrix() {
     websocket_generation_settings_have_the_same_dispositions_as_sse().await;
     retention_is_projected_or_refused_before_io().await;
     eprintln!(
-        "generation disposition matrix: 179 cases in {:?}",
+        "generation disposition matrix: 188 cases in {:?}",
         start.elapsed()
     );
 }

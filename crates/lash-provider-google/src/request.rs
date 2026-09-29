@@ -7,6 +7,7 @@ use lash_core::GoogleDialect;
 use lash_core::facade_support::{
     ProviderSchemaCapabilities, SchemaPurpose, SchemaResolutionRequest, resolve_schema,
 };
+use lash_sansio::llm::capability::ReasoningRetentionSelection;
 
 fn user_prompt_id(req: &LlmRequest) -> uuid::Uuid {
     let scope = format!("{}\0{}", req.provider_prompt_cache_key(), req.request_id());
@@ -484,7 +485,13 @@ impl GoogleOAuthProvider {
         project_id: Option<&str>,
     ) -> Result<(Value, GenerationReceipt), LlmTransportError> {
         let (policy, thinking_config) = Self::resolve_generation(provider, req)?;
-        let mut emission = GenerationEmission::default();
+        let mut emission = GenerationEmission {
+            reasoning_retention: matches!(
+                req.model_capability.reasoning_retention.selection,
+                ReasoningRetentionSelection::ClientSideUserSegments { .. }
+            ),
+            ..GenerationEmission::default()
+        };
         let mut generation_config = json!({});
         if let Some(temperature) = &policy.temperature {
             generation_config["temperature"] = Value::Number(temperature.clone().into());

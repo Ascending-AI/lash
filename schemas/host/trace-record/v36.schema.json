@@ -342,6 +342,15 @@
           "default": "not_requested",
           "description": "The model spec's reasoning selection; `ProviderDefault` is not a request."
         },
+        "reasoning_retention": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested",
+          "description": "The model spec's reasoning-history retention selection."
+        },
         "seed": {
           "allOf": [
             {

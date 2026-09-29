@@ -469,7 +469,13 @@ impl OpenAiCompatibleProvider {
             self.kind(),
             &Self::chat_generation_wire(&compat, req),
         )?;
-        let mut emission = GenerationEmission::default();
+        let mut emission = GenerationEmission {
+            reasoning_retention: matches!(
+                req.model_capability.reasoning_retention.selection,
+                ReasoningRetentionSelection::ClientSideUserSegments { .. }
+            ),
+            ..GenerationEmission::default()
+        };
         let mut reasoning_body = json!({});
         if let Some(intent) = &policy.reasoning {
             apply_reasoning(

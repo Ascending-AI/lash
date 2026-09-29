@@ -323,6 +323,10 @@ fn receipt_joins_requested_settings_with_adapter_emission() {
         ..crate::provider::ReasoningCapability::default()
     });
     request.model_variant = ReasoningSelection::Effort("high".to_string());
+    request.model_capability.reasoning_retention.selection =
+        crate::provider::ReasoningRetentionSelection::ClientSideUserSegments {
+            max_segments: NonZeroUsize::new(1).expect("positive"),
+        };
     let options = ProviderOptions {
         max_output_tokens: Some(4_096),
         expose_thinking: true,
@@ -337,6 +341,7 @@ fn receipt_joins_requested_settings_with_adapter_emission() {
             temperature: true,
             parallel_tool_calls: true,
             reasoning: true,
+            reasoning_retention: true,
             thinking_summary: true,
             ..GenerationEmission::default()
         },
@@ -350,6 +355,7 @@ fn receipt_joins_requested_settings_with_adapter_emission() {
             stop_sequences: GenerationOptionOutcome::NotRequested,
             cache: GenerationOptionOutcome::NotRequested,
             reasoning: GenerationOptionOutcome::Applied,
+            reasoning_retention: GenerationOptionOutcome::Applied,
             parallel_tool_calls: GenerationOptionOutcome::Applied,
             thinking_summary: GenerationOptionOutcome::Applied,
             thinking_visibility: GenerationOptionOutcome::Applied,
@@ -362,6 +368,10 @@ fn receipt_joins_requested_settings_with_adapter_emission() {
     let defective = policy.receipt(&request, &GenerationEmission::default());
     assert_eq!(
         defective.reasoning,
+        GenerationOptionOutcome::OmittedUnsupported
+    );
+    assert_eq!(
+        defective.reasoning_retention,
         GenerationOptionOutcome::OmittedUnsupported
     );
     assert!(!defective.nothing_omitted());
