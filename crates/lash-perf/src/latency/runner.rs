@@ -2,11 +2,14 @@
 //!
 //! One *sample* is a send→outcome round trip on a live Restate server. The
 //! host measures the wall spans it can see; a per-sample store poller reads
-//! durable evidence at a fixed 50 ms cadence so the claim, application and
-//! settlement instants do not ride the follower's own wake schedule. Every
-//! read is keyed — the open-input row, the input's root binding, the root's
-//! terminal — and all of them run on the lane's one observer connection, so
-//! the cadence never rescans session history or opens a connection per tick:
+//! durable evidence so the claim, application and settlement instants do
+//! not ride the follower's own wake schedule. Every read is keyed — the
+//! input's open-set row, the input's root binding, the root's terminal —
+//! and all of them run on the lane's one observer connection, so a poll
+//! never rescans session history or opens a connection per tick. The tick
+//! backs off from a 2 ms floor toward a 50 ms ceiling while nothing changes
+//! and restarts at the floor the moment a mark lands, so clustered marks
+//! keep tick-fine precision while a quiet wait stays cheap:
 //!
 //! * `claim` — the input's pending row first reports `Admitted` (a root took
 //!   it), or leaves the open set.
@@ -40,10 +43,15 @@ use crate::perf_support::time::round3;
 use crate::runtime_perf::openai_compat::OpenAiCompatBenchServer;
 use crate::runtime_perf::providers::BenchmarkStreamProfile;
 
-/// Keep the observer's reads sparse enough to leave checkpoint windows under
-/// concurrent lanes. These phase markers have up to one tick of observation
-/// error; the send-to-completion measurement uses the direct outcome clock.
-const STORE_POLL_TICK: Duration = Duration::from_millis(50);
+/// The store poller's interval bounds. A fresh send's claim is imminent, so
+/// the interval starts at the floor and a tick that lands a mark or first
+/// sees the open row restarts it there; a tick that observes nothing
+/// doubles it up to the ceiling, keeping an idle wait's reads sparse enough
+/// to leave checkpoint windows under concurrent lanes. These phase markers
+/// carry up to one interval of observation error; the send-to-completion
+/// measurement uses the direct outcome clock.
+const STORE_POLL_FLOOR: Duration = Duration::from_millis(2);
+const STORE_POLL_CEILING: Duration = Duration::from_millis(50);
 /// A sample's store poller gives up here; its marks stay `None`.
 const STORE_POLL_TIMEOUT: Duration = Duration::from_secs(120);
 /// The follower poll schedule the `poll_detect` phase simulates.
@@ -691,11 +699,18 @@ fn status_name(status: &lash::TurnStatus) -> String {
 
 /// The durable-evidence poller for one send: claim, application and
 /// settlement instants read from the store itself, not the follower's wake
-/// schedule. Every read is keyed — the open-input row, the input's root
-/// binding, the root's terminal — on `store`'s one connection (FIG-3974):
-/// the input→root binding and the terminal are the same point reads the
-/// follower resolves with, so the poller never decodes the session's commit
-/// history.
+/// schedule. Every read is keyed — the input's open-set row, the input's
+/// root binding, the root's terminal — on `store`'s one connection
+/// (FIG-3974, FIG-4061): `pending_turn_input` is the claim read the open-set
+/// listing used to answer, narrowed to the one tracked row, so a poll never
+/// rescans the session's pending inputs or decodes its commit history.
+///
+/// The interval starts at `STORE_POLL_FLOOR` — a fresh send's claim is
+/// imminent — and doubles each tick that observes nothing, up to
+/// `STORE_POLL_CEILING`. A tick that lands a mark or first sees the row
+/// restarts it at the floor: admission binds the row and names its root in
+/// one transaction, so the next mark is imminent whenever one just landed,
+/// and only a quiet wait pays the backoff.
 async fn poll_marks(
     store: Arc<dyn lash::persistence::RuntimePersistence>,
     session_id: SessionId,
@@ -705,24 +720,31 @@ async fn poll_marks(
     let mut marks = PollMarks::default();
     let mut root: Option<lash_core::TurnId> = None;
     let mut row_seen = false;
+    let mut interval = STORE_POLL_FLOOR;
     let deadline = Instant::now() + STORE_POLL_TIMEOUT;
     loop {
         let now = elapsed_ms(t_request);
+        let mut changed = false;
         if marks.claim_ms.is_none()
-            && let Ok(rows) = store.list_pending_turn_inputs(&session_id).await
+            && let Ok(row) = store.pending_turn_input(&session_id, &input_id).await
         {
-            match rows.iter().find(|row| row.input.input_id == input_id) {
+            match row {
                 Some(row) => {
+                    changed |= !row_seen;
                     row_seen = true;
                     if matches!(
                         row.status,
                         lash::PendingTurnInputReadStatus::Admitted { .. }
                     ) {
                         marks.claim_ms = Some(now);
+                        changed = true;
                     }
                 }
                 // The row left the open set: the drive consumed it.
-                None if row_seen => marks.claim_ms = Some(now),
+                None if row_seen => {
+                    marks.claim_ms = Some(now);
+                    changed = true;
+                }
                 None => {}
             }
         }
@@ -734,6 +756,7 @@ async fn poll_marks(
         {
             marks.applied_ms = Some(now);
             root = Some(bound);
+            changed = true;
         }
         if let Some(root) = &root {
             if let Ok(Some(_)) = store.root_terminal(&session_id, root).await {
@@ -748,7 +771,12 @@ async fn poll_marks(
             marks.timed_out = true;
             break;
         }
-        tokio::time::sleep(STORE_POLL_TICK).await;
+        interval = if changed {
+            STORE_POLL_FLOOR
+        } else {
+            (interval * 2).min(STORE_POLL_CEILING)
+        };
+        tokio::time::sleep(interval).await;
     }
     marks
 }
@@ -1038,18 +1066,20 @@ mod tests {
 
     use super::*;
 
-    /// The store half of `poll_marks`' keyed-read contract (FIG-3974): the
-    /// claim, applied and settled marks come from point reads — the pending
-    /// row, the input's root binding, the root's terminal — on the one store
-    /// the lane's pollers share. `list_turn_input_applications`, the
-    /// full-history receipt decode the poller issued every tick before, is
-    /// armed to panic: reaching it at all is the regression.
+    /// The store half of `poll_marks`' keyed-read contract (FIG-3974,
+    /// FIG-4061): the claim, applied and settled marks come from point
+    /// reads — the pending row, the input's root binding, the root's
+    /// terminal — on the one store the lane's pollers share.
+    /// `list_pending_turn_inputs` and `list_turn_input_applications`, the
+    /// open-set scan and the full-history receipt decode the poller issued
+    /// every tick before, are armed to panic: reaching either is the
+    /// regression.
     struct PollProbeStore {
         inner: Arc<dyn lash::persistence::RuntimePersistence>,
         row: lash::PendingTurnInput,
         root: lash_core::TurnId,
         terminal: lash::persistence::RootTerminal,
-        pending_calls: AtomicUsize,
+        pending_input_calls: AtomicUsize,
         applications_calls: AtomicUsize,
         root_of_input_calls: AtomicUsize,
         root_terminal_calls: AtomicUsize,
@@ -1087,7 +1117,7 @@ mod tests {
                     head_revision: None,
                     at_ms: 1,
                 },
-                pending_calls: AtomicUsize::new(0),
+                pending_input_calls: AtomicUsize::new(0),
                 applications_calls: AtomicUsize::new(0),
                 root_of_input_calls: AtomicUsize::new(0),
                 root_terminal_calls: AtomicUsize::new(0),
@@ -1101,21 +1131,32 @@ mod tests {
             self.inner.as_ref()
         }
 
-        /// The row reports `Open` on the first read and `Admitted` after, a
-        /// drive's root admission landing between two ticks.
+        /// The whole open-set listing the poller used to issue every tick
+        /// (FIG-4061): armed to panic, so reaching it at all is the
+        /// regression.
         async fn list_pending_turn_inputs(
             &self,
             _session_id: &SessionId,
         ) -> Result<Vec<lash::PendingTurnInputRead>, lash::persistence::StoreError> {
-            let call = self.pending_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(vec![if call == 0 {
+            panic!("the store poller must never list the open set");
+        }
+
+        /// The row reports `Open` on the first keyed read and `Admitted`
+        /// after, a drive's root admission landing between two ticks.
+        async fn pending_turn_input(
+            &self,
+            _session_id: &SessionId,
+            _input_id: &lash_core::InputId,
+        ) -> Result<Option<lash::PendingTurnInputRead>, lash::persistence::StoreError> {
+            let call = self.pending_input_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(if call == 0 {
                 lash::PendingTurnInputRead::open(self.row.clone())
             } else {
                 lash::PendingTurnInputRead::admitted(
                     self.row.clone(),
                     lash_core::TurnId::from("poll-probe-root"),
                 )
-            }])
+            }))
         }
 
         async fn list_turn_input_applications(
@@ -1185,6 +1226,7 @@ mod tests {
             "claim {claim}, applied {applied}, settled {settled}"
         );
         assert_eq!(probe.applications_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(probe.pending_input_calls.load(Ordering::SeqCst), 2);
         assert_eq!(probe.root_of_input_calls.load(Ordering::SeqCst), 3);
         assert_eq!(probe.root_terminal_calls.load(Ordering::SeqCst), 2);
     }

@@ -480,6 +480,15 @@ impl crate::store::RuntimePersistenceDecorator for RedriveStore {
         self.pending_row_reads.fetch_add(1, Ordering::SeqCst);
         self.inner.list_pending_turn_inputs(session_id).await
     }
+
+    async fn pending_turn_input(
+        &self,
+        session_id: &SessionId,
+        input_id: &crate::InputId,
+    ) -> Result<Option<crate::PendingTurnInputRead>, crate::StoreError> {
+        self.pending_row_reads.fetch_add(1, Ordering::SeqCst);
+        self.inner.pending_turn_input(session_id, input_id).await
+    }
 }
 
 /// One journal and one effect host shared by a first execution and its
