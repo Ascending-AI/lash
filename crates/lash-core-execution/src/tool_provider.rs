@@ -536,12 +536,15 @@ impl std::fmt::Debug for ToolProgressSink {
 /// each persisted before it is published.
 #[async_trait::async_trait]
 pub trait ToolAttemptCaptureWriter: ToolProgressReporter {
-    /// Persist the attempt's settled output for call `call_id`.
+    /// Persist the attempt's settled output for call `call_id`. A seal that
+    /// already fenced the writer is no fault: the partial stays as it was
+    /// sealed. Any other failure is the step's: a transient store fault is
+    /// retried, and a refusal ends the step typed.
     async fn settled(
         &self,
         call_id: &str,
         output: &crate::ToolCallOutput,
-    ) -> Result<(), ProgressRefused>;
+    ) -> Result<(), crate::RuntimeEffectControllerError>;
 
     /// Where the attempt's writer stood: the reference its recorded outcome
     /// carries.

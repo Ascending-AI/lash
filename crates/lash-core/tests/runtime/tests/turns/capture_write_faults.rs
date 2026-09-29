@@ -38,6 +38,8 @@ enum AppendFault {
     TransientOnce,
     /// Every append is refused: the turn's capture is sealed.
     Refused,
+    /// Only the append of a tool's settlement is refused, as corrupt.
+    SettlementRefused,
 }
 
 /// A store whose capture appends fail as `fault` says.
@@ -76,7 +78,17 @@ impl RuntimePersistenceDecorator for CaptureAppendFaults {
                 turn_id: batch.lease.turn.turn_id.clone(),
                 sealed_through: 0,
             }),
-            AppendFault::TransientOnce => {
+            AppendFault::SettlementRefused
+                if batch.frames.iter().any(|frame| {
+                    matches!(frame, lash_core::store::CaptureFrame::ToolSettled { .. })
+                }) =>
+            {
+                Err(lash_core::StoreError::StoredDataCorrupt {
+                    record_kind: "turn capture",
+                    message: "injected refused tool settlement".to_string(),
+                })
+            }
+            AppendFault::TransientOnce | AppendFault::SettlementRefused => {
                 lash_core::store::TurnCaptureStore::append_capture_batch(self.inner.as_ref(), batch)
                     .await
             }
@@ -97,9 +109,10 @@ struct CapturedTurn {
     handler_attempts: u32,
 }
 
-/// Run one turn whose model call answers text, in a handler on the double,
-/// over a store whose capture appends fail as `fault` says.
-async fn run_captured_turn(fault: AppendFault, turn_id: &str) -> CapturedTurn {
+/// Run one turn in a handler on the double, over a store whose capture
+/// appends fail as `fault` says. Its first model call asks for the echo tool
+/// when `tool_call` is set; every other call answers text.
+async fn run_captured_turn(fault: AppendFault, turn_id: &str, tool_call: bool) -> CapturedTurn {
     let double = kernel_double(
         SEED,
         lash_restate_test::ServerConfig::default().retry(pausing_after(ATTEMPTS)),
@@ -117,12 +130,22 @@ async fn run_captured_turn(fault: AppendFault, turn_id: &str) -> CapturedTurn {
         .complete({
             let model_calls = Arc::clone(&model_calls);
             move |_request| {
-                model_calls.fetch_add(1, Ordering::SeqCst);
-                std::future::ready(Ok(LlmResponse {
-                    parts: vec![LlmOutputPart::Text {
+                let call = model_calls.fetch_add(1, Ordering::SeqCst);
+                let part = if tool_call && call == 0 {
+                    LlmOutputPart::ToolCall {
+                        call_id: "captured-call".to_string(),
+                        tool_name: "echo_tool".to_string(),
+                        input_json: r#"{"value":"echoed"}"#.to_string(),
+                        replay: None,
+                    }
+                } else {
+                    LlmOutputPart::Text {
                         text: "captured before it publishes".to_string(),
                         response_meta: None,
-                    }],
+                    }
+                };
+                std::future::ready(Ok(LlmResponse {
+                    parts: vec![part],
                     response_metadata: Default::default(),
                     ..LlmResponse::default()
                 }))
@@ -130,7 +153,7 @@ async fn run_captured_turn(fault: AppendFault, turn_id: &str) -> CapturedTurn {
         })
         .build();
     let runtime = TestRuntime::new(&backend, transport)
-        .tools(Arc::new(EmptyTools))
+        .tools(Arc::new(EchoTool))
         .host(test_host_config(&backend))
         .store(Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>)
         .build()
@@ -190,7 +213,12 @@ async fn run_captured_turn(fault: AppendFault, turn_id: &str) -> CapturedTurn {
 /// transient fault.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn a_refused_capture_write_ends_the_turn_typed_within_one_attempt() {
-    let turn = Box::pin(run_captured_turn(AppendFault::Refused, "refused-capture")).await;
+    let turn = Box::pin(run_captured_turn(
+        AppendFault::Refused,
+        "refused-capture",
+        false,
+    ))
+    .await;
     turn.handler
         .expect("a refused capture write ends its turn, not pauses its invocation");
     assert_eq!(turn.handler_attempts, 1, "the refusal was never retried");
@@ -218,6 +246,7 @@ pub(super) async fn a_transient_capture_write_fault_is_retried_and_then_succeeds
     let turn = Box::pin(run_captured_turn(
         AppendFault::TransientOnce,
         "transient-capture",
+        false,
     ))
     .await;
     turn.handler.expect("the retried handler completes");
@@ -241,5 +270,33 @@ pub(super) async fn a_transient_capture_write_fault_is_retried_and_then_succeeds
     assert!(
         matches!(outcome, TurnOutcome::Finished(_)),
         "the retried turn finishes: {outcome:?}"
+    );
+}
+
+/// A tool attempt whose settlement the store refuses ends its step with that
+/// typed refusal in the one attempt, as a refused model-call capture does.
+#[tokio::test(flavor = "multi_thread")]
+pub(super) async fn a_refused_tool_settlement_capture_ends_the_turn_typed_within_one_attempt() {
+    let turn = Box::pin(run_captured_turn(
+        AppendFault::SettlementRefused,
+        "refused-settlement",
+        true,
+    ))
+    .await;
+    turn.handler
+        .expect("a refused settlement ends its turn, not pauses its invocation");
+    assert_eq!(turn.handler_attempts, 1, "the refusal was never retried");
+    assert_eq!(turn.model_calls, 1, "the turn ended at the tool step");
+    let outcome = turn.outcome.expect("the handler ran the turn");
+    let failure = match outcome {
+        Err(error) => error,
+        Ok((outcome @ TurnOutcome::Stopped(_), errors)) => format!("{outcome:?}: {errors}"),
+        Ok((outcome, _)) => panic!("a refused settlement must end the turn: {outcome:?}"),
+    };
+    assert!(
+        failure.contains("runtime_store_corrupt")
+            && failure.contains("injected refused tool settlement")
+            && !failure.contains("transient_capture_write"),
+        "the turn ends with the store's typed refusal, not a transient fault: {failure}"
     );
 }
