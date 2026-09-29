@@ -195,7 +195,9 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 parent_session_id: Some(SessionId::from("layout-parent-literal")),
                 caused_by_kind: Some("tool_call".to_string()),
                 caused_by_session_id: Some(SessionId::from("layout-tool-session-literal")),
-                caused_by_call_id: Some("layout-tool-call-literal".to_string()),
+                caused_by_call_id: Some(
+                    lash_core::ToolCallId::fixture("layout-tool-call-literal").to_string(),
+                ),
                 ..RawSessionMetaRow::literal(
                     &SessionId::from("layout-child-tool-call-literal"),
                     "child",
