@@ -591,7 +591,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         let request_fingerprint =
             lash_core_execution::facade_support::trigger_command_fingerprint(&command);
         let fixed_incarnation = self.fixed_incarnation.clone().unwrap_or_else(|| {
-            lash_core_execution::trigger_incarnation(command.owner_scope(), operation_id)
+            lash_core_execution::trigger_incarnation(command.owner_scope(), &operation_id)
         });
         let owner_scope = command.owner_scope().clone();
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
