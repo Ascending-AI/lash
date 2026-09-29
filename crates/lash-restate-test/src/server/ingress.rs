@@ -17,7 +17,7 @@ use super::Shared;
 use super::catalog::{HandlerKind, ServiceKind};
 use super::model::{Outcome, Status, Target, Waiter};
 use super::processor::{
-    AttachTarget, ControlResult, Submission, Submitted, WORKFLOW_ALREADY_INVOKED,
+    AttachTarget, ControlOutcome, Submission, Submitted, WORKFLOW_ALREADY_INVOKED,
 };
 use crate::protocol::generated::{self as pb, notification_template};
 
@@ -525,7 +525,7 @@ impl Routes {
             "kill" => state.kill(&self.shared, invocation, &mut Vec::new()),
             "purge" => {
                 if state.purge(invocation) {
-                    ControlResult::Done
+                    ControlOutcome::Done
                 } else {
                     return error(409, format!("invocation {id} is not completed"));
                 }
@@ -536,7 +536,7 @@ impl Routes {
                     Err(message) => return error(400, message),
                 };
                 match state.resume_on(&self.shared, invocation, &deployment) {
-                    Ok(()) => ControlResult::Done,
+                    Ok(()) => ControlOutcome::Done,
                     Err(super::ResumeRefusal::Status(status)) => {
                         return error(
                             409,
@@ -553,9 +553,9 @@ impl Routes {
             }
         };
         match result {
-            ControlResult::Appended => respond(202, ""),
-            ControlResult::Done => respond(200, ""),
-            ControlResult::AlreadyCompleted => {
+            ControlOutcome::Appended => respond(202, ""),
+            ControlOutcome::Done => respond(200, ""),
+            ControlOutcome::AlreadyCompleted => {
                 error(409, format!("invocation {id} is already completed"))
             }
         }

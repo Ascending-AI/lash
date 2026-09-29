@@ -25,7 +25,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use lashlang::{
-    AbilityOp, AbilityResult, AssignPathStep, AssignTarget, ExecutionHost, ExecutionHostError,
+    AbilityOp, AbilityOutcome, AssignPathStep, AssignTarget, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, Expr, JavaScriptBinaryOp, Program, State, Value, execute,
 };
 
@@ -90,10 +90,10 @@ unsafe impl GlobalAlloc for CountingAllocator {
 struct Host;
 
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
-            AbilityOp::Print(_) => Ok(AbilityResult::Value(Value::Null)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
+            AbilityOp::Print(_) => Ok(AbilityOutcome::Value(Value::Null)),
             _ => Err(ExecutionHostError::new("unsupported append-cost ability")),
         }
     }

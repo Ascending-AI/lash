@@ -25,7 +25,7 @@ use crate::runtime::turn_boundary::{SeedCarries, derive_seed_carries};
 /// A frame an author opened in resident state, with what its commit needs.
 #[must_use = "an opened frame is committed with its carries, then the live state is reset"]
 pub(in crate::runtime) struct OpenedFrame {
-    pub(in crate::runtime) result: crate::OpenAgentFrameResult,
+    pub(in crate::runtime) result: crate::OpenAgentFrameOutcome,
     /// The frame current when it opened: the one it leaves.
     pub(in crate::runtime) ended: Option<crate::FrameNodeId>,
     /// What its seed carries out of `ended` (ADR 0113 §3.1).
@@ -84,7 +84,7 @@ impl LashRuntime {
     pub async fn open_agent_frame(
         &mut self,
         request: crate::OpenAgentFrameRequest,
-    ) -> Result<crate::OpenAgentFrameResult, RuntimeError> {
+    ) -> Result<crate::OpenAgentFrameOutcome, RuntimeError> {
         let opened = self.stage_agent_frame(request, StagedOpen::Caller).await?;
         if opened.result.opened {
             self.restore_protocol_session_after_frame_open().await?;

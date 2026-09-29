@@ -14,7 +14,7 @@ use crate::runner::run_generated_workload_for_fixture;
 use crate::scheduler::BoundaryKind;
 use crate::store::ModelStore;
 use crate::trace::{
-    AbstractWorldSummary, OracleStatus, OracleVerdict, SimulationTrace, TraceIoError, read_trace,
+    AbstractWorldView, OracleStatus, OracleVerdict, SimulationTrace, TraceIoError, read_trace,
     write_replay_report, write_trace,
 };
 
@@ -34,7 +34,7 @@ pub struct MinimizeReport {
     pub minimized_event_count: usize,
     pub removed_event_count: usize,
     pub operation_family_reductions: Vec<OperationFamilyReduction>,
-    pub final_summary: AbstractWorldSummary,
+    pub final_summary: AbstractWorldView,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -612,7 +612,7 @@ fn select_fixture_target_oracle(
     Ok(())
 }
 
-fn summary_for_trace(trace: &SimulationTrace) -> Result<AbstractWorldSummary, MinimizeError> {
+fn summary_for_trace(trace: &SimulationTrace) -> Result<AbstractWorldView, MinimizeError> {
     let mut store = ModelStore::default();
     for event in &trace.events {
         store.apply_observed_boundary(&event.as_event(), &event.observed);
@@ -1178,7 +1178,7 @@ mod tests {
             Vec::new(),
             target.clone(),
             vec![target],
-            AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new()),
+            AbstractWorldView::with_digest(0, 0, Vec::new(), Vec::new()),
         );
         let tmp = tempfile::tempdir().expect("tempdir");
 

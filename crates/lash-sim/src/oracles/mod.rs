@@ -20,7 +20,7 @@ use crate::scheduler::{
 #[cfg(test)]
 use crate::scheduler::{PENDING_RUNTIME_BOUNDARY_SCHEMA, RuntimeCompletionUnit};
 use crate::store::CheckpointWriteEvent;
-use crate::trace::{AbstractWorldSummary, OracleVerdict, WorkloadExpectations};
+use crate::trace::{AbstractWorldView, OracleVerdict, WorkloadExpectations};
 
 pub const CROSS_SESSION_ISOLATION_ORACLE: &str = "sim.oracle.cross-session-isolation.v1";
 pub const BACKEND_FAILURE_ORACLE: &str = "sim.oracle.backend-failure-observed.v1";
@@ -189,7 +189,7 @@ pub const RUN_ONLY_ORACLES: &[&str] = &[
 /// definition instead of maintaining parallel lists.
 pub fn generated_trace_oracles(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     durable_writes: &[CheckpointWriteEvent],
     expectations: &WorkloadExpectations,
 ) -> Vec<OracleVerdict> {
@@ -244,7 +244,7 @@ impl OracleSlot<'_> {
 /// change its answer (see `minimize::candidate_preserves_target`).
 pub fn walk_generated_trace_oracles<S, V>(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     durable_writes: &[CheckpointWriteEvent],
     expectations: &WorkloadExpectations,
     memo: &ScenarioFactMemo,
@@ -440,7 +440,7 @@ pub fn walk_generated_trace_oracles<S, V>(
 /// call the walk directly.
 pub fn visit_generated_trace_oracles<V>(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     durable_writes: &[CheckpointWriteEvent],
     expectations: &WorkloadExpectations,
     visit: V,

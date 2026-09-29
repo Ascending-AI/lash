@@ -2432,7 +2432,7 @@ run_authority_rebind_mutation_evidence() {
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-core-execution-rebind-checklist-targeted" \
     -- --locked -p lash-internal-core-execution --lib rebind
-  # `RebindField::disposition` has no viable mutants (RebindDisposition is not
+  # `RebindField::disposition` has no viable mutants (RebindSource is not
   # `Default`), so the checklist's other ruling is judged by the two-opener
   # differential rather than by a vacuous sweep here.
   run_mutants_recorded "lash-core-execution retained tool-child request" "${out_dir}/mutants-lash-core-execution-tool-child-targeted" \

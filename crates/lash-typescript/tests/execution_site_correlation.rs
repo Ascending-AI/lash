@@ -17,7 +17,7 @@ use lash_typescript::parse;
 use lashlang::testing::ast_builders as b;
 use lashlang::testing::harness::{EchoHost, compiled_execution_sites, link_labeled};
 use lashlang::{
-    AbilityOp, AbilityResult, AstRoot, Declaration, ExecutionHost, ExecutionHostError,
+    AbilityOp, AbilityOutcome, AstRoot, Declaration, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, LashlangExecutionObservation, Program, State, Value, WorkflowEffectKind,
     WorkflowNodeKind,
 };
@@ -76,7 +76,7 @@ async fn real_run_observations_use_projected_workflow_node_ids_directly() {
     }
 
     impl ExecutionHost for ObservationHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             EchoHost.perform(op).await
         }
 
@@ -289,7 +289,7 @@ async fn real_runs_correlate_every_execution_site_to_the_selected_workflow_path(
     }
 
     impl ExecutionHost for CorrelationHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             EchoHost.perform(op).await
         }
 

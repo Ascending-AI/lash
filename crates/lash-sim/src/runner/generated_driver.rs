@@ -20,13 +20,7 @@ pub(crate) async fn run_generated_workload_for_fixture(
 pub(super) async fn drive_generated_workload(
     world: &mut GeneratedRuntimeWorld,
     workload: &GeneratedWorkload,
-) -> Result<
-    (
-        Vec<crate::scheduler::DeliveredBoundary>,
-        AbstractWorldSummary,
-    ),
-    FixedScriptRunnerError,
-> {
+) -> Result<(Vec<crate::scheduler::DeliveredBoundary>, AbstractWorldView), FixedScriptRunnerError> {
     let (initial_boundaries, mut completion_queue) =
         split_runtime_completion_boundaries(workload.boundaries.clone());
     let mut scheduler = BoundaryScheduler::with_events(workload.seed, initial_boundaries);

@@ -92,7 +92,7 @@ fn provider_counter_gap_round_trips_and_stays_on_original_turn() {
 
 #[test]
 fn unmapped_scenario_semantics_fail_loudly_for_every_suite() {
-    let summary = AbstractWorldSummary::with_digest(0, 0, vec![], vec![]);
+    let summary = AbstractWorldView::with_digest(0, 0, vec![], vec![]);
 
     for (suite, verdict) in [
         (

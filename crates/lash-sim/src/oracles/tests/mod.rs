@@ -2,8 +2,8 @@ use super::*;
 use crate::scheduler::SchedulerDeliveryEvidence;
 use crate::store::ModelStore;
 use crate::trace::{
-    DurableEffectAbstractSummary, ProviderTurnSummary, SessionAbstractSummary, SimulationTrace,
-    read_trace, write_trace,
+    AbstractDurableEffectView, AbstractSessionView, ProviderTurnView, SimulationTrace, read_trace,
+    write_trace,
 };
 use serde_json::json;
 

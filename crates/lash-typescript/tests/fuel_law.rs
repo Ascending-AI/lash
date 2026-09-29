@@ -16,7 +16,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionBound, ExecutionBounds, ExecutionHost, ExecutionHostError,
+    AbilityOp, AbilityOutcome, ExecutionBound, ExecutionBounds, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, RuntimeError, State,
 };
 
@@ -31,9 +31,9 @@ const WALL: Duration = Duration::from_secs(20);
 struct BudgetHost;
 
 impl ExecutionHost for BudgetHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "the fuel-law host answers no effect but finish",
             )),

@@ -12,7 +12,7 @@ use axum::Router;
 use axum::response::IntoResponse as _;
 use axum::routing::post;
 
-use crate::bot::channel::{Disposition, ReplySource};
+use crate::bot::channel::{DeliveryOutcome, ReplySource};
 use crate::bot::ledger::{DetailWrite, EventLedger, KIND_APP_MENTION, KIND_MESSAGE, Stage};
 use crate::bot::runtime::session_id;
 use crate::bot::{ledger, webhook};
@@ -51,7 +51,7 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
             .expect("handle mention");
         assert!(matches!(
             disposition,
-            Disposition::Replied {
+            DeliveryOutcome::Replied {
                 source: ReplySource::Turn,
                 ..
             }
@@ -89,7 +89,7 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
     assert!(
         matches!(
             disposition,
-            Disposition::Duplicate {
+            DeliveryOutcome::Duplicate {
                 stage: Stage::Replied,
                 ..
             }
@@ -122,7 +122,7 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
     let disposition = bot.ingest(app_mention, None).await.expect("handle mention");
     assert!(matches!(
         disposition,
-        Disposition::Replied {
+        DeliveryOutcome::Replied {
             source: ReplySource::Turn,
             ..
         }
@@ -188,7 +188,7 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
     assert!(
         matches!(
             recovered[0],
-            Disposition::Replied {
+            DeliveryOutcome::Replied {
                 source: ReplySource::Ledger,
                 ..
             }
@@ -209,7 +209,7 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
     assert!(
         matches!(
             disposition,
-            Disposition::Duplicate {
+            DeliveryOutcome::Duplicate {
                 stage: Stage::Replied,
                 ..
             }
@@ -261,7 +261,7 @@ async fn a_crash_between_posting_and_recording_does_not_produce_a_second_reply()
     assert!(
         matches!(
             recovered[0],
-            Disposition::Duplicate {
+            DeliveryOutcome::Duplicate {
                 stage: Stage::Replied,
                 ..
             }
@@ -483,7 +483,7 @@ async fn an_event_accepted_before_a_crash_is_answered_by_the_next_boots_recovery
 
     let folded = recovered
         .iter()
-        .filter(|disposition| matches!(disposition, Disposition::Folded { .. }))
+        .filter(|disposition| matches!(disposition, DeliveryOutcome::Folded { .. }))
         .count();
     assert_eq!(
         folded, 1,
@@ -491,12 +491,12 @@ async fn an_event_accepted_before_a_crash_is_answered_by_the_next_boots_recovery
     );
     let replied = recovered
         .iter()
-        .find(|disposition| matches!(disposition, Disposition::Replied { .. }))
+        .find(|disposition| matches!(disposition, DeliveryOutcome::Replied { .. }))
         .expect("the mention row is answered");
     assert!(
         matches!(
             replied,
-            Disposition::Replied {
+            DeliveryOutcome::Replied {
                 source: ReplySource::Turn,
                 ..
             }
@@ -525,7 +525,7 @@ async fn an_event_accepted_before_a_crash_is_answered_by_the_next_boots_recovery
             .await
             .expect("redelivery after recovery");
         assert!(
-            matches!(disposition, Disposition::Duplicate { .. }),
+            matches!(disposition, DeliveryOutcome::Duplicate { .. }),
             "{disposition:?}"
         );
     }
@@ -579,7 +579,7 @@ async fn a_reply_lost_with_its_process_is_recovered_from_the_committed_transcrip
     assert!(
         matches!(
             recovered[0],
-            Disposition::Replied {
+            DeliveryOutcome::Replied {
                 source: ReplySource::Transcript,
                 ..
             }
@@ -784,7 +784,7 @@ async fn a_mention_interrupted_mid_turn_is_deferred_and_never_terminalized() {
     assert!(
         matches!(
             report.settled.first(),
-            Some(Disposition::Deferred {
+            Some(DeliveryOutcome::Deferred {
                 reason: "turn_not_settled",
                 ..
             })
@@ -815,7 +815,10 @@ async fn a_mention_interrupted_mid_turn_is_deferred_and_never_terminalized() {
 
 /// Settle `event_id` on a boot's recovery pass: the pass either answers it or
 /// defers it while its turn has not settled, and a deferred event is retried.
-async fn settle_on_recovery(bot: &crate::bot::channel::ChannelBot, event_id: &str) -> Disposition {
+async fn settle_on_recovery(
+    bot: &crate::bot::channel::ChannelBot,
+    event_id: &str,
+) -> DeliveryOutcome {
     let report = bot.recover().await.expect("recovery pass");
     if report.deferred.is_empty() {
         let settled = report
@@ -854,7 +857,7 @@ async fn a_mention_interrupted_by_a_dead_boot_is_answered_once_by_the_next_boot(
     assert!(
         matches!(
             outcome,
-            Disposition::Replied {
+            DeliveryOutcome::Replied {
                 source: ReplySource::Turn | ReplySource::Transcript,
                 ..
             }
@@ -880,7 +883,7 @@ async fn a_mention_interrupted_by_a_dead_boot_is_answered_once_by_the_next_boot(
     assert!(
         matches!(
             disposition,
-            Disposition::Duplicate {
+            DeliveryOutcome::Duplicate {
                 stage: Stage::Replied,
                 ..
             }
@@ -943,7 +946,7 @@ async fn a_thread_mention_interrupted_by_a_dead_boot_uses_the_same_recovery() {
     assert!(
         matches!(
             outcome,
-            Disposition::Replied {
+            DeliveryOutcome::Replied {
                 source: ReplySource::Turn | ReplySource::Transcript,
                 ..
             }
@@ -1037,7 +1040,7 @@ async fn webhook_retry_answers_after_the_root_outlives_the_initial_wait_without_
         .await
         .expect("join long-running root turn")
         .expect("root admission lands after the initial wait");
-    assert!(matches!(root_disposition, Disposition::Replied { .. }));
+    assert!(matches!(root_disposition, DeliveryOutcome::Replied { .. }));
 
     tokio::time::timeout(std::time::Duration::from_secs(180), async {
         loop {
@@ -1107,7 +1110,7 @@ async fn recovery_folds_a_late_root_before_re_driving_its_unavailable_reply() {
         .expect("record unavailable reply");
     assert!(matches!(
         initial,
-        Disposition::RecoverableFailure {
+        DeliveryOutcome::RecoverableFailure {
             reason: "thread_root_not_available",
             ..
         }
@@ -1146,11 +1149,11 @@ async fn recovery_folds_a_late_root_before_re_driving_its_unavailable_reply() {
     assert!(report.deferred.is_empty(), "{report:?}");
     assert!(matches!(
         report.settled.first(),
-        Some(Disposition::Folded { .. })
+        Some(DeliveryOutcome::Folded { .. })
     ));
     assert!(matches!(
         report.settled.get(1),
-        Some(Disposition::Replied {
+        Some(DeliveryOutcome::Replied {
             source: ReplySource::Turn,
             ..
         })
@@ -1190,7 +1193,7 @@ async fn reply_lost_still_reports_a_committed_turn_that_produced_no_text() {
         .await
         .expect("handle mention");
     assert!(
-        matches!(disposition, Disposition::Silent { .. }),
+        matches!(disposition, DeliveryOutcome::Silent { .. }),
         "{disposition:?}"
     );
 
@@ -1211,7 +1214,10 @@ async fn reply_lost_still_reports_a_committed_turn_that_produced_no_text() {
         "a consumed input is not deferred: {report:?}"
     );
     assert!(
-        matches!(report.settled.first(), Some(Disposition::ReplyLost { .. })),
+        matches!(
+            report.settled.first(),
+            Some(DeliveryOutcome::ReplyLost { .. })
+        ),
         "{:?}",
         report.settled
     );

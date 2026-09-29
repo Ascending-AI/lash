@@ -713,7 +713,7 @@ pub use plugin::{
     SessionStateService, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
     durable_identity_conflict, is_durable_identity_conflict,
 };
-pub use plugin::{OpenAgentFrameRequest, OpenAgentFrameResult};
+pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
     AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,

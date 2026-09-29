@@ -20,8 +20,8 @@ use std::{
 
 use lash_typescript::DiagnosticCode;
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
-    ExecutionHostError, ExecutionOutcome, RuntimeError, State, Value,
+    AbilityOp, AbilityOutcome, ExecutionBound, ExecutionBounds, ExecutionEnvironment,
+    ExecutionHost, ExecutionHostError, ExecutionOutcome, RuntimeError, State, Value,
 };
 
 use super::ingest::{
@@ -191,24 +191,24 @@ fn host_read(call: &lashlang::ResourceOperation) -> Result<Value, ExecutionHostE
 }
 
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::ResourceOperation(call) => host_read(&call).map(AbilityResult::Value),
+            AbilityOp::ResourceOperation(call) => host_read(&call).map(AbilityOutcome::Value),
             AbilityOp::ResourceOperationBatch(batch) => {
                 let answers = batch
                     .leaves
                     .iter()
                     .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
-                    .map(|call| host_read(call).map(lashlang::ResourceOperationResult::Value))
+                    .map(|call| host_read(call).map(lashlang::ResourceOperationOutcome::Value))
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(AbilityResult::ResourceOperationBatch(
+                Ok(AbilityOutcome::ResourceOperationBatch(
                     batch.answer_in_leaf_order(answers),
                 ))
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             AbilityOp::Print(value) => {
                 self.prints.lock().expect("print journal").push(value);
-                Ok(AbilityResult::Value(Value::Null))
+                Ok(AbilityOutcome::Value(Value::Null))
             }
             _ => Err(ExecutionHostError::new(UNEXPECTED_ABILITY)),
         }

@@ -416,7 +416,7 @@ mod tests {
         async fn perform(
             &self,
             op: lashlang::AbilityOp,
-        ) -> Result<lashlang::AbilityResult, ExecutionHostError> {
+        ) -> Result<lashlang::AbilityOutcome, ExecutionHostError> {
             self.performs
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             match op {
@@ -428,10 +428,10 @@ mod tests {
                         "cancel-key",
                         &self.cancellation,
                     )
-                    .map(lashlang::AbilityResult::Value)
+                    .map(lashlang::AbilityOutcome::Value)
                 }
                 lashlang::AbilityOp::Finish(value) | lashlang::AbilityOp::Fail(value) => {
-                    Ok(lashlang::AbilityResult::Value(value))
+                    Ok(lashlang::AbilityOutcome::Value(value))
                 }
                 _ => Err(ExecutionHostError::new(
                     "the cancelled-tool host performs resource operations only",

@@ -38,10 +38,10 @@ pub use plugin::{
 };
 pub use pool::{McpConnectionPool, McpServerFault, McpServerStatus};
 pub use rmcp::model::{
-    CreateElicitationRequestParams, CreateElicitationResult, CreateMessageRequestParams,
-    CreateMessageResult, ElicitationAction, ElicitationCapability, ErrorData as McpProtocolError,
-    FormElicitationCapability, Root, SamplingMessage, SamplingMessageContent,
-    UrlElicitationCapability,
+    CreateElicitationRequestParams, CreateElicitationResult as CreateElicitationOutcome,
+    CreateMessageRequestParams, CreateMessageResult as CreateMessageOutcome, ElicitationAction,
+    ElicitationCapability, ErrorData as McpProtocolError, FormElicitationCapability, Root,
+    SamplingMessage, SamplingMessageContent, UrlElicitationCapability,
 };
 
 /// The result is stable for that raw server/tool identity.

@@ -8,7 +8,7 @@
 //! the catalog never mentioned worked (FIG-1444).
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 
 struct ToolCallRecordingHost {
@@ -16,7 +16,7 @@ struct ToolCallRecordingHost {
 }
 
 impl ExecutionHost for ToolCallRecordingHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(call) => {
                 let alias = match &call.receiver {
@@ -27,10 +27,10 @@ impl ExecutionHost for ToolCallRecordingHost {
                     .lock()
                     .expect("dispatched lock")
                     .push((alias, call.operation));
-                Ok(AbilityResult::Value(Value::String("tool-ok".into())))
+                Ok(AbilityOutcome::Value(Value::String("tool-ok".into())))
             }
-            AbilityOp::Print(_) => Ok(AbilityResult::Value(Value::Null)),
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Print(_) => Ok(AbilityOutcome::Value(Value::Null)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             other => Err(ExecutionHostError::new(format!(
                 "unexpected ability {other:?}"
             ))),

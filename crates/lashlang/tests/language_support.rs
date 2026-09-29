@@ -107,7 +107,7 @@ async fn type_is_usable_as_a_tool_call_argument() {
         captured: std::sync::Mutex<Option<Value>>,
     }
     impl ExecutionHost for CaptureHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             match op {
                 AbilityOp::ResourceOperation(operation) => {
                     *self.captured.lock_recover() = operation
@@ -116,10 +116,10 @@ async fn type_is_usable_as_a_tool_call_argument() {
                         .and_then(Value::as_record)
                         .and_then(|record| record.get("output"))
                         .cloned();
-                    Ok(AbilityResult::Value(Value::Null))
+                    Ok(AbilityOutcome::Value(Value::Null))
                 }
                 AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
-                    Ok(AbilityResult::Value(value))
+                    Ok(AbilityOutcome::Value(value))
                 }
                 _ => Err(ExecutionHostError::new("unsupported host ability")),
             }

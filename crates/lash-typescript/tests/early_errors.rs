@@ -5,14 +5,14 @@
 //! parser exactly as written.
 
 use lash_typescript::DiagnosticCode as Code;
-use lashlang::{AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, State, Value};
+use lashlang::{AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, State, Value};
 
 struct Host;
 
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported early-error ability")),
         }
     }

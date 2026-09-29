@@ -1724,7 +1724,7 @@ pub fn open_agent_frame_in_state_with_clock(
     state: &mut RuntimeSessionState,
     request: crate::OpenAgentFrameRequest,
     clock: &dyn crate::Clock,
-) -> Result<crate::OpenAgentFrameResult, crate::RuntimeError> {
+) -> Result<crate::OpenAgentFrameOutcome, crate::RuntimeError> {
     state.ensure_agent_frame_initialized_with_clock(clock);
     let previous = state.current_agent_frame().cloned();
     let mut assignment = previous
@@ -1745,7 +1745,7 @@ pub fn open_agent_frame_in_state_with_clock(
     );
     if !opened {
         if state.current_frame_node_id.as_deref() == Some(frame_node_id.as_str()) {
-            return Ok(crate::OpenAgentFrameResult {
+            return Ok(crate::OpenAgentFrameOutcome {
                 frame_node_id: frame_node_id.into_inner(),
                 opened: false,
                 initial_node_ids: Vec::new(),
@@ -1781,7 +1781,7 @@ pub fn open_agent_frame_in_state_with_clock(
         request.frame_key.as_str(),
         clock,
     );
-    Ok(crate::OpenAgentFrameResult {
+    Ok(crate::OpenAgentFrameOutcome {
         frame_node_id: state
             .current_frame_node_id
             .clone()

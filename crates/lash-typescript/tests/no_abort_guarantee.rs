@@ -575,9 +575,9 @@ fn guest_named_allocations_fail_without_aborting() {
         async fn perform(
             &self,
             op: lashlang::AbilityOp,
-        ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+        ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
             match op {
-                lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityResult::Value(value)),
+                lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityOutcome::Value(value)),
                 _ => Err(lashlang::ExecutionHostError::new("unsupported ability")),
             }
         }

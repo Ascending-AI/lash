@@ -148,7 +148,7 @@ pub async fn run_fixed_script_profile(
     let fixed_events = fixed_script_events(&proof_runs);
     let events_sha256 = write_events_artifact(artifact_root, &fixed_events)?;
     let proofs = write_proof_artifacts(artifact_root, proof_runs)?;
-    let summary = FixedScriptSummary {
+    let summary = FixedScriptReport {
         total_scripts: scripts.len(),
         total_proofs: proofs.len(),
         total_events: fixed_events.len(),

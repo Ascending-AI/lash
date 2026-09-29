@@ -77,7 +77,7 @@ pub use linker::{
 #[cfg(test)]
 pub(crate) use runtime::compile_ast;
 pub use runtime::{
-    AbilityOp, AbilityResult, AggregateConsumer, BINDING_SUMMARY_MAX_CHARS,
+    AbilityOp, AbilityOutcome, AggregateConsumer, BINDING_SUMMARY_MAX_CHARS,
     CANCEL_CHECKPOINT_INSTRUCTIONS, CANCEL_CHECKPOINT_INTERVAL_CAP, CompiledLinkedProgram,
     CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram, CompiledProgramCacheStats,
     ContinuationError, DurableBaseline, DurableFragment, DurableParts, EcmaErrorClass, Entry,
@@ -91,7 +91,7 @@ pub use runtime::{
     ProcessSignal, ProcessStart, ProfileReport, ProfileStat, ProjectedBindingError,
     ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
     ProjectedValue, Record, ResourceHandle, ResourceOperation, ResourceOperationBatch,
-    ResourceOperationBatchLeaf, ResourceOperationBatchResult, ResourceOperationResult,
+    ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome,
     RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot, SnapshotDecodeError, State,
     VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete, VmContinuation, VmExecutionStart,
     VmFinallyCompletionContinuation, VmFinallyContinuation, VmGuestError, VmHandlerContinuation,
@@ -426,16 +426,16 @@ mod tests {
     struct Host;
 
     impl ExecutionHost for Host {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             match op {
                 AbilityOp::ResourceOperation(operation) if operation.operation == "anything" => {
-                    Ok(AbilityResult::Value(Value::Record(std::sync::Arc::new(
+                    Ok(AbilityOutcome::Value(Value::Record(std::sync::Arc::new(
                         Record::from_iter([("ok".to_string(), Value::Bool(true))]),
                     ))))
                 }
                 AbilityOp::ResourceOperationBatch(batch) => {
-                    Ok(AbilityResult::ResourceOperationBatch(
-                        ResourceOperationBatchResult::AllResults(
+                    Ok(AbilityOutcome::ResourceOperationBatch(
+                        ResourceOperationBatchOutcome::AllResults(
                             batch
                                 .leaves
                                 .into_iter()
@@ -445,14 +445,14 @@ mod tests {
                                         ResourceOperationBatchLeaf::Operation(operation)
                                             if operation.operation == "anything"
                                     ) {
-                                        ResourceOperationResult::Value(Value::Record(
+                                        ResourceOperationOutcome::Value(Value::Record(
                                             std::sync::Arc::new(Record::from_iter([(
                                                 "ok".to_string(),
                                                 Value::Bool(true),
                                             )])),
                                         ))
                                     } else {
-                                        ResourceOperationResult::Error(ExecutionHostError::new(
+                                        ResourceOperationOutcome::Error(ExecutionHostError::new(
                                             "unsupported host ability",
                                         ))
                                     }
@@ -462,9 +462,9 @@ mod tests {
                     ))
                 }
                 AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
-                    Ok(AbilityResult::Value(value))
+                    Ok(AbilityOutcome::Value(value))
                 }
-                _ => Ok(AbilityResult::Value(Value::Null)),
+                _ => Ok(AbilityOutcome::Value(Value::Null)),
             }
         }
     }

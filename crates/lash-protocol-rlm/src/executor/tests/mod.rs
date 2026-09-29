@@ -7,7 +7,7 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
+    AbilityOp, AbilityOutcome, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest,
     ProjectedReadResponse, ProjectedValue, Record as FlowRecord, Value as FlowValue,
 };

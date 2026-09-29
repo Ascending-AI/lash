@@ -1337,7 +1337,7 @@ impl lashlang::ExecutionHost for AllResultsHost {
     async fn perform(
         &self,
         op: lashlang::AbilityOp,
-    ) -> std::result::Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+    ) -> std::result::Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
         match op {
             lashlang::AbilityOp::ResourceOperationBatch(batch) => {
                 self.batches.lock_recover().push(batch.leaves.len());
@@ -1345,17 +1345,17 @@ impl lashlang::ExecutionHost for AllResultsHost {
                 self.calls.fetch_add(batch.leaves.len(), Ordering::SeqCst);
                 let mut results = vec![None; batch.leaves.len()];
                 for index in (0..batch.leaves.len()).rev() {
-                    results[index] = Some(lashlang::ResourceOperationResult::Error(
+                    results[index] = Some(lashlang::ResourceOperationOutcome::Error(
                         lashlang::ExecutionHostError::new(format!("leaf-{index} rejected")),
                     ));
                 }
-                Ok(lashlang::AbilityResult::ResourceOperationBatch(
-                    lashlang::ResourceOperationBatchResult::AllResults(
+                Ok(lashlang::AbilityOutcome::ResourceOperationBatch(
+                    lashlang::ResourceOperationBatchOutcome::AllResults(
                         results.into_iter().flatten().collect(),
                     ),
                 ))
             }
-            lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityResult::Value(value)),
+            lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityOutcome::Value(value)),
             other => Err(lashlang::ExecutionHostError::new(format!(
                 "unexpected ability {other:?}"
             ))),

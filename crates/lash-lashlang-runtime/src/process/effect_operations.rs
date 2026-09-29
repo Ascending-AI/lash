@@ -256,7 +256,7 @@ impl LashlangProcessHost<'_> {
     pub(super) async fn resource_operation_batch(
         &self,
         batch: lashlang::ResourceOperationBatch,
-    ) -> Result<lashlang::ResourceOperationBatchResult, ExecutionHostError> {
+    ) -> Result<lashlang::ResourceOperationBatchOutcome, ExecutionHostError> {
         let lashlang::ResourceOperationBatch {
             leaves,
             consumer,

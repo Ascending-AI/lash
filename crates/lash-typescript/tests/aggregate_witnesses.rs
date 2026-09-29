@@ -17,8 +17,8 @@
 //! took a different path from the same array written inline.
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    ResourceOperation, ResourceOperationResult, State, Value,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
+    ResourceOperation, ResourceOperationOutcome, State, Value,
 };
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -62,14 +62,14 @@ impl OrderRecordingHost {
 }
 
 impl ExecutionHost for OrderRecordingHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
                 let value = self.record(&operation)?;
                 if self.fail_every_call {
                     return Err(ExecutionHostError::new(format!("failure-{}", value - 10.0)));
                 }
-                Ok(AbilityResult::Value(Value::Number(value)))
+                Ok(AbilityOutcome::Value(Value::Number(value)))
             }
             AbilityOp::ResourceOperationBatch(batch) => {
                 self.batches.fetch_add(1, Ordering::SeqCst);
@@ -85,23 +85,23 @@ impl ExecutionHost for OrderRecordingHost {
                 {
                     let value = self.record(operation)?;
                     results.push(if self.fail_every_call {
-                        ResourceOperationResult::Error(ExecutionHostError::new(format!(
+                        ResourceOperationOutcome::Error(ExecutionHostError::new(format!(
                             "failure-{}",
                             value - 10.0
                         )))
                     } else {
-                        ResourceOperationResult::Value(Value::Number(value))
+                        ResourceOperationOutcome::Value(Value::Number(value))
                     });
                 }
-                Ok(AbilityResult::ResourceOperationBatch(
+                Ok(AbilityOutcome::ResourceOperationBatch(
                     batch.answer_in_leaf_order(results),
                 ))
             }
             AbilityOp::Print(_) => {
                 self.prints.fetch_add(1, Ordering::SeqCst);
-                Ok(AbilityResult::Unit)
+                Ok(AbilityOutcome::Unit)
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             other => Err(ExecutionHostError::new(format!(
                 "unexpected ability {other:?}"
             ))),
@@ -249,22 +249,22 @@ impl ProcessHost {
 }
 
 impl ExecutionHost for ProcessHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             // The typed `await handle` seam, and `processes.await`, the tool
             // that parks on the same durable wait (ADR 0095).
-            AbilityOp::Await(_) => Ok(AbilityResult::Value(self.wait())),
+            AbilityOp::Await(_) => Ok(AbilityOutcome::Value(self.wait())),
             // FIG-2999: starting is a leaf tool, so a start arrives as a
             // resource operation beside `processes.await`.
             AbilityOp::ResourceOperation(operation) if operation.operation == "start" => {
                 let index = self.starts.fetch_add(1, Ordering::SeqCst);
-                Ok(AbilityResult::Value(process_handle(&format!(
+                Ok(AbilityOutcome::Value(process_handle(&format!(
                     "run-{index}"
                 ))))
             }
             AbilityOp::ResourceOperation(operation) => {
                 assert_eq!(operation.operation, "await");
-                Ok(AbilityResult::Value(self.wait()))
+                Ok(AbilityOutcome::Value(self.wait()))
             }
             AbilityOp::ResourceOperationBatch(batch) => {
                 let results = batch
@@ -273,14 +273,14 @@ impl ExecutionHost for ProcessHost {
                     .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
                     .map(|operation| {
                         assert_eq!(operation.operation, "await");
-                        ResourceOperationResult::Value(self.wait())
+                        ResourceOperationOutcome::Value(self.wait())
                     })
                     .collect();
-                Ok(AbilityResult::ResourceOperationBatch(
+                Ok(AbilityOutcome::ResourceOperationBatch(
                     batch.answer_in_leaf_order(results),
                 ))
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             other => Err(ExecutionHostError::new(format!(
                 "unexpected ability {other:?}"
             ))),

@@ -172,7 +172,7 @@ mod rlm_inventory {
 
     // The Lashlang language vocabulary, re-exported whole as `lash::rlm::lang`.
     use lash::rlm::lang::AbilityOp as _;
-    use lash::rlm::lang::AbilityResult as _;
+    use lash::rlm::lang::AbilityOutcome as _;
     use lash::rlm::lang::ContentHash as _;
     use lash::rlm::lang::Entry as _;
     use lash::rlm::lang::ExecutionEnvironment as _;
@@ -188,8 +188,8 @@ mod rlm_inventory {
     use lash::rlm::lang::NamedDataTypeIntrospection as _;
     use lash::rlm::lang::ProcessIntrospection as _;
     use lash::rlm::lang::ResourceOperation as _;
-    use lash::rlm::lang::ResourceOperationBatchResult as _;
-    use lash::rlm::lang::ResourceOperationResult as _;
+    use lash::rlm::lang::ResourceOperationBatchOutcome as _;
+    use lash::rlm::lang::ResourceOperationOutcome as _;
     use lash::rlm::lang::State as _;
     use lash::rlm::lang::TriggerInputTemplate as _;
     use lash::rlm::lang::TriggerListRequest as _;

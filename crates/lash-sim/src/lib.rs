@@ -96,7 +96,7 @@ pub(crate) async fn open_created_session(
 }
 
 pub use artifacts::{
-    FixedScriptManifest, FixedScriptProof, FixedScriptSummary, GeneratedSimProfileReport,
+    FixedScriptManifest, FixedScriptProof, FixedScriptReport, GeneratedSimProfileReport,
     ScriptHashManifest,
 };
 pub use provider::{

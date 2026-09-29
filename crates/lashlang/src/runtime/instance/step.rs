@@ -25,7 +25,7 @@ use thiserror::Error;
 
 use crate::LashlangExecutionObservation;
 use crate::runtime::{
-    AbilityOp, AbilityResult, CompiledProgram, ContinuationError, ExecutionBounds, ExecutionHost,
+    AbilityOp, AbilityOutcome, CompiledProgram, ContinuationError, ExecutionBounds, ExecutionHost,
     ExecutionHostError, ExecutionMode, ExecutionOutcome, ExecutionScratch, ProfileReport,
     ProjectedBindings, RuntimeError, RuntimeFailure, State, Vm, VmContinuation, VmRunOutcome,
 };
@@ -136,7 +136,7 @@ impl RequestKind {
 /// The host's answer to the pending request.
 #[derive(Debug)]
 pub enum VmResume {
-    Effect(Result<AbilityResult, ExecutionHostError>),
+    Effect(Result<AbilityOutcome, ExecutionHostError>),
     CancelCheckpoint {
         cancelled: bool,
     },
@@ -307,7 +307,7 @@ impl Future for Answer<'_> {
 }
 
 impl ExecutionHost for StepHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match self.ask(VmRequest::Effect(op)).await {
             VmResume::Effect(result) => result,
             // `answer` admits only the resume that answers the request.

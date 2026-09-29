@@ -78,8 +78,8 @@ use crate::store::{
     CheckpointComponentWriteKind, CheckpointWriteCollector, CheckpointWriteEvent, ModelStore,
 };
 use crate::trace::{
-    AbstractWorldSummary, OracleCensus, OracleStatus, OracleVerdict, SimulationTrace,
-    TraceEventLine, TraceIoError, write_event_lines, write_replay_report, write_trace,
+    AbstractWorldView, OracleCensus, OracleStatus, OracleVerdict, SimulationTrace, TraceEventLine,
+    TraceIoError, write_event_lines, write_replay_report, write_trace,
 };
 
 pub const FIXED_SCRIPT_PROFILE: &str = "tiny-fixed-provider-scripts";

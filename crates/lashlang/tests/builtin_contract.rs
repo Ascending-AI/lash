@@ -18,7 +18,7 @@
 //! so a builtin cannot be added or removed without this file saying so.
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Expr,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, Expr,
     RuntimeError, State, TypeExpr, TypeField, Value,
 };
 
@@ -29,9 +29,9 @@ use crate::ast_support::{call, finish_program, list, number, program, string};
 struct PureHost;
 
 impl ExecutionHost for PureHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             other => Err(ExecutionHostError::new(format!(
                 "a builtin program performed an ability: {other:?}"
             ))),

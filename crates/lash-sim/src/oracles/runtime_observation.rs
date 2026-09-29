@@ -1,6 +1,6 @@
 use super::*;
 
-pub fn cross_session_isolation(summary: &AbstractWorldSummary) -> OracleVerdict {
+pub fn cross_session_isolation(summary: &AbstractWorldView) -> OracleVerdict {
     if summary.session_count < 2 {
         return OracleVerdict::failed(
             CROSS_SESSION_ISOLATION_ORACLE,
@@ -50,7 +50,7 @@ pub fn cross_session_isolation(summary: &AbstractWorldSummary) -> OracleVerdict 
 }
 
 pub fn ingress_sessions_opened(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     expectations: &WorkloadExpectations,
 ) -> OracleVerdict {
     if let Some(shortfall) = declared_coverage_shortfall(
@@ -83,7 +83,7 @@ pub fn ingress_sessions_opened(
 }
 
 pub fn observer_convergence(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     expectations: &WorkloadExpectations,
 ) -> OracleVerdict {
     if let Some(shortfall) = declared_coverage_shortfall(
@@ -101,7 +101,7 @@ pub fn observer_convergence(
 /// evidence predicates use this: they ask whether the sessions they *did*
 /// observe converged, and the workload-level coverage floor is the oracle's job.
 pub(super) fn observer_convergence_law(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     expectations: Option<&WorkloadExpectations>,
 ) -> OracleVerdict {
     for session in &summary.sessions {
@@ -153,7 +153,7 @@ pub(super) fn coverage_invariant_verdict(
 }
 
 pub fn queued_ingress_observed(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     events: &[DeliveredBoundary],
 ) -> OracleVerdict {
     coverage_invariant_verdict(
@@ -170,7 +170,7 @@ pub fn queued_ingress_observed(
 }
 
 pub fn cancellation_observed(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     events: &[DeliveredBoundary],
 ) -> OracleVerdict {
     coverage_invariant_verdict(
@@ -187,7 +187,7 @@ pub fn cancellation_observed(
 }
 
 pub fn trigger_delivery_observed(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     events: &[DeliveredBoundary],
 ) -> OracleVerdict {
     coverage_invariant_verdict(
@@ -204,7 +204,7 @@ pub fn trigger_delivery_observed(
 }
 
 pub fn observer_reconnect_observed(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     events: &[DeliveredBoundary],
 ) -> OracleVerdict {
     coverage_invariant_verdict(
@@ -221,7 +221,7 @@ pub fn observer_reconnect_observed(
 }
 
 pub fn backend_failure_observed(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     events: &[DeliveredBoundary],
 ) -> OracleVerdict {
     coverage_invariant_verdict(
@@ -238,7 +238,7 @@ pub fn backend_failure_observed(
 }
 
 pub fn provider_mutation_rejected(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     events: &[DeliveredBoundary],
 ) -> OracleVerdict {
     coverage_invariant_verdict(
@@ -482,7 +482,7 @@ pub fn provider_transport_mutation_classified(
 }
 
 pub fn exec_code_observed(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     events: &[DeliveredBoundary],
 ) -> OracleVerdict {
     coverage_invariant_verdict(
@@ -499,7 +499,7 @@ pub fn exec_code_observed(
 }
 
 pub fn tool_boundary_observed(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     events: &[DeliveredBoundary],
 ) -> OracleVerdict {
     coverage_invariant_verdict(
@@ -516,7 +516,7 @@ pub fn tool_boundary_observed(
 }
 
 pub fn runtime_session_graph_contract(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     expectations: &WorkloadExpectations,
 ) -> OracleVerdict {
     if let Some(shortfall) = declared_coverage_shortfall(
@@ -533,7 +533,7 @@ pub fn runtime_session_graph_contract(
 /// The session-graph advancement law without the declared-coverage floor, for
 /// scenario evidence predicates that only judge the sessions they observed.
 pub(super) fn runtime_session_graph_law(
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     expectations: Option<&WorkloadExpectations>,
 ) -> OracleVerdict {
     for session in &summary.sessions {

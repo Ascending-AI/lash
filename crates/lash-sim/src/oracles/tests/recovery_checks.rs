@@ -122,11 +122,11 @@ fn live_provider_failure_coverage_requires_multiple_kinds_and_positions() {
 #[test]
 fn replay_determinism_compares_durable_effect_outcomes() {
     let summary = |execution_count| {
-        AbstractWorldSummary::with_digest(
+        AbstractWorldView::with_digest(
             1,
             1,
             vec![],
-            vec![DurableEffectAbstractSummary {
+            vec![AbstractDurableEffectView {
                 durable_key: "sleep/session-001/001".to_string(),
                 execution_count,
                 replay_count: 1,
@@ -629,7 +629,7 @@ fn rlm_mini_oracle_requires_provider_after_same_actor_exec() {
 
 #[test]
 fn agent_mini_oracle_rejects_provider_completions_without_runtime_sessions() {
-    let summary = AbstractWorldSummary::with_digest(2, 2, Vec::new(), Vec::new());
+    let summary = AbstractWorldView::with_digest(2, 2, Vec::new(), Vec::new());
     let provider = |sequence, session: &str, observed: serde_json::Value| {
         delivered_with_payload(
             sequence,

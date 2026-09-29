@@ -1,6 +1,6 @@
 use compact_str::ToCompactString;
 use lashlang::{
-    AbilityOp, AbilityResult, AssignTarget, Declaration, ExecutionHost, ExecutionHostError, Expr,
+    AbilityOp, AbilityOutcome, AssignTarget, Declaration, ExecutionHost, ExecutionHostError, Expr,
     FunctionExpr, HostDescriptor, ImageValue, JavaScriptBinaryOp, JavaScriptLogicalOp,
     JavaScriptUnaryOp, LASH_PROCESS_NAME_KEY, LashlangAbilities, LashlangHostCatalog,
     LashlangHostEnvironment, LinkedModule, ListValue, Program, ProjectedBindings,

@@ -1,12 +1,12 @@
 use super::*;
 use crate::ast::{AssignTarget, Expr, FunctionExpr, Program};
 use crate::runtime::entry_points::compile_program_internal;
-use crate::{AbilityOp, AbilityResult, ExecutionHostError};
+use crate::{AbilityOp, AbilityOutcome, ExecutionHostError};
 
 struct TestHost;
 
 impl ExecutionHost for TestHost {
-    async fn perform(&self, _op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, _op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         Err(ExecutionHostError::new("test host performs no effects"))
     }
 }
@@ -14,9 +14,9 @@ impl ExecutionHost for TestHost {
 struct CallbackHost;
 
 impl ExecutionHost for CallbackHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Print(_) | AbilityOp::Finish(_) => Ok(AbilityResult::Value(Value::Null)),
+            AbilityOp::Print(_) | AbilityOp::Finish(_) => Ok(AbilityOutcome::Value(Value::Null)),
             _ => Err(ExecutionHostError::new("unexpected callback test effect")),
         }
     }

@@ -9,22 +9,22 @@
 //! function has no string the dialect keeps (its source text), so converting
 //! one refuses as `TS_FUNCTION_STRING_COERCION`.
 
-use lashlang::{AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, State, Value};
+use lashlang::{AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, State, Value};
 
 #[derive(Default)]
 struct Host(std::sync::Mutex<Vec<String>>);
 
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::Print(value) => {
                 self.0.lock().expect("print lock").push(match value {
                     Value::String(text) => text.to_string(),
                     other => format!("{other:?}"),
                 });
-                Ok(AbilityResult::Unit)
+                Ok(AbilityOutcome::Unit)
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported test ability")),
         }
     }

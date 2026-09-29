@@ -559,7 +559,7 @@ fn a_stored_session_state_refusal_reads_as_a_foreign_code_before_the_codes_exist
 /// left behind (FIG-3822).
 #[test]
 fn session_retirement_never_takes_derivation_retry_authority() {
-    use crate::runtime_error::{EffectErrorJournalDisposition, RuntimeEffectControllerError};
+    use crate::runtime_error::{EffectErrorJournalPolicy, RuntimeEffectControllerError};
     for store_error in [
         crate::StoreError::SessionDeleted {
             session_id: SessionId::from("retired-admission"),
@@ -576,7 +576,7 @@ fn session_retirement_never_takes_derivation_retry_authority() {
         assert!(fault.is_session_retirement());
         assert_eq!(
             fault.journal_disposition(crate::RuntimeEffectKind::AdmitDrive),
-            EffectErrorJournalDisposition::Terminal,
+            EffectErrorJournalPolicy::Terminal,
             "a retired session's fault records; the step never runs again"
         );
     }
@@ -587,7 +587,7 @@ fn session_retirement_never_takes_derivation_retry_authority() {
     .retryable_uncommitted_derivation();
     assert_eq!(
         live.journal_disposition(crate::RuntimeEffectKind::AdmitDrive),
-        EffectErrorJournalDisposition::RetryUncommittedResponseDerivation,
+        EffectErrorJournalPolicy::RetryUncommittedResponseDerivation,
         "a live fault is still the attempt's, never the step's outcome"
     );
 }

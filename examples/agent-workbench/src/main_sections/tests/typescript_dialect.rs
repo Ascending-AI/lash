@@ -420,21 +420,21 @@ impl lashlang::ExecutionHost for TutorialHost {
     async fn perform(
         &self,
         op: lashlang::AbilityOp,
-    ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+    ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
         match op {
             lashlang::AbilityOp::ResourceOperation(call) => self
                 .resource_result(&call)
-                .map(lashlang::AbilityResult::Value),
+                .map(lashlang::AbilityOutcome::Value),
             // The one tutorial that awaits a process awaits a subagent branch,
             // whose declared output is `{ summary, key_metrics }`.
-            lashlang::AbilityOp::Await(_) => Ok(lashlang::AbilityResult::Value(
+            lashlang::AbilityOp::Await(_) => Ok(lashlang::AbilityOutcome::Value(
                 lashlang::from_json(serde_json::json!({
                     "summary": "what the branch found",
                     "key_metrics": ["first metric", "second metric"]
                 })),
             )),
-            lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityResult::Value(value)),
-            lashlang::AbilityOp::Print(_) => Ok(lashlang::AbilityResult::Unit),
+            lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityOutcome::Value(value)),
+            lashlang::AbilityOp::Print(_) => Ok(lashlang::AbilityOutcome::Unit),
             other => Err(lashlang::ExecutionHostError::new(format!(
                 "the workbench tutorials should not reach {other:?}"
             ))),

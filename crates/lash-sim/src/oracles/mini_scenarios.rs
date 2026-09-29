@@ -6,7 +6,7 @@ use super::*;
 /// per-contract while sharing the same semantic proof.
 pub fn scenario_contract_oracles(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> Vec<OracleVerdict> {
     let memo = ScenarioFactMemo::default();
     all_scenario_contracts()
@@ -249,7 +249,7 @@ pub(super) fn mini_standard_tool_loop_reenters(events: &[DeliveredBoundary]) -> 
 
 pub(super) fn mini_rlm_finish_required_prose_repair(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> OracleVerdict {
     verdict_from_bool(
         SCENARIO_MINI_RLM_FINISH_REPAIR_ORACLE,
@@ -313,7 +313,7 @@ pub(super) fn mini_agent_durable_input_resolution(events: &[DeliveredBoundary]) 
 
 pub(super) fn mini_agent_child_failure_graph(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> OracleVerdict {
     verdict_from_bool(
         SCENARIO_MINI_AGENT_CHILD_FAILURE_ORACLE,
@@ -328,7 +328,7 @@ pub(super) fn mini_agent_child_failure_graph(
 
 pub(super) fn mini_agent_parallel_spawn_join(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> OracleVerdict {
     let provider_sessions = events
         .iter()
@@ -411,7 +411,7 @@ pub(super) fn observer_reconnect_has_any(events: &[DeliveredBoundary]) -> bool {
 pub(super) fn scenario_contract_oracle(
     contract: &ScenarioContractSpec,
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     memo: &ScenarioFactMemo,
 ) -> OracleVerdict {
     let missing = contract
@@ -463,7 +463,7 @@ pub(super) fn scenario_contract_oracle_id(contract: &ScenarioContractSpec) -> St
 pub(super) fn scenario_evidence_satisfied(
     evidence: &str,
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> bool {
     match evidence {
         "queued_ingress" => summary
@@ -685,7 +685,7 @@ pub fn scenario_contract_generated_facts_with_memo(
 pub(super) fn scenario_contract_semantics(
     contract: &ScenarioContractSpec,
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
     memo: &ScenarioFactMemo,
 ) -> ScenarioSemanticVerdict {
     match contract.suite {
@@ -702,7 +702,7 @@ pub(super) fn scenario_contract_semantics(
 pub(super) fn runtime_contract_semantics(
     semantic_oracle: &str,
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> ScenarioSemanticVerdict {
     // Each runtime contract owns a DISTINCT semantic adapter keyed on the
     // specific runtime boundary it governs — no `|`-grouped shared arms and no
@@ -747,7 +747,7 @@ pub(super) fn runtime_contract_semantics(
 pub(super) fn standard_contract_semantics(
     semantic_oracle: &str,
     events: &[DeliveredBoundary],
-    _summary: &AbstractWorldSummary,
+    _summary: &AbstractWorldView,
     memo: &ScenarioFactMemo,
 ) -> ScenarioSemanticVerdict {
     match scenario_contract_generated_facts_with_memo(semantic_oracle, events, memo) {
@@ -762,7 +762,7 @@ pub(super) fn standard_contract_semantics(
 pub(super) fn rlm_contract_semantics(
     semantic_oracle: &str,
     events: &[DeliveredBoundary],
-    _summary: &AbstractWorldSummary,
+    _summary: &AbstractWorldView,
     memo: &ScenarioFactMemo,
 ) -> ScenarioSemanticVerdict {
     match scenario_contract_generated_facts_with_memo(semantic_oracle, events, memo) {
@@ -777,7 +777,7 @@ pub(super) fn rlm_contract_semantics(
 pub(super) fn agent_contract_semantics(
     semantic_oracle: &str,
     events: &[DeliveredBoundary],
-    _summary: &AbstractWorldSummary,
+    _summary: &AbstractWorldView,
     memo: &ScenarioFactMemo,
 ) -> ScenarioSemanticVerdict {
     match scenario_contract_generated_facts_with_memo(semantic_oracle, events, memo) {

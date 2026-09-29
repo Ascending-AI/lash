@@ -29,12 +29,12 @@ pub(super) fn mutate_contract_execution(
     );
 }
 
-pub(super) fn semantic_summary() -> AbstractWorldSummary {
-    AbstractWorldSummary::with_digest(
+pub(super) fn semantic_summary() -> AbstractWorldView {
+    AbstractWorldView::with_digest(
         2,
         29,
         vec![
-            SessionAbstractSummary {
+            AbstractSessionView {
                 alias: "session-001".to_string(),
                 opened: true,
                 ingress_count: 1,
@@ -58,7 +58,7 @@ pub(super) fn semantic_summary() -> AbstractWorldSummary {
                 checkpoint_component_ref_count: 0,
                 checkpoint_head_revision: 0,
             },
-            SessionAbstractSummary {
+            AbstractSessionView {
                 alias: "session-002".to_string(),
                 opened: true,
                 ingress_count: 1,
@@ -82,7 +82,7 @@ pub(super) fn semantic_summary() -> AbstractWorldSummary {
                 checkpoint_head_revision: 0,
             },
         ],
-        vec![DurableEffectAbstractSummary {
+        vec![AbstractDurableEffectView {
             durable_key: "durable/session-001".to_string(),
             execution_count: 1,
             replay_count: 1,
@@ -96,8 +96,8 @@ pub(super) fn provider_turn_summary(
     exchange_count: u64,
     graph_node_count: u64,
     transcript_message_count: u64,
-) -> ProviderTurnSummary {
-    ProviderTurnSummary {
+) -> ProviderTurnView {
+    ProviderTurnView {
         output: output.to_string(),
         exchange_count: Some(exchange_count),
         graph_node_count: Some(graph_node_count),

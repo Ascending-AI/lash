@@ -19,7 +19,7 @@ use std::task::{Context, Poll, Waker};
 
 use lashlang::testing::harness::EchoHost;
 use lashlang::{
-    AbilityOp, AbilityResult, CompiledProgram, ExecutionBound, ExecutionBounds, ExecutionHost,
+    AbilityOp, AbilityOutcome, CompiledProgram, ExecutionBound, ExecutionBounds, ExecutionHost,
     ExecutionHostError, ExecutionMode, LashlangHostEnvironment, State, Value, VmExecutionStart,
     VmInstance, VmRequest, VmResume, VmRunConfig, VmStep,
 };
@@ -50,7 +50,7 @@ fn ready<F: Future>(future: F) -> F::Output {
 }
 
 /// The harness's answer to one effect.
-fn answer(op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+fn answer(op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
     ready(EchoHost.perform(op))
 }
 
@@ -81,7 +81,7 @@ struct StraightHost {
 }
 
 impl ExecutionHost for StraightHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         self.record(format!("effect {op:?}"));
         answer(op)
     }

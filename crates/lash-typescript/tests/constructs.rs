@@ -1,15 +1,15 @@
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, RuntimeError,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, RuntimeError,
     State, Value,
 };
 
 struct Host;
 
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
-            AbilityOp::Print(_) => Ok(AbilityResult::Value(Value::Null)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
+            AbilityOp::Print(_) => Ok(AbilityOutcome::Value(Value::Null)),
             _ => Err(ExecutionHostError::new("unexpected construct-test ability")),
         }
     }

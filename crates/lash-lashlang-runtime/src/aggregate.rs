@@ -11,7 +11,9 @@
 //! (§10 L5); host-control failures come back as `Err`, never as a leaf
 //! rejection (L3).
 
-use lashlang::{ExecutionHostError, ResourceOperationBatchResult, ResourceOperationResult, Value};
+use lashlang::{
+    ExecutionHostError, ResourceOperationBatchOutcome, ResourceOperationOutcome, Value,
+};
 
 /// One unique leaf of an aggregate, as a bridge resolved it.
 pub enum BridgeAggregateLeaf {
@@ -38,7 +40,7 @@ pub async fn settle_bridge_aggregate(
         usize,
         lash_core::session::ToolInvocationReply,
     ) -> Result<Value, ExecutionHostError>,
-) -> Result<ResourceOperationBatchResult, ExecutionHostError> {
+) -> Result<ResourceOperationBatchOutcome, ExecutionHostError> {
     let mut settled = Vec::with_capacity(leaves.len());
     let mut request_leaves = Vec::with_capacity(leaves.len());
     for leaf in leaves {
@@ -96,20 +98,20 @@ pub async fn settle_bridge_aggregate(
         lash_core::session::ToolAggregateOutcome::AllResults(replies) => {
             let mut results = Vec::with_capacity(replies.len());
             for (leaf, reply) in replies.into_iter().enumerate() {
-                results.push(ResourceOperationResult::from_result(result_of(
+                results.push(ResourceOperationOutcome::from_result(result_of(
                     leaf, reply,
                 )?));
             }
-            Ok(ResourceOperationBatchResult::AllResults(results))
+            Ok(ResourceOperationBatchOutcome::AllResults(results))
         }
         lash_core::session::ToolAggregateOutcome::Selected { leaf, reply } => {
-            Ok(ResourceOperationBatchResult::Selected {
+            Ok(ResourceOperationBatchOutcome::Selected {
                 leaf,
-                result: ResourceOperationResult::from_result(result_of(leaf, reply)?),
+                result: ResourceOperationOutcome::from_result(result_of(leaf, reply)?),
             })
         }
         lash_core::session::ToolAggregateOutcome::SettledValue => {
-            Ok(ResourceOperationBatchResult::SettledValue)
+            Ok(ResourceOperationBatchOutcome::SettledValue)
         }
         lash_core::session::ToolAggregateOutcome::ExhaustedRejections(replies) => {
             let mut errors = Vec::with_capacity(replies.len());
@@ -124,7 +126,7 @@ pub async fn settle_bridge_aggregate(
                     }
                 }
             }
-            Ok(ResourceOperationBatchResult::ExhaustedRejections(errors))
+            Ok(ResourceOperationBatchOutcome::ExhaustedRejections(errors))
         }
         lash_core::session::ToolAggregateOutcome::HostControl(message) => {
             Err(ExecutionHostError::new(message))

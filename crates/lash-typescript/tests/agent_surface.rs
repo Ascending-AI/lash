@@ -1,6 +1,6 @@
 use lashlang::{
-    AbilityOp, AbilityResult, Declaration, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    Expr, ResourceOperationBatchResult, ResourceOperationResult, State, Value, Vm, VmRunOutcome,
+    AbilityOp, AbilityOutcome, Declaration, ExecutionHost, ExecutionHostError, ExecutionOutcome,
+    Expr, ResourceOperationBatchOutcome, ResourceOperationOutcome, State, Value, Vm, VmRunOutcome,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -12,10 +12,10 @@ mod journaled_randomness;
 struct Host;
 
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
-            AbilityOp::Print(_) => Ok(AbilityResult::Value(Value::Null)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
+            AbilityOp::Print(_) => Ok(AbilityOutcome::Value(Value::Null)),
             _ => Err(ExecutionHostError::new("unexpected agent-surface ability")),
         }
     }
@@ -222,10 +222,10 @@ struct SignalHost {
 }
 
 impl ExecutionHost for SignalHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(call) => match call.operation.as_str() {
-                "start" => Ok(AbilityResult::Value(lashlang::from_json(
+                "start" => Ok(AbilityOutcome::Value(lashlang::from_json(
                     process_handle_json("run-1"),
                 ))),
                 "signal" => {
@@ -233,13 +233,13 @@ impl ExecutionHost for SignalHost {
                         return Err(ExecutionHostError::new("expected record args"));
                     };
                     *self.signal.lock().expect("signal lock") = Some((**fields).clone());
-                    Ok(AbilityResult::Value(Value::Null))
+                    Ok(AbilityOutcome::Value(Value::Null))
                 }
                 other => Err(ExecutionHostError::new(format!(
                     "unexpected process operation: {other}"
                 ))),
             },
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected signal ability")),
         }
     }
@@ -310,7 +310,7 @@ fn process_handle(label: &str) -> Value {
 }
 
 impl ExecutionHost for StartHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(call) => {
                 assert_eq!(call.operation, "start");
@@ -324,12 +324,12 @@ impl ExecutionHost for StartHost {
                     .and_then(Value::as_record)
                     .expect("a start passes its arguments in `args`");
                 assert_eq!(start_args.get("input"), Some(&Value::Number(3.0)));
-                Ok(AbilityResult::Value(process_handle("run-handle")))
+                Ok(AbilityOutcome::Value(process_handle("run-handle")))
             }
             AbilityOp::Await(handle) if handle == process_handle("run-handle") => {
-                Ok(AbilityResult::Value(Value::Number(6.0)))
+                Ok(AbilityOutcome::Value(Value::Number(6.0)))
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected start ability")),
         }
     }
@@ -358,10 +358,10 @@ enum ProcessAwaitFailureHost {
 }
 
 impl ExecutionHost for ProcessAwaitFailureHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(_) => {
-                Ok(AbilityResult::Value(process_handle("rejected-run")))
+                Ok(AbilityOutcome::Value(process_handle("rejected-run")))
             }
             AbilityOp::Await(handle) if handle == process_handle("rejected-run") => match self {
                 Self::Typed => Err(ExecutionHostError::from_tool_failure(
@@ -377,7 +377,7 @@ impl ExecutionHost for ProcessAwaitFailureHost {
                 )),
                 Self::MessageOnly => Err(ExecutionHostError::new("plain await failure")),
             },
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "unexpected process-await rejection ability",
             )),
@@ -463,7 +463,7 @@ struct ProcessHandleIdInspectionHost {
 }
 
 impl ExecutionHost for ProcessHandleIdInspectionHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(call) if call.operation == "start" => {
                 let [Value::Record(fields)] = call.args.as_slice() else {
@@ -476,7 +476,7 @@ impl ExecutionHost for ProcessHandleIdInspectionHost {
                     .and_then(Value::as_record)
                     .expect("a start passes its arguments in `args`");
                 assert_eq!(start_args.get("input"), Some(&Value::Number(42.0)));
-                Ok(AbilityResult::Value(lashlang::from_json(
+                Ok(AbilityOutcome::Value(lashlang::from_json(
                     process_handle_json("process-test-42"),
                 )))
             }
@@ -500,12 +500,12 @@ impl ExecutionHost for ProcessHandleIdInspectionHost {
                             ExecutionHostError::new("missing process_id in status args")
                         })?;
                     *self.status_checked_process_id.lock().unwrap() = Some(pid);
-                    Ok(AbilityResult::Value(Value::String("status-ok".into())))
+                    Ok(AbilityOutcome::Value(Value::String("status-ok".into())))
                 } else {
                     Err(ExecutionHostError::new("unexpected resource operation"))
                 }
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected ability")),
         }
     }
@@ -583,7 +583,7 @@ struct ToolCallRecordingHost {
 }
 
 impl ExecutionHost for ToolCallRecordingHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(call) => {
                 let alias = match &call.receiver {
@@ -594,9 +594,9 @@ impl ExecutionHost for ToolCallRecordingHost {
                     .lock()
                     .expect("dispatched lock")
                     .push((alias, call.operation));
-                Ok(AbilityResult::Value(Value::String("tool-ok".into())))
+                Ok(AbilityOutcome::Value(Value::String("tool-ok".into())))
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected tool call ability")),
         }
     }
@@ -919,9 +919,9 @@ fn sibling_receiver_branches_pin_regexp_and_unsupported_checks() {
 struct AggregateHost;
 
 impl ExecutionHost for AggregateHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityOutcome::ResourceOperationBatch(
                 batch.answer_in_leaf_order(
                     batch
                         .leaves
@@ -929,12 +929,12 @@ impl ExecutionHost for AggregateHost {
                         .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
                         .enumerate()
                         .map(|(index, _)| {
-                            ResourceOperationResult::Value(Value::Number(index as f64 + 1.0))
+                            ResourceOperationOutcome::Value(Value::Number(index as f64 + 1.0))
                         })
                         .collect(),
                 ),
             )),
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected aggregate ability")),
         }
     }
@@ -943,9 +943,9 @@ impl ExecutionHost for AggregateHost {
 struct SettledHost;
 
 impl ExecutionHost for SettledHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityOutcome::ResourceOperationBatch(
                 batch.answer_in_leaf_order(
                     batch
                         .leaves
@@ -954,15 +954,15 @@ impl ExecutionHost for SettledHost {
                         .enumerate()
                         .map(|(index, _)| {
                             if index == 0 {
-                                ResourceOperationResult::Value(Value::String("ok".into()))
+                                ResourceOperationOutcome::Value(Value::String("ok".into()))
                             } else {
-                                ResourceOperationResult::Error(ExecutionHostError::new("boom"))
+                                ResourceOperationOutcome::Error(ExecutionHostError::new("boom"))
                             }
                         })
                         .collect(),
                 ),
             )),
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected settled ability")),
         }
     }
@@ -973,16 +973,16 @@ struct SequentialAsyncMapHost {
 }
 
 impl ExecutionHost for SequentialAsyncMapHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(_) => {
                 if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                    Ok(AbilityResult::Value(Value::String("ok".into())))
+                    Ok(AbilityOutcome::Value(Value::String("ok".into())))
                 } else {
                     Err(ExecutionHostError::new("boom"))
                 }
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "unexpected sequential async-map ability",
             )),
@@ -1127,11 +1127,11 @@ fn promise_all_settled_rejection_reason_is_an_idiomatic_error() {
 struct RejectingToolHost;
 
 impl ExecutionHost for RejectingToolHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(_) => Err(ExecutionHostError::new("boom")),
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
-            AbilityOp::Print(_) => Ok(AbilityResult::Value(Value::Null)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
+            AbilityOp::Print(_) => Ok(AbilityOutcome::Value(Value::Null)),
             _ => Err(ExecutionHostError::new("unexpected rejection ability")),
         }
     }
@@ -1236,7 +1236,7 @@ fn promise_aggregates_apply_promise_resolve_to_plain_values() {
 struct RuntimeValueHost;
 
 impl ExecutionHost for RuntimeValueHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
                 let Value::Resource(receiver) = operation.receiver else {
@@ -1252,17 +1252,17 @@ impl ExecutionHost for RuntimeValueHost {
                 assert!(operation.args.is_empty());
                 match operation.operation.as_str() {
                     lashlang::LANGUAGE_RUNTIME_NOW_OPERATION => {
-                        Ok(AbilityResult::Value(Value::Number(1_723_456.0)))
+                        Ok(AbilityOutcome::Value(Value::Number(1_723_456.0)))
                     }
                     lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION => {
-                        Ok(AbilityResult::Value(Value::Number(0.25)))
+                        Ok(AbilityOutcome::Value(Value::Number(0.25)))
                     }
                     other => Err(ExecutionHostError::new(format!(
                         "unexpected runtime operation {other}"
                     ))),
                 }
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected runtime-value ability")),
         }
     }
@@ -1358,16 +1358,16 @@ fn common_for_forms_and_standard_library_execute() {
 struct ProcessDurabilityHost;
 
 impl ExecutionHost for ProcessDurabilityHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityOutcome::ResourceOperationBatch(
                 batch.answer_in_leaf_order(
                     batch
                         .leaves
                         .iter()
                         .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
                         .map(|operation| {
-                            ResourceOperationResult::Value(
+                            ResourceOperationOutcome::Value(
                                 operation
                                     .args
                                     .first()
@@ -1382,10 +1382,10 @@ impl ExecutionHost for ProcessDurabilityHost {
             )),
             AbilityOp::WaitSignal { name, .. } => {
                 assert_eq!(name, "ready");
-                Ok(AbilityResult::Value(Value::String("signalled".into())))
+                Ok(AbilityOutcome::Value(Value::String("signalled".into())))
             }
-            AbilityOp::Sleep(_) => Ok(AbilityResult::Value(Value::Null)),
-            AbilityOp::ProcessEvent(event) => Ok(AbilityResult::Value(event.value)),
+            AbilityOp::Sleep(_) => Ok(AbilityOutcome::Value(Value::Null)),
+            AbilityOp::ProcessEvent(event) => Ok(AbilityOutcome::Value(event.value)),
             // A start names the process it is asked to start: the fixture's
             // process values carry a `name`, so a handle minted here can be
             // told apart from a handle minted for another process.
@@ -1399,7 +1399,7 @@ impl ExecutionHost for ProcessDurabilityHost {
                     .and_then(|record| record.get("name"))
                     .map(|name| name.to_string())
                     .unwrap_or_else(|| "worker".to_string());
-                Ok(AbilityResult::Value(lashlang::from_json(
+                Ok(AbilityOutcome::Value(lashlang::from_json(
                     process_handle_json(&name),
                 )))
             }
@@ -1409,11 +1409,11 @@ impl ExecutionHost for ProcessDurabilityHost {
                     .and_then(|record| record.get("process_id"))
                     .cloned()
                     .unwrap_or(Value::Null);
-                Ok(AbilityResult::Value(Value::String(
+                Ok(AbilityOutcome::Value(Value::String(
                     format!("{id} awaited").into(),
                 )))
             }
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "unexpected durable-process ability",
             )),
@@ -1616,25 +1616,25 @@ fn contains_aggregate_await(expr: &Expr, unwrap: bool) -> bool {
 struct FirstSettledRejectionHost;
 
 impl ExecutionHost for FirstSettledRejectionHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => {
                 assert_eq!(batch.leaves.len(), 2, "the decisive case has two leaves");
-                Ok(AbilityResult::ResourceOperationBatch(
+                Ok(AbilityOutcome::ResourceOperationBatch(
                     match batch.consumer {
                         // Leaf 1 settled first.
                         lashlang::AggregateConsumer::All => {
-                            ResourceOperationBatchResult::Selected {
+                            ResourceOperationBatchOutcome::Selected {
                                 leaf: 1,
-                                result: ResourceOperationResult::Error(ExecutionHostError::new(
+                                result: ResourceOperationOutcome::Error(ExecutionHostError::new(
                                     "early-B",
                                 )),
                             }
                         }
                         lashlang::AggregateConsumer::AllSettled => {
-                            ResourceOperationBatchResult::AllResults(vec![
-                                ResourceOperationResult::Error(ExecutionHostError::new("late-A")),
-                                ResourceOperationResult::Error(ExecutionHostError::new("early-B")),
+                            ResourceOperationBatchOutcome::AllResults(vec![
+                                ResourceOperationOutcome::Error(ExecutionHostError::new("late-A")),
+                                ResourceOperationOutcome::Error(ExecutionHostError::new("early-B")),
                             ])
                         }
                         other => {
@@ -1643,7 +1643,7 @@ impl ExecutionHost for FirstSettledRejectionHost {
                     },
                 ))
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected first-settled ability")),
         }
     }
@@ -1741,23 +1741,23 @@ fn promise_all_settled_stays_input_ordered_under_out_of_order_settlement() {
 struct MisfitReplyHost;
 
 impl ExecutionHost for MisfitReplyHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityOutcome::ResourceOperationBatch(
                 match batch.consumer {
                     // Two leaves, but the host names a fifth.
-                    lashlang::AggregateConsumer::All => ResourceOperationBatchResult::Selected {
+                    lashlang::AggregateConsumer::All => ResourceOperationBatchOutcome::Selected {
                         leaf: 5,
-                        result: ResourceOperationResult::Error(ExecutionHostError::new("boom")),
+                        result: ResourceOperationOutcome::Error(ExecutionHostError::new("boom")),
                     },
                     // `race` is decided by one settlement, never by every one.
-                    _ => ResourceOperationBatchResult::AllResults(vec![
-                        ResourceOperationResult::Value(Value::Null);
+                    _ => ResourceOperationBatchOutcome::AllResults(vec![
+                        ResourceOperationOutcome::Value(Value::Null);
                         batch.leaves.len()
                     ]),
                 },
             )),
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected malformed ability")),
         }
     }
@@ -2032,22 +2032,22 @@ fn for_of_follows_its_iterable_live() {
 struct PreparationFailureHost;
 
 impl ExecutionHost for PreparationFailureHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => {
                 assert_eq!(batch.leaves.len(), 2);
                 // Leaf 1 never entered the batch: it failed while being
                 // prepared, so it had already settled when the batch started.
-                Ok(AbilityResult::ResourceOperationBatch(
-                    ResourceOperationBatchResult::Selected {
+                Ok(AbilityOutcome::ResourceOperationBatch(
+                    ResourceOperationBatchOutcome::Selected {
                         leaf: 1,
-                        result: ResourceOperationResult::Error(ExecutionHostError::new(
+                        result: ResourceOperationOutcome::Error(ExecutionHostError::new(
                             "never-prepared",
                         )),
                     },
                 ))
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected preparation ability")),
         }
     }
@@ -2311,13 +2311,13 @@ fn pending_tool_handles_survive_durable_process_park() {
 struct MixedAggregateHost;
 
 impl MixedAggregateHost {
-    fn settle(operation: &lashlang::ResourceOperation) -> ResourceOperationResult {
+    fn settle(operation: &lashlang::ResourceOperation) -> ResourceOperationOutcome {
         let args = operation.args.first().and_then(Value::as_record);
         match args.and_then(|record| record.get("fail")) {
             Some(Value::Bool(true)) => {
-                ResourceOperationResult::Error(ExecutionHostError::new("tool failed"))
+                ResourceOperationOutcome::Error(ExecutionHostError::new("tool failed"))
             }
-            _ => ResourceOperationResult::Value(
+            _ => ResourceOperationOutcome::Value(
                 args.and_then(|record| record.get("value"))
                     .cloned()
                     .unwrap_or(Value::Null),
@@ -2327,9 +2327,9 @@ impl MixedAggregateHost {
 }
 
 impl ExecutionHost for MixedAggregateHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityOutcome::ResourceOperationBatch(
                 batch.answer_in_leaf_order(
                     batch
                         .leaves
@@ -2351,7 +2351,7 @@ impl ExecutionHost for MixedAggregateHost {
                     .and_then(|record| record.get("input"))
                     .cloned()
                     .unwrap_or(Value::Null);
-                Ok(AbilityResult::Value(lashlang::from_json(
+                Ok(AbilityOutcome::Value(lashlang::from_json(
                     process_handle_json(&input.to_string()),
                 )))
             }
@@ -2364,12 +2364,12 @@ impl ExecutionHost for MixedAggregateHost {
                 if id == lash_sansio::ProcessId::fixture("fail-p").as_str() {
                     Err(ExecutionHostError::new("process fail-p failed"))
                 } else {
-                    Ok(AbilityResult::Value(Value::String(
+                    Ok(AbilityOutcome::Value(Value::String(
                         format!("process {id} done").into(),
                     )))
                 }
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "unexpected mixed-aggregate ability",
             )),

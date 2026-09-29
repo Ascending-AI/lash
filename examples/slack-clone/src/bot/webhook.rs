@@ -9,7 +9,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
 
-use super::channel::{self, ChannelBot, Disposition};
+use super::channel::{self, ChannelBot, DeliveryOutcome};
 use crate::wire::events::{ChallengeResponse, EventRequest, RETRY_NUM_HEADER, RETRY_REASON_HEADER};
 use crate::{log_err, log_out};
 
@@ -80,7 +80,7 @@ async fn events(State(bot): State<Arc<ChannelBot>>, headers: HeaderMap, body: St
             let event_id = envelope.event_id.clone();
             tokio::spawn(async move {
                 match bot.ingest(*envelope, retry_num).await {
-                    Ok(Disposition::Deferred { event_id, .. }) => {
+                    Ok(DeliveryOutcome::Deferred { event_id, .. }) => {
                         // The admission is contended — a redelivery racing
                         // another writer that still holds the session lane.
                         // Slack's own retries are bounded and may all land
@@ -95,7 +95,7 @@ async fn events(State(bot): State<Arc<ChannelBot>>, headers: HeaderMap, body: St
                             );
                         }
                     }
-                    Ok(Disposition::RecoverableFailure { event_id, .. }) => {
+                    Ok(DeliveryOutcome::RecoverableFailure { event_id, .. }) => {
                         // The foreground path already spent its bounded root wait.
                         // Keep retrying under the remainder of the shared 120s
                         // budget so a long-running root can land without another

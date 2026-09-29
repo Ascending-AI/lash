@@ -65,7 +65,7 @@ where
     async fn perform(
         &self,
         op: lashlang::AbilityOp,
-    ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+    ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
         self.host.perform(op).await
     }
 

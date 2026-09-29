@@ -18,7 +18,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     LashlangAbilities, LashlangExecutionObservation, LashlangHostCatalog, LashlangHostEnvironment,
     State, Value,
 };
@@ -80,9 +80,9 @@ unsafe impl GlobalAlloc for CountingAllocator {
 struct UnobservedHost;
 
 impl ExecutionHost for UnobservedHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "unsupported observation-cost ability",
             )),

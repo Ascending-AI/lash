@@ -8,7 +8,7 @@ mod preparation;
 mod retry;
 
 pub use context::{
-    REBIND_FIELDS, RebindDisposition, RebindField, TOOL_CHILD_REBIND_VERSION, ToolDispatchContext,
+    REBIND_FIELDS, RebindField, RebindSource, TOOL_CHILD_REBIND_VERSION, ToolDispatchContext,
     ToolTriggerEffectOutcome,
 };
 pub use pending_resolver::{

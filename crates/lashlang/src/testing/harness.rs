@@ -11,11 +11,11 @@
 //! the unit tests use it rather than keeping a second copy.
 
 use crate::{
-    AbilityOp, AbilityResult, CompiledProgram, ExecutionEnvironment, ExecutionHost,
+    AbilityOp, AbilityOutcome, CompiledProgram, ExecutionEnvironment, ExecutionHost,
     ExecutionHostError, ExecutionOutcome, LashlangAbilities, LashlangExecutionSite,
     LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures, LinkedModule,
     ProcessType, Program, ProjectedBindings, ResourceOperation, ResourceOperationBatchLeaf,
-    ResourceOperationResult, RuntimeError, RuntimeFailure, State, TypeExpr, TypeField, Value,
+    ResourceOperationOutcome, RuntimeError, RuntimeFailure, State, TypeExpr, TypeField, Value,
 };
 
 /// A host that answers the four `tools.*` operations [`test_environment`]
@@ -52,10 +52,10 @@ impl EchoHost {
 }
 
 impl ExecutionHost for EchoHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
-                Self::perform_resource_operation(*operation).map(AbilityResult::Value)
+                Self::perform_resource_operation(*operation).map(AbilityOutcome::Value)
             }
             AbilityOp::ResourceOperationBatch(batch) => {
                 let results = batch
@@ -63,25 +63,25 @@ impl ExecutionHost for EchoHost {
                     .iter()
                     .map(|leaf| match leaf {
                         ResourceOperationBatchLeaf::Operation(operation) => {
-                            ResourceOperationResult::from_result(Self::perform_resource_operation(
+                            ResourceOperationOutcome::from_result(Self::perform_resource_operation(
                                 operation.clone(),
                             ))
                         }
                         ResourceOperationBatchLeaf::Timer(_) => {
-                            ResourceOperationResult::Value(Value::Undefined)
+                            ResourceOperationOutcome::Value(Value::Undefined)
                         }
                     })
                     .collect();
-                Ok(AbilityResult::ResourceOperationBatch(
+                Ok(AbilityOutcome::ResourceOperationBatch(
                     batch.answer_in_leaf_order(results),
                 ))
             }
             AbilityOp::Await(handle) => match handle {
-                Value::Record(_) => Ok(AbilityResult::Value(Value::Null)),
+                Value::Record(_) => Ok(AbilityOutcome::Value(Value::Null)),
                 _ => Err(ExecutionHostError::new("expected handle record")),
             },
-            AbilityOp::Print(_) => Ok(AbilityResult::Unit),
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Print(_) => Ok(AbilityOutcome::Unit),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
     }

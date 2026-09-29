@@ -1,14 +1,14 @@
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    ResourceOperationResult, State, Value,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
+    ResourceOperationOutcome, State, Value,
 };
 
 struct FluencyHost;
 
 impl ExecutionHost for FluencyHost {
-    async fn perform(&self, operation: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, operation: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match operation {
-            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityOutcome::ResourceOperationBatch(
                 batch.answer_in_leaf_order(
                     batch
                         .leaves
@@ -16,13 +16,13 @@ impl ExecutionHost for FluencyHost {
                         .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
                         .enumerate()
                         .map(|(index, call)| {
-                            ResourceOperationResult::Value(resource_operation_value(call, index))
+                            ResourceOperationOutcome::Value(resource_operation_value(call, index))
                         })
                         .collect(),
                 ),
             )),
             AbilityOp::ResourceOperation(call) => {
-                Ok(AbilityResult::Value(resource_operation_value(&call, 0)))
+                Ok(AbilityOutcome::Value(resource_operation_value(&call, 0)))
             }
             AbilityOp::Await(Value::Record(handle))
                 if handle.get("process_id")
@@ -32,9 +32,9 @@ impl ExecutionHost for FluencyHost {
                             .into(),
                     )) =>
             {
-                Ok(AbilityResult::Value(Value::Number(2.0)))
+                Ok(AbilityOutcome::Value(Value::Number(2.0)))
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             other => Err(ExecutionHostError::new(format!(
                 "unexpected fluency operation: {other:?}"
             ))),

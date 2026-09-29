@@ -17,7 +17,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, ImageValue,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, ImageValue,
     ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
     ResourceHandle, Snapshot, State, TypeExpr, TypeField, Value,
 };
@@ -32,10 +32,10 @@ use execute_support::{ExecuteError, execute};
 struct DeterministicHost;
 
 impl ExecutionHost for DeterministicHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => match operation.operation.as_str() {
-                "echo" => Ok(AbilityResult::Value(
+                "echo" => Ok(AbilityOutcome::Value(
                     operation
                         .args
                         .first()
@@ -50,7 +50,7 @@ impl ExecutionHost for DeterministicHost {
                     operation.operation
                 ))),
             },
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
     }

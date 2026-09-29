@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
     ProjectedValue, RuntimeError, State, Value,
 };
@@ -40,9 +40,9 @@ struct Host {
 }
 
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             AbilityOp::Print(value) => {
                 self.printed
                     .lock()
@@ -51,7 +51,7 @@ impl ExecutionHost for Host {
                         Value::String(value) => value.to_string(),
                         other => format!("{other:?}"),
                     });
-                Ok(AbilityResult::Value(Value::Null))
+                Ok(AbilityOutcome::Value(Value::Null))
             }
             _ => Err(ExecutionHostError::new(
                 "unsupported projected-coercion ability",
@@ -134,9 +134,9 @@ struct CountingHost {
 }
 
 impl ExecutionHost for CountingHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "unsupported counting projected-coercion ability",
             )),

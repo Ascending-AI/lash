@@ -153,7 +153,7 @@ succeeds, and only the worker's open refuses it.
 transport or pool:
 
 - **Messages.** Parent to worker: `Start` (the program source, explicit
-  context descriptions, and a fresh session or opaque state), `EffectResult`,
+  context descriptions, and a fresh session or opaque state), `EffectResponse`,
   `Cancel`, `Reset`, `Shutdown`. Worker to parent: `Ready`, `EffectRequest`,
   `Suspended`, `Complete`, `GuestError`, `Cancelled`, `ResetDone`.
 - **Headers.** Every message carries its execution lease, owner and frame

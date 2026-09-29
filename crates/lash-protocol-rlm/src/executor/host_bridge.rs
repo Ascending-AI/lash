@@ -15,7 +15,7 @@ use lash_lashlang_runtime::{
     process_sleep, protocol_tool_output_to_lashlang_value, resolve_lashlang_module_operation,
 };
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, Record as FlowRecord, Sleep,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, Record as FlowRecord, Sleep,
     Value as FlowValue,
 };
 use serde_json::Value;
@@ -58,7 +58,7 @@ pub(super) struct HostBridgeConfig<'run> {
 }
 
 type HostAbilityFuture<'a> =
-    lash_sansio::future::SendBoxFuture<'a, Result<AbilityResult, ExecutionHostError>>;
+    lash_sansio::future::SendBoxFuture<'a, Result<AbilityOutcome, ExecutionHostError>>;
 
 impl<'run> HostBridge<'run> {
     pub(super) fn new(config: HostBridgeConfig<'run>) -> Self {
@@ -635,7 +635,7 @@ impl HostBridge<'_> {
     async fn resource_operation_batch(
         &self,
         batch: lashlang::ResourceOperationBatch,
-    ) -> Result<lashlang::ResourceOperationBatchResult, ExecutionHostError> {
+    ) -> Result<lashlang::ResourceOperationBatchOutcome, ExecutionHostError> {
         let lashlang::ResourceOperationBatch {
             leaves,
             consumer,
@@ -952,7 +952,7 @@ impl HostBridge<'_> {
 
     /// An ability a cell may not use: it holds its ordinal — the recorded run
     /// held one there too — and is refused before it reaches the host.
-    fn refused_in_cell(&self, message: &'static str) -> Result<AbilityResult, ExecutionHostError> {
+    fn refused_in_cell(&self, message: &'static str) -> Result<AbilityOutcome, ExecutionHostError> {
         let commands = self.commands()?;
         let command = commands.issue()?;
         commands.skipped(&command)?;
@@ -970,22 +970,22 @@ impl HostBridge<'_> {
                 } = *operation;
                 Box::pin(self.resource_operation(operation, receiver, args, call_site))
                     .await
-                    .map(AbilityResult::Value)
+                    .map(AbilityOutcome::Value)
             }),
             AbilityOp::ResourceOperationBatch(batch) => Box::pin(async move {
                 self.resource_operation_batch(batch)
                     .await
-                    .map(AbilityResult::ResourceOperationBatch)
+                    .map(AbilityOutcome::ResourceOperationBatch)
             }),
             AbilityOp::Await(handle) => {
-                Box::pin(async move { self.await_handle(handle).await.map(AbilityResult::Value) })
+                Box::pin(async move { self.await_handle(handle).await.map(AbilityOutcome::Value) })
             }
             AbilityOp::Print(value) => Box::pin(async move {
                 self.print(value).await?;
-                Ok(AbilityResult::Unit)
+                Ok(AbilityOutcome::Unit)
             }),
             AbilityOp::Sleep(sleep) => {
-                Box::pin(async move { self.sleep(sleep).await.map(AbilityResult::Value) })
+                Box::pin(async move { self.sleep(sleep).await.map(AbilityOutcome::Value) })
             }
             AbilityOp::ProcessEvent(_) => Box::pin(async {
                 self.refused_in_cell(
@@ -998,7 +998,7 @@ impl HostBridge<'_> {
                 )
             }),
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
-                Box::pin(async move { Ok(AbilityResult::Value(value)) })
+                Box::pin(async move { Ok(AbilityOutcome::Value(value)) })
             }
         }
     }
@@ -1024,7 +1024,7 @@ impl ExecutionHost for HostBridge<'_> {
     fn perform(
         &self,
         op: AbilityOp,
-    ) -> impl Future<Output = Result<AbilityResult, ExecutionHostError>> + Send {
+    ) -> impl Future<Output = Result<AbilityOutcome, ExecutionHostError>> + Send {
         self.perform_selected_ability(op)
     }
 

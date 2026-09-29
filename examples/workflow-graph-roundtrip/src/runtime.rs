@@ -7,10 +7,10 @@ use anyhow::{Context, Result, anyhow};
 use lash::rlm::{
     LanguageTraceHost,
     lang::{
-        AbilityOp, AbilityResult, AggregateConsumer, ExecutionEnvironment, ExecutionHost,
+        AbilityOp, AbilityOutcome, AggregateConsumer, ExecutionEnvironment, ExecutionHost,
         ExecutionHostError, LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment,
         LashlangLanguageFeatures, LinkedModule, OperationContract, ProcessRef, ResourceOperation,
-        ResourceOperationBatchLeaf, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
+        ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome, Sleep,
         State, Value, WorkflowGraph, compile, from_json,
     },
 };
@@ -293,11 +293,11 @@ impl RunHost {
         Ok(value)
     }
 
-    async fn perform_sleep(&self, sleep: Sleep) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform_sleep(&self, sleep: Sleep) -> Result<AbilityOutcome, ExecutionHostError> {
         self.emit_waiting();
         let requested = duration_from_value(&sleep.value)?;
         tokio::time::sleep(requested.min(self.timing.sleep_cap)).await;
-        Ok(AbilityResult::Value(Value::Null))
+        Ok(AbilityOutcome::Value(Value::Null))
     }
 
     fn project_language_trace(&self, payload: TraceLanguageExecutionPayload) {
@@ -345,10 +345,10 @@ impl RunHost {
 }
 
 impl ExecutionHost for RunHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
-                self.apply_operation(*operation).map(AbilityResult::Value)
+                self.apply_operation(*operation).map(AbilityOutcome::Value)
             }
             AbilityOp::ResourceOperationBatch(batch) => {
                 let results = batch
@@ -356,16 +356,16 @@ impl ExecutionHost for RunHost {
                     .iter()
                     .map(|leaf| match leaf {
                         ResourceOperationBatchLeaf::Operation(operation) => {
-                            ResourceOperationResult::from_result(
+                            ResourceOperationOutcome::from_result(
                                 self.apply_operation(operation.clone()),
                             )
                         }
                         ResourceOperationBatchLeaf::Timer(_) => {
-                            ResourceOperationResult::Value(Value::Undefined)
+                            ResourceOperationOutcome::Value(Value::Undefined)
                         }
                     })
                     .collect();
-                Ok(AbilityResult::ResourceOperationBatch(answer_sequentially(
+                Ok(AbilityOutcome::ResourceOperationBatch(answer_sequentially(
                     batch.consumer,
                     batch.settled_value_after.is_some(),
                     results,
@@ -375,12 +375,12 @@ impl ExecutionHost for RunHost {
             AbilityOp::WaitSignal { name, .. } => {
                 self.emit_waiting();
                 tokio::time::sleep(self.timing.signal_delay).await;
-                Ok(AbilityResult::Value(from_json(serde_json::json!({
+                Ok(AbilityOutcome::Value(from_json(serde_json::json!({
                     "name": name,
                     "autoFired": true
                 }))))
             }
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "the toy workflow host does not support this ability",
             )),
@@ -395,38 +395,38 @@ impl ExecutionHost for RunHost {
 fn answer_sequentially(
     consumer: AggregateConsumer,
     holds_plain_value: bool,
-    results: Vec<ResourceOperationResult>,
-) -> ResourceOperationBatchResult {
+    results: Vec<ResourceOperationOutcome>,
+) -> ResourceOperationBatchOutcome {
     let first = |fulfilled: bool| {
         results
             .iter()
-            .position(|result| matches!(result, ResourceOperationResult::Value(_)) == fulfilled)
+            .position(|result| matches!(result, ResourceOperationOutcome::Value(_)) == fulfilled)
     };
-    let selected = |leaf: usize| ResourceOperationBatchResult::Selected {
+    let selected = |leaf: usize| ResourceOperationBatchOutcome::Selected {
         leaf,
         result: results[leaf].clone(),
     };
     match consumer {
-        AggregateConsumer::AllSettled => ResourceOperationBatchResult::AllResults(results),
+        AggregateConsumer::AllSettled => ResourceOperationBatchOutcome::AllResults(results),
         AggregateConsumer::All => match first(false) {
             Some(leaf) => selected(leaf),
-            None => ResourceOperationBatchResult::AllResults(results),
+            None => ResourceOperationBatchOutcome::AllResults(results),
         },
         AggregateConsumer::Race | AggregateConsumer::Any if holds_plain_value => {
-            ResourceOperationBatchResult::SettledValue
+            ResourceOperationBatchOutcome::SettledValue
         }
         AggregateConsumer::Race => match results.is_empty() {
             false => selected(0),
-            true => ResourceOperationBatchResult::AllResults(results),
+            true => ResourceOperationBatchOutcome::AllResults(results),
         },
         AggregateConsumer::Any => match first(true) {
             Some(leaf) => selected(leaf),
-            None => ResourceOperationBatchResult::ExhaustedRejections(
+            None => ResourceOperationBatchOutcome::ExhaustedRejections(
                 results
                     .into_iter()
                     .filter_map(|result| match result {
-                        ResourceOperationResult::Error(error) => Some(error),
-                        ResourceOperationResult::Value(_) => None,
+                        ResourceOperationOutcome::Error(error) => Some(error),
+                        ResourceOperationOutcome::Value(_) => None,
                     })
                     .collect(),
             ),

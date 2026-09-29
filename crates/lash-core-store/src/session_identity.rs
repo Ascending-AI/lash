@@ -270,7 +270,7 @@ impl OpenAgentFrameRequest {
     }
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct OpenAgentFrameResult {
+pub struct OpenAgentFrameOutcome {
     pub frame_node_id: String,
     pub opened: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -1,6 +1,6 @@
 pub use lash_core_store::session_identity::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
-    OpenAgentFrameRequest, OpenAgentFrameResult, SessionLineage, SessionObservedProcessOutcome,
+    OpenAgentFrameOutcome, OpenAgentFrameRequest, SessionLineage, SessionObservedProcessOutcome,
     SessionObservedProcessReceipt, SessionObserverIntent, SessionRelation, SessionSnapshot,
     SessionStartPoint, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
 };

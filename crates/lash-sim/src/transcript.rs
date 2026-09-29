@@ -330,7 +330,7 @@ fn trace_with_events(
         writes,
         crate::trace::OracleVerdict::passed("sim.oracle.generated-workload.v1", "passed"),
         Vec::new(),
-        crate::trace::AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new()),
+        crate::trace::AbstractWorldView::with_digest(0, 0, Vec::new(), Vec::new()),
     )
 }
 
@@ -422,7 +422,7 @@ mod tests {
 
     use super::*;
     use crate::store::{CheckpointWriteCollector, ObservedDeploymentStore};
-    use crate::trace::{AbstractWorldSummary, OracleVerdict};
+    use crate::trace::{AbstractWorldView, OracleVerdict};
 
     async fn collect_process_events(
         registry: &dyn lash_core::ProcessRegistry,
@@ -696,7 +696,7 @@ mod tests {
             vec![write],
             OracleVerdict::passed("sim.oracle.generated-workload.v1", "passed"),
             Vec::new(),
-            AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new()),
+            AbstractWorldView::with_digest(0, 0, Vec::new(), Vec::new()),
         )
     }
 }

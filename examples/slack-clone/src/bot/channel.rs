@@ -88,7 +88,7 @@ pub enum ReplySource {
 
 /// What the bot did with one delivery.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Disposition {
+pub enum DeliveryOutcome {
     /// The envelope's verification token did not match.
     Rejected { reason: &'static str },
     /// Already handled to completion; nothing was done.
@@ -154,7 +154,7 @@ pub enum Disposition {
 #[derive(Debug, Default)]
 pub struct RecoveryReport {
     /// Events this pass finished, for logging.
-    pub settled: Vec<Disposition>,
+    pub settled: Vec<DeliveryOutcome>,
     /// Events worth retrying in-process after this pass. This includes admissions
     /// contended by another writer and thread roots that exist but have not
     /// finished.
@@ -337,8 +337,10 @@ impl ChannelBot {
                 record.stage.as_str()
             );
             match &outcome {
-                Disposition::Deferred { event_id, .. } => report.deferred.push(event_id.clone()),
-                Disposition::RecoverableFailure {
+                DeliveryOutcome::Deferred { event_id, .. } => {
+                    report.deferred.push(event_id.clone())
+                }
+                DeliveryOutcome::RecoverableFailure {
                     event_id, reason, ..
                 } if *reason == EventReason::ThreadRootNotProcessed.as_str() => {
                     report.deferred.push(event_id.clone());
@@ -370,17 +372,17 @@ impl ChannelBot {
         &self,
         event_id: String,
         deadline: Duration,
-    ) -> Result<Disposition> {
+    ) -> Result<DeliveryOutcome> {
         let started = Instant::now();
         loop {
             let Some(record) = self.ledger.get(event_id.clone()).await? else {
-                return Ok(Disposition::Ignored {
+                return Ok(DeliveryOutcome::Ignored {
                     event_id,
                     reason: "ledger_row_vanished",
                 });
             };
             if record.stage.is_terminal() {
-                return Ok(Disposition::Duplicate {
+                return Ok(DeliveryOutcome::Duplicate {
                     event_id,
                     stage: record.stage,
                     reply_ts: record.reply_ts,
@@ -420,7 +422,7 @@ impl ChannelBot {
                         "slack-clone-bot retry attempt for event {event_id} failed \
                          (will retry until the deadline): {error:#}"
                     );
-                    Disposition::Deferred {
+                    DeliveryOutcome::Deferred {
                         event_id: event_id.clone(),
                         channel: record.channel_id.clone(),
                         reason: "retry_attempt_failed",
@@ -429,7 +431,7 @@ impl ChannelBot {
             };
             if !matches!(
                 outcome,
-                Disposition::Deferred { .. } | Disposition::RecoverableFailure { .. }
+                DeliveryOutcome::Deferred { .. } | DeliveryOutcome::RecoverableFailure { .. }
             ) {
                 log_err!("slack-clone-bot settled deferred event {event_id}: {outcome:?}");
                 return Ok(outcome);
@@ -453,9 +455,9 @@ impl ChannelBot {
         &self,
         envelope: EventCallback,
         retry_num: Option<u32>,
-    ) -> Result<Disposition> {
+    ) -> Result<DeliveryOutcome> {
         if !self.accepts_token(&envelope.token) {
-            return Ok(Disposition::Rejected {
+            return Ok(DeliveryOutcome::Rejected {
                 reason: "bad_verification_token",
             });
         }
@@ -490,7 +492,7 @@ impl ChannelBot {
             )
             .await?;
         if let Claim::Settled(record) = &claim {
-            return Ok(Disposition::Duplicate {
+            return Ok(DeliveryOutcome::Duplicate {
                 event_id: record.event_id.clone(),
                 stage: record.stage,
                 reply_ts: record.reply_ts.clone(),
@@ -505,7 +507,7 @@ impl ChannelBot {
                 DetailWrite::Set(reason.as_str().to_string()),
             )
             .await?;
-            return Ok(Disposition::Ignored {
+            return Ok(DeliveryOutcome::Ignored {
                 event_id: envelope.event_id,
                 reason: reason.as_str(),
             });
@@ -532,7 +534,11 @@ impl ChannelBot {
     /// one `conversations.history` scan to rule out a reply that was posted
     /// before the crash. A first delivery skips it: there cannot be a prior reply
     /// to an event nobody has seen.
-    async fn drive_accepted(&self, record: &EventRecord, resuming: bool) -> Result<Disposition> {
+    async fn drive_accepted(
+        &self,
+        record: &EventRecord,
+        resuming: bool,
+    ) -> Result<DeliveryOutcome> {
         self.drive_accepted_with_root_budget(record, resuming, self.thread_root_wait_budget())
             .await
     }
@@ -542,7 +548,7 @@ impl ChannelBot {
         record: &EventRecord,
         resuming: bool,
         thread_root_wait_budget: Duration,
-    ) -> Result<Disposition> {
+    ) -> Result<DeliveryOutcome> {
         let Some(text) = record.input_text.clone() else {
             // Only reachable for a row written before `input_text` existed. The
             // admission text is unrecoverable, so say so instead of guessing.
@@ -553,7 +559,7 @@ impl ChannelBot {
                 DetailWrite::Set(EventReason::AdmissionTextUnavailable.as_str().to_string()),
             )
             .await?;
-            return Ok(Disposition::Ignored {
+            return Ok(DeliveryOutcome::Ignored {
                 event_id: record.event_id.clone(),
                 reason: EventReason::AdmissionTextUnavailable.as_str(),
             });
@@ -571,7 +577,7 @@ impl ChannelBot {
                 DetailWrite::Clear,
             )
             .await?;
-            return Ok(Disposition::Duplicate {
+            return Ok(DeliveryOutcome::Duplicate {
                 event_id: record.event_id.clone(),
                 stage: Stage::Replied,
                 reply_ts: Some(reply_ts),
@@ -601,14 +607,14 @@ impl ChannelBot {
                         DetailWrite::Set(EventReason::ThreadSessionRetired.as_str().to_string()),
                     )
                     .await?;
-                    return Ok(Disposition::Ignored {
+                    return Ok(DeliveryOutcome::Ignored {
                         event_id: record.event_id.clone(),
                         reason: EventReason::ThreadSessionRetired.as_str(),
                     });
                 }
                 threads::ThreadSessionOpen::AdmissionContended => {
                     Self::log_turn_deferral(record, "the session lane is held elsewhere");
-                    return Ok(Disposition::Deferred {
+                    return Ok(DeliveryOutcome::Deferred {
                         event_id: record.event_id.clone(),
                         channel: record.channel_id.clone(),
                         reason: "session_admission_contended",
@@ -638,7 +644,7 @@ impl ChannelBot {
                 Ok(session) => (session, None),
                 Err(error) if threads::anyhow_session_admission_contended(&error) => {
                     Self::log_turn_deferral(record, "the session lane is held elsewhere");
-                    return Ok(Disposition::Deferred {
+                    return Ok(DeliveryOutcome::Deferred {
                         event_id: record.event_id.clone(),
                         channel: record.channel_id.clone(),
                         reason: "session_admission_contended",
@@ -663,7 +669,7 @@ impl ChannelBot {
             }
             self.settle(record, Stage::Folded, None, DetailWrite::Keep)
                 .await?;
-            return Ok(Disposition::Folded {
+            return Ok(DeliveryOutcome::Folded {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
             });
@@ -707,7 +713,7 @@ impl ChannelBot {
         record: &EventRecord,
         notify_user: bool,
         detail: EventReason,
-    ) -> Result<Disposition> {
+    ) -> Result<DeliveryOutcome> {
         let copy: &str = if detail == EventReason::ThreadRootNotAvailable {
             "I can’t find the message this thread started from, so I can’t answer right \
              now. If it reaches me later, I’ll follow up here."
@@ -765,7 +771,7 @@ impl ChannelBot {
         } else {
             false
         };
-        Ok(Disposition::RecoverableFailure {
+        Ok(DeliveryOutcome::RecoverableFailure {
             event_id: record.event_id.clone(),
             channel: record.channel_id.clone(),
             notified,
@@ -787,7 +793,7 @@ impl ChannelBot {
         record: &EventRecord,
         handle: SendHandle,
         resuming: bool,
-    ) -> Result<Disposition> {
+    ) -> Result<DeliveryOutcome> {
         let input_id = handle.input_id().to_string();
         let input_id = input_id.as_str();
         if resuming
@@ -832,7 +838,7 @@ impl ChannelBot {
             self.ledger
                 .advance_provider_error(record.event_id.clone(), record.stage, failure.clone())
                 .await?;
-            return Ok(Disposition::ProviderError {
+            return Ok(DeliveryOutcome::ProviderError {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
                 failure,
@@ -853,7 +859,7 @@ impl ChannelBot {
                 DetailWrite::Set(EventReason::EmptyModelReply.as_str().to_string()),
             )
             .await?;
-            return Ok(Disposition::Silent {
+            return Ok(DeliveryOutcome::Silent {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
                 reason: EventReason::EmptyModelReply.as_str(),
@@ -870,7 +876,7 @@ impl ChannelBot {
         session: &LashSession,
         record: &EventRecord,
         input_id: &str,
-    ) -> Result<Disposition> {
+    ) -> Result<DeliveryOutcome> {
         if record.thread_ts.is_none() {
             threads::retain_applied_turn_boundary(&self.core, &self.ledger, session, input_id)
                 .await?;
@@ -899,7 +905,7 @@ impl ChannelBot {
                     DetailWrite::Set(EventReason::ReplyLostAfterCommit.as_str().to_string()),
                 )
                 .await?;
-                Ok(Disposition::ReplyLost {
+                Ok(DeliveryOutcome::ReplyLost {
                     event_id: record.event_id.clone(),
                     channel: record.channel_id.clone(),
                 })
@@ -911,9 +917,9 @@ impl ChannelBot {
     /// stage: terminalizing it is what made an interrupted mention permanently
     /// unanswered, because no redelivery and no later boot revisits a terminal
     /// row.
-    fn defer_unsettled_turn(record: &EventRecord) -> Disposition {
+    fn defer_unsettled_turn(record: &EventRecord) -> DeliveryOutcome {
         Self::log_turn_deferral(record, "its turn has not settled");
-        Disposition::Deferred {
+        DeliveryOutcome::Deferred {
             event_id: record.event_id.clone(),
             channel: record.channel_id.clone(),
             reason: "turn_not_settled",
@@ -929,7 +935,7 @@ impl ChannelBot {
         record: &EventRecord,
         reply: String,
         source: ReplySource,
-    ) -> Result<Disposition> {
+    ) -> Result<DeliveryOutcome> {
         // A failed post, an unreachable platform or a crash now all leave a row that says
         // exactly what is owed and to whom — which is what makes recovery a read rather than a
         // guess.
@@ -956,7 +962,7 @@ impl ChannelBot {
                 DetailWrite::Clear,
             )
             .await?;
-        Ok(Disposition::Replied {
+        Ok(DeliveryOutcome::Replied {
             event_id: record.event_id.clone(),
             channel: record.channel_id.clone(),
             reply_ts,
@@ -965,7 +971,7 @@ impl ChannelBot {
     }
 
     /// Pay off a recorded reply debt, or discover it was already paid.
-    async fn settle_reply_debt(&self, record: &EventRecord) -> Result<Disposition> {
+    async fn settle_reply_debt(&self, record: &EventRecord) -> Result<DeliveryOutcome> {
         if let Some(reply_ts) = self.already_posted(record).await? {
             self.settle(
                 record,
@@ -974,7 +980,7 @@ impl ChannelBot {
                 DetailWrite::Clear,
             )
             .await?;
-            return Ok(Disposition::Duplicate {
+            return Ok(DeliveryOutcome::Duplicate {
                 event_id: record.event_id.clone(),
                 stage: Stage::Replied,
                 reply_ts: Some(reply_ts),
@@ -988,7 +994,7 @@ impl ChannelBot {
                 DetailWrite::Set(EventReason::ReplyLostAfterCommit.as_str().to_string()),
             )
             .await?;
-            return Ok(Disposition::ReplyLost {
+            return Ok(DeliveryOutcome::ReplyLost {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
             });
@@ -1001,7 +1007,7 @@ impl ChannelBot {
             DetailWrite::Clear,
         )
         .await?;
-        Ok(Disposition::Replied {
+        Ok(DeliveryOutcome::Replied {
             event_id: record.event_id.clone(),
             channel: record.channel_id.clone(),
             reply_ts,
@@ -1051,9 +1057,9 @@ impl ChannelBot {
         Ok(())
     }
 
-    async fn observed_elsewhere(&self, record: &EventRecord) -> Result<Disposition> {
+    async fn observed_elsewhere(&self, record: &EventRecord) -> Result<DeliveryOutcome> {
         let current = self.ledger.get(record.event_id.clone()).await?;
-        Ok(Disposition::Duplicate {
+        Ok(DeliveryOutcome::Duplicate {
             event_id: record.event_id.clone(),
             stage: current.as_ref().map_or(record.stage, |row| row.stage),
             reply_ts: current.and_then(|row| row.reply_ts),

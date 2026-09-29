@@ -651,16 +651,16 @@ fn a_prototype_chain_key_refuses_at_json_parse() {
 struct ProtoToolHost;
 
 impl ExecutionHost for ProtoToolHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(_) => {
                 let mut record = lashlang::Record::new();
                 record.insert("__proto__".to_string(), Value::Number(1.0));
-                Ok(AbilityResult::Value(Value::Record(std::sync::Arc::new(
+                Ok(AbilityOutcome::Value(Value::Record(std::sync::Arc::new(
                     record,
                 ))))
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported proto-tool ability")),
         }
     }

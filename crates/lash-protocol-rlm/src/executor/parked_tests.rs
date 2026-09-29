@@ -22,7 +22,7 @@ impl lashlang::ExecutionHost for ParkedCellHost<'_> {
         &self,
         op: lashlang::AbilityOp,
     ) -> impl std::future::Future<
-        Output = Result<lashlang::AbilityResult, lashlang::ExecutionHostError>,
+        Output = Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError>,
     > + Send {
         self.bridge.perform(op)
     }

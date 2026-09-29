@@ -1,6 +1,6 @@
 //! The typed messages a parent and its worker exchange.
 //!
-//! Parent to worker: [`ParentMessage`] (`Start`, `EffectResult`, `Cancel`,
+//! Parent to worker: [`ParentMessage`] (`Start`, `EffectResponse`, `Cancel`,
 //! `Reset`, `Shutdown`). Worker to parent: [`WorkerMessage`] (`Ready`,
 //! `EffectRequest`, `Suspended`, `Complete`, `GuestError`, `Cancelled`,
 //! `ResetDone`). Every message travels under a [`MessageHeader`], and a
@@ -258,7 +258,7 @@ pub enum EffectOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectResult {
+pub struct EffectResponse {
     pub id: EffectRequestId,
     pub outcome: EffectOutcome,
 }
@@ -267,7 +267,8 @@ pub struct EffectResult {
 #[serde(rename_all = "snake_case")]
 pub enum ParentMessage {
     Start(Box<Start>),
-    EffectResult(EffectResult),
+    #[serde(rename = "effect_result")]
+    EffectResponse(EffectResponse),
     /// Cooperative cancellation. It never decides the durable winner: that is
     /// the journaled checkpoint observation (ADR 0039).
     Cancel,

@@ -54,11 +54,11 @@ impl AggregateBatchHost {
 }
 
 impl ExecutionHost for AggregateBatchHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
                 self.singles.fetch_add(1, Ordering::SeqCst);
-                Self::perform_operation(*operation).map(AbilityResult::Value)
+                Self::perform_operation(*operation).map(AbilityOutcome::Value)
             }
             AbilityOp::ResourceOperationBatch(batch) => {
                 let operations = batch
@@ -73,19 +73,19 @@ impl ExecutionHost for AggregateBatchHost {
                 // Deliberately run in reverse order, so a test can tell the
                 // order leaves ran in from the order they were written.
                 let mut results =
-                    vec![ResourceOperationResult::Value(Value::Null); batch.leaves.len()];
+                    vec![ResourceOperationOutcome::Value(Value::Null); batch.leaves.len()];
                 for (index, operation) in operations.into_iter().enumerate().rev() {
                     results[index] =
-                        ResourceOperationResult::from_result(Self::perform_operation(operation));
+                        ResourceOperationOutcome::from_result(Self::perform_operation(operation));
                 }
                 // A Lashlang-native aggregate asks for every result (ADR 0099
                 // §10 L7), which this host answers in leaf order.
                 assert_eq!(batch.consumer, crate::AggregateConsumer::AllSettled);
-                Ok(AbilityResult::ResourceOperationBatch(
-                    ResourceOperationBatchResult::AllResults(results),
+                Ok(AbilityOutcome::ResourceOperationBatch(
+                    ResourceOperationBatchOutcome::AllResults(results),
                 ))
             }
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             other => Err(ExecutionHostError::new(format!(
                 "unexpected host ability in aggregate await test: {other:?}"
             ))),
@@ -100,9 +100,9 @@ struct AggregateProcessHost {
 }
 
 impl ExecutionHost for AggregateProcessHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityOutcome::ResourceOperationBatch(
                 batch.answer_in_leaf_order(
                     batch
                         .leaves
@@ -110,11 +110,11 @@ impl ExecutionHost for AggregateProcessHost {
                         .filter_map(crate::ResourceOperationBatchLeaf::operation)
                         .map(|operation| {
                             if operation.operation == "err" {
-                                ResourceOperationResult::Error(ExecutionHostError::new(
+                                ResourceOperationOutcome::Error(ExecutionHostError::new(
                                     "tool failed",
                                 ))
                             } else {
-                                ResourceOperationResult::Value(Value::Number(7.0))
+                                ResourceOperationOutcome::Value(Value::Number(7.0))
                             }
                         })
                         .collect(),
@@ -136,17 +136,17 @@ impl ExecutionHost for AggregateProcessHost {
                         .into(),
                     ),
                 );
-                Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
+                Ok(AbilityOutcome::Value(Value::Record(Arc::new(handle))))
             }
             AbilityOp::Await(_) => {
                 self.awaits.fetch_add(1, Ordering::SeqCst);
                 if self.reject_await {
                     Err(ExecutionHostError::new("process failed"))
                 } else {
-                    Ok(AbilityResult::Value(Value::Number(42.0)))
+                    Ok(AbilityOutcome::Value(Value::Number(42.0)))
                 }
             }
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             other => Err(ExecutionHostError::new(format!(
                 "unexpected host ability in aggregate process await test: {other:?}"
             ))),

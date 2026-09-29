@@ -228,19 +228,19 @@ async fn aggregate_await_mixed_pure_values_batch_resource_leaves_and_reconstruct
     }
 
     impl ExecutionHost for MixedHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             match op {
                 AbilityOp::ResourceOperationBatch(batch) => {
                     self.batch_len
                         .store(batch.leaves.len(), std::sync::atomic::Ordering::SeqCst);
-                    Ok(AbilityResult::ResourceOperationBatch(
+                    Ok(AbilityOutcome::ResourceOperationBatch(
                         batch.answer_in_leaf_order(
                             batch
                                 .leaves
                                 .iter()
                                 .filter_map(crate::ResourceOperationBatchLeaf::operation)
                                 .map(|operation| {
-                                    ResourceOperationResult::Value(
+                                    ResourceOperationOutcome::Value(
                                         operation
                                             .args
                                             .first()
@@ -258,7 +258,7 @@ async fn aggregate_await_mixed_pure_values_batch_resource_leaves_and_reconstruct
                     "mixed aggregate should use the batch host ability",
                 )),
                 AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
-                    Ok(AbilityResult::Value(value))
+                    Ok(AbilityOutcome::Value(value))
                 }
                 _ => Err(ExecutionHostError::new("unsupported host ability")),
             }
@@ -382,12 +382,12 @@ async fn aggregate_await_evaluates_arguments_once_in_source_order_before_batch()
     }
 
     impl ExecutionHost for OrderHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             match op {
                 AbilityOp::ResourceOperation(operation) => {
                     let value = Self::echo_value(&operation);
                     self.events.lock_recover().push(format!("single:{value}"));
-                    Ok(AbilityResult::Value(value))
+                    Ok(AbilityOutcome::Value(value))
                 }
                 AbilityOp::ResourceOperationBatch(batch) => {
                     let values = batch
@@ -404,17 +404,17 @@ async fn aggregate_await_evaluates_arguments_once_in_source_order_before_batch()
                             .collect::<Vec<_>>()
                             .join(",")
                     ));
-                    Ok(AbilityResult::ResourceOperationBatch(
+                    Ok(AbilityOutcome::ResourceOperationBatch(
                         batch.answer_in_leaf_order(
                             values
                                 .into_iter()
-                                .map(ResourceOperationResult::Value)
+                                .map(ResourceOperationOutcome::Value)
                                 .collect(),
                         ),
                     ))
                 }
                 AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
-                    Ok(AbilityResult::Value(value))
+                    Ok(AbilityOutcome::Value(value))
                 }
                 _ => Err(ExecutionHostError::new("unsupported host ability")),
             }
@@ -455,12 +455,12 @@ async fn aggregate_await_leaf_unwrap_waits_for_all_siblings_then_reports_first_e
     }
 
     impl ExecutionHost for CountingBatchHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             match op {
                 AbilityOp::ResourceOperationBatch(batch) => {
                     self.batch_len
                         .store(batch.leaves.len(), std::sync::atomic::Ordering::SeqCst);
-                    Ok(AbilityResult::ResourceOperationBatch(
+                    Ok(AbilityOutcome::ResourceOperationBatch(
                         batch.answer_in_leaf_order(
                             batch
                                 .leaves
@@ -468,11 +468,11 @@ async fn aggregate_await_leaf_unwrap_waits_for_all_siblings_then_reports_first_e
                                 .filter_map(crate::ResourceOperationBatchLeaf::operation)
                                 .map(|operation| {
                                     if operation.operation == "err" {
-                                        ResourceOperationResult::Error(ExecutionHostError::new(
+                                        ResourceOperationOutcome::Error(ExecutionHostError::new(
                                             "boom",
                                         ))
                                     } else {
-                                        ResourceOperationResult::Value(Value::String("ok".into()))
+                                        ResourceOperationOutcome::Value(Value::String("ok".into()))
                                     }
                                 })
                                 .collect(),
@@ -480,7 +480,7 @@ async fn aggregate_await_leaf_unwrap_waits_for_all_siblings_then_reports_first_e
                     ))
                 }
                 AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
-                    Ok(AbilityResult::Value(value))
+                    Ok(AbilityOutcome::Value(value))
                 }
                 _ => Err(ExecutionHostError::new("unexpected non-batch host ability")),
             }

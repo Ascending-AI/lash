@@ -4,7 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 
 const DOCUMENTED_SOURCE_NESTING_LIMIT: usize = 28;
@@ -13,9 +13,9 @@ const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 struct Host;
 
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected ability in depth test")),
         }
     }

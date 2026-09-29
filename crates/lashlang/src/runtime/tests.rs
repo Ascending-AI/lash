@@ -25,7 +25,7 @@ use std::sync::{
 struct RejectingAwaitHost;
 
 impl ExecutionHost for RejectingAwaitHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::Await(_) => Err(ExecutionHostError::new(
                 "unexpected generic handle await in resource operation test",
@@ -38,7 +38,7 @@ impl ExecutionHost for RejectingAwaitHost {
 struct SlowToolHost;
 
 impl ExecutionHost for SlowToolHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         if matches!(op, AbilityOp::ResourceOperation(_)) {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
@@ -52,7 +52,7 @@ struct FailedSleepObservationHost {
 }
 
 impl ExecutionHost for FailedSleepObservationHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::Sleep(_) => Err(ExecutionHostError::new("sleep refused")),
             other => Host.perform(other).await,
@@ -114,24 +114,26 @@ struct RecordingProcessHost {
 }
 
 impl ExecutionHost for RecordingProcessHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(_) | AbilityOp::ResourceOperationBatch(_) => Err(
                 ExecutionHostError::new("module operations are not supported by this host"),
             ),
             AbilityOp::ProcessEvent(event) => {
                 self.events.lock_recover().push(event);
-                Ok(AbilityResult::Unit)
+                Ok(AbilityOutcome::Unit)
             }
             AbilityOp::Sleep(sleep) => {
                 self.sleeps.lock_recover().push(sleep);
-                Ok(AbilityResult::Value(Value::Null))
+                Ok(AbilityOutcome::Value(Value::Null))
             }
             AbilityOp::WaitSignal { name, .. } => {
                 assert_eq!(name, "ready");
-                Ok(AbilityResult::Value(Value::String("signal-payload".into())))
+                Ok(AbilityOutcome::Value(Value::String(
+                    "signal-payload".into(),
+                )))
             }
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
     }
@@ -1180,7 +1182,7 @@ struct CheckpointCountingHost {
 }
 
 impl ExecutionHost for CheckpointCountingHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         Host.perform(op).await
     }
 

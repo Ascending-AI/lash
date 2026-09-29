@@ -64,11 +64,11 @@ pub use heap::{
     HeapId, is_javascript_builtin_global,
 };
 pub use host::{
-    AbilityOp, AbilityResult, AggregateConsumer, DEFAULT_HOST_MEMORY_LIMIT_BYTES,
+    AbilityOp, AbilityOutcome, AggregateConsumer, DEFAULT_HOST_MEMORY_LIMIT_BYTES,
     DEFAULT_MAX_VM_FRAME_DEPTH, ExecutionBound, ExecutionBounds, ExecutionEnvironment,
     ExecutionHost, ExecutionHostError, ExecutionMode, ProcessEvent, ProcessEventKind,
     ProcessSignal, ProcessStart, ResourceOperation, ResourceOperationBatch,
-    ResourceOperationBatchLeaf, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
+    ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome, Sleep,
     SleepKind,
 };
 pub use instance::{

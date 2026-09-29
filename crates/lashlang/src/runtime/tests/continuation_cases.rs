@@ -622,12 +622,12 @@ struct SegmentRecordingHost {
 }
 
 impl ExecutionHost for SegmentRecordingHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
                 let value = Host::perform_resource_operation(*operation)?;
                 self.effects.lock_recover().push(value.clone());
-                Ok(AbilityResult::Value(value))
+                Ok(AbilityOutcome::Value(value))
             }
             other => Host.perform(other).await,
         }
@@ -680,23 +680,23 @@ struct HandOverHost {
 }
 
 impl ExecutionHost for HandOverHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::Sleep(_) => {
                 *self.sleeps.lock_recover() += 1;
-                Ok(AbilityResult::Value(Value::Null))
+                Ok(AbilityOutcome::Value(Value::Null))
             }
             AbilityOp::WaitSignal { name, .. } => {
                 let mut waits = self.waits.lock_recover();
                 waits.push(name.clone());
                 if waits.len() == 1 {
-                    return Ok(AbilityResult::HandedOver);
+                    return Ok(AbilityOutcome::HandedOver);
                 }
-                Ok(AbilityResult::Value(Value::String(
+                Ok(AbilityOutcome::Value(Value::String(
                     format!("{name}-payload").into(),
                 )))
             }
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
     }
@@ -846,7 +846,7 @@ struct BoundedContinuationHost {
 }
 
 impl ExecutionHost for BoundedContinuationHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         Host.perform(op).await
     }
 
@@ -886,7 +886,7 @@ pub(super) struct HeapConformanceHost {
 }
 
 impl ExecutionHost for HeapConformanceHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         Host.perform(op).await
     }
 
@@ -916,7 +916,7 @@ impl DynamicMemoryHost {
 }
 
 impl ExecutionHost for DynamicMemoryHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         Host.perform(op).await
     }
 

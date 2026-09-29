@@ -25,7 +25,7 @@
 use std::sync::Arc;
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionBound, ExecutionBounds, ExecutionHost, ExecutionHostError,
+    AbilityOp, AbilityOutcome, ExecutionBound, ExecutionBounds, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, Expr, LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment,
     Record, RuntimeError, State, TypeExpr, Value,
 };
@@ -43,9 +43,9 @@ const LARGE: usize = 50_000;
 struct BudgetHost;
 
 impl ExecutionHost for BudgetHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) | AbilityOp::Print(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) | AbilityOp::Print(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "no other host abilities in this test",
             )),

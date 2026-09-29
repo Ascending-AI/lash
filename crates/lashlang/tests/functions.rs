@@ -1,14 +1,14 @@
 use lashlang::{
-    AbilityOp, AbilityResult, AssignTarget, ExecutionHost, ExecutionHostError, ExecutionOutcome,
+    AbilityOp, AbilityOutcome, AssignTarget, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     Expr, FunctionExpr, Program, State, Value, execute,
 };
 
 struct Host;
 
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected effect")),
         }
     }

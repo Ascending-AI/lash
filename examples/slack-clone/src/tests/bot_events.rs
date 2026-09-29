@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::bot::channel::{Disposition, ReplySource};
+use crate::bot::channel::{DeliveryOutcome, ReplySource};
 use crate::bot::ledger::{DetailWrite, ProviderFailure, Stage};
 use crate::bot::runtime::{session_id, thread_session_id};
 use crate::bot::tools::{CHANNEL_HISTORY, LIST_CHANNELS};
@@ -31,7 +31,7 @@ async fn a_mention_runs_one_turn_and_posts_one_reply() {
         .ingest(app_mention.clone(), None)
         .await
         .expect("handle app_mention");
-    let Disposition::Replied {
+    let DeliveryOutcome::Replied {
         reply_ts, source, ..
     } = disposition
     else {
@@ -102,13 +102,13 @@ async fn the_same_event_id_delivered_twice_runs_one_turn_and_posts_one_reply() {
 
     assert!(matches!(
         first,
-        Disposition::Replied {
+        DeliveryOutcome::Replied {
             source: ReplySource::Turn,
             ..
         }
     ));
     for redelivery in [&second, &third] {
-        let Disposition::Duplicate { stage, .. } = redelivery else {
+        let DeliveryOutcome::Duplicate { stage, .. } = redelivery else {
             panic!("a redelivery must not act: {redelivery:?}");
         };
         assert_eq!(*stage, Stage::Replied);
@@ -147,7 +147,7 @@ async fn ambient_traffic_folds_into_the_session_without_a_turn_or_a_reply() {
     assert_eq!(folded.len(), 2);
     for disposition in &folded {
         assert!(
-            matches!(disposition, Disposition::Folded { .. }),
+            matches!(disposition, DeliveryOutcome::Folded { .. }),
             "ambient traffic folds: {disposition:?}"
         );
     }
@@ -187,7 +187,7 @@ async fn ambient_traffic_folds_into_the_session_without_a_turn_or_a_reply() {
         .await;
     let app_mention = only_event(&platform.drain_envelopes().await, "app_mention");
     let disposition = bot.ingest(app_mention, None).await.expect("handle mention");
-    assert!(matches!(disposition, Disposition::Replied { .. }));
+    assert!(matches!(disposition, DeliveryOutcome::Replied { .. }));
     assert_eq!(script.calls(), 1, "one turn, not one per queued line");
     assert!(
         session
@@ -240,7 +240,7 @@ async fn the_bot_ignores_app_authored_messages_and_its_own_replies() {
         .filter(|disposition| {
             matches!(
                 disposition,
-                Disposition::Ignored {
+                DeliveryOutcome::Ignored {
                     reason: "superseded_by_app_mention",
                     ..
                 }
@@ -259,7 +259,7 @@ async fn the_bot_ignores_app_authored_messages_and_its_own_replies() {
         assert!(
             matches!(
                 disposition,
-                Disposition::Ignored {
+                DeliveryOutcome::Ignored {
                     reason: "app_authored_message",
                     ..
                 }
@@ -370,7 +370,7 @@ async fn a_thread_forks_on_its_first_reply_and_inherits_uncommitted_root_context
         .ingest(app_mention, None)
         .await
         .expect("handle first thread engagement");
-    assert!(matches!(disposition, Disposition::Replied { .. }));
+    assert!(matches!(disposition, DeliveryOutcome::Replied { .. }));
 
     let thread_id = thread_session_id(&channel, &root.to_string());
     assert!(
@@ -467,12 +467,12 @@ async fn a_thread_reply_waits_for_midflight_root_admission_and_forks_from_that_t
         .await
         .expect("join root turn")
         .expect("complete root turn");
-    assert!(matches!(root_disposition, Disposition::Replied { .. }));
+    assert!(matches!(root_disposition, DeliveryOutcome::Replied { .. }));
     let reply_disposition = reply_turn
         .await
         .expect("join thread turn")
         .expect("complete deferred thread turn");
-    assert!(matches!(reply_disposition, Disposition::Replied { .. }));
+    assert!(matches!(reply_disposition, DeliveryOutcome::Replied { .. }));
 
     let requests = script.requests();
     assert_eq!(requests.len(), 2);
@@ -515,7 +515,7 @@ async fn a_permanently_missing_root_fails_loudly_then_root_arrival_and_retry_rec
         .expect("exhaust bounded root wait");
     assert!(matches!(
         failure,
-        Disposition::RecoverableFailure {
+        DeliveryOutcome::RecoverableFailure {
             notified: true,
             reason: "thread_root_not_available",
             ..
@@ -552,7 +552,7 @@ async fn a_permanently_missing_root_fails_loudly_then_root_arrival_and_retry_rec
         .expect("exhaust the still-missing root a second time");
     assert!(matches!(
         second_failure,
-        Disposition::RecoverableFailure {
+        DeliveryOutcome::RecoverableFailure {
             notified: false,
             reason: "thread_root_not_available",
             ..
@@ -573,14 +573,14 @@ async fn a_permanently_missing_root_fails_loudly_then_root_arrival_and_retry_rec
         .ingest(root_event, None)
         .await
         .expect("admit the late root");
-    assert!(matches!(folded, Disposition::Folded { .. }));
+    assert!(matches!(folded, DeliveryOutcome::Folded { .. }));
     let recovered = bot
         .ingest(reply_mention.clone(), Some(1))
         .await
         .expect("retry after root arrival");
     assert!(matches!(
         recovered,
-        Disposition::Replied {
+        DeliveryOutcome::Replied {
             source: ReplySource::Turn,
             ..
         }
@@ -629,7 +629,7 @@ async fn a_terminal_unroutable_root_fails_fast_without_spending_the_wait_budget(
         .expect("record the permanently unroutable root");
     assert!(matches!(
         ignored,
-        Disposition::Ignored {
+        DeliveryOutcome::Ignored {
             reason: "no_author",
             ..
         }
@@ -656,7 +656,7 @@ async fn a_terminal_unroutable_root_fails_fast_without_spending_the_wait_budget(
             .expect("handle unroutable-root reply");
     assert!(matches!(
         outcome,
-        Disposition::RecoverableFailure {
+        DeliveryOutcome::RecoverableFailure {
             reason: "thread_root_not_available",
             ..
         }
@@ -924,7 +924,7 @@ async fn recovery_records_the_applied_turns_boundary_after_a_later_turn_commits(
         .ingest(older_mention.clone(), None)
         .await
         .expect("commit older turn");
-    let Disposition::Replied {
+    let DeliveryOutcome::Replied {
         reply_ts: older_reply_ts,
         ..
     } = older_reply
@@ -1218,11 +1218,11 @@ async fn a_thread_event_is_deduplicated_in_the_shared_ledger() {
         bot.ingest(event.clone(), None)
             .await
             .expect("first delivery"),
-        Disposition::Replied { .. }
+        DeliveryOutcome::Replied { .. }
     ));
     assert!(matches!(
         bot.ingest(event, Some(1)).await.expect("redelivery"),
-        Disposition::Duplicate {
+        DeliveryOutcome::Duplicate {
             stage: Stage::Replied,
             ..
         }
@@ -1253,7 +1253,7 @@ async fn an_ambient_thread_reply_creates_the_fork_and_waits_for_a_mention() {
         bot.ingest(ambient, None)
             .await
             .expect("fold thread ambient"),
-        Disposition::Folded { .. }
+        DeliveryOutcome::Folded { .. }
     ));
     assert_eq!(script.calls(), 0, "ambient thread traffic spends no token");
     let thread =
@@ -1350,7 +1350,7 @@ async fn a_mention_can_drive_the_standard_tool_loop() {
         .await;
     let app_mention = only_event(&platform.drain_envelopes().await, "app_mention");
     let disposition = bot.ingest(app_mention, None).await.expect("handle mention");
-    let Disposition::Replied { .. } = disposition else {
+    let DeliveryOutcome::Replied { .. } = disposition else {
         panic!("expected a reply, got {disposition:?}");
     };
     assert_eq!(
@@ -1398,7 +1398,7 @@ async fn an_envelope_with_the_wrong_verification_token_is_rejected() {
     let disposition = bot.ingest(app_mention, None).await.expect("handle spoof");
     assert_eq!(
         disposition,
-        Disposition::Rejected {
+        DeliveryOutcome::Rejected {
             reason: "bad_verification_token"
         }
     );
@@ -1424,7 +1424,7 @@ async fn an_empty_model_answer_is_absorbed_rather_than_posted() {
     assert!(
         matches!(
             disposition,
-            Disposition::Silent {
+            DeliveryOutcome::Silent {
                 reason: "empty_model_reply",
                 ..
             }
@@ -1453,7 +1453,7 @@ async fn a_provider_rejection_surfaces_as_typed_provider_error() {
         .ingest(app_mention.clone(), None)
         .await
         .expect("handle mention");
-    let Disposition::ProviderError { failure, .. } = disposition else {
+    let DeliveryOutcome::ProviderError { failure, .. } = disposition else {
         panic!("a provider rejection must surface as ProviderError, got {disposition:?}");
     };
     let ProviderFailure {
@@ -1488,7 +1488,7 @@ async fn a_provider_rejection_surfaces_as_typed_provider_error() {
         .expect("redeliver provider failure");
     assert_eq!(
         duplicate,
-        Disposition::Duplicate {
+        DeliveryOutcome::Duplicate {
             event_id: record.event_id,
             stage: Stage::ProviderError,
             reply_ts: None,

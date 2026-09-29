@@ -1,20 +1,20 @@
 use std::sync::Mutex;
 
 use lash_typescript::DiagnosticCode;
-use lashlang::{AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, State, Value};
+use lashlang::{AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, State, Value};
 use serde_json::json;
 
 #[derive(Default)]
 struct PrintHost(Mutex<Vec<Value>>);
 
 impl ExecutionHost for PrintHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::Print(value) => {
                 self.0.lock().expect("print journal").push(value);
-                Ok(AbilityResult::Value(Value::Null))
+                Ok(AbilityOutcome::Value(Value::Null))
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "unexpected structural-test ability",
             )),

@@ -1597,7 +1597,7 @@ async fn await_list_process_starts_and_joins_handles() {
     }
 
     impl ExecutionHost for BatchHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             match op {
                 AbilityOp::ResourceOperation(operation) => {
                     assert_eq!(operation.operation, "start");
@@ -1631,7 +1631,7 @@ async fn await_list_process_starts_and_joins_handles() {
                         "value".to_string(),
                         args.get("value").cloned().unwrap_or(Value::Null),
                     );
-                    Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
+                    Ok(AbilityOutcome::Value(Value::Record(Arc::new(handle))))
                 }
                 AbilityOp::Await(handle) => {
                     let value = handle
@@ -1639,10 +1639,10 @@ async fn await_list_process_starts_and_joins_handles() {
                         .and_then(|record| record.get("value"))
                         .cloned()
                         .unwrap_or(Value::Null);
-                    Ok(AbilityResult::Value(value))
+                    Ok(AbilityOutcome::Value(value))
                 }
                 AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
-                    Ok(AbilityResult::Value(value))
+                    Ok(AbilityOutcome::Value(value))
                 }
                 _ => Err(ExecutionHostError::new("unsupported host ability")),
             }

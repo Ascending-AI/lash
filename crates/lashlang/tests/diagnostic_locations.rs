@@ -10,7 +10,7 @@
 //! line, column and caret run, not a printed lashlang form.
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
+    AbilityOp, AbilityOutcome, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, State, TypeExpr,
 };
 
@@ -82,11 +82,11 @@ fn unknown_resource_operation_points_at_the_operation_call() {
 struct FailingOperationHost;
 
 impl ExecutionHost for FailingOperationHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(_) => Err(ExecutionHostError::new("the operation failed")),
-            AbilityOp::Print(_) => Ok(AbilityResult::Unit),
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Print(_) => Ok(AbilityOutcome::Unit),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             other => Err(ExecutionHostError::new(format!(
                 "unsupported ability: {other:?}"
             ))),

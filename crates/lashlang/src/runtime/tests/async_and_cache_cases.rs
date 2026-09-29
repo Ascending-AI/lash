@@ -69,7 +69,7 @@ fn finish_seven() -> Program {
 struct AsyncHost;
 
 impl ExecutionHost for AsyncHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => match operation.operation.as_str() {
                 // `processes.start` is the tool spelling of the retired `start`
@@ -104,9 +104,9 @@ impl ExecutionHost for AsyncHost {
                         "value".to_string(),
                         args.get("value").cloned().unwrap_or(Value::Null),
                     );
-                    Ok(AbilityResult::Value(Value::Record(Arc::new(record))))
+                    Ok(AbilityOutcome::Value(Value::Record(Arc::new(record))))
                 }
-                "cancel" | "signal" => Ok(AbilityResult::Value(Value::Null)),
+                "cancel" | "signal" => Ok(AbilityOutcome::Value(Value::Null)),
                 _ => Host.perform(AbilityOp::ResourceOperation(operation)).await,
             },
             AbilityOp::ResourceOperationBatch(batch) => {
@@ -120,10 +120,10 @@ impl ExecutionHost for AsyncHost {
                 if value == Value::String("fail".into()) {
                     return Err(ExecutionHostError::new("process failed"));
                 }
-                Ok(AbilityResult::Value(value))
+                Ok(AbilityOutcome::Value(value))
             }
-            AbilityOp::Print(_) => Ok(AbilityResult::Unit),
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Print(_) => Ok(AbilityOutcome::Unit),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
     }
@@ -134,7 +134,7 @@ impl ExecutionHost for AsyncHost {
 struct FailingAwaitHost;
 
 impl ExecutionHost for FailingAwaitHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::Await(handle) => {
                 let record = handle
@@ -144,8 +144,8 @@ impl ExecutionHost for FailingAwaitHost {
                     Some(Value::String(value)) if value.as_str() == "fail" => {
                         Err(ExecutionHostError::new("process failed: fail"))
                     }
-                    Some(value) => Ok(AbilityResult::Value(value.clone())),
-                    None => Ok(AbilityResult::Value(Value::Null)),
+                    Some(value) => Ok(AbilityOutcome::Value(value.clone())),
+                    None => Ok(AbilityOutcome::Value(Value::Null)),
                 }
             }
             other => AsyncHost.perform(other).await,
@@ -238,7 +238,7 @@ async fn process_handle_await_reports_the_child_and_its_resolution() {
     struct ObservingHost(std::sync::Mutex<Vec<LashlangExecutionObservation>>);
 
     impl ExecutionHost for ObservingHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             AsyncHost.perform(op).await
         }
 
@@ -302,11 +302,11 @@ async fn aggregate_await_reports_all_children_once() {
     }
 
     impl ExecutionHost for ObservingHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             let starting = matches!(&op, AbilityOp::ResourceOperation(operation) if operation.operation == "start");
             let result = AsyncHost.perform(op).await?;
             if starting {
-                let AbilityResult::Value(Value::Record(record)) = result else {
+                let AbilityOutcome::Value(Value::Record(record)) = result else {
                     panic!("start must return a process handle");
                 };
                 let ordinal = self.next_child.fetch_add(1, Ordering::Relaxed) + 1;
@@ -321,7 +321,7 @@ async fn aggregate_await_reports_all_children_once() {
                         .into(),
                     ),
                 );
-                return Ok(AbilityResult::Value(Value::Record(Arc::new(record))));
+                return Ok(AbilityOutcome::Value(Value::Record(Arc::new(record))));
             }
             Ok(result)
         }
@@ -1356,7 +1356,7 @@ async fn type_literal_inside_resource_operation_args_passes_through_as_record() 
         captured: std::sync::Mutex<Option<Value>>,
     }
     impl ExecutionHost for CaptureHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             match op {
                 AbilityOp::ResourceOperation(operation) => {
                     if operation.operation == "spawn" {
@@ -1368,7 +1368,7 @@ async fn type_literal_inside_resource_operation_args_passes_through_as_record() 
                             .cloned()
                             .expect("output arg must be present");
                         *self.captured.lock_recover() = Some(schema);
-                        return Ok(AbilityResult::Value(Value::Null));
+                        return Ok(AbilityOutcome::Value(Value::Null));
                     }
                     Err(ExecutionHostError::new(format!(
                         "unknown: {}",
@@ -1376,7 +1376,7 @@ async fn type_literal_inside_resource_operation_args_passes_through_as_record() 
                     )))
                 }
                 AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
-                    Ok(AbilityResult::Value(value))
+                    Ok(AbilityOutcome::Value(value))
                 }
                 _ => Err(ExecutionHostError::new("unsupported host ability")),
             }
@@ -1600,7 +1600,7 @@ impl TerminatorHost {
 }
 
 impl ExecutionHost for TerminatorHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
                 let observed = match &value {
@@ -1609,13 +1609,13 @@ impl ExecutionHost for TerminatorHost {
                 };
                 self.observed.lock_recover().push(observed);
                 match self.mode {
-                    TerminatorMode::Identity => Ok(AbilityResult::Value(value)),
+                    TerminatorMode::Identity => Ok(AbilityOutcome::Value(value)),
                     TerminatorMode::Transform => match value {
-                        Value::Number(n) => Ok(AbilityResult::Value(Value::Number(n + 100.0))),
-                        other => Ok(AbilityResult::Value(other)),
+                        Value::Number(n) => Ok(AbilityOutcome::Value(Value::Number(n + 100.0))),
+                        other => Ok(AbilityOutcome::Value(other)),
                     },
                     TerminatorMode::Err => Err(ExecutionHostError::new("handler refused")),
-                    TerminatorMode::Unit => Ok(AbilityResult::Unit),
+                    TerminatorMode::Unit => Ok(AbilityOutcome::Unit),
                 }
             }
             _ => Err(ExecutionHostError::new("unsupported host ability")),

@@ -121,7 +121,7 @@ async fn effect_failure_is_a_throw_with_structured_operation_metadata() {
 struct StructuredToolFailureHost;
 
 impl ExecutionHost for StructuredToolFailureHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         if matches!(op, AbilityOp::ResourceOperation(_)) {
             return Err(ExecutionHostError::from_tool_failure(
                 &lash_sansio::ToolFailure {
@@ -317,7 +317,7 @@ async fn continuation_round_trips_inside_try_and_finally() {
 struct CancelledExceptionHost;
 
 impl ExecutionHost for CancelledExceptionHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         Host.perform(op).await
     }
 
@@ -440,7 +440,7 @@ pub(super) struct ExceptionRecordingHost {
 }
 
 impl ExecutionHost for ExceptionRecordingHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         if let AbilityOp::ResourceOperation(operation) = op {
             let value = operation
                 .args
@@ -458,7 +458,7 @@ impl ExecutionHost for ExceptionRecordingHost {
                 return if self.operations.lock_recover().len() == 1 {
                     Err(ExecutionHostError::new("transient failure"))
                 } else {
-                    Ok(AbilityResult::Value(value))
+                    Ok(AbilityOutcome::Value(value))
                 };
             }
             return Host.perform(AbilityOp::ResourceOperation(operation)).await;
@@ -604,7 +604,7 @@ async fn effect_failure_catch_retry_is_a_new_occurrence() {
 pub(super) struct StressExceptionHost;
 
 impl ExecutionHost for StressExceptionHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         Host.perform(op).await
     }
 

@@ -1562,13 +1562,13 @@ pub struct RuntimeEffectReplayMismatchReport {
 
 /// Journal treatment of an executor failure before a terminal is committed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum EffectErrorJournalDisposition {
+pub enum EffectErrorJournalPolicy {
     #[default]
     Terminal,
     RetryUncommittedResponseDerivation,
 }
 
-impl EffectErrorJournalDisposition {
+impl EffectErrorJournalPolicy {
     pub fn is_retryable_derivation(self) -> bool {
         matches!(self, Self::RetryUncommittedResponseDerivation)
     }
@@ -1578,7 +1578,7 @@ impl EffectErrorJournalDisposition {
 #[error("{code}: {message}")]
 pub struct RuntimeEffectControllerError {
     #[serde(skip)]
-    journal_disposition: EffectErrorJournalDisposition,
+    journal_disposition: EffectErrorJournalPolicy,
     pub code: RuntimeErrorCode,
     pub message: String,
     /// Boxed, as on [`RuntimeError`]: the rare diagnostic must not size
@@ -1605,7 +1605,7 @@ pub struct RuntimeEffectControllerError {
 impl RuntimeEffectControllerError {
     pub fn new(code: RuntimeErrorCode, message: impl Into<String>) -> Self {
         Self {
-            journal_disposition: EffectErrorJournalDisposition::Terminal,
+            journal_disposition: EffectErrorJournalPolicy::Terminal,
             code,
             message: message.into(),
             summary: None,
@@ -1629,8 +1629,7 @@ impl RuntimeEffectControllerError {
             RuntimeErrorCode::RuntimeEffectAssistantResponseHook,
             message,
         );
-        error.journal_disposition =
-            EffectErrorJournalDisposition::RetryUncommittedResponseDerivation;
+        error.journal_disposition = EffectErrorJournalPolicy::RetryUncommittedResponseDerivation;
         error
     }
 
@@ -1648,8 +1647,7 @@ impl RuntimeEffectControllerError {
     #[must_use]
     pub fn retryable_uncommitted_derivation(mut self) -> Self {
         if !self.is_session_retirement() {
-            self.journal_disposition =
-                EffectErrorJournalDisposition::RetryUncommittedResponseDerivation;
+            self.journal_disposition = EffectErrorJournalPolicy::RetryUncommittedResponseDerivation;
         }
         self
     }
@@ -1674,7 +1672,7 @@ impl RuntimeEffectControllerError {
     /// can any step whose cancellation watch was lost
     /// ([`Self::turn_cancel_watch_lost`]): that fault is about the attempt,
     /// never the step.
-    pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalDisposition {
+    pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalPolicy {
         if matches!(
             kind,
             RuntimeEffectKind::BeforeLlmCall
@@ -1694,7 +1692,7 @@ impl RuntimeEffectControllerError {
         {
             self.journal_disposition
         } else {
-            EffectErrorJournalDisposition::Terminal
+            EffectErrorJournalPolicy::Terminal
         }
     }
 
@@ -1800,7 +1798,7 @@ impl RuntimeEffectControllerError {
 impl From<RuntimeError> for RuntimeEffectControllerError {
     fn from(err: RuntimeError) -> Self {
         Self {
-            journal_disposition: EffectErrorJournalDisposition::Terminal,
+            journal_disposition: EffectErrorJournalPolicy::Terminal,
             code: err.code,
             message: err.message,
             summary: err.summary,
@@ -1875,7 +1873,7 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
             _ => crate::RuntimeErrorCode::RuntimeStore,
         };
         Self {
-            journal_disposition: EffectErrorJournalDisposition::Terminal,
+            journal_disposition: EffectErrorJournalPolicy::Terminal,
             code,
             message: err.to_string(),
             summary: None,

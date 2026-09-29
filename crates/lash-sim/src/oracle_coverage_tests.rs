@@ -18,7 +18,7 @@ use crate::oracles::{
     runtime_session_graph_contract,
 };
 use crate::state_checker::checkpoint_state_consistency;
-use crate::trace::{AbstractWorldSummary, OracleVerdict, WorkloadExpectations};
+use crate::trace::{AbstractWorldView, OracleVerdict, WorkloadExpectations};
 
 /// Every random workload profile, at the budget the runner actually uses.
 const PROFILES: [&str; 3] = ["fast-random", "default-random", "full-random"];
@@ -36,8 +36,8 @@ fn declared() -> WorkloadExpectations {
     declared_for("default-random")
 }
 
-fn empty_summary() -> AbstractWorldSummary {
-    AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new())
+fn empty_summary() -> AbstractWorldView {
+    AbstractWorldView::with_digest(0, 0, Vec::new(), Vec::new())
 }
 
 fn assert_absent_class(verdict: &OracleVerdict, oracle_id: &str, declared: usize) {

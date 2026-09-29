@@ -1110,7 +1110,7 @@ async fn wait_since_ms(
 }
 
 type ProcessHostAbilityFuture<'a> =
-    lash_sansio::future::SendBoxFuture<'a, Result<lashlang::AbilityResult, ExecutionHostError>>;
+    lash_sansio::future::SendBoxFuture<'a, Result<lashlang::AbilityOutcome, ExecutionHostError>>;
 
 impl LashlangProcessHost<'_> {
     fn resource_payload(
@@ -1366,7 +1366,7 @@ impl LashlangProcessHost<'_> {
         &self,
         name: String,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
-    ) -> Result<lashlang::AbilityResult, ExecutionHostError> {
+    ) -> Result<lashlang::AbilityOutcome, ExecutionHostError> {
         let commands = self.commands();
         let command = commands.issue()?;
         let event_type = match lash_core::facade_support::process_signal_event_type(&name) {
@@ -1459,7 +1459,7 @@ impl LashlangProcessHost<'_> {
             if let Some(ordinal) = wait_ordinals.get_mut(&name) {
                 *ordinal = ordinal.saturating_sub(1);
             }
-            return Ok(lashlang::AbilityResult::HandedOver);
+            return Ok(lashlang::AbilityOutcome::HandedOver);
         }
         if matches!(&payload, Err(error)
             if error.code == lash_core::RuntimeErrorCode::ProcessSignalWaitCancelled)
@@ -1499,7 +1499,9 @@ impl LashlangProcessHost<'_> {
             self.lashlang_execution_trace
                 .emit_resumed(call_site, TraceNodeWaitResolution::Resumed);
         }
-        Ok(lashlang::AbilityResult::Value(lashlang::from_json(payload)))
+        Ok(lashlang::AbilityOutcome::Value(lashlang::from_json(
+            payload,
+        )))
     }
 
     fn perform_selected_ability<'a>(
@@ -1515,24 +1517,26 @@ impl LashlangProcessHost<'_> {
                     operation.call_site,
                 ))
                 .await
-                .map(lashlang::AbilityResult::Value)
+                .map(lashlang::AbilityOutcome::Value)
             }),
             lashlang::AbilityOp::ResourceOperationBatch(batch) => Box::pin(async move {
                 self.resource_operation_batch(batch)
                     .await
-                    .map(lashlang::AbilityResult::ResourceOperationBatch)
+                    .map(lashlang::AbilityOutcome::ResourceOperationBatch)
             }),
             lashlang::AbilityOp::Await(handle) => Box::pin(async move {
                 self.await_handle(handle)
                     .await
-                    .map(lashlang::AbilityResult::Value)
+                    .map(lashlang::AbilityOutcome::Value)
             }),
             lashlang::AbilityOp::ProcessEvent(event) => Box::pin(async move {
                 self.process_event(event).await?;
-                Ok(lashlang::AbilityResult::Unit)
+                Ok(lashlang::AbilityOutcome::Unit)
             }),
             lashlang::AbilityOp::Sleep(sleep) => {
-                Box::pin(async move { self.sleep(sleep).await.map(lashlang::AbilityResult::Value) })
+                Box::pin(
+                    async move { self.sleep(sleep).await.map(lashlang::AbilityOutcome::Value) },
+                )
             }
             lashlang::AbilityOp::WaitSignal { name, call_site } => {
                 Box::pin(async move { self.wait_signal(name, call_site).await })
@@ -1541,7 +1545,7 @@ impl LashlangProcessHost<'_> {
                 Box::pin(async { Err(LashlangHostError::PrintUnavailable.into()) })
             }
             lashlang::AbilityOp::Finish(value) | lashlang::AbilityOp::Fail(value) => {
-                Box::pin(async move { Ok(lashlang::AbilityResult::Value(value)) })
+                Box::pin(async move { Ok(lashlang::AbilityOutcome::Value(value)) })
             }
         }
     }
@@ -1551,7 +1555,7 @@ impl lashlang::ExecutionHost for LashlangProcessHost<'_> {
     fn perform(
         &self,
         op: lashlang::AbilityOp,
-    ) -> impl Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send {
+    ) -> impl Future<Output = Result<lashlang::AbilityOutcome, ExecutionHostError>> + Send {
         self.perform_selected_ability(op)
     }
 

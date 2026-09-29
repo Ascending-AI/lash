@@ -184,7 +184,7 @@ struct CancelAfterFirstEffectHost {
 }
 
 impl ExecutionHost for CancelAfterFirstEffectHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Host.perform(op).await
     }

@@ -49,7 +49,7 @@ pub(in crate::runtime) struct OutcomeFrameSwitch {
 #[derive(Clone, Debug)]
 pub(in crate::runtime) struct RecordedFrameSwitch {
     pub(in crate::runtime) request: OutcomeFrameSwitch,
-    outcome: crate::OpenAgentFrameResult,
+    outcome: crate::OpenAgentFrameOutcome,
 }
 
 impl RecordedFrameSwitch {
@@ -209,7 +209,7 @@ impl TurnGraphAppendDraft {
         session_id: &SessionId,
         current_frame_node_id: Option<&str>,
         request: &OutcomeFrameSwitch,
-    ) -> Result<crate::OpenAgentFrameResult, crate::RuntimeError> {
+    ) -> Result<crate::OpenAgentFrameOutcome, crate::RuntimeError> {
         let frame_node_id =
             crate::session_graph::frame_node_id(session_id, request.frame_key.as_str());
         let mut inner = self.inner.lock_recover();
@@ -233,13 +233,13 @@ impl TurnGraphAppendDraft {
             return Ok(recorded.outcome.clone());
         }
         let outcome = if current_frame_node_id == Some(frame_node_id.as_str()) {
-            crate::OpenAgentFrameResult {
+            crate::OpenAgentFrameOutcome {
                 frame_node_id: frame_node_id.clone().into_inner(),
                 opened: false,
                 initial_node_ids: Vec::new(),
             }
         } else {
-            crate::OpenAgentFrameResult {
+            crate::OpenAgentFrameOutcome {
                 frame_node_id: frame_node_id.clone().into_inner(),
                 opened: true,
                 initial_node_ids: (0..request.initial_nodes.len() as u64)

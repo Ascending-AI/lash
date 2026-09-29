@@ -10,9 +10,9 @@
 )]
 
 use lashlang::{
-    AbilityOp, AbilityResult, AggregateConsumer, ExecutionHost, ExecutionHostError,
-    ExecutionOutcome, ResourceOperationBatchLeaf, ResourceOperationBatchResult,
-    ResourceOperationResult, State, Value,
+    AbilityOp, AbilityOutcome, AggregateConsumer, ExecutionHost, ExecutionHostError,
+    ExecutionOutcome, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
+    ResourceOperationOutcome, State, Value,
 };
 use std::sync::Mutex;
 
@@ -27,7 +27,7 @@ struct Asked {
 /// Answers every aggregate with a reply the case scripts, and records what
 /// each one asked for.
 struct ScriptedHost {
-    reply: Box<dyn Fn(usize) -> ResourceOperationBatchResult + Send + Sync>,
+    reply: Box<dyn Fn(usize) -> ResourceOperationBatchOutcome + Send + Sync>,
     asked: Mutex<Vec<Asked>>,
     /// Answer every aggregate on the host-control channel instead, the way
     /// the product host answers a settlement read that failed on store I/O.
@@ -38,7 +38,7 @@ struct ScriptedHost {
 }
 
 impl ScriptedHost {
-    fn new(reply: impl Fn(usize) -> ResourceOperationBatchResult + Send + Sync + 'static) -> Self {
+    fn new(reply: impl Fn(usize) -> ResourceOperationBatchOutcome + Send + Sync + 'static) -> Self {
         Self {
             reply: Box::new(reply),
             asked: Mutex::new(Vec::new()),
@@ -59,7 +59,7 @@ impl ScriptedHost {
 }
 
 impl ExecutionHost for ScriptedHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(_) if self.host_control_failure.is_some() => Err(
                 ExecutionHostError::new(self.host_control_failure.unwrap_or_default()),
@@ -77,11 +77,11 @@ impl ExecutionHost for ScriptedHost {
                         .collect(),
                     settled_value_after: batch.settled_value_after,
                 });
-                Ok(AbilityResult::ResourceOperationBatch((self.reply)(
+                Ok(AbilityOutcome::ResourceOperationBatch((self.reply)(
                     batch.leaves.len(),
                 )))
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             other => Err(ExecutionHostError::new(format!(
                 "unexpected ability {other:?}"
             ))),
@@ -122,17 +122,17 @@ fn json(value: &Value) -> serde_json::Value {
     }
 }
 
-fn value(json: serde_json::Value) -> ResourceOperationResult {
-    ResourceOperationResult::Value(lashlang::from_json(json))
+fn value(json: serde_json::Value) -> ResourceOperationOutcome {
+    ResourceOperationOutcome::Value(lashlang::from_json(json))
 }
 
-fn rejection(message: &str) -> ResourceOperationResult {
-    ResourceOperationResult::Error(ExecutionHostError::new(message))
+fn rejection(message: &str) -> ResourceOperationOutcome {
+    ResourceOperationOutcome::Error(ExecutionHostError::new(message))
 }
 
 #[test]
 fn a_race_asks_for_its_first_settlement_and_resolves_with_the_selected_leaf() {
-    let host = ScriptedHost::new(|_| ResourceOperationBatchResult::Selected {
+    let host = ScriptedHost::new(|_| ResourceOperationBatchOutcome::Selected {
         leaf: 1,
         result: value(serde_json::json!({ "id": "b" })),
     });
@@ -154,7 +154,7 @@ fn a_race_asks_for_its_first_settlement_and_resolves_with_the_selected_leaf() {
 
 #[test]
 fn a_selected_rejection_rejects_the_race() {
-    let host = ScriptedHost::new(|_| ResourceOperationBatchResult::Selected {
+    let host = ScriptedHost::new(|_| ResourceOperationBatchOutcome::Selected {
         leaf: 0,
         result: rejection("first to settle"),
     });
@@ -176,7 +176,7 @@ fn a_selected_rejection_rejects_the_race() {
 #[test]
 fn a_plain_operand_decides_after_its_pending_siblings_are_admitted() {
     for (operands, boundary) in [("7, web.fetch({})", 0), ("web.fetch({}), 7", 1)] {
-        let host = ScriptedHost::new(|_| ResourceOperationBatchResult::SettledValue);
+        let host = ScriptedHost::new(|_| ResourceOperationBatchOutcome::SettledValue);
         let outcome = run(&format!("finish(await Promise.race([{operands}]));"), &host)
             .expect("the plain value decides");
         assert_eq!(finished(outcome), serde_json::json!(7.0), "{operands}");
@@ -226,7 +226,7 @@ fn racing_nothing_ends_the_cell_uncaught() {
 fn an_exhausted_any_rejects_with_input_ordered_errors_for_every_position() {
     let host = ScriptedHost::new(|leaves| {
         assert_eq!(leaves, 2, "a handle written twice is one leaf");
-        ResourceOperationBatchResult::ExhaustedRejections(vec![
+        ResourceOperationBatchOutcome::ExhaustedRejections(vec![
             ExecutionHostError::new("rejected p"),
             ExecutionHostError::new("rejected q"),
         ])
@@ -304,9 +304,9 @@ fn any_of_nothing_rejects_with_an_empty_aggregate_error() {
 /// that awaits it, and its fulfilment value is `undefined`.
 #[test]
 fn a_timer_leaf_rides_the_aggregate_and_fulfils_with_undefined() {
-    let host = ScriptedHost::new(|_| ResourceOperationBatchResult::Selected {
+    let host = ScriptedHost::new(|_| ResourceOperationBatchOutcome::Selected {
         leaf: 1,
-        result: ResourceOperationResult::Value(Value::Undefined),
+        result: ResourceOperationOutcome::Value(Value::Undefined),
     });
     let outcome = run(
         "const winner = await Promise.race([web.fetch({}), sleep(5)]); finish(winner === undefined);",
@@ -339,7 +339,7 @@ fn a_timer_nothing_awaits_fails_at_cell_end_like_a_pending_tool() {
 /// retired). `allSettled` asks for every result.
 #[test]
 fn promise_all_and_all_settled_ask_for_their_own_consumer_modes() {
-    let host = ScriptedHost::new(|_| ResourceOperationBatchResult::Selected {
+    let host = ScriptedHost::new(|_| ResourceOperationBatchOutcome::Selected {
         leaf: 1,
         result: rejection("first consumed"),
     });
@@ -356,7 +356,7 @@ fn promise_all_and_all_settled_ask_for_their_own_consumer_modes() {
     assert_eq!(host.asked()[0].consumer, AggregateConsumer::All);
 
     let host = ScriptedHost::new(|leaves| {
-        ResourceOperationBatchResult::AllResults(
+        ResourceOperationBatchOutcome::AllResults(
             (0..leaves).map(|_| value(serde_json::json!(1))).collect(),
         )
     });

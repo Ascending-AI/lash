@@ -7,13 +7,13 @@
 //! arrays therefore render as JSON — the same shape Lashlang's `print` shows —
 //! while every other value keeps JavaScript's coercion.
 
-use lashlang::{AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, State, Value};
+use lashlang::{AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, State, Value};
 
 #[derive(Default)]
 struct PrintHost(std::sync::Mutex<Vec<String>>);
 
 impl ExecutionHost for PrintHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::Print(value) => {
                 let Value::String(text) = value else {
@@ -22,9 +22,9 @@ impl ExecutionHost for PrintHost {
                     )));
                 };
                 self.0.lock().expect("print lock").push(text.to_string());
-                Ok(AbilityResult::Unit)
+                Ok(AbilityOutcome::Unit)
             }
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported test ability")),
         }
     }
@@ -43,11 +43,11 @@ fn printed(source: &str) -> Vec<String> {
 struct RawPrintHost(std::sync::Mutex<Vec<Value>>);
 
 impl ExecutionHost for RawPrintHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::Print(value) => {
                 self.0.lock().expect("print lock").push(value);
-                Ok(AbilityResult::Unit)
+                Ok(AbilityOutcome::Unit)
             }
             _ => Err(ExecutionHostError::new("unsupported test ability")),
         }

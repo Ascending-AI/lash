@@ -989,7 +989,7 @@ existing all-results wait and its first-settled rejection selection; ADR 0086's
 comprehension rules are untouched. Changing that surface requires its own ruling.
 
 *Status.* **Implemented** (FIG-3397). `AbilityOp::ResourceOperationBatch`
-carries the consumer mode and answers with `ResourceOperationBatchResult`'s
+carries the consumer mode and answers with `ResourceOperationBatchOutcome`'s
 four arms — `AllResults`, `Selected`, `SettledValue`, `ExhaustedRejections`;
 infrastructure failure and cancellation are the ability's `Err`, which the VM
 raises as the uncatchable `AggregateHostControl` terminal — no guest `catch`

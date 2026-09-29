@@ -35,7 +35,7 @@ pub use super::timers::{duration_ms, wall_delay_ms};
 
 /// How an operator command (cancel, kill) applied.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ControlResult {
+pub enum ControlOutcome {
     /// The cancel signal was appended for the handler to act on (HTTP 202).
     Appended,
     /// The invocation was ended by the command itself (HTTP 200).
@@ -1288,23 +1288,23 @@ impl State {
     /// never started completes as `409 canceled` at once; a started one gets
     /// the cancel signal and unwinds through its own handler, whose SDK
     /// cancels the calls it is waiting on. A paused one resumes to do so.
-    pub fn cancel(&mut self, sh: &Arc<Shared>, key: InvKey) -> ControlResult {
+    pub fn cancel(&mut self, sh: &Arc<Shared>, key: InvKey) -> ControlOutcome {
         match &self.invocations[key.0].status {
-            Status::Completed(_) => ControlResult::AlreadyCompleted,
+            Status::Completed(_) => ControlOutcome::AlreadyCompleted,
             Status::Scheduled | Status::Inboxed => {
                 self.remove_from_inbox(key);
                 self.remove_timers_of(key);
                 self.complete(sh, key, Outcome::failure(409, "canceled"));
-                ControlResult::Done
+                ControlOutcome::Done
             }
             Status::Paused => {
                 self.store_signal(sh, key, CANCEL_SIGNAL_ID);
                 self.resume(sh, key);
-                ControlResult::Appended
+                ControlOutcome::Appended
             }
             _ => {
                 self.store_signal(sh, key, CANCEL_SIGNAL_ID);
-                ControlResult::Appended
+                ControlOutcome::Appended
             }
         }
     }
@@ -1332,9 +1332,9 @@ impl State {
         sh: &Arc<Shared>,
         key: InvKey,
         tasks: &mut Vec<tokio::task::JoinHandle<()>>,
-    ) -> ControlResult {
+    ) -> ControlOutcome {
         if self.invocations[key.0].status.is_completed() {
-            return ControlResult::AlreadyCompleted;
+            return ControlOutcome::AlreadyCompleted;
         }
         if let Status::Running(attempt) = &mut self.invocations[key.0].status
             && let Some(task) = attempt.task.take()
@@ -1349,7 +1349,7 @@ impl State {
         for child in children {
             self.kill(sh, child, tasks);
         }
-        ControlResult::Done
+        ControlOutcome::Done
     }
 
     /// Purge a completed `key` as the admin API does: its journal and id are

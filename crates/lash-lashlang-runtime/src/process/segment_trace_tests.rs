@@ -458,10 +458,10 @@ impl lashlang::ExecutionHost for SegmentFixtureHost {
     async fn perform(
         &self,
         op: lashlang::AbilityOp,
-    ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+    ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
         match op {
             lashlang::AbilityOp::Sleep(_) => {
-                Ok(lashlang::AbilityResult::Value(lashlang::Value::Null))
+                Ok(lashlang::AbilityOutcome::Value(lashlang::Value::Null))
             }
             _ => Err(lashlang::ExecutionHostError::new(
                 "the segment fixture executes only its loop sleep",

@@ -4,7 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use lashlang::{
-    AbilityOp, AbilityResult, CatchClause, ExecutionHost, ExecutionHostError, ExecutionOutcome,
+    AbilityOp, AbilityOutcome, CatchClause, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     Expr, LashlangAbilities, LashlangHostEnvironment, Program, Record, State, TryExpr, Value,
     execute,
 };
@@ -293,7 +293,7 @@ fn run_on_stack_budget(name: &str, test: impl FnOnce() + Send + 'static) {
 struct StackBudgetHost;
 
 impl ExecutionHost for StackBudgetHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
                 // The start's own arguments ride in `args`, beside the
@@ -331,7 +331,7 @@ impl ExecutionHost for StackBudgetHost {
                     ),
                 );
                 handle.insert("value".to_string(), Value::String(value));
-                Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
+                Ok(AbilityOutcome::Value(Value::Record(Arc::new(handle))))
             }
             AbilityOp::Await(Value::Record(handle)) => {
                 let Some(Value::String(value)) = handle.get("value").cloned() else {
@@ -343,11 +343,11 @@ impl ExecutionHost for StackBudgetHost {
                     "lookup".to_string(),
                     Value::String(format!("lookup:{value}").into()),
                 );
-                Ok(AbilityResult::Value(Value::Record(Arc::new(record))))
+                Ok(AbilityOutcome::Value(Value::Record(Arc::new(record))))
             }
             AbilityOp::Await(_) => Err(ExecutionHostError::new("expected handle record")),
-            AbilityOp::Sleep(_) => Ok(AbilityResult::Value(Value::Null)),
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Sleep(_) => Ok(AbilityOutcome::Value(Value::Null)),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "unsupported stack-budget host ability",
             )),

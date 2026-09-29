@@ -3,7 +3,7 @@ use serde::Serialize;
 use super::time::round3;
 
 #[derive(Debug, Clone, Serialize)]
-pub struct BasicMetricSummary {
+pub struct BasicMetricStats {
     pub min: f64,
     pub median: f64,
     pub max: f64,
@@ -14,7 +14,7 @@ pub struct BasicMetricSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct PercentileMetricSummary {
+pub struct PercentileMetricStats {
     pub p50: f64,
     pub p95: f64,
     pub p99: f64,
@@ -22,7 +22,7 @@ pub struct PercentileMetricSummary {
     pub mean: f64,
 }
 
-pub fn basic_summary(mut values: Vec<f64>) -> BasicMetricSummary {
+pub fn basic_summary(mut values: Vec<f64>) -> BasicMetricStats {
     values.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
     let min = *values.first().unwrap_or(&0.0);
     let max = *values.last().unwrap_or(&0.0);
@@ -41,7 +41,7 @@ pub fn basic_summary(mut values: Vec<f64>) -> BasicMetricSummary {
     let p50 = percentile_sorted(&values, 0.50);
     let p95 = percentile_sorted(&values, 0.95);
     let p99 = percentile_sorted(&values, 0.99);
-    BasicMetricSummary {
+    BasicMetricStats {
         min: round3(min),
         median: round3(median),
         max: round3(max),
@@ -52,7 +52,7 @@ pub fn basic_summary(mut values: Vec<f64>) -> BasicMetricSummary {
     }
 }
 
-pub fn optional_basic_summary(values: Vec<f64>) -> Option<BasicMetricSummary> {
+pub fn optional_basic_summary(values: Vec<f64>) -> Option<BasicMetricStats> {
     if values.is_empty() {
         None
     } else {
@@ -60,9 +60,9 @@ pub fn optional_basic_summary(values: Vec<f64>) -> Option<BasicMetricSummary> {
     }
 }
 
-pub fn percentile_summary(mut values: Vec<f64>) -> PercentileMetricSummary {
+pub fn percentile_summary(mut values: Vec<f64>) -> PercentileMetricStats {
     values.sort_by(f64::total_cmp);
-    PercentileMetricSummary {
+    PercentileMetricStats {
         p50: round3(percentile_sorted(&values, 0.50)),
         p95: round3(percentile_sorted(&values, 0.95)),
         p99: round3(percentile_sorted(&values, 0.99)),

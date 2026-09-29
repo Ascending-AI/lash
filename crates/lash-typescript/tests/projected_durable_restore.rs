@@ -18,7 +18,7 @@
 use std::collections::BTreeSet;
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
     ProjectedBindings, ProjectedValue, Record, RuntimeError, Snapshot, State, Value, Vm,
     VmContinuation, VmRunOutcome,
 };
@@ -42,10 +42,10 @@ impl RestoreHost {
 }
 
 impl ExecutionHost for RestoreHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
-            AbilityOp::ResourceOperation(_) => Ok(AbilityResult::Value(Value::Number(7.0))),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
+            AbilityOp::ResourceOperation(_) => Ok(AbilityOutcome::Value(Value::Number(7.0))),
             other => Err(ExecutionHostError::new(format!(
                 "unexpected ability {other:?}"
             ))),

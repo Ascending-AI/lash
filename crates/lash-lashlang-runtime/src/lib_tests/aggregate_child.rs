@@ -11,7 +11,7 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
         async fn perform(
             &self,
             op: lashlang::AbilityOp,
-        ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+        ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
             match op {
                 lashlang::AbilityOp::ResourceOperation(operation)
                     if operation.operation == "start" =>
@@ -32,15 +32,15 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
                             .into(),
                         ),
                     );
-                    Ok(lashlang::AbilityResult::Value(lashlang::Value::Record(
+                    Ok(lashlang::AbilityOutcome::Value(lashlang::Value::Record(
                         Arc::new(record),
                     )))
                 }
                 lashlang::AbilityOp::Await(_) => {
-                    Ok(lashlang::AbilityResult::Value(lashlang::Value::Null))
+                    Ok(lashlang::AbilityOutcome::Value(lashlang::Value::Null))
                 }
                 lashlang::AbilityOp::Finish(value) | lashlang::AbilityOp::Fail(value) => {
-                    Ok(lashlang::AbilityResult::Value(value))
+                    Ok(lashlang::AbilityOutcome::Value(value))
                 }
                 _ => Err(lashlang::ExecutionHostError::new(
                     "unexpected child-host operation",
@@ -134,7 +134,7 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
         async fn perform(
             &self,
             op: lashlang::AbilityOp,
-        ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+        ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
             match op {
                 lashlang::AbilityOp::ResourceOperation(operation)
                     if operation.operation == "start" =>
@@ -154,7 +154,7 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
                             .into(),
                         ),
                     );
-                    Ok(lashlang::AbilityResult::Value(lashlang::Value::Record(
+                    Ok(lashlang::AbilityOutcome::Value(lashlang::Value::Record(
                         Arc::new(record),
                     )))
                 }
@@ -163,7 +163,7 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
                     Err(lashlang::ExecutionHostError::new("cancelled while parked"))
                 }
                 lashlang::AbilityOp::Finish(value) | lashlang::AbilityOp::Fail(value) => {
-                    Ok(lashlang::AbilityResult::Value(value))
+                    Ok(lashlang::AbilityOutcome::Value(value))
                 }
                 _ => Err(lashlang::ExecutionHostError::new(
                     "unexpected cancelling-host operation",
@@ -291,11 +291,11 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
         async fn perform(
             &self,
             op: lashlang::AbilityOp,
-        ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+        ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
             match op {
-                lashlang::AbilityOp::Print(_) => Ok(lashlang::AbilityResult::Unit),
+                lashlang::AbilityOp::Print(_) => Ok(lashlang::AbilityOutcome::Unit),
                 lashlang::AbilityOp::Finish(value) | lashlang::AbilityOp::Fail(value) => {
-                    Ok(lashlang::AbilityResult::Value(value))
+                    Ok(lashlang::AbilityOutcome::Value(value))
                 }
                 _ => Err(lashlang::ExecutionHostError::new(
                     "unexpected print-host operation",

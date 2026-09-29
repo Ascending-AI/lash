@@ -132,7 +132,7 @@ pub struct TranscriptCall {
 
 /// One committed tool result.
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct TranscriptResult {
+pub struct TranscriptToolOutput {
     pub call_id: String,
     pub tool: String,
     /// [`super::result_digest`] of the text the model reads.
@@ -144,7 +144,7 @@ pub struct TranscriptResult {
 pub struct TranscriptSession {
     pub session: String,
     pub calls: Vec<TranscriptCall>,
-    pub results: Vec<TranscriptResult>,
+    pub results: Vec<TranscriptToolOutput>,
 }
 
 /// One committed session graph node, as the frame-lineage checker reads it.
@@ -493,7 +493,7 @@ impl StoreSnapshot {
                 }
             }
             for (index, result) in reopened.tool_results.iter().enumerate() {
-                transcript.results.push(TranscriptResult {
+                transcript.results.push(TranscriptToolOutput {
                     call_id: reopened
                         .result_call_ids
                         .get(index)

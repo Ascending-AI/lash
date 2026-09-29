@@ -17,7 +17,7 @@ fn math_random_draws_replay_from_the_journal_in_order() {
     }
 
     impl ExecutionHost for JournalHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             match op {
                 AbilityOp::ResourceOperation(operation) => {
                     assert_eq!(
@@ -30,9 +30,9 @@ fn math_random_draws_replay_from_the_journal_in_order() {
                         .get(*cursor)
                         .expect("the journal has a recorded draw for every call");
                     *cursor += 1;
-                    Ok(AbilityResult::Value(Value::Number(value)))
+                    Ok(AbilityOutcome::Value(Value::Number(value)))
                 }
-                AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+                AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
                 _ => Err(ExecutionHostError::new("unexpected ability")),
             }
         }

@@ -37,7 +37,7 @@ impl StableAliases {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ProviderTurnSummary {
+pub struct ProviderTurnView {
     pub output: String,
     pub exchange_count: Option<u64>,
     pub graph_node_count: Option<u64>,
@@ -45,11 +45,11 @@ pub struct ProviderTurnSummary {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SessionAbstractSummary {
+pub struct AbstractSessionView {
     pub alias: String,
     pub opened: bool,
     pub ingress_count: usize,
-    pub provider_turns: Vec<ProviderTurnSummary>,
+    pub provider_turns: Vec<ProviderTurnView>,
     pub tool_outputs: Vec<String>,
     pub exec_code_outputs: Vec<String>,
     pub observer_turn_indices: Vec<usize>,
@@ -79,7 +79,7 @@ fn is_zero_u64(value: &u64) -> bool {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct DurableEffectAbstractSummary {
+pub struct AbstractDurableEffectView {
     pub durable_key: String,
     pub execution_count: usize,
     pub replay_count: usize,
@@ -187,20 +187,20 @@ impl WorkloadExpectations {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct AbstractWorldSummary {
+pub struct AbstractWorldView {
     pub session_count: usize,
     pub total_events: usize,
-    pub sessions: Vec<SessionAbstractSummary>,
-    pub durable_effects: Vec<DurableEffectAbstractSummary>,
+    pub sessions: Vec<AbstractSessionView>,
+    pub durable_effects: Vec<AbstractDurableEffectView>,
     pub digest: String,
 }
 
-impl AbstractWorldSummary {
+impl AbstractWorldView {
     pub fn with_digest(
         session_count: usize,
         total_events: usize,
-        sessions: Vec<SessionAbstractSummary>,
-        durable_effects: Vec<DurableEffectAbstractSummary>,
+        sessions: Vec<AbstractSessionView>,
+        durable_effects: Vec<AbstractDurableEffectView>,
     ) -> Self {
         let digest = summary_digest(session_count, total_events, &sessions, &durable_effects);
         Self {
@@ -497,7 +497,7 @@ pub struct SimulationTrace {
     pub durable_writes: Vec<crate::store::CheckpointWriteEvent>,
     pub oracle: OracleVerdict,
     pub oracles: Vec<OracleVerdict>,
-    pub final_summary: AbstractWorldSummary,
+    pub final_summary: AbstractWorldView,
 }
 
 impl SimulationTrace {
@@ -516,7 +516,7 @@ impl SimulationTrace {
         durable_writes: Vec<crate::store::CheckpointWriteEvent>,
         oracle: OracleVerdict,
         oracles: Vec<OracleVerdict>,
-        final_summary: AbstractWorldSummary,
+        final_summary: AbstractWorldView,
     ) -> Self {
         Self {
             schema: TRACE_SCHEMA.to_string(),
@@ -585,7 +585,7 @@ pub struct ReplayReport {
     pub terminal_verdict: OracleVerdict,
     pub delivered_event_count: usize,
     pub delivered_boundary_sequence: Vec<String>,
-    pub final_summary: AbstractWorldSummary,
+    pub final_summary: AbstractWorldView,
     #[serde(default)]
     pub runtime_invariant_reverification: RuntimeInvariantReverification,
 }
@@ -595,7 +595,7 @@ impl ReplayReport {
         trace_path: impl Into<PathBuf>,
         terminal_verdict: OracleVerdict,
         delivered_boundary_sequence: Vec<String>,
-        final_summary: AbstractWorldSummary,
+        final_summary: AbstractWorldView,
         runtime_invariant_reverification: RuntimeInvariantReverification,
     ) -> Self {
         Self {
@@ -718,8 +718,8 @@ pub fn write_replay_report(path: &Path, report: &ReplayReport) -> Result<String,
 pub fn summary_digest(
     session_count: usize,
     total_events: usize,
-    sessions: &[SessionAbstractSummary],
-    durable_effects: &[DurableEffectAbstractSummary],
+    sessions: &[AbstractSessionView],
+    durable_effects: &[AbstractDurableEffectView],
 ) -> String {
     let value = serde_json::json!({
         "session_count": session_count,

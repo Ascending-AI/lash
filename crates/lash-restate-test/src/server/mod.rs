@@ -42,7 +42,7 @@ pub use processor::{RetryPolicy, Stats};
 
 use catalog::{Catalog, HandlerSpec};
 use model::{InvKey, Status};
-use processor::{ControlResult, Flow, State};
+use processor::{ControlOutcome, Flow, State};
 
 use crate::protocol::{Frame, MessageType, ProtocolVersion};
 
@@ -1013,7 +1013,7 @@ impl RestateTestServer {
     pub fn cancel(&self, invocation: &str) -> Option<bool> {
         let mut state = self.shared.lock();
         let key = state.lookup(invocation)?;
-        Some(state.cancel(&self.shared, key) != ControlResult::AlreadyCompleted)
+        Some(state.cancel(&self.shared, key) != ControlOutcome::AlreadyCompleted)
     }
 
     /// Kill `invocation` as the admin API does.
@@ -1021,7 +1021,7 @@ impl RestateTestServer {
         let mut state = self.shared.lock();
         let key = state.lookup(invocation)?;
         let mut tasks = Vec::new();
-        Some(state.kill(&self.shared, key, &mut tasks) != ControlResult::AlreadyCompleted)
+        Some(state.kill(&self.shared, key, &mut tasks) != ControlOutcome::AlreadyCompleted)
     }
 
     /// Kill `invocation` as the admin API does, and wait until every attempt
@@ -1037,7 +1037,7 @@ impl RestateTestServer {
             let key = state.lookup(invocation)?;
             let mut tasks = Vec::new();
             let killed =
-                state.kill(&self.shared, key, &mut tasks) != ControlResult::AlreadyCompleted;
+                state.kill(&self.shared, key, &mut tasks) != ControlOutcome::AlreadyCompleted;
             (killed, tasks)
         };
         for task in tasks {

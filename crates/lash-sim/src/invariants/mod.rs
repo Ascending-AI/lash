@@ -64,7 +64,7 @@ use serde::Serialize;
 
 pub use snapshot::{
     ArtifactRow, CleanupRow, GraphNodeRow, InputRow, ObligationRow, RootRow, StoreSnapshot,
-    TranscriptCall, TranscriptResult, TranscriptSession,
+    TranscriptCall, TranscriptSession, TranscriptToolOutput,
 };
 
 /// The oracle a generated run reports its global-invariant verdict under.

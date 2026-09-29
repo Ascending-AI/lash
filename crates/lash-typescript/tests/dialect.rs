@@ -5,17 +5,17 @@
 
 use lashlang::testing::ast_builders as b;
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
     Vm, VmRunOutcome,
 };
 
 struct Host;
 
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
-            AbilityOp::Print(_) => Ok(AbilityResult::Value(Value::Null)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
+            AbilityOp::Print(_) => Ok(AbilityOutcome::Value(Value::Null)),
             _ => Err(ExecutionHostError::new("unsupported test ability")),
         }
     }
@@ -38,7 +38,7 @@ fn finished(source: &str) -> Value {
 struct JournalHost(std::sync::Mutex<Vec<(String, Value)>>);
 
 impl ExecutionHost for JournalHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         let (kind, value) = match op {
             AbilityOp::Print(value) => ("print", value),
             AbilityOp::Finish(value) => ("finish", value),
@@ -48,7 +48,7 @@ impl ExecutionHost for JournalHost {
             .lock()
             .expect("journal lock")
             .push((kind.to_string(), value.clone()));
-        Ok(AbilityResult::Value(value))
+        Ok(AbilityOutcome::Value(value))
     }
 }
 
@@ -262,7 +262,7 @@ struct DurabilityHost {
 }
 
 impl ExecutionHost for DurabilityHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         Host.perform(op).await
     }
 

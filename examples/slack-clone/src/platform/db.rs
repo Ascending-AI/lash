@@ -532,14 +532,14 @@ pub fn thread_summary(
     connection: &Connection,
     channel_id: &str,
     parent: Ts,
-) -> Result<ThreadSummary> {
+) -> Result<ThreadStats> {
     let mut statement = connection.prepare(
         "SELECT COUNT(*), COUNT(DISTINCT COALESCE(author_user_id, bot_id)), MAX(ts)
          FROM messages WHERE channel_id = ?1 AND thread_ts = ?2",
     )?;
     let summary = statement.query_row(params![channel_id, parent.micros() as i64], |row| {
         let latest: Option<i64> = row.get(2)?;
-        Ok(ThreadSummary {
+        Ok(ThreadStats {
             reply_count: row.get(0)?,
             reply_users_count: row.get(1)?,
             latest_reply: latest.map(|ts| Ts::from_micros(ts as u64)),
@@ -550,7 +550,7 @@ pub fn thread_summary(
 
 /// Reply statistics for one thread parent.
 #[derive(Clone, Copy, Debug)]
-pub struct ThreadSummary {
+pub struct ThreadStats {
     pub reply_count: u32,
     pub reply_users_count: u32,
     pub latest_reply: Option<Ts>,

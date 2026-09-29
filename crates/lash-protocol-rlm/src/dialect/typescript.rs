@@ -1474,7 +1474,7 @@ mod tests {
             async fn perform(
                 &self,
                 op: lashlang::AbilityOp,
-            ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+            ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
                 match op {
                     lashlang::AbilityOp::ResourceOperation(call) => {
                         let alias = match &call.receiver {
@@ -1485,11 +1485,13 @@ mod tests {
                             .lock()
                             .expect("dispatched lock")
                             .push((alias, call.operation));
-                        Ok(lashlang::AbilityResult::Value(lashlang::Value::String(
+                        Ok(lashlang::AbilityOutcome::Value(lashlang::Value::String(
                             "tool-ok".into(),
                         )))
                     }
-                    lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityResult::Value(value)),
+                    lashlang::AbilityOp::Finish(value) => {
+                        Ok(lashlang::AbilityOutcome::Value(value))
+                    }
                     other => Err(lashlang::ExecutionHostError::new(format!(
                         "unexpected ability {other:?}"
                     ))),

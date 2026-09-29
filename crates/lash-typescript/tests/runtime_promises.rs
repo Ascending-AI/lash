@@ -1,6 +1,6 @@
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    ResourceOperation, ResourceOperationResult, State, Value,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
+    ResourceOperation, ResourceOperationOutcome, State, Value,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -14,21 +14,21 @@ fn echo_or_fail(call: ResourceOperation) -> Result<Value, ExecutionHostError> {
 
 struct Host;
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::ResourceOperation(call) => echo_or_fail(*call).map(AbilityResult::Value),
-            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+            AbilityOp::ResourceOperation(call) => echo_or_fail(*call).map(AbilityOutcome::Value),
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityOutcome::ResourceOperationBatch(
                 batch.answer_in_leaf_order(
                     batch
                         .leaves
                         .iter()
                         .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
                         .cloned()
-                        .map(|call| ResourceOperationResult::from_result(echo_or_fail(call)))
+                        .map(|call| ResourceOperationOutcome::from_result(echo_or_fail(call)))
                         .collect(),
                 ),
             )),
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected operation")),
         }
     }
@@ -206,7 +206,7 @@ struct CountingHost {
 }
 
 impl ExecutionHost for CountingHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(_) | AbilityOp::ResourceOperationBatch(_) => {
                 self.dispatched.fetch_add(1, Ordering::SeqCst);

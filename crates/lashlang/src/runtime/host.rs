@@ -34,9 +34,9 @@ pub enum AbilityOp {
 }
 
 #[derive(Clone, Debug)]
-pub enum AbilityResult {
+pub enum AbilityOutcome {
     Value(Value),
-    ResourceOperationBatch(ResourceOperationBatchResult),
+    ResourceOperationBatch(ResourceOperationBatchOutcome),
     Unit,
     /// The host handed a process's pending `wait_signal` to a successor
     /// segment instead of completing it: the wait is still open, and the VM
@@ -46,7 +46,7 @@ pub enum AbilityResult {
     HandedOver,
 }
 
-impl AbilityResult {
+impl AbilityOutcome {
     /// Takes the host's value, refusing one that carries a prototype-chain name
     /// as a data key.
     ///
@@ -126,50 +126,50 @@ impl ResourceOperationBatch {
     ///
     /// A plain operand is part of the immediate prefix, which answers ahead of
     /// every dispatched settlement (ADR 0099 §10 L5), so such a host answers a
-    /// `race` or an `any` that holds one with [`ResourceOperationBatchResult::SettledValue`].
+    /// `race` or an `any` that holds one with [`ResourceOperationBatchOutcome::SettledValue`].
     #[must_use]
     pub fn answer_in_leaf_order(
         &self,
-        results: Vec<ResourceOperationResult>,
-    ) -> ResourceOperationBatchResult {
+        results: Vec<ResourceOperationOutcome>,
+    ) -> ResourceOperationBatchOutcome {
         let first_rejection = || {
             results
                 .iter()
-                .position(|result| matches!(result, ResourceOperationResult::Error(_)))
+                .position(|result| matches!(result, ResourceOperationOutcome::Error(_)))
         };
         match self.consumer {
-            AggregateConsumer::AllSettled => ResourceOperationBatchResult::AllResults(results),
+            AggregateConsumer::AllSettled => ResourceOperationBatchOutcome::AllResults(results),
             AggregateConsumer::All => match first_rejection() {
-                Some(leaf) => ResourceOperationBatchResult::Selected {
+                Some(leaf) => ResourceOperationBatchOutcome::Selected {
                     leaf,
                     result: results[leaf].clone(),
                 },
-                None => ResourceOperationBatchResult::AllResults(results),
+                None => ResourceOperationBatchOutcome::AllResults(results),
             },
             AggregateConsumer::Race | AggregateConsumer::Any
                 if self.settled_value_after.is_some() =>
             {
-                ResourceOperationBatchResult::SettledValue
+                ResourceOperationBatchOutcome::SettledValue
             }
             AggregateConsumer::Race => match results.into_iter().next() {
-                Some(result) => ResourceOperationBatchResult::Selected { leaf: 0, result },
-                None => ResourceOperationBatchResult::AllResults(Vec::new()),
+                Some(result) => ResourceOperationBatchOutcome::Selected { leaf: 0, result },
+                None => ResourceOperationBatchOutcome::AllResults(Vec::new()),
             },
             AggregateConsumer::Any => {
                 match results
                     .iter()
-                    .position(|result| matches!(result, ResourceOperationResult::Value(_)))
+                    .position(|result| matches!(result, ResourceOperationOutcome::Value(_)))
                 {
-                    Some(leaf) => ResourceOperationBatchResult::Selected {
+                    Some(leaf) => ResourceOperationBatchOutcome::Selected {
                         leaf,
                         result: results[leaf].clone(),
                     },
-                    None => ResourceOperationBatchResult::ExhaustedRejections(
+                    None => ResourceOperationBatchOutcome::ExhaustedRejections(
                         results
                             .into_iter()
                             .filter_map(|result| match result {
-                                ResourceOperationResult::Error(error) => Some(error),
-                                ResourceOperationResult::Value(_) => None,
+                                ResourceOperationOutcome::Error(error) => Some(error),
+                                ResourceOperationOutcome::Value(_) => None,
                             })
                             .collect(),
                     ),
@@ -240,16 +240,16 @@ impl AggregateConsumer {
 /// §10 L2. Infrastructure failure and host cancellation are not in it: they
 /// travel as the ability's `Err` (L3) and never become a leaf rejection.
 #[derive(Clone, Debug)]
-pub enum ResourceOperationBatchResult {
+pub enum ResourceOperationBatchOutcome {
     /// One result per leaf, in leaf order: `allSettled`, a successful `all`,
     /// and every Lashlang-native aggregate.
-    AllResults(Vec<ResourceOperationResult>),
+    AllResults(Vec<ResourceOperationOutcome>),
     /// The one settlement that decided the aggregate: the first settlement
     /// for `race`, the first fulfilment for `any`, the first rejection for
     /// `all`. `leaf` indexes [`ResourceOperationBatch::leaves`].
     Selected {
         leaf: usize,
-        result: ResourceOperationResult,
+        result: ResourceOperationOutcome,
     },
     /// The plain value [`ResourceOperationBatch::settled_value_after`] names
     /// decided a `race` or `any`; every pending leaf was admitted first.
@@ -261,12 +261,12 @@ pub enum ResourceOperationBatchResult {
 }
 
 #[derive(Clone, Debug)]
-pub enum ResourceOperationResult {
+pub enum ResourceOperationOutcome {
     Value(Value),
     Error(ExecutionHostError),
 }
 
-impl ResourceOperationResult {
+impl ResourceOperationOutcome {
     pub fn from_result(result: Result<Value, ExecutionHostError>) -> Self {
         match result {
             Ok(value) => Self::Value(value),
@@ -462,7 +462,7 @@ pub trait ExecutionHost: Sync {
     fn perform(
         &self,
         op: AbilityOp,
-    ) -> impl Future<Output = Result<AbilityResult, ExecutionHostError>> + Send;
+    ) -> impl Future<Output = Result<AbilityOutcome, ExecutionHostError>> + Send;
 
     /// The run's cancel checkpoint: the VM awaits it each time its
     /// executed-instruction count crosses a multiple of
@@ -614,7 +614,7 @@ impl<'host, H: ExecutionHost> ExecutionEnvironment<'host, H> {
 }
 
 impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         self.host.perform(op).await
     }
 
@@ -752,7 +752,7 @@ mod tests {
     struct BareHost;
 
     impl ExecutionHost for BareHost {
-        async fn perform(&self, _op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        async fn perform(&self, _op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
             Err(ExecutionHostError::new("no abilities"))
         }
     }

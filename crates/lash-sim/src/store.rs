@@ -13,8 +13,8 @@ use crate::scheduler::{
     ACTIVE_TURN_INPUT_STATE, BoundaryEvent, BoundaryKind, NEXT_TURN_INPUT_STATE, QueuedIngressMode,
 };
 use crate::trace::{
-    AbstractWorldSummary, DurableEffectAbstractSummary, ProviderTurnSummary,
-    SessionAbstractSummary, value_digest,
+    AbstractDurableEffectView, AbstractSessionView, AbstractWorldView, ProviderTurnView,
+    value_digest,
 };
 
 mod boundary;
@@ -212,7 +212,7 @@ impl ModelStore {
                     .or_else(|| event.payload.get("text").and_then(Value::as_str))
                     .unwrap_or("")
                     .to_string();
-                session.provider_turns.push(ProviderTurnSummary {
+                session.provider_turns.push(ProviderTurnView {
                     output: text,
                     exchange_count: observed
                         .get("provider_exchange_count")
@@ -306,7 +306,7 @@ impl ModelStore {
         }
     }
 
-    pub fn summary(&self) -> AbstractWorldSummary {
+    pub fn summary(&self) -> AbstractWorldView {
         let sessions = self
             .sessions
             .values()
@@ -317,7 +317,7 @@ impl ModelStore {
             .values()
             .map(ModelDurableEffect::summary)
             .collect::<Vec<_>>();
-        AbstractWorldSummary::with_digest(
+        AbstractWorldView::with_digest(
             self.sessions.len(),
             self.total_events,
             sessions,
@@ -358,7 +358,7 @@ impl ModelStore {
     pub fn summarize_with_checkpoint_writes(
         mut self,
         writes: &[CheckpointWriteEvent],
-    ) -> Result<AbstractWorldSummary, String> {
+    ) -> Result<AbstractWorldView, String> {
         self.apply_checkpoint_writes(writes)?;
         Ok(self.summary())
     }
@@ -370,7 +370,7 @@ impl ModelStore {
         self,
         events: &[crate::scheduler::DeliveredBoundary],
         writes: &[CheckpointWriteEvent],
-    ) -> Result<AbstractWorldSummary, String> {
+    ) -> Result<AbstractWorldView, String> {
         let modeled_sessions = events
             .iter()
             .filter(|event| {
@@ -1015,7 +1015,7 @@ struct ModelSession {
     alias: String,
     opened: bool,
     ingress_count: usize,
-    provider_turns: Vec<ProviderTurnSummary>,
+    provider_turns: Vec<ProviderTurnView>,
     usage_ledger_keys: BTreeSet<String>,
     cumulative_usage: RuntimeUsageTotals,
     tool_outputs: Vec<String>,
@@ -1060,8 +1060,8 @@ impl ModelSession {
         }
     }
 
-    fn summary(&self) -> SessionAbstractSummary {
-        SessionAbstractSummary {
+    fn summary(&self) -> AbstractSessionView {
+        AbstractSessionView {
             alias: self.alias.clone(),
             opened: self.opened,
             ingress_count: self.ingress_count,
@@ -1112,8 +1112,8 @@ impl ModelDurableEffect {
         }
     }
 
-    fn summary(&self) -> DurableEffectAbstractSummary {
-        DurableEffectAbstractSummary {
+    fn summary(&self) -> AbstractDurableEffectView {
+        AbstractDurableEffectView {
             durable_key: self.durable_key.clone(),
             execution_count: self.execution_count,
             replay_count: self.replay_count,

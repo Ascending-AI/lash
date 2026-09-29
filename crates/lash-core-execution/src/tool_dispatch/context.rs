@@ -211,7 +211,7 @@ impl ToolDispatchContext<'_> {
 
 /// Version of the tool-child rebind checklist below (ADR 0099 section 3).
 ///
-/// Bump this when [`REBIND_FIELDS`] or the [`RebindField`]/[`RebindDisposition`]
+/// Bump this when [`REBIND_FIELDS`] or the [`RebindField`]/[`RebindSource`]
 /// vocabulary changes: the list is the contract every tool-child driver rebinds
 /// a lent opener context against, so an edit that slips by unnoticed is a field
 /// a child can inherit under the wrong opener's authority.
@@ -224,7 +224,7 @@ pub const TOOL_CHILD_REBIND_VERSION: u16 = 6;
 /// meta-test in `tool_dispatch/tests/rebind_checklist.rs` refuses a field that
 /// arrives unclassified.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RebindDisposition {
+pub enum RebindSource {
     /// Rebound to the child — taken from its recorded request or rebuilt under
     /// the child's own admitted authority. The lent value is unreachable in the
     /// child's context.
@@ -311,7 +311,7 @@ impl RebindField {
 
     /// The disposition a child's context assigns this field.
     #[must_use]
-    pub const fn disposition(self) -> RebindDisposition {
+    pub const fn disposition(self) -> RebindSource {
         match self {
             // The recorded request is authoritative for what the child was
             // admitted under: its catalog manifest, its lineage, its session
@@ -325,14 +325,14 @@ impl RebindField {
             | Self::ParentInvocation
             | Self::ExecutionEnvSpec
             | Self::SessionId
-            | Self::AgentFrameId => RebindDisposition::Rebound,
+            | Self::AgentFrameId => RebindSource::Rebound,
             // Facts that ride the child's own outcome: a buffer the opener
             // filled would smuggle the opener's pending facts into the child's
             // settlement. The observation call key is likewise call-scoped —
             // inherited, it would key the child's lanes under a call that is
             // not theirs.
             Self::CheckpointMessages | Self::TriggerOutcomes | Self::ObservationCallKey => {
-                RebindDisposition::Fresh
+                RebindSource::Fresh
             }
             // Everything else is deployment wiring and live channels, which
             // section 3 puts on the lent side of the split.
@@ -350,14 +350,14 @@ impl RebindField {
             | Self::AttachmentStore
             | Self::AttachmentSourcePolicy
             | Self::TurnContext
-            | Self::Clock => RebindDisposition::Lent,
+            | Self::Clock => RebindSource::Lent,
             // The lineage of the process the opener's body runs inside is
             // lent with the opener: request validation makes the opener and
             // the enclosing process one fact, so a live opener's lineage is
             // the child's. A context the deployment built carries none, and a
             // start the child makes reads the enclosing process's recorded
             // lineage back from its row (FIG-3607 R2).
-            Self::ProcessLineage | Self::ProcessOriginator => RebindDisposition::Lent,
+            Self::ProcessLineage | Self::ProcessOriginator => RebindSource::Lent,
         }
     }
 }

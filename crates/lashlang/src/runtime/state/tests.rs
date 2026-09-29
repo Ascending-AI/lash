@@ -1485,7 +1485,7 @@ impl crate::runtime::ExecutionHost for CrossProgramHost {
     async fn perform(
         &self,
         _op: crate::runtime::AbilityOp,
-    ) -> Result<crate::runtime::AbilityResult, crate::runtime::ExecutionHostError> {
+    ) -> Result<crate::runtime::AbilityOutcome, crate::runtime::ExecutionHostError> {
         Err(crate::runtime::ExecutionHostError::new("no abilities"))
     }
 }

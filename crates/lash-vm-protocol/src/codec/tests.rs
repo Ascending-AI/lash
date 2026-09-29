@@ -1,6 +1,6 @@
 use super::*;
 use crate::message::{
-    EffectKind, EffectOutcome, EffectRequest, EffectRequestId, EffectResult, EncodedPayload,
+    EffectKind, EffectOutcome, EffectRequest, EffectRequestId, EffectResponse, EncodedPayload,
     ExecutionLease, FrameEpoch, MessageFence, OwnerEpoch, ParentMessage, ProgramSource, Start,
     StartState, VmLimits, WorkerMessage,
 };
@@ -72,7 +72,7 @@ fn every_message_round_trips() {
         Ok(start)
     );
     let parents = [
-        ParentMessage::EffectResult(EffectResult {
+        ParentMessage::EffectResponse(EffectResponse {
             id: EffectRequestId(4),
             outcome: EffectOutcome::Checkpoint { cancelled: true },
         }),

@@ -15,13 +15,13 @@ pub struct BackendContentionReport {
     pub schema: &'static str,
     pub status: &'static str,
     pub scenarios: Vec<BackendContentionScenario>,
-    pub summary: BackendContentionSummary,
+    pub summary: BackendContentionTotals,
     #[serde(skip)]
     pub report_path: PathBuf,
 }
 
 #[derive(Debug, Serialize)]
-pub struct BackendContentionSummary {
+pub struct BackendContentionTotals {
     pub passed: usize,
     pub skipped: usize,
     pub failed: usize,
@@ -133,7 +133,7 @@ pub async fn run_backend_contention_report_against(
         schema: "lash.sim.backend-contention.v1",
         status,
         scenarios,
-        summary: BackendContentionSummary {
+        summary: BackendContentionTotals {
             passed,
             skipped,
             failed,

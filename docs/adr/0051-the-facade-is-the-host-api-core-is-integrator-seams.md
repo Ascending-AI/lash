@@ -162,7 +162,7 @@ These plugin-namespace items are **integrator seams and stay core-only**:
 - **Plugin-session internals**: `PluginOperationRegistrations`,
   `SessionPluginSource`, `SessionRelation`, `AgentFrameAssignment`,
   `AgentFrameId`, `AgentFrameReason`, `AgentFrameRecord`,
-  `OpenAgentFrameRequest`, `OpenAgentFrameResult`,
+  `OpenAgentFrameRequest`, `OpenAgentFrameOutcome`,
   `SessionObservedProcessOutcome`, `SessionObservedProcessReceipt`.
 - **The persisted snapshot aggregate**: `PluginSessionSnapshot`,
   `PluginSnapshotEntry`, `PluginSnapshotArtifact`. A plugin writes blobs and

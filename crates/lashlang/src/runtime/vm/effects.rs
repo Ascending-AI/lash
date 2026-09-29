@@ -5,8 +5,8 @@ use crate::span::Span;
 
 use super::super::access::prototype_chain_data_key_error;
 use super::super::host::{
-    AbilityOp, AbilityResult, AggregateConsumer, ResourceOperation, ResourceOperationBatch,
-    ResourceOperationBatchLeaf, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
+    AbilityOp, AbilityOutcome, AggregateConsumer, ResourceOperation, ResourceOperationBatch,
+    ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome, Sleep,
     SleepKind,
 };
 use super::super::ops::value_type_name;
@@ -93,18 +93,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     })))
                     .await
                 {
-                    Ok(AbilityResult::Value(value)) => host_success(value, &operation_name),
-                    Ok(AbilityResult::ResourceOperationBatch(_)) => execution_host_error_value(
+                    Ok(AbilityOutcome::Value(value)) => host_success(value, &operation_name),
+                    Ok(AbilityOutcome::ResourceOperationBatch(_)) => execution_host_error_value(
                         ExecutionHostError::new(
                             "module operation returned a resource operation batch result",
                         ),
                         &operation_name,
                     ),
-                    Ok(AbilityResult::Unit) => execution_host_error_value(
+                    Ok(AbilityOutcome::Unit) => execution_host_error_value(
                         ExecutionHostError::new("module operation returned no value"),
                         &operation_name,
                     ),
-                    Ok(AbilityResult::HandedOver) => execution_host_error_value(
+                    Ok(AbilityOutcome::HandedOver) => execution_host_error_value(
                         ExecutionHostError::new("module operation returned a hand-over"),
                         &operation_name,
                     ),
@@ -193,7 +193,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         call_site: active.map(lashlang_execution_call_site),
                     })
                     .await;
-                if matches!(result, Ok(AbilityResult::HandedOver)) {
+                if matches!(result, Ok(AbilityOutcome::HandedOver)) {
                     // The wait moved to a successor segment without
                     // completing. The instruction takes no operand, so
                     // standing on it again is the whole rewind: a
@@ -395,7 +395,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .perform_resource_operation_batch(operations, &active_nodes, batch.consumer, None)
             .await?;
         match reply {
-            ResourceOperationBatchResult::AllResults(results) => self
+            ResourceOperationBatchOutcome::AllResults(results) => self
                 .settle_resource_operation_leaves(
                     batch
                         .leaves
@@ -404,9 +404,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     results,
                     &active_nodes,
                 ),
-            ResourceOperationBatchResult::Selected {
+            ResourceOperationBatchOutcome::Selected {
                 leaf,
-                result: ResourceOperationResult::Error(source),
+                result: ResourceOperationOutcome::Error(source),
             } => {
                 let error = RuntimeError::UnwrappedModuleOperationFailed { source };
                 if let Some(Some(active)) = active_nodes.get(leaf) {
@@ -498,14 +498,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
             )
             .await?;
         match reply {
-            ResourceOperationBatchResult::Selected { leaf, result } => match result {
-                ResourceOperationResult::Value(value) => {
+            ResourceOperationBatchOutcome::Selected { leaf, result } => match result {
+                ResourceOperationOutcome::Value(value) => {
                     if let Some(Some(active)) = active_nodes.get(leaf) {
                         self.complete_lashlang_execution(active);
                     }
                     Ok(value)
                 }
-                ResourceOperationResult::Error(source) => {
+                ResourceOperationOutcome::Error(source) => {
                     let error = RuntimeError::UnwrappedModuleOperationFailed { source };
                     if let Some(Some(active)) = active_nodes.get(leaf) {
                         self.fail_lashlang_execution(active, &error);
@@ -515,10 +515,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     Err(error)
                 }
             },
-            ResourceOperationBatchResult::SettledValue => first_value
+            ResourceOperationBatchOutcome::SettledValue => first_value
                 .and_then(|index| values.get(index).cloned())
                 .ok_or(RuntimeError::AggregateAwaitValueOutOfRange),
-            ResourceOperationBatchResult::ExhaustedRejections(errors) => {
+            ResourceOperationBatchOutcome::ExhaustedRejections(errors) => {
                 for (active, error) in active_nodes.iter().zip(&errors) {
                     if let Some(active) = active {
                         self.fail_lashlang_execution(
@@ -531,12 +531,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 Err(self.aggregate_error(elements, &errors, instruction_ip)?)
             }
-            ResourceOperationBatchResult::AllResults(_) => Err(self.fail_resource_operation_batch(
-                &active_nodes,
-                RuntimeError::ResourceBatchReply {
-                    problem: format!("a {aggregate} cannot be answered with every result"),
-                },
-            )),
+            ResourceOperationBatchOutcome::AllResults(_) => Err(self
+                .fail_resource_operation_batch(
+                    &active_nodes,
+                    RuntimeError::ResourceBatchReply {
+                        problem: format!("a {aggregate} cannot be answered with every result"),
+                    },
+                )),
         }
     }
 
@@ -588,7 +589,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         active_nodes: &[Option<ActiveLashlangExecutionNode>],
         consumer: AggregateConsumer,
         settled_value_after: Option<usize>,
-    ) -> Result<ResourceOperationBatchResult, RuntimeError> {
+    ) -> Result<ResourceOperationBatchOutcome, RuntimeError> {
         let expected = leaves.len();
         let result = self
             .host
@@ -599,8 +600,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }))
             .await;
         let reply = match result {
-            Ok(AbilityResult::ResourceOperationBatch(reply)) => reply,
-            Ok(AbilityResult::Value(_) | AbilityResult::Unit | AbilityResult::HandedOver) => {
+            Ok(AbilityOutcome::ResourceOperationBatch(reply)) => reply,
+            Ok(AbilityOutcome::Value(_) | AbilityOutcome::Unit | AbilityOutcome::HandedOver) => {
                 return Err(self.fail_resource_operation_batch(
                     active_nodes,
                     RuntimeError::InvalidResourceBatchResult,
@@ -618,19 +619,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
         // prototype-chain data key fails the whole batch closed rather than
         // handing one leaf a value nothing can read.
         let carried = match &reply {
-            ResourceOperationBatchResult::AllResults(results) => results.iter().collect(),
-            ResourceOperationBatchResult::Selected { result, .. } => vec![result],
-            ResourceOperationBatchResult::SettledValue
-            | ResourceOperationBatchResult::ExhaustedRejections(_) => Vec::new(),
+            ResourceOperationBatchOutcome::AllResults(results) => results.iter().collect(),
+            ResourceOperationBatchOutcome::Selected { result, .. } => vec![result],
+            ResourceOperationBatchOutcome::SettledValue
+            | ResourceOperationBatchOutcome::ExhaustedRejections(_) => Vec::new(),
         };
         if let Some(rejection) = carried.into_iter().find_map(|result| match result {
-            ResourceOperationResult::Value(value) => prototype_chain_data_key_error(value),
-            ResourceOperationResult::Error(_) => None,
+            ResourceOperationOutcome::Value(value) => prototype_chain_data_key_error(value),
+            ResourceOperationOutcome::Error(_) => None,
         }) {
             return Err(self.fail_resource_operation_batch(active_nodes, rejection));
         }
         let problem = match (&reply, consumer) {
-            (ResourceOperationBatchResult::AllResults(results), _) if results.len() != expected => {
+            (ResourceOperationBatchOutcome::AllResults(results), _)
+                if results.len() != expected =>
+            {
                 return Err(self.fail_resource_operation_batch(
                     active_nodes,
                     RuntimeError::ResourceBatchResultCount {
@@ -640,36 +643,35 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 ));
             }
             (
-                ResourceOperationBatchResult::AllResults(_),
+                ResourceOperationBatchOutcome::AllResults(_),
                 AggregateConsumer::All | AggregateConsumer::AllSettled,
             ) => None,
-            (ResourceOperationBatchResult::Selected { leaf, .. }, _) if *leaf >= expected => Some(
+            (ResourceOperationBatchOutcome::Selected { leaf, .. }, _) if *leaf >= expected => Some(
                 format!("selected leaf {leaf} is out of range for {expected} leaves"),
             ),
-            (ResourceOperationBatchResult::Selected { .. }, AggregateConsumer::Race) => None,
+            (ResourceOperationBatchOutcome::Selected { .. }, AggregateConsumer::Race) => None,
             (
-                ResourceOperationBatchResult::Selected {
-                    result: ResourceOperationResult::Value(_),
+                ResourceOperationBatchOutcome::Selected {
+                    result: ResourceOperationOutcome::Value(_),
                     ..
                 },
                 AggregateConsumer::Any,
             ) => None,
             (
-                ResourceOperationBatchResult::Selected {
-                    result: ResourceOperationResult::Error(_),
+                ResourceOperationBatchOutcome::Selected {
+                    result: ResourceOperationOutcome::Error(_),
                     ..
                 },
                 AggregateConsumer::All,
             ) => None,
             (
-                ResourceOperationBatchResult::SettledValue,
+                ResourceOperationBatchOutcome::SettledValue,
                 AggregateConsumer::Race | AggregateConsumer::Any,
             ) if settled_value_after.is_some() => None,
-            (ResourceOperationBatchResult::ExhaustedRejections(errors), AggregateConsumer::Any)
-                if errors.len() == expected =>
-            {
-                None
-            }
+            (
+                ResourceOperationBatchOutcome::ExhaustedRejections(errors),
+                AggregateConsumer::Any,
+            ) if errors.len() == expected => None,
             (other, consumer) => Some(format!(
                 "a {consumer:?} aggregate cannot be answered with {}",
                 reply_shape_name(other)
@@ -704,7 +706,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     fn settle_resource_operation_leaves(
         &mut self,
         leaves: impl Iterator<Item = (bool, Option<Span>)>,
-        results: Vec<ResourceOperationResult>,
+        results: Vec<ResourceOperationOutcome>,
         active_nodes: &[Option<ActiveLashlangExecutionNode>],
     ) -> Result<Vec<Value>, RuntimeError> {
         let mut first_rejection = None;
@@ -713,13 +715,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             leaves.zip(results).zip(active_nodes.iter())
         {
             match result {
-                ResourceOperationResult::Value(value) => {
+                ResourceOperationOutcome::Value(value) => {
                     leaf_values.push(if unwrap { value } else { success(value) });
                     if let Some(active) = active {
                         self.complete_lashlang_execution(active);
                     }
                 }
-                ResourceOperationResult::Error(error) => {
+                ResourceOperationOutcome::Error(error) => {
                     if unwrap {
                         if let Some(active) = active {
                             self.fail_lashlang_execution(
@@ -803,18 +805,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         .perform(AbilityOp::Await(Value::Record(handles)))
                         .await;
                     Ok(match result {
-                        Ok(AbilityResult::Value(value)) => host_success(value, "await"),
-                        Ok(AbilityResult::ResourceOperationBatch(_)) => execution_host_error_value(
-                            ExecutionHostError::new(
-                                "await returned a resource operation batch result",
-                            ),
-                            "await",
-                        ),
-                        Ok(AbilityResult::Unit) => execution_host_error_value(
+                        Ok(AbilityOutcome::Value(value)) => host_success(value, "await"),
+                        Ok(AbilityOutcome::ResourceOperationBatch(_)) => {
+                            execution_host_error_value(
+                                ExecutionHostError::new(
+                                    "await returned a resource operation batch result",
+                                ),
+                                "await",
+                            )
+                        }
+                        Ok(AbilityOutcome::Unit) => execution_host_error_value(
                             ExecutionHostError::new("await returned no value"),
                             "await",
                         ),
-                        Ok(AbilityResult::HandedOver) => execution_host_error_value(
+                        Ok(AbilityOutcome::HandedOver) => execution_host_error_value(
                             ExecutionHostError::new("await returned a hand-over"),
                             "await",
                         ),
@@ -941,12 +945,12 @@ fn collect_awaited_process_ids(value: &Value, process_ids: &mut Vec<lash_sansio:
 }
 
 /// The name of a reply shape, for the refusal that names what arrived.
-fn reply_shape_name(reply: &ResourceOperationBatchResult) -> &'static str {
+fn reply_shape_name(reply: &ResourceOperationBatchOutcome) -> &'static str {
     match reply {
-        ResourceOperationBatchResult::AllResults(_) => "every result",
-        ResourceOperationBatchResult::Selected { .. } => "a selected settlement",
-        ResourceOperationBatchResult::SettledValue => "a settled plain value",
-        ResourceOperationBatchResult::ExhaustedRejections(_) => "exhausted rejections",
+        ResourceOperationBatchOutcome::AllResults(_) => "every result",
+        ResourceOperationBatchOutcome::Selected { .. } => "a selected settlement",
+        ResourceOperationBatchOutcome::SettledValue => "a settled plain value",
+        ResourceOperationBatchOutcome::ExhaustedRejections(_) => "exhausted rejections",
     }
 }
 

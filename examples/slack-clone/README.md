@@ -669,7 +669,7 @@ untouched by a failed attempt, so only the deadline ends the loop.
 
 > If the mention's input has a committed application and neither the ledger nor
 > the committed transcript holds any assistant text, there is nothing to post and nothing to recover. The bot reports
-> `Disposition::ReplyLost` and marks the event `ignored` with
+> `DeliveryOutcome::ReplyLost` and marks the event `ignored` with
 > `reply_lost_after_commit` rather than silently dropping it. This is now the
 > *only* route to `ReplyLost`.
 

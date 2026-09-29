@@ -6,7 +6,7 @@
 #![allow(clippy::expect_used)]
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 use std::collections::BTreeSet;
 use std::env;
@@ -36,12 +36,12 @@ const AGENT_BLOCKS: [&str; 10] = [
 pub(crate) struct Host(Mutex<Option<String>>);
 
 impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             AbilityOp::Print(Value::String(value)) => {
                 *self.0.lock().expect("print lock") = Some(value.to_string());
-                Ok(AbilityResult::Unit)
+                Ok(AbilityOutcome::Unit)
             }
             other => Err(ExecutionHostError::new(format!(
                 "unexpected ability: {other:?}"

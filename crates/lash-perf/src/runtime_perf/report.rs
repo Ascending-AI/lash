@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::perf_support::dhat;
 use crate::perf_support::metrics::{
-    BasicMetricSummary as RuntimePerfMetricSummary, basic_summary, optional_basic_summary,
+    BasicMetricStats as RuntimePerfMetricSummary, basic_summary, optional_basic_summary,
 };
 use crate::perf_support::paths;
 use crate::perf_support::report as report_support;

@@ -1,6 +1,6 @@
 use lash_sansio::sync::MutexExt;
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Record,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, Record,
     RuntimeError, State, TypeExpr, Value,
 };
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ impl TestHost {
 }
 
 impl ExecutionHost for TestHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             // A started process is a real handle record, never its bare
             // result: awaiting a resolved value is a guest error (FIG-2764).
@@ -64,27 +64,27 @@ impl ExecutionHost for TestHost {
                     ),
                 );
                 handle.insert("value".to_string(), value);
-                Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
+                Ok(AbilityOutcome::Value(Value::Record(Arc::new(handle))))
             }
             AbilityOp::ResourceOperation(operation) => self
                 .perform_resource_operation(*operation)
                 .await
-                .map(AbilityResult::Value),
+                .map(AbilityOutcome::Value),
             AbilityOp::ResourceOperationBatch(batch) => {
                 let results = futures::future::join_all(batch.leaves.iter().map(|leaf| async {
                     match leaf {
                         lashlang::ResourceOperationBatchLeaf::Operation(operation) => {
-                            lashlang::ResourceOperationResult::from_result(
+                            lashlang::ResourceOperationOutcome::from_result(
                                 self.perform_resource_operation(operation.clone()).await,
                             )
                         }
                         lashlang::ResourceOperationBatchLeaf::Timer(_) => {
-                            lashlang::ResourceOperationResult::Value(Value::Undefined)
+                            lashlang::ResourceOperationOutcome::Value(Value::Undefined)
                         }
                     }
                 }))
                 .await;
-                Ok(AbilityResult::ResourceOperationBatch(
+                Ok(AbilityOutcome::ResourceOperationBatch(
                     batch.answer_in_leaf_order(results),
                 ))
             }
@@ -92,13 +92,13 @@ impl ExecutionHost for TestHost {
                 .as_record()
                 .filter(|record| record.get("__handle__").is_some())
                 .and_then(|record| record.get("value").cloned())
-                .map(AbilityResult::Value)
+                .map(AbilityOutcome::Value)
                 .ok_or_else(|| ExecutionHostError::new("expected handle record")),
             AbilityOp::Print(value) => {
                 self.observations.lock_recover().push(value);
-                Ok(AbilityResult::Unit)
+                Ok(AbilityOutcome::Unit)
             }
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
     }

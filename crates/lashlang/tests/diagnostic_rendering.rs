@@ -14,26 +14,26 @@
 //! tables, in `src/runtime/tests.rs`.
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
+    AbilityOp, AbilityOutcome, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, State, TypeExpr,
 };
 
 struct DiagnosticHost;
 
 impl ExecutionHost for DiagnosticHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) if operation.operation == "err" => {
                 Err(ExecutionHostError::new("boom"))
             }
-            AbilityOp::ResourceOperation(operation) => Ok(AbilityResult::Value(
+            AbilityOp::ResourceOperation(operation) => Ok(AbilityOutcome::Value(
                 operation
                     .args
                     .first()
                     .cloned()
                     .unwrap_or(lashlang::Value::Null),
             )),
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
     }

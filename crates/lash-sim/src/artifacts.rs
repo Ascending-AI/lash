@@ -22,7 +22,7 @@ pub struct FixedScriptManifest {
     pub provider_matrix: Vec<ProviderMatrixRow>,
     pub provider_transport_exclusions: Vec<ProviderTransportExclusion>,
     pub proofs: Vec<FixedScriptProof>,
-    pub summary: FixedScriptSummary,
+    pub summary: FixedScriptReport,
     #[serde(skip)]
     pub manifest_path: PathBuf,
     #[serde(skip)]
@@ -70,7 +70,7 @@ pub struct FixedScriptProof {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct FixedScriptSummary {
+pub struct FixedScriptReport {
     pub total_scripts: usize,
     pub total_proofs: usize,
     pub total_events: usize,

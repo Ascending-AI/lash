@@ -8,7 +8,7 @@ mod bench_support;
 
 use bench_support::{BenchHost, FunctionScenario, function_benchmark_program};
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
+    AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
     State, Value, Vm, VmRunOutcome, execute,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -55,10 +55,10 @@ unsafe impl GlobalAlloc for CountingAllocator {
 struct FrameHost;
 
 impl ExecutionHost for FrameHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::ProcessEvent(_) => Ok(AbilityResult::Unit),
-            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::ProcessEvent(_) => Ok(AbilityOutcome::Unit),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected frame benchmark effect")),
         }
     }

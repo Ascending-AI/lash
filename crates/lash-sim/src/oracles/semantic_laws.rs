@@ -702,14 +702,14 @@ pub(super) fn backend_retry_terminalization_semantics(events: &[DeliveredBoundar
 
 pub(super) fn duplicate_delivery_semantics(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> bool {
     durable_effect_replay_semantics(events, summary)
 }
 
 pub(super) fn durable_effect_replay_semantics(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> bool {
     summary
         .durable_effects
@@ -720,7 +720,7 @@ pub(super) fn durable_effect_replay_semantics(
 
 pub(super) fn protocol_terminal_state_semantics(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> bool {
     duplicate_free_stream_finalization(events, summary)
         && provider_rate_limit_terminalized_by_scripted_parsers(events)
@@ -754,7 +754,7 @@ pub(super) fn queued_inputs_have_cancel_targets(events: &[DeliveredBoundary]) ->
     })
 }
 
-pub(super) fn provider_turns_after_queue(summary: &AbstractWorldSummary) -> bool {
+pub(super) fn provider_turns_after_queue(summary: &AbstractWorldView) -> bool {
     summary
         .sessions
         .iter()
@@ -822,7 +822,7 @@ pub(super) fn exec_outcome_has_no_tool_call_replay(events: &[DeliveredBoundary])
 
 pub(super) fn duplicate_free_stream_finalization(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> bool {
     let provider_count = events
         .iter()
@@ -991,7 +991,7 @@ pub(super) fn trigger_delivery_runtime_observed(events: &[DeliveredBoundary]) ->
     })
 }
 
-pub(super) fn provider_turn_exchange_counts_are_indexed(summary: &AbstractWorldSummary) -> bool {
+pub(super) fn provider_turn_exchange_counts_are_indexed(summary: &AbstractWorldView) -> bool {
     summary.sessions.iter().all(|session| {
         !session.provider_turns.is_empty()
             && session
@@ -1004,7 +1004,7 @@ pub(super) fn provider_turn_exchange_counts_are_indexed(summary: &AbstractWorldS
 
 pub(super) fn observer_reconnect_has_matching_turn(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> bool {
     let reconnect_seen = events.iter().any(|event| {
         event.kind == BoundaryKind::Observer
@@ -1021,8 +1021,8 @@ pub(super) fn observer_reconnect_has_matching_turn(
 }
 
 pub fn replay_determinism(
-    expected: &AbstractWorldSummary,
-    actual: &AbstractWorldSummary,
+    expected: &AbstractWorldView,
+    actual: &AbstractWorldView,
 ) -> OracleVerdict {
     let semantic_match = expected.session_count == actual.session_count
         && expected.total_events == actual.total_events

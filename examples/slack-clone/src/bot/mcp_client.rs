@@ -12,7 +12,7 @@ use lash::direct::{
 };
 use lash::provider::{LlmResponse, ProviderHandle};
 use lash_plugin_mcp::{
-    CreateElicitationRequestParams, CreateElicitationResult, CreateMessageResult,
+    CreateElicitationOutcome, CreateElicitationRequestParams, CreateMessageOutcome,
     ElicitationAction, ElicitationCapability, FormElicitationCapability, McpElicitationHandler,
     McpElicitationRequest, McpProtocolError, McpRootsProvider, McpRootsRequest, McpSamplingHandler,
     McpSamplingRequest, McpUrlElicitationComplete, Root, SamplingMessage, SamplingMessageContent,
@@ -39,7 +39,7 @@ impl McpSamplingHandler for DemoSamplingHandler {
     async fn create_message(
         &self,
         request: McpSamplingRequest<'_>,
-    ) -> Result<CreateMessageResult, McpProtocolError> {
+    ) -> Result<CreateMessageOutcome, McpProtocolError> {
         let params = request.params;
         if request.context.server_name() != crate::mcp_server::SERVER_NAME {
             return Err(McpProtocolError::invalid_params(
@@ -110,10 +110,10 @@ impl McpSamplingHandler for DemoSamplingHandler {
             }
         };
         let stop_reason = match result.terminal_reason {
-            LlmTerminalReason::OutputLimit => CreateMessageResult::STOP_REASON_END_MAX_TOKEN,
-            _ => CreateMessageResult::STOP_REASON_END_TURN,
+            LlmTerminalReason::OutputLimit => CreateMessageOutcome::STOP_REASON_END_MAX_TOKEN,
+            _ => CreateMessageOutcome::STOP_REASON_END_TURN,
         };
-        Ok(CreateMessageResult::new(
+        Ok(CreateMessageOutcome::new(
             SamplingMessage::assistant_text(LlmResponse::full_text(&result)),
             self.model.id.clone(),
         )
@@ -164,7 +164,7 @@ impl McpElicitationHandler for DemoElicitationHandler {
     async fn create_elicitation(
         &self,
         request: McpElicitationRequest<'_>,
-    ) -> Result<CreateElicitationResult, McpProtocolError> {
+    ) -> Result<CreateElicitationOutcome, McpProtocolError> {
         if request.context.cancellation_token().is_cancelled() {
             return Err(McpProtocolError::internal_error(
                 "the MCP elicitation request was cancelled",
@@ -172,7 +172,7 @@ impl McpElicitationHandler for DemoElicitationHandler {
             ));
         }
         if !TRUSTED_SERVERS.contains(&request.context.server_name()) {
-            return Ok(CreateElicitationResult::new(ElicitationAction::Decline));
+            return Ok(CreateElicitationOutcome::new(ElicitationAction::Decline));
         }
         match request.params {
             CreateElicitationRequestParams::FormElicitationParams {
@@ -190,7 +190,7 @@ impl McpElicitationHandler for DemoElicitationHandler {
                             "slack-clone-bot has no answer on file for MCP form field `{name}` \
                              of prompt {message:?}; declining"
                         );
-                        return Ok(CreateElicitationResult::new(ElicitationAction::Decline));
+                        return Ok(CreateElicitationOutcome::new(ElicitationAction::Decline));
                     };
                     content.insert(name.clone(), answer);
                 }
@@ -203,7 +203,7 @@ impl McpElicitationHandler for DemoElicitationHandler {
                             "slack-clone-bot declined an MCP form its answer book cannot satisfy: {}",
                             error.message()
                         );
-                        Ok(CreateElicitationResult::new(ElicitationAction::Decline))
+                        Ok(CreateElicitationOutcome::new(ElicitationAction::Decline))
                     }
                 }
             }
@@ -216,7 +216,7 @@ impl McpElicitationHandler for DemoElicitationHandler {
                 let approved = message == "Approve the Slack-clone MCP demo in the browser"
                     && url == "https://example.invalid/slack-clone/approval"
                     && !elicitation_id.is_empty();
-                Ok(CreateElicitationResult::new(if approved {
+                Ok(CreateElicitationOutcome::new(if approved {
                     ElicitationAction::Accept
                 } else {
                     ElicitationAction::Decline

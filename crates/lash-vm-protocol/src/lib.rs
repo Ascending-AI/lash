@@ -35,7 +35,7 @@ pub use codec::{
 };
 pub use identity::BuildIdentity;
 pub use message::{
-    ContextDescription, EffectKind, EffectOutcome, EffectRequest, EffectRequestId, EffectResult,
+    ContextDescription, EffectKind, EffectOutcome, EffectRequest, EffectRequestId, EffectResponse,
     EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, MessageFence, MessageHeader,
     OwnerEpoch, ParentFrame, ParentMessage, ProgramSource, Start, StartState, TransportSequence,
     VmLimits, WorkerFrame, WorkerMessage,

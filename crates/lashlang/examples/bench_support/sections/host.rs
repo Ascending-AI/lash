@@ -1,5 +1,5 @@
 impl ExecutionHost for BenchHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
                 let empty = Record::new();
@@ -8,7 +8,7 @@ impl ExecutionHost for BenchHost {
                     .first()
                     .and_then(Value::as_record)
                     .unwrap_or(&empty);
-                bench_resource_call(&operation, args).map(AbilityResult::Value)
+                bench_resource_call(&operation, args).map(AbilityOutcome::Value)
             }
             AbilityOp::ResourceOperationBatch(batch) => {
                 let results = batch
@@ -22,16 +22,16 @@ impl ExecutionHost for BenchHost {
                                 .first()
                                 .and_then(Value::as_record)
                                 .unwrap_or(&empty);
-                            lashlang::ResourceOperationResult::from_result(bench_resource_call(
+                            lashlang::ResourceOperationOutcome::from_result(bench_resource_call(
                                 operation, args,
                             ))
                         }
                         lashlang::ResourceOperationBatchLeaf::Timer(_) => {
-                            lashlang::ResourceOperationResult::Value(Value::Undefined)
+                            lashlang::ResourceOperationOutcome::Value(Value::Undefined)
                         }
                     })
                     .collect();
-                Ok(AbilityResult::ResourceOperationBatch(
+                Ok(AbilityOutcome::ResourceOperationBatch(
                     batch.answer_in_leaf_order(results),
                 ))
             }
@@ -39,12 +39,12 @@ impl ExecutionHost for BenchHost {
                 let record = handle
                     .as_record()
                     .ok_or_else(|| ExecutionHostError::new("expected handle record"))?;
-                Ok(AbilityResult::Value(
+                Ok(AbilityOutcome::Value(
                     record.get("value").cloned().unwrap_or(Value::Null),
                 ))
             }
-            AbilityOp::Print(_) => Ok(AbilityResult::Unit),
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Print(_) => Ok(AbilityOutcome::Unit),
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
     }

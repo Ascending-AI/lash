@@ -1,6 +1,6 @@
 use super::*;
 
-pub fn durable_effect_exactly_once(summary: &AbstractWorldSummary) -> OracleVerdict {
+pub fn durable_effect_exactly_once(summary: &AbstractWorldView) -> OracleVerdict {
     if summary.durable_effects.is_empty() {
         return OracleVerdict::failed(
             DURABLE_EFFECT_EXACTLY_ONCE_ORACLE,
@@ -232,7 +232,7 @@ pub fn scheduler_owned_runtime_completions(
 
 pub fn operational_coverage(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> OracleVerdict {
     let mut missing = Vec::new();
     if !summary
@@ -350,7 +350,7 @@ pub fn operational_coverage(
 
 pub fn state_machine_semantic_invariants(
     events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
+    summary: &AbstractWorldView,
 ) -> OracleVerdict {
     let mut missing = Vec::new();
     if !queued_active_turn_input_hidden_semantics(events) {
