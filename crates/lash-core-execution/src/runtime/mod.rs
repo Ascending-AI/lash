@@ -185,10 +185,10 @@ pub use turn_queue::{
     process_wake_source_key,
 };
 pub use usage::{
-    LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, TokenLedgerEntry,
-    UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageDispositionError,
-    UsageReconciliationReport, UsageReportRow, UsageTotals, diff_token_ledger, diff_usage_reports,
-    outstanding_unreported_attempts,
+    LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, SessionUsageTotals,
+    TokenLedgerEntry, UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageDispositionError,
+    UsageReconciliationReport, UsageReportRow, UsageTotalRow, UsageTotals, diff_token_ledger,
+    diff_usage_reports, outstanding_unreported_attempts,
 };
 pub use work::{
     NoProcessWork, NoSessionWork, ProcessRegistryAwaiter, ProcessTerminalWait,
