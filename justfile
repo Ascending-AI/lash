@@ -212,6 +212,14 @@ effect-group-conformance-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg replay \
     --artifacts "$artifacts"
 
+  # The admission-fence law is its own named suite (FIG-4395): same recipe,
+  # same legs.
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite admission-fence --leg live \
+    --artifacts "$artifacts"
+
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite admission-fence --leg replay \
+    --artifacts "$artifacts"
+
 # The server double's deployment laws against a live restate-server (FIG-3795
 # part B): newest-deployment routing and invocation pinning, so the double
 # cannot drift; and the deployment-namespace laws (FIG-3898): namespaced cores

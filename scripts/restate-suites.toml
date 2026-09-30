@@ -41,6 +41,9 @@ filters = [
   "tests::batch_oracle::postgres_late_seat_cancellation_on_double",
 ]
 endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
+# The admission-fence law is registered by name in its own suite (FIG-4395),
+# not by the module sweep here.
+skips = ["tests::conformance_and_poison::a_cancel_decided_before_a_sink_is_refused_at_the_sink"]
 shards = 3
 # The barrier laws drive width-64 tool groups (ADR 0116 §7.1) through five
 # producers, thirty scenarios on the live leg; each scenario writes a progress
@@ -52,6 +55,18 @@ timeout_seconds = 360
 [suites.effect-group.replay]
 # Every replay failure gates the suite. Remaining held-back laws have their
 # own ticket and reason in scripts/restate-divergences/.
+
+# The admission-fence law's live leg (FIG-4395, ADR 0099 §4, FIG-3470): a
+# cancel-decided effect-group child mints no new semantic admission beneath
+# it. One law, one endpoint bind — the effect-group-conformance-e2e recipe
+# runs this suite beside effect-group.
+[suites.admission-fence]
+label = "//crates/lash-restate:lash-restate__unit_test"
+cwd = "crates/lash-restate"
+filters = ["tests::conformance_and_poison::a_cancel_decided_before_a_sink_is_refused_at_the_sink"]
+endpoints = ["EG_RESTATE_ENDPOINT"]
+shards = 1
+timeout_seconds = 180
 
 [suites.agent-workbench]
 label = "//examples/agent-workbench:agent-workbench__unit_test"
