@@ -75,6 +75,8 @@ pub mod protocol_build;
 pub mod provider {
     pub use lash_core_llm::provider::*;
 }
+#[cfg(test)]
+mod replay_read_gate;
 pub mod runtime;
 pub mod session;
 pub use lash_core_store::session_graph;

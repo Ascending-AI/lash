@@ -499,3 +499,10 @@ packages = ["lash-internal-protocol-rlm", "lash-internal-lashlang-runtime", "las
 kinds = ["unit-test", "test", "bin-unit-test"]
 data = ["//crates/lash-vm-worker:lash-vm-worker__bin"]
 env = { LASH_VM_WORKER = "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)" }
+
+# The replay-read gate (FIG-4324) reads the production sources of every crate,
+# example and runbook host, and the store trait declarations, at run time.
+[[rule]]
+packages = ["lash-internal-core-execution"]
+kinds = ["unit-test"]
+data = ["//:workspace_rust_sources"]

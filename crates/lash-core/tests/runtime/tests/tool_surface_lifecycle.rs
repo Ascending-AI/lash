@@ -869,11 +869,14 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         )
         .await
         .expect_err("cancelling an unknown process must be refused");
-    assert!(matches!(
-        unknown_process,
-        lash_core::PluginError::ProcessUnknown { ref process_id }
-            if process_id == unknown_process_id
-    ));
+    assert!(
+        matches!(
+            unknown_process,
+            lash_core::PluginError::RuntimeEffectController(ref error)
+                if error.message.contains(&format!("unknown process `{unknown_process_id}`"))
+        ) && unknown_process.is_terminal(),
+        "cancelling an unknown process is refused by its recorded admission: {unknown_process:?}"
+    );
     let listed = service
         .list_visible(
             &SessionId::from(session_id),
@@ -1173,7 +1176,8 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
         assert!(
             matches!(
                 error,
-                lash_core::PluginError::ProcessNoLongerRetained { .. }
+                lash_core::PluginError::RuntimeEffectController(ref error)
+                    if error.code == lash_core::RuntimeErrorCode::ProcessNoLongerRetained
             ),
             "cancel and signal must preserve the typed tombstone outcome, got {error}"
         );

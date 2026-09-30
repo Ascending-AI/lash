@@ -311,6 +311,7 @@ impl World {
             env_store: Some(self.ports.env()),
             engines: Some(&self.engines),
             engines_required: true,
+            session_catalog: None,
             executor: "definition conformance start",
             starter,
         }

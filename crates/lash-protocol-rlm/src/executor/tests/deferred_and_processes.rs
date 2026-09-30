@@ -1961,6 +1961,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
                     env_store: Some(&self.env_store),
                     engines: Some(&self.engines),
                     engines_required: true,
+                    session_catalog: None,
                     executor: "the signal fixture",
                     starter: &starter,
                 },

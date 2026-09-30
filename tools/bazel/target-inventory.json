@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 2,
   "cargo_package_count": 55,
-  "cargo_target_count": 213,
+  "cargo_target_count": 214,
   "feature_lane_units": [
     {
       "features": [],
@@ -23795,6 +23795,122 @@
         "rlm"
       ],
       "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_26f56f02",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "typescript"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_3102cd39",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_42c78c40",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_49664c7c",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_5b9f21e0",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_5b9f21e0",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_67408e98",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_91df71ec",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "http-transport"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_9258e783",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_a8c70673",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_c2f7d314",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "openai"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_dc7f6027",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_de4f0733",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "postgres"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_ffa14dec",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:replay_after_advance__test__fv_ffd53ed5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "test",
       "label": "//crates/lash:seam_proof_dialect__test__fv_26f56f02",
       "package": "lash-runtime"
     },
@@ -25199,7 +25315,7 @@
       "package": "lash-restate-postgres-workers-e2e"
     }
   ],
-  "generated_label_count": 281,
+  "generated_label_count": 282,
   "packages": [
     {
       "declared_features": [
@@ -28210,6 +28326,12 @@
           "cargo": "protocol_evidence",
           "kind": "test",
           "label": "//crates/lash:protocol_evidence__test",
+          "tags": []
+        },
+        {
+          "cargo": "replay_after_advance",
+          "kind": "test",
+          "label": "//crates/lash:replay_after_advance__test",
           "tags": []
         },
         {

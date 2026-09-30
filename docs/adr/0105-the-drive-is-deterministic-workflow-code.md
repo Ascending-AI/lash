@@ -29,11 +29,58 @@ work. Restate records durable timers, keyed waits and cancellation races.
 Opaque tool bodies execute inside recorded attempts under ADR 0116; they are
 not replayable orchestration drivers.
 
+The rule holds on every durable path, not only in the drive. A durable path is
+any code that can run more than once for one durable effect: a handler's
+replay, a retried recorded step, a workflow redrive, a duplicate or redelivered
+invocation carrying the same durable identity (a signal id, a trigger
+occurrence key, a tool-intent identity, a session-command idempotency key), and
+a facade call retried under its handler's journal. On a durable path every
+decision that shapes what is recorded or returned comes from one of three
+sources:
+
+- a recorded outcome: a journal entry of this invocation (a step result, a
+  promise, an awakeable, a call reply);
+- a recorded admission: the retained row a durable identity's first admission
+  wrote, returned by the admission itself when it coalesces (the retained
+  signal event and its wait binding, a trigger delivery's bound process, a
+  tool-intent submission's recorded outcome, a session command's persisted
+  outcome);
+- an immutable admitted input, or a pure function of the three.
+
+A fresh read of mutable store state is allowed in exactly two places. It may
+run inside the recorded step whose output it becomes: the step journals the
+answer, and nothing after the step decides from the read except through that
+output. It may serve explicitly non-durable observation: listings, snapshots
+and cursors a host reads and nothing records, and the live revalidation above,
+which can stop stale work before its next effect but never chooses different
+work. Anything else is a violation, in one of two forms. A read before the
+record consults today's registry before the journaled command issues or
+replays, so after a prune the replay refuses or branches differently. A
+duplicate that re-decides runs its step fresh without a journal and re-derives
+the decision from mutable state instead of from the admission the store
+coalesced. An idempotent admission therefore retains every fact its first
+decision used (the target binding, the selected wait, the canonical request),
+and a coalesced admission returns those facts for the caller to use without
+further reads.
+
+So the process commands (start, signal, cancel, await, attach) carry their
+target and session checks inside their recorded admissions. A cancel, signal or
+await of a pruned process refuses or answers `NoLongerRetained` from the
+recorded guard or admission, and a replay after a prune returns what the first
+run recorded. A host start `Until` a session checks the session inside its
+recorded start admission (`HostSessionNotLive`), so a replay after the session
+is deleted returns the recorded start. A tool-intent redelivery claims its
+submission-ledger row before it realizes anything, and a row that already
+holds an outcome answers that outcome.
+
 Evidence: `crates/lash-restate/src/controller/journaled_effect.rs:314`,
 `crates/lash-restate/src/controller/execution.rs:122`,
 `crates/lash-core/src/runtime/observation_publisher.rs:1`,
 `crates/lash-core/src/runtime/turn_boundary/recorded_assembly.rs:1`,
-`crates/lash-core-execution/src/engine/testing/controller.rs:40`.
+`crates/lash-core-execution/src/engine/testing/controller.rs:40`,
+`crates/lash-core-execution/src/runtime/process/start_staging.rs:1`,
+`crates/lash-restate/src/controller/process_command.rs:1`,
+`crates/lash/src/tool_intent_ingress.rs:1`.
 
 ### 2. Unfenced admission, separate from fenced execution
 
@@ -314,12 +361,48 @@ in-process effect host. The server double supports crashes and always-replay
 through its backend constructor. Restate cancellation and process crash
 matrices exercise the production handlers. Upgrade proofs use synthetic-next.
 
+The §1 durable-path rule has a repository gate and a law harness. The gate,
+`replay_read_gate`, is a test over the workspace source (`crates/`,
+`examples/`, `runbooks/`). It finds every replay path: a function whose
+signature names a recorded controller or context, a method of a type holding
+one, and every helper those call outside a recorded step. It then fails on
+each read of the store's mutable surface (the process registry's query,
+observer, event-log and lifecycle reads, the trigger store's listings, and the
+facade's session and process lookups) that runs on a replay path outside
+every recorded step. It parses the store traits, so a new trait method must be
+classified as a read or as a write or admission before the gate passes. A read
+the rule allows outside a step (a non-durable observation, a stop-only
+revalidation, an exempt store-side fact) is pinned in the gate's table with
+its class and reason, and a violation owned by an open ticket is pinned with
+that ticket; a pin that matches nothing fails as stale. The gate's
+self-tests plant a read ahead of a journaled command, including in the real
+facade, and require the gate to fail.
+
+The harness, `crates/lash/tests/replay_after_advance.rs`, records one durable
+operation per effect family (process start, trigger emit, signal, cancel,
+process await, durable wait), moves the store on (the target ended, pruned
+and compacted, the session deleted, the wait resolved again), then loses the handler attempt so the
+engine replays its journal. The replay must answer the recorded outcome, write
+no registry row and send no new invocation. It runs on the Restate server
+double over SQLite memory, SQLite file and PostgreSQL, and on live Restate
+(the `replay-after-advance` suite in `scripts/restate-suites.toml`). A fresh
+command against a pruned target still refuses there, since the refusal is the
+recorded admission's. The tool-intent family's redelivery laws (start, signal,
+cancel and trigger emit, after a prune and compaction or a session delete) run
+in the ingress unit tests over `KeyJournalController`, because the ingress on
+Restate runs only inside a handler scope: each redelivery arrives on a fresh
+invocation with an empty journal and must answer the submission ledger's
+recorded outcome and register nothing.
+
 Evidence: `crates/lash-core-execution/src/engine/testing/check.rs:25`,
 `crates/lash-conformance/src/conformance/drive_admission.rs:1`,
 `crates/lash-conformance/src/conformance/root_start_marker.rs:1`,
 `crates/lash-restate/src/tests/drive_laws_on_the_double.rs:1`,
 `crates/lash-restate-test/tests/process_crash_replay.rs:1`,
-`crates/lash-upgrade-harness/tests/phase_a/main.rs:1`.
+`crates/lash-upgrade-harness/tests/phase_a/main.rs:1`,
+`crates/lash-core-execution/src/replay_read_gate.rs:1`,
+`crates/lash/tests/replay_after_advance.rs:1`,
+`crates/lash/src/tests/tool_intent_ingress/replay_after_advance.rs:1`.
 
 ### 12. Journal generations and the version freeze
 

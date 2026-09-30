@@ -186,3 +186,16 @@ filters = ["tests::json_decode_ingress::live_call_decode_refuses_before_writes_o
 endpoints = ["JSON_MEM", "JSON_FILE", "JSON_PG"]
 shards = 1
 timeout_seconds = 120
+
+[suites.replay-after-advance]
+# The replay-after-advance laws' live legs (FIG-4324, ADR 0105 §11): each
+# family records in a handler, advances the store, stops serving and serves
+# again so the journal replays.
+label = "//crates/lash:replay_after_advance__test"
+cwd = "crates/lash"
+filters = ["live_sqlite_memory::"]
+# Held for its ticket like its double legs; FIG-4351 removes the skip.
+skips = ["live_sqlite_memory::session_signal_replay_after_compaction_returns_recorded_event"]
+endpoints = ["RAA_RESTATE_ENDPOINT"]
+shards = 1
+timeout_seconds = 180

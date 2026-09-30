@@ -1653,30 +1653,19 @@ struct EffectBackedProcessService {
 }
 
 impl EffectBackedProcessService {
-    async fn cancel_command(
-        &self,
+    /// The cancel command production issues: the retained-process check is
+    /// the recorded cancel admission's, never a read ahead of it.
+    fn cancel_command(
         process_id: &ProcessId,
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
-    ) -> Result<crate::ProcessCommand, crate::PluginError> {
-        match self.registry.require_process_id(process_id).await {
-            Ok(process_id) => Ok(crate::ProcessCommand::Cancel {
-                process_id,
-                origin,
-                requester,
-                attribution,
-            }),
-            Err(refusal @ crate::PluginError::ProcessUnknown { .. })
-            | Err(refusal @ crate::PluginError::ProcessNoLongerRetained { .. }) => {
-                Ok(crate::ProcessCommand::CancelRefused {
-                    process_id: process_id.clone(),
-                    origin,
-                    requester,
-                    refusal,
-                })
-            }
-            Err(error) => Err(error),
+    ) -> crate::ProcessCommand {
+        crate::ProcessCommand::Cancel {
+            process_id: process_id.clone(),
+            origin,
+            requester,
+            attribution,
         }
     }
 
@@ -1883,18 +1872,15 @@ impl crate::ProcessService for EffectBackedProcessService {
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let command = self
-            .cancel_command(
-                process_id,
-                crate::CancelOrigin::OperatorRequested,
-                serde_json::to_string(scope.effect_controller.execution_scope())
-                    .expect("serializable effect scope"),
-                None,
-            )
-            .await?;
+        let command = Self::cancel_command(
+            process_id,
+            crate::CancelOrigin::OperatorRequested,
+            serde_json::to_string(scope.effect_controller.execution_scope())
+                .expect("serializable effect scope"),
+            None,
+        );
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
-            crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
             _ => unreachable!("cancel command returns cancel outcome"),
         }
     }
@@ -1906,17 +1892,14 @@ impl crate::ProcessService for EffectBackedProcessService {
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let command = self
-            .cancel_command(
-                process_id,
-                crate::CancelOrigin::ModelRequested,
-                identity.replay_key.clone(),
-                Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
-            )
-            .await?;
+        let command = Self::cancel_command(
+            process_id,
+            crate::CancelOrigin::ModelRequested,
+            identity.replay_key.clone(),
+            Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
+        );
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
-            crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
             _ => unreachable!("cancel command returns cancel outcome"),
         }
     }
@@ -1930,10 +1913,9 @@ impl crate::ProcessService for EffectBackedProcessService {
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let process_id = self.registry.require_process_id(process_id).await?;
         let command = crate::ProcessCommand::Signal {
             signal: crate::ProcessSignal::new(
-                crate::ProcessSignalIdentity::new(process_id, signal_name, signal_id)?,
+                crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?,
                 payload,
             ),
         };

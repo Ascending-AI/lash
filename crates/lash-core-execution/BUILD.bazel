@@ -97,6 +97,9 @@ lash_rust_unit_test(
         "src/**/*.rs",
     ],
     extra_compile_data = [],
+    extra_data = [
+        "//:workspace_rust_sources",
+    ],
     manifest_dir = "crates/lash-core-execution",
     package_name = "lash-internal-core-execution",
     tags = [],
@@ -1077,6 +1080,9 @@ lash_rust_feature_test(
         "src/**/*.rs",
     ],
     extra_compile_data = [],
+    extra_data = [
+        "//:workspace_rust_sources",
+    ],
     manifest_dir = "crates/lash-core-execution",
     package_name = "lash-internal-core-execution",
     tags = [

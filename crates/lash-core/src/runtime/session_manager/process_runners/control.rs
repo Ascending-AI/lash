@@ -107,27 +107,17 @@ impl<'scope> ProcessCommandRunner<'scope> {
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let command = match self.registry.require_process_id(process_id).await {
-            Ok(process_id) => crate::ProcessCommand::Cancel {
-                process_id,
-                origin,
-                requester,
-                attribution,
-            },
-            Err(refusal @ crate::PluginError::ProcessUnknown { .. })
-            | Err(refusal @ crate::PluginError::ProcessNoLongerRetained { .. }) => {
-                crate::ProcessCommand::CancelRefused {
-                    process_id: process_id.clone(),
-                    origin,
-                    requester,
-                    refusal,
-                }
-            }
-            Err(error) => return Err(error),
+        // The recorded cancel admission checks the process is retained and
+        // records its answer: a replay after the process was pruned reads
+        // that answer, never a registry that has moved on (ADR 0105 §1).
+        let command = crate::ProcessCommand::Cancel {
+            process_id: process_id.clone(),
+            origin,
+            requester,
+            attribution,
         };
         match self.run(command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
-            crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
             _ => Err(wrong_process_outcome("cancel")),
         }
     }
@@ -584,26 +574,10 @@ impl ProcessCapability {
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
-        let process_id = match current
-            .host
-            .process_registry()
-            .ok_or_else(|| crate::PluginError::Session("process registry unavailable".to_string()))?
-            .require_process_id(process_id)
+        // The await's recorded existence guard answers an unknown or pruned
+        // process, so a replay after a prune reads what the first run saw.
+        self.await_process_ref(current, process_id.clone(), scope)
             .await
-        {
-            Ok(process_id) => process_id,
-            Err(crate::PluginError::ProcessNoLongerRetained {
-                terminal_label,
-                pruned_at_ms,
-            }) => {
-                return Ok(crate::ProcessAwaitOutput::NoLongerRetained {
-                    terminal_label,
-                    pruned_at_ms,
-                });
-            }
-            Err(error) => return Err(error),
-        };
-        self.await_process_ref(current, process_id, scope).await
     }
 
     pub(in crate::runtime::session_manager) async fn await_process_ref(
@@ -894,20 +868,12 @@ impl ProcessCapability {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
-        let record = runner
-            .registry()
-            .get_process(process_id)
-            .await?
-            .ok_or_else(|| crate::runtime::registry_transitions::unknown_process(process_id))?;
-        if record.is_terminal() {
-            return Err(crate::PluginError::ProcessAlreadyTerminal {
-                process_id: process_id.clone(),
-                status: record.status,
-            });
-        }
+        // The recorded append admission refuses an unknown, pruned or ended
+        // target and records the refusal, so a replay after the target moved
+        // on reads the first run's answer (ADR 0105 §1).
         runner
             .signal(crate::ProcessSignal::new(
-                crate::ProcessSignalIdentity::new(record.id.clone(), signal_name, signal_id)?,
+                crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?,
                 payload,
             ))
             .await
@@ -924,10 +890,9 @@ impl ProcessCapability {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
-        let process_id = runner.registry().require_process_id(process_id).await?;
         runner
             .signal(crate::ProcessSignal::new(
-                crate::ProcessSignalIdentity::new(process_id, signal_name, signal_id)?,
+                crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?,
                 payload,
             ))
             .await

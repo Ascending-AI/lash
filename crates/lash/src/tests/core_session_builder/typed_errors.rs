@@ -189,12 +189,12 @@ fn assert_state_error(error: &PluginError, mode: usize) {
         serde_json::to_value(replayed.clone()).expect("clone transport"),
         value
     );
-    let outcome = lash_core::ProcessEffectOutcome::CancelRefused {
-        refusal: replayed.clone(),
-    };
-    let journal = serde_json::to_vec(&outcome).expect("process journal outcome");
-    let lash_core::ProcessEffectOutcome::CancelRefused { refusal } =
-        serde_json::from_slice(&journal).expect("replay process journal")
+    // A recorded process admission journals its refusal as the step's
+    // `Result<_, PluginError>` answer.
+    let recorded: std::result::Result<(), PluginError> = Err(replayed.clone());
+    let journal = serde_json::to_vec(&recorded).expect("recorded admission refusal");
+    let Err(refusal) = serde_json::from_slice::<std::result::Result<(), PluginError>>(&journal)
+        .expect("replay recorded admission")
     else {
         panic!("journal outcome kind");
     };

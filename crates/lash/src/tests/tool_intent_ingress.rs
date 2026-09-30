@@ -1167,12 +1167,29 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
             emit_intent(&SessionId::from(SESSION), &process),
         )
         .await;
+    let duplicate = ingress
+        .submit(
+            key.clone(),
+            emit_intent(&SessionId::from(SESSION), &process),
+        )
+        .await;
     let mut conflicting_duplicate = emit_intent(&SessionId::from(SESSION), &process);
     let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut conflicting_duplicate else {
         unreachable!("fixture is an event intent")
     };
     intent.payload = serde_json::json!({"law": "same-key-different-payload"});
-    let duplicate = ingress.submit(key, conflicting_duplicate).await;
+    let conflicting = ingress.submit(key, conflicting_duplicate).await;
+    assert!(
+        matches!(
+            &conflicting,
+            crate::tools::ToolIntentIngressOutcome::Refused {
+                refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
+                    kind: lash_core::ToolIntentKind::EmitProcessEvent,
+                },
+            }
+        ),
+        "the same identity with different content is refused: {conflicting:?}"
+    );
 
     let crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome: first_outcome,
@@ -1650,22 +1667,18 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     };
     intent.payload = serde_json::json!({"law": "conflicting-redrive-payload"});
     let redriven = ingress.submit(key.clone(), conflicting_redrive).await;
+    // The first delivery's ledger claim bound the identity to its content,
+    // so a redrive with different content is refused at admission.
     assert!(
         matches!(
             &redriven,
-            crate::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Refused {
+            crate::tools::ToolIntentIngressOutcome::Refused {
+                refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
                     kind: lash_core::ToolIntentKind::EmitProcessEvent,
-                    refusal: lash_core::ToolIntentRefusalReason::CommandFailed {
-                        code,
-                        ..
-                    },
-                    ..
                 },
-                replayed: false,
-            } if code == "tool_intent_ingress_realization_failed"
+            }
         ),
-        "a conflicting redrive must be rejected as a typed command failure: {redriven:?}"
+        "a conflicting redrive must be refused as a duplicate identity: {redriven:?}"
     );
     assert_eq!(controller.realizations.load(Ordering::SeqCst), 0);
     assert_eq!(
@@ -2219,5 +2232,7 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
 }
 
 mod redelivery;
+
+mod replay_after_advance;
 
 mod engine_owned;

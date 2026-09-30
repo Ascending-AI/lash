@@ -171,6 +171,10 @@ pub struct ProcessLocalExecution {
     pub process_starts: Option<Arc<crate::runtime::process_start::ProcessStartRelay>>,
     pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     pub process_engines: Option<crate::ProcessEngineRegistry>,
+    /// The session catalog a root start's host session-lookup grant is
+    /// checked against inside the start's recorded admission. `None` refuses
+    /// every host-granted start: nothing can prove its session live.
+    pub session_catalog: Option<Arc<dyn crate::store::RuntimeStore>>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
     pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
     /// The attachment referrers a delivered terminal is acquired through
@@ -637,6 +641,22 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    /// Binds the session catalog a root start's host session-lookup grant is
+    /// checked against inside the start's recorded admission, so a replay
+    /// after the session was deleted answers the recorded start instead of
+    /// refusing it (ADR 0105 §1).
+    pub fn with_process_session_catalog(
+        mut self,
+        catalog: Arc<dyn crate::store::RuntimeStore>,
+    ) -> Self {
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
+        {
+            execution.session_catalog = Some(catalog);
+        }
+        self
+    }
+
     /// Binds process engines that own start-time artifact lifecycle hooks.
     pub fn with_process_engines(mut self, engines: crate::ProcessEngineRegistry) -> Self {
         if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
@@ -673,6 +693,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     process_starts: None,
                     process_env_store: None,
                     process_engines: None,
+                    session_catalog: None,
                     turn_cancellation: None,
                     effect_controller: None,
                     attachments: None,

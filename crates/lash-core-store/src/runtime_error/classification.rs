@@ -116,6 +116,8 @@ impl RuntimeErrorCode {
             Self::SessionDeleted => Terminal,
             // a capability fact about the deployment.
             Self::SessionCatalogLookupUnsupported => Terminal,
+            // the granted session is gone or never existed; its admission recorded that.
+            Self::HostSessionNotLive => Terminal,
             // the session's generation marker is older than this build admits; a redrive reads the same marker.
             Self::SessionStateVersionUnsupported => Terminal,
             // the session's generation marker is newer than this build knows; a redrive reads the same marker.

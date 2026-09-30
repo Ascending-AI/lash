@@ -94,6 +94,7 @@ impl ProcessLocalExecution {
             process_starts,
             process_env_store,
             process_engines,
+            session_catalog,
             turn_cancellation,
             effect_controller,
             attachments,
@@ -117,6 +118,7 @@ impl ProcessLocalExecution {
                         env_store: process_env_store.as_ref(),
                         engines: process_engines.as_ref(),
                         engines_required: false,
+                        session_catalog: session_catalog.as_deref(),
                         executor: "process start on the local executor",
                         starter: &starter,
                     },
@@ -386,10 +388,6 @@ impl ProcessLocalExecution {
                     realization,
                 ))
             }
-            ProcessCommand::CancelRefused { refusal, .. } => Ok((
-                ProcessEffectOutcome::CancelRefused { refusal },
-                crate::StoreRealization::Realized,
-            )),
             ProcessCommand::Signal { signal } => {
                 let effect_controller = effect_controller.ok_or_else(|| {
                     RuntimeEffectControllerError::new(

@@ -360,6 +360,7 @@ impl Processes {
                     .with_process_env_store(Arc::clone(
                         &self.core.env.core.durability.process_env_store,
                     ))
+                    .with_process_session_catalog(Arc::clone(&self.core.store_factory) as _)
                     .with_process_engines(self.core.host_process_engines.clone()),
             )
             .await?;
@@ -414,16 +415,18 @@ impl Processes {
         request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessStartReceipt> {
-        // A root start's session grant is the host's lookup: the session must
-        // exist now, whether the grant came from `session_scope` or from a
-        // remote start's `until_session` data (FIG-3607 R3).
-        if let lash_core::LifetimeDecision::Until {
-            scope: lash_core::ScopeId::Session(session_id),
-            grant: lash_core::ScopeGrant::HostSessionLookup,
-        } = &request.lifetime
-        {
-            self.require_live_session(session_id).await?;
-        }
+        // A root start's session grant is the host's lookup, whether it came
+        // from `session_scope` or from a remote start's `until_session` data
+        // (FIG-3607 R3). The start's recorded admission checks the session is
+        // live, so a replay after the session was deleted answers the start
+        // its first run made (ADR 0105 §1).
+        let host_session = match &request.lifetime {
+            lash_core::LifetimeDecision::Until {
+                scope: lash_core::ScopeId::Session(session_id),
+                grant: lash_core::ScopeGrant::HostSessionLookup,
+            } => Some(session_id.clone()),
+            _ => None,
+        };
         let observers = request.observers.clone();
         // The registrar mints the id; the key only makes the start idempotent.
         // A host mints only host keys: a key of a family lash derives for its
@@ -461,12 +464,17 @@ impl Processes {
         let outcome = self
             .execute_command(command, scoped_effect_controller.clone())
             .await
-            .map_err(|error| {
-                EmbedError::Plugin(host_start_refusal(
+            .map_err(|error| match host_session {
+                Some(session_id)
+                    if error.code == lash_core::RuntimeErrorCode::HostSessionNotLive =>
+                {
+                    EmbedError::UnknownSession { session_id }
+                }
+                _ => EmbedError::Plugin(host_start_refusal(
                     start_key.as_ref(),
                     error.code.clone(),
                     error.to_string(),
-                ))
+                )),
             })?;
         let lash_core::ProcessEffectOutcome::Start {
             record,

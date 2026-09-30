@@ -13,7 +13,7 @@ use crate::SessionId;
 /// It is spelled as a [`RuntimeError`](crate::RuntimeError) carrying
 /// [`RuntimeErrorCode::DurableIdentityConflict`](crate::RuntimeErrorCode::DurableIdentityConflict)
 /// rather than a new `PluginError` variant, because `PluginError` is journaled
-/// through `ProcessEffectOutcome::CancelRefused`: a new code string is data an
+/// inside recorded process admissions: a new code string is data an
 /// existing variant already carries, while a new variant would be a shape an
 /// older build could not read.
 pub fn durable_identity_conflict(message: impl Into<String>) -> PluginError {

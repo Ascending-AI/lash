@@ -115,6 +115,10 @@ pub enum RuntimeErrorCode {
     /// transient miss: retrying the identical lookup cannot change the
     /// answer, so this is terminal.
     SessionCatalogLookupUnsupported,
+    /// A root process start holds a host session-lookup grant for a session
+    /// the catalog does not hold live when the start's recorded admission
+    /// runs. The admission records the refusal, so a replay answers it too.
+    HostSessionNotLive,
     /// The session's durable state is an older generation than this build
     /// admits (FIG-3571, FIG-3619). Under the clean-cutover policy it is
     /// refused before any turn, model, tool or provider effect. A redrive on
@@ -615,6 +619,7 @@ impl RuntimeErrorCode {
             Self::StoreCommitSuperseded => "store_commit_superseded",
             Self::SessionDeleted => "session_deleted",
             Self::SessionCatalogLookupUnsupported => "session_catalog_lookup_unsupported",
+            Self::HostSessionNotLive => "host_session_not_live",
             Self::SessionStateVersionUnsupported => "session_state_version_unsupported",
             Self::SessionStateVersionNewerThanRuntime => "session_state_version_newer_than_runtime",
             Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
@@ -871,6 +876,7 @@ impl RuntimeErrorCode {
         Self::StoreCommitSuperseded,
         Self::SessionDeleted,
         Self::SessionCatalogLookupUnsupported,
+        Self::HostSessionNotLive,
         Self::SessionStateVersionUnsupported,
         Self::SessionStateVersionNewerThanRuntime,
         Self::StoreCommitNodeBudgetExceeded,
@@ -1063,6 +1069,7 @@ impl RuntimeErrorCode {
             "store_commit_superseded" => Self::StoreCommitSuperseded,
             "session_deleted" => Self::SessionDeleted,
             "session_catalog_lookup_unsupported" => Self::SessionCatalogLookupUnsupported,
+            "host_session_not_live" => Self::HostSessionNotLive,
             "session_state_version_unsupported" => Self::SessionStateVersionUnsupported,
             "session_state_version_newer_than_runtime" => Self::SessionStateVersionNewerThanRuntime,
             "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,

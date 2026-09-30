@@ -682,12 +682,6 @@ pub enum ProcessCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attribution: Option<crate::RuntimeReplayAttribution>,
     },
-    CancelRefused {
-        process_id: ProcessId,
-        origin: crate::CancelOrigin,
-        requester: String,
-        refusal: crate::PluginError,
-    },
     /// Deliver one signal. The command carries the signal as it is
     /// admitted, never an append request: the append key is derived from the
     /// signal's identity at admission, so no caller can select another
@@ -750,12 +744,6 @@ enum ProcessCommandDecode {
         requester: String,
         #[serde(default)]
         attribution: Option<crate::RuntimeReplayAttribution>,
-    },
-    CancelRefused {
-        process_id: ProcessId,
-        origin: crate::CancelOrigin,
-        requester: String,
-        refusal: crate::PluginError,
     },
     Signal {
         signal: crate::ProcessSignal,
@@ -831,17 +819,6 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 origin,
                 requester,
                 attribution,
-            },
-            ProcessCommandDecode::CancelRefused {
-                process_id,
-                origin,
-                requester,
-                refusal,
-            } => Self::CancelRefused {
-                process_id,
-                origin,
-                requester,
-                refusal,
             },
             ProcessCommandDecode::Signal { signal } => Self::Signal { signal },
             ProcessCommandDecode::EmitEvent {
@@ -950,9 +927,6 @@ impl ProcessCommand {
                 format!("process:attach-terminal:{process_id}:{}", key.key_id)
             }
             Self::Cancel { process_id, .. } => format!("process:cancel:{process_id}"),
-            Self::CancelRefused { process_id, .. } => {
-                format!("process:cancel:{process_id}")
-            }
             Self::Signal { signal } => format!(
                 "process:signal:{}:signal.{}:{}",
                 signal.identity.process_id(),
@@ -1012,9 +986,6 @@ pub enum ProcessEffectOutcome {
     AttachTerminal,
     Cancel {
         record: Box<ProcessRecord>,
-    },
-    CancelRefused {
-        refusal: crate::PluginError,
     },
     Signal {
         // Boxed for the same reason as the record variants: a fat event should

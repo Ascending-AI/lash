@@ -247,6 +247,10 @@ pub struct ProcessStartStores<'a> {
     /// controller) or registered without staging engine artifacts (the local
     /// executor, whose host may serve engine rows elsewhere).
     pub engines_required: bool,
+    /// The session catalog a root start's host session-lookup grant is
+    /// checked against, inside the recorded admission this registration
+    /// runs in. `None` refuses a host-granted start.
+    pub session_catalog: Option<&'a dyn crate::store::RuntimeStore>,
     /// Names the executor in a refusal, e.g. "Restate process start".
     pub executor: &'static str,
     /// The journal of the scope running the start: the authority of the
@@ -328,6 +332,7 @@ pub async fn register_process_start(
             "a journaled process start must carry its start key",
         ));
     };
+    require_host_session_live(stores, &registration).await?;
     match stage_and_register(stores, &start_key, registration, observers).await {
         Ok(registered) => {
             if let Some(ports) = stores.ports() {
@@ -342,6 +347,45 @@ pub async fn register_process_start(
             Err(error)
         }
     }
+}
+
+/// Refuse a root start whose host session-lookup grant names a session the
+/// catalog does not hold live.
+///
+/// The check belongs here, inside the start's recorded admission, and never
+/// ahead of the command: a replay after the session was deleted reads the
+/// recorded registration instead of looking the session up again, so it
+/// answers the start its first run made (ADR 0105 §1). The refusal is
+/// terminal, so the admission records it too.
+async fn require_host_session_live(
+    stores: &ProcessStartStores<'_>,
+    registration: &ProcessRegistration,
+) -> Result<(), RuntimeEffectControllerError> {
+    let super::model::LifetimeDecision::Until {
+        scope: super::model::ScopeId::Session(session_id),
+        grant: super::model::ScopeGrant::HostSessionLookup,
+    } = &registration.lifetime
+    else {
+        return Ok(());
+    };
+    let live = match stores.session_catalog {
+        Some(catalog) => crate::runtime::session_is_live(catalog, session_id)
+            .await
+            .map_err(RuntimeEffectControllerError::from)?,
+        None => false,
+    };
+    if live {
+        return Ok(());
+    }
+    Err(RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::HostSessionNotLive,
+        format!(
+            "{}: {} holds a host session-lookup grant for session `{session_id}`, which the \
+             catalog does not hold live",
+            stores.executor,
+            registration.refusal_name()
+        ),
+    ))
 }
 
 /// End `Start(key)` after a terminal refusal, unless a process already holds

@@ -245,7 +245,23 @@ where
         )
         .await
         .map_err(|error| process_command_journal_error("await observation", error))?;
-    let observed = observed?;
+    let observed = match observed {
+        Ok(observed) => observed,
+        // The observation recorded that the process was pruned: the await
+        // answers the typed not-retained output from that record, as the
+        // local awaiter does, so a replay after the prune returns it too
+        // (ADR 0105 §1).
+        Err(PluginError::ProcessNoLongerRetained {
+            terminal_label,
+            pruned_at_ms,
+        }) => {
+            return Ok(Some(lash_core::ProcessAwaitOutput::NoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }));
+        }
+        Err(refusal) => return Err(refusal.into()),
+    };
     // Cancellation and revocation remain journaled observations. A
     // closed gate or cancelled process drive takes the ordinary wait
     // path, which owns the cancellation race and its refusal.
@@ -361,6 +377,7 @@ where
     let registry = execution.registry;
     let process_env_store = execution.process_env_store;
     let process_engines = execution.process_engines;
+    let session_catalog = execution.session_catalog;
     let turn_cancellation = execution.turn_cancellation;
     let attachments = execution.attachments;
     let outcome = match command {
@@ -436,6 +453,7 @@ where
                         engines_required: true,
                         executor: "Restate process start",
                         starter: &starter,
+                        session_catalog: session_catalog.as_deref(),
                     };
                     match lash_core::runtime::register_process_start(
                         &stores,
@@ -956,10 +974,6 @@ where
                 realization,
             ))
         }
-        ProcessCommand::CancelRefused { refusal, .. } => Ok((
-            ProcessEffectOutcome::CancelRefused { refusal },
-            lash_core::StoreRealization::Realized,
-        )),
         ProcessCommand::Signal { signal } => {
             // The append is the signal's admission, one recorded step ahead
             // of the resolution (FIG-3827): the store derives nothing from

@@ -537,7 +537,9 @@ impl ToolIntentIngress {
     > {
         let kind = intent.kind();
         let submitted_intent = intent.clone();
-        self.bind_cancel_target(identity, &intent).await?;
+        if let Some(recorded) = self.admit_submission(identity, &intent).await? {
+            return Ok((recorded, true));
+        }
         let (result, replayed) = self
             .realize_inner(identity, intent)
             .await
@@ -600,9 +602,6 @@ impl ToolIntentIngress {
             lash_core::ProcessEffectOutcome::Cancel { .. } => {
                 lash_core::ToolIntentKind::CancelProcess
             }
-            lash_core::ProcessEffectOutcome::CancelRefused { .. } => {
-                lash_core::ToolIntentKind::CancelProcess
-            }
             lash_core::ProcessEffectOutcome::EmitEvent { .. } => {
                 lash_core::ToolIntentKind::EmitProcessEvent
             }
@@ -648,12 +647,6 @@ impl ToolIntentIngress {
                 })?,
             )
             .unwrap_or(serde_json::Value::Null),
-            lash_core::ProcessEffectOutcome::CancelRefused { refusal } => {
-                return Err(RealizationFailure::Command(
-                    kind,
-                    crate::EmbedError::Plugin(refusal),
-                ));
-            }
             lash_core::ProcessEffectOutcome::EmitEvent { event, .. } => {
                 serde_json::to_value(*event).unwrap_or(serde_json::Value::Null)
             }
@@ -689,38 +682,39 @@ impl ToolIntentIngress {
         Ok(((kind, value), replayed))
     }
 
-    /// The other four shapes carry their content into the durable key they
-    /// land on — a registration fingerprint, an event replay key, an
-    /// occurrence idempotency key — so a re-used identity carrying different
-    /// content is refused by the store itself. A cancel carries nothing but
-    /// its target, and its fence lives on the *target* record: a bound
-    /// identity re-submitted against a second process finds that record
-    /// unfenced and cancels it. Nothing on the first target can see that
-    /// (FIG-3072).
+    /// Claim `identity`'s row in the durable tool-intent submission ledger
+    /// before anything realizes it, and answer the outcome the row already
+    /// records (ADR 0105 §1).
     ///
-    /// The binding is therefore taken in the durable tool-intent submission
-    /// ledger, which [`Self::retain_outcome`] writes once an outcome exists.
-    /// Claiming the row *before* realization is what makes the target durable
-    /// across invocations: the redelivery arrives with an empty effect
-    /// journal, reads the row the first invocation left, and compares payload
-    /// hashes. The store's claim is atomic and answers the first writer, so
-    /// two concurrent submissions of one identity cannot both bind a target.
+    /// The row is the submission's recorded admission. A redelivery arrives
+    /// with an empty effect journal, so the row is the only record of what the
+    /// first invocation did: one that executed answers its recorded result
+    /// here, without realizing again against a store that may have moved on,
+    /// such as a target that has since ended and been pruned. A row with no
+    /// executed outcome (the first invocation crashed before retaining one, or
+    /// refused) realizes again; every shape's durable key coalesces what a
+    /// first realization committed.
     ///
-    /// A matching payload is not refused: a redelivered invocation
-    /// legitimately re-presents its own submission, and the target record
-    /// coalesces it onto the recorded request. Only a changed payload — for a
-    /// cancel, only a changed target — is refused, as
-    /// [`ToolIntentIngressRefusal::DuplicateIdentity`], the same vocabulary the
-    /// other shapes' store fences use.
-    async fn bind_cancel_target(
+    /// The claim also binds the identity to its first payload. A cancel
+    /// carries nothing but its target, and its fence lives on the target
+    /// record, so a bound identity re-submitted against a second process
+    /// would find that record unfenced and cancel it (FIG-3072); the other
+    /// shapes carry their content into the key they land on. The store's
+    /// claim is atomic and answers the first writer, so two concurrent
+    /// submissions of one identity cannot both bind. A matching payload is a
+    /// redelivery; a changed one is refused as
+    /// [`ToolIntentIngressRefusal::DuplicateIdentity`], the vocabulary every
+    /// shape's store fence uses, except a start's, whose key answers the
+    /// process it first minted whatever the declaration (ADR 0107).
+    async fn admit_submission(
         &self,
         identity: &lash_core::ToolIntentIdentity,
         intent: &lash_core::ToolIntent,
-    ) -> std::result::Result<(), RealizationFailure> {
+    ) -> std::result::Result<
+        Option<(lash_core::ToolIntentKind, serde_json::Value)>,
+        RealizationFailure,
+    > {
         let kind = intent.kind();
-        if kind != lash_core::ToolIntentKind::CancelProcess {
-            return Ok(());
-        }
         let submitted =
             lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone()).map_err(
                 |error| {
@@ -739,7 +733,7 @@ impl ToolIntentIngress {
             .await
             .map_err(|error| RealizationFailure::Command(kind, crate::EmbedError::Plugin(error)))?;
         let lash_core::ToolIntentSubmissionAdmission::Existing(existing) = admission else {
-            return Ok(());
+            return Ok(None);
         };
         if existing.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V3 {
             return Err(RealizationFailure::Refused(
@@ -756,18 +750,28 @@ impl ToolIntentIngress {
                 },
             ));
         }
-        if existing.payload_hash != submitted.payload_hash {
+        // A start's key is trusted (ADR 0107): a changed declaration under
+        // the identity answers the process the key first minted, as the
+        // registry would.
+        if existing.payload_hash != submitted.payload_hash
+            && kind != lash_core::ToolIntentKind::StartProcess
+        {
             return Err(RealizationFailure::Refused(
                 ToolIntentIngressRefusal::DuplicateIdentity { kind },
             ));
         }
-        Ok(())
+        Ok(match existing.outcome {
+            Some(lash_core::ToolIntentExecutionOutcome::Executed { kind, result, .. }) => {
+                Some((kind, result))
+            }
+            _ => None,
+        })
     }
 
     /// Retain `outcome` in the durable tool-intent submission ledger under
-    /// `identity`, claiming the row first when no cancel binding claimed it
-    /// before realization. The first recorded outcome is kept: a redelivery
-    /// that realizes again never replaces it.
+    /// `identity`, claiming the row first when [`Self::admit_submission`]
+    /// could not. The first recorded outcome is kept: a redelivery that
+    /// realizes again never replaces it.
     async fn retain_outcome(
         &self,
         identity: &lash_core::ToolIntentIdentity,
@@ -866,15 +870,9 @@ impl ToolIntentIngress {
                 // (FIG-2876, FIG-2994).
                 let request = intent.into_request(identity);
                 // A host-submitted start is a root: its lifetime is
-                // `Detached` or `Until` a session the host holds, looked up
-                // now (FIG-3607 R3).
-                if let lash_core::LifetimeDecision::Until {
-                    scope: lash_core::ScopeId::Session(session_id),
-                    grant: lash_core::ScopeGrant::HostSessionLookup,
-                } = &request.lifetime
-                {
-                    self.core.processes().session_scope(session_id).await?;
-                }
+                // `Detached` or `Until` a session the host holds (FIG-3607
+                // R3). The start's recorded admission checks that session is
+                // live, never a lookup ahead of it (ADR 0105 §1).
                 let env_spec = match request.env_ref.as_ref() {
                     Some(env_ref) => Some(
                         lash_core::runtime::load_process_execution_env(
@@ -897,10 +895,9 @@ impl ToolIntentIngress {
                 }
             }
             lash_core::ToolIntent::SignalProcess(intent) => {
-                let process_id = self
-                    .process_registry()?
-                    .require_process_id(&intent.process_id)
-                    .await?;
+                // The recorded append admission refuses an unknown or pruned
+                // target; no registry read comes ahead of it (ADR 0105 §1).
+                let process_id = intent.process_id.clone();
                 // The intent's replay key is the signal's id, as on core's
                 // recorded-intent seam: the append key is derived from the
                 // signal's identity, never spelled here (FIG-4299).
@@ -916,10 +913,9 @@ impl ToolIntentIngress {
                 }
             }
             lash_core::ToolIntent::CancelProcess(intent) => {
-                let process_id = self
-                    .process_registry()?
-                    .require_process_id(&intent.process_id)
-                    .await?;
+                // The recorded cancel admission refuses an unknown or pruned
+                // target; no registry read comes ahead of it (ADR 0105 §1).
+                let process_id = intent.process_id;
                 // Same stamping core's recorded-intent cancel seam applies
                 // (`runtime/session_manager/process_runners/control.rs`): the
                 // replay key requests the cancel and the whole identity is the
@@ -1213,6 +1209,7 @@ impl ToolIntentIngress {
                 .with_process_env_store(std::sync::Arc::clone(
                     &self.core.env.core.durability.process_env_store,
                 ))
+                .with_process_session_catalog(std::sync::Arc::clone(&self.core.store_factory) as _)
                 .with_process_engines(self.core.host_process_engines.clone())
                 .with_process_outcome_observer(outcome_observer)
                 },
