@@ -95,10 +95,10 @@ Repeating the test returned `cache=true` for the same action digest,
 The generated graph's runtime probes reproduced the same existing worker floor
 and exact 2 CPU / 3 GiB limits recorded above.
 
-Full acceptance still requires rule-level CPU/memory coverage for every Rust,
-build-script, native child, test and helper action, followed by the workspace
-and feature parity runs. The representative target does not establish that
-coverage by itself.
+Rule-level resource wiring covers compiler, build-script, native and helper
+actions, with separate execution budgets for tests and batches. The observed
+cgroups verify the representative requests; they are not measurements of every
+individual action or proof of full-workspace throughput.
 
 Primary contracts are the [action environment API](https://buck2.build/docs/api/build/AnalysisActions/),
 the [executor configuration API](https://buck2.build/docs/api/build/CommandExecutorConfig/),
@@ -187,11 +187,11 @@ bootstrapped. These are single observations on a shared pool.
 | Workload | Bazel wall s | Buck2 wall s | Bazel daemon CPU s | Buck2 daemon CPU s | Bazel peak RSS MiB | Buck2 peak RSS MiB |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Warm SQL build | 10.380 | 2.485 | 20.40 | 0.11 | 1199.88 | 236.98 |
-| First SQL test | 69.167 | 43.189 | 105.70 | 1.01 | 2522.68 | 250.73 |
+| First SQL test | 69.167 | 43.189 | 105.70 | 1.01 | 2520.79 | 250.73 |
 | Warm SQL test | not measured | 3.543 | not measured | 0.19 | not measured | 239.23 |
 | Edited SQL check, initial receipt | 11.457 | 17.871 | 2.84 | 0.36 | 1678.89 | 240.77 |
 | Edited SQL check, corrected receipt | 11.457 | 10.953 | 2.84 | 1.60 | 1678.89 | 281.01 |
-| Edited SQL test, corrected receipt | 35.805 | 22.280 | 98.64 | 1.18 | 2419.42 | 279.32 |
+| Edited SQL test, corrected receipt | 35.805 | 22.280 | 98.64 | 1.18 | 2419.59 | 279.32 |
 | Two fresh workspace analyses | 108.153 | 7.986 | 558.18 | 6.15 | 4076.48 | 458.63 |
 | Two warm workspace analyses | not measured | 4.516 | not measured | 1.36 | not measured | 512.31 |
 
@@ -227,13 +227,63 @@ independent worktrees. Full-workspace build/test latency remains a separate
 acceptance measurement, and source revisions after the frozen benchmark are
 validated for correctness rather than mixed into the comparison.
 
+
+## Verified workflow and validation coverage
+
+`kiln build` requests full libraries or binaries; `kiln check` requests native
+Rust metadata and reports compiler errors without linking. `kiln clippy` uses
+Cargo lint declarations and the nearest declared `clippy.toml`, including
+first-party tests. `kiln test` uses native remote Execute2 and the cacheable
+developer partition. Filtered single/batch tests fail if they execute no cases.
+The driver materializes test logs, JUnit and receipt outputs even for cached
+verdicts and failures. Named service, release and consumer Cargo recipes remain
+supported, and ordinary Lash compilation and tests use the NativeLink pool.
+
+The generated graph covers 55 Cargo packages and 216 Cargo targets at upstream
+`df6dbdf058635b23bc12b55b291f37d8288b696b`. Two targets retain explicit
+Cargo-only ownership. The checked feature inventory resolves 90 lanes; all
+7,030 configured Buck targets pass dependency analysis. These numbers describe
+inventory and analysis, not 7,030 executed compiler actions.
+
+The stock-client normal UI fixture proof passed all 56 cases at frozen source
+`8f2cb9a58d`. It executed remotely in 7.105 seconds with `UI_JOBS=8`, requested
+1 CPU/1,572,864 KiB, and received the existing worker floor of 1.666 CPU and
+2,236,960,768 bytes. Worker peak usage was 536,645,632 bytes, CPU time was
+9.652 seconds, and no OOM event occurred. The fixture action digest was
+`579e3274ee94e2797863a6954d33192a8be0d00d78efd443b8f451d8d5ab16ab:147`.
+All 56 XML cases and expected/actual stderr receipts were materialized. Its
+first dependency build performed 391 remote actions and no local execution
+commands; this controlled one-slot cold dependency preparation took much longer
+than the fixture runner itself and is not a warm-workspace speed measurement.
+
+Repository-script validation passed 67 of 71 commands. Four failures reproduce
+unchanged on exact upstream `df6dbdf` with byte-identical relevant scripts,
+source files and allowlist: outcome suffix inventory, its unit gate, identity
+ADR inventory, and guarded transactions. The reported types are `Summary` and
+`UsageDisposition`; the transaction finding is `load_owner_usage` in PostgreSQL
+usage accounting. They are recorded as baseline failures rather than rewritten
+as part of the build migration. The existing slow workbench reset self-test
+retains its documented local skip and still runs in CI.
+
+Native AWS-LC-rs compiled with 86 remote and zero local actions. Protocol/VM
+build scripts produced their expected schema/fingerprint outputs with 117
+remote and zero local actions. Clippy passed the SQL target, rejected an
+intentional test-only warning and a root-config disallowed method, and passed
+again after restoration. Cargo manifests and lockfiles remain authoritative;
+the integration preserved current-main contents apart from a build-engine
+comment. The supported Cargo Git-consumer gate compiled successfully from exact
+cutover `d51a56b6d73187f5c948651bd279fe961c62155c` without a patch mirror.
+Cargo resolved that Git revision and its manifest hash matched the cutover. The
+gate took 242.68 seconds using the unchanged Cargo shim/admission recipe. This
+consumer check compiles locally and is separate from ordinary remote Buck2
+build/test measurements. Later repository-rule changes do not alter those
+consumer sources or manifests. Final-current-source metadata/build/lint, test
+selection, and corrected feature-variant UI evidence remain pending.
+
 ## Remaining delivery gates
 
-- Complete Cargo-shaped dependency and target generation, native build scripts,
-  source/asset declarations, features and profiles.
-- Build/check and Clippy parity, deterministic unit/integration partition,
+- Workspace build/check and Clippy checks, unit/integration partition,
   generated files, feature lanes, service runners and relevant CI/release paths.
-- Cargo consumption from the migration Git revision.
 - Concurrent independent worktrees with separate source, outputs and daemons.
 - Kiln generation/dispatch for Lash/Buck2 and Figments's existing backend.
 - Matched coordinator benchmarks with compilation work reported separately.
