@@ -49,6 +49,7 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-subagents": "lash-internal-subagents",
     "lash-tool-support": "lash-internal-tool-support",
     "lash-trace": "lash-internal-trace",
+    "lash-vm-broker": "lash-internal-vm-broker",
     "lash-vm-protocol": "lash-internal-vm-protocol",
     "lash-vm-worker": "lash-internal-vm-worker",
     "lash-typescript": "lash-internal-typescript",
