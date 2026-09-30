@@ -2279,8 +2279,8 @@ jobs:
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: |
           set -euo pipefail
-          # The crash-window attachment laws require PostgreSQL in both legs.
-          if [ "${{ matrix.name }}" = "server-double" ]; then
+          # The crash-window and effect-group attachment laws require PostgreSQL in both legs.
+          if [ "${{ matrix.name }}" = "server-double" ] || [ "${{ matrix.name }}" = "effect-group-conformance" ]; then
             bash scripts/ci/with-service.sh pg16 -- just ${{ matrix.recipe }}
           else
             just ${{ matrix.recipe }}

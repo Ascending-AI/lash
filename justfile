@@ -189,6 +189,7 @@ workbench-continue-as-budget-gate:
 effect-group-conformance-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
+  : "${LASH_POSTGRES_DATABASE_URL:?run scripts/ci/with-service.sh pg16 -- just effect-group-conformance-e2e}"
   source "{{repo}}/scripts/worktree-gate-env.sh"
   lash_gate_acquire_locks effect-group-conformance-e2e
 
