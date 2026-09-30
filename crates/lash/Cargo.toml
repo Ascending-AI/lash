@@ -109,6 +109,7 @@ synthetic-next = [
     "lash-restate?/synthetic-next",
     "lashlang?/synthetic-next",
     "lash-protocol-rlm?/synthetic-next",
+    "lash-vm-worker?/synthetic-next",
 ]
 
 [dev-dependencies]

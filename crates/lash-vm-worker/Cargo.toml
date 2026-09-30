@@ -21,6 +21,7 @@ test = false
 
 [features]
 testing = ["lash-vm-client/testing"]
+synthetic-next = ["lashlang/synthetic-next", "lash-core-execution/synthetic-next"]
 
 [[bin]]
 name = "lash-vm-worker-fixture"
