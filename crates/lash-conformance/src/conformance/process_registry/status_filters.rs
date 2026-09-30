@@ -20,7 +20,7 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
                     ),
                 )
                 .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                    ProcessIdentity::for_definition(
+                    definition_identity(
                         lash_core::ProcessDefinitionRef::unclaimed(
                             "indexed-filter-kind",
                             serde_json::json!({"definition": "target"}),
@@ -76,7 +76,7 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
 
     let matches = registry
         .list_processes(&ProcessListFilter {
-            definition: Some(serde_json::json!({"definition": "target"}).into()),
+            definition_id: record.identity.definition_id.clone(),
             status: ProcessStatusFilter::any_of([ProcessStatus::Waiting]),
 
             originator: Some(ProcessOriginatorFilter::session("filter-origin")),
@@ -142,4 +142,24 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
         assert_eq!(records.iter().any(|row| row.id == process_id), target);
         assert_eq!(records.iter().any(|row| row.id == decoy_id), decoy);
     }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture uses a valid descriptor without dependencies"
+)]
+fn definition_identity(
+    reference: lash_core::ProcessDefinitionRef,
+    label: Option<impl Into<String>>,
+) -> lash_core::ProcessIdentity {
+    let id = lash_core::ProcessDefinitionDraft::new(
+        reference.engine_kind.clone(),
+        reference.definition.as_json().clone(),
+        [],
+    )
+    .expect("fixture descriptor")
+    .id();
+    let mut identity = lash_core::ProcessIdentity::labelled(reference.engine_kind, label);
+    identity.definition_id = Some(id);
+    identity
 }

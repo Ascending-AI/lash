@@ -699,9 +699,8 @@ finish(value);"#,
         .expect("tool provider entered");
 
     let processes = session.admin().processes().list().await?;
-    // The lifted literal's label is the lift digest (#1529), so the run is
-    // found by kind and liveness and the graph's entry name is compared against
-    // the label the registry actually recorded.
+    // The trace names the source export; the run identity names its definition.
+    // Resolve that export through the stored immutable process reference.
     let running = processes
         .iter()
         .find(|process| process.kind() == "lashlang" && !process.terminal())
@@ -717,7 +716,32 @@ finish(value);"#,
         .expect("Lashlang graph snapshot");
     assert_eq!(graph.graph_key, graph_key);
     assert_eq!(graph.entry_kind, "process");
-    assert_eq!(graph.entry_name, running.label());
+    let definition_id = running
+        .identity
+        .definition_id
+        .as_ref()
+        .expect("definition id");
+    let bytes = core
+        .backend()
+        .process_definitions()
+        .get_process_definition(definition_id)
+        .await
+        .map_err(lash_core::PluginError::from)?
+        .expect("retained descriptor");
+    let draft = lash_core::ProcessDefinitionDraft::from_store_bytes(definition_id, &bytes)
+        .expect("canonical descriptor");
+    let definition =
+        crate::rlm::lang::ProcessDefinitionIdentity::from_process_value(draft.value().as_json())
+            .expect("stock definition");
+    let artifact = crate::persistence::LashlangArtifacts::of_backend(core.backend())
+        .get_module_artifact(&definition.module_ref)
+        .await
+        .map_err(lash_core::PluginError::from)?
+        .expect("retained module");
+    assert_eq!(
+        Some(graph.entry_name.as_str()),
+        artifact.process_name_for_ref(&definition.process_ref)
+    );
     assert_eq!(
         graph.status,
         lash_lashlang_runtime::TraceLanguageExecutionStatus::Running
@@ -727,7 +751,7 @@ finish(value);"#,
         graph_store
             .graphs()
             .iter()
-            .any(|graph| graph.entry_name == running.label())
+            .any(|graph| graph.graph_key == graph_key)
     );
 
     let mut subscription = core
@@ -1149,7 +1173,7 @@ const lookup = async () => { return await tools.app_lookup({}); };
 const probe = async () => { return await tools.app_lookup({}); };
 const first = await processes.start({ definition: lookup });
 const second = await processes.start({ definition: probe });
-const matched = await processes.list({ definition: lookup, status: "any" });
+const matched = await processes.list({ definition_id: lookup.id, status: "any" });
 const every = await processes.list({ status: "any" });
 await first;
 await second;
@@ -1198,8 +1222,8 @@ pub(super) fn process_list_rejects_a_definition_that_was_not_started() -> Result
 const lookup = async () => { return await tools.app_lookup({}); };
 const idle = async () => { return await tools.app_lookup({}); };
 const handle = await processes.start({ definition: lookup });
-const matched = await processes.list({ definition: lookup, status: "any" });
-const other = await processes.list({ definition: idle, status: "any" });
+const matched = await processes.list({ definition_id: lookup.id, status: "any" });
+const other = await processes.list({ definition_id: idle.id, status: "any" });
 await handle;
 finish({ matched: matched.length, other: other.length });"#,
         )

@@ -221,8 +221,8 @@ fn add_process_control_operations(resources: &mut lashlang::LashlangHostCatalog)
             lash_plugin_process_controls::process_emit_tool_definition(),
         ),
         (
-            "register",
-            lash_plugin_process_controls::process_register_tool_definition(),
+            "get",
+            lash_plugin_process_controls::process_get_tool_definition(),
         ),
         (
             "list",

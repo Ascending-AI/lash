@@ -193,7 +193,10 @@ fn a_const_bound_literal_lifts_the_same_way() {
                 "register",
                 vec![
                     ("source", builders::var("source")),
-                    ("target", builders::var("handler")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("handler"))]),
+                    ),
                     ("inputs", builders::record(vec![("tick", trigger_event())])),
                 ],
             ),

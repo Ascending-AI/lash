@@ -389,7 +389,8 @@ impl ReferrerClaim {
     /// Unguarded kinds: `frame_environment`, `process_record`, `host_pin`.
     pub fn unguarded(referrer: ArtifactReferrer) -> Result<Self, ArtifactReferrerError>;
     /// `Execution` with `AwaitJournal`, `Start` with `AwaitStart`,
-    /// `SubscriptionRevision` with `AwaitSubscriptionRevision`. Any other
+    /// `SubscriptionRevision` with `AwaitSubscriptionRevision`, and a
+    /// prepared `FrameEnvironment` with `AwaitFrame`. Any other
     /// pairing, and every `Ended` plan, is refused.
     pub fn guarded(referrer: ArtifactReferrer, guard: ArtifactCleanupPlan)
         -> Result<Self, ArtifactReferrerError>;
@@ -517,6 +518,8 @@ pub struct ArtifactCleanup {
 pub enum ArtifactCleanupPlan {
     /// The referrer has ended. Carry, then fence and sever.
     Ended { carries: Vec<ArtifactCarry> },
+    /// Guard of a successor frame prepared before its SQL activation.
+    AwaitFrame { creator: lash_sansio::EffectJournalIdentity },
     /// Guard of an execution referrer: ends when its journal is settled.
     AwaitJournal,
     /// Guard of a start referrer (§3.3).
@@ -690,6 +693,9 @@ own transaction. Its `deliver`:
      expiry.
    - `AwaitSessionGraphRetired` (ADR 0124): no carries once the session is
      `DeletedRetired`.
+   - `AwaitFrame { creator }`: keep a frame reachable from a head, anchor or
+     admission base. If no retained frame exists, sever only after `creator`
+     is `Settled`; see §3.1.
 4. Call `end_process_env_referrer`, `end_module_referrer` and
    `ProcessEngineRegistry::end_artifact_referrer`, each with the carries for
    its store. When the referrer's kind holds attachments, also call the
@@ -812,6 +818,26 @@ transaction that fact lives in, and where the cleanup record comes from.
 So every artifact that a global of F references has an F edge. Call this
 **I-frame**. It is what makes carries safe.
 
+**Cross-store definition activation (FIG-4177).** The successor frame id is
+minted before the seed callback. The worker reports tagged definition ids;
+the parent validates each canonical descriptor and its complete manifest.
+Before activating the frame in SQL, the parent acquires every engine-owned
+manifest entry under the successor's `FrameEnvironment` claim, idempotently
+by `(frame id, artifact)`. This claim arms `AwaitFrame { creator }` before
+any engine edge is acquired. No engine artifact bytes are copied.
+
+The SQLite/PG frame transaction validates the descriptor again and carries
+SQL-owned entries atomically with the new frame and head. It never publishes
+the frame before engine acquisition completes. A crash before SQL activation
+leaves prepared edges whose frame does not exist. Their guard waits until
+the preparing journal cannot replay, then severs them. A committed frame
+reachable from a head, anchor or admission root retains the prepared edges
+under the same root classes as checkpoint reclamation (FIG-4237); admission
+retention conservatively protects committed nodes in that session until the
+admission is released. A crash after activation therefore preserves the
+complete closure. A later `Ended` hook with no carry still fences and severs
+all of the ending frame's edges.
+
 **`continue_as`.** The final commit of the switching turn
 (`crates/lash-core/src/runtime/turn_boundary.rs:384-398`) asks the code
 executor for its carries:
@@ -819,11 +845,13 @@ executor for its carries:
 ```rust
 // CodeExecutorPlugin, crates/lash-core-execution/src/plugin/protocol.rs: required
 async fn frame_switch_carries(&self, ctx: ProtocolSessionContext<'_>,
-    initial_nodes: &[SessionAppendNode]) -> Result<Vec<ArtifactName>, SessionError>;
+    successor: &FrameNodeId, initial_nodes: &[SessionAppendNode]) -> Result<Vec<ArtifactName>, SessionError>;
 ```
 
-RLM answers the modules that the seed values in `initial_nodes` reference
-(the `continue_as` seed, `crates/lash-protocol-rlm/src/projection/transport.rs:14-48`).
+RLM discovers tagged definition IDs in the seed values in `initial_nodes`
+(the `continue_as` seed, `crates/lash-protocol-rlm/src/projection/transport.rs:14-48`)
+and returns each validated descriptor and complete dependency manifest.
+Bare module references and copied digest strings carry no definition.
 `ExecutionStateUpdate::Clear` becomes `Clear { carries: Vec<ArtifactName> }`.
 `RuntimeCommit` gains:
 
@@ -845,13 +873,15 @@ The backend's session commit transaction
 `crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs:280-292`)
 does all of this with the head CAS:
 
-1. Every carried artifact must have an edge of `ended`. If one does not, the
-   commit is refused with `ArtifactCarryMissing` (I-frame is broken).
-2. Insert the successor's edges.
+1. Validate each canonical definition descriptor. Every SQL-owned carried
+   artifact must have an edge of `ended`; otherwise refuse with
+   `ArtifactCarryMissing` (I-frame is broken). Engine-owned entries have
+   already been prepared under the successor's guarded claim.
+2. Insert the successor's SQL-owned edges.
 3. Insert `ended`'s fence.
 4. Upsert `Ended { carries: [] }` for `ended` with `gate`. The carries were
-   applied in step 2, and frame edges live only in the store set's two ports,
-   which share this database.
+   applied before activation: engine-owned entries in the prepare step and
+   SQL-owned entries in step 2.
 
 **Every other committed frame open ends the frame too.** Administrative
 compaction (`crates/lash-core/src/runtime/session_api.rs:782`, commit at
@@ -1097,10 +1127,10 @@ edge.
 
 The switching turn may still replay and read F's artifacts. So F's cleanup
 carries `gate = <that turn's journal>`, and the executor severs nothing until
-`journal_replay` is `Settled`. Carries into the successor are applied inside
-the switch commit, so the successor is protected when it becomes visible.
-This is the report's "acknowledge destination protection before activating
-the successor", done atomically.
+`journal_replay` is `Settled`. Engine-store edges are prepared before the
+switch; SQL-owned edges are acquired inside its commit. Both shares protect
+the successor when it becomes visible. `AwaitFrame` reclaims an uncommitted
+preparation only after its creating journal cannot replay.
 
 #### 4.2 A crash between publication and the referrer's record
 
@@ -1153,9 +1183,10 @@ process engine with its own artifact store. PostgreSQL, and the frame and
 definition paths on SQLite, share one database.
 
 - **Prepare.** Destination protection is acquired in every artifact store
-  before the successor record commits. Frame carries do it in the commit
-  itself; revisions and starts do it pre-commit under guards. Source edges
-  are kept throughout.
+  before the successor record commits. A frame's engine-store share is
+  acquired before activation under `AwaitFrame`; its SQL-owned share is
+  acquired atomically in the frame commit. Starts and subscription revisions
+  prepare under their guards. Source edges are kept throughout.
 - **Activate.** The referrer store's transaction commits the successor and
   the ended referrer's `Ended` record together, or its guard is already
   durable.

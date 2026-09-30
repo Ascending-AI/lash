@@ -280,7 +280,7 @@ finish(result);"#,
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"embed_tools":{"generation":0,"values":{}},"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
-        process-001  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
+        process-001  outcome   process.completed       label="-" kind="lashlang" terminal=true
         "#);
         Ok(())
     })
@@ -427,7 +427,7 @@ finish(result);"#,
         session-001              tool_state            ref (unchanged)
         session-001              plugin_state          ref (unchanged)
         session-001              execution_state       stored logical=unknown
-        process-001  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
+        process-001  outcome   process.completed       label="-" kind="lashlang" terminal=true
         process-002  outcome   process.completed       label="spawn" kind="subagent" terminal=true
         "#);
         Ok(())
@@ -487,9 +487,9 @@ finish(result);"#,
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
-        process-001  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
-        process-002  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
-        process-003  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
+        process-001  outcome   process.completed       label="-" kind="lashlang" terminal=true
+        process-002  outcome   process.completed       label="-" kind="lashlang" terminal=true
+        process-003  outcome   process.completed       label="-" kind="lashlang" terminal=true
         "#);
         assert_lashlang_process_ids_unique_for_labels(
             &run.final_process_list,
@@ -669,8 +669,8 @@ finish({ joined: [leftValue, rightValue] });"#,
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
-        process-001  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
-        process-002  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
+        process-001  outcome   process.completed       label="-" kind="lashlang" terminal=true
+        process-002  outcome   process.completed       label="-" kind="lashlang" terminal=true
         "#);
         assert_lashlang_process_ids_unique_for_labels(&run.final_process_list, ["child", "child"]);
 
@@ -735,11 +735,16 @@ fn assert_lashlang_process_ids_unique_for_labels<const N: usize>(
             "duplicate lashlang process id `{}`",
             process.process_id
         );
-        labels.push(process.label.as_deref().unwrap_or("<missing>"));
+        labels.push(
+            process
+                .definition_id
+                .as_ref()
+                .expect("a lifted definition id")
+                .as_str(),
+        );
     }
-    // #1529 retired the source-level process name: a lifted literal's label is
-    // its lift digest. One digest per distinct definition still holds, so the
-    // scenario pins how many distinct definitions ran, and how many runs.
+    // Distinct immutable definition ids identify the definitions that ran.
+    // Labels are independent, so the scenario counts ids and runs.
     labels.sort_unstable();
     assert_eq!(
         labels.len(),

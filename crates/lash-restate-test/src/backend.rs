@@ -262,6 +262,22 @@ async fn sqlite_stores(
 }
 
 impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
+    /// Retain the same server and stores behind the common storage interface.
+    pub fn erase_store_type(self) -> RestateTestBackend<dyn StoreSet> {
+        RestateTestBackend {
+            server: self.server,
+            restate: self.restate,
+            stores: Arc::clone(&self.engine_stores),
+            engine_stores: self.engine_stores,
+            clock: self.clock,
+            connection: self.connection,
+            processes: self.processes,
+            jobs: self.jobs,
+            loans: self.loans,
+            authority: self.authority,
+        }
+    }
+
     async fn build<StoreFuture>(
         config: ServerConfig,
         segment_effect_budget: Option<u64>,

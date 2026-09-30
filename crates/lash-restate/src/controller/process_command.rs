@@ -229,6 +229,26 @@ where
 {
     let mut local_executor = local_executor;
     let outcome_observer = local_executor.take_process_outcome_observer();
+    if matches!(
+        command,
+        ProcessCommand::PublishDefinition { .. } | ProcessCommand::GetDefinition { .. }
+    ) {
+        let execution = local_executor.into_process_definitions()?;
+        return recorded_process_step(context, invocation, "process-definition", async move {
+            let outcome = execution
+                .execute(invocation.effect_replay_key(), command)
+                .await?;
+            if let Some(observer) = outcome_observer {
+                observer(&outcome, lash_core::StoreRealization::Realized);
+            }
+            Ok(JournaledProcessOutcome {
+                outcome,
+                realization: lash_core::StoreRealization::Realized,
+            })
+        })
+        .await
+        .map(|recorded| recorded.outcome);
+    }
     if matches!(command, ProcessCommand::RegisterDefinition { .. }) {
         let outcome = local_executor
             .into_process_definitions()?
@@ -912,7 +932,9 @@ where
         }
         // Served by the early arm above against the process-definition
         // executor; it never reaches the process executor.
-        ProcessCommand::RegisterDefinition { .. } => Err(RuntimeEffectControllerError::new(
+        ProcessCommand::PublishDefinition { .. }
+        | ProcessCommand::GetDefinition { .. }
+        | ProcessCommand::RegisterDefinition { .. } => Err(RuntimeEffectControllerError::new(
             RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
             "register-definition is served by the process-definition executor, \
              which the early arm requires before the process executor runs",

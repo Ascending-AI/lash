@@ -469,9 +469,15 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
         effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),
-        engines: Arc::new(lash_core::ProcessEngineRegistry::new().with_registration(
-            lash_lashlang_runtime::lashlang_process_engine_registration(traced_engine()),
-        )),
+        engines: Arc::new(
+            lash_core::ProcessEngineRegistry::new()
+                .with_artifact_ports(lash_core::ArtifactReferrerPorts::of_backend(
+                    table.backend(),
+                ))
+                .with_registration(lash_lashlang_runtime::lashlang_process_engine_registration(
+                    traced_engine(),
+                )),
+        ),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         crate::testing::double_ports(table.double(), &handler),

@@ -98,6 +98,7 @@ fn start_request(
 ) -> Result<lash_core::ProcessStartRequest, String> {
     Ok(lash_core::ProcessStartRequest::new(
         lash_core::ProcessInput::Definition {
+            signature_claim: None,
             definition_id: id.clone(),
             args: serde_json::Map::new(),
         },

@@ -1,5 +1,5 @@
 //! The declaring process-control leaf tools: `start`, `signal`, `emit` and
-//! `register`.
+//! `get`.
 //!
 //! Each one is an ordinary leaf tool. None of them performs its durable act in
 //! the attempt body: every one declares a [`lash_core::ToolIntent`] and lets
@@ -25,80 +25,74 @@ use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
 
 use crate::done_without_intents;
 
-/// The engine a start or registration names when the caller does not say.
-///
-/// A definition value is engine-owned bytes: nothing in it says which engine
-/// owns it, so the engine kind is an argument rather than something this plugin
-/// can infer. The default is the one engine a stock runtime configures; a
-/// third-party plugin contributing its own engine passes its own kind, and an
-/// engine this host never registered is refused at realization by the engine
-/// registry rather than guessed at here.
-pub const DEFAULT_PROCESS_ENGINE_KIND: &str = "lashlang";
-
-/// The process value a definition argument carries, as `x-lash` says it.
-///
-/// `process_unknown` rather than `handle`: `handle` is the *trigger* handle
-/// kind and requires the payload its trigger delivers, which is a different
-/// type and would refuse a process value. The host has no authoritative call
-/// signature for an arbitrary caller-supplied definition, so it describes the
-/// argument as a process it can only say is callable. The engine that owns the
-/// definition supplies the authority at admission.
 fn definition_property(description: &str) -> Value {
-    serde_json::json!({
-        "x-lash": { "kind": "process_unknown" },
-        "description": description,
-    })
+    serde_json::json!({ "type": "object", "description": description, "properties": { "id": definition_id_schema(), "signature": {"oneOf": [{"type": "object", "properties": {"signature": {"const": "unknown"}}, "required": ["signature"], "additionalProperties": false}, {"type": "object", "properties": {"signature": {"const": "known"}, "encoding": {}}, "required": ["signature", "encoding"], "additionalProperties": false}]} }, "required": ["id", "signature"], "additionalProperties": false })
 }
 
-fn engine_property() -> Value {
-    serde_json::json!({
-        "type": "string",
-        "description": "Engine that owns the definition value. Defaults to the stock engine; pass the kind a third-party engine registered under.",
-    })
+pub fn definition_id_schema() -> Value {
+    serde_json::json!({ "type": "object", "properties": { "$lash_definition_id": { "type": "string", "pattern": "^lash\\.definition:sha256:[0-9a-f]{64}$" } }, "required": ["$lash_definition_id"], "additionalProperties": false })
 }
 
-/// `processes.start(definition, args)` — declare a durable child start and
-/// answer with the handle it will be held by.
 pub fn process_start_tool_definition() -> ToolDefinition {
-    ToolDefinition::raw(
-        "tool:start_process",
-        "start_process",
-        "Start a durable process from a process definition value and return a handle to it. The start is durable: it survives a restart of the starting turn, and the handle returned here names the process the registry holds afterwards.",
+    ToolDefinition::raw("tool:start_process", "start_process", "Start a durable process by immutable definition or tagged definition ID and return its handle.",
         serde_json::json!({
             "type": "object",
             "properties": {
-                "definition": definition_property(
-                    "The process to start, for example `on_button`: pass the process itself.",
-                ),
-                "args": {
-                    "type": "object",
-                    "description": "Arguments for the process's declared parameters. Defaults to no arguments.",
-                },
-                "engine": engine_property(),
-                "label": {
-                    "type": "string",
-                    "description": "Host-facing label for the started run. Never part of the process's identity.",
-                },
+                "definition": definition_property("The immutable definition returned by create or get."),
+                "definition_id": definition_id_schema(),
+                "args": { "type": "object" },
+                "label": { "type": "string" }
             },
-            "required": ["definition"],
+            "oneOf": [{"required": ["definition"], "not": {"required": ["definition_id"]}}, {"required": ["definition_id"], "not": {"required": ["definition"]}}],
             "additionalProperties": false
         }),
-        // The answer *is* the handle, so it is typed as the one process type
-        // rather than as the record that carries it: a start whose result read
-        // as a plain object could not be handed back to `await`, `signal` or
-        // `cancel`, which is the whole point of holding it. The record's own
-        // fields are `__handle__` and the opaque `id`, plus the `process_id`
-        // the process tools take; the id is opaque to the cell and is never
-        // parsed or built by guest code (ADR 0095).
-        serde_json::json!({
-            "x-lash": { "kind": "process_unknown" },
-            "description": "Handle to the started process: await it for the result, or pass it to `processes.signal`, `processes.cancel` or `processes.await`.",
-        }),
+        serde_json::json!({"x-lash": {"kind": "process_unknown"}}))
+        .with_tool_binding(ToolBinding::new(["processes"], "start"))
+}
+
+pub fn process_get_tool_definition() -> ToolDefinition {
+    ToolDefinition::raw("tool:get_process_definition", "get_process_definition", "Resolve a tagged definition ID and retain its definition in this execution.",
+        serde_json::json!({"type": "object", "properties": {"definition_id": definition_id_schema()}, "required": ["definition_id"], "additionalProperties": false}),
+        serde_json::json!({"type": "object", "properties": {"id": definition_id_schema(), "signature": {}}, "required": ["id", "signature"], "additionalProperties": false}))
+        .with_tool_binding(ToolBinding::new(["processes"], "get"))
+}
+
+pub fn execute_process_get_tool_call(
+    context: &AttemptContext<'_>,
+    args: &Value,
+) -> ToolAttemptOutcome {
+    let Ok(map) = exact_fields(args, &["definition_id"]) else {
+        return refuse("get requires only definition_id");
+    };
+    let Some(value) = map.get("definition_id") else {
+        return refuse("get requires definition_id");
+    };
+    let id = match lash_core::ProcessDefinitionId::from_tagged_json(value) {
+        Ok(id) => id,
+        Err(error) => return refuse(error),
+    };
+    ToolAttemptOutcome::done(
+        ToolOutcomeDone::ok(lash_sansio::handle::definition_slot_json(0)),
+        ToolIntents::v3(vec![ToolIntent::GetDefinition(
+            lash_core::GetDefinitionIntent {
+                owner: context.owner().runtime_owner(),
+                definition_id: id,
+            },
+        )]),
     )
-    .with_examples(vec![
-        "await processes.start({ definition: on_button, args: { request: r } })?".into(),
-    ])
-    .with_tool_binding(ToolBinding::new(["processes"], "start"))
+}
+
+fn exact_fields<'a>(
+    value: &'a Value,
+    fields: &[&str],
+) -> Result<&'a serde_json::Map<String, Value>, String> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| "arguments must be an object".to_owned())?;
+    if let Some(key) = map.keys().find(|key| !fields.contains(&key.as_str())) {
+        return Err(format!("unknown field `{key}`"));
+    }
+    Ok(map)
 }
 
 /// `processes.signal(handle, name, payload)` — deliver a named signal.
@@ -162,69 +156,9 @@ pub fn process_emit_tool_definition() -> ToolDefinition {
     .with_tool_binding(ToolBinding::new(["processes"], "emit"))
 }
 
-/// `processes.register(name, definition)` — install a name for a definition.
-pub fn process_register_tool_definition() -> ToolDefinition {
-    ToolDefinition::raw(
-        "tool:register_process",
-        "register_process",
-        "Register a process definition under a name so later starts and trigger registrations can select it by that name.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Name to register the definition under, unique within the owning scope.",
-                },
-                "definition": definition_property(
-                    "The process to register, for example `on_button`: pass the process itself.",
-                ),
-                "engine": engine_property(),
-            },
-            "required": ["name", "definition"],
-            "additionalProperties": false
-        }),
-        serde_json::json!({ "description": "The registered definition." }),
-    )
-    .with_examples(vec![
-        r#"await processes.register({ name: "approval", definition: on_button })?"#.into(),
-    ])
-    .with_tool_binding(ToolBinding::new(["processes"], "register"))
-}
-
-/// The engine start payload a definition value and its arguments make.
-///
-/// A definition value is the engine's own encoding of "which definition", and
-/// an engine start payload is that same encoding plus the arguments for this
-/// run. Building it here by adding `args` keeps the plugin engine-agnostic:
-/// nothing in this crate knows the shape of any engine's definition value, and
-/// the engine's own admission is what reads the result and refuses a payload it
-/// does not recognise.
-fn engine_start_payload(definition: &Value, args: Option<&Value>) -> Result<Value, String> {
-    let Value::Object(fields) = definition else {
-        return Err("`definition` must be a process definition value".to_string());
-    };
-    let mut payload = fields.clone();
-    let args = match args {
-        None => serde_json::Map::new(),
-        Some(Value::Object(args)) => args.clone(),
-        Some(_) => return Err("`args` must be an object".to_string()),
-    };
-    payload.insert("args".to_string(), Value::Object(args));
-    Ok(Value::Object(payload))
-}
-
 fn required_object_field<'a>(args: &'a Value, field: &str) -> Result<&'a Value, String> {
     args.get(field)
         .ok_or_else(|| format!("`{field}` is required"))
-}
-
-fn engine_kind(args: &Value) -> String {
-    args.get("engine")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|kind| !kind.is_empty())
-        .unwrap_or(DEFAULT_PROCESS_ENGINE_KIND)
-        .to_string()
 }
 
 /// The host-facing label a start declares, when it declares one.
@@ -234,7 +168,7 @@ fn engine_kind(args: &Value) -> String {
 /// the defect this plumbing fixes.
 fn start_label(args: &Value) -> Result<Option<String>, String> {
     match args.get("label") {
-        None | Some(Value::Null) => Ok(None),
+        None => Ok(None),
         Some(Value::String(label)) => {
             let label = label.trim();
             if label.is_empty() {
@@ -256,13 +190,27 @@ pub async fn execute_process_start_tool_call(
     args: &Value,
     lifetime: &lash_core::LifetimePolicy,
 ) -> ToolAttemptOutcome {
-    let definition = match required_object_field(args, "definition") {
-        Ok(value) => value,
-        Err(message) => return refuse(message),
+    let fields = match exact_fields(args, &["definition", "definition_id", "args", "label"]) {
+        Ok(fields) => fields,
+        Err(error) => return refuse(error),
     };
-    let payload = match engine_start_payload(definition, args.get("args")) {
-        Ok(payload) => payload,
-        Err(message) => return refuse(message),
+    let target = match (fields.get("definition"), fields.get("definition_id")) {
+        (Some(value), None) => {
+            match serde_json::from_value::<lash_core::ProcessDefinition>(value.clone()) {
+                Ok(definition) => lash_core::ProcessDefinitionTarget::Definition(definition),
+                Err(error) => return refuse(error),
+            }
+        }
+        (None, Some(value)) => match lash_core::ProcessDefinitionId::from_tagged_json(value) {
+            Ok(id) => lash_core::ProcessDefinitionTarget::DefinitionId(id),
+            Err(error) => return refuse(error),
+        },
+        _ => return refuse("exactly one of definition or definition_id is required"),
+    };
+    let run_args = match fields.get("args") {
+        None => serde_json::Map::new(),
+        Some(Value::Object(args)) => args.clone(),
+        Some(_) => return refuse("args must be an object"),
     };
     let identity = context.intent_identity(0);
     // The lifetime is the host's policy resolved against this attempt's
@@ -314,9 +262,9 @@ pub async fn execute_process_start_tool_call(
         }
     };
     let declaration = lash_core::ProcessStartDeclaration::new(
-        lash_core::ProcessInput::Engine {
-            kind: engine_kind(args),
-            payload,
+        lash_core::ProcessInput::Definition {
+            definition_id: target.definition_id().clone(), args: run_args,
+            signature_claim: Some(target.signature_claim().clone()),
         },
         originator,
         lifetime,
@@ -336,7 +284,7 @@ pub async fn execute_process_start_tool_call(
     let declaration = match start_label(args) {
         Ok(None) => declaration,
         Ok(Some(label)) => declaration.with_declared_identity(
-            lash_core::DeclaredProcessIdentity::labelled(engine_kind(args), Some(label)),
+            lash_core::DeclaredProcessIdentity::labelled("definition", Some(label)),
         ),
         Err(message) => return refuse(message),
     };
@@ -421,46 +369,6 @@ pub fn execute_process_emit_tool_call(
                 payload: value,
             },
         )]),
-    )
-}
-
-/// The declaration carries the claimed name to the registry (FIG-2995):
-/// realization resolves the definition once, pins the returned reference into
-/// the durable row, and refuses with the shared typed
-/// `process_definition_registry_unavailable` reason on a runtime that has no
-/// registry. No `expected_revision` rides this tool, so the registration is a
-/// fresh-slot claim and a take-over of a registered name refuses with the
-/// typed conflict instead of silently rewriting it.
-pub fn execute_process_register_tool_call(
-    context: &AttemptContext<'_>,
-    args: &Value,
-) -> ToolAttemptOutcome {
-    let Some(name) = args
-        .get("name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-    else {
-        return refuse("register_process requires a non-empty `name`");
-    };
-    let definition = match required_object_field(args, "definition") {
-        Ok(value) => value.clone(),
-        Err(message) => return refuse(message),
-    };
-    ToolAttemptOutcome::done(
-        ToolOutcomeDone::ok(serde_json::json!({ "name": name })),
-        ToolIntents::v3(vec![ToolIntent::RegisterProcessDefinition(Box::new(
-            lash_core::RegisterProcessDefinitionIntent {
-                owner: context.owner().runtime_owner(),
-                engine_kind: engine_kind(args),
-                definition,
-                env_spec: None,
-                label: Some(name.to_string()),
-                name: Some(name.to_string()),
-                expected_revision: None,
-                module: None,
-            },
-        ))]),
     )
 }
 

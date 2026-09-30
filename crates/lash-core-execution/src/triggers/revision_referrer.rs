@@ -195,6 +195,11 @@ impl RevisionReferrerTriggerStore {
             store: ArtifactStoreId::ProcessEnv,
             artifact_ref: revision.env_ref.as_str().to_owned(),
         }];
+        if let ProcessInput::Definition { definition_id, .. } = &revision.target {
+            ports
+                .acquire_definition(&self.engines, &claim, definition_id)
+                .await?;
+        }
         if let ProcessInput::Engine { kind, payload } = &revision.target {
             names.extend(self.engines.require(kind)?.start_artifacts(payload)?);
         }

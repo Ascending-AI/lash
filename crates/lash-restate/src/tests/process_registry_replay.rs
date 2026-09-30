@@ -177,7 +177,12 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
         &sent.host_requirements_ref,
         linked_module.artifact.host_requirements_ref()
     );
-    assert_eq!(sent.process_name, "scan");
+    assert_eq!(
+        linked_module
+            .artifact
+            .process_name_for_ref(&sent.process_ref),
+        Some("scan")
+    );
     assert_eq!(sent.args, args);
     assert_eq!(
         context

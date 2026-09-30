@@ -66,7 +66,7 @@ fn list_and_prune_statements_keep_their_previous_predicates() {
             .process_postgres
             .list
             .sql()
-            .contains("(record_json::JSONB #> '{identity,definition,definition}') = $5")
+            .contains("(record_json::JSONB #> '{identity,definition_id}') = $5")
     );
     assert!(process_sql().registry_postgres.list_observed.sql().contains(
         "               AND ($3::BIGINT IS NULL OR p.status IN ('running', 'waiting')\n                    OR p.updated_at_ms >= $3)\n"

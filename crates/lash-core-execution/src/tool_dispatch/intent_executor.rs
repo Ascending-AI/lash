@@ -549,19 +549,26 @@ async fn execute_one(
                 Box::pin(router.emit_recorded(request, &context.effect_controller)).await?;
             Ok(serde_json::to_value(report).unwrap_or(serde_json::Value::Null))
         }
-        crate::ToolIntent::RegisterProcessDefinition(intent) => {
-            publish_declared_module(context, intent).await?;
-            if intent.name.is_none() {
-                return realize_created_process_definition(context, intent).await;
-            }
-            let registry = context
-                .process_definitions
-                .clone()
-                .ok_or_else(|| process_definition_registry_unavailable(&intent.engine_kind))?;
-            Ok(serde_json::to_value(
-                realize_register_process_definition(context, intent, identity, registry).await?,
+        crate::ToolIntent::PublishDefinition(intent) => {
+            realize_definition(
+                context,
+                identity,
+                crate::ProcessCommand::PublishDefinition {
+                    draft: intent.draft.clone(),
+                    module: intent.module.clone(),
+                },
             )
-            .unwrap_or(serde_json::Value::Null))
+            .await
+        }
+        crate::ToolIntent::GetDefinition(intent) => {
+            realize_definition(
+                context,
+                identity,
+                crate::ProcessCommand::GetDefinition {
+                    definition_id: intent.definition_id.clone(),
+                },
+            )
+            .await
         }
         crate::ToolIntent::RegisterTrigger(intent) => {
             let router = context.trigger_router.as_ref().ok_or_else(|| {
@@ -574,213 +581,48 @@ async fn execute_one(
     }
 }
 
-/// The definition registry is unavailable in this runtime: the declaration is
-/// admitted, identified and journaled like any other intent, so realization
-/// refuses in the shared typed vocabulary rather than reporting a
-/// registration that never happened.
-fn process_definition_registry_unavailable(engine_kind: &str) -> crate::PluginError {
-    crate::PluginError::Session(format!(
-        "process definition registry is unavailable in this runtime: \
-         cannot register a `{engine_kind}` definition"
-    ))
-}
-
-/// Publish the module a definition declaration carries, under the realizing
-/// execution's journal referrer (ADR 0113 §3.7), before anything resolves or
-/// acquires it. The bytes are content-addressed, so a redrive publishes the
-/// same module again and changes nothing.
-async fn publish_declared_module(
-    context: &ToolDispatchContext<'_>,
-    intent: &crate::RegisterProcessDefinitionIntent,
-) -> Result<(), crate::PluginError> {
-    let Some(module) = intent.module.as_ref() else {
-        return Ok(());
-    };
-    let ports = context.process_engines.artifact_ports().ok_or_else(|| {
-        crate::PluginError::Session(format!(
-            "a `{}` definition carries a module but the runtime's engine registry has no \
-             artifact stores to publish it",
-            intent.engine_kind
-        ))
-    })?;
-    let scoped = context.effect_controller.clone();
-    ports
-        .modules()
-        .publish_module_artifact(
-            &crate::session::execution_claim_of(scoped.execution_scope())?,
-            &module.module_ref,
-            module.bytes.as_bytes(),
-        )
-        .await
-        .map_err(crate::PluginError::from)
-}
-
-/// Realization of an unnamed [`RegisterProcessDefinitionIntent`](crate::tool_intent::RegisterProcessDefinitionIntent):
-/// `processes.create` (FIG-3116). No registry slot is written. The engine
-/// resolves the definition against the module just published, so a value that
-/// names bytes it does not match refuses typed, and the result is the
-/// definition value the attempt answered. The caller's frame holds its module
-/// from the cell that binds it (ADR 0113 §3.1, §6); until then the realizing
-/// execution's journal does.
-async fn realize_created_process_definition(
-    context: &ToolDispatchContext<'_>,
-    intent: &crate::RegisterProcessDefinitionIntent,
-) -> Result<serde_json::Value, crate::PluginError> {
-    context
-        .process_engines
-        .resolve(&crate::ProcessDefinitionRef::unclaimed(
-            intent.engine_kind.clone(),
-            intent.definition.clone(),
-        ))
-        .await
-        .map_err(crate::PluginError::from)?;
-    Ok(serde_json::json!({ "definition": intent.definition }))
-}
-
-/// Realization of one [`RegisterProcessDefinitionIntent`](crate::tool_intent::RegisterProcessDefinitionIntent)
-/// against the registry (FIG-2995).
-///
-/// Resolve-once discipline: the engine registry resolves the definition
-/// reference first, and the durable row pins the engine's authoritative
-/// signature and its derived fingerprint. The name is tool input only and
-/// never reaches a durable consumer record. The write carries the caller's
-/// compare-and-swap expectation, so a stale expected revision, or a
-/// take-over of a name without the caller's endorsement, refuses with the
-/// registry's typed conflict instead of rewriting silently.
 #[expect(
     clippy::expect_used,
-    reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+    reason = "the controller carries an admitted scope"
 )]
-async fn realize_register_process_definition(
+async fn realize_definition(
     context: &ToolDispatchContext<'_>,
-    intent: &crate::RegisterProcessDefinitionIntent,
     identity: &crate::ToolIntentIdentity,
-    registry: Arc<dyn crate::ProcessDefinitionRegistry>,
-) -> Result<crate::ProcessDefinitionRegistration, crate::PluginError> {
-    let name = intent
-        .name
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| {
-            crate::PluginError::Session(
-                "process definition registration requires a registered name".to_string(),
-            )
-        })?;
-    crate::process_registry::validate_process_definition_name(name)?;
-    // A named definition belongs to a session's registry slot; a process
-    // runtime has no session to name it under.
-    let session_id = match &intent.owner {
-        crate::RuntimeOwner::Session(session_id) => session_id,
-        crate::RuntimeOwner::Process(process_id) => {
-            return Err(crate::runtime::not_a_session_runtime(
-                "register_named_process_definition",
-                process_id,
-            ));
-        }
-    };
-    // A name resolves once, at intent execution. An existing slot under this
-    // name resolves its pinned record; a fresh registration resolves through
-    // the engine directly.
-    let existing =
-        crate::process_registry::resolve_named_definition(registry.as_ref(), session_id, name)
-            .await?;
-    let pinned = match existing.as_ref() {
-        Some(existing) => {
-            if existing.definition.engine_kind.as_str() != intent.engine_kind {
-                return Err(crate::PluginError::Session(format!(
-                    "process definition name `{name}` is registered under engine kind \
-                     `{}`, not `{}`",
-                    existing.definition.engine_kind, intent.engine_kind
-                )));
-            }
-            existing.definition.clone()
-        }
-        None => crate::ProcessDefinitionRef::unclaimed(
-            intent.engine_kind.clone(),
-            intent.definition.clone(),
-        ),
-    };
-    let resolution = context
-        .process_engines
-        .resolve(&pinned)
-        .await
-        .map_err(crate::PluginError::from)?;
-    let pinned = pinned.with_resolved_signature(resolution.signature);
-    let expectation = match existing
-        .as_ref()
-        .map(|existing| (existing.revision, existing.fingerprint.clone()))
-    {
-        Some((existing_revision, existing_fingerprint)) => {
-            // A re-registration must carry the caller's observed revision;
-            // without it the write would silently take the name over, which
-            // the compare-and-swap fence forbids.
-            let Some(observed_revision) = intent.expected_revision else {
-                return Err(crate::PluginError::Session(format!(
-                    "process definition name `{name}` is registered at revision \
-                     {existing_revision}; re-registration requires the caller's \
-                     revision compare-and-swap"
-                )));
-            };
-            Some(crate::ProcessDefinitionExpectation::observed(
-                observed_revision,
-                existing_fingerprint,
-            ))
-        }
-        None => None,
-    };
-    // The CAS write crosses the runtime-effect seam exactly like
-    // `register_recorded_trigger` (FIG-3470): the journaled admission — not
-    // this call — owns the durable write, so a redrive replays the recorded
-    // registration and a group child admits it under its own binding.
+    command: crate::ProcessCommand,
+) -> Result<serde_json::Value, crate::PluginError> {
     let scoped = context.effect_controller.clone();
-    // The CAS holds the revision it writes before it writes, under the
-    // intent's journal (ADR 0113 §3.6).
-    let creator = scoped
-        .execution_scope()
-        .journal_identity()
-        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-    let registry: Arc<dyn crate::ProcessDefinitionRegistry> = Arc::new(
-        crate::process_registry::RevisionReferrerDefinitionRegistry::new(
-            registry,
-            context.process_engines.clone(),
-            creator,
-        ),
-    );
     let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
             scoped.execution_scope().clone(),
             identity.replay_key.clone(),
         )
-        .expect("tool-intent execution carries an admitted effect scope"),
+        .expect("admitted scope"),
         context.parentless_attribution(),
         identity.replay_key.clone(),
     )
     .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
         identity.clone(),
     ));
-    let outcome = scoped
+    let claim = crate::session::execution_claim_of(scoped.execution_scope())?;
+    let result = scoped
         .execute_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
-                crate::RuntimeEffectCommand::process(crate::ProcessCommand::RegisterDefinition {
-                    owner_scope: crate::TriggerOwnerScope::session(session_id.clone()),
-                    name: name.to_string(),
-                    pinned,
-                    expectation,
-                }),
+                crate::RuntimeEffectCommand::process(command),
             ),
-            crate::RuntimeEffectLocalExecutor::process_definitions(registry),
+            crate::RuntimeEffectLocalExecutor::definition_artifacts(
+                context.process_engines.clone(),
+                claim,
+            ),
         )
-        .await
-        .map_err(crate::PluginError::RuntimeEffectController)?
-        .into_process()
-        .map_err(crate::PluginError::RuntimeEffectController)?;
-    match outcome {
-        crate::ProcessEffectOutcome::RegisterDefinition { registration } => Ok(*registration),
-        other => Err(crate::PluginError::Session(format!(
-            "process definition registration returned a non-registration outcome: {other:?}"
-        ))),
+        .await?
+        .into_process()?;
+    match result {
+        crate::ProcessEffectOutcome::Definition { definition } => serde_json::to_value(definition)
+            .map_err(|error| crate::PluginError::Session(error.to_string())),
+        _ => Err(crate::PluginError::Session(
+            "definition effect returned a different outcome".into(),
+        )),
     }
 }
 

@@ -19,7 +19,10 @@ fn register_scan_trigger(source: Expr) -> Expr {
         "register",
         vec![
             ("source", source),
-            ("target", builders::var("scan")),
+            (
+                "target",
+                builders::record(vec![("definition", builders::var("scan"))]),
+            ),
             ("inputs", builders::record(vec![("tick", trigger_event())])),
         ],
     )

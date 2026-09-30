@@ -651,7 +651,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 -- The named process-definition registry (FIG-2995, ADR 0095): owner scope,
 -- name, revision, pinned definition fingerprint, lifecycle tombstone and
 -- change sequence, unique on owner scope and name. Written only by the
--- RegisterProcessDefinition intent under revision-and-fingerprint
+-- PublishDefinition intent under revision-and-fingerprint
 -- compare-and-swap. The pinned ProcessDefinitionRef travels in record_json;
 -- the fingerprint column is what the CAS fence compares. The lifecycle is
 -- the FIG-1951 one-column enum with a paired-nullable delete timestamp, not
@@ -1458,7 +1458,7 @@ CREATE TABLE IF NOT EXISTS tool_intent_submissions (
     kind                TEXT NOT NULL,
     payload_hash        TEXT NOT NULL,
     submission_json     TEXT NOT NULL,
-    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger', 'register_process_definition', 'register_trigger'))
+    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger', 'publish_definition', 'get_definition', 'register_trigger'))
 );
 CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
     ON tool_intent_submissions(owner, execution_scope_id, intent_index);

@@ -997,12 +997,12 @@ fn process_input_serializes_as_generic_engine_payload() {
         panic!("lashlang runtime must use the generic engine process input");
     };
     assert_eq!(kind, LASHLANG_ENGINE_KIND);
-    assert_eq!(
-        LashlangProcessInput::from_payload(payload)
-            .expect("engine payload decodes")
-            .process_name,
-        input.process_name
-    );
+    assert!(payload.get("process_name").is_none());
+    let decoded = LashlangProcessInput::from_payload(payload).expect("engine payload decodes");
+    assert!(decoded.process_name.is_empty());
+    assert_eq!(decoded.module_ref, input.module_ref);
+    assert_eq!(decoded.process_ref, input.process_ref);
+    assert_eq!(decoded.args, input.args);
 }
 
 #[test]
@@ -1024,12 +1024,11 @@ fn process_input_remote_helpers_use_generic_engine_and_identity() {
         panic!("lashlang runtime must use the generic remote engine process input");
     };
     assert_eq!(kind, LASHLANG_ENGINE_KIND);
-    assert_eq!(
-        LashlangProcessInput::from_payload(payload)
-            .expect("remote payload decodes")
-            .process_name,
-        "main"
-    );
+    assert!(payload.get("process_name").is_none());
+    let decoded = LashlangProcessInput::from_payload(payload).expect("remote payload decodes");
+    assert!(decoded.process_name.is_empty());
+    assert_eq!(decoded.process_ref, input.process_ref);
+    assert_eq!(decoded.args, input.args);
 
     let identity = input.process_identity();
     assert_eq!(identity.kind, LASHLANG_ENGINE_KIND);

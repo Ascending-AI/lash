@@ -76,41 +76,42 @@ macro_rules! attempt {
     }};
 }
 
+fn id(byte: u8) -> lash_core::ProcessDefinitionId {
+    lash_core::ProcessDefinitionId::from_sha256_digest([byte; 32])
+}
+fn definition() -> Value {
+    serde_json::to_value(lash_core::ProcessDefinition::new(
+        id(1),
+        lash_core::ProcessSignature::Unknown,
+    ))
+    .expect("definition")
+}
+
 #[tokio::test]
 async fn start_process_declares_a_start_and_answers_with_its_start_slot() {
-    let outcome = attempt!(
+    let (output, declared) = intents(attempt!(
         "start_process",
-        serde_json::json!({
-            "definition": { "$lash_process": true, "process_name": "on_button" },
-            "args": { "request": { "id": "req-1" } },
-        })
-    );
-    let (output, declared) = intents(outcome);
+        serde_json::json!({"definition": definition(), "args": {"request": "one"}})
+    ));
     let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
-        panic!("expected exactly one start declaration, got {declared:?}");
+        panic!("one start")
     };
-    let lash_core::ProcessInput::Engine { kind, payload } = &intent.declaration.input else {
-        panic!("a start declares an engine input");
+    let lash_core::ProcessInput::Definition {
+        definition_id,
+        args,
+        signature_claim,
+    } = &intent.declaration.input
+    else {
+        panic!("definition start")
     };
-    assert_eq!(kind, DEFAULT_PROCESS_ENGINE_KIND);
-    // The engine payload is the definition value plus this run's arguments:
-    // nothing in the plugin reshapes the engine's own encoding.
+    assert_eq!(definition_id, &id(1));
     assert_eq!(
-        payload.get("process_name"),
-        Some(&serde_json::json!("on_button"))
+        args,
+        &serde_json::Map::from_iter([("request".into(), serde_json::json!("one"))])
     );
-    assert_eq!(
-        payload.get("args"),
-        Some(&serde_json::json!({ "request": { "id": "req-1" } }))
-    );
-
-    // The answer is a start slot, never a handle (ADR 0107): a declaring
-    // attempt cannot know the id the registrar will mint, so it names its own
-    // intent index, and the attempt coordinator replaces the slot with the
-    // realized start's handle before any model or cell sees the output. The
-    // slot is not a handle record, so an unrealized start can never be
-    // mistaken for a started process.
+    assert_eq!(signature_claim, &Some(lash_core::ProcessSignature::Unknown));
     assert_eq!(output, lash_sansio::handle::process_start_slot_json(0));
+    assert!(intent.declaration.identity.is_none());
     assert!(
         output.get(lash_sansio::handle::HANDLE_FIELD).is_none(),
         "the unrealized answer carries no handle"
@@ -127,7 +128,7 @@ async fn a_session_start_declares_the_calling_session_as_its_wake_target() {
     let outcome = attempt!(
         "start_process",
         serde_json::json!({
-            "definition": { "$lash_process": true, "process_name": "waker" },
+            "definition": definition(),
         })
     );
     let (_, declared) = intents(outcome);
@@ -143,49 +144,134 @@ async fn a_session_start_declares_the_calling_session_as_its_wake_target() {
     };
     assert_eq!(
         intent.declaration.wake_session_id.as_ref(),
-        Some(&session_id),
-        "a session start must name its own session as the wake target"
-    );
-    let lash_core::ProcessOriginator::Session {
-        session_id: originator_session_id,
-        ..
-    } = &intent.declaration.originator
-    else {
-        panic!("a session start is originated by its session");
-    };
-    assert_eq!(
-        originator_session_id, &session_id,
-        "originator and wake target are the same session for a session start"
+        Some(&session_id)
     );
 }
 
 #[tokio::test]
-async fn start_process_takes_the_engine_kind_a_third_party_names() {
-    let outcome = attempt!(
+async fn start_and_get_accept_only_the_exact_definition_contracts() {
+    let (_, declared) = intents(attempt!(
         "start_process",
-        serde_json::json!({
-            "definition": { "definition_id": "scheduler-job" },
-            "engine": "third-party-engine",
-        })
-    );
-    let (_, declared) = intents(outcome);
-    let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
-        panic!("expected one start declaration");
-    };
-    let lash_core::ProcessInput::Engine { kind, payload } = &intent.declaration.input else {
-        panic!("a start declares an engine input");
-    };
-    assert_eq!(kind, "third-party-engine");
-    assert_eq!(payload.get("args"), Some(&serde_json::json!({})));
-}
-
-#[tokio::test]
-async fn start_process_refuses_a_definition_that_is_not_a_process_value() {
-    let message = refusal(attempt!(
-        "start_process",
-        serde_json::json!({ "definition": "on_button" })
+        serde_json::json!({"definition_id": id(1).to_tagged_json()})
     ));
-    assert!(message.contains("process definition value"), "{message}");
+    let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
+        panic!("one start")
+    };
+    assert!(
+        matches!(&intent.declaration.input, lash_core::ProcessInput::Definition {definition_id, args, ..} if definition_id == &id(1) && args.is_empty())
+    );
+    let (slot, get) = intents(attempt!(
+        "get_process_definition",
+        serde_json::json!({"definition_id": id(1).to_tagged_json()})
+    ));
+    assert_eq!(slot, lash_sansio::handle::definition_slot_json(0));
+    assert!(
+        matches!(&get[..], [ToolIntent::GetDefinition(intent)] if intent.definition_id == id(1))
+    );
+    for args in [
+        serde_json::json!({}),
+        serde_json::json!({"definition": definition(), "definition_id": id(1).to_tagged_json()}),
+        serde_json::json!({"definition_id": id(1).to_string()}),
+        serde_json::json!({"definition": {"$lash_process": true, "process_name": "legacy"}}),
+        serde_json::json!({"definition_id": id(1).to_tagged_json(), "args": []}),
+    ] {
+        refusal(attempt!("start_process", args));
+    }
+    for key in [
+        "engine",
+        "name",
+        "revision",
+        "replace",
+        "expected_revision",
+        "process_name",
+    ] {
+        let mut args = serde_json::json!({"definition": definition()});
+        args[key] = serde_json::json!("forbidden");
+        assert!(refusal(attempt!("start_process", args)).contains("unknown"));
+        let mut args = serde_json::json!({"definition_id": id(1).to_tagged_json()});
+        args[key] = serde_json::json!("forbidden");
+        refusal(attempt!("get_process_definition", args));
+    }
+}
+
+#[tokio::test]
+async fn two_starts_of_one_definition_differ_only_in_the_declared_label() {
+    let mut declarations = Vec::new();
+    for label in ["first", "second"] {
+        let (_, declared) = intents(attempt!(
+            "start_process",
+            serde_json::json!({"definition": definition(), "label": label})
+        ));
+        let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
+            panic!("start")
+        };
+        assert_eq!(
+            intent
+                .declaration
+                .identity
+                .as_ref()
+                .and_then(|i| i.label.as_deref()),
+            Some(label)
+        );
+        declarations.push(intent.declaration.input.clone());
+    }
+    assert_eq!(declarations[0], declarations[1]);
+    for label in [
+        serde_json::Value::Null,
+        serde_json::json!(7),
+        serde_json::json!(" "),
+    ] {
+        assert!(
+            refusal(attempt!(
+                "start_process",
+                serde_json::json!({"definition": definition(), "label": label})
+            ))
+            .contains("label")
+        );
+    }
+}
+
+#[test]
+fn a_started_definition_is_the_definition_processes_list_filters_by() {
+    let registration = lash_core::ProcessRegistration::new(
+        lash_core::ProcessInput::External {
+            metadata: Value::Null,
+        },
+        lash_core::ProcessProvenance::host(),
+        lash_core::Lifetime::Detached,
+    );
+    let mut record = lash_core::ProcessRecord::from_registration(
+        registration,
+        lash_core::ProcessId::fixture("run"),
+    );
+    record.identity.definition_id = Some(id(1));
+    for (candidate, matches) in [(id(1), true), (id(2), false)] {
+        let filter = lash_core::ProcessListFilter::decode(
+            &serde_json::json!({"definition_id": candidate.to_tagged_json(), "status": "any"}),
+        )
+        .expect("id filter");
+        assert_eq!(filter.matches_record(&record), matches);
+    }
+}
+
+#[test]
+fn host_surface_has_no_named_operation() {
+    let tools = crate::processes_tool_definitions(true);
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool.name() == "get_process_definition")
+    );
+    assert!(tools.iter().all(|tool| tool.name() != "register_process"));
+    assert!(
+        !process_start_tool_definition()
+            .contract()
+            .input_schema
+            .canonical()["properties"]
+            .as_object()
+            .expect("properties")
+            .contains_key("name")
+    );
 }
 
 #[tokio::test]
@@ -250,234 +336,4 @@ async fn emit_process_event_declares_an_append_to_its_own_process() {
         lash_core::ProcessId::fixture("process-9")
     );
     assert_eq!(intent.payload, serde_json::json!({ "stage": "approved" }));
-}
-
-#[tokio::test]
-async fn register_process_declares_a_registration_that_claims_the_name() {
-    let outcome = attempt!(
-        "register_process",
-        serde_json::json!({
-            "name": "approval",
-            "definition": { "$lash_process": true, "process_name": "on_button" },
-        })
-    );
-    let (output, declared) = intents(outcome);
-    let [ToolIntent::RegisterProcessDefinition(intent)] = declared.as_slice() else {
-        panic!("expected one registration declaration, got {declared:?}");
-    };
-    assert_eq!(intent.engine_kind, DEFAULT_PROCESS_ENGINE_KIND);
-    assert_eq!(intent.label.as_deref(), Some("approval"));
-    assert_eq!(intent.name.as_deref(), Some("approval"));
-    assert_eq!(intent.expected_revision, None);
-    assert_eq!(output.get("name"), Some(&serde_json::json!("approval")));
-}
-
-#[tokio::test]
-async fn register_process_refuses_an_empty_name() {
-    let message = refusal(attempt!(
-        "register_process",
-        serde_json::json!({ "name": "   ", "definition": {} })
-    ));
-    assert!(message.contains("non-empty `name`"), "{message}");
-}
-
-#[test]
-fn declaring_tools_type_their_process_arguments_as_processes() {
-    for definition in [
-        process_start_tool_definition(),
-        process_register_tool_definition(),
-    ] {
-        let schema = definition.contract().input_schema.canonical().clone();
-        let declared = schema
-            .get("properties")
-            .and_then(|properties| properties.get("definition"))
-            .and_then(|property| property.get("x-lash"))
-            .cloned();
-        assert_eq!(
-            declared,
-            Some(serde_json::json!({ "kind": "process_unknown" })),
-            "{} did not type its definition argument as a process",
-            definition.name()
-        );
-    }
-}
-
-/// The definition a caller starts is the definition `processes.list` filters
-/// by. The tool puts the definition value verbatim in the engine payload, the
-/// engine's own admission decodes that payload back into the definition
-/// reference it stores on the row, and the same value passed as
-/// `processes.list({ definition })` selects that row. Nothing in this path is
-/// the plugin's own encoding: the value is minted and read by the engine, and
-/// the plugin only carries it.
-#[tokio::test]
-async fn a_started_definition_is_the_definition_processes_list_filters_by() {
-    let component = lashlang::ContentHash::new(
-        "0000000000000000000000000000000000000000000000000000000000000001",
-    );
-    let definition = lashlang::ProcessDefinitionIdentity::new(
-        lashlang::ModuleRef::new(&component),
-        lashlang::HostRequirementsRef::new(&component),
-        lashlang::ProcessRef::new(component.clone(), 0),
-        "review",
-    )
-    .to_process_value();
-
-    let (_, declared) = intents(attempt!(
-        "start_process",
-        serde_json::json!({ "definition": definition, "args": { "topic": "handles" } })
-    ));
-    let [ToolIntent::StartProcess(start)] = declared.as_slice() else {
-        panic!("expected one start declaration, got {declared:?}");
-    };
-    let lash_core::ProcessInput::Engine { kind, payload } = &start.declaration.input else {
-        panic!("a definition start is an engine start");
-    };
-
-    // The owning engine admits its own payload and names the definition itself.
-    let identity = lash_lashlang_runtime::admit_lashlang_process(
-        lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
-        payload,
-        None,
-    )
-    .expect("the lashlang engine admits the payload the tool declared");
-    assert_eq!(kind, lash_lashlang_runtime::LASHLANG_ENGINE_KIND);
-
-    let mut registration = lash_core::ProcessRegistration::new(
-        start.declaration.input.clone(),
-        lash_core::ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
-    )
-    .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
-        "process-env:fig-3000-declaration-test",
-    )));
-    registration.identity = identity;
-    let record = lash_core::ProcessRecord::from_registration(
-        registration,
-        lash_core::ProcessId::fixture("process-review"),
-    );
-
-    let filter = lash_core::ProcessListFilter::decode(&serde_json::json!({
-        "definition": definition,
-        "status": "any",
-    }))
-    .expect("the definition value is a valid list filter");
-    assert!(
-        filter.matches_record(&record),
-        "the process started from a definition must be the one listing by it returns"
-    );
-
-    let other = lashlang::ProcessDefinitionIdentity::new(
-        lashlang::ModuleRef::new(&component),
-        lashlang::HostRequirementsRef::new(&component),
-        lashlang::ProcessRef::new(component, 1),
-        "summarize",
-    )
-    .to_process_value();
-    let other_filter = lash_core::ProcessListFilter::decode(&serde_json::json!({
-        "definition": other,
-        "status": "any",
-    }))
-    .expect("the definition value is a valid list filter");
-    assert!(
-        !other_filter.matches_record(&record),
-        "a different definition must not select this process"
-    );
-}
-
-/// FIG-3122 law (b)/(c) at the declaring seam: two starts of the same
-/// definition with different labels carry the same engine payload — the same
-/// `module_ref`, `process_ref` and `process_name` a lifted literal answers —
-/// and differ only in the declared label. A label is host-facing display
-/// metadata; it is never an input to what the row identifies.
-#[tokio::test]
-async fn two_starts_of_one_definition_differ_only_in_the_declared_label() {
-    let definition = serde_json::json!({
-        "$lash_process": true,
-        "module_ref": "lashlang:v2:blake3:93b4cbf8fa9ac47be98eaec61083ef95dda7df8c6efaf028b81468351c203523",
-        "process_ref": { "component": "57a0dc64da4566efeae196f9607a0278bfbb7913ab9ac9dd44e90d452703d69a", "pos": 0 },
-        "process_name": "__process_02178275819fb79b903c9a8b03a8b2d28c41708383b1728900e429e3a59b6a32",
-    });
-    let start = |label: &str| {
-        let definition = definition.clone();
-        let args = serde_json::json!({ "definition": definition, "label": label });
-        async move {
-            let (_, declared) = intents(attempt!("start_process", args));
-            let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
-                panic!("expected exactly one start declaration, got {declared:?}");
-            };
-            intent.declaration.clone()
-        }
-    };
-
-    let first = start("probe-a").await;
-    let second = start("probe-b").await;
-
-    let lash_core::ProcessInput::Engine {
-        payload: first_payload,
-        ..
-    } = &first.input
-    else {
-        panic!("a start declares an engine input");
-    };
-    let lash_core::ProcessInput::Engine {
-        payload: second_payload,
-        ..
-    } = &second.input
-    else {
-        panic!("a start declares an engine input");
-    };
-    assert_eq!(
-        first_payload, second_payload,
-        "the label is not part of the engine payload, so the definition bytes are identical"
-    );
-    assert_eq!(
-        first_payload.get("module_ref"),
-        Some(&definition["module_ref"]),
-        "the module ref the literal lifted to is untouched"
-    );
-    assert_eq!(
-        first
-            .identity
-            .as_ref()
-            .and_then(|identity| identity.label.as_deref()),
-        Some("probe-a")
-    );
-    assert_eq!(
-        second
-            .identity
-            .as_ref()
-            .and_then(|identity| identity.label.as_deref()),
-        Some("probe-b")
-    );
-}
-
-/// A start that names no label declares none, so the engine's derived label —
-/// for Lashlang, the lift digest — stays the row's label.
-#[tokio::test]
-async fn a_start_without_a_label_declares_no_identity() {
-    let outcome = attempt!(
-        "start_process",
-        serde_json::json!({ "definition": { "$lash_process": true, "process_name": "on_button" } })
-    );
-    let (_, declared) = intents(outcome);
-    let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
-        panic!("expected one start declaration");
-    };
-    assert!(intent.declaration.identity.is_none());
-}
-
-/// The argument is documented, so an unusable value is refused rather than
-/// dropped: silently ignoring it is the defect this plumbing fixes.
-#[tokio::test]
-async fn start_process_refuses_a_label_that_is_not_a_usable_string() {
-    for label in [serde_json::json!(7), serde_json::json!("   ")] {
-        let message = refusal(attempt!(
-            "start_process",
-            serde_json::json!({
-                "definition": { "$lash_process": true, "process_name": "on_button" },
-                "label": label,
-            })
-        ));
-        assert!(message.contains("`label`"), "{message}");
-    }
 }

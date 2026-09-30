@@ -199,6 +199,26 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
             ));
     }
 
+    async fn artifact_frame_is_retained(
+        &self,
+        frame: &lash_core_execution::FrameEnvironmentId,
+    ) -> Result<bool, StoreError> {
+        let frame = frame.clone();
+        self.read_connection()
+            .read(move |conn| {
+                conn.query_row(
+                    crate::session_sql::session_sql()
+                        .graph_sqlite
+                        .artifact_frame_is_retained
+                        .sql(),
+                    params![frame.session_id().as_str(), frame.frame_node_id().as_str()],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
     async fn reclaim_retained_evidence(
         &self,
         bound: lash_core_execution::store::RetentionBound,

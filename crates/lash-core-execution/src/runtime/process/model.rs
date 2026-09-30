@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::definition_ref::{ProcessDefinitionRef, ProcessDefinitionValue, ProcessEngineKind};
+use super::definition_ref::{ProcessDefinitionRef, ProcessEngineKind};
 use super::events::{ProcessAwaitOutput, ProcessEventType, default_process_event_types};
 use super::op_scope::ProcessOpScope;
 use super::validation::prepare_process_registration;
@@ -121,6 +121,8 @@ pub enum ProcessInput {
     /// names the id ([`register_process_start`](crate::runtime::register_process_start)).
     Definition {
         definition_id: super::ProcessDefinitionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature_claim: Option<super::ProcessSignature>,
         #[serde(default)]
         args: serde_json::Map<String, serde_json::Value>,
     },
@@ -168,9 +170,11 @@ impl Clone for ProcessInput {
             },
             Self::Definition {
                 definition_id,
+                signature_claim,
                 args,
             } => Self::Definition {
                 definition_id: definition_id.clone(),
+                signature_claim: signature_claim.clone(),
                 args: args.clone(),
             },
         }
@@ -1038,7 +1042,8 @@ impl DeclaredProcessIdentity {
 /// itself, and an engine start derives it through the engine registry's
 /// admission, which is the only thing that can name a definition reference.
 /// There are no setters — a durable row's identity is never edited into place.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessIdentity {
     pub kind: ProcessEngineKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1047,61 +1052,13 @@ pub struct ProcessIdentity {
     /// one. It is the whole reference, not a bare blob: the engine kind that
     /// owns the definition, the definition value, and the signature claimed for
     /// it when the row was created.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub definition: Option<ProcessDefinitionRef>,
     /// The immutable definition a start by id admitted this row from
     /// (ADR 0113 §3.6): the row's `ProcessRecord` holds its descriptor and
     /// manifest for as long as it holds the row's other inputs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition_id: Option<super::ProcessDefinitionId>,
-}
-
-/// Reads a durable identity, including one written before the definition
-/// reference was typed.
-///
-/// A pre-FIG-2992 row stored the definition as a bare engine-owned value with
-/// no engine kind and no signature beside it. Such a row still names exactly
-/// one definition, and the engine that owns it is the row's own `kind`, so it
-/// reads back as an unclaimed reference to that engine's definition — no row is
-/// unreadable, and no legacy row is credited with a signature it never carried.
-impl<'de> Deserialize<'de> for ProcessIdentity {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct StoredIdentity {
-            kind: ProcessEngineKind,
-            #[serde(default)]
-            label: Option<String>,
-            #[serde(default)]
-            definition: Option<serde_json::Value>,
-            #[serde(default)]
-            definition_id: Option<super::ProcessDefinitionId>,
-        }
-
-        let StoredIdentity {
-            kind,
-            label,
-            definition,
-            definition_id,
-        } = StoredIdentity::deserialize(deserializer)?;
-        let definition = match definition {
-            None | Some(serde_json::Value::Null) => None,
-            Some(stored) => Some(
-                match serde_json::from_value::<ProcessDefinitionRef>(stored.clone()) {
-                    Ok(reference) => reference,
-                    Err(_) => ProcessDefinitionRef::unclaimed(kind.clone(), stored),
-                },
-            ),
-        };
-        Ok(Self {
-            kind,
-            label,
-            definition,
-            definition_id,
-        })
-    }
 }
 
 impl ProcessIdentity {
@@ -1226,7 +1183,7 @@ pub struct ProcessHandleView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub definition: Option<ProcessDefinitionRef>,
+    pub definition_id: Option<super::ProcessDefinitionId>,
     pub status: ProcessStatus,
 }
 
@@ -1266,15 +1223,15 @@ impl ProcessHandleView {
             process_id,
             kind: identity.kind,
             label: identity.label,
-            definition: identity.definition,
+            definition_id: identity.definition_id,
             status,
         }
     }
 
     /// Sets the definition carried by a `ProcessHandleView` for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
-    pub fn with_definition(mut self, definition: Option<ProcessDefinitionRef>) -> Self {
-        self.definition = definition;
+    pub fn with_definition_id(mut self, definition_id: Option<super::ProcessDefinitionId>) -> Self {
+        self.definition_id = definition_id;
         self
     }
 

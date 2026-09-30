@@ -678,6 +678,9 @@ impl ReferrerClaim {
         let paired = matches!(
             (&referrer, &guard),
             (
+                ArtifactReferrer::FrameEnvironment(_),
+                ArtifactCleanupPlan::AwaitFrame { .. }
+            ) | (
                 ArtifactReferrer::Execution(_),
                 ArtifactCleanupPlan::AwaitJournal
             ) | (
@@ -826,6 +829,12 @@ impl ArtifactCleanup {
 pub enum ArtifactCleanupPlan {
     /// The referrer has ended. Carry, then fence and sever.
     Ended { carries: Vec<ArtifactCarry> },
+    /// A successor prepared before its frame commit. Committed frames retain
+    /// their edges; an absent frame ends after the preparing journal settles.
+    AwaitFrame {
+        #[serde(with = "journal_identity")]
+        creator: EffectJournalIdentity,
+    },
     /// Guard of an execution referrer: ends when its journal is settled.
     AwaitJournal,
     /// Upload staging ends at this store-clock instant or when its session ends.
@@ -864,6 +873,7 @@ impl ArtifactCleanupPlan {
             Self::AwaitJournal => "await_journal",
             Self::AwaitUploadExpiry { .. } => "await_upload_expiry",
             Self::AwaitSessionGraphRetired => "await_session_graph_retired",
+            Self::AwaitFrame { .. } => "await_frame",
             Self::AwaitStart { .. } => "await_start",
             Self::AwaitSubscriptionRevision { .. } => "await_subscription_revision",
             Self::AwaitDefinitionRevision { .. } => "await_definition_revision",

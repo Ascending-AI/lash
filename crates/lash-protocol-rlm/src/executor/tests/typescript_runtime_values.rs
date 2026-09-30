@@ -59,7 +59,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
         effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),
-        engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
+        engines: fixture_process_engines(artifact_store.clone(), surface.clone(), table.backend()),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         crate::testing::double_ports(table.double(), &handler),

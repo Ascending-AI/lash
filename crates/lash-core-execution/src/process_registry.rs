@@ -12,7 +12,7 @@
 //!
 //! The table shape follows ADR 0095's ruling: owner scope, name, revision,
 //! definition fingerprint, lifecycle tombstone, change sequence, unique on
-//! owner scope and name, written by the `RegisterProcessDefinition` intent
+//! owner scope and name, written by the `PublishDefinition` intent
 //! under revision-and-fingerprint compare-and-swap. Session-scoped names
 //! follow the ADR 0049 deletion frontier; host- and platform-scoped
 //! tombstones are never collected (ADR 0067).

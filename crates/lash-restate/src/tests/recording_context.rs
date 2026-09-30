@@ -1963,6 +1963,37 @@ impl ReplayableRecordingContext {
             .collect();
     }
 
+    pub(super) fn recorded_process_command_facts(
+        &self,
+    ) -> std::collections::BTreeMap<String, serde_json::Value> {
+        self.records
+            .lock_recover()
+            .iter()
+            .filter(|(name, _)| is_process_command_journal_fact(name))
+            .map(|(name, bytes)| {
+                (
+                    name.clone(),
+                    serde_json::from_slice(bytes).expect("recorded process command fact"),
+                )
+            })
+            .collect()
+    }
+
+    pub(super) fn install_recorded_process_command_facts(
+        &self,
+        facts: std::collections::BTreeMap<String, serde_json::Value>,
+    ) {
+        self.records
+            .lock_recover()
+            .extend(facts.into_iter().map(|(name, value)| {
+                assert!(is_process_command_journal_fact(&name));
+                (
+                    name,
+                    serde_json::to_vec(&value).expect("encode process command fact"),
+                )
+            }));
+    }
+
     pub(super) fn recorded_runtime_effect(
         &self,
         effect_name: &str,
@@ -1995,6 +2026,7 @@ fn is_process_command_journal_fact(effect_name: &str) -> bool {
         ".process-transfer:v1",
         ".process-delete-session:v1",
         ".process-emit-event:v1",
+        ".process-definition:v1",
         ".process-start-register:v1",
         ".process-start-register-after-cancel:v1",
         ".process-start-claim:v1",

@@ -18,7 +18,8 @@ macro_rules! tool_intent_variants {
             CancelProcess "cancel_process",
             EmitProcessEvent "emit_process_event",
             EmitTrigger "emit_trigger",
-            RegisterProcessDefinition "register_process_definition",
+            GetDefinition "get_definition",
+            PublishDefinition "publish_definition",
             RegisterTrigger "register_trigger",
         }
     };

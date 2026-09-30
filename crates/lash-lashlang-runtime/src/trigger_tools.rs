@@ -34,7 +34,7 @@ pub fn register_trigger_tool_definition() -> ToolDefinition {
         lashlang::register_trigger_tool_output_schema(),
     )
     .with_examples(vec![
-        r#"await triggers.register({ source: timer.Schedule({ expr: "0 8 * * *" }), target: scan, inputs: { tick: trigger.event } })"#
+        r#"await triggers.register({ source: timer.Schedule({ expr: "0 8 * * *" }), target: { definition: scan }, inputs: { tick: trigger.event } })"#
             .into(),
     ])
     .with_tool_binding(lash_core::ToolBinding::new(["triggers"], "register"))
@@ -72,10 +72,11 @@ pub async fn execute_register_trigger_tool_call(
         Ok(request) => request,
         Err(error) => return refuse(error.to_string()),
     };
-    let prepared = match prepare_trigger_draft(artifact_store, &request).await {
-        Ok(prepared) => prepared,
-        Err(error) => return refuse(error.to_string()),
-    };
+    let prepared =
+        match prepare_trigger_draft(artifact_store, context.definition_engines(), &request).await {
+            Ok(prepared) => prepared,
+            Err(error) => return refuse(error.to_string()),
+        };
     let owner = context.owner().runtime_owner();
     let session_scope = match context.owner() {
         lash_core::ExecutionOwner::SessionFrame {
@@ -189,9 +190,16 @@ mod tests {
             serde_json::json!(["source", "target", "inputs"])
         );
         assert_eq!(input["additionalProperties"], serde_json::json!(false));
-        assert_eq!(
-            input["properties"]["target"]["x-lash"],
-            serde_json::json!({ "kind": "process_unknown" })
+        let targets = input["properties"]["target"]["oneOf"]
+            .as_array()
+            .expect("target union");
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0]["required"], serde_json::json!(["definition"]));
+        assert_eq!(targets[1]["required"], serde_json::json!(["definition_id"]));
+        assert!(
+            targets
+                .iter()
+                .all(|target| target["additionalProperties"] == false)
         );
 
         let output = &definition.contract.output_schema.canonical;

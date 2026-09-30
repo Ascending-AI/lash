@@ -26,6 +26,8 @@ pub enum CrashPoint {
     /// Before the server stores the `ctx.run` command named `name`: the run
     /// never reaches the journal, and the replay issues it anew.
     BeforeRun { name: String },
+    /// Before a journal run whose generated name ends with this suffix.
+    BeforeRunEnding { suffix: String },
     /// Before the server stores the command with this 0-based journal
     /// command index (the input command is index 0).
     BeforeCommand { index: usize },
@@ -142,6 +144,13 @@ impl CrashRule {
             }
             CrashPoint::BeforeRun { name } => {
                 site.ty == MessageType::RunCommand && site.run_name.as_deref() == Some(name)
+            }
+            CrashPoint::BeforeRunEnding { suffix } => {
+                site.ty == MessageType::RunCommand
+                    && site
+                        .run_name
+                        .as_deref()
+                        .is_some_and(|name| name.ends_with(suffix))
             }
             CrashPoint::BeforeCommand { index } => {
                 site.ty.is_command() && site.command_index == *index

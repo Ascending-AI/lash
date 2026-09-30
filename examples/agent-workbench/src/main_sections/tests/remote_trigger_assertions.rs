@@ -84,7 +84,7 @@ pub(crate) async fn assert_remote_started_process_surface(
     process_ids: &[ProcessId],
 ) {
     let filter = lash::process::ProcessListFilter {
-        definition: None,
+        definition_id: None,
         status: lash::process::ProcessStatusFilter::Any,
         ..Default::default()
     };

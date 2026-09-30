@@ -7,6 +7,11 @@ use std::sync::Arc;
 use super::RuntimeExecutionContext;
 
 impl RuntimeExecutionContext<'_> {
+    /// Engines and definition stores admitted by this execution's parent.
+    pub fn definition_engines(&self) -> &crate::ProcessEngineRegistry {
+        &self.dispatch.process_engines
+    }
+
     /// The execution referrer of this replayable execution (ADR 0113 §3.7):
     /// the journal of the scope that runs it, which holds what it publishes
     /// until the engine settles that journal.

@@ -221,16 +221,15 @@ impl TryFrom<lash_core::ProcessInput> for RemoteProcessInput {
                 result: result.into(),
             }),
             lash_core::ProcessInput::External { metadata } => Ok(Self::External { metadata }),
-            // Realization resolves a start by id into its engine start before
-            // any row exists, so no peer ever holds one.
-            lash_core::ProcessInput::Definition { definition_id, .. } => {
-                Err(RemoteProtocolError::InvalidEnvelope {
-                    type_name: "RemoteProcessInput",
-                    message: format!(
-                        "a start of definition `{definition_id}` is resolved before a peer sees it"
-                    ),
-                })
-            }
+            lash_core::ProcessInput::Definition {
+                definition_id,
+                args,
+                signature_claim,
+            } => Ok(Self::Definition {
+                definition_id,
+                args,
+                signature_claim: signature_claim.map(Into::into),
+            }),
         }
     }
 }
@@ -241,6 +240,15 @@ impl TryFrom<RemoteProcessInput> for lash_core::ProcessInput {
     fn try_from(value: RemoteProcessInput) -> Result<Self, Self::Error> {
         value.validate("RemoteProcessInput")?;
         match value {
+            RemoteProcessInput::Definition {
+                definition_id,
+                args,
+                signature_claim,
+            } => Ok(Self::Definition {
+                definition_id,
+                args,
+                signature_claim: signature_claim.map(Into::into),
+            }),
             RemoteProcessInput::Engine { kind, payload } => Ok(Self::Engine { kind, payload }),
             RemoteProcessInput::SessionTurn {
                 definition_key,

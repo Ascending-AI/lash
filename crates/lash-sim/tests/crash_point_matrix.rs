@@ -77,6 +77,11 @@ crash_matrix! {
     process_start_after_state_commit => (ProcessStart, AfterStateCommit);
     definition_start_mid_journal_step => (DefinitionStart, MidJournalStep);
     definition_start_after_state_commit => (DefinitionStart, AfterStateCommit);
+    definition_create_mid_journal_step => (DefinitionCreate, MidJournalStep);
+    definition_create_after_state_commit => (DefinitionCreate, AfterStateCommit);
+    definition_create_after_delivery_before_settle => (DefinitionCreate, AfterDeliveryBeforeSettle);
+    definition_carry_mid_journal_step => (DefinitionCarry, MidJournalStep);
+    definition_carry_after_state_commit => (DefinitionCarry, AfterStateCommit);
     process_terminal_mid_journal_step => (ProcessTerminal, MidJournalStep);
     process_terminal_invocation_lost => (ProcessTerminal, InvocationLost);
     process_terminal_caller_killed => (ProcessTerminal, CallerKilled);

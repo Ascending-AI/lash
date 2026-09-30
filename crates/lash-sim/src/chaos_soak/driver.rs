@@ -1150,7 +1150,10 @@ pub(super) fn pinned_open(
 }
 
 /// The printable text of `invocation`'s input, for a report.
-fn invocation_input(double: &lash_restate_test::RestateTestBackend, invocation: &str) -> String {
+fn invocation_input(
+    double: &lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
+    invocation: &str,
+) -> String {
     double
         .server()
         .journal(invocation)

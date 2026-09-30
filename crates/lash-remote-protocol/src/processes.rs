@@ -183,33 +183,33 @@ mod core_process_status_label_tests;
 /// owns the definition, the engine-owned definition value, and the signature
 /// claimed for it. The claim is never authority (ADR 0095) — a peer's claim is
 /// checked against the owning engine before any local row is created.
+#[derive(JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DefinitionIdSchema {
+    #[serde(rename = "$lash_definition_id")]
+    #[schemars(regex(pattern = "^lash\\.definition:sha256:[0-9a-f]{64}$"))]
+    _digest: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct RemoteProcessDefinitionIdentity {
-    pub engine_kind: String,
-    #[serde(default)]
-    pub value: serde_json::Value,
+pub struct RemoteProcessDefinition {
+    #[schemars(with = "DefinitionIdSchema")]
+    pub id: lash_sansio::ProcessDefinitionId,
     pub signature: RemoteProcessSignature,
 }
 
 /// A signature claim travelling on a definition reference, or the explicit
 /// absence of one (ADR 0090's unknown process type).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "signature", rename_all = "snake_case")]
+#[serde(tag = "signature", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteProcessSignature {
     Unknown,
     Known { encoding: serde_json::Value },
 }
 
-impl RemoteProcessDefinitionIdentity {
-    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        require_non_empty(type_name, "definition.engine_kind", &self.engine_kind)?;
-        if self.value.is_null() {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: "definition value cannot be null".to_string(),
-            });
-        }
+impl RemoteProcessDefinition {
+    pub fn validate(&self, _type_name: &'static str) -> Result<(), RemoteProtocolError> {
         Ok(())
     }
 }
@@ -233,19 +233,17 @@ impl RemoteDeclaredProcessIdentity {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessIdentity {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<DefinitionIdSchema>")]
+    pub definition_id: Option<lash_sansio::ProcessDefinitionId>,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub definition: Option<RemoteProcessDefinitionIdentity>,
 }
 
 impl RemoteProcessIdentity {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "identity.kind", &self.kind)?;
-        if let Some(definition) = &self.definition {
-            definition.validate(type_name)?;
-        }
         Ok(())
     }
 }
@@ -255,6 +253,14 @@ impl RemoteProcessIdentity {
 // justification: this public remote DTO preserves its source-compatible inline SessionTurn construction and matching API.
 #[allow(clippy::large_enum_variant)]
 pub enum RemoteProcessInput {
+    Definition {
+        #[schemars(with = "DefinitionIdSchema")]
+        definition_id: lash_sansio::ProcessDefinitionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature_claim: Option<RemoteProcessSignature>,
+        #[serde(default)]
+        args: serde_json::Map<String, serde_json::Value>,
+    },
     Engine {
         kind: String,
         #[serde(default)]
@@ -297,6 +303,7 @@ impl RemoteSessionTurnOutcome {
 impl RemoteProcessInput {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
+            Self::Definition { .. } => Ok(()),
             Self::Engine { kind, payload: _ } => require_non_empty(type_name, "kind", kind),
             Self::SessionTurn {
                 definition_key,
@@ -317,7 +324,7 @@ impl RemoteProcessInput {
     /// ref and declarative ones must not (FIG-2985).
     fn requires_execution_env(&self) -> bool {
         match self {
-            Self::Engine { .. } => true,
+            Self::Definition { .. } | Self::Engine { .. } => true,
             Self::SessionTurn { .. } | Self::External { .. } => false,
         }
     }
@@ -535,7 +542,8 @@ pub struct RemoteProcessHandleView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub definition: Option<RemoteProcessDefinitionIdentity>,
+    #[schemars(with = "Option<DefinitionIdSchema>")]
+    pub definition_id: Option<lash_sansio::ProcessDefinitionId>,
     pub status: RemoteProcessStatus,
 }
 
@@ -544,9 +552,6 @@ impl RemoteProcessHandleView {
         require_non_empty(type_name, "id", &self.id)?;
         require_non_empty(type_name, "process_id", &self.process_id)?;
         require_non_empty(type_name, "kind", &self.kind)?;
-        if let Some(definition) = &self.definition {
-            definition.validate(type_name)?;
-        }
         Ok(())
     }
 }
@@ -1481,7 +1486,8 @@ impl RemoteProcessStatusFilter {
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessListFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub definition: Option<serde_json::Value>,
+    #[schemars(with = "Option<DefinitionIdSchema>")]
+    pub definition_id: Option<lash_sansio::ProcessDefinitionId>,
     #[serde(default)]
     pub status: RemoteProcessStatusFilter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1513,16 +1519,6 @@ pub struct RemoteProcessListFilter {
 
 impl RemoteProcessListFilter {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        if self
-            .definition
-            .as_ref()
-            .is_some_and(serde_json::Value::is_null)
-        {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteProcessListFilter",
-                message: "definition value cannot be null".to_string(),
-            });
-        }
         if let Some(originator) = &self.originator {
             originator.validate("RemoteProcessListFilter")?;
         }

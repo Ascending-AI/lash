@@ -46,7 +46,10 @@ fn trigger_target_uses_the_scoped_callable_when_it_shadows_a_declaration() {
                             vec![
                                 ("source", builders::var("source")),
                                 ("subscription_key", builders::string(key)),
-                                ("target", builders::var("scan")),
+                                (
+                                    "target",
+                                    builders::record(vec![("definition", builders::var("scan"))]),
+                                ),
                                 ("inputs", builders::record(vec![(input, trigger_event())])),
                             ],
                         ),
@@ -96,7 +99,13 @@ fn trigger_list_accepts_same_signature_alias_branch_targets() {
                             builders::var("handler"),
                         )]),
                     ),
-                    triggers_call("list", vec![("target", builders::var("selected"))]),
+                    triggers_call(
+                        "list",
+                        vec![(
+                            "target",
+                            builders::record(vec![("definition", builders::var("selected"))]),
+                        )],
+                    ),
                     builders::finish(builders::bool_lit(true)),
                 ]),
             ),

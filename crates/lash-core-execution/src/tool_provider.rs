@@ -208,9 +208,14 @@ pub struct AttemptContext<'run> {
     /// The catalog the attempt was dispatched against. `None` outside a
     /// runtime dispatch.
     tool_catalog: Option<Arc<crate::ToolCatalog>>,
+    definition_engines: crate::ProcessEngineRegistry,
 }
 
 impl<'run> AttemptContext<'run> {
+    pub fn definition_engines(&self) -> &crate::ProcessEngineRegistry {
+        &self.definition_engines
+    }
+
     /// The logical root this attempt runs under, read from the admitted
     /// scope it was recorded in (FIG-3607 item 6): never a live read. `None`
     /// outside a session turn (a process body, a runtime operation).
@@ -241,6 +246,11 @@ impl<'run> AttemptContext<'run> {
             .as_ref()
             .and_then(crate::RuntimeExecutionContext::attempt_phase_probe);
         Self {
+            definition_engines: context
+                .runtime_dispatch
+                .as_ref()
+                .map(|dispatch| dispatch.process_engines.clone())
+                .unwrap_or_default(),
             parent_scope: context.effect_controller.admitted_scope().clone(),
             owner: context.owner.clone(),
             execution_scope_id,

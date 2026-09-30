@@ -2,16 +2,15 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::artifact::{HostRequirementsRef, ModuleArtifact, ModuleRef, ProcessRef};
-use crate::runtime::{
-    LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,
-    LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
-};
+use crate::runtime::{LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_REF_KEY};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessDefinitionIdentity {
     pub module_ref: ModuleRef,
     pub host_requirements_ref: HostRequirementsRef,
     pub process_ref: ProcessRef,
+    #[serde(skip)]
     pub process_name: String,
 }
 
@@ -30,18 +29,22 @@ impl ProcessDefinitionIdentity {
         }
     }
 
-    /// [`Self::to_process_value`] and this decoder are the only codec for that
-    /// value: the record a cell holds for `p`, the `definition` a started
-    /// process stores in its `ProcessIdentity`, and the `definition` filter
-    /// `processes.list` compares are all the same bytes, so equality over them
-    /// is meaningful. Any other encoding of the same four fields is a defect.
+    /// The normalized engine value contains only immutable artifact references.
     pub fn from_process_value(
         value: &serde_json::Value,
     ) -> Result<Self, ProcessDefinitionIdentityError> {
-        if value
-            .get(LASH_PROCESS_VALUE_KEY)
-            .and_then(serde_json::Value::as_bool)
-            != Some(true)
+        let fields = value
+            .as_object()
+            .ok_or(ProcessDefinitionIdentityError::NotProcessValue)?;
+        if fields.len() != 3
+            || !fields.keys().all(|key| {
+                [
+                    LASH_MODULE_REF_KEY,
+                    LASH_HOST_REQUIREMENTS_REF_KEY,
+                    LASH_PROCESS_REF_KEY,
+                ]
+                .contains(&key.as_str())
+            })
         {
             return Err(ProcessDefinitionIdentityError::NotProcessValue);
         }
@@ -49,26 +52,47 @@ impl ProcessDefinitionIdentity {
             module_ref: decode_field(value, LASH_MODULE_REF_KEY)?,
             host_requirements_ref: decode_field(value, LASH_HOST_REQUIREMENTS_REF_KEY)?,
             process_ref: decode_field(value, LASH_PROCESS_REF_KEY)?,
-            process_name: value
-                .get(LASH_PROCESS_NAME_KEY)
-                .and_then(serde_json::Value::as_str)
-                .ok_or(ProcessDefinitionIdentityError::MissingField {
-                    field: LASH_PROCESS_NAME_KEY,
-                })?
-                .to_string(),
+            process_name: String::new(),
         })
     }
 
-    /// The `$lash_process` marker distinguishes it from an ordinary record; see
-    /// [`Self::from_process_value`] for the codec contract.
+    /// Canonical stock-engine descriptor, with no redundant export name.
     pub fn to_process_value(&self) -> serde_json::Value {
         serde_json::json!({
-            LASH_PROCESS_VALUE_KEY: true,
             LASH_MODULE_REF_KEY: self.module_ref,
             LASH_HOST_REQUIREMENTS_REF_KEY: self.host_requirements_ref,
             LASH_PROCESS_REF_KEY: self.process_ref,
-            LASH_PROCESS_NAME_KEY: self.process_name,
         })
+    }
+
+    /// Canonical engine descriptor and its complete dependency manifest.
+    pub fn draft(
+        &self,
+    ) -> Result<
+        lash_core_execution::ProcessDefinitionDraft,
+        lash_core_execution::ProcessDefinitionDraftError,
+    > {
+        lash_core_execution::ProcessDefinitionDraft::new(
+            "lashlang",
+            self.to_process_value(),
+            [lash_core_execution::ArtifactName {
+                store: lash_core_execution::ArtifactStoreId::LashlangModule,
+                artifact_ref: self.module_ref.to_string(),
+            }],
+        )
+    }
+
+    pub fn definition(
+        &self,
+        signature: lash_core_execution::ProcessSignature,
+    ) -> Result<
+        lash_core_execution::ProcessDefinition,
+        lash_core_execution::ProcessDefinitionDraftError,
+    > {
+        Ok(lash_core_execution::ProcessDefinition::new(
+            self.draft()?.id(),
+            signature,
+        ))
     }
 
     pub fn from_artifact_export(artifact: &ModuleArtifact, process_name: &str) -> Option<Self> {
@@ -91,7 +115,7 @@ impl ProcessDefinitionIdentity {
         self.module_ref == *module_ref
             && self.host_requirements_ref == *host_requirements_ref
             && self.process_ref == *process_ref
-            && self.process_name == process_name
+            && (self.process_name.is_empty() || self.process_name == process_name)
     }
 
     pub fn matches_artifact_export(&self, artifact: &ModuleArtifact) -> bool {
@@ -102,7 +126,9 @@ impl ProcessDefinitionIdentity {
         }
         artifact
             .process_name_for_ref(&self.process_ref)
-            .is_some_and(|export_name| export_name == self.process_name)
+            .is_some_and(|export_name| {
+                self.process_name.is_empty() || export_name == self.process_name
+            })
     }
 
     pub fn resolve_process_type(
@@ -114,7 +140,12 @@ impl ProcessDefinitionIdentity {
                 process: self.process_name.clone(),
             });
         }
-        artifact.process_type(&self.process_name).ok_or_else(|| {
+        let process_name = artifact
+            .process_name_for_ref(&self.process_ref)
+            .ok_or_else(|| ProcessDefinitionIdentityError::ArtifactMismatch {
+                process: self.process_name.clone(),
+            })?;
+        artifact.process_type(process_name).ok_or_else(|| {
             ProcessDefinitionIdentityError::MissingSignature {
                 process: self.process_name.clone(),
             }
@@ -172,6 +203,16 @@ mod tests {
         let decoded = ProcessDefinitionIdentity::from_process_value(&identity.to_process_value())
             .expect("process value should decode");
 
-        assert_eq!(decoded, identity);
+        assert_eq!(decoded.to_process_value(), identity.to_process_value());
+        assert!(decoded.process_name.is_empty());
+        let mut relabeled = identity.clone();
+        relabeled.process_name = "another diagnostic name".into();
+        assert_eq!(
+            identity.draft().unwrap().id(),
+            relabeled.draft().unwrap().id()
+        );
+        let mut legacy = identity.to_process_value();
+        legacy["process_name"] = serde_json::json!("scan");
+        assert!(ProcessDefinitionIdentity::from_process_value(&legacy).is_err());
     }
 }

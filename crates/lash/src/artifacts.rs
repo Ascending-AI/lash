@@ -141,6 +141,18 @@ impl HostArtifacts {
         }
     }
 
+    /// Read a definition snapshot. This acquires no lasting pin.
+    pub async fn get_definition(
+        &self,
+        id: &ProcessDefinitionId,
+    ) -> Result<Option<ProcessDefinition>> {
+        Ok(self
+            .definition_ports
+            .read_definition(&self.engines, id)
+            .await?
+            .map(|resolved| resolved.definition))
+    }
+
     /// Ends the pin: its `Ended` record, and on the store set's own
     /// database its fence, in one core transaction. The artifact-cleanup
     /// relay then severs every edge the pin holds in every store. The pin can

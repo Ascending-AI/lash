@@ -271,6 +271,7 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
                 ledger: stores.artifact_cleanup(),
                 authorities: Arc::new(StoreSetAuthorities {
                     effect_host: backend.effect_host(),
+                    sessions: stores.session_store_factory(),
                     processes: stores.process_registry(),
                     triggers: stores.trigger_store(),
                     definitions: stores.process_definition_registry(),

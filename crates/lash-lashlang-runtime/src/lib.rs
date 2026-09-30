@@ -665,10 +665,12 @@ pub fn lashlang_host_environment_satisfies_requirements(
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LashlangProcessInput {
     pub module_ref: lashlang::ModuleRef,
     pub process_ref: lashlang::ProcessRef,
     pub host_requirements_ref: lashlang::HostRequirementsRef,
+    #[serde(skip)]
     pub process_name: String,
     #[serde(default)]
     pub args: serde_json::Map<String, serde_json::Value>,
@@ -762,7 +764,7 @@ pub fn validate_lashlang_process_admission(
             actual: artifact.host_requirements_ref().to_string(),
         });
     }
-    if artifact.process_ref(&input.process_name) != Some(&input.process_ref) {
+    if artifact.process_name_for_ref(&input.process_ref).is_none() {
         return Err(LashlangProcessAdmissionRefusal::ProcessRefMismatch {
             module_ref: input.module_ref.to_string(),
             process: input.process_name.clone(),
@@ -796,15 +798,15 @@ impl LashlangProcessInput {
         lash_core::ExecutableGeneration::new(process::lashlang_program_hash(self))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "validated references form a canonical descriptor"
+    )]
     pub fn remote_identity(&self) -> lash_remote_protocol::RemoteProcessIdentity {
         lash_remote_protocol::RemoteProcessIdentity {
             kind: LASHLANG_ENGINE_KIND.to_string(),
             label: Some(self.process_name.clone()),
-            definition: Some(lash_remote_protocol::RemoteProcessDefinitionIdentity {
-                engine_kind: LASHLANG_ENGINE_KIND.to_string(),
-                value: self.definition_identity().to_process_value(),
-                signature: lash_remote_protocol::RemoteProcessSignature::Unknown,
-            }),
+            definition_id: Some(self.definition_identity().draft().expect("descriptor").id()),
         }
     }
 
@@ -1144,14 +1146,23 @@ pub fn resolve_lashlang_module_operation(
         })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "validated engine references form a canonical descriptor"
+)]
 fn lashlang_process_identity(input: &LashlangProcessInput) -> lash_core::ProcessIdentity {
-    lash_core::ProcessIdentity::for_definition(
-        lash_core::ProcessDefinitionRef::unclaimed(
-            LASHLANG_ENGINE_KIND,
-            input.definition_identity().to_process_value(),
-        ),
-        Some(input.process_name.clone()),
-    )
+    let mut identity = lash_core::ProcessIdentity::labelled(
+        LASHLANG_ENGINE_KIND,
+        (!input.process_name.is_empty()).then(|| input.process_name.clone()),
+    );
+    identity.definition_id = Some(
+        input
+            .definition_identity()
+            .draft()
+            .expect("descriptor")
+            .id(),
+    );
+    identity
 }
 
 #[derive(Clone)]
@@ -1263,7 +1274,11 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             .chain(
                 artifact
                     .ir()
-                    .process(&identity.process_name)
+                    .process(
+                        artifact
+                            .process_name_for_ref(&identity.process_ref)
+                            .unwrap_or(""),
+                    )
                     .map(lashlang_process_signal_event_types)
                     .unwrap_or_default(),
             )
@@ -1282,10 +1297,7 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         &self,
         payload: &serde_json::Value,
     ) -> Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
-        let definition_value = payload
-            .get(lashlang::LASH_PROCESS_VALUE_KEY)
-            .and_then(serde_json::Value::as_bool)
-            == Some(true);
+        let definition_value = payload.as_object().is_some_and(|fields| fields.len() == 3);
         let module_ref = if definition_value {
             lashlang::ProcessDefinitionIdentity::from_process_value(payload)
                 .map_err(|error| {

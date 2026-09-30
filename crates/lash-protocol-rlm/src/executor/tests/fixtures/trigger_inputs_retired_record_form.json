@@ -75,9 +75,89 @@
                         "name": "target",
                         "optional": false,
                         "ty": {
-                          "Process": {
-                            "kind": "unknown"
-                          }
+                          "Union": [
+                            {
+                              "Object": [
+                                {
+                                  "name": "definition",
+                                  "optional": false,
+                                  "ty": {
+                                    "Object": [
+                                      {
+                                        "name": "id",
+                                        "optional": false,
+                                        "ty": {
+                                          "Object": [
+                                            {
+                                              "name": "$lash_definition_id",
+                                              "optional": false,
+                                              "ty": "Str"
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "name": "signature",
+                                        "optional": false,
+                                        "ty": {
+                                          "Union": [
+                                            {
+                                              "Object": [
+                                                {
+                                                  "name": "signature",
+                                                  "optional": false,
+                                                  "ty": {
+                                                    "Enum": [
+                                                      "unknown"
+                                                    ]
+                                                  }
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "Object": [
+                                                {
+                                                  "name": "encoding",
+                                                  "optional": false,
+                                                  "ty": "Any"
+                                                },
+                                                {
+                                                  "name": "signature",
+                                                  "optional": false,
+                                                  "ty": {
+                                                    "Enum": [
+                                                      "known"
+                                                    ]
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Object": [
+                                {
+                                  "name": "definition_id",
+                                  "optional": false,
+                                  "ty": {
+                                    "Object": [
+                                      {
+                                        "name": "$lash_definition_id",
+                                        "optional": false,
+                                        "ty": "Str"
+                                      }
+                                    ]
+                                  }
+                                }
+                              ]
+                            }
+                          ]
                         }
                       }
                     ]
@@ -133,7 +213,7 @@
           }
         }
       },
-      "host_requirements_ref": "lashlang-host-requirements:v2:blake3:2b2728aa4bd4e17e616b558b63d2fcf22515de08ccfc9fc01d05fec03daeb4d8",
+      "host_requirements_ref": "lashlang-host-requirements:v2:blake3:b92e79f7db06a944afaf1fc26389fe8d76e12a73291de2dc14b5e171cf154ea8",
       "ir": {
         "declarations": [
           {
@@ -284,7 +364,14 @@
                               [
                                 "target",
                                 {
-                                  "Variable": "remember"
+                                  "Record": [
+                                    [
+                                      "definition",
+                                      {
+                                        "Variable": "remember"
+                                      }
+                                    ]
+                                  ]
                                 }
                               ],
                               [
@@ -355,12 +442,12 @@
           ]
         }
       },
-      "module_ref": "lashlang:v2:blake3:d3bab32a87815b8dcbad510edc940d1a7ea2440f478e7dd53b6621df27ac91f7"
+      "module_ref": "lashlang:v2:blake3:be43253af638173771819185cdcb2fe36e67a47b1c13939f6405bd7e762058f4"
     },
     "encoding": 1,
     "family": "lashlang-semantic-v24"
   },
-  "compiled_program_debug": "CompiledProgram { instruction_count: 21 }",
+  "compiled_program_debug": "CompiledProgram { instruction_count: 22 }",
   "exports": {
     "processes": {
       "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf": {
@@ -369,12 +456,11 @@
       }
     }
   },
-  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:2b2728aa4bd4e17e616b558b63d2fcf22515de08ccfc9fc01d05fec03daeb4d8",
-  "module_ref": "lashlang:v2:blake3:d3bab32a87815b8dcbad510edc940d1a7ea2440f478e7dd53b6621df27ac91f7",
+  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:b92e79f7db06a944afaf1fc26389fe8d76e12a73291de2dc14b5e171cf154ea8",
+  "module_ref": "lashlang:v2:blake3:be43253af638173771819185cdcb2fe36e67a47b1c13939f6405bd7e762058f4",
   "process_definition_identity": {
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:2b2728aa4bd4e17e616b558b63d2fcf22515de08ccfc9fc01d05fec03daeb4d8",
-    "module_ref": "lashlang:v2:blake3:d3bab32a87815b8dcbad510edc940d1a7ea2440f478e7dd53b6621df27ac91f7",
-    "process_name": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:b92e79f7db06a944afaf1fc26389fe8d76e12a73291de2dc14b5e171cf154ea8",
+    "module_ref": "lashlang:v2:blake3:be43253af638173771819185cdcb2fe36e67a47b1c13939f6405bd7e762058f4",
     "process_ref": {
       "component": "3e82cb083e3d4c67a7599c8df0eff14b1ed07e64cf85ca5a928b0372d74b308a",
       "pos": 0
@@ -469,35 +555,51 @@
     "source_type": "timer.Schedule",
     "subscription_key": "remembered-key",
     "target": {
-      "kind": "lashlang",
-      "payload": {
-        "args": {},
-        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:2b2728aa4bd4e17e616b558b63d2fcf22515de08ccfc9fc01d05fec03daeb4d8",
-        "module_ref": "lashlang:v2:blake3:d3bab32a87815b8dcbad510edc940d1a7ea2440f478e7dd53b6621df27ac91f7",
-        "process_name": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
-        "process_ref": {
-          "component": "3e82cb083e3d4c67a7599c8df0eff14b1ed07e64cf85ca5a928b0372d74b308a",
-          "pos": 0
-        }
+      "args": {},
+      "definition_id": {
+        "$lash_definition_id": "lash.definition:sha256:e9c9dd6bf5bb9f5b4d4db637cf32ab68066c63b86ecacb46c50426e59554707c"
       },
-      "type": "engine"
-    },
-    "target_identity": {
-      "definition": {
-        "definition": {
-          "$lash_process": true,
-          "host_requirements_ref": "lashlang-host-requirements:v2:blake3:2b2728aa4bd4e17e616b558b63d2fcf22515de08ccfc9fc01d05fec03daeb4d8",
-          "module_ref": "lashlang:v2:blake3:d3bab32a87815b8dcbad510edc940d1a7ea2440f478e7dd53b6621df27ac91f7",
-          "process_name": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
-          "process_ref": {
-            "component": "3e82cb083e3d4c67a7599c8df0eff14b1ed07e64cf85ca5a928b0372d74b308a",
-            "pos": 0
+      "signature_claim": {
+        "encoding": {
+          "x-lash": {
+            "kind": "process",
+            "signature": {
+              "output": {
+                "type": "null"
+              },
+              "params": [
+                {
+                  "name": "tick",
+                  "schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "fired_at": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "fired_at"
+                    ],
+                    "type": "object"
+                  }
+                },
+                {
+                  "name": "label",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              ]
+            }
           }
         },
-        "engine_kind": "lashlang",
-        "signature": {
-          "signature": "unknown"
-        }
+        "signature": "known"
+      },
+      "type": "definition"
+    },
+    "target_identity": {
+      "definition_id": {
+        "$lash_definition_id": "lash.definition:sha256:e9c9dd6bf5bb9f5b4d4db637cf32ab68066c63b86ecacb46c50426e59554707c"
       },
       "kind": "lashlang",
       "label": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf"
@@ -508,5 +610,5 @@
       "session_id": "test-session"
     }
   },
-  "source": "const remember = defineProcess({\n  name: \"remember\",\n  signals: {},\n  run: async (tick: timer.Tick, label: string) => {\n    return true;\n  }\n});\nconst source = timer.Schedule({ expr: \"0 8 * * *\", tz: \"UTC\" });\nconst handle = await registerTrigger({\n  source,\n  target: remember,\n  inputs: { tick: trigger.event, label: \"daily\" },\n  name: \"remembered\",\n  subscription_key: \"remembered-key\"\n});\nfinish(handle);\n"
+  "source": "const remember = defineProcess({\n  name: \"remember\",\n  signals: {},\n  run: async (tick: timer.Tick, label: string) => {\n    return true;\n  }\n});\nconst source = timer.Schedule({ expr: \"0 8 * * *\", tz: \"UTC\" });\nconst handle = await registerTrigger({\n  source,\n  target: { definition: remember },\n  inputs: { tick: trigger.event, label: \"daily\" },\n  name: \"remembered\",\n  subscription_key: \"remembered-key\"\n});\nfinish(handle);\n"
 }

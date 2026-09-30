@@ -99,15 +99,10 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
         registry
             .register_process(
                 registration(&format!("proc-filter-definition-{suffix}")).with_admitted_identity(
-                    lash_core::AdmittedProcessIdentity::for_testing(
-                        ProcessIdentity::for_definition(
-                            lash_core::ProcessDefinitionRef::unclaimed(
-                                "definition-kind",
-                                definition,
-                            ),
-                            Some(&format!("definition-{suffix}")),
-                        ),
-                    ),
+                    lash_core::AdmittedProcessIdentity::for_testing(definition_identity(
+                        lash_core::ProcessDefinitionRef::unclaimed("definition-kind", definition),
+                        Some(&format!("definition-{suffix}")),
+                    )),
                 ),
             )
             .await
@@ -205,7 +200,11 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
             &registry,
             ProcessListFilter {
                 status: ProcessStatusFilter::Any,
-                definition: Some(definition.into()),
+                definition_id: Some(
+                    lash_core::ProcessDefinitionDraft::new("definition-kind", definition, [])
+                        .expect("filter descriptor")
+                        .id(),
+                ),
                 ..ProcessListFilter::default()
             },
         )
@@ -671,4 +670,24 @@ pub async fn list_processes_filters_by_until_scope_and_pending_cancel(
         "a settled row is no longer a pending cancel",
     )
     .await;
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture uses a valid descriptor without dependencies"
+)]
+fn definition_identity(
+    reference: lash_core::ProcessDefinitionRef,
+    label: Option<impl Into<String>>,
+) -> lash_core::ProcessIdentity {
+    let id = lash_core::ProcessDefinitionDraft::new(
+        reference.engine_kind.clone(),
+        reference.definition.as_json().clone(),
+        [],
+    )
+    .expect("fixture descriptor")
+    .id();
+    let mut identity = lash_core::ProcessIdentity::labelled(reference.engine_kind, label);
+    identity.definition_id = Some(id);
+    identity
 }

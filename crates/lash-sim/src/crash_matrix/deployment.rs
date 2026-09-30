@@ -115,6 +115,10 @@ impl Trip {
 /// host process can die.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum HostSite {
+    /// The engine share is prepared, before the frame SQL transaction.
+    FrameCommitBefore,
+    /// The frame SQL transaction committed, before its caller hears the receipt.
+    FrameCommitAfter,
     /// The host's drive ask after an acceptance committed: the ingress
     /// obligation's awaited `SessionWorkEngine::request_drive` (the host dies
     /// there) or a fire-and-forget `schedule_drive` (the ask never leaves).
@@ -575,6 +579,37 @@ impl lash_core::store::RuntimeStoreDecorator for CrashSessionFactory {
 
     fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
+    }
+
+    async fn commit_runtime_state(
+        &self,
+        commit: lash_core::store::RuntimeCommit,
+    ) -> StoreResult<lash_core::store::RuntimeCommitReceipt> {
+        let definition_carry = commit.frame_transition.as_ref().is_some_and(|transition| {
+            transition
+                .carries
+                .iter()
+                .any(|name| name.store == lash_core::ArtifactStoreId::ProcessDefinition)
+        });
+        if definition_carry
+            && self
+                .faults
+                .take(HostSite::FrameCommitBefore, "definition carry")
+                .is_some()
+        {
+            return die().await;
+        }
+        let result = self.inner.commit_runtime_state(commit).await;
+        if definition_carry
+            && result.is_ok()
+            && self
+                .faults
+                .take(HostSite::FrameCommitAfter, "definition carry")
+                .is_some()
+        {
+            return die().await;
+        }
+        result
     }
 
     async fn acknowledge_intent(

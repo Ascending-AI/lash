@@ -353,6 +353,7 @@ pub trait CodeExecutorPlugin: Send + Sync {
     async fn frame_switch_carries(
         &self,
         ctx: ProtocolSessionContext<'_>,
+        _successor: &crate::FrameNodeId,
         initial_nodes: &[crate::SessionAppendNode],
     ) -> Result<Vec<crate::ArtifactName>, crate::SessionError>;
 

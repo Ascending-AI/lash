@@ -125,29 +125,17 @@ impl From<RemoteProcessSignature> for lash_core::ProcessSignature {
     }
 }
 
-impl From<lash_core::ProcessDefinitionRef> for RemoteProcessDefinitionIdentity {
-    fn from(value: lash_core::ProcessDefinitionRef) -> Self {
-        let lash_core::ProcessDefinitionRef {
-            engine_kind,
-            definition,
-            signature,
-        } = value;
+impl From<lash_core::ProcessDefinition> for RemoteProcessDefinition {
+    fn from(value: lash_core::ProcessDefinition) -> Self {
         Self {
-            engine_kind: engine_kind.into(),
-            value: definition.into_json(),
-            signature: signature.into(),
+            id: value.id,
+            signature: value.signature.into(),
         }
     }
 }
-
-impl From<RemoteProcessDefinitionIdentity> for lash_core::ProcessDefinitionRef {
-    fn from(value: RemoteProcessDefinitionIdentity) -> Self {
-        let RemoteProcessDefinitionIdentity {
-            engine_kind,
-            value,
-            signature,
-        } = value;
-        lash_core::ProcessDefinitionRef::new(engine_kind, value, signature.into())
+impl From<RemoteProcessDefinition> for lash_core::ProcessDefinition {
+    fn from(value: RemoteProcessDefinition) -> Self {
+        Self::new(value.id, value.signature.into())
     }
 }
 
@@ -170,35 +158,18 @@ impl From<RemoteDeclaredProcessIdentity> for lash_core::DeclaredProcessIdentity 
 
 impl From<lash_core::ProcessIdentity> for RemoteProcessIdentity {
     fn from(value: lash_core::ProcessIdentity) -> Self {
-        // A peer's identity carries no definition id yet: the record a
-        // start by id admitted holds the descriptor on this side only.
-        let lash_core::ProcessIdentity {
-            kind,
-            label,
-            definition,
-            definition_id: _,
-        } = value;
         Self {
-            kind: kind.into(),
-            label,
-            definition: definition.map(Into::into),
+            kind: value.kind.into(),
+            label: value.label,
+            definition_id: value.definition_id,
         }
     }
 }
-
 impl From<RemoteProcessIdentity> for lash_core::ProcessIdentity {
     fn from(value: RemoteProcessIdentity) -> Self {
-        let RemoteProcessIdentity {
-            kind,
-            label,
-            definition,
-        } = value;
-        match definition {
-            Some(definition) => {
-                lash_core::ProcessIdentity::for_definition(definition.into(), label)
-            }
-            None => lash_core::ProcessIdentity::labelled(kind, label),
-        }
+        let mut identity = Self::labelled(value.kind, value.label);
+        identity.definition_id = value.definition_id;
+        identity
     }
 }
 

@@ -688,7 +688,7 @@ pub async fn check_crash_world(
     world: &crate::crash_matrix::world::CrashWorld,
     scenario: &str,
 ) -> Vec<String> {
-    let Ok(double) = world.double() else {
+    let Some(stores) = world.sqlite_stores() else {
         return Vec::new();
     };
     // One more recovery pass, so the history ends after the relay had its
@@ -696,7 +696,7 @@ pub async fn check_crash_world(
     // A pass that fails leaves the history judged as one no pass ended.
     let relayed = world.tick().await.is_ok();
     world.quiesce().await;
-    let mut history = match capture_crash_world(world, double, scenario, relayed).await {
+    let mut history = match capture_crash_world(world, stores, scenario, relayed).await {
         Ok(history) => history,
         Err(error) => return vec![error],
     };
@@ -722,7 +722,7 @@ pub async fn check_crash_world(
             relayed = world.tick().await.is_ok();
         }
         world.quiesce().await;
-        history = match capture_crash_world(world, double, scenario, relayed).await {
+        history = match capture_crash_world(world, stores, scenario, relayed).await {
             Ok(history) => history,
             Err(error) => return vec![error],
         };
@@ -735,7 +735,7 @@ pub async fn check_crash_world(
 /// `world`'s stores as they stand now, as a history of `scenario`.
 async fn capture_crash_world(
     world: &crate::crash_matrix::world::CrashWorld,
-    double: &lash_restate_test::RestateTestBackend,
+    stores: &lash_sqlite_store::SqliteStoreSet,
     scenario: &str,
     relayed: bool,
 ) -> Result<History, String> {
@@ -744,7 +744,7 @@ async fn capture_crash_world(
     history.relay_ran = relayed;
     history.now_ms = Some(world.now_ms());
     history
-        .capture_store_with_transcripts("engine", double.stores())
+        .capture_store_with_transcripts("engine", stores)
         .await
         .map_err(|error| format!("capture the history for the global invariants: {error}"))?;
     Ok(history)

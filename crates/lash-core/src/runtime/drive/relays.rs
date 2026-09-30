@@ -265,6 +265,7 @@ pub fn obligation_relays(
                         ledger: backend.artifact_cleanup(),
                         authorities: Arc::new(StoreSetAuthorities {
                             effect_host: backend.effect_host(),
+                            sessions: backend.session_store_factory(),
                             processes: backend.process_registry(),
                             triggers: backend.trigger_store(),
                             definitions: backend.process_definition_registry(),

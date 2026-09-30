@@ -172,7 +172,7 @@ impl CrashWorld {
     ) -> Result<Self, String> {
         let engine = lash_restate_test::backend(seed, config)
             .await
-            .map(Engine::Double)
+            .map(|backend| Engine::Double(super::engine::DoubleBackend::sqlite(backend)))
             .map_err(|error| format!("build the Restate test backend: {error}"))?;
         Self::on_engine(seed, engine, build, serve_processes).await
     }
@@ -289,9 +289,18 @@ impl CrashWorld {
 
     /// The server double this world runs on; a world on a live server has
     /// none.
-    pub fn double(&self) -> Result<&lash_restate_test::RestateTestBackend, String> {
+    pub(crate) fn sqlite_stores(&self) -> Option<&lash_sqlite_store::SqliteStoreSet> {
         match &self.engine {
-            Engine::Double(double) => Ok(double),
+            Engine::Double(double) => double.sqlite_stores.as_deref(),
+            Engine::Live(_) => None,
+        }
+    }
+
+    pub fn double(
+        &self,
+    ) -> Result<&lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>, String> {
+        match &self.engine {
+            Engine::Double(double) => Ok(&double.backend),
             Engine::Live(_) => {
                 Err("this world runs on a live restate-server, not the double".to_owned())
             }
@@ -482,7 +491,7 @@ impl CrashWorld {
             // The host's own handler jobs are crashed as lash's are, and
             // the server replays them on the next deployment.
             (Engine::Double(double), true) => {
-                let server = double.server();
+                let server = double.backend.server();
                 for view in server.invocations() {
                     if view.status == "running" {
                         let _ = server.crash(&view.id);

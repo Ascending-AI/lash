@@ -181,7 +181,6 @@ enum RealizedIntent {
     // record, including its captured source contract and route, and is an
     // order of magnitude larger than the other two variants.
     TriggerRegistration(Box<serde_json::Value>),
-    ProcessDefinitionRegistration(Box<lash_core::ProcessDefinitionRegistration>),
 }
 
 /// Session-and-scope-bound host front door for durable intent realization.
@@ -551,10 +550,6 @@ impl ToolIntentIngress {
             RealizedIntent::TriggerRegistration(handle) => {
                 Some((lash_core::ToolIntentKind::RegisterTrigger, *handle.clone()))
             }
-            RealizedIntent::ProcessDefinitionRegistration(registration) => Some((
-                lash_core::ToolIntentKind::RegisterProcessDefinition,
-                serde_json::to_value(registration).unwrap_or(serde_json::Value::Null),
-            )),
             RealizedIntent::Process(_) => None,
         };
         let result = match trigger_result {
@@ -590,9 +585,7 @@ impl ToolIntentIngress {
             }
             None => match result {
                 RealizedIntent::Process(result) => result,
-                RealizedIntent::Trigger(_)
-                | RealizedIntent::TriggerRegistration(_)
-                | RealizedIntent::ProcessDefinitionRegistration(_) => {
+                RealizedIntent::Trigger(_) | RealizedIntent::TriggerRegistration(_) => {
                     unreachable!("trigger outcomes are settled above")
                 }
             },
@@ -628,6 +621,7 @@ impl ToolIntentIngress {
             lash_core::ProcessEffectOutcome::AttachTerminal => {
                 return Err(Self::outside_protocol_outcome("attach_terminal"));
             }
+            lash_core::ProcessEffectOutcome::Definition { .. } => kind,
             lash_core::ProcessEffectOutcome::RegisterDefinition { .. } => {
                 return Err(Self::outside_protocol_outcome("register_definition"));
             }
@@ -641,6 +635,9 @@ impl ToolIntentIngress {
             ));
         }
         let value = match result {
+            lash_core::ProcessEffectOutcome::Definition { definition } => {
+                serde_json::to_value(definition).unwrap_or(serde_json::Value::Null)
+            }
             lash_core::ProcessEffectOutcome::Start { record, .. } => {
                 let summary = lash_core::ProcessHandleView::from_record(*record);
                 serde_json::to_value(summary).unwrap_or(serde_json::Value::Null)
@@ -942,12 +939,16 @@ impl ToolIntentIngress {
                 let replayed = realization.is_coalesced();
                 return Ok((RealizedIntent::Trigger(report), replayed));
             }
-            lash_core::ToolIntent::RegisterProcessDefinition(intent) => {
-                let registration = self.register_process_definition(identity, *intent).await?;
-                return Ok((
-                    RealizedIntent::ProcessDefinitionRegistration(Box::new(registration)),
-                    false,
-                ));
+            lash_core::ToolIntent::PublishDefinition(intent) => {
+                lash_core::ProcessCommand::PublishDefinition {
+                    draft: intent.draft,
+                    module: intent.module,
+                }
+            }
+            lash_core::ToolIntent::GetDefinition(intent) => {
+                lash_core::ProcessCommand::GetDefinition {
+                    definition_id: intent.definition_id,
+                }
             }
             lash_core::ToolIntent::RegisterTrigger(intent) => {
                 let handle = self.register_recorded_trigger(identity, *intent).await?;
@@ -1061,127 +1062,6 @@ impl ToolIntentIngress {
     }
 
     /// Install one recorded process-definition registration through the
-    /// same resolve-once path the runtime intent executor uses (FIG-2995).
-    async fn register_process_definition(
-        &self,
-        identity: &lash_core::ToolIntentIdentity,
-        intent: lash_core::RegisterProcessDefinitionIntent,
-    ) -> crate::Result<lash_core::ProcessDefinitionRegistration> {
-        // The registration holds the revision its CAS writes before the CAS
-        // commits, under this ingress's journal (ADR 0113 §3.6).
-        let creator = self.scope.journal_identity().map_err(|error| {
-            crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
-        })?;
-        let registry: std::sync::Arc<dyn lash_core::ProcessDefinitionRegistry> =
-            std::sync::Arc::new(
-                lash_core::process_registry::RevisionReferrerDefinitionRegistry::new(
-                    self.core.env.core.process_definitions(),
-                    self.core.host_process_engines.clone(),
-                    creator.clone(),
-                ),
-            );
-        let name = intent
-            .name
-            .as_deref()
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .ok_or_else(|| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                    "process definition registration requires a registered name".to_string(),
-                ))
-            })?;
-        lash_core::process_registry::validate_process_definition_name(name)
-            .map_err(crate::EmbedError::Plugin)?;
-        if let Some(module) = intent.module.as_ref() {
-            // A declared module lands under this ingress's journal referrer,
-            // which holds it until the revision below acquires it (ADR 0113
-            // §3.6, §3.7).
-            let claim = lash_core::ReferrerClaim::guarded(
-                lash_core::ArtifactReferrer::Execution(creator.clone()),
-                lash_core::ArtifactCleanupPlan::AwaitJournal,
-            )
-            .map_err(|error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
-            })?;
-            let ports = self
-                .core
-                .host_process_engines
-                .artifact_ports()
-                .ok_or_else(|| {
-                    crate::EmbedError::Plugin(lash_core::PluginError::Session(format!(
-                        "process definition `{name}` carries a module but the runtime's engine \
-                         registry has no artifact stores to publish it"
-                    )))
-                })?;
-            ports
-                .modules()
-                .publish_module_artifact(&claim, &module.module_ref, module.bytes.as_bytes())
-                .await
-                .map_err(|error| crate::EmbedError::Plugin(error.into()))?;
-        }
-        let existing = lash_core::process_registry::resolve_named_definition(
-            registry.as_ref(),
-            &self.session_id,
-            name,
-        )
-        .await
-        .map_err(crate::EmbedError::Plugin)?;
-        let pinned = match existing.as_ref() {
-            Some(existing) => {
-                if existing.definition.engine_kind.as_str() != intent.engine_kind {
-                    return Err(crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                        format!(
-                            "process definition name `{name}` is registered under engine \
-                             kind `{}`, not `{}`",
-                            existing.definition.engine_kind, intent.engine_kind
-                        ),
-                    )));
-                }
-                existing.definition.clone()
-            }
-            None => lash_core::ProcessDefinitionRef::unclaimed(
-                intent.engine_kind.clone(),
-                intent.definition.clone(),
-            ),
-        };
-        let resolution = self
-            .core
-            .host_process_engines
-            .resolve(&pinned)
-            .await
-            .map_err(|error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
-            })?;
-        let pinned = pinned.with_resolved_signature(resolution.signature);
-        let expectation = match existing.as_ref() {
-            Some(existing) => {
-                let observed_revision = intent.expected_revision.ok_or_else(|| {
-                    crate::EmbedError::Plugin(lash_core::PluginError::Session(format!(
-                        "process definition name `{name}` is registered at revision {}; \
-                             re-registration requires the caller's revision compare-and-swap",
-                        existing.revision
-                    )))
-                })?;
-                Some(lash_core::ProcessDefinitionExpectation::observed(
-                    observed_revision,
-                    existing.fingerprint.clone(),
-                ))
-            }
-            None => None,
-        };
-        let registration_result = registry
-            .register_definition(
-                &identity.replay_key,
-                lash_core::TriggerOwnerScope::session(self.session_id.clone()),
-                name,
-                pinned,
-                expectation.as_ref(),
-            )
-            .await
-            .map_err(crate::EmbedError::Plugin)?;
-        Ok(registration_result)
-    }
-
     async fn emit_recorded_trigger(
         &self,
         request: lash_core::TriggerOccurrenceRequest,
@@ -1305,12 +1185,21 @@ impl ToolIntentIngress {
                 *store_realization.lock_recover() = Some(realization);
             })
         };
+        let definition_command = matches!(
+            &command,
+            lash_core::ProcessCommand::PublishDefinition { .. }
+                | lash_core::ProcessCommand::GetDefinition { .. }
+        );
         let outcome = scoped
             .execute_process_effect(
                 lash_core::RuntimeEffectEnvelope::new(
                     invocation,
                     lash_core::RuntimeEffectCommand::process(command),
                 ),
+                if definition_command {
+                    lash_core::RuntimeEffectLocalExecutor::definition_artifacts(self.core.host_process_engines.clone(),
+                        lash_core::ReferrerClaim::guarded(lash_core::ArtifactReferrer::Execution(self.scope.journal_identity().map_err(|e| lash_core::PluginError::Session(e.to_string()))?), lash_core::ArtifactCleanupPlan::AwaitJournal).map_err(|e| lash_core::PluginError::Session(e.to_string()))?)
+                } else {
                 lash_core::RuntimeEffectLocalExecutor::processes(
                     registry,
                     std::sync::Arc::clone(self.core.substrate_slot.ports().await.process.port()),
@@ -1327,7 +1216,8 @@ impl ToolIntentIngress {
                     &self.core.env.core.durability.process_env_store,
                 ))
                 .with_process_engines(self.core.host_process_engines.clone())
-                .with_process_outcome_observer(outcome_observer),
+                .with_process_outcome_observer(outcome_observer)
+                },
             )
             .await
             // Kept typed rather than flattened to prose: the durable-identity

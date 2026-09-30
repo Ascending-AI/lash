@@ -95,7 +95,7 @@ impl lash_core_execution::ProcessQuery for SqliteProcessRegistry {
         }
         let filter = filter.clone();
         let definition = filter
-            .definition
+            .definition_id
             .as_ref()
             .map(serde_json::to_string)
             .transpose()

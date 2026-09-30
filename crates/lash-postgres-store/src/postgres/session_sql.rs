@@ -398,6 +398,22 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `graph_nodes` statements only PostgreSQL issues.
     pub(crate) struct GraphNodePostgresStatements @ "graph_node" {
+        /// The same root classes as checkpoint reclamation. An admission
+        /// conservatively protects its committed session nodes until released.
+        artifact_frame_is_retained = "WITH RECURSIVE roots AS (
+            SELECT leaf_node_id AS node_id FROM sessions WHERE leaf_node_id IS NOT NULL
+            UNION SELECT node_id FROM node_anchors
+            UNION SELECT node.node_id FROM graph_nodes AS node
+                JOIN session_meta AS meta ON meta.session_id = node.session_id
+                WHERE meta.admission_base_checkpoint_ref IS NOT NULL AND node.tombstoned = FALSE
+        ), retained AS (
+            SELECT node_id FROM roots
+            UNION SELECT node.parent_node_id FROM graph_nodes AS node
+                JOIN retained ON retained.node_id = node.node_id
+                WHERE node.parent_node_id IS NOT NULL AND node.tombstoned = FALSE
+        ) SELECT EXISTS(SELECT 1 FROM graph_nodes AS node JOIN retained USING(node_id)
+            WHERE node.session_id = ?1 AND node.node_id = ?2 AND node.tombstoned = FALSE)";
+
         /// Take the row lock on live node `?1`, reporting whether it is there.
         lock_live = "SELECT TRUE FROM graph_nodes
              WHERE node_id = ?1 AND tombstoned = FALSE

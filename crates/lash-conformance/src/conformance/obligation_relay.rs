@@ -88,6 +88,13 @@ struct NoGuardAuthorities;
 
 #[async_trait::async_trait]
 impl ArtifactCleanupAuthorities for NoGuardAuthorities {
+    async fn frame_is_retained(
+        &self,
+        _frame: &lash_core::FrameEnvironmentId,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
+
     async fn journal_replay(
         &self,
         _journal: &crate::EffectJournalIdentity,

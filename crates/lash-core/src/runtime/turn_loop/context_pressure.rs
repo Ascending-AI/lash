@@ -365,6 +365,12 @@ impl LashRuntime {
             &persisted_node_ids,
         )
         .map_err(super::runtime_error_from_store_commit)?;
+        super::frame_definition_carry::prepare(
+            &self.host.core.process_engines,
+            commit.frame_transition.as_ref(),
+        )
+        .await
+        .map_err(super::runtime_error_from_store_commit)?;
         let result = store
             .commit_runtime_state_verified(commit)
             .await

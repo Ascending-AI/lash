@@ -32,7 +32,10 @@ fn register_trigger(source: &str, target: &str, param: &str) -> Expr {
         "register",
         vec![
             ("source", builders::var(source)),
-            ("target", builders::var(target)),
+            (
+                "target",
+                builders::record(vec![("definition", builders::var(target))]),
+            ),
             ("inputs", builders::record(vec![(param, trigger_event())])),
         ],
     )
@@ -117,7 +120,10 @@ fn linked_module_accepts_named_processes_resource_params_and_activations() {
                     "register",
                     vec![
                         ("source", builders::var("source")),
-                        ("target", builders::var("from_tick")),
+                        (
+                            "target",
+                            builders::record(vec![("definition", builders::var("from_tick"))]),
+                        ),
                         ("inputs", builders::record(vec![("tick", trigger_event())])),
                         ("name", builders::string("changed")),
                     ],
@@ -208,7 +214,10 @@ fn linked_module_allows_trigger_registration_name_to_match_target_process() {
                 "register",
                 vec![
                     ("source", builders::var("source")),
-                    ("target", builders::var("changed")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("changed"))]),
+                    ),
                     ("inputs", builders::record(vec![("tick", trigger_event())])),
                     ("name", builders::string("changed")),
                 ],
@@ -373,7 +382,10 @@ fn linked_module_validates_value_constructors_and_trigger_registry_ops() {
                     "register",
                     vec![
                         ("source", builders::var("source")),
-                        ("target", builders::var("scan")),
+                        (
+                            "target",
+                            builders::record(vec![("definition", builders::var("scan"))]),
+                        ),
                         ("inputs", builders::record(vec![("tick", trigger_event())])),
                         ("name", builders::string("scan")),
                         ("subscription_key", builders::string("scan")),
@@ -382,7 +394,13 @@ fn linked_module_validates_value_constructors_and_trigger_registry_ops() {
             ),
             builders::assign(
                 "registrations",
-                triggers_call("list", vec![("target", builders::var("scan"))]),
+                triggers_call(
+                    "list",
+                    vec![(
+                        "target",
+                        builders::record(vec![("definition", builders::var("scan"))]),
+                    )],
+                ),
             ),
             builders::assign(
                 "disabled",
@@ -442,7 +460,10 @@ fn linked_module_accepts_explicit_trigger_input_mappings() {
                 "register",
                 vec![
                     ("source", builders::var("source")),
-                    ("target", builders::var("scan")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("scan"))]),
+                    ),
                     (
                         "inputs",
                         builders::record(vec![("a", trigger_event()), ("b", trigger_event())]),
@@ -492,7 +513,10 @@ fn linked_module_accepts_explicit_trigger_input_mappings() {
                 "register",
                 vec![
                     ("source", builders::var("source")),
-                    ("target", builders::var("scan")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("scan"))]),
+                    ),
                     (
                         "inputs",
                         builders::record(vec![
@@ -555,7 +579,10 @@ fn linked_module_allows_explicit_keys_for_default_key_collision_shape() {
             "register",
             vec![
                 ("source", builders::var("source")),
-                ("target", builders::var("scan")),
+                (
+                    "target",
+                    builders::record(vec![("definition", builders::var("scan"))]),
+                ),
                 ("inputs", builders::record(vec![("tick", trigger_event())])),
                 ("subscription_key", builders::string(key)),
             ],
@@ -596,7 +623,10 @@ fn linked_artifact_keeps_explicit_keys_and_leaves_derivation_to_the_runtime() {
                 "register",
                 vec![
                     ("source", builders::var("evening")),
-                    ("target", builders::var("scan")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("scan"))]),
+                    ),
                     ("inputs", builders::record(vec![("tick", trigger_event())])),
                     ("subscription_key", builders::string("evening-scan")),
                 ],
@@ -711,7 +741,10 @@ fn linked_module_accepts_button_trigger_source_constructor() {
                                 vec![builders::record(Vec::new())],
                             ),
                         ),
-                        ("target", builders::var("on_button")),
+                        (
+                            "target",
+                            builders::record(vec![("definition", builders::var("on_button"))]),
+                        ),
                         ("inputs", builders::record(vec![("event", trigger_event())])),
                         ("name", builders::string("button watcher")),
                     ],
@@ -791,7 +824,10 @@ fn named_process_signature_survives_parameter_return_container_branch_and_trigge
                         "register",
                         vec![
                             ("source", builders::var("source")),
-                            ("target", builders::var("selected")),
+                            (
+                                "target",
+                                builders::record(vec![("definition", builders::var("selected"))]),
+                            ),
                             ("inputs", builders::record(vec![("event", trigger_event())])),
                             ("subscription_key", builders::string("indirect-handler")),
                         ],
@@ -839,7 +875,10 @@ fn zero_parameter_process_is_valid_but_trigger_registration_still_requires_event
                 "register",
                 vec![
                     ("source", builders::var("source")),
-                    ("target", builders::var("idle")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("idle"))]),
+                    ),
                     ("inputs", builders::record(Vec::new())),
                 ],
             ),
@@ -865,7 +904,10 @@ fn omitted_trigger_inputs_bind_the_event_to_a_single_target_parameter() {
                     "register",
                     vec![
                         ("source", builders::var("source")),
-                        ("target", builders::var(name)),
+                        (
+                            "target",
+                            builders::record(vec![("definition", builders::var(name))]),
+                        ),
                     ],
                 ),
             ],
@@ -926,7 +968,13 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
         vec![tick_process("scan", "tick")],
         vec![
             assign_daily_source("source"),
-            triggers_call("register", vec![("target", builders::var("scan"))]),
+            triggers_call(
+                "register",
+                vec![(
+                    "target",
+                    builders::record(vec![("definition", builders::var("scan"))]),
+                )],
+            ),
         ],
     );
     assert!(matches!(
@@ -949,7 +997,10 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
                     "source",
                     builders::record(vec![("expr", builders::string("0 8 * * *"))]),
                 ),
-                ("target", builders::var("scan")),
+                (
+                    "target",
+                    builders::record(vec![("definition", builders::var("scan"))]),
+                ),
                 ("inputs", builders::record(vec![("tick", trigger_event())])),
             ],
         )],
@@ -993,7 +1044,10 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
                 "register",
                 vec![
                     ("source", builders::var("source")),
-                    ("target", builders::var("scan")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("scan"))]),
+                    ),
                     (
                         "inputs",
                         builders::record(vec![
@@ -1025,7 +1079,10 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
                 "register",
                 vec![
                     ("source", builders::var("source")),
-                    ("target", builders::var("scan")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("scan"))]),
+                    ),
                     (
                         "inputs",
                         builders::record(vec![
@@ -1064,7 +1121,10 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
                 "register",
                 vec![
                     ("source", builders::var("source")),
-                    ("target", builders::var("scan")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("scan"))]),
+                    ),
                     (
                         "inputs",
                         builders::record(vec![
@@ -1103,7 +1163,10 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
                 "register",
                 vec![
                     ("source", builders::var("source")),
-                    ("target", builders::var("scan")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("scan"))]),
+                    ),
                     (
                         "inputs",
                         builders::record(vec![(
@@ -1188,7 +1251,10 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
         vec![triggers_call(
             "list",
             vec![
-                ("target", builders::var("scan")),
+                (
+                    "target",
+                    builders::record(vec![("definition", builders::var("scan"))]),
+                ),
                 ("name", builders::string("daily")),
                 ("source_type", builders::string("timer.Schedule")),
                 ("enabled", builders::bool_lit(true)),
@@ -1204,7 +1270,13 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
         vec![tick_process("scan", "tick")],
         vec![
             assign_daily_source("source"),
-            triggers_call("list", vec![("target", builders::var("source"))]),
+            triggers_call(
+                "list",
+                vec![(
+                    "target",
+                    builders::record(vec![("definition", builders::var("source"))]),
+                )],
+            ),
         ],
     );
     assert!(matches!(

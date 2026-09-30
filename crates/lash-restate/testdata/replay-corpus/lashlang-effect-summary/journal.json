@@ -1,6 +1,6 @@
 {
   "scenario": "lashlang-effect-summary",
-  "recorded_at_git_sha": "3d5f8d35636d4aa52cd738647e02c281b2c7371f",
+  "recorded_at_git_sha": "6a3685df4c5a0ec1be98c6a7a32529112af7ff69",
   "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
   "records": {
     "lash:lashlang:v2:process:34:p_00000000000070008000000000000001:lk2:0000000000:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:attempt:1": {
@@ -64,6 +64,35 @@
               "witness_bytes": 4096
             }
           }
+        }
+      }
+    }
+  },
+  "process_command_facts": {
+    "lash:literal-definition:lash.definition:sha256:7688b3086850b52534166981c00972d8bfa20e40869d4dc858e899a334511669.process-definition:v1": {
+      "Ok": {
+        "Ok": {
+          "outcome": {
+            "definition": {
+              "id": {
+                "$lash_definition_id": "lash.definition:sha256:7688b3086850b52534166981c00972d8bfa20e40869d4dc858e899a334511669"
+              },
+              "signature": {
+                "encoding": {
+                  "x-lash": {
+                    "kind": "process",
+                    "signature": {
+                      "output": {},
+                      "params": []
+                    }
+                  }
+                },
+                "signature": "known"
+              }
+            },
+            "op": "definition"
+          },
+          "realization": "realized"
         }
       }
     }

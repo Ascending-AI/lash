@@ -51,19 +51,16 @@ fn process_originator_host_scope_is_serde_compatible() {
 
 #[test]
 fn process_list_filter_matches_definition_and_status() {
-    let target_ref = json!({ "component": "target", "pos": 0, "name": "target" });
-    let other_ref = json!({ "component": "other", "pos": 1, "name": "other" });
+    let target_ref = crate::ProcessDefinitionId::from_sha256_digest([1; 32]);
+    let other_ref = crate::ProcessDefinitionId::from_sha256_digest([2; 32]);
     let filter = ProcessListFilter::decode(&json!({
-        "definition": target_ref.clone(),
+        "definition_id": target_ref.to_tagged_json(),
         "status": {"in": ["completed"]}
     }))
     .expect("decode filter");
 
     let mut matching = record(&crate::process_id_for_test("matching"), "target", 100);
-    matching.identity.definition = Some(crate::ProcessDefinitionRef::unclaimed(
-        "test-engine",
-        target_ref,
-    ));
+    matching.identity.definition_id = Some(target_ref);
     matching.status = ProcessStatus::Completed;
     matching.outcome = Some(crate::ProcessAwaitOutput::from_tool_output(
         crate::ToolCallOutput::success(json!(true)),
@@ -73,10 +70,7 @@ fn process_list_filter_matches_definition_and_status() {
         "other",
         100,
     );
-    wrong_definition.identity.definition = Some(crate::ProcessDefinitionRef::unclaimed(
-        "test-engine",
-        other_ref,
-    ));
+    wrong_definition.identity.definition_id = Some(other_ref);
     wrong_definition.status = matching.status;
 
     assert_eq!(filter.list_mode(), ProcessListMode::All);

@@ -164,7 +164,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     // unboxed context held across the cell would size every caller's future.
     let seal_ctx = Box::new(ctx.clone());
     let prints = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let frame_artifact_store = artifact_store.clone();
     let mut response = Box::pin(execute_code_inner(
         dialect,
         state,
@@ -186,13 +185,13 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     // (I-frame, ADR 0113 §3.1): a value the cell bound or a tool returned
     // outlives the execution that published its module.
     if !seal_ctx.is_cancelled() {
-        let _phase = seal_ctx.named_phase("rlm_lashlang.hold_frame_modules");
-        if let Err(err) = hold_global_modules(state, &seal_ctx, &frame_artifact_store).await
+        let _phase = seal_ctx.named_phase("rlm_lashlang.hold_frame_definitions");
+        if let Err(err) = hold_global_definitions(state, &seal_ctx).await
             && response.error.is_none()
         {
             response.error = Some(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Host,
-                format!("failed to keep lashlang module artifacts for this frame: {err}"),
+                format!("failed to retain definition artifacts for this frame: {err}"),
             ));
         }
     }
@@ -958,6 +957,43 @@ async fn publish_cell_module(
         .publish_module_artifact(&claim, artifact)
         .await
         .map_err(|error| error.to_string())?;
+    let publication = lash_core::DeclaredModuleArtifact {
+        module_ref: artifact.module_ref().to_string(),
+        bytes: String::from_utf8(
+            artifact
+                .to_store_bytes()
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?,
+    };
+    for name in artifact.exports().processes.keys() {
+        let identity = lashlang::ProcessDefinitionIdentity::from_artifact_export(artifact, name)
+            .ok_or_else(|| format!("module has no process `{name}`"))?;
+        let draft = identity.draft().map_err(|error| error.to_string())?;
+        let definition = ctx
+            .publish_compiled_definition(
+                format!("literal-definition:{}", draft.id()),
+                draft,
+                Some(publication.clone()),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        if frame.is_some() {
+            let engines = ctx.definition_engines();
+            let ports = engines
+                .artifact_ports()
+                .ok_or_else(|| "definition artifact ports are unavailable".to_string())?;
+            let claim = ctx.frame_claim().map_err(|error| error.to_string())?;
+            match ports
+                .acquire_definition(engines, &claim, &definition.id)
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                lash_core::DefinitionAcquisition::Held(_) => {}
+                lash_core::DefinitionAcquisition::Ended => return Ok(()),
+            }
+        }
+    }
     let Some(frame) = frame else {
         return Ok(());
     };
@@ -971,36 +1007,31 @@ async fn publish_cell_module(
     }
 }
 
-/// Hold in the frame every module a global references (ADR 0113 §3.1),
-/// however the global holds it: in a record, or in a `Map` the host view
-/// omits. It covers the definitions a cell bound, and the ones a tool
-/// returned into a global. A module the frame already holds is skipped, so after the first
-/// cell of a process lifetime this reads the globals and writes nothing.
-///
-/// A module no store holds is left alone: a value naming bytes that were
-/// never published, or were reclaimed, cannot be revived by an edge, and a
-/// start from it refuses typed.
-async fn hold_global_modules(
+/// Acquire every worker-discovered definition and its manifest under the frame.
+async fn hold_global_definitions(
     state: &mut RlmExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
-    artifact_store: &lashlang::LashlangArtifacts,
 ) -> Result<(), String> {
-    let Some(frame) = frame_environment(ctx) else {
+    if frame_environment(ctx).is_none() {
         return Ok(());
-    };
-    for module_ref in state.vm.state().referenced_module_refs() {
-        if state.frame_holds(&frame, &module_ref) {
-            continue;
-        }
-        match acquire_frame_edge(&frame, artifact_store, &module_ref).await {
-            Ok(())
-            | Err(FrameHoldError::Store(lash_core::ArtifactStoreError::ArtifactMissing {
-                ..
-            })) => {
-                state.record_frame_hold(&frame, module_ref);
-            }
-            Err(FrameHoldError::Ended) => return Ok(()),
-            Err(FrameHoldError::Store(error)) => return Err(error.to_string()),
+    }
+    let engines = ctx.definition_engines();
+    let ids = state.vm.state().referenced_definition_ids();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let ports = engines
+        .artifact_ports()
+        .ok_or_else(|| "definition artifact ports are unavailable".to_string())?;
+    let claim = ctx.frame_claim().map_err(|error| error.to_string())?;
+    for id in ids {
+        match ports
+            .acquire_definition(engines, &claim, &id)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            lash_core::DefinitionAcquisition::Held(_) => {}
+            lash_core::DefinitionAcquisition::Ended => return Ok(()),
         }
     }
     Ok(())

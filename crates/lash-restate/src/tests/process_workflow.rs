@@ -855,14 +855,13 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
         RECOVERY_PROCESS_ENV_STORE.clone();
     // The worker reaches sessions through the catalog the test hands it, and
     // artifacts through the recovery backend its registrations publish into,
-    // which its process starts acquire from (ADR 0113 §3.3), layered onto a
-    // memory store set for every other port.
-    let backend =
-        lash_core::testing::runtime_helpers::LayeredBackend::over(memory_engine_backend().await)
-            .map_session_store_factory(|_| store_factory)
-            .map_module_artifacts(|_| RECOVERY_ARTIFACT_BACKEND.module_artifacts())
-            .map_process_env_store(|_| RECOVERY_PROCESS_ENV_STORE.clone())
-            .into_backend();
+    // which holds modules and definition manifests in one store set (ADR
+    // 0113 §3.3). The session catalog is the law's reopened catalog.
+    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(
+        RECOVERY_ARTIFACT_BACKEND.clone(),
+    )
+    .map_session_store_factory(|_| store_factory)
+    .into_backend();
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         backend,
         lash_core::CommitBudget::bounded(1024 * 1024, 512),

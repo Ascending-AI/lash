@@ -89,7 +89,7 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
             return Ok(Vec::new());
         }
         let definition = filter
-            .definition
+            .definition_id
             .as_ref()
             .map(serde_json::to_value)
             .transpose()

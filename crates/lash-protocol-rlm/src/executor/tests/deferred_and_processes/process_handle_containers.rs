@@ -63,7 +63,7 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
         effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),
-        engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
+        engines: fixture_process_engines(artifact_store.clone(), surface.clone(), table.backend()),
     });
     let handler = table
         .open_handler(crate::testing::default_cell_scope())

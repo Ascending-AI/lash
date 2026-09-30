@@ -871,7 +871,9 @@ pub async fn execute_effect_locally(
         crate::RuntimeEffectCommand::Process { command } => {
             if matches!(
                 command.as_ref(),
-                crate::ProcessCommand::RegisterDefinition { .. }
+                crate::ProcessCommand::PublishDefinition { .. }
+                    | crate::ProcessCommand::GetDefinition { .. }
+                    | crate::ProcessCommand::RegisterDefinition { .. }
             ) {
                 let result = local_executor
                     .into_process_definitions()?

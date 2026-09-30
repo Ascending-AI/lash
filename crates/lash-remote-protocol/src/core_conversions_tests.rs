@@ -725,9 +725,8 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
         lash_core::ProcessIdentity::labelled("external", Some("External".to_string())),
         lash_core::ProcessStatus::Completed,
     )
-    .with_definition(Some(lash_core::ProcessDefinitionRef::unclaimed(
-        "lashlang",
-        process_definition_identity("main"),
+    .with_definition_id(Some(lash_sansio::ProcessDefinitionId::from_sha256_digest(
+        [1; 32],
     )));
     let remote = RemoteProcessHandleView::from(summary.clone());
     remote
@@ -947,8 +946,8 @@ fn process_await_output_keeps_code_value_and_display_projection_distinct() {
 #[test]
 fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     let filter = lash_core::ProcessListFilter {
-        definition: Some(lash_core::ProcessDefinitionValue::new(
-            process_definition_identity("main"),
+        definition_id: Some(lash_sansio::ProcessDefinitionId::from_sha256_digest(
+            [1; 32],
         )),
         status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Waiting]),
         originator: Some(lash_core::ProcessOriginatorFilter::session("test")),
@@ -985,7 +984,7 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     assert_eq!(core.created_at_start_ms, filter.created_at_start_ms);
     assert_eq!(core.created_at_end_ms, filter.created_at_end_ms);
     assert_eq!(core.retired_since_ms, filter.retired_since_ms);
-    assert!(core.definition.is_some());
+    assert!(core.definition_id.is_some());
 
     let cancel = RemoteProcessCancelRequest {
         process_id: lash_sansio::ProcessId::fixture("process:cancel"),

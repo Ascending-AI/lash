@@ -496,7 +496,8 @@ pub enum RemoteToolIntentKind {
     CancelProcess,
     EmitProcessEvent,
     EmitTrigger,
-    RegisterProcessDefinition,
+    PublishDefinition,
+    GetDefinition,
     RegisterTrigger,
 }
 

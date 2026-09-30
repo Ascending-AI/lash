@@ -18,6 +18,8 @@ struct ReplayCorpusFixture {
     recorded_at_git_sha: String,
     format: String,
     records: BTreeMap<String, RecordedRuntimeEffect>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    process_command_facts: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Copy)]
@@ -61,6 +63,7 @@ async fn replay_corpus_fixtures_match_current_controller() {
 
         let context = Arc::new(ReplayableRecordingContext::default());
         context.install_recorded_runtime_effects(fixture.records);
+        context.install_recorded_process_command_facts(fixture.process_command_facts);
         context.start_replay();
         Box::pin(drive_scenario(*scenario, context, true)).await;
     }
@@ -84,6 +87,7 @@ async fn regenerate_replay_corpus_fixtures() {
             recorded_at_git_sha: git_sha.clone(),
             format: FORMAT_NOTE.to_string(),
             records: context.recorded_runtime_effects(),
+            process_command_facts: context.recorded_process_command_facts(),
         };
         let path = fixture_path(*scenario);
         std::fs::create_dir_all(path.parent().expect("fixture parent"))

@@ -10,5 +10,5 @@ const worker = async () => {
   return 1;
 };
 console.log(typeof worker);
-lash {"outcome":"normal","prints":["object"],"probes":{"worker":"object {\"$lash_process\":true,\"process_name\":\"__process_<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0},\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\"}"}}
+lash {"outcome":"normal","prints":["object"],"probes":{"worker":"object {\"id\":{\"$lash_definition_id\":\"lash.definition:sha256:<hash>\"},\"signature\":{\"encoding\":{\"x-lash\":{\"kind\":\"process\",\"signature\":{\"output\":{\"type\":\"null\"},\"params\":[]}}},\"signature\":\"known\"}}"}}
 end

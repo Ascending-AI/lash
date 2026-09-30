@@ -439,6 +439,13 @@ pub trait DeploymentStore:
     /// catalog returns `StoreError::UnsupportedStoreOperation` rather than
     /// report zero: an inferred zero would let a host retire a deployment
     /// with turns still in flight.
+    /// Whether a committed frame remains rooted by a head, anchor or retained
+    /// admission. Prepared frames that never committed answer false.
+    async fn artifact_frame_is_retained(
+        &self,
+        frame: &crate::FrameEnvironmentId,
+    ) -> Result<bool, crate::StoreError>;
+
     async fn count_unsettled_turns(
         &self,
     ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError>;

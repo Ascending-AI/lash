@@ -203,6 +203,9 @@ impl lash_core::ModuleArtifactStore for TestModuleStore {
     ) -> Result<(), lash_core::ArtifactStoreError> {
         self.current()
             .publish_module_artifact(claim, module_ref, bytes)
+            .await?;
+        self.fallback
+            .publish_module_artifact(claim, module_ref, bytes)
             .await
     }
 

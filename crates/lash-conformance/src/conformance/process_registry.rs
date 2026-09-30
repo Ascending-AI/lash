@@ -410,7 +410,7 @@ pub(super) fn registration(id: &str) -> ProcessRegistration {
         lash_core::Lifetime::Detached,
     )
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-        ProcessIdentity::for_definition(
+        definition_identity(
             lash_core::ProcessDefinitionRef::unclaimed(
                 "conformance",
                 serde_json::json!({"suite": "process_registry"}),
@@ -435,7 +435,7 @@ pub(super) fn executed_registration(id: &str) -> ProcessRegistration {
         "process-env:fixture-{id}"
     ))))
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-        ProcessIdentity::for_definition(
+        definition_identity(
             lash_core::ProcessDefinitionRef::unclaimed(
                 "conformance",
                 serde_json::json!({"suite": "process_registry"}),
@@ -1487,7 +1487,7 @@ pub async fn waiting_processes_remain_in_the_non_terminal_scan(registry: Arc<dyn
                 lash_core::Lifetime::Detached,
             )
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                ProcessIdentity::for_definition(
+                definition_identity(
                     lash_core::ProcessDefinitionRef::unclaimed(
                         "waiting-non-terminal-scan",
                         definition.clone(),
@@ -1559,11 +1559,7 @@ pub async fn waiting_processes_remain_in_the_non_terminal_scan(registry: Arc<dyn
         .expect("summarize waiting live references");
     assert!(
         references.iter().any(|summary| {
-            summary
-                .definition
-                .as_ref()
-                .map(|reference| reference.definition.as_json())
-                == Some(&definition)
+            summary.definition_id == record.identity.definition_id
                 && summary.env_ref.as_ref() == Some(&env_ref)
                 && summary.process_count == 1
         }),
@@ -2450,4 +2446,24 @@ pub async fn terminal_completion_replay_keeps_original_authority_and_writes_noth
         registry,
     )
     .await;
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture uses a valid descriptor without dependencies"
+)]
+fn definition_identity(
+    reference: lash_core::ProcessDefinitionRef,
+    label: Option<impl Into<String>>,
+) -> lash_core::ProcessIdentity {
+    let id = lash_core::ProcessDefinitionDraft::new(
+        reference.engine_kind.clone(),
+        reference.definition.as_json().clone(),
+        [],
+    )
+    .expect("fixture descriptor")
+    .id();
+    let mut identity = lash_core::ProcessIdentity::labelled(reference.engine_kind, label);
+    identity.definition_id = Some(id);
+    identity
 }

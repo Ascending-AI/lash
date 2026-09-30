@@ -1508,8 +1508,6 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
         assert!(first.error.is_none(), "{:?}", first.error);
         assert_eq!(state.frame_held_module_refs().count(), 1);
 
-        let double =
-            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let handler = double
             .open_handler(crate::testing::default_cell_scope())
             .await
@@ -1636,15 +1634,18 @@ pub(super) fn process_engine_surface(surface: LashlangSurface) -> LashlangSurfac
 pub(super) fn fixture_process_engines(
     artifact_store: lashlang::LashlangArtifacts,
     surface: LashlangSurface,
+    backend: &lash_core::Backend,
 ) -> Arc<lash_core::ProcessEngineRegistry> {
-    Arc::new(lash_core::ProcessEngineRegistry::new().with_registration(
-        lash_lashlang_runtime::lashlang_process_engine_registration(
-            lash_lashlang_runtime::LashlangProcessEngine::new(
-                artifact_store,
-                process_engine_surface(surface),
-            ),
-        ),
-    ))
+    Arc::new(
+        lash_core::ProcessEngineRegistry::new()
+            .with_artifact_ports(lash_core::ArtifactReferrerPorts::of_backend(backend))
+            .with_registration(lash_lashlang_runtime::lashlang_process_engine_registration(
+                lash_lashlang_runtime::LashlangProcessEngine::new(
+                    artifact_store,
+                    process_engine_surface(surface),
+                ),
+            )),
+    )
 }
 
 pub(super) fn status_inspect_definition() -> lash_core::ToolDefinition {
@@ -1722,7 +1723,7 @@ pub(super) fn process_control_tool_definitions() -> Vec<lash_core::ToolDefinitio
         lash_plugin_process_controls::process_start_tool_definition(),
         lash_plugin_process_controls::process_signal_tool_definition(),
         lash_plugin_process_controls::process_emit_tool_definition(),
-        lash_plugin_process_controls::process_register_tool_definition(),
+        lash_plugin_process_controls::process_get_tool_definition(),
         lash_plugin_process_controls::process_await_tool_definition(),
         lash_plugin_process_controls::process_cancel_tool_definition(),
     ]
@@ -1770,10 +1771,9 @@ impl lash_core::ToolProvider for ProcessControlToolProvider {
                 call.context,
                 call.args,
             ),
-            "register_process" => lash_plugin_process_controls::execute_process_register_tool_call(
-                call.context,
-                call.args,
-            ),
+            "get_process_definition" => {
+                lash_plugin_process_controls::execute_process_get_tool_call(call.context, call.args)
+            }
             "await_process" => lash_plugin_process_controls::execute_process_await_tool_call(
                 call.context,
                 call.args,
@@ -1956,6 +1956,32 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
             )
             .await?;
             registration = registration.with_execution_env_ref(Some(env_ref));
+        }
+        if matches!(
+            registration.input.as_ref(),
+            lash_core::ProcessInput::Definition { .. }
+        ) {
+            let starter = scope
+                .effect_controller
+                .execution_scope()
+                .journal_identity()
+                .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+            return lash_core::runtime::register_process_start(
+                &lash_core::runtime::ProcessStartStores {
+                    registry: self.registry.as_ref(),
+                    env_store: Some(&self.env_store),
+                    engines: Some(&self.engines),
+                    engines_required: true,
+                    executor: "the signal fixture",
+                    starter: &starter,
+                },
+                registration,
+                &options.initial_observers,
+                options.env_spec.as_ref(),
+            )
+            .await
+            .map(|started| started.record)
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()));
         }
         lash_core::ProcessRegistrar::register_process_with_observers(
             self.registry.as_ref(),
@@ -2171,7 +2197,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),
-        engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
+        engines: fixture_process_engines(artifact_store.clone(), surface.clone(), table.backend()),
     });
     let handler = table
         .open_handler(crate::testing::default_cell_scope())
@@ -2304,7 +2330,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),
-        engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
+        engines: fixture_process_engines(artifact_store.clone(), surface.clone(), table.backend()),
     });
     let handler = table
         .open_handler(crate::testing::default_cell_scope())
@@ -2421,7 +2447,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),
-        engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
+        engines: fixture_process_engines(artifact_store.clone(), surface.clone(), table.backend()),
     });
     let handler = table
         .open_handler(crate::testing::default_cell_scope())

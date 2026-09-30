@@ -416,6 +416,10 @@ impl crate::ToolProvider for LawLeafProvider {
             || *tool_id == crate::ToolId::from(LEAF_DECLARED_PENDING)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "law fixture constructs a valid definition draft"
+    )]
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let context = call.context;
         let name = call.name().to_string();
@@ -648,18 +652,15 @@ impl crate::ToolProvider for LawLeafProvider {
                             event_type: "law.intent-event".to_string(),
                             payload: serde_json::json!({ "leaf": "fence", "call_id": call_id }),
                         }),
-                        crate::ToolIntent::RegisterProcessDefinition(Box::new(
-                            crate::RegisterProcessDefinitionIntent {
+                        crate::ToolIntent::PublishDefinition(Box::new(
+                            crate::PublishDefinitionIntent {
                                 owner: crate::RuntimeOwner::Session(self.session_id.clone()),
-                                engine_kind: admission_fence::LAW_FENCE_ENGINE_KIND.to_string(),
-                                definition: serde_json::json!({
-                                    "program": "law-fence",
-                                    "call_id": call_id,
-                                }),
-                                env_spec: None,
-                                label: Some(format!("law fence {call_id}")),
-                                name: Some(format!("law-fence-{call_id}")),
-                                expected_revision: None,
+                                draft: crate::ProcessDefinitionDraft::new(
+                                    "law",
+                                    serde_json::Value::Null,
+                                    [],
+                                )
+                                .expect("draft"),
                                 module: None,
                             },
                         )),

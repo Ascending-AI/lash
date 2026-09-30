@@ -179,7 +179,7 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
     fn try_from(value: RemoteProcessListFilter) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteProcessListFilter {
-            definition,
+            definition_id,
             status,
             originator,
             until,
@@ -193,7 +193,7 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
             retired_since_ms,
         } = value;
         Ok(Self {
-            definition: definition.map(Into::into),
+            definition_id,
             status: status.into(),
             originator: originator.map(TryInto::try_into).transpose()?,
             until: until.map(Into::into),
@@ -212,7 +212,7 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
 impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
     fn from(value: lash_core::ProcessListFilter) -> Self {
         let lash_core::ProcessListFilter {
-            definition,
+            definition_id,
             status,
             originator,
             until,
@@ -226,7 +226,7 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
             retired_since_ms,
         } = value;
         Self {
-            definition: definition.map(Into::into),
+            definition_id,
             status: status.into(),
             originator: originator.map(Into::into),
             until: until.map(Into::into),

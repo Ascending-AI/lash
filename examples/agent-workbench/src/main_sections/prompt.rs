@@ -52,7 +52,7 @@ Available host features:
 
     const handle = await triggers.register({
       source: ui.button.pressed({}),
-      target: on_button,
+      target: { definition: on_button },
       inputs: (event) => ({ event: event }),
       name: "button watcher"
     });
@@ -84,7 +84,7 @@ Available host features:
 
     const handle = await triggers.register({
       source: mail.received({}),
-      target: on_mail,
+      target: { definition: on_mail },
       inputs: (event) => ({ event: event }),
       name: "inbox concierge"
     });

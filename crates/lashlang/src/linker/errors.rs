@@ -156,7 +156,7 @@ pub enum LinkError {
         source_ty: String,
         span: Option<Span>,
     },
-    #[error("trigger target must be a process value, got {actual}")]
+    #[error("trigger target must select one definition or definition id, got {actual}")]
     InvalidTriggerTarget { actual: String, span: Option<Span> },
     #[error("trigger source emits {event}, but target input `{input_name}` expects {input}")]
     TriggerEventMismatch {

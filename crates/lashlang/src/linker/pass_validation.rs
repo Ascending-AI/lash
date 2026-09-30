@@ -139,30 +139,51 @@ impl<'module> Linker<'module> {
             call.target,
             &field_path(call.target),
             scope,
-            Some(&process_unknown_type()),
+            Some(&TypeExpr::Object(vec![TypeField {
+                name: "definition".into(),
+                ty: process_unknown_type(),
+                optional: true,
+            }])),
         )?;
         let target_ty = binding_type(&target_binding);
-        let params = self.trigger_target_params(&target_ty, scope.span)?;
+        let signature = self.trigger_target_signature(&target_ty, scope.span)?;
         let process = trigger_target_process_label(call.target);
 
-        let inputs = match call.inputs {
-            Some(inputs) => self.lower_trigger_input_record(
+        let mut entries = vec![("source".into(), source), ("target".into(), target)];
+        if let Some(inputs) = call.inputs {
+            let params = match &signature {
+                Some(signature) => signature.params().to_vec(),
+                None => {
+                    let Expr::Record(fields) = inputs else {
+                        return Err(LinkError::InvalidTriggerInputs { span: scope.span });
+                    };
+                    fields
+                        .iter()
+                        .map(|(name, _)| ProcessParam {
+                            name: name.clone(),
+                            ty: TypeExpr::Any,
+                        })
+                        .collect()
+                }
+            };
+            let inputs = self.lower_trigger_input_record(
                 process.as_str(),
                 &params,
                 &event_ty,
                 inputs,
                 &field_path(inputs),
                 scope,
-            )?,
-            None => {
-                self.default_trigger_input_record(process.as_str(), &params, &event_ty, scope.span)?
-            }
-        };
-        let mut entries = vec![
-            ("source".into(), source),
-            ("target".into(), target),
-            ("inputs".into(), inputs),
-        ];
+            )?;
+            entries.push(("inputs".into(), inputs));
+        } else if let Some(signature) = &signature {
+            let inputs = self.default_trigger_input_record(
+                process.as_str(),
+                signature.params(),
+                &event_ty,
+                scope.span,
+            )?;
+            entries.push(("inputs".into(), inputs));
+        }
         if let Some(name) = call.name {
             entries.push((
                 "name".into(),
@@ -320,25 +341,38 @@ impl<'module> Linker<'module> {
         Ok(Expr::Record(lowered))
     }
 
-    pub(super) fn trigger_target_params(
-        &self,
-        target_ty: &TypeExpr,
-        span: Option<Span>,
-    ) -> Result<Vec<ProcessParam>, LinkError> {
-        self.trigger_target_signature(target_ty, span)?
-            .map(|signature| signature.params().to_vec())
-            .ok_or_else(|| LinkError::InvalidTriggerTarget {
-                actual: format_type_expr(target_ty),
-                span,
-            })
-    }
-
     fn trigger_target_signature(
         &self,
         target_ty: &TypeExpr,
         span: Option<Span>,
     ) -> Result<Option<crate::ProcessSignature>, LinkError> {
-        let resolved = self.resolve_type_aliases(target_ty);
+        let target = self.resolve_type_aliases(target_ty);
+        let TypeExpr::Object(fields) = &target else {
+            return Err(LinkError::InvalidTriggerTarget {
+                actual: format_type_expr(&target),
+                span,
+            });
+        };
+        let [field] = fields.as_slice() else {
+            return Err(LinkError::InvalidTriggerTarget {
+                actual: format_type_expr(&target),
+                span,
+            });
+        };
+        if field.name.as_str() == "definition_id" {
+            return Ok(None);
+        }
+        if field.name.as_str() != "definition" {
+            return Err(LinkError::InvalidTriggerTarget {
+                actual: format_type_expr(&target),
+                span,
+            });
+        }
+        let resolved = self.resolve_type_aliases(&field.ty);
+        if matches!(&resolved, TypeExpr::Object(fields) if fields.iter().any(|field| field.name.as_str() == "id") && fields.iter().any(|field| field.name.as_str() == "signature"))
+        {
+            return Ok(None);
+        }
         let signature = match &resolved {
             TypeExpr::Process(process) => process.as_signature().cloned(),
             TypeExpr::Union(items) => {

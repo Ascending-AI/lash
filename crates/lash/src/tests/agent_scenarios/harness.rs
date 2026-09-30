@@ -607,10 +607,7 @@ async fn assert_session_process_admission_contract(
         let matching = observed
             .iter()
             .filter(|process| {
-                process.identity.kind == *kind
-                    && process.identity.label.as_deref().is_some_and(|label| {
-                        label.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
-                    })
+                process.identity.kind == *kind && process.identity.definition_id.is_some()
             })
             .collect::<Vec<_>>();
         assert_eq!(
@@ -664,7 +661,7 @@ async fn all_host_process_summaries(core: &LashCore) -> Result<Vec<lash_core::Pr
     let processes = core
         .processes()
         .list(&lash_core::ProcessListFilter {
-            definition: None,
+            definition_id: None,
             status: lash_core::ProcessStatusFilter::Any,
 
             ..lash_core::ProcessListFilter::default()
@@ -684,7 +681,7 @@ fn observed_process_summary(
         process.identity.clone(),
         process.lifecycle,
     )
-    .with_definition(process.identity.definition)
+    .with_definition_id(process.identity.definition_id)
 }
 
 async fn assert_remote_process_dto_surface(
@@ -693,7 +690,7 @@ async fn assert_remote_process_dto_surface(
     session_id: &SessionId,
 ) {
     let filter = lash_core::ProcessListFilter {
-        definition: None,
+        definition_id: None,
         status: lash_core::ProcessStatusFilter::Any,
 
         ..lash_core::ProcessListFilter::default()

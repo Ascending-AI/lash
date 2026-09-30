@@ -557,6 +557,7 @@ pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_set
         ledger: stores.artifact_cleanup(),
         authorities: Arc::new(StoreSetAuthorities {
             effect_host: host,
+            sessions: stores.session_store_factory(),
             processes: stores.process_registry(),
             triggers: stores.trigger_store(),
             definitions: stores.process_definition_registry(),

@@ -347,7 +347,8 @@ impl Server {
                 VmStateKind::Continuation => lashlang::VM_CONTINUATION_FORMAT_VERSION,
             },
             bytes,
-        ))
+        )
+        .with_definition_ids(self.instance.state().referenced_definition_ids()))
     }
     fn snapshot(&self) -> Result<OpaqueVmState, PoolError> {
         self.seal(
@@ -443,13 +444,15 @@ impl Server {
                 })
             }
             VmStep::Parked(parked) => WorkerMessage::Suspended {
-                state: self.seal(
-                    VmStateKind::Continuation,
-                    parked
-                        .continuation
-                        .to_bytes()
-                        .map_err(PoolError::protocol)?,
-                )?,
+                state: self
+                    .seal(
+                        VmStateKind::Continuation,
+                        parked
+                            .continuation
+                            .to_bytes()
+                            .map_err(PoolError::protocol)?,
+                    )?
+                    .with_definition_ids(parked.continuation.referenced_definition_ids()),
             },
             VmStep::Complete(complete) => WorkerMessage::Complete {
                 state: self.snapshot()?,

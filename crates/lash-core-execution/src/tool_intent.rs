@@ -79,9 +79,10 @@ impl ToolIntent {
     fn leave_out_captured_env(&mut self) {
         match self {
             Self::StartProcess(start) => start.declaration.env_spec = None,
-            Self::RegisterProcessDefinition(registration) => registration.env_spec = None,
             Self::RegisterTrigger(registration) => registration.env_spec = None,
-            Self::SignalProcess(_)
+            Self::PublishDefinition(_)
+            | Self::GetDefinition(_)
+            | Self::SignalProcess(_)
             | Self::CancelProcess(_)
             | Self::EmitProcessEvent(_)
             | Self::EmitTrigger(_) => {}
@@ -100,7 +101,8 @@ macro_rules! tool_intent_payload {
     (CancelProcess) => { CancelProcessIntent };
     (EmitProcessEvent) => { EmitProcessEventIntent };
     (EmitTrigger) => { EmitTriggerIntent };
-    (RegisterProcessDefinition) => { Box<RegisterProcessDefinitionIntent> };
+    (GetDefinition) => { GetDefinitionIntent };
+    (PublishDefinition) => { Box<PublishDefinitionIntent> };
     (RegisterTrigger) => { Box<RegisterTriggerIntent> };
 }
 
@@ -252,48 +254,22 @@ impl StartProcessIntent {
     }
 }
 
+/// Publication of an immutable descriptor after the attempt commits.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-/// Process-definition registration declaration consumed by protocol and
-/// process-engine implementors.
-///
-/// The definition registry table is a separate child of FIG-2990; until it
-/// lands this declaration is admitted, identified and journaled like any other
-/// intent and its realization is refused with a typed
-/// `process_definition_registry_unavailable` command failure rather than
-/// silently succeeding. The declaration shape is what a leaf `register` tool
-/// binds against, which is why it exists ahead of its table.
-pub struct RegisterProcessDefinitionIntent {
-    /// The runtime whose authority owns the registration.
+#[serde(deny_unknown_fields)]
+pub struct PublishDefinitionIntent {
     pub owner: RuntimeOwner,
-    /// Engine that owns the definition, e.g. the value an engine registry keys on.
-    pub engine_kind: String,
-    /// Engine-owned definition value.
-    pub definition: serde_json::Value,
-    /// Immutable execution environment the definition resolves against.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_spec: Option<crate::ProcessExecutionEnvSpec>,
-    /// Host-facing label, never part of the definition's identity.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    /// The registered name this declaration claims. Tool input only: the
-    /// durable row pins the resolved reference, never this name. `None`
-    /// registers no name: the declaration only creates the definition, and
-    /// the caller holds the definition value it answered (ADR 0113 §6). A
-    /// host front door has no frame to hold one, so it refuses `None`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    /// The revision the caller last observed under `name`. `None` creates a
-    /// fresh slot; a stale value conflicts with the live row (FIG-2995 CAS).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expected_revision: Option<u64>,
-    /// The module the definition names, when no store holds it yet: a
-    /// definition `processes.create` compiled in its attempt. The attempt
-    /// publishes nothing (ADR 0116); realization publishes these bytes under
-    /// the realizing execution's journal referrer before it resolves the
-    /// definition, and a name's revision or the caller's frame takes them
-    /// over from there (ADR 0113 §3.6, §3.7).
+    pub draft: crate::ProcessDefinitionDraft,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module: Option<DeclaredModuleArtifact>,
+}
+
+/// Acquire a definition under the realizing execution before returning it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GetDefinitionIntent {
+    pub owner: RuntimeOwner,
+    pub definition_id: crate::ProcessDefinitionId,
 }
 
 /// A module artifact a declaration carries for realization to publish.
@@ -627,15 +603,19 @@ mod tests {
                     "idempotency-key",
                 ),
             }),
-            ToolIntentKind::RegisterProcessDefinition => {
-                ToolIntent::RegisterProcessDefinition(Box::new(RegisterProcessDefinitionIntent {
-                    owner: crate::RuntimeOwner::Session(session_id),
-                    engine_kind: "engine".to_string(),
-                    definition: serde_json::Value::Null,
-                    env_spec: None,
-                    label: None,
-                    name: None,
-                    expected_revision: None,
+            ToolIntentKind::GetDefinition => ToolIntent::GetDefinition(GetDefinitionIntent {
+                owner: RuntimeOwner::Session(session_id),
+                definition_id: crate::ProcessDefinitionId::from_sha256_digest([0; 32]),
+            }),
+            ToolIntentKind::PublishDefinition => {
+                ToolIntent::PublishDefinition(Box::new(PublishDefinitionIntent {
+                    owner: RuntimeOwner::Session(session_id),
+                    draft: crate::ProcessDefinitionDraft::new(
+                        "engine",
+                        serde_json::Value::Null,
+                        [],
+                    )
+                    .expect("draft"),
                     module: None,
                 }))
             }
@@ -693,7 +673,7 @@ mod tests {
     #[test]
     fn the_registration_declarations_carry_their_session_authority() {
         for kind in [
-            ToolIntentKind::RegisterProcessDefinition,
+            ToolIntentKind::PublishDefinition,
             ToolIntentKind::RegisterTrigger,
         ] {
             assert_eq!(

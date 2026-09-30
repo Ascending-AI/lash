@@ -144,15 +144,17 @@ pub(super) fn project_trigger_draft(
     project_process_schema_leaf(identity, &payload_schema.schema);
     project_trigger_source_capture(identity, source_capture);
     project_trigger_process_input(identity, target);
-    // The id a start by id admitted from is not projected: a target that
-    // starts by id names it in its input (tag 5), and projecting the field
-    // would move every existing subscription's identity.
+    // A definition ID is projected when present. Existing engine targets
+    // without one keep their separately-owned identity preimages.
     let crate::ProcessIdentity {
         kind,
         label,
         definition,
-        definition_id: _,
+        definition_id,
     } = target_identity;
+    if let Some(id) = definition_id {
+        identity.string(id.as_str());
+    }
     identity.string(kind.as_str());
     identity.optional(label.as_deref(), |identity, label| identity.string(label));
     // A target identity's definition reference projects as the engine-owned
@@ -244,6 +246,7 @@ fn project_trigger_process_input(
         crate::ProcessInput::Definition {
             definition_id,
             args,
+            ..
         } => {
             identity.tag(5);
             identity.string(definition_id.as_str());
@@ -984,6 +987,12 @@ fn apply_trigger_inputs(
     args: serde_json::Map<String, serde_json::Value>,
 ) -> Result<crate::ProcessInput, PluginError> {
     match &mut target {
+        crate::ProcessInput::Definition {
+            args: target_args, ..
+        } => {
+            *target_args = args;
+            Ok(target)
+        }
         crate::ProcessInput::Engine { payload, .. } => {
             let object = payload.as_object_mut().ok_or_else(|| {
                 PluginError::Session(

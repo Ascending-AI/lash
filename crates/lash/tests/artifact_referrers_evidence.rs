@@ -45,6 +45,34 @@ fn frame_artifacts(edges: &[Edge]) -> BTreeSet<&str> {
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the evidence fixture must fail on a store read error"
+)]
+async fn wait_definition_reclaimed(
+    fixture: &Fixture,
+    id: &lash_core::ProcessDefinitionId,
+    module_ref: &str,
+) {
+    let backend = fixture.double.lash_backend();
+    loop {
+        let descriptor = backend
+            .process_definitions()
+            .get_process_definition(id)
+            .await
+            .expect("read definition reclamation");
+        let module = backend
+            .module_artifacts()
+            .get_module_artifact(module_ref)
+            .await
+            .expect("read module reclamation");
+        if descriptor.is_none() && module.is_none() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
 #[tokio::test]
 async fn wait_edges_waits_for_condition_past_former_deadline() {
     let fixture = Fixture::new(0x4232_0001).await;
@@ -588,95 +616,250 @@ async fn first_turn_continue_as_fences_its_initial_frame() {
 }
 
 #[tokio::test]
-async fn named_definition_survives_uncarried_frame_switch() {
-    let fixture = Fixture::new(0x4031_0012).await;
-    let double = &fixture.double;
+async fn carried_definition_id_retains_the_closure_across_frame_switch() {
+    let fixture = Fixture::new(0x4177_0012).await;
     let core = rlm_core(
-        double,
+        &fixture.double,
         vec![
             response(
-                "const named = async () => 31; await processes.register({ name: 'saved', definition: named }); finish('registered');",
+                "const made = await processes.create({ source: 'const answer = async () => 31;', dialect: 'typescript' }); finish(made.id);",
             ),
-            response("await control.continue_as({ task: 'use saved name' });"),
-            response("finish('switched');"),
+            response(
+                "await control.continue_as({ task: 'carry id', seed: { kept_id: made.id } });",
+            ),
+            response("finish(kept_id);"),
         ],
     );
-    let session = created_session(&core, "artifact-referrers-named")
+    let session = created_session(&core, "definition-id-carry")
         .await
         .open()
         .await
         .expect("session");
-    assert!(
-        session
-            .send(TurnInput::text("register definition"))
-            .output()
-            .await
-            .expect("registration turn")
-            .is_success()
-    );
-    let registered = wait_edges(&fixture, |edges| {
-        edges.iter().any(|edge| edge.kind == "definition_revision")
+    let first = session
+        .send(TurnInput::text("create"))
+        .output()
+        .await
+        .expect("create turn");
+    assert!(first.is_success(), "{first:?}");
+    let id_json = last_cell_finish(&first).expect("tagged id output");
+    let id = lash_core::ProcessDefinitionId::from_tagged_json(&id_json).expect("id");
+    let before = wait_edges(&fixture, |edges| {
+        edges.len() == 1 && edges[0].kind == "frame_environment"
     })
     .await;
-    let module_ref = registered
-        .iter()
-        .find(|edge| edge.kind == "definition_revision")
-        .expect("revision edge")
-        .artifact_ref
-        .clone();
+    let old_frame = before[0].id.clone();
+    let module_ref = before[0].artifact_ref.clone();
+    let roots = fixture.double.lash_backend().session_store_factory();
+    let lash_core::ArtifactReferrer::FrameEnvironment(committed_frame) =
+        lash_core::ArtifactReferrer::decode("frame_environment", &old_frame)
+            .expect("committed frame referrer")
+    else {
+        panic!("frame edge must name a frame")
+    };
     assert!(
-        session
-            .send(TurnInput::text("switch without seed"))
-            .output()
+        roots
+            .artifact_frame_is_retained(&committed_frame)
             .await
-            .expect("switch turn")
-            .is_success()
+            .expect("read committed frame roots")
     );
-    let after = wait_edges(&fixture, |edges| {
-        edges
-            .iter()
-            .any(|edge| edge.artifact_ref == module_ref && edge.kind == "definition_revision")
-            && !edges
-                .iter()
-                .any(|edge| edge.artifact_ref == module_ref && edge.kind == "frame_environment")
-            && edges
-                .iter()
-                .filter(|edge| edge.artifact_ref == module_ref)
-                .count()
-                == 1
+    let absent_frame = lash_core::FrameEnvironmentId::new(
+        session.session_id(),
+        lash_core::FrameNodeId::new("never-committed-frame").expect("absent frame id"),
+    );
+    assert!(
+        !roots
+            .artifact_frame_is_retained(&absent_frame)
+            .await
+            .expect("read absent frame roots")
+    );
+    let switched = session
+        .send(TurnInput::text("switch"))
+        .output()
+        .await
+        .expect("switch");
+    assert!(switched.is_success(), "{switched:?}");
+    assert_eq!(last_cell_finish(&switched), Some(id_json));
+    wait_edges(&fixture, |edges| {
+        edges.len() == 1
+            && edges[0].kind == "frame_environment"
+            && edges[0].id != old_frame
+            && edges[0].artifact_ref == module_ref
     })
     .await;
-    assert_eq!(
-        after
-            .iter()
-            .filter(|edge| edge.artifact_ref == module_ref)
-            .count(),
-        1
-    );
-    drop(session);
-    drop(core);
-    let registry = double.lash_backend().process_definition_registry();
-    let saved = lash_core::process_registry::resolve_named_definition(
-        registry.as_ref(),
-        &lash_core::SessionId::from("artifact-referrers-named"),
-        "saved",
-    )
-    .await
-    .expect("resolve registered name")
-    .expect("the registered name survives the frame switch");
-    assert_eq!(
-        saved.definition.definition.as_json()["module_ref"],
-        module_ref
+    assert!(
+        core.host_artifacts()
+            .get_definition(&id)
+            .await
+            .expect("definition snapshot")
+            .is_some()
     );
     assert!(
-        double
+        fixture
+            .double
             .lash_backend()
             .module_artifacts()
             .get_module_artifact(&module_ref)
             .await
-            .expect("read pinned module")
-            .is_some(),
-        "the registered definition's module survives its frame"
+            .expect("module snapshot")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn uncarried_frame_switch_loses_an_uncarried_definition() {
+    let fixture = Fixture::new(0x4177_0013).await;
+    let core = rlm_core(
+        &fixture.double,
+        vec![
+            response(
+                "const made = await processes.create({ source: 'const answer = async () => 31;', dialect: 'typescript' }); finish(made.id);",
+            ),
+            response("await control.continue_as({ task: 'no carry' });"),
+            response("finish('switched');"),
+        ],
+    );
+    let session = created_session(&core, "definition-id-no-carry")
+        .await
+        .open()
+        .await
+        .expect("session");
+    let first = session
+        .send(TurnInput::text("create"))
+        .output()
+        .await
+        .expect("create");
+    assert!(first.is_success(), "{first:?}");
+    let id = lash_core::ProcessDefinitionId::from_tagged_json(
+        &last_cell_finish(&first).expect("id output"),
+    )
+    .expect("id");
+    let before = wait_edges(&fixture, |edges| {
+        edges.len() == 1 && edges[0].kind == "frame_environment"
+    })
+    .await;
+    let module_ref = before[0].artifact_ref.clone();
+    let switched = session
+        .send(TurnInput::text("switch"))
+        .output()
+        .await
+        .expect("switch");
+    assert!(switched.is_success(), "{switched:?}");
+    wait_edges(&fixture, |edges| edges.is_empty()).await;
+    wait_definition_reclaimed(&fixture, &id, &module_ref).await;
+    assert!(
+        core.host_artifacts()
+            .get_definition(&id)
+            .await
+            .expect("definition snapshot")
+            .is_none()
+    );
+    assert!(
+        fixture
+            .double
+            .lash_backend()
+            .module_artifacts()
+            .get_module_artifact(&module_ref)
+            .await
+            .expect("module snapshot")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn host_pin_keeps_a_definition_across_an_uncarried_switch() {
+    let fixture = Fixture::new(0x4177_0014).await;
+    let core = rlm_core(
+        &fixture.double,
+        vec![
+            response(
+                "const made = await processes.create({ source: 'const answer = async () => 31;', dialect: 'typescript' }); finish(made.id);",
+            ),
+            response("await control.continue_as({ task: 'host keeps id' });"),
+            response("finish('switched');"),
+        ],
+    );
+    let session = created_session(&core, "definition-id-host-pin")
+        .await
+        .open()
+        .await
+        .expect("session");
+    let first = session
+        .send(TurnInput::text("create"))
+        .output()
+        .await
+        .expect("create");
+    assert!(first.is_success(), "{first:?}");
+    let id = lash_core::ProcessDefinitionId::from_tagged_json(
+        &last_cell_finish(&first).expect("id output"),
+    )
+    .expect("id");
+    let before = wait_edges(&fixture, |edges| {
+        edges.len() == 1 && edges[0].kind == "frame_environment"
+    })
+    .await;
+    let module_ref = before[0].artifact_ref.clone();
+    let artifacts = core.host_artifacts();
+    let first_pin = lash::process::HostArtifactPin::mint();
+    let last_pin = lash::process::HostArtifactPin::mint();
+    artifacts
+        .pin_definition(&first_pin, &id)
+        .await
+        .expect("first pin");
+    artifacts
+        .pin_definition(&last_pin, &id)
+        .await
+        .expect("last pin");
+    let switched = session
+        .send(TurnInput::text("switch"))
+        .output()
+        .await
+        .expect("switch");
+    assert!(switched.is_success(), "{switched:?}");
+    wait_edges(&fixture, |edges| {
+        edges.len() == 2
+            && edges
+                .iter()
+                .all(|edge| edge.kind == "host_pin" && edge.artifact_ref == module_ref)
+    })
+    .await;
+    assert!(
+        artifacts
+            .get_definition(&id)
+            .await
+            .expect("pinned snapshot")
+            .is_some()
+    );
+    artifacts.release(first_pin).await.expect("release first");
+    wait_edges(&fixture, |edges| {
+        edges.len() == 1 && edges[0].kind == "host_pin"
+    })
+    .await;
+    assert!(
+        artifacts
+            .get_definition(&id)
+            .await
+            .expect("last pin snapshot")
+            .is_some()
+    );
+    artifacts.release(last_pin).await.expect("release last");
+    wait_edges(&fixture, |edges| edges.is_empty()).await;
+    wait_definition_reclaimed(&fixture, &id, &module_ref).await;
+    assert!(
+        artifacts
+            .get_definition(&id)
+            .await
+            .expect("reclaimed snapshot")
+            .is_none()
+    );
+    assert!(
+        fixture
+            .double
+            .lash_backend()
+            .module_artifacts()
+            .get_module_artifact(&module_ref)
+            .await
+            .expect("reclaimed module")
+            .is_none()
     );
 }
 

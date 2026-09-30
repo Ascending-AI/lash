@@ -182,13 +182,13 @@ pub use usage_activity::*;
 // work item. A window-73 peer requires those fields and refuses a record
 // without them, so peers must adopt 74.
 // Window 75: FIG-2992 types the process definition reference a peer exchanges.
-// `RemoteProcessDefinitionIdentity` now carries the engine kind and a tagged
+// `RemoteProcessDefinition` now carries the engine kind and a tagged
 // signature beside the definition value, a process-list filter selects on the
 // bare definition value, and a start request declares only a kind and label
 // (`RemoteDeclaredProcessIdentity`) because a definition reference is derived by
 // the engine registry, never asserted by a caller. A window-74 peer writes the
 // untyped definition blob and is refused, so peers must adopt 75.
-// Window 76: FIG-2994 adds `register_process_definition` and `register_trigger`
+// Window 76: FIG-2994 adds `publish_definition` and `register_trigger`
 // to the tool-intent kind vocabulary. A window-75 peer refuses both tags when
 // decoding a turn report that carries either outcome, so peers must adopt 76.
 // Window 77: FIG-2913 makes a trigger subscription carry the source contract

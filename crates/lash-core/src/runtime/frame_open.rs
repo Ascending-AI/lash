@@ -42,14 +42,17 @@ impl LashRuntime {
         &mut self,
         request: crate::OpenAgentFrameRequest,
     ) -> Result<OpenedFrame, RuntimeError> {
-        let carries = derive_seed_carries(self.session.as_mut(), &request.initial_nodes)
-            .await
-            .map_err(|error| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ExecutionStateCaptureFailed,
-                    format!("failed to derive what a frame's seed carries: {error}"),
-                )
-            })?;
+        let successor =
+            crate::session_graph::frame_node_id(&self.state.session_id, request.frame_key.as_str());
+        let carries =
+            derive_seed_carries(self.session.as_mut(), &successor, &request.initial_nodes)
+                .await
+                .map_err(|error| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::ExecutionStateCaptureFailed,
+                        format!("failed to derive what a frame's seed carries: {error}"),
+                    )
+                })?;
         let ended = self.state.current_frame_node_id.clone();
         let result = open_agent_frame_in_state_with_clock(
             &mut self.state,
@@ -125,6 +128,10 @@ impl LashRuntime {
         .await?;
         let seed_carries = crate::runtime::turn_boundary::derive_seed_carries(
             self.session.as_mut(),
+            &crate::session_graph::frame_node_id(
+                &self.state.session_id,
+                request.frame_key.as_str(),
+            ),
             &request.initial_nodes,
         )
         .await

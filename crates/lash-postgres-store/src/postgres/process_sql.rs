@@ -346,7 +346,7 @@ lash_store_sql::statements! {
                AND (?3::TEXT IS NULL OR identity_kind = ?3)
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{identity,definition,definition}') = ?5)
+                    (record_json::JSONB #> '{identity,definition_id}') = ?5)
                AND (?6::TEXT IS NULL OR
                     (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = ?6)
                AND (?7::TEXT IS NULL OR
@@ -363,7 +363,7 @@ lash_store_sql::statements! {
                AND (?3::TEXT IS NULL OR identity_kind = ?3)
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{identity,definition,definition}') = ?5)
+                    (record_json::JSONB #> '{identity,definition_id}') = ?5)
                AND (?6::TEXT IS NULL OR
                     (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = ?6)
                AND (?7::TEXT IS NULL OR
@@ -383,7 +383,7 @@ lash_store_sql::statements! {
                AND (?3::TEXT IS NULL OR identity_kind = ?3)
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{identity,definition,definition}') = ?5)
+                    (record_json::JSONB #> '{identity,definition_id}') = ?5)
                AND (?6::TEXT IS NULL OR
                     (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = ?6)
                AND (?7::TEXT IS NULL OR
@@ -403,7 +403,7 @@ lash_store_sql::statements! {
                AND (?3::TEXT IS NULL OR identity_kind = ?3)
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{identity,definition,definition}') = ?5)
+                    (record_json::JSONB #> '{identity,definition_id}') = ?5)
                AND (?6::TEXT IS NULL OR
                     (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = ?6)
                AND (?7::TEXT IS NULL OR

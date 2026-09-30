@@ -1,6 +1,6 @@
 //! `process_definitions`: the named process-definition registry (ADR 0095).
 //!
-//! Written only by the `RegisterProcessDefinition` intent, under a
+//! Written only by the `PublishDefinition` intent, under a
 //! revision-and-fingerprint compare-and-swap. Both backends issue every
 //! statement over this table verbatim, so it has no backend-only set at all.
 

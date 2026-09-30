@@ -441,7 +441,15 @@ impl Compiler {
             &module_context.module_ref,
             &module_context.host_requirements_ref,
             process_ref,
-            process,
+            module_context
+                .process_types
+                .get(process)
+                .map(|ty| {
+                    lash_core_execution::ProcessSignature::known(crate::type_expr_to_json_schema(
+                        ty,
+                    ))
+                })
+                .unwrap_or(lash_core_execution::ProcessSignature::Unknown),
         );
         self.emit_push_value(literal);
     }
@@ -545,107 +553,54 @@ fn aggregate_await_leaf_count(expr: &Expr) -> Option<usize> {
 }
 
 /// This is the cell-side half of the one definition codec: converted to JSON it
-/// must equal
-/// [`ProcessDefinitionIdentity::to_process_value`](crate::ProcessDefinitionIdentity::to_process_value)
-/// for the same four fields, because a started process stores that value as its
-/// `ProcessIdentity.definition` and `processes.list({ definition: p })` compares
-/// the two by equality. The unit test below pins that equality; the literal is
-/// built by hand only to keep the compiled record's key order stable.
+/// uses the immutable definition codec: canonical ID and signature. The
+/// descriptor's module references stay in the published definition store.
+#[expect(
+    clippy::expect_used,
+    reason = "compiled references form a validated descriptor"
+)]
 pub(crate) fn process_ref_literal(
     module_ref: &crate::ModuleRef,
     host_requirements_ref: &crate::HostRequirementsRef,
     process_ref: &crate::ProcessRef,
-    process_name: &str,
+    signature: lash_core_execution::ProcessSignature,
 ) -> Value {
-    let mut record = record_with_capacity(5);
-    record.insert(LASH_PROCESS_VALUE_KEY.to_string(), Value::Bool(true));
-    record.insert(
-        LASH_PROCESS_NAME_KEY.to_string(),
-        Value::String(process_name.into()),
+    let identity = crate::ProcessDefinitionIdentity::new(
+        module_ref.clone(),
+        host_requirements_ref.clone(),
+        process_ref.clone(),
+        "",
     );
-    record.insert(
-        LASH_MODULE_REF_KEY.to_string(),
-        Value::String(module_ref.to_string().into()),
-    );
-    let mut process_ref_record = record_with_capacity(2);
-    process_ref_record.insert(
-        "component".to_string(),
-        Value::String(process_ref.component.to_string().into()),
-    );
-    process_ref_record.insert("pos".to_string(), Value::Number(process_ref.pos as f64));
-    record.insert(
-        LASH_PROCESS_REF_KEY.to_string(),
-        Value::Record(Arc::new(process_ref_record)),
-    );
-    record.insert(
-        LASH_HOST_REQUIREMENTS_REF_KEY.to_string(),
-        Value::String(host_requirements_ref.to_string().into()),
-    );
-    Value::Record(Arc::new(record))
+    crate::from_json(
+        serde_json::to_value(identity.definition(signature).expect("compiled descriptor"))
+            .expect("definition serializes"),
+    )
 }
 
 #[cfg(test)]
 mod process_ref_literal_tests {
-    use super::process_ref_literal;
-    use crate::{
-        ContentHash, HostRequirementsRef, ModuleRef, ProcessDefinitionIdentity, ProcessRef,
-    };
-
-    fn fixture() -> (ModuleRef, HostRequirementsRef, ProcessRef, &'static str) {
-        (
-            ModuleRef::new(&ContentHash::new("module-source")),
-            HostRequirementsRef::new(&ContentHash::new("host-requirements")),
-            ProcessRef::new(ContentHash::new("component-source"), 3),
-            "on_button",
-        )
-    }
-
     #[test]
-    fn compiled_process_literal_encodes_exactly_what_the_codec_encodes() {
-        let (module_ref, host_requirements_ref, process_ref, process_name) = fixture();
-        let literal = process_ref_literal(
-            &module_ref,
-            &host_requirements_ref,
-            &process_ref,
-            process_name,
+    fn compiled_literal_uses_the_immutable_definition_codec() {
+        let identity = crate::ProcessDefinitionIdentity::new(
+            crate::ModuleRef::new(&crate::ContentHash::new("module")),
+            crate::HostRequirementsRef::new(&crate::ContentHash::new("host")),
+            crate::ProcessRef::new(crate::ContentHash::new("component"), 3),
+            "",
         );
-        let identity = ProcessDefinitionIdentity::new(
-            module_ref,
-            host_requirements_ref,
-            process_ref,
-            process_name,
+        let literal = super::process_ref_literal(
+            &identity.module_ref,
+            &identity.host_requirements_ref,
+            &identity.process_ref,
+            lash_core_execution::ProcessSignature::Unknown,
         );
-
         assert_eq!(
-            serde_json::to_value(&literal).expect("compiled process literal serializes"),
-            identity.to_process_value(),
-            "the VM literal and the definition codec must produce one encoding"
-        );
-    }
-
-    #[test]
-    fn compiled_process_literal_round_trips_through_the_codec() {
-        let (module_ref, host_requirements_ref, process_ref, process_name) = fixture();
-        let literal = process_ref_literal(
-            &module_ref,
-            &host_requirements_ref,
-            &process_ref,
-            process_name,
-        );
-        let encoded = serde_json::to_value(&literal).expect("compiled process literal serializes");
-
-        let decoded = ProcessDefinitionIdentity::from_process_value(&encoded)
-            .expect("the VM literal decodes through the definition codec");
-
-        assert_eq!(
-            decoded,
-            ProcessDefinitionIdentity::new(
-                module_ref,
-                host_requirements_ref,
-                process_ref,
-                process_name,
+            serde_json::to_value(literal).expect("literal"),
+            serde_json::to_value(
+                identity
+                    .definition(lash_core_execution::ProcessSignature::Unknown)
+                    .expect("definition")
             )
+            .expect("codec")
         );
-        assert_eq!(decoded.to_process_value(), encoded);
     }
 }

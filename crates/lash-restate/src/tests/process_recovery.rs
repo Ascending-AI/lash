@@ -807,7 +807,7 @@ pub(super) async fn typescript_artifact_runs_through_process_engine_to_terminal(
 
 pub(super) fn assert_lashlang_engine_record(
     record: &lash_core::ProcessRecord,
-    expected_process_name: &str,
+    expected_process_ref: &lashlang::ProcessRef,
     expected_args: serde_json::Map<String, serde_json::Value>,
 ) {
     let ProcessInput::Engine { kind, payload } = record.input.as_ref() else {
@@ -823,7 +823,11 @@ pub(super) fn assert_lashlang_engine_record(
     );
     let decoded = lash_lashlang_runtime::LashlangProcessInput::from_payload(payload.clone())
         .expect("persisted Lashlang engine payload must decode after registry reopen");
-    assert_eq!(decoded.process_name, expected_process_name);
+    assert!(
+        decoded.process_name.is_empty(),
+        "durable inputs carry the process reference"
+    );
+    assert_eq!(&decoded.process_ref, expected_process_ref);
     assert_eq!(decoded.args, expected_args);
 }
 
@@ -887,7 +891,14 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         .expect("trigger-started process survives registry reopen");
     assert_lashlang_engine_record(
         &reopened_record,
-        "notify",
+        &lash_lashlang_runtime::LashlangProcessInput::from_payload(
+            match trigger_registration.input.as_ref() {
+                ProcessInput::Engine { payload, .. } => payload.clone(),
+                _ => panic!("engine input"),
+            },
+        )
+        .expect("admitted input")
+        .process_ref,
         serde_json::Map::from_iter([("resource".to_string(), serde_json::json!("issue-42"))]),
     );
     assert_eq!(

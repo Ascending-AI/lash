@@ -61,6 +61,7 @@ pub(super) struct TurnBoundary {
     /// `RuntimeSessionState` if the transition ever panicked mid-move.
     stage: Option<TurnCommitStage>,
     clock: Arc<dyn crate::Clock>,
+    definition_engines: crate::ProcessEngineRegistry,
     operation_scope: crate::ExecutionScope,
     commit_budget: crate::CommitBudget,
     /// In-turn graph appends riding this turn's commit. Held here as well as
@@ -107,6 +108,11 @@ struct FinalizedTurnCommitStage {
 }
 
 impl TurnBoundary {
+    pub(super) fn with_definition_engines(mut self, engines: crate::ProcessEngineRegistry) -> Self {
+        self.definition_engines = engines;
+        self
+    }
+
     pub(super) fn final_operation(&self) -> crate::OperationId {
         crate::OperationId::new(self.operation_scope.clone(), "final")
     }
@@ -158,6 +164,7 @@ impl TurnBoundary {
                 ),
             ))),
             clock,
+            definition_engines: crate::ProcessEngineRegistry::new(),
             operation_scope,
             commit_budget,
             graph_appends,
@@ -400,7 +407,19 @@ impl TurnBoundary {
                         .pending_frame_switch()
                         .map(|recorded| recorded.initial_nodes().to_vec())
                         .unwrap_or_default();
-                    frame_switch_execution_state_update(session, &initial_nodes)
+                    let successor = self
+                        .graph_appends
+                        .pending_frame_switch()
+                        .map(|recorded| {
+                            crate::session_graph::frame_node_id(
+                                &self.state().session_id,
+                                recorded.request.frame_key.as_str(),
+                            )
+                        })
+                        .ok_or_else(|| {
+                            StoreError::Backend("frame switch has no successor".into())
+                        })?;
+                    frame_switch_execution_state_update(session, &successor, &initial_nodes)
                         .await
                         .map_err(accepted_commit::execution_state_capture_error)?
                 } else {
@@ -642,6 +661,7 @@ impl TurnBoundary {
         // A switch this turn makes ends the frame the turn was admitted on;
         // otherwise the commit ends whatever frame a resident open left
         // behind, if any.
+        let definition_engines = self.definition_engines.clone();
         let frame_switch = FrameSwitchCommit {
             ended: admitted_frame.filter(|_| agent_frame_switch_materializes),
             carries: frame_carries,
@@ -667,6 +687,7 @@ impl TurnBoundary {
                 .try_into()
                 .unwrap_or(u64::MAX);
             Self::apply_commit(
+                &definition_engines,
                 state,
                 commit_budget,
                 store,
@@ -708,6 +729,7 @@ impl TurnBoundary {
         reason = "derived graph node identities are non-empty"
     )]
     async fn apply_commit(
+        definition_engines: &crate::ProcessEngineRegistry,
         state: &mut RuntimeSessionState,
         commit_budget: crate::CommitBudget,
         store: &crate::store::SessionStore,
@@ -806,6 +828,8 @@ impl TurnBoundary {
             None => {}
         }
         commit.park_root = park_root;
+        super::frame_definition_carry::prepare(definition_engines, frame_transition.as_ref())
+            .await?;
         commit.frame_transition = frame_transition;
         // Cancellation-intent retries are progress-fenced: every refusal
         // proves a newer durable intent revision. Refresh only that snapshot:

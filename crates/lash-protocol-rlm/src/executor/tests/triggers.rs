@@ -109,8 +109,14 @@ pub(super) async fn trigger_tool_context<'run>(
     )
     .with_process_artifacts(
         Arc::clone(&ports.process_env_store),
-        lash_core::ProcessEngineRegistry::new().with_registration(
-            lash_lashlang_runtime::lashlang_process_engine_registration(
+        lash_core::ProcessEngineRegistry::new()
+            .with_artifact_ports(
+                ports
+                    .artifact_ports
+                    .clone()
+                    .expect("trigger fixture artifact ports"),
+            )
+            .with_registration(lash_lashlang_runtime::lashlang_process_engine_registration(
                 lash_lashlang_runtime::LashlangProcessEngine::new(
                     artifact_store.clone(),
                     LashlangSurface::new(
@@ -119,8 +125,7 @@ pub(super) async fn trigger_tool_context<'run>(
                         timer_trigger_resources(),
                     ),
                 ),
-            ),
-        ),
+            )),
     );
     let builder = lash_core::testing::TestExecutionContextBuilder::new(ports)
         .provider(Arc::new(
@@ -201,7 +206,7 @@ fn deferred_trigger_constructor_and_event_schema_link() {
                     const remember = async (change: calendar.Change) => true;
                     const source = calendar.Changed({});
                     finish(await triggers.register({
-                      source, target: remember, inputs: (event) => ({ change: event })
+                      source, target: { definition: remember }, inputs: (event) => ({ change: event })
                     }));
                 "#,
         )];
@@ -249,7 +254,7 @@ fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
                 const remember = async (change: calendar.Change) => true;
                 const source = calendar.Changed({});
                 finish(await triggers.register({
-                  source, target: remember, inputs: (event) => ({ change: event })
+                  source, target: { definition: remember }, inputs: (event) => ({ change: event })
                 }));
             "#,
             resolver,
@@ -286,7 +291,7 @@ fn deferred_trigger_references_inside_helpers_and_processes_are_gathered() {
                     const sourceInput = () => ({});
                     const remember = async (change: calendar.Change) => true;
                     finish(await triggers.register({
-                      source: calendar.Changed(sourceInput()), target: remember,
+                      source: calendar.Changed(sourceInput()), target: { definition: remember },
                       inputs: (event) => ({ change: event })
                     }));
                 "#,
@@ -387,7 +392,7 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
                     const unused = async () => { await web.fetch({}); return true; };
                     const source = calendar.Changed({});
                     await triggers.register({
-                      source, target: remember,
+                      source, target: { definition: remember },
                       inputs: (event) => ({ change: event })
                     });
                     finish(true);
@@ -502,6 +507,29 @@ impl TriggerEffectCapture {
             .collect()
     }
 
+    fn definition_identity(
+        &self,
+        id: &lash_core::ProcessDefinitionId,
+    ) -> lashlang::ProcessDefinitionIdentity {
+        let envelopes = self.envelopes.lock_recover();
+        envelopes
+            .iter()
+            .find_map(|envelope| {
+                let lash_core::RuntimeEffectCommand::Process { command } = &envelope.command else {
+                    return None;
+                };
+                let lash_core::ProcessCommand::PublishDefinition { draft, .. } = command.as_ref()
+                else {
+                    return None;
+                };
+                (draft.id() == *id).then(|| {
+                    lashlang::ProcessDefinitionIdentity::from_process_value(draft.value().as_json())
+                        .expect("canonical process definition")
+                })
+            })
+            .expect("the target's immutable definition was published")
+    }
+
     fn trigger_effects(&self) -> Vec<(String, &'static str)> {
         self.envelopes
             .lock_recover()
@@ -585,7 +613,7 @@ pub(super) fn typescript_register_trigger_executes_end_to_end() {
                 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
                 const handle = await triggers.register({
                   source,
-                  target: remember,
+                  target: { definition: remember },
                   inputs: (event) => ({ tick: event }),
                   name: "remembered"
                 });
@@ -627,7 +655,7 @@ fn trigger_registration_failure_prevents_foreground_execution() {
                 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
                 await triggers.register({
                   source,
-                  target: remember,
+                  target: { definition: remember },
                   inputs: (event) => ({ tick: event }),
                   name: "remembered"
                 });
@@ -660,11 +688,11 @@ pub(super) fn trigger_registry_operations_execute_foreground_code() {
                 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
                 const handle = await triggers.register({
                   source,
-                  target: remember,
+                  target: { definition: remember },
                   inputs: (event) => ({ tick: event }),
                   name: "remembered"
                 });
-                const registrations = await triggers.list({ target: remember });
+                const registrations = await triggers.list({ target: { definition: remember } });
 
                 finish({ answer: "foreground ran", handle: handle, registrations: registrations });
                 "#,
@@ -747,7 +775,7 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
                         const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
                         const handle = await triggers.register({
                           source,
-                          target: remember,
+                          target: { definition: remember },
                           inputs: (event) => ({ tick: event })
                         });
                         finish(handle);
@@ -862,14 +890,7 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
                     Some((
                         draft.source_key.clone(),
                         draft.subscription_key.clone(),
-                        draft
-                            .target_identity
-                            .definition
-                            .as_ref()?
-                            .definition
-                            .as_json()["module_ref"]
-                            .as_str()?
-                            .to_string(),
+                        draft.target_identity.definition_id.as_ref()?.to_string(),
                     ))
                 })
                 .collect()
@@ -882,8 +903,8 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
                 const remember = async (tick: timer.Tick) => tick.fired_at;
                 const morning = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
                 const evening = timer.Schedule({ expr: "0 18 * * *", tz: "UTC" });
-                await triggers.register({ source: morning, target: remember, inputs: (event) => ({ tick: event }) });
-                await triggers.register({ source: evening, target: remember, inputs: (event) => ({ tick: event }) });
+                await triggers.register({ source: morning, target: { definition: remember }, inputs: (event) => ({ tick: event }) });
+                await triggers.register({ source: evening, target: { definition: remember }, inputs: (event) => ({ tick: event }) });
                 finish(true);
                 "#,
             ))
@@ -895,8 +916,8 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
                 const remember = async (tick: timer.Tick) => tick.fired_at;
                 const morning = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
                 const evening = timer.Schedule({ expr: "0 18 * * *", tz: "UTC" });
-                await triggers.register({ source: evening, target: remember, inputs: (event) => ({ tick: event }) });
-                await triggers.register({ source: morning, target: remember, inputs: (event) => ({ tick: event }) });
+                await triggers.register({ source: evening, target: { definition: remember }, inputs: (event) => ({ tick: event }) });
+                await triggers.register({ source: morning, target: { definition: remember }, inputs: (event) => ({ tick: event }) });
                 finish(true);
                 "#,
             ))
@@ -948,7 +969,7 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
                         const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
                         await triggers.register({
                           source,
-                          target: remember,
+                          target: { definition: remember },
                           inputs: (event) => ({ tick: event }),
                           subscription_key: "old-schedule"
                         });
@@ -979,8 +1000,6 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
         .await
         .expect("list registration before unrelated execution");
 
-        let double =
-            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let handler = double
             .open_handler(crate::testing::default_cell_scope())
             .await
@@ -1340,7 +1359,7 @@ async fn execute_trigger_process_with_originator(
         effect_host: Arc::clone(&effect_host),
         originator_override: originator_override.clone(),
         env_store: Arc::clone(&process_env_store),
-        engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
+        engines: fixture_process_engines(artifact_store.clone(), surface.clone(), table.backend()),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         crate::testing::double_ports(table.double(), &handler),
@@ -1563,13 +1582,13 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
                 const remember = async (tick: timer.Tick) => true;
                 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
                 const registered = await triggers.register({
-                  source, target: remember, inputs: (event) => ({ tick: event }),
+                  source, target: { definition: remember }, inputs: (event) => ({ tick: event }),
                   name: "scalar", subscription_key: "scalar"
                 });
-                const listed = await triggers.list({ target: remember });
+                const listed = await triggers.list({ target: { definition: remember } });
                 const updated = await triggers.update({
                   subscription_key: "scalar", expected_revision: registered.revision,
-                  source, target: remember, inputs: (event) => ({ tick: event }),
+                  source, target: { definition: remember }, inputs: (event) => ({ tick: event }),
                   name: "scalar-updated"
                 });
                 const disabled = await triggers.disable({
@@ -1582,7 +1601,7 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
                   subscription_key: "scalar", expected_revision: enabled.revision
                 });
                 await triggers.register({
-                  source, target: remember, inputs: (event) => ({ tick: event }),
+                  source, target: { definition: remember }, inputs: (event) => ({ tick: event }),
                   subscription_key: "prune-me"
                 });
                 const pruned = await triggers.prune({ subscription_keys: ["prune-me"] });
@@ -1632,33 +1651,33 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
                 const remember = async (tick: timer.Tick) => true;
                 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
                 const update_seed = await triggers.register({
-                  source, target: remember, inputs: (event) => ({ tick: event }),
+                  source, target: { definition: remember }, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-update"
                 });
                 const registered_enable_seed = await triggers.register({
-                  source, target: remember, inputs: (event) => ({ tick: event }),
+                  source, target: { definition: remember }, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-enable"
                 });
                 const enable_seed = await triggers.disable({
                   subscription_key: "batch-enable", expected_revision: registered_enable_seed.revision
                 });
                 const disable_seed = await triggers.register({
-                  source, target: remember, inputs: (event) => ({ tick: event }),
+                  source, target: { definition: remember }, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-disable"
                 });
                 const delete_seed = await triggers.register({
-                  source, target: remember, inputs: (event) => ({ tick: event }),
+                  source, target: { definition: remember }, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-delete"
                 });
                 const results = await Promise.all([
                   triggers.register({
-                    source, target: remember, inputs: (event) => ({ tick: event }),
+                    source, target: { definition: remember }, inputs: (event) => ({ tick: event }),
                     subscription_key: "batch-register"
                   }),
                   triggers.list({}),
                   triggers.update({
                     subscription_key: "batch-update", expected_revision: update_seed.revision,
-                    source, target: remember, inputs: (event) => ({ tick: event }),
+                    source, target: { definition: remember }, inputs: (event) => ({ tick: event }),
                     name: "batch-updated"
                   }),
                   triggers.enable({
@@ -1733,7 +1752,7 @@ pub(super) fn trigger_disable_is_revision_checked_and_keeps_registry_entry() {
                 const source = timer.Schedule({ expr: "0 8 * * *" });
                 const handle = await triggers.register({
                   source,
-                  target: remember,
+                  target: { definition: remember },
                   inputs: (event) => ({ tick: event }),
                   name: "remembered",
                   subscription_key: "remembered"
@@ -1742,7 +1761,7 @@ pub(super) fn trigger_disable_is_revision_checked_and_keeps_registry_entry() {
                   subscription_key: "remembered",
                   expected_revision: handle.revision
                 });
-                const registrations = await triggers.list({ target: remember });
+                const registrations = await triggers.list({ target: { definition: remember } });
                 finish({ disposition: disabled.disposition, enabled: registrations[0].enabled });
                 "#,
         )
@@ -1985,7 +2004,7 @@ const remember = async (tick: timer.Tick, label: string) => {
 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
 const handle = await triggers.register({
   source,
-  target: remember,
+  target: { definition: remember },
   inputs: (event) => ({ tick: event, label: "daily" }),
   name: "remembered",
   subscription_key: "remembered-key"
@@ -2015,15 +2034,13 @@ fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
         let [draft] = drafts.as_slice() else {
             panic!("exactly one registration, got {}", drafts.len());
         };
-        let identity = draft
-            .target_identity
-            .definition
-            .clone()
-            .expect("the target carries a process definition identity")
-            .definition
-            .into_json();
-        let identity: lashlang::ProcessDefinitionIdentity =
-            serde_json::from_value(identity).expect("a process definition identity");
+        let identity = capture.definition_identity(
+            draft
+                .target_identity
+                .definition_id
+                .as_ref()
+                .expect("the target carries a definition id"),
+        );
 
         let artifact =
             lashlang::LashlangArtifacts::get_module_artifact(&store, &identity.module_ref)
@@ -2108,15 +2125,13 @@ fn repin_trigger_inputs_retired_record_form() {
         let [draft] = drafts.as_slice() else {
             panic!("exactly one registration, got {}", drafts.len());
         };
-        let identity = draft
-            .target_identity
-            .definition
-            .clone()
-            .expect("the target carries a process definition identity")
-            .definition
-            .into_json();
-        let identity: lashlang::ProcessDefinitionIdentity =
-            serde_json::from_value(identity).expect("a process definition identity");
+        let identity = capture.definition_identity(
+            draft
+                .target_identity
+                .definition_id
+                .as_ref()
+                .expect("the target carries a definition id"),
+        );
         let artifact =
             lashlang::LashlangArtifacts::get_module_artifact(&store, &identity.module_ref)
                 .await

@@ -602,6 +602,13 @@ impl ControlIntentStore for Integrator {
 
 #[lash::async_trait]
 impl DeploymentStore for Integrator {
+    async fn artifact_frame_is_retained(
+        &self,
+        frame: &lash::persistence::FrameEnvironmentId,
+    ) -> Result<bool, StoreError> {
+        unreachable!("external signature witness")
+    }
+
     fn bind_effect_host(&self, effect_host: &Arc<dyn EffectHost>) {
         unreachable!("external signature witness")
     }

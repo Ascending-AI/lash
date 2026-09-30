@@ -1706,3 +1706,6 @@ mod guarded_surface_tests;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod definition_id_laws;

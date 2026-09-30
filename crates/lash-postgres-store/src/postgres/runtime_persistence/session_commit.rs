@@ -96,9 +96,31 @@ async fn carry_into_successor_tx(
             referrer: successor,
         });
     }
-    let mut carries = transition
-        .carries
+    let mut closure = transition.carries.clone();
+    for carry in &transition.carries {
+        if carry.store != lash_core_execution::ArtifactStoreId::ProcessDefinition {
+            continue;
+        }
+        let id = lash_core_execution::ProcessDefinitionId::parse(&carry.artifact_ref)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let bytes: Vec<u8> = sqlx::query_scalar(sql.lashlang_artifacts.select_bytes.sql())
+            .bind("process_definition")
+            .bind(&carry.artifact_ref)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let draft = lash_core_execution::ProcessDefinitionDraft::from_store_bytes(&id, &bytes)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        closure.extend(draft.artifacts().iter().cloned());
+    }
+    let mut carries = closure
         .iter()
+        .filter(|artifact| {
+            !matches!(
+                artifact.store,
+                lash_core_execution::ArtifactStoreId::Engine(_)
+            )
+        })
         .map(|artifact| {
             let namespace =
                 crate::artifact_store::store_namespace(&artifact.store).ok_or_else(|| {

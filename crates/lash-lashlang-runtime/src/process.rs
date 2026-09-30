@@ -260,7 +260,7 @@ fn decode_lashlang_segment_state(
 /// instruction-accounting and node-id contracts the body compiles and reports
 /// under) plus what this tier adds on top: the segment-state generation a
 /// parked body resumes from, the replay-key grammar its journal is keyed by,
-/// the host requirements it was admitted against and the process name. Nothing
+/// the host requirements it was admitted against. Nothing
 /// stored says "this was written by version N": a run compares the generation
 /// its start record names against the one this build mints for the same
 /// payload, which is a pure function computed before the artifact is loaded.
@@ -281,7 +281,6 @@ pub fn lashlang_program_hash(input: &LashlangProcessInput) -> String {
         LASHLANG_SEGMENT_STATE_VERSION,
         crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
         &input.host_requirements_ref,
-        &input.process_name,
     ))
     .expect("lashlang program identity should serialize");
     format!(
@@ -355,7 +354,7 @@ pub async fn run_lashlang_process(
     let is_initial_segment = handover.is_none();
     let segment_controller = context.scoped_effect_controller();
     let phase_probe = context.turn_phase_probe();
-    let input = match LashlangProcessInput::from_payload(payload) {
+    let mut input = match LashlangProcessInput::from_payload(payload) {
         Ok(input) => input,
         Err(err) => {
             return Ok(process_lashlang_failure(
@@ -469,6 +468,10 @@ pub async fn run_lashlang_process(
             }
         }
     };
+    input.process_name = artifact
+        .process_name_for_ref(&input.process_ref)
+        .unwrap_or("")
+        .to_owned();
     let (tool_catalog, host_environment) = {
         let _phase = context.named_phase("rlm_process.resolve_environment");
         let tool_catalog = match context.resolved_tool_catalog() {
@@ -579,6 +582,7 @@ pub async fn run_lashlang_process(
         let state = lashlang::State::from_snapshot(lashlang::Snapshot::new(globals));
         (ctx, guard, state)
     };
+    definition_publication::publish_exports(&ctx, &artifact).await?;
     if let Some(segment_state) = segment_state.as_mut() {
         ctx.restore_started_process_ids(&segment_state.started_process_ids);
         ctx.restore_incorporation_ledger(segment_state.incorporation_ledger.clone());
@@ -1762,3 +1766,5 @@ mod signal_wait_tests;
 #[cfg(test)]
 #[path = "process/opaque_state_tests.rs"]
 mod opaque_state_tests;
+
+mod definition_publication;

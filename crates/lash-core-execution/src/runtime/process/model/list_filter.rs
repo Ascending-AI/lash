@@ -69,13 +69,8 @@ impl ProcessOriginatorFilter {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProcessListFilter {
-    /// Engine-owned process definition value, compared verbatim against the
-    /// definition a record's reference names. The core owns no encoding here: a
-    /// caller passes the same value the engine that started the run stores, so a
-    /// caller holding a definition can filter by it directly. The reference's
-    /// signature is deliberately excluded: it is resolved authority about the
-    /// same definition, not part of what names it.
-    pub definition: Option<super::ProcessDefinitionValue>,
+    /// Select runs of this immutable definition.
+    pub definition_id: Option<crate::ProcessDefinitionId>,
     pub status: ProcessStatusFilter,
     pub originator: Option<ProcessOriginatorFilter>,
     /// Selects the processes that live until one scope, compared by the same
@@ -111,7 +106,7 @@ impl ProcessListFilter {
             .ok_or_else(|| "processes.list expects a record of process filters".to_string())?;
         for key in map.keys() {
             match key.as_str() {
-                "definition"
+                "definition_id"
                 | "status"
                 | "originator"
                 | "until"
@@ -126,13 +121,13 @@ impl ProcessListFilter {
                 _ => return Err(format!("processes.list unknown filter `{key}`")),
             }
         }
-        // Taken verbatim: the definition value is whichever encoding the engine
-        // that started the process stores, and `matches_record` compares the two
-        // by equality. Normalizing here would reintroduce a second encoding.
-        let definition = args
-            .get("definition")
-            .cloned()
-            .map(super::ProcessDefinitionValue::new);
+        let definition_id = args
+            .get("definition_id")
+            .map(|value| {
+                crate::ProcessDefinitionId::from_tagged_json(value)
+                    .map_err(|error| format!("processes.list invalid definition_id: {error}"))
+            })
+            .transpose()?;
         let status = ProcessStatusFilter::decode(args.get("status"))?;
         let originator = args
             .get("originator")
@@ -157,7 +152,7 @@ impl ProcessListFilter {
         let created_at_end_ms = optional_u64_filter(args, "created_at_end_ms")?;
         let retired_since_ms = optional_u64_filter(args, "retired_since_ms")?;
         Ok(Self {
-            definition,
+            definition_id,
             status,
             originator,
             until,
@@ -180,13 +175,10 @@ impl ProcessListFilter {
 
     pub fn matches_record(&self, record: &ProcessRecord) -> bool {
         self.status.matches(record.status)
-            && self.definition.as_ref().is_none_or(|definition| {
-                record
-                    .identity
-                    .definition
-                    .as_ref()
-                    .is_some_and(|reference| &reference.definition == definition)
-            })
+            && self
+                .definition_id
+                .as_ref()
+                .is_none_or(|id| record.identity.definition_id.as_ref() == Some(id))
             && self
                 .originator
                 .as_ref()

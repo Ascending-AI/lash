@@ -96,7 +96,7 @@ impl From<lash_core::ProcessHandleView> for RemoteProcessHandleView {
             process_id,
             kind,
             label,
-            definition,
+            definition_id,
             status,
             ..
         } = value;
@@ -106,7 +106,7 @@ impl From<lash_core::ProcessHandleView> for RemoteProcessHandleView {
             process_id,
             kind: kind.into(),
             label,
-            definition: definition.map(Into::into),
+            definition_id,
             status: status.into(),
         }
     }
@@ -122,7 +122,7 @@ impl TryFrom<RemoteProcessHandleView> for lash_core::ProcessHandleView {
             process_id,
             kind,
             label,
-            definition,
+            definition_id,
             status,
             ..
         } = value;
@@ -134,8 +134,8 @@ impl TryFrom<RemoteProcessHandleView> for lash_core::ProcessHandleView {
             lash_core::ProcessIdentity {
                 kind: kind.into(),
                 label,
-                definition: definition.map(Into::into),
-                definition_id: None,
+                definition: None,
+                definition_id,
             },
             status.into(),
         );

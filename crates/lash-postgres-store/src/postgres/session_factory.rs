@@ -15,6 +15,23 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
     }
 
+    async fn artifact_frame_is_retained(
+        &self,
+        frame: &lash_core_execution::FrameEnvironmentId,
+    ) -> Result<bool, StoreError> {
+        sqlx::query_scalar(
+            session_sql()
+                .graph_postgres
+                .artifact_frame_is_retained
+                .sql(),
+        )
+        .bind(frame.session_id().as_str())
+        .bind(frame.frame_node_id().as_str())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(store_sqlx_error)
+    }
+
     async fn reclaim_retained_evidence(
         &self,
         bound: lash_core_execution::store::RetentionBound,

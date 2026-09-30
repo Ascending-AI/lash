@@ -765,6 +765,35 @@ fn project_recorded_intent_outcomes(
     let crate::ToolCallOutcome::Success(value) = &mut output.outcome else {
         return;
     };
+    if let Some(index) = lash_sansio::handle::definition_slot(&value.to_json_value()) {
+        let outcome = outcomes.iter().find(|outcome| {
+            declares_at(outcome, crate::ToolIntentKind::PublishDefinition, index)
+                || declares_at(outcome, crate::ToolIntentKind::GetDefinition, index)
+        });
+        match outcome {
+            Some(crate::ToolIntentExecutionOutcome::Executed { result, .. }) => {
+                match serde_json::from_value(result.clone()) {
+                    Ok(decoded) => *value = decoded,
+                    Err(error) => {
+                        *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                            crate::ToolFailureClass::Internal,
+                            "tool_value_decode_failed",
+                            error.to_string(),
+                        ))
+                    }
+                }
+            }
+            Some(crate::ToolIntentExecutionOutcome::Refused { refusal, .. }) => {
+                *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Unavailable,
+                    refusal.code(),
+                    format!("{refusal:?}"),
+                ));
+            }
+            _ => {}
+        }
+        return;
+    }
     // A start's slot is resolved from the realized start of the same intent
     // index: the process handle its registration minted replaces the slot
     // before any model or cell sees the output (ADR 0107). A slot whose start

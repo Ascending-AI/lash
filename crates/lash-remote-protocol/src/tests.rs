@@ -766,7 +766,7 @@ fn remote_trigger_dtos_json_round_trip() {
             identity: RemoteProcessIdentity {
                 kind: "lashlang".to_string(),
                 label: Some("on_button".to_string()),
-                definition: Some(remote_process_definition_identity()),
+                definition_id: Some(remote_process_definition_identity().id),
             },
             input: RemoteProcessInput::Engine {
                 kind: "lashlang".to_string(),
@@ -828,7 +828,7 @@ struct Protocol62TriggerSubscriptionFilterEnvelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     source_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    target: Option<RemoteProcessDefinitionIdentity>,
+    target: Option<RemoteProcessDefinition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     enabled: Option<bool>,
 }
@@ -1255,7 +1255,7 @@ fn remote_process_dtos_json_round_trip() {
                 identity: RemoteProcessIdentity {
                     kind: "external".to_string(),
                     label: Some("Import".to_string()),
-                    definition: None,
+                    definition_id: None,
                 },
                 lifecycle: RemoteProcessStatus::Running,
                 lifetime: RemoteLifetimeDecision::Detached,
@@ -1290,7 +1290,7 @@ fn remote_process_dtos_json_round_trip() {
     snapshot.validate().expect("valid process work snapshot");
 
     let list_filter = RemoteProcessListFilter {
-        definition: Some(remote_process_definition_value()),
+        definition_id: Some(remote_process_definition_identity().id),
         status: RemoteProcessStatusFilter::any_of([
             RemoteProcessStatus::Running,
             RemoteProcessStatus::Completed,
@@ -1458,7 +1458,7 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
             target_identity: RemoteProcessIdentity {
                 kind: "lashlang".to_string(),
                 label: Some("on_button".to_string()),
-                definition: Some(remote_process_definition_identity()),
+                definition_id: Some(remote_process_definition_identity().id),
             },
             event_types: vec![remote_process_event_type()],
             input_template: remote_trigger_input_template(),
@@ -1943,7 +1943,7 @@ fn trigger_target_label_round_trips_independently_of_the_identity_label() {
         RemoteProcessIdentity {
             kind: "external".to_string(),
             label: Some("identity-label".to_string()),
-            definition: None,
+            definition_id: None,
         },
     )
     .with_target_label("other-label");
@@ -2078,31 +2078,10 @@ fn remote_trigger_input_template() -> RemoteTriggerInputTemplate {
     ]))
 }
 
-fn remote_process_definition_value() -> serde_json::Value {
-    serde_json::json!({
-        "module_ref": "lashlang:v2:blake3:module",
-        "host_requirements_ref": "lashlang-host-requirements:v1:sha256:host",
-        "process_id": {
-            "component": "process-component",
-            "pos": 1
-        },
-        "process_name": "main"
-    })
-}
-
-fn remote_process_definition_identity() -> RemoteProcessDefinitionIdentity {
-    RemoteProcessDefinitionIdentity {
-        engine_kind: "lashlang".to_string(),
+fn remote_process_definition_identity() -> RemoteProcessDefinition {
+    RemoteProcessDefinition {
+        id: lash_sansio::ProcessDefinitionId::from_sha256_digest([1; 32]),
         signature: RemoteProcessSignature::Unknown,
-        value: serde_json::json!({
-            "module_ref": "lashlang:v2:blake3:module",
-            "host_requirements_ref": "lashlang-host-requirements:v1:sha256:host",
-            "process_id": {
-                "component": "process-component",
-                "pos": 1
-            },
-            "process_name": "main"
-        }),
     }
 }
 
@@ -2141,7 +2120,7 @@ fn remote_process_record() -> RemoteProcessRecord {
         identity: RemoteProcessIdentity {
             kind: "engine".to_string(),
             label: Some("Import".to_string()),
-            definition: None,
+            definition_id: None,
         },
         event_types: vec![remote_process_event_type()],
         provenance: RemoteProcessProvenance {
@@ -2331,7 +2310,7 @@ fn remote_trigger_registration_refuses_non_engine_target() {
         RemoteProcessIdentity {
             kind: "external".to_string(),
             label: None,
-            definition: None,
+            definition_id: None,
         },
     );
     assert!(matches!(

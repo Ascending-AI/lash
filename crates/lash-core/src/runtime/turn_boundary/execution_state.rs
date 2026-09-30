@@ -71,6 +71,7 @@ impl SeedCarries {
 /// initial nodes. A session with no code executor carries nothing.
 pub(in crate::runtime) async fn derive_seed_carries(
     session: Option<&mut Session>,
+    successor: &crate::FrameNodeId,
     seed: &[crate::SessionAppendNode],
 ) -> Result<SeedCarries, SessionError> {
     let Some(session) = session else {
@@ -83,6 +84,7 @@ pub(in crate::runtime) async fn derive_seed_carries(
     let carries = code_executor
         .frame_switch_carries(
             crate::plugin::ProtocolSessionContext::new(session, &SessionId::from(session_id)),
+            successor,
             seed,
         )
         .await?;
@@ -94,10 +96,11 @@ pub(in crate::runtime) async fn derive_seed_carries(
 /// `initial_nodes` are carried into the successor frame (ADR 0113 §3.1).
 pub(super) async fn frame_switch_execution_state_update(
     session: &mut Session,
+    successor: &crate::FrameNodeId,
     initial_nodes: &[crate::SessionAppendNode],
 ) -> Result<ExecutionStateUpdate, SessionError> {
     Ok(ExecutionStateUpdate::Clear {
-        carries: derive_seed_carries(Some(session), initial_nodes).await?,
+        carries: derive_seed_carries(Some(session), successor, initial_nodes).await?,
     })
 }
 

@@ -1506,7 +1506,7 @@ async fn rlm_trigger_register_is_a_leaf_tool_and_fires_in_a_later_turn() -> Resu
 const remember = async (change: calendar.Change) => change.id;
 const handle = await triggers.register({
   source: calendar.Changed({}),
-  target: remember,
+  target: { definition: remember },
   inputs: (event) => ({ change: event })
 });
 finish(handle.id);
@@ -1619,7 +1619,7 @@ const remember = async (change: calendar.Change) => change.id;
 const registrar = async () => {
   const handle = await triggers.register({
     source: calendar.Changed({}),
-    target: remember,
+    target: { definition: remember },
     inputs: (event) => ({ change: event })
   });
   return handle.id;

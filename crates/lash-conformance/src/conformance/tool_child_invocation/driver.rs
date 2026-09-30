@@ -126,18 +126,18 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
                 "caller-key",
             ),
         }),
-        crate::ToolIntent::RegisterProcessDefinition(Box::new(
-            crate::RegisterProcessDefinitionIntent {
-                owner: crate::RuntimeOwner::Session(session_id.clone()),
-                engine_kind: "law".to_string(),
-                definition: serde_json::Value::Null,
-                env_spec: None,
-                label: None,
-                name: Some("law".to_string()),
-                expected_revision: None,
-                module: None,
-            },
-        )),
+        crate::ToolIntent::PublishDefinition(Box::new(crate::PublishDefinitionIntent {
+            owner: crate::RuntimeOwner::Session(session_id.clone()),
+            draft: crate::ProcessDefinitionDraft::new("law", serde_json::Value::Null, [])
+                .expect("draft"),
+            module: None,
+        })),
+        crate::ToolIntent::GetDefinition(crate::GetDefinitionIntent {
+            owner: crate::RuntimeOwner::Session(session_id.clone()),
+            definition_id: crate::ProcessDefinitionDraft::new("law", serde_json::Value::Null, [])
+                .expect("draft")
+                .id(),
+        }),
         crate::ToolIntent::RegisterTrigger(Box::new(crate::RegisterTriggerIntent {
             owner: crate::RuntimeOwner::Session(session_id.clone()),
             owner_scope: crate::TriggerOwnerScope::session(session_id.clone()),
@@ -315,7 +315,8 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
             crate::ToolIntentKind::SignalProcess,
             crate::ToolIntentKind::CancelProcess,
             crate::ToolIntentKind::EmitTrigger,
-            crate::ToolIntentKind::RegisterProcessDefinition,
+            crate::ToolIntentKind::PublishDefinition,
+            crate::ToolIntentKind::GetDefinition,
             crate::ToolIntentKind::RegisterTrigger,
         ],
         "the child records every vocabulary result in declaration order after commit"
@@ -328,12 +329,12 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
                 identity: Some(identity),
                 refusal: crate::ToolIntentRefusalReason::CommandFailed { .. },
                 ..
-            } if (4..6).contains(&index) => identity,
+            } if (4..7).contains(&index) => identity,
             crate::ToolIntentExecutionOutcome::Refused {
                 identity: Some(identity),
                 refusal: crate::ToolIntentRefusalReason::ForeignTriggerActor { .. },
                 ..
-            } if index == 6 => identity,
+            } if index == 7 => identity,
             other => panic!("unexpected vocabulary result at index {index}: {other:?}"),
         };
         assert_eq!(identity.intent_index as usize, index);

@@ -575,6 +575,13 @@ struct KeyRecords(Arc<dyn crate::ProcessRegistry>);
 
 #[async_trait::async_trait]
 impl ArtifactCleanupAuthorities for KeyRecords {
+    async fn frame_is_retained(
+        &self,
+        _frame: &lash_core::FrameEnvironmentId,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
+
     async fn journal_replay(
         &self,
         journal: &crate::EffectJournalIdentity,

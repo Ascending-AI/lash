@@ -25,6 +25,7 @@ use crate::{ExecutionScope, StoreError};
 macro_rules! deployment_operations {
     ($emit:ident) => {
         $emit! {
+            fn artifact_frame_is_retained(&self, frame: &crate::FrameEnvironmentId) -> Result<bool, StoreError>;
             fn count_unsettled_turns(&self) -> Result<UnsettledTurnCounts, StoreError>;
             fn list_turn_parks(&self, query: &TurnParkQuery) -> Result<Vec<TurnPark>, StoreError>;
             fn turn_park_feed(&self, after: ParkFeedCursor, limit: NonZeroUsize) -> Result<ParkFeedPage<TurnParkTarget>, StoreError>;

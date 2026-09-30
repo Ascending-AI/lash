@@ -620,6 +620,9 @@ pub(super) fn is_trigger_event_projection_expr(expr: &Expr) -> bool {
 pub(super) fn trigger_target_process_name(expr: &Expr) -> Option<String> {
     match expr {
         Expr::LabelAnnotated { expr, .. } => trigger_target_process_name(expr),
+        Expr::Record(fields) if fields.len() == 1 && fields[0].0.as_str() == "definition" => {
+            trigger_target_process_name(&fields[0].1)
+        }
         Expr::Variable(name) | Expr::ProcessRef { process: name } => Some(name.to_string()),
         _ => None,
     }

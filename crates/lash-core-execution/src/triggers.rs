@@ -693,47 +693,16 @@ impl TriggerSubscriptionDraft {
 }
 
 fn validate_trigger_target(target: &crate::ProcessInput) -> Result<(), PluginError> {
-    if matches!(target, crate::ProcessInput::Engine { .. }) {
+    if matches!(
+        target,
+        crate::ProcessInput::Engine { .. } | crate::ProcessInput::Definition { .. }
+    ) {
         Ok(())
     } else {
         Err(PluginError::InvalidTriggerTarget {
             kind: target.engine_kind().to_string(),
         })
     }
-}
-
-/// Runs the process-engine registry's admission on a trigger registration's
-/// target before the subscription becomes durable (FIG-1522).
-///
-/// The delivery side deliberately stays outside the per-start gate: a delivery
-/// replays the target and identity the subscription recorded, so the admission
-/// decision has to be made once, here, when that record is created. Without it
-/// a registration naming an engine kind this host never registered would
-/// produce starts that were admitted nowhere.
-///
-/// An engine target resolves its definition reference through the owning
-/// engine, so the durable row pins the engine's authoritative signature rather
-/// than whatever the registrant claimed; a target that names no definition is
-/// admitted on its engine kind alone. Every non-Engine target is refused.
-pub async fn admit_trigger_registration_target(
-    registry: &crate::ProcessEngineRegistry,
-    draft: &mut TriggerSubscriptionDraft,
-) -> Result<(), PluginError> {
-    validate_trigger_target(&draft.target)?;
-    let Some(reference) = draft.target_identity.definition.clone() else {
-        // Refuses an unregistered kind with the registry's own typed error.
-        registry.require(draft.target_identity.kind.as_str())?;
-        return Ok(());
-    };
-    let resolution = registry
-        .resolve(&reference)
-        .await
-        .map_err(crate::PluginError::from)?;
-    draft.target_identity = crate::ProcessIdentity::for_definition(
-        reference.with_resolved_signature(resolution.signature),
-        draft.target_identity.label.clone(),
-    );
-    Ok(())
 }
 
 pub const INTERNAL_TRIGGER_KEY_PREFIX: &str = "lash.internal/";
@@ -1086,9 +1055,9 @@ impl TriggerSubscriptionFilter {
             && self.target.as_ref().is_none_or(|target| {
                 record
                     .target_identity
-                    .definition
+                    .definition_id
                     .as_ref()
-                    .is_some_and(|reference| reference.definition.as_json() == target)
+                    .is_some_and(|id| &id.to_tagged_json() == target)
             })
     }
 }
@@ -1955,3 +1924,6 @@ pub trait TriggerStore: Send + Sync {
     async fn prune_non_fired_occurrences(&self, cutoff_epoch_ms: u64)
     -> Result<usize, PluginError>;
 }
+
+mod target_admission;
+pub use target_admission::admit_trigger_registration_target;

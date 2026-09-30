@@ -40,9 +40,11 @@ fn context<'h>(
 }
 
 /// Runs `code` as one cell in a handler of its own on a fresh double.
-async fn run(state: &mut RlmExecutionState, code: &str) -> lash_core::ExecResponse {
-    let double =
-        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+async fn run(
+    double: &lash_restate_test::RestateTestBackend,
+    state: &mut RlmExecutionState,
+    code: &str,
+) -> lash_core::ExecResponse {
     let handler = double
         .open_handler(lash_core::AdmittedScope::turn(
             lash_core::SessionId::from("fig3571-l11"),
@@ -50,7 +52,7 @@ async fn run(state: &mut RlmExecutionState, code: &str) -> lash_core::ExecRespon
         ))
         .await
         .expect("open the cell's handler");
-    let response = run_in(state, context(&double, &handler), code).await;
+    let response = run_in(state, context(double, &handler), code).await;
     handler.close().await.expect("close the cell's handler");
     response
 }
@@ -125,7 +127,7 @@ async fn process_context<'h>(
         effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),
-        engines: fixture_process_engines(artifact_store, LashlangSurface::default()),
+        engines: fixture_process_engines(artifact_store, LashlangSurface::default(), &backend),
     });
     lash_core::testing::code_execution_context_with_process_dependencies(
         crate::testing::double_ports(double, handler),
@@ -176,7 +178,10 @@ const CELL_2_GLOBALS: &[&str] = &[
 fn session_globals_survive_cells_and_reload_and_private_slots_never_do() {
     block_on(async {
         let mut state = RlmExecutionState::for_engine("typescript");
+        let process_double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let first = run(
+            &process_double,
             &mut state,
             r#"let answer = 41;
 const box = { n: 1 };
@@ -203,8 +208,6 @@ const total = [1, 2, 3].map((value) => value * 2).length;"#,
         let mut state = cold_reload(&state);
         assert_exact_globals(&state, CELL_1_GLOBALS, "reload after cell 1");
 
-        let process_double =
-            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let process_handler = process_double
             .open_handler(crate::testing::default_cell_scope())
             .await
@@ -235,6 +238,7 @@ const from_host = host_config.label;"#,
         // Cell 3's block shadow lowers to the same generated slot cell 2's
         // did; neither survives its cell, so nothing stale collides.
         let third = run(
+            &process_double,
             &mut state,
             r#"if (counter > 0) {
   let answer = 7;

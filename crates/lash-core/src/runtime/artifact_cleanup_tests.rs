@@ -105,10 +105,15 @@ impl ObligationLedger for Ledger {
 impl ArtifactCleanupLedger for Ledger {
     async fn arm_cleanup(
         &self,
-        _cleanup: &ArtifactCleanup,
+        cleanup: &ArtifactCleanup,
         _now_ms: u64,
     ) -> Result<ObligationId, StoreError> {
-        Err(StoreError::Backend("not armed in these tests".to_owned()))
+        let id = ObligationId::new(format!("core:{}", cleanup.referrer.canonical_id()));
+        self.rows
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id.clone(), cleanup.clone());
+        Ok(id)
     }
 
     async fn nudge(&self, _referrer: &ArtifactReferrer, _now_ms: u64) -> Result<bool, StoreError> {
@@ -133,6 +138,7 @@ struct Authorities {
     retained: Mutex<Option<RetainedStart>>,
     subscription: Mutex<Option<SubscriptionRevisionStanding>>,
     definition_current: Mutex<bool>,
+    frame_retained: Mutex<bool>,
 }
 
 impl Authorities {
@@ -146,6 +152,13 @@ impl Authorities {
 
 #[async_trait::async_trait]
 impl ArtifactCleanupAuthorities for Authorities {
+    async fn frame_is_retained(&self, _frame: &crate::FrameEnvironmentId) -> Result<bool, String> {
+        Ok(*self
+            .frame_retained
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+
     async fn journal_replay(
         &self,
         journal: &lash_sansio::EffectJournalIdentity,
@@ -1069,4 +1082,120 @@ async fn a_guard_that_does_not_fit_its_referrer_is_undecodable() {
         Err(DeliveryFailure::Undecodable(_))
     ));
     assert!(harness.nothing_applied());
+}
+
+#[tokio::test]
+async fn a_prepared_frame_is_reclaimed_only_after_its_failed_commit_cannot_replay() {
+    let harness = harness();
+    let scope = journal("failed-frame-prepare");
+    let predecessor = ArtifactReferrer::FrameEnvironment(crate::FrameEnvironmentId::new(
+        crate::SessionId::from("carry"),
+        crate::FrameNodeId::new("old").unwrap(),
+    ));
+    let successor = ArtifactReferrer::FrameEnvironment(crate::FrameEnvironmentId::new(
+        crate::SessionId::from("carry"),
+        crate::FrameNodeId::new("never-committed").unwrap(),
+    ));
+    let claim = ReferrerClaim::guarded(
+        successor.clone(),
+        ArtifactCleanupPlan::AwaitFrame {
+            creator: scope.clone(),
+        },
+    )
+    .unwrap();
+    let ports = crate::ArtifactReferrerPorts::new(
+        Arc::new(Modules(harness.applied.clone())),
+        Arc::new(EnvStore(harness.applied.clone())),
+        Arc::new(Definitions(harness.applied.clone())),
+        Arc::new(crate::attachments::NoopAttachmentReferrers),
+        harness.ledger.clone(),
+        Arc::new(crate::testing::TestClock::new(1)),
+    );
+    let draft = ProcessDefinitionDraft::new(
+        ENGINE_KIND,
+        serde_json::Value::Null,
+        [
+            name(ArtifactStoreId::module(), "mod-start"),
+            name(ArtifactStoreId::Engine(ENGINE_KIND.into()), "own-start"),
+        ],
+    )
+    .unwrap();
+    harness
+        .applied
+        .descriptors
+        .lock()
+        .unwrap()
+        .insert(draft.id().to_string(), draft.to_store_bytes());
+    let engines = ProcessEngineRegistry::new()
+        .with_registration(crate::ProcessEngineRegistration::accepting(Arc::new(
+            Engine(harness.applied.clone()),
+        )))
+        .with_artifact_ports(ports.clone());
+    let transition = crate::store::FrameTransition {
+        ended: match predecessor.clone() {
+            ArtifactReferrer::FrameEnvironment(frame) => frame,
+            _ => unreachable!(),
+        },
+        successor: match successor.clone() {
+            ArtifactReferrer::FrameEnvironment(frame) => frame,
+            _ => unreachable!(),
+        },
+        carries: vec![name(
+            ArtifactStoreId::ProcessDefinition,
+            draft.id().as_str(),
+        )],
+        gate: scope.clone(),
+    };
+    crate::runtime::frame_definition_carry::prepare(&engines, Some(&transition))
+        .await
+        .unwrap();
+    let acquired = std::mem::take(&mut *harness.applied.acquired.lock().unwrap());
+    assert_eq!(
+        acquired,
+        vec![(successor.clone(), "own-start".into())],
+        "only the engine share prepares before SQL activation"
+    );
+    let guard = claim.guard_cleanup().unwrap();
+    assert_eq!(
+        harness.deliver(guard.clone()).await,
+        Err(DeliveryFailure::NotYet)
+    );
+    assert!(harness.nothing_applied());
+    harness.authorities.settle(&scope);
+    harness.deliver(guard).await.unwrap();
+    let (_, _, engine) = harness.applied();
+    assert_eq!(engine, vec![resolved(&successor, vec![])]);
+    assert_ne!(
+        engine[0].referrer, predecessor,
+        "the predecessor remains usable after a failed successor commit"
+    );
+}
+
+#[tokio::test]
+async fn a_committed_prepared_frame_retains_its_engine_share_until_ended_without_a_carry() {
+    let harness = harness();
+    let scope = journal("committed-frame-prepare");
+    let frame = ArtifactReferrer::FrameEnvironment(crate::FrameEnvironmentId::new(
+        crate::SessionId::from("carry"),
+        crate::FrameNodeId::new("committed").unwrap(),
+    ));
+    let guard = ReferrerClaim::guarded(
+        frame.clone(),
+        ArtifactCleanupPlan::AwaitFrame {
+            creator: scope.clone(),
+        },
+    )
+    .unwrap()
+    .guard_cleanup()
+    .unwrap();
+    *harness.authorities.frame_retained.lock().unwrap() = true;
+    harness.authorities.settle(&scope);
+    assert_eq!(harness.deliver(guard).await, Err(DeliveryFailure::NotYet));
+    assert!(harness.nothing_applied());
+    harness
+        .deliver(ArtifactCleanup::ended(frame.clone(), vec![], None))
+        .await
+        .unwrap();
+    let (_, _, engine) = harness.applied();
+    assert_eq!(engine, vec![resolved(&frame, vec![])]);
 }

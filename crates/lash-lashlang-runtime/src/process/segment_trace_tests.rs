@@ -766,8 +766,20 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
         fixture["source_commit"],
         "4f96c76629575e46b8d7f29526bb0cab7c16625b"
     );
-    let input: crate::LashlangProcessInput =
-        serde_json::from_value(fixture["input"].clone()).expect("fixture input decodes");
+    assert!(
+        serde_json::from_value::<crate::LashlangProcessInput>(fixture["input"].clone()).is_err(),
+        "the obsolete named input is refused"
+    );
+    let input = crate::LashlangProcessInput {
+        module_ref: serde_json::from_value(fixture["input"]["module_ref"].clone()).unwrap(),
+        process_ref: serde_json::from_value(fixture["input"]["process_ref"].clone()).unwrap(),
+        host_requirements_ref: serde_json::from_value(
+            fixture["input"]["host_requirements_ref"].clone(),
+        )
+        .unwrap(),
+        args: serde_json::from_value(fixture["input"]["args"].clone()).unwrap(),
+        process_name: String::new(),
+    };
     let persisted = fixture["program_hash"]
         .as_str()
         .expect("fixture program hash");
@@ -1059,8 +1071,20 @@ fn pre_fig3571_parked_segment_is_refused_at_both_fences() {
     assert_eq!(fixture["segment_state"]["version"], 17);
     assert_eq!(fixture["segment_state"]["vm"]["format_version"], 18);
 
-    let input: crate::LashlangProcessInput =
-        serde_json::from_value(fixture["input"].clone()).expect("fixture input decodes");
+    assert!(
+        serde_json::from_value::<crate::LashlangProcessInput>(fixture["input"].clone()).is_err(),
+        "the obsolete named input is refused"
+    );
+    let input = crate::LashlangProcessInput {
+        module_ref: serde_json::from_value(fixture["input"]["module_ref"].clone()).unwrap(),
+        process_ref: serde_json::from_value(fixture["input"]["process_ref"].clone()).unwrap(),
+        host_requirements_ref: serde_json::from_value(
+            fixture["input"]["host_requirements_ref"].clone(),
+        )
+        .unwrap(),
+        args: serde_json::from_value(fixture["input"]["args"].clone()).unwrap(),
+        process_name: String::new(),
+    };
     let persisted = fixture["program_hash"]
         .as_str()
         .expect("fixture program hash");

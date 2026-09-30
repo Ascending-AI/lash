@@ -56,6 +56,8 @@ pub trait ArtifactCleanupAuthorities: Send + Sync {
         journal: &lash_sansio::EffectJournalIdentity,
     ) -> Result<JournalReplay, String>;
 
+    async fn frame_is_retained(&self, frame: &crate::FrameEnvironmentId) -> Result<bool, String>;
+
     /// The record `key` registered, if any.
     async fn retained_start(&self, key: &StartKey) -> Result<Option<RetainedStart>, String>;
 
@@ -74,6 +76,7 @@ pub trait ArtifactCleanupAuthorities: Send + Sync {
 /// The authorities of one store set and its engine.
 pub struct StoreSetAuthorities {
     pub effect_host: Arc<dyn EffectHost>,
+    pub sessions: Arc<dyn crate::DeploymentStore>,
     pub processes: Arc<dyn ProcessRegistry>,
     pub triggers: Arc<dyn TriggerStore>,
     pub definitions: Arc<dyn ProcessDefinitionRegistry>,
@@ -87,6 +90,13 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
     ) -> Result<JournalReplay, String> {
         self.effect_host
             .journal_replay(journal)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    async fn frame_is_retained(&self, frame: &crate::FrameEnvironmentId) -> Result<bool, String> {
+        self.sessions
+            .artifact_frame_is_retained(frame)
             .await
             .map_err(|error| error.to_string())
     }
@@ -242,6 +252,19 @@ impl ArtifactCleanupRelay {
                 Ok(Resolution::Carry(carries.clone()))
             }
             (ArtifactCleanupPlan::Ended { carries }, _) => Ok(Resolution::Carry(carries.clone())),
+            (
+                ArtifactCleanupPlan::AwaitFrame { creator },
+                ArtifactReferrer::FrameEnvironment(frame),
+            ) => {
+                if authorities
+                    .frame_is_retained(frame)
+                    .await
+                    .map_err(retryable_text("frame root read"))?
+                {
+                    return Ok(Resolution::NotYet);
+                }
+                Ok(settled_or_not_yet(self.journal_settled(creator).await?))
+            }
             (ArtifactCleanupPlan::AwaitJournal, ArtifactReferrer::Execution(journal)) => {
                 Ok(settled_or_not_yet(self.journal_settled(journal).await?))
             }

@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-use super::definition_ref::ProcessDefinitionRef;
+use super::ProcessDefinitionId;
 use super::model::{ProcessExecutionEnvRef, ProcessRecord};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessLiveReferenceView {
-    pub definition: Option<ProcessDefinitionRef>,
+    pub definition_id: Option<ProcessDefinitionId>,
     pub env_ref: Option<ProcessExecutionEnvRef>,
     pub process_count: usize,
 }
@@ -22,13 +22,13 @@ impl ProcessLiveReferenceView {
                 continue;
             }
             if let Some(summary) = summaries.iter_mut().find(|summary| {
-                summary.definition == record.identity.definition
+                summary.definition_id == record.identity.definition_id
                     && summary.env_ref == record.env_ref
             }) {
                 summary.process_count += 1;
             } else {
                 summaries.push(Self {
-                    definition: record.identity.definition.clone(),
+                    definition_id: record.identity.definition_id.clone(),
                     env_ref: record.env_ref.clone(),
                     process_count: 1,
                 });
@@ -45,7 +45,7 @@ impl ProcessLiveReferenceView {
 )]
 fn live_reference_sort_key(summary: &ProcessLiveReferenceView) -> (String, String) {
     let definition = summary
-        .definition
+        .definition_id
         .as_ref()
         .map(|definition| serde_json::to_string(definition).expect("definition serializes"))
         .unwrap_or_default();

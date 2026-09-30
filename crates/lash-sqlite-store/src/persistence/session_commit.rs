@@ -23,11 +23,33 @@ fn commit_frame_transition_tx(
         });
     }
     let sql = crate::artifact_store::artifact_sql();
+    let mut carries = transition.carries.clone();
     for carry in &transition.carries {
+        if carry.store != lash_core_execution::ArtifactStoreId::ProcessDefinition {
+            continue;
+        }
+        let id = lash_core_execution::ProcessDefinitionId::parse(&carry.artifact_ref)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let blob: String = tx
+            .query_row(
+                sql.refs.select_blob_ref.sql(),
+                params!["process_definition", carry.artifact_ref],
+                |row| row.get(0),
+            )
+            .map_err(sqlite_error)?;
+        let bytes = SqliteStore::get_blob_conn(tx, &lash_core_execution::store::BlobRef(blob))?
+            .ok_or_else(|| {
+                StoreError::Backend("carried definition has no descriptor bytes".into())
+            })?;
+        let draft = lash_core_execution::ProcessDefinitionDraft::from_store_bytes(&id, &bytes)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        carries.extend(draft.artifacts().iter().cloned());
+    }
+    carries.sort();
+    carries.dedup();
+    for carry in &carries {
         let Some(namespace) = crate::artifact_store::store_namespace(&carry.store) else {
-            return Err(StoreError::Backend(
-                "a frame transition cannot carry an engine artifact".into(),
-            ));
+            continue;
         };
         let exists: bool = tx
             .query_row(

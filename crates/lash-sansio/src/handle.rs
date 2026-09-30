@@ -208,6 +208,19 @@ pub fn trigger_register_slot(value: &serde_json::Value) -> Option<u32> {
         .and_then(|index| u32::try_from(index).ok())
 }
 
+/// Unrealized result of a definition publication or read.
+pub fn definition_slot_json(intent_index: u32) -> serde_json::Value {
+    serde_json::json!({ "$lash_definition_slot": intent_index })
+}
+
+pub fn definition_slot(value: &serde_json::Value) -> Option<u32> {
+    let fields = value.as_object()?;
+    if fields.len() != 1 {
+        return None;
+    }
+    u32::try_from(fields.get("$lash_definition_slot")?.as_u64()?).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

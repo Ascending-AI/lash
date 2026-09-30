@@ -1784,3 +1784,5 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
 
 #[cfg(test)]
 mod tests;
+
+mod definition_refs;

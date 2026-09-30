@@ -261,7 +261,10 @@ fn linked_module_captures_concrete_process_body_resources_statically() {
                 "register",
                 vec![
                     ("source", builders::var("source")),
-                    ("target", builders::var("scan")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("scan"))]),
+                    ),
                     ("inputs", builders::record(vec![("tick", trigger_event())])),
                 ],
             ),
@@ -329,7 +332,10 @@ fn linked_module_infers_process_output_and_validates_return_annotations() {
                 "register",
                 vec![
                     ("source", builders::var("source")),
-                    ("target", builders::var("done")),
+                    (
+                        "target",
+                        builders::record(vec![("definition", builders::var("done"))]),
+                    ),
                     ("inputs", builders::record(vec![("tick", trigger_event())])),
                 ],
             ),

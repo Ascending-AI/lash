@@ -838,7 +838,7 @@ pub(crate) use store::{
 };
 pub use tool_intent::{
     CancelProcessIntent, DeclaredModuleArtifact, EmitProcessEventIntent, EmitTriggerIntent,
-    RegisterProcessDefinitionIntent, RegisterTriggerIntent, SignalProcessIntent,
+    GetDefinitionIntent, PublishDefinitionIntent, RegisterTriggerIntent, SignalProcessIntent,
     StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
     TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, ToolAttemptOutcome, ToolIntent,
     ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents, ToolOutcomeDone,

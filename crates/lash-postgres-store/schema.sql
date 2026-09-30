@@ -948,7 +948,7 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
     kind TEXT NOT NULL,
     payload_hash TEXT NOT NULL,
     submission_json TEXT NOT NULL,
-    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger', 'register_process_definition', 'register_trigger'))
+    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger', 'publish_definition', 'get_definition', 'register_trigger'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_scope
     ON lash_tool_intent_submissions(owner, execution_scope_id, intent_index);

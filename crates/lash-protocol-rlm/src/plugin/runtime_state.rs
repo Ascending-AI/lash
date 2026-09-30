@@ -354,6 +354,7 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
     async fn frame_switch_carries(
         &self,
         _ctx: ProtocolSessionContext<'_>,
+        _successor: &lash_core::FrameNodeId,
         initial_nodes: &[lash_core::SessionAppendNode],
     ) -> Result<Vec<lash_core::ArtifactName>, SessionError> {
         Ok(frame_switch_carries(initial_nodes))
@@ -421,7 +422,7 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
 /// survive into the successor frame; the ended frame's other modules are
 /// severed once the switching turn settles.
 fn frame_switch_carries(nodes: &[lash_core::SessionAppendNode]) -> Vec<lash_core::ArtifactName> {
-    let mut modules = BTreeSet::new();
+    let mut definitions = BTreeSet::new();
     for node in nodes {
         let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node else {
             continue;
@@ -434,16 +435,16 @@ fn frame_switch_carries(nodes: &[lash_core::SessionAppendNode]) -> Vec<lash_core
         // Both bodies are JSON maps, so encoding them cannot fail; a body
         // that did would carry nothing.
         if let Ok(values) = values {
-            modules.extend(lashlang::referenced_module_refs(
-                &crate::projection::json_to_flow_value(values),
+            definitions.extend(lashlang::referenced_definition_ids(
+                &crate::projection::json_to_flow_value(values.clone()),
             ));
         }
     }
-    modules
+    definitions
         .into_iter()
-        .map(|module_ref| lash_core::ArtifactName {
-            store: lash_core::ArtifactStoreId::LashlangModule,
-            artifact_ref: module_ref.to_string(),
+        .map(|id| lash_core::ArtifactName {
+            store: lash_core::ArtifactStoreId::ProcessDefinition,
+            artifact_ref: id.to_string(),
         })
         .collect()
 }
@@ -1217,11 +1218,19 @@ mod tests {
             lashlang::ProcessRef::new(lashlang::ContentHash::new("component"), 0),
             "run",
         );
-        (module_ref.to_string(), identity.to_process_value())
+        (
+            identity.draft().expect("descriptor").id().to_string(),
+            serde_json::to_value(
+                identity
+                    .definition(lash_core::ProcessSignature::Unknown)
+                    .expect("definition"),
+            )
+            .expect("definition JSON"),
+        )
     }
 
     #[test]
-    fn a_frame_switch_carries_exactly_the_modules_its_seed_references() {
+    fn a_frame_switch_carries_exactly_the_definition_ids_its_seed_references() {
         let (carried, carried_value) = definition_json("carried");
         let (projected, projected_value) = definition_json("projected");
         let mut seed = crate::projection::RlmSeed::from_seed_value(&serde_json::json!({
@@ -1251,7 +1260,7 @@ mod tests {
         let mut expected = [carried, projected, patched]
             .into_iter()
             .map(|artifact_ref| lash_core::ArtifactName {
-                store: lash_core::ArtifactStoreId::LashlangModule,
+                store: lash_core::ArtifactStoreId::ProcessDefinition,
                 artifact_ref,
             })
             .collect::<Vec<_>>();

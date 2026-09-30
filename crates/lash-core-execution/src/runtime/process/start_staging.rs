@@ -657,6 +657,7 @@ async fn stage_definition<'a>(
 ) -> Result<Option<StagedDefinition<'a>>, RuntimeEffectControllerError> {
     let ProcessInput::Definition {
         definition_id,
+        signature_claim,
         args,
     } = registration.input.as_ref()
     else {
@@ -691,15 +692,36 @@ async fn stage_definition<'a>(
             (resolved, false)
         }
     };
+    if let Some(signature) = signature_claim {
+        engines
+            .verify_definition_claim(
+                &resolved.draft,
+                &super::ProcessDefinition::new(definition_id.clone(), signature.clone()),
+            )
+            .await
+            .map_err(|error| {
+                crate::PluginError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::DefinitionRefused,
+                    error.to_string(),
+                ))
+            })?;
+    }
     let kind = resolved.draft.engine_kind().as_str().to_owned();
     let payload = resolved.start_payload(args)?;
-    let (mut identity, signals) = engines.admit(&kind, &payload, env_spec).await?.into_parts();
+    let declared_label = registration.identity.label.clone();
+    let (mut identity, _) = engines.admit(&kind, &payload, env_spec).await?.into_parts();
+    let signals = engines
+        .resolve(&resolved.draft.unclaimed_reference())
+        .await
+        .map_err(crate::PluginError::from)?
+        .signals;
     identity.definition_id = Some(resolved.id().clone());
     let id = resolved.id().clone();
     let mut resolved_registration = registration.clone();
     resolved_registration.input = Arc::new(ProcessInput::Engine { kind, payload });
     *registration = resolved_registration
-        .with_admitted_identity(super::AdmittedProcessIdentity::admitted(identity, signals));
+        .with_admitted_identity(super::AdmittedProcessIdentity::admitted(identity, signals))
+        .with_host_facing_label(declared_label);
     Ok(Some(StagedDefinition {
         engines,
         ports,

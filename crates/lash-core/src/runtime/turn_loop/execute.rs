@@ -264,7 +264,8 @@ impl LashRuntime {
             self.state.turn_scope(&trace_turn_id),
             self.host.core.durability.commit_budget,
             turn_graph_appends,
-        );
+        )
+        .with_definition_engines(self.host.core.process_engines.clone());
         turn_pipeline.apply_prepared_messages(&prepared.messages);
         hold_terminal_sequence(
             &mut recorded_assembly,
@@ -422,7 +423,8 @@ impl LashRuntime {
             self.state.turn_scope(&trace_turn_id),
             self.host.core.durability.commit_budget,
             turn_graph_appends.clone(),
-        );
+        )
+        .with_definition_engines(self.host.core.process_engines.clone());
         turn_pipeline
             .prepared_checkpoint(
                 turn_policy.clone(),

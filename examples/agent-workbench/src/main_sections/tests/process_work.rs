@@ -409,19 +409,12 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
     };
     assert_eq!(input.engine_kind(), "engine");
     assert_eq!(input.engine_specific_kind(), Some("report-export"));
-    let identity = ProcessIdentity::for_definition(
-        lash::process::ProcessDefinitionRef::unclaimed(
-            "report-export",
-            json!({ "workflow": "invoice-export", "revision": 7 }),
-        ),
-        Some("Nightly invoice export"),
-    );
+    let definition_id = lash::process::ProcessDefinitionId::from_sha256_digest([7; 32]);
+    let mut identity = ProcessIdentity::labelled("report-export", Some("Nightly invoice export"));
+    identity.definition_id = Some(definition_id.clone());
     assert_eq!(identity.kind, "report-export");
     assert_eq!(identity.label.as_deref(), Some("Nightly invoice export"));
-    assert_eq!(
-        identity.definition.as_ref().unwrap().definition.as_json()["revision"],
-        7
-    );
+    assert_eq!(identity.definition_id.as_ref(), Some(&definition_id));
     let execution_env_ref = ProcessExecutionEnvSpec::new(
         Default::default(),
         lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
@@ -719,15 +712,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         .expect("summarize live references");
     assert_eq!(live_refs.len(), 1);
     assert_eq!(live_refs[0].process_count, 1);
-    assert_eq!(
-        live_refs[0]
-            .definition
-            .as_ref()
-            .unwrap()
-            .definition
-            .as_json()["revision"],
-        7
-    );
+    assert_eq!(live_refs[0].definition_id.as_ref(), Some(&definition_id));
     assert_eq!(
         live_refs[0]
             .env_ref
@@ -798,12 +783,8 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         "operator cancelled"
     );
 
-    let handle = ProcessHandleView::from_record(completed.clone()).with_definition(Some(
-        lash::process::ProcessDefinitionRef::unclaimed(
-            "report-export",
-            json!({ "workflow": "invoice-export", "revision": 7 }),
-        ),
-    ));
+    let handle = ProcessHandleView::from_record(completed.clone())
+        .with_definition_id(Some(definition_id.clone()));
     // The handle id is opaque: it is the value to carry and hand back, not the
     // process id. Before ADR 0095 it was a copy of `process_id` and a separate
     // `__handle__` string said what kind of handle it was.
@@ -812,10 +793,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
     assert_eq!(handle.id, lash::process::HandleId::process(&process_id));
     assert_eq!(handle.kind, "report-export");
     assert_eq!(handle.label.as_deref(), Some("Nightly invoice export"));
-    assert_eq!(
-        handle.definition.as_ref().unwrap().definition.as_json()["revision"],
-        7
-    );
+    assert_eq!(handle.definition_id.as_ref(), Some(&definition_id));
     assert_eq!(handle.status, ProcessStatus::Completed);
     assert!(
         lash::process::ProcessCancelReceipt::from_record(completed.clone()).is_err(),

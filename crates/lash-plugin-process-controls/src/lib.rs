@@ -22,10 +22,9 @@ use lash_tool_support::{
 mod declarations;
 
 pub use declarations::{
-    DEFAULT_PROCESS_ENGINE_KIND, execute_process_emit_tool_call,
-    execute_process_register_tool_call, execute_process_signal_tool_call,
-    execute_process_start_tool_call, process_emit_tool_definition,
-    process_register_tool_definition, process_signal_tool_definition,
+    execute_process_emit_tool_call, execute_process_get_tool_call,
+    execute_process_signal_tool_call, execute_process_start_tool_call,
+    process_emit_tool_definition, process_get_tool_definition, process_signal_tool_definition,
     process_start_tool_definition,
 };
 
@@ -114,8 +113,8 @@ impl StaticToolExecute for SessionProcessAdminTools {
         if call.name() == "emit_process_event" {
             return execute_process_emit_tool_call(call.context, call.args);
         }
-        if call.name() == "register_process" {
-            return execute_process_register_tool_call(call.context, call.args);
+        if call.name() == "get_process_definition" {
+            return execute_process_get_tool_call(call.context, call.args);
         }
         if call.name() == "list_process_handles" {
             return done_without_intents(
@@ -183,7 +182,7 @@ pub fn process_list_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:list_process_handles",
         "list_process_handles",
-        "List process runs visible to this session, including host-launched runs, with process id, descriptor, optional definition name, and lifecycle status. Filters are optional; the default returns running runs. Empty arguments select running runs; `definition` selects runs of a definition and `status: \"any\"` includes visible run history.",
+        "List process runs visible to this session, including host-launched runs, with process id, descriptor, optional definition ID, and lifecycle status. Filters are optional; the default returns running runs. Empty arguments select running runs; `definition_id` selects runs of a definition and `status: \"any\"` includes visible run history.",
         serde_json::json!({
             "type": "object",
             "properties": {
@@ -198,9 +197,7 @@ pub fn process_list_tool_definition() -> ToolDefinition {
                 // encoding the engine that started the run stores, and a
                 // Lashlang cell passes the process itself (`on_button`), whose
                 // `Process<...>` type is not assignable to a record.
-                "definition": {
-                    "description": "A process definition value, for example `on_button`: pass the process itself and rows started from it match."
-                }
+                "definition_id": declarations::definition_id_schema()
             },
             "additionalProperties": false
         }),
@@ -209,7 +206,7 @@ pub fn process_list_tool_definition() -> ToolDefinition {
     .with_examples(vec![
         "await processes.list({})?".into(),
         r#"await processes.list({ status: "any" })?"#.into(),
-        "await processes.list({ definition: on_button })?".into(),
+        "await processes.list({ definition_id: on_button.id })?".into(),
     ])
     .with_tool_binding(ToolBinding::new(["processes"], "list"))
 }
@@ -221,7 +218,7 @@ fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinitio
         process_await_tool_definition(),
         process_signal_tool_definition(),
         process_emit_tool_definition(),
-        process_register_tool_definition(),
+        process_get_tool_definition(),
     ];
     if include_cancel_process {
         definitions.push(process_cancel_tool_definition());
@@ -395,17 +392,7 @@ pub fn process_handle_view_schema() -> Value {
                 "type": "string",
                 "description": "Host-facing label, absent when the run has none."
             },
-            "definition": {
-                "type": "object",
-                "properties": {
-                    "engine_kind": { "type": "string" },
-                    "definition": { "description": "Engine-owned definition value." },
-                    "signature": { "description": "Signature the engine resolved for the definition." }
-                },
-                "required": ["engine_kind", "definition", "signature"],
-                "additionalProperties": false,
-                "description": "The definition reference this run pins, absent for a run that names none."
-            },
+            "definition_id": declarations::definition_id_schema(),
             "status": {
                 "type": "string",
                 "enum": ["running", "waiting", "completed", "failed", "cancelled", "abandoned", "caller_departed"]
@@ -444,7 +431,7 @@ mod tests {
                 "await_process",
                 "signal_process",
                 "emit_process_event",
-                "register_process",
+                "get_process_definition",
                 "cancel_process"
             ]
         );
@@ -463,13 +450,13 @@ mod tests {
         // previous hand-written schema had already accumulated.
         let view = lash_core::ProcessHandleView::new(
             lash_core::ProcessId::fixture("process-1"),
-            lash_core::ProcessIdentity::for_definition(
-                lash_core::ProcessDefinitionRef::unclaimed(
-                    "lashlang",
-                    serde_json::json!({ "process_name": "on_button" }),
-                ),
-                Some("on_button"),
-            ),
+            {
+                let mut identity =
+                    lash_core::ProcessIdentity::labelled("lashlang", Some("on_button"));
+                identity.definition_id =
+                    Some(lash_core::ProcessDefinitionId::from_sha256_digest([1; 32]));
+                identity
+            },
             lash_core::ProcessStatus::Running,
         );
         let serialized = serde_json::to_value(&view).expect("a handle view serializes");
@@ -702,7 +689,7 @@ mod tests {
         );
         // A Lashlang cell passes the process itself, whose `Process<...>` type
         // is not assignable to a record, so the filter parameter is untyped.
-        assert!(rendered.contains("definition?: any"), "{rendered}");
+        assert!(rendered.contains("definition_id"), "{rendered}");
         assert!(!rendered.contains("history"), "{rendered}");
         assert!(!rendered.contains("terminal:"), "{rendered}");
     }

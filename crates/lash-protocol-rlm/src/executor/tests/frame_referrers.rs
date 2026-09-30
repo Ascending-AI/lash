@@ -16,7 +16,8 @@ enum ArtifactWrite {
 /// names, and answers `ArtifactMissing` for bytes it does not hold.
 #[derive(Default)]
 struct RecordingArtifactStore {
-    stored: Mutex<BTreeSet<String>>,
+    stored: Mutex<BTreeMap<String, Vec<u8>>>,
+    double: tokio::sync::OnceCell<lash_restate_test::RestateTestBackend>,
     /// Every frame environment has ended: the cells run as a replay of the
     /// turn that switched away from their frame.
     frames_ended: std::sync::atomic::AtomicBool,
@@ -49,10 +50,19 @@ impl lash_core::ModuleArtifactStore for RecordingArtifactStore {
         &self,
         claim: &lash_core::ReferrerClaim,
         module_ref: &str,
-        _bytes: &[u8],
+        bytes: &[u8],
     ) -> Result<(), lash_core::ArtifactStoreError> {
         self.check_fence(claim)?;
-        self.stored.lock_recover().insert(module_ref.to_string());
+        self.double
+            .get()
+            .expect("store initialized")
+            .lash_backend()
+            .module_artifacts()
+            .publish_module_artifact(claim, module_ref, bytes)
+            .await?;
+        self.stored
+            .lock_recover()
+            .insert(module_ref.to_string(), bytes.to_vec());
         self.writes.lock_recover().push(ArtifactWrite::Publish(
             claim.referrer().kind(),
             module_ref.to_string(),
@@ -70,12 +80,13 @@ impl lash_core::ModuleArtifactStore for RecordingArtifactStore {
             claim.referrer().kind(),
             module_ref.to_string(),
         ));
-        if !self.stored.lock_recover().contains(module_ref) {
-            return Err(lash_core::ArtifactStoreError::ArtifactMissing {
-                artifact_ref: module_ref.to_string(),
-            });
-        }
-        Ok(())
+        self.double
+            .get()
+            .expect("store initialized")
+            .lash_backend()
+            .module_artifacts()
+            .acquire_module_artifact(claim, module_ref)
+            .await
     }
 
     async fn end_module_referrer(
@@ -87,9 +98,9 @@ impl lash_core::ModuleArtifactStore for RecordingArtifactStore {
 
     async fn get_module_artifact(
         &self,
-        _module_ref: &str,
+        module_ref: &str,
     ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
-        Ok(None)
+        Ok(self.stored.lock_recover().get(module_ref).cloned())
     }
 }
 
@@ -103,14 +114,28 @@ async fn run_cell(
     store: &Arc<RecordingArtifactStore>,
     code: &str,
 ) -> ExecResponse {
-    let double =
-        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let double = store
+        .double
+        .get_or_init(|| {
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+        })
+        .await;
     let handler = double
         .open_handler(crate::testing::default_cell_scope())
         .await
         .expect("open the cell's handler");
-    let ctx =
-        lash_core::testing::code_execution_context(crate::testing::double_ports(&double, &handler));
+    let backend = double.lash_backend();
+    let mut ports = crate::testing::double_ports(double, &handler)
+        .with_module_artifact_store(&backend, store.clone());
+    ports.process_engines = lash_core::ProcessEngineRegistry::new().with_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                lashlang::LashlangArtifacts::new(store.clone()),
+                LashlangSurface::default(),
+            ),
+        ),
+    );
+    let ctx = lash_core::testing::code_execution_context(ports);
     assert!(
         super::super::frame_environment(&ctx).is_some(),
         "the test context admits cells on a frame"
@@ -159,15 +184,12 @@ fn a_cell_module_is_published_under_its_execution_then_held_by_its_frame() {
         let first = run_cell(&mut state, &store, PROCESS_CELL).await;
         assert!(first.error.is_none(), "{:?}", first.error);
         let writes = store.writes();
-        let [
-            ArtifactWrite::Publish(lash_core::ArtifactReferrerKind::Execution, published),
-            ArtifactWrite::Acquire(lash_core::ArtifactReferrerKind::FrameEnvironment, held),
-            ..,
-        ] = writes.as_slice()
+        let Some(ArtifactWrite::Publish(lash_core::ArtifactReferrerKind::Execution, published)) =
+            writes.first()
         else {
-            panic!("expected publish under the execution, then the frame's edge: {writes:?}");
+            panic!("publication must precede acquisition: {writes:?}");
         };
-        assert_eq!(published, held);
+        assert!(writes.iter().any(|write| matches!(write, ArtifactWrite::Acquire(lash_core::ArtifactReferrerKind::FrameEnvironment, held) if held == published)));
 
         // The frame already holds it: the same cell again writes nothing.
         let second = run_cell(&mut state, &store, PROCESS_CELL).await;
@@ -200,43 +222,22 @@ fn a_switched_frame_refusing_its_edge_is_a_replay_and_the_cell_goes_on() {
 }
 
 #[test]
-fn every_module_a_global_references_is_held_by_the_frame_once() {
+fn a_bare_module_reference_does_not_acquire_a_definition() {
     block_on(async {
         let store = Arc::new(RecordingArtifactStore::default());
-        let (held, held_value) = definition_value("held");
-        let (missing, missing_value) = definition_value("never-published");
-        store.stored.lock_recover().insert(held.clone());
+        let (_, value) = definition_value("never-published");
         let mut state = RlmExecutionState::for_engine("typescript");
-        let mut record = FlowRecord::new();
-        record.insert("inner".to_string(), held_value);
         state
             .vm
             .state_mut()
-            .insert_global("nested", FlowValue::Record(Arc::new(record)))
-            .expect("bind a global holding a definition");
-        state
-            .vm
-            .state_mut()
-            .insert_global("dangling", missing_value)
-            .expect("bind a global naming absent bytes");
-
-        let first = run_cell(&mut state, &store, "finish(1);").await;
-        assert!(first.error.is_none(), "{:?}", first.error);
-        let frame = lash_core::ArtifactReferrerKind::FrameEnvironment;
-        let mut acquired = store.writes();
-        acquired.sort_by(|left, right| format!("{left:?}").cmp(&format!("{right:?}")));
-        let mut expected = vec![
-            ArtifactWrite::Acquire(frame, held.clone()),
-            ArtifactWrite::Acquire(frame, missing.clone()),
-        ];
-        expected.sort_by(|left, right| format!("{left:?}").cmp(&format!("{right:?}")));
-        assert_eq!(acquired, expected);
-
-        // Absent bytes cannot be revived by an edge, so they are not asked
-        // for again; the held module is cached.
-        let second = run_cell(&mut state, &store, "finish(2);").await;
-        assert!(second.error.is_none(), "{:?}", second.error);
-        assert_eq!(store.writes().len(), 2, "{:?}", store.writes());
+            .insert_global("bare", value)
+            .expect("bind bare module refs");
+        let response = run_cell(&mut state, &store, "finish(1);").await;
+        assert!(response.error.is_none(), "{:?}", response.error);
+        assert!(
+            store.writes().is_empty(),
+            "bare module refs are not definition holders"
+        );
     });
 }
 
@@ -278,12 +279,33 @@ fn a_definition_held_only_inside_a_map_is_held_by_the_frame() {
         let before = store.writes().len();
         let response = run_cell(&mut restored, &store, "finish(2);").await;
         assert!(response.error.is_none(), "{:?}", response.error);
+        assert!(
+            store.writes()[before..].is_empty(),
+            "SQL owns the descriptor and its module closure acquisition"
+        );
+        let ids = restored.vm.state().referenced_definition_ids();
         assert_eq!(
-            store.writes()[before..],
-            [ArtifactWrite::Acquire(
-                lash_core::ArtifactReferrerKind::FrameEnvironment,
-                module_ref
-            )]
+            ids.len(),
+            1,
+            "the map remains a guest root after q is removed"
+        );
+        let backend = store.double.get().expect("double").lash_backend();
+        let definition = backend
+            .process_definitions()
+            .get_process_definition(ids.first().expect("map candidate"))
+            .await
+            .expect("descriptor read");
+        assert!(
+            definition.is_some(),
+            "the parent validated and acquired the stored descriptor"
+        );
+        assert!(
+            backend
+                .module_artifacts()
+                .get_module_artifact(&module_ref)
+                .await
+                .expect("module read")
+                .is_some()
         );
     });
 }

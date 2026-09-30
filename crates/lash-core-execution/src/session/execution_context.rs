@@ -3,6 +3,7 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
+mod definition_publication;
 mod referrers;
 mod trigger_scope;
 pub(crate) use referrers::execution_claim_of;
@@ -314,8 +315,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         )
     }
 
-    /// Executes a nondeterministic language-runtime operation behind the
-    /// durable effect controller so replay returns the recorded sample.
     pub async fn journaled_language_runtime_value(
         &self,
         effect_id: String,
@@ -1756,7 +1755,10 @@ impl<'run> RuntimeExecutionContext<'run> {
             | crate::TriggerCommand::Revive { draft, .. } => draft,
             _ => return Ok(()),
         };
-        if !matches!(draft.target, crate::ProcessInput::Engine { .. }) {
+        if !matches!(
+            draft.target,
+            crate::ProcessInput::Engine { .. } | crate::ProcessInput::Definition { .. }
+        ) {
             return Ok(());
         }
         // A runtime that wired no process-engine registry has no authority to
@@ -1772,6 +1774,13 @@ impl<'run> RuntimeExecutionContext<'run> {
             .as_ref()
             .and_then(crate::TriggerRouter::process_engines)
         else {
+            if matches!(draft.target, crate::ProcessInput::Definition { .. }) {
+                return Err(crate::RuntimeEffectControllerError::foreign(
+                    "process_definition_store_unavailable",
+                    crate::TurnFailureCause::Outcome,
+                    "trigger definition admission requires a process-engine registry",
+                ));
+            }
             return Ok(());
         };
         crate::admit_trigger_registration_target(registry, draft)

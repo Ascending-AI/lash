@@ -1114,7 +1114,7 @@ async fn agent_contract_process_observations(
     let processes = core
         .processes()
         .list(&lash_core::ProcessListFilter {
-            definition: None,
+            definition_id: None,
             status: lash_core::ProcessStatusFilter::Any,
             ..lash_core::ProcessListFilter::default()
         })
@@ -1123,7 +1123,8 @@ async fn agent_contract_process_observations(
     let mut observed = Vec::with_capacity(processes.len());
     for process in processes {
         let process_ref = agent_contract_process_ref(&process);
-        let process_origin = agent_contract_process_origin(&artifacts, &process).await?;
+        let process_origin =
+            agent_contract_process_origin(core.backend(), &artifacts, &process).await?;
         observed.push(AgentContractProcessObservation {
             raw_process_id: process.process_id.clone(),
             process_ref: process_ref.clone(),
@@ -1133,7 +1134,7 @@ async fn agent_contract_process_observations(
                 "label": process.label(),
                 "status": process.lifecycle.label(),
                 "terminal": process.terminal(),
-                "definition_present": process.identity.definition.is_some(),
+                "definition_present": process.identity.definition_id.is_some(),
                 "process_origin": process_origin.map(Value::from).unwrap_or(Value::Null),
                 "child_session_present": process.child_session_id.is_some(),
             }),
@@ -1149,24 +1150,37 @@ async fn agent_contract_process_observations(
 /// Lashlang definition at all; an unresolvable pinned definition is a defect
 /// the contract run reports rather than quietly uncounting.
 async fn agent_contract_process_origin(
+    backend: &lash::Backend,
     artifacts: &lash::persistence::LashlangArtifacts,
     process: &lash_core::facade_support::ObservedProcess,
 ) -> Result<Option<&'static str>, FixedScriptRunnerError> {
     if process.kind() != lash_lashlang_runtime::LASHLANG_ENGINE_KIND {
         return Ok(None);
     }
-    let Some(reference) = process.identity.definition.as_ref() else {
+    let Some(id) = process.identity.definition_id.as_ref() else {
         return Ok(None);
     };
-    let identity = lash::rlm::lang::ProcessDefinitionIdentity::from_process_value(
-        reference.definition.as_json(),
-    )
-    .map_err(|err| {
-        FixedScriptRunnerError::Runtime(format!(
-            "lashlang process {} pins a definition that is not a process identity: {err}",
-            process.process_id
-        ))
-    })?;
+    let bytes = backend
+        .process_definitions()
+        .get_process_definition(id)
+        .await
+        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?
+        .ok_or_else(|| {
+            FixedScriptRunnerError::Runtime(format!(
+                "process {} has an unretained definition {id}",
+                process.process_id
+            ))
+        })?;
+    let draft = lash_core::ProcessDefinitionDraft::from_store_bytes(id, &bytes)
+        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
+    let identity =
+        lash::rlm::lang::ProcessDefinitionIdentity::from_process_value(draft.value().as_json())
+            .map_err(|err| {
+                FixedScriptRunnerError::Runtime(format!(
+                    "lashlang process {} pins a definition that is not a process identity: {err}",
+                    process.process_id
+                ))
+            })?;
     let artifact = artifacts
         .get_module_artifact(&identity.module_ref)
         .await
@@ -1177,15 +1191,17 @@ async fn agent_contract_process_origin(
                 process.process_id, identity.module_ref
             ))
         })?;
-    let declaration = artifact
-        .ir()
-        .process(&identity.process_name)
+    let process_name = artifact
+        .process_name_for_ref(&identity.process_ref)
         .ok_or_else(|| {
-            FixedScriptRunnerError::Runtime(format!(
-                "module artifact `{}` exports no process `{}`",
-                identity.module_ref, identity.process_name
-            ))
+            FixedScriptRunnerError::Runtime("definition has no matching module export".into())
         })?;
+    let declaration = artifact.ir().process(process_name).ok_or_else(|| {
+        FixedScriptRunnerError::Runtime(format!(
+            "module artifact `{}` exports no process `{}`",
+            identity.module_ref, process_name
+        ))
+    })?;
     Ok(Some(if declaration.origin.is_lifted() {
         "lifted"
     } else {
@@ -1198,7 +1214,7 @@ fn agent_contract_process_ref(process: &lash_core::facade_support::ObservedProce
     let label = process.label();
     let status = process.lifecycle.label();
     let terminal = process.terminal().to_string();
-    let definition_present = process.identity.definition.is_some().to_string();
+    let definition_present = process.identity.definition_id.is_some().to_string();
     let child_session_present = process.child_session_id.is_some().to_string();
     let mut hasher = Sha256::new();
     hasher.update(kind.as_bytes());
@@ -1210,6 +1226,10 @@ fn agent_contract_process_ref(process: &lash_core::facade_support::ObservedProce
     hasher.update(terminal.as_bytes());
     hasher.update([0]);
     hasher.update(definition_present.as_bytes());
+    hasher.update([0]);
+    if let Some(id) = &process.identity.definition_id {
+        hasher.update(id.as_str().as_bytes());
+    }
     hasher.update([0]);
     hasher.update(child_session_present.as_bytes());
     let digest = hasher.finalize();

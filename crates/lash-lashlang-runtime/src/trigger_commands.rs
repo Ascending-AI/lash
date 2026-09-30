@@ -4,8 +4,7 @@ use lashlang::{ExecutionHostError, TriggerHostOperation};
 use serde_json::Value;
 
 use crate::{
-    LASHLANG_ENGINE_KIND, LashlangProcessInput, lashlang_process_event_types,
-    lashlang_process_signal_event_types, lashlang_type_expr_schema,
+    lashlang_process_event_types, lashlang_process_signal_event_types, lashlang_type_expr_schema,
 };
 
 /// Foreground code and durable processes share this adapter so trigger operations never depend on
@@ -121,10 +120,32 @@ impl PreparedTriggerDraft {
 
 pub(crate) async fn prepare_trigger_draft(
     artifact_store: &lashlang::LashlangArtifacts,
+    engines: &lash_core::ProcessEngineRegistry,
     request: &lashlang::TriggerRegistrationRequest,
 ) -> Result<PreparedTriggerDraft, ExecutionHostError> {
+    let ports = engines
+        .artifact_ports()
+        .ok_or_else(|| ExecutionHostError::new("definition artifact ports are unavailable"))?;
+    let resolved = ports
+        .read_definition(engines, request.target.definition_id())
+        .await
+        .map_err(|e| ExecutionHostError::new(e.to_string()))?
+        .ok_or_else(|| ExecutionHostError::new("DefinitionMissing"))?;
+    engines
+        .verify_definition_claim(
+            &resolved.draft,
+            &lash_core::ProcessDefinition::new(
+                request.target.definition_id().clone(),
+                request.target.signature_claim().clone(),
+            ),
+        )
+        .await
+        .map_err(|e| ExecutionHostError::new(e.to_string()))?;
+    let mut definition =
+        lashlang::ProcessDefinitionIdentity::from_process_value(resolved.draft.value().as_json())
+            .map_err(|e| ExecutionHostError::new(e.to_string()))?;
     let artifact = artifact_store
-        .get_module_artifact(&request.target.module_ref)
+        .get_module_artifact(&definition.module_ref)
         .await
         .map_err(|err| {
             ExecutionHostError::new(format!("failed to load lashlang module artifact: {err}"))
@@ -132,13 +153,17 @@ pub(crate) async fn prepare_trigger_draft(
         .ok_or_else(|| {
             ExecutionHostError::new(format!(
                 "missing lashlang module artifact `{}` for trigger target `{}`",
-                request.target.module_ref, request.target.process_name
+                definition.module_ref, definition.process_name
             ))
         })?;
+    definition.process_name = artifact
+        .process_name_for_ref(&definition.process_ref)
+        .ok_or_else(|| ExecutionHostError::new("definition ProcessRef is not exported"))?
+        .to_owned();
     let compatibility =
         lashlang::check_trigger_compatibility(lashlang::TriggerCompatibilityRequest {
             artifact: artifact.as_ref(),
-            definition: &request.target,
+            definition: &definition,
             source_type: &request.source.source_type,
             inputs: &request.inputs,
         })
@@ -153,21 +178,27 @@ pub(crate) async fn prepare_trigger_draft(
     // derives the identity here, from what the registration actually carries.
     let subscription_key = materialized_trigger_subscription_key(
         request.subscription_key.as_deref(),
-        &request.target.process_name,
+        &definition.process_name,
         &request.source.source_type,
         &source_key,
     )?;
-    let target = trigger_target_process_input(&request.target).map_err(|err| {
-        ExecutionHostError::new(format!("failed to encode trigger target: {err}"))
-    })?;
-    let target_identity = lashlang_process_identity_for_definition(&request.target);
+    let target = lash_core::ProcessInput::Definition {
+        definition_id: resolved.id().clone(),
+        args: serde_json::Map::new(),
+        signature_claim: Some(resolved.definition.signature.clone()),
+    };
+    let mut target_identity = lash_core::ProcessIdentity::labelled(
+        resolved.draft.engine_kind().clone(),
+        Some(definition.process_name.clone()),
+    );
+    target_identity.definition_id = Some(resolved.id().clone());
     let process = artifact
         .ir()
-        .process(&request.target.process_name)
+        .process(&definition.process_name)
         .ok_or_else(|| {
             ExecutionHostError::new(format!(
                 "trigger target artifact `{}` is missing process `{}`",
-                request.target.module_ref, request.target.process_name
+                definition.module_ref, definition.process_name
             ))
         })?;
     let event_types = lashlang_process_event_types()
@@ -188,7 +219,7 @@ pub(crate) async fn prepare_trigger_draft(
         target_identity,
         event_types,
         input_template: core_trigger_input_template(&request.inputs),
-        target_label: Some(request.target.process_name.clone()),
+        target_label: Some(definition.process_name.clone()),
     })
 }
 
@@ -241,7 +272,7 @@ async fn list_triggers(
     filter.target = request
         .target
         .as_ref()
-        .map(lashlang_process_definition_for_identity);
+        .map(|target| target.definition_id().to_tagged_json());
     execute_trigger_command(
         ctx,
         effect_id,
@@ -269,7 +300,8 @@ async fn update_trigger(
         .clone()
         .ok_or_else(|| ExecutionHostError::new("trigger update requires `subscription_key`"))?;
     let expected_revision = trigger_expected_revision(&payload)?;
-    let prepared = prepare_trigger_draft(artifact_store, &request).await?;
+    let prepared =
+        prepare_trigger_draft(artifact_store, ctx.definition_engines(), &request).await?;
     // An environment this execution captures is published under its own
     // execution referrer; the command's journaled effect then holds it, with
     // the target module, under the revision it commits (ADR 0113 §3.4).
@@ -454,36 +486,6 @@ async fn execute_trigger_command(
     Ok(lashlang::from_json(value))
 }
 
-fn lashlang_process_input_for_definition(
-    definition: &lashlang::ProcessDefinitionIdentity,
-) -> LashlangProcessInput {
-    LashlangProcessInput {
-        module_ref: definition.module_ref.clone(),
-        process_ref: definition.process_ref.clone(),
-        host_requirements_ref: definition.host_requirements_ref.clone(),
-        process_name: definition.process_name.clone(),
-        args: serde_json::Map::new(),
-    }
-}
-
-fn lashlang_process_definition_for_identity(
-    definition: &lashlang::ProcessDefinitionIdentity,
-) -> Value {
-    definition.to_process_value()
-}
-
-fn lashlang_process_identity_for_definition(
-    definition: &lashlang::ProcessDefinitionIdentity,
-) -> lash_core::ProcessIdentity {
-    lash_core::ProcessIdentity::for_definition(
-        lash_core::ProcessDefinitionRef::unclaimed(
-            LASHLANG_ENGINE_KIND,
-            lashlang_process_definition_for_identity(definition),
-        ),
-        Some(definition.process_name.clone()),
-    )
-}
-
 fn trigger_key_and_revision(payload: &Value) -> Result<(String, u64), ExecutionHostError> {
     let subscription_key = payload
         .get("subscription_key")
@@ -519,12 +521,6 @@ fn materialized_trigger_subscription_key(
             source_key,
         )),
     }
-}
-
-fn trigger_target_process_input(
-    definition: &lashlang::ProcessDefinitionIdentity,
-) -> Result<lash_core::ProcessInput, serde_json::Error> {
-    lashlang_process_input_for_definition(definition).into_process_input()
 }
 
 fn core_trigger_input_template(

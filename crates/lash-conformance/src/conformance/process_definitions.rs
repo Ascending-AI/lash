@@ -114,6 +114,13 @@ struct LawAuthorities {
 
 #[async_trait::async_trait]
 impl ArtifactCleanupAuthorities for LawAuthorities {
+    async fn frame_is_retained(
+        &self,
+        _frame: &lash_core::FrameEnvironmentId,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
+
     async fn journal_replay(
         &self,
         journal: &crate::EffectJournalIdentity,
@@ -327,6 +334,7 @@ impl World {
     ) -> Result<crate::RegisteredProcessStart, crate::RuntimeEffectControllerError> {
         let registration = crate::ProcessRegistration::new(
             crate::ProcessInput::Definition {
+                signature_claim: None,
                 definition_id: id.clone(),
                 args: serde_json::Map::from_iter([("n".to_owned(), serde_json::json!(1))]),
             },

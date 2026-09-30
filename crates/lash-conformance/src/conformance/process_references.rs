@@ -97,7 +97,7 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
                     lash_core::Lifetime::Detached,
                 )
                 .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                    ProcessIdentity::for_definition(
+                    definition_identity(
                         lash_core::ProcessDefinitionRef::unclaimed("reference-test", definition),
                         None::<String>,
                     ),
@@ -178,9 +178,9 @@ fn reference_counts(summaries: Vec<ProcessLiveReferenceView>) -> BTreeMap<(Strin
             (
                 (
                     summary
-                        .definition
+                        .definition_id
                         .as_ref()
-                        .map(|reference| key(reference.definition.as_json()))
+                        .map(ToString::to_string)
                         .unwrap_or_default(),
                     summary
                         .env_ref
@@ -199,5 +199,28 @@ fn reference_counts(summaries: Vec<ProcessLiveReferenceView>) -> BTreeMap<(Strin
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 fn key(definition: &serde_json::Value) -> String {
-    serde_json::to_string(definition).expect("definition serializes")
+    lash_core::ProcessDefinitionDraft::new("reference-test", definition.clone(), [])
+        .expect("definition descriptor")
+        .id()
+        .to_string()
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture uses a valid descriptor without dependencies"
+)]
+fn definition_identity(
+    reference: lash_core::ProcessDefinitionRef,
+    label: Option<impl Into<String>>,
+) -> lash_core::ProcessIdentity {
+    let id = lash_core::ProcessDefinitionDraft::new(
+        reference.engine_kind.clone(),
+        reference.definition.as_json().clone(),
+        [],
+    )
+    .expect("fixture descriptor")
+    .id();
+    let mut identity = lash_core::ProcessIdentity::labelled(reference.engine_kind, label);
+    identity.definition_id = Some(id);
+    identity
 }

@@ -184,8 +184,14 @@ pub struct ProcessLocalExecution {
 /// (FIG-3470): unlike [`ProcessLocalExecution`], which serves the process
 /// service, this target binds only the definition registry the
 /// `RegisterDefinition` command writes through.
-pub struct ProcessDefinitionLocalExecution {
-    pub registry: Arc<dyn crate::ProcessDefinitionRegistry>,
+pub enum ProcessDefinitionLocalExecution {
+    Registry {
+        registry: Arc<dyn crate::ProcessDefinitionRegistry>,
+    },
+    Artifacts {
+        engines: crate::ProcessEngineRegistry,
+        claim: crate::ReferrerClaim,
+    },
 }
 
 pub(super) struct LocalDirectEffectRunner {
@@ -722,7 +728,21 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub fn process_definitions(registry: Arc<dyn crate::ProcessDefinitionRegistry>) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(
-                ProcessDefinitionLocalExecution { registry },
+                ProcessDefinitionLocalExecution::Registry { registry },
+            )),
+            replay_trace: None,
+            served_only: None,
+        }
+    }
+
+    /// Bind immutable definition mechanics under the parent's admitted claim.
+    pub fn definition_artifacts(
+        engines: crate::ProcessEngineRegistry,
+        claim: crate::ReferrerClaim,
+    ) -> Self {
+        Self {
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(
+                ProcessDefinitionLocalExecution::Artifacts { engines, claim },
             )),
             replay_trace: None,
             served_only: None,

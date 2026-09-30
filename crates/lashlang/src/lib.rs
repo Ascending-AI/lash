@@ -117,7 +117,7 @@ pub use runtime::{
 };
 pub use runtime::{DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH};
 pub use span::Span;
-pub use value_refs::referenced_module_refs;
+pub use value_refs::referenced_definition_ids;
 
 /// The module path under which a host registers a front end's journaled
 /// language-runtime values (the clock and the random source), and the alias a

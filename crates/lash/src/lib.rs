@@ -420,7 +420,9 @@ pub mod persistence {
         session_delete::{SessionDeleteLedger, SessionDeleteObligation},
     };
     /// Artifact ownership supplied to protocol engines and effect controllers.
-    pub use lash_core::{ArtifactName, ArtifactReferrer, ReferrerClaim, ResolvedArtifactCleanup};
+    pub use lash_core::{
+        ArtifactName, ArtifactReferrer, FrameEnvironmentId, ReferrerClaim, ResolvedArtifactCleanup,
+    };
     pub use lash_core::{AttachmentReferrers, AttachmentWrite, SessionReferrerState};
     pub use lash_core::{RunSpecHash, SessionUsageTotals};
     /// Queued-work ordering values and admission-selection helpers.
@@ -762,7 +764,7 @@ pub mod remote {
             RemoteObservedWorkItemState, RemoteParkReason, RemotePersistProcessEnvReceipt,
             RemotePersistProcessEnvRequest, RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput,
             RemoteProcessAwaitRequest, RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
-            RemoteProcessDefinitionIdentity, RemoteProcessEvent, RemoteProcessEventSemantics,
+            RemoteProcessDefinition, RemoteProcessEvent, RemoteProcessEventSemantics,
             RemoteProcessEventSemanticsSpec, RemoteProcessEventType, RemoteProcessEventsRequest,
             RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,
             RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessExternalRef,

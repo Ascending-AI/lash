@@ -115,8 +115,62 @@ pub struct EngineInvocation {
 /// See the module documentation.
 #[derive(Clone, Debug)]
 pub enum Engine {
-    Double(RestateTestBackend),
+    Double(DoubleBackend),
     Live(LiveRestateBackend),
+}
+
+/// A server double and the external resources its stores need.
+#[derive(Clone, Debug)]
+pub struct DoubleBackend {
+    pub(super) backend: RestateTestBackend<dyn lash_core::StoreSet>,
+    pub(super) sqlite_stores: Option<Arc<lash_sqlite_store::SqliteStoreSet>>,
+    _resources: Option<
+        Arc<(
+            lash_postgres_store::testing::IsolatedDatabase,
+            tempfile::TempDir,
+        )>,
+    >,
+}
+
+impl DoubleBackend {
+    pub(super) fn sqlite(backend: RestateTestBackend) -> Self {
+        Self {
+            sqlite_stores: Some(Arc::clone(backend.stores())),
+            backend: backend.erase_store_type(),
+            _resources: None,
+        }
+    }
+
+    async fn start(seed: u64, config: lash_restate_test::ServerConfig) -> Result<Self, String> {
+        if let Some(database) = crate::postgres_test_isolation::isolated_database().await {
+            let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+                .await
+                .map_err(|error| error.to_string())?;
+            let attachments = tempfile::tempdir().map_err(|error| error.to_string())?;
+            let backend = lash_restate_test::backend_with_store_set(seed, config, |clock| async {
+                Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                    &storage,
+                    Arc::new(lash::persistence::FileAttachmentStore::new(
+                        attachments.path(),
+                    )),
+                    lash_core::WakeDeliveryConfig::default(),
+                    clock,
+                )) as Arc<dyn lash_core::StoreSet>)
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+            Ok(Self {
+                backend,
+                sqlite_stores: None,
+                _resources: Some(Arc::new((database, attachments))),
+            })
+        } else {
+            lash_restate_test::backend(seed, config)
+                .await
+                .map(Self::sqlite)
+                .map_err(|error| error.to_string())
+        }
+    }
 }
 
 /// A hold on a service or one of its keys; [`release`](Self::release) lets
@@ -158,7 +212,7 @@ impl Engine {
                 // every cut.
                 config.retry.initial_interval = Duration::from_millis(1);
                 config.retry.max_interval = Duration::from_millis(10);
-                lash_restate_test::backend(seed, config)
+                DoubleBackend::start(seed, config)
                     .await
                     .map(Self::Double)
                     .map_err(|error| format!("build the Restate test backend: {error}"))
@@ -189,7 +243,7 @@ impl Engine {
     #[must_use]
     pub fn clock(&self) -> Arc<dyn Clock> {
         match self {
-            Self::Double(double) => double.test_clock(),
+            Self::Double(double) => double.backend.test_clock(),
             Self::Live(live) => live.clock(),
         }
     }
@@ -198,7 +252,7 @@ impl Engine {
     #[must_use]
     pub fn now_ms(&self) -> u64 {
         match self {
-            Self::Double(double) => double.server().now_ms(),
+            Self::Double(double) => double.backend.server().now_ms(),
             Self::Live(live) => live.now_ms(),
         }
     }
@@ -208,7 +262,7 @@ impl Engine {
     pub fn advance(&self, by: Duration) {
         match self {
             Self::Double(double) => {
-                double.server().advance(by);
+                double.backend.server().advance(by);
             }
             Self::Live(live) => live.advance(by),
         }
@@ -236,7 +290,7 @@ impl Engine {
     #[must_use]
     pub fn explicit_reconcile_session_work(&self) -> Arc<dyn SessionWorkEngine> {
         match self {
-            Self::Double(double) => double.explicit_reconcile_session_work(),
+            Self::Double(double) => double.backend.explicit_reconcile_session_work(),
             Self::Live(live) => live.explicit_reconcile_session_work(),
         }
     }
@@ -244,14 +298,14 @@ impl Engine {
     #[must_use]
     pub fn lash_backend(&self) -> lash_core::Backend {
         match self {
-            Self::Double(double) => double.lash_backend(),
+            Self::Double(double) => double.backend.lash_backend(),
             Self::Live(live) => live.lash_backend(),
         }
     }
 
     pub fn install_process_worker(&self, worker: lash::durability::DurableProcessWorker) {
         match self {
-            Self::Double(double) => double.install_process_worker(worker),
+            Self::Double(double) => double.backend.install_process_worker(worker),
             Self::Live(live) => live.install_process_worker(worker),
         }
     }
@@ -261,7 +315,7 @@ impl Engine {
     pub fn on_crash(&self, listener: CrashListener) {
         match self {
             Self::Double(double) => {
-                double.server().on_crash(listener);
+                double.backend.server().on_crash(listener);
             }
             Self::Live(live) => {
                 live.on_crash(listener);
@@ -272,7 +326,7 @@ impl Engine {
     /// Arm a journal-step crash.
     pub fn crash_on(&self, rule: CrashRule) {
         match self {
-            Self::Double(double) => double.server().crash_on(rule),
+            Self::Double(double) => double.backend.server().crash_on(rule),
             Self::Live(live) => live.crash_on(rule),
         }
     }
@@ -284,7 +338,7 @@ impl Engine {
         attempt: HandlerAttempt,
     ) -> Result<(), String> {
         match self {
-            Self::Double(double) => double.run_in_handler(admitted, attempt).await,
+            Self::Double(double) => double.backend.run_in_handler(admitted, attempt).await,
             Self::Live(live) => live.run_in_handler(admitted, attempt).await,
         }
     }
@@ -292,7 +346,7 @@ impl Engine {
     #[must_use]
     pub fn ingress(&self) -> lash_restate::RestateIngressClient {
         match self {
-            Self::Double(double) => double.ingress(),
+            Self::Double(double) => double.backend.ingress(),
             Self::Live(live) => live.ingress(),
         }
     }
@@ -303,6 +357,7 @@ impl Engine {
     pub async fn invocations(&self) -> Vec<EngineInvocation> {
         match self {
             Self::Double(double) => double
+                .backend
                 .server()
                 .invocations()
                 .into_iter()
@@ -342,7 +397,7 @@ impl Engine {
     pub async fn kill_and_await(&self, id: &str) -> Result<(), String> {
         match self {
             Self::Double(double) => {
-                double.server().kill_and_await(id).await;
+                double.backend.server().kill_and_await(id).await;
                 Ok(())
             }
             Self::Live(live) => live
@@ -356,7 +411,7 @@ impl Engine {
     /// How `id` completed; `None` while it has not.
     pub async fn outcome(&self, id: &str) -> Option<Result<(), String>> {
         match self {
-            Self::Double(double) => double.server().outcome(id).map(|outcome| {
+            Self::Double(double) => double.backend.server().outcome(id).map(|outcome| {
                 outcome
                     .map(|_| ())
                     .map_err(|(code, message)| format!("{code}: {message}"))
@@ -372,6 +427,7 @@ impl Engine {
     pub async fn journal_names(&self, id: &str) -> Vec<String> {
         match self {
             Self::Double(double) => double
+                .backend
                 .server()
                 .journal(id)
                 .unwrap_or_default()
@@ -392,7 +448,7 @@ impl Engine {
     pub async fn settle(&self, budget: Duration) {
         match self {
             Self::Double(double) => {
-                let _ = tokio::time::timeout(budget, double.server().settle()).await;
+                let _ = tokio::time::timeout(budget, double.backend.server().settle()).await;
             }
             Self::Live(live) => live.settle(budget, Duration::from_millis(100)).await,
         }
@@ -402,7 +458,9 @@ impl Engine {
     /// the hold is released.
     pub async fn hold_session_drive(&self, session: &lash_core::SessionId) -> EngineHold {
         match self {
-            Self::Double(double) => EngineHold::Double(double.hold_session_drive(session).await),
+            Self::Double(double) => {
+                EngineHold::Double(double.backend.hold_session_drive(session).await)
+            }
             Self::Live(live) => EngineHold::Live(live.hold(
                 lash_restate_test::SESSION_DRIVER_SERVICE,
                 Some(session.as_str()),
@@ -413,7 +471,9 @@ impl Engine {
     /// Hold every invocation of `service` until the hold is released.
     pub async fn hold_service(&self, service: &str) -> EngineHold {
         match self {
-            Self::Double(double) => EngineHold::Double(double.server().hold_service(service).await),
+            Self::Double(double) => {
+                EngineHold::Double(double.backend.server().hold_service(service).await)
+            }
             Self::Live(live) => EngineHold::Live(live.hold(service, None)),
         }
     }
@@ -424,7 +484,7 @@ impl Engine {
     pub async fn kill_deployment(&self) {
         match self {
             Self::Double(double) => {
-                let server = double.server();
+                let server = double.backend.server();
                 for view in server.invocations() {
                     if view.status != "running" {
                         continue;

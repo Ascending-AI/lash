@@ -31,7 +31,7 @@ use super::*;
 /// sinks the law watches.
 const LEAF_FENCE: &str = "tool:law_fence";
 
-/// The engine kind the leaf's `RegisterProcessDefinition` declaration names,
+/// The engine kind the leaf's `PublishDefinition` declaration names,
 /// registered on the opener's dispatch so the intent's resolve step succeeds
 /// and the journaled CAS write is what the fence refuses.
 pub(super) const LAW_FENCE_ENGINE_KIND: &str = "law-fence-engine";
@@ -105,7 +105,7 @@ struct FenceOpenerProcesses {
 
 /// The opener registration the law needs: `register_opener_with_processes`
 /// plus the process-definition registry and the law's resolve-only engine,
-/// so the leaf's `RegisterProcessDefinition` declaration resolves and reaches
+/// so the leaf's `PublishDefinition` declaration resolves and reaches
 /// the journaled write the fence refuses.
 #[expect(
     clippy::expect_used,
@@ -249,7 +249,7 @@ fn fence_group(
 /// closes the group under `Cancel`: the child's cancel decision commits and
 /// the substrate physically stops the in-flight attempt, so the leaf never
 /// mints the `StartProcess`, `EmitProcessEvent` and
-/// `RegisterProcessDefinition` its terminal declared — the gated process
+/// `PublishDefinition` its terminal declared — the gated process
 /// service records nothing and the definition registry holds no slot.
 ///
 /// The fence is then probed directly: the bound controller minted before the

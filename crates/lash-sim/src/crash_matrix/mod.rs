@@ -89,6 +89,8 @@ pub enum Seam {
     /// A start by definition id (ADR 0113 §3.6): the host's journaled start
     /// replays exactly, holding the definition through its own referrers.
     DefinitionStart,
+    DefinitionCreate,
+    DefinitionCarry,
     /// S-14: a process's terminal and its publication to engine waiters.
     ProcessTerminal,
     /// A control intent's cancel reaching a running effect-group child: the
@@ -100,7 +102,7 @@ pub enum Seam {
 
 impl Seam {
     /// Every seam, in registry order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 11] = [
         Self::Ingress,
         Self::ControlIntent,
         Self::ScopeClose,
@@ -108,6 +110,8 @@ impl Seam {
         Self::SessionDelete,
         Self::ProcessStart,
         Self::DefinitionStart,
+        Self::DefinitionCreate,
+        Self::DefinitionCarry,
         Self::ProcessTerminal,
         Self::ChildCancel,
     ];
@@ -123,6 +127,8 @@ impl Seam {
             Self::SessionDelete => "session_delete",
             Self::ProcessStart => "process_start",
             Self::DefinitionStart => "definition_start",
+            Self::DefinitionCreate => "definition_create",
+            Self::DefinitionCarry => "definition_carry",
             Self::ProcessTerminal => "process_terminal",
             Self::ChildCancel => "child_cancel",
         }
@@ -139,6 +145,8 @@ impl Seam {
             Self::SessionDelete => &["S-21"],
             Self::ProcessStart => &[],
             Self::DefinitionStart => &[],
+            Self::DefinitionCreate => &[],
+            Self::DefinitionCarry => &[],
             Self::ProcessTerminal => &["S-14"],
             Self::ChildCancel => &[],
         }
@@ -544,6 +552,36 @@ pub const MATRIX: &[CaseSpec] = &[
         CrashPoint::AfterStateCommit,
         DetectionBound::LapsedClaim,
         "a start by id whose registration result was journaled never registers again, and its one process starts and holds the definition",
+    ),
+    today(
+        Seam::DefinitionCreate,
+        CrashPoint::MidJournalStep,
+        DetectionBound::LostImmediateSqliteFailover,
+        "a create attempt lost before its journal commit publishes one definition on replay",
+    ),
+    today(
+        Seam::DefinitionCreate,
+        CrashPoint::AfterStateCommit,
+        DetectionBound::LostImmediateSqliteFailover,
+        "a committed create attempt publishes its descriptor and closure before exposing the ID",
+    ),
+    today(
+        Seam::DefinitionCreate,
+        CrashPoint::AfterDeliveryBeforeSettle,
+        DetectionBound::LostImmediateSqliteFailover,
+        "a publication lost before frame commit replays the same definition and retains its closure",
+    ),
+    today(
+        Seam::DefinitionCarry,
+        CrashPoint::MidJournalStep,
+        DetectionBound::LapsedClaim,
+        "a frame prepared before its SQL activation replays the complete carry and reclaims every edge after an uncarried switch",
+    ),
+    today(
+        Seam::DefinitionCarry,
+        CrashPoint::AfterStateCommit,
+        DetectionBound::LapsedClaim,
+        "a committed frame retains its complete engine share across a deployment crash",
     ),
     // --- Process terminal (S-14) ------------------------------------------
     today(

@@ -1874,17 +1874,22 @@ fn admit_ingress_engine(
             "ingress admission requires the recorded execution environment".to_string(),
         )
     })?;
-    Ok(lash_core::ProcessIdentity::for_definition(
-        lash_core::ProcessDefinitionRef::unclaimed(
-            INGRESS_ENGINE_KIND,
-            serde_json::json!({
-                "payload": payload,
-                "model": env.policy.model.id,
-                "provider": env.policy.provider_id,
-            }),
-        ),
+    let draft = lash_core::ProcessDefinitionDraft::new(
+        INGRESS_ENGINE_KIND,
+        serde_json::json!({
+            "payload": payload,
+            "model": env.policy.model.id,
+            "provider": env.policy.provider_id,
+        }),
+        [],
+    )
+    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+    let mut identity = lash_core::ProcessIdentity::labelled(
+        INGRESS_ENGINE_KIND,
         payload.get("program").and_then(serde_json::Value::as_str),
-    ))
+    );
+    identity.definition_id = Some(draft.id());
+    Ok(identity)
 }
 
 struct IngressAdmissionEnginePlugin;
@@ -2129,16 +2134,19 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
         .identity;
 
     assert_eq!(ingress_identity, session_identity);
-    assert_eq!(
-        ingress_identity
-            .definition
-            .as_ref()
-            .map(|reference| reference.definition.as_json().clone()),
-        Some(serde_json::json!({
+    let expected = lash_core::ProcessDefinitionDraft::new(
+        INGRESS_ENGINE_KIND,
+        serde_json::json!({
             "payload": {"program": "environment-sensitive"},
             "model": mock_model_spec().id,
             "provider": "",
-        })),
+        }),
+        [],
+    )
+    .expect("the environment produces a canonical definition");
+    assert_eq!(
+        ingress_identity.definition_id,
+        Some(expected.id()),
         "the shared identity must prove the recorded environment reached admission"
     );
     Ok(())

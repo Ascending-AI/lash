@@ -73,6 +73,7 @@ impl CodeExecutorPlugin for Executor {
     async fn frame_switch_carries(
         &self,
         _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
+        _successor: &lash_core::FrameNodeId,
         _initial_nodes: &[lash_core::SessionAppendNode],
     ) -> Result<Vec<lash_core::ArtifactName>, SessionError> {
         Ok(Vec::new())

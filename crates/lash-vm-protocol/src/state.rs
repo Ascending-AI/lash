@@ -100,6 +100,7 @@ impl<'de> Deserialize<'de> for StateDigest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpaqueVmState {
+    definition_ids: Vec<lash_sansio::ProcessDefinitionId>,
     kind: VmStateKind,
     owner: VmOwner,
     vm_contract: VmContract,
@@ -165,6 +166,7 @@ impl OpaqueVmState {
         bytes: Vec<u8>,
     ) -> Self {
         Self {
+            definition_ids: Vec::new(),
             kind,
             owner,
             vm_contract,
@@ -173,6 +175,22 @@ impl OpaqueVmState {
             hash: StateDigest::of(&bytes),
             bytes,
         }
+    }
+
+    /// Worker-computed candidates. The parent validates each descriptor and
+    /// acquires its complete manifest under its own admitted referrer.
+    pub fn with_definition_ids(
+        mut self,
+        ids: impl IntoIterator<Item = lash_sansio::ProcessDefinitionId>,
+    ) -> Self {
+        self.definition_ids = ids.into_iter().collect();
+        self.definition_ids.sort();
+        self.definition_ids.dedup();
+        self
+    }
+
+    pub fn definition_ids(&self) -> &[lash_sansio::ProcessDefinitionId] {
+        &self.definition_ids
     }
 
     /// The structural check, and the only check the parent makes.

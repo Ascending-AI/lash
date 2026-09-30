@@ -873,6 +873,7 @@ pub(crate) struct CompiledModuleContext {
     pub(crate) module_ref: ModuleRef,
     pub(crate) host_requirements_ref: HostRequirementsRef,
     pub(crate) process_refs: BTreeMap<String, ProcessRef>,
+    pub(crate) process_types: BTreeMap<String, crate::TypeExpr>,
 }
 
 impl From<&ModuleArtifact> for CompiledModuleContext {
@@ -881,6 +882,12 @@ impl From<&ModuleArtifact> for CompiledModuleContext {
             module_ref: value.module_ref.clone(),
             host_requirements_ref: value.host_requirements_ref.clone(),
             process_refs: value.exports.processes.clone(),
+            process_types: value
+                .exports
+                .processes
+                .keys()
+                .filter_map(|name| value.process_type(name).map(|ty| (name.clone(), ty)))
+                .collect(),
         }
     }
 }

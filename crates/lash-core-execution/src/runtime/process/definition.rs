@@ -254,7 +254,7 @@ impl ProcessDefinitionDraft {
 
     /// The engine reference this descriptor resolves through, claiming no
     /// signature.
-    fn unclaimed_reference(&self) -> ProcessDefinitionRef {
+    pub(crate) fn unclaimed_reference(&self) -> ProcessDefinitionRef {
         ProcessDefinitionRef::unclaimed(self.engine_kind.clone(), self.value.clone())
     }
 }

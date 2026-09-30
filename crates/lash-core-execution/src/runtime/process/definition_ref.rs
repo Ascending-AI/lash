@@ -143,7 +143,7 @@ impl From<ProcessDefinitionValue> for serde_json::Value {
 /// the absence of a claim, so resolution adopts the authority outright. A
 /// [`ProcessSignature::Known`] claim must equal the authority exactly.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "signature", rename_all = "snake_case")]
+#[serde(tag = "signature", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProcessSignature {
     Unknown,
     Known { encoding: serde_json::Value },

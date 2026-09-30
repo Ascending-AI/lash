@@ -315,10 +315,7 @@ lash_store_sql::statements! {
        AND (?3 IS NULL OR identity_kind = ?3)
        AND (?4 IS NULL OR identity_label = ?4)
        AND (?5 IS NULL OR
-            (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-             AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-             AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                  OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+            (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
        AND (?6 IS NULL OR
             json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
        AND (?7 IS NULL OR
@@ -333,10 +330,7 @@ lash_store_sql::statements! {
        AND (?3 IS NULL OR identity_kind = ?3)
        AND (?4 IS NULL OR identity_label = ?4)
        AND (?5 IS NULL OR
-            (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-             AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-             AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                  OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+            (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
        AND (?6 IS NULL OR
             json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
        AND (?7 IS NULL OR
@@ -354,10 +348,7 @@ lash_store_sql::statements! {
        AND (?3 IS NULL OR identity_kind = ?3)
        AND (?4 IS NULL OR identity_label = ?4)
        AND (?5 IS NULL OR
-            (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-             AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-             AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                  OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+            (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
        AND (?6 IS NULL OR
             json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
        AND (?7 IS NULL OR
@@ -375,10 +366,7 @@ lash_store_sql::statements! {
        AND (?3 IS NULL OR identity_kind = ?3)
        AND (?4 IS NULL OR identity_label = ?4)
        AND (?5 IS NULL OR
-            (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-             AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-             AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                  OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+            (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
        AND (?6 IS NULL OR
             json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
        AND (?7 IS NULL OR
@@ -403,10 +391,7 @@ lash_store_sql::statements! {
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
-                (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-                 AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+                (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
            AND (?6 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR
@@ -422,10 +407,7 @@ lash_store_sql::statements! {
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
-                (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-                 AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+                (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
            AND (?6 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR
@@ -442,10 +424,7 @@ lash_store_sql::statements! {
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
-                (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-                 AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+                (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
            AND (?6 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR
@@ -463,10 +442,7 @@ lash_store_sql::statements! {
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
-                (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-                 AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+                (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
            AND (?6 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR
@@ -486,10 +462,7 @@ lash_store_sql::statements! {
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
-                (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-                 AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+                (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
            AND (?6 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR
@@ -508,10 +481,7 @@ lash_store_sql::statements! {
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
-                (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-                 AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+                (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
            AND (?6 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR
@@ -531,10 +501,7 @@ lash_store_sql::statements! {
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
-                (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-                 AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+                (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
            AND (?6 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR
@@ -555,10 +522,7 @@ lash_store_sql::statements! {
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
-                (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
-                 AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
+                (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
            AND (?6 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR

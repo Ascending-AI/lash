@@ -240,6 +240,15 @@ PendingFollowOn {
   would move the frame while a follow-on is pending is refused, and
   `open_agent_frame` refuses with `FollowOnPending`. A stranded handoff is
   unrepresentable.
+* **Definition carry (FIG-4177).** Mint the successor frame id before its
+  seed callback. Acquire its engine-owned definition manifest edges before
+  the SQL head CAS; validate the canonical descriptor and carry SQL-owned
+  entries inside that CAS. Prepared engine edges arm an `AwaitFrame` guard:
+  a committed frame retained by a head, anchor or admission root keeps them;
+  an absent or unretained frame loses them only after the preparing journal
+  cannot replay. A post-commit crash leaves the complete successor closure.
+  Engine artifact bytes stay in the engine store. ADR 0113 §3.1 owns this
+  prepare/commit/reclaim protocol and the existing `Ended` cleanup.
 * **Recovery.** One check in the lease funnel: after acquiring the lease and
   refreshing the head, a set fact is driven as a logical run before any ingress
   claim. A Restate drive whose scope owns the chain (the root turn of

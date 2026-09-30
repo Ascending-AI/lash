@@ -139,6 +139,7 @@ impl CodeExecutorPlugin for Integrator {
     async fn frame_switch_carries(
         &self,
         ctx: ProtocolSessionContext<'_>,
+        successor: &lash::plugins::FrameNodeId,
         initial_nodes: &[SessionAppendNode],
     ) -> Result<Vec<ArtifactName>, SessionError> {
         unreachable!("external signature witness")
