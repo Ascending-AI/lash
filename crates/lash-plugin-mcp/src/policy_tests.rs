@@ -64,98 +64,7 @@ impl McpEntry {
     }
 }
 
-const MOCK_SERVER: &str = r#"
-import json, os, signal, sys, threading, time
-
-# The mock ignores SIGTERM so scripted tests deterministically reach the
-# SIGKILL stage of forced shutdown; graceful stdin-EOF exit is unchanged.
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-
-lock = threading.Lock()
-behavior = os.environ['BEHAVIOR']
-protocol = os.environ.get('PROTOCOL', '2025-11-25')
-log_path = os.environ['LOG_PATH']
-starts_path = os.environ['STARTS_PATH']
-pid_path = os.environ.get('PID_PATH')
-eof_path = os.environ.get('EOF_PATH')
-close_path = os.environ.get('CLOSE_PATH')
-if pid_path:
-    with open(pid_path, 'w', encoding='utf-8') as f:
-        f.write(str(os.getpid()))
-
-try:
-    with open(starts_path, 'r', encoding='utf-8') as f:
-        starts = int(f.read())
-except (FileNotFoundError, ValueError):
-    starts = 0
-with open(starts_path, 'w', encoding='utf-8') as f:
-    f.write(str(starts + 1))
-if behavior == 'fail_once_then_success' and starts < 1:
-    sys.exit(1)
-if behavior == 'fail_twice_then_success' and starts < 2:
-    sys.exit(1)
-if behavior == 'reset_attempts_after_success' and starts in (0, 2):
-    sys.exit(1)
-
-def send(message):
-    with lock:
-        sys.stdout.write(json.dumps(message, separators=(',', ':')) + '\n')
-        sys.stdout.flush()
-
-def result(request_id):
-    send({'jsonrpc': '2.0', 'id': request_id,
-          'result': {'content': [{'type': 'text', 'text': 'ok'}]}})
-
-def run_call(message, index):
-    request_id = message['id']
-    token = message.get('params', {}).get('_meta', {}).get('progressToken')
-    if behavior == 'success':
-        result(request_id)
-
-call_index = 0
-for line in sys.stdin:
-    with open(log_path, 'a', encoding='utf-8') as log:
-        log.write(line)
-    message = json.loads(line)
-    method = message.get('method')
-    if method == 'initialize' and behavior not in ('hang_initialize', 'exit_on_eof_after_hang_initialize'):
-        send({'jsonrpc': '2.0', 'id': message['id'], 'result': {
-            'protocolVersion': protocol,
-            'capabilities': {'tools': {}},
-            'serverInfo': {'name': 'policy-mock', 'version': '1.0.0'}}})
-    elif method == 'tools/list':
-        tool_name = 'work'
-        if behavior == 'catalog_by_generation':
-            tool_name = 'generation-' + str(starts + 1)
-        send({'jsonrpc': '2.0', 'id': message['id'], 'result': {'tools': [{
-            'name': tool_name, 'description': 'Policy test tool',
-            'inputSchema': {'type': 'object', 'properties': {}}}]}})
-        if behavior == 'exit_after_list' or (behavior == 'exit_after_list_once' and starts < 1):
-            sys.exit(0)
-        if behavior == 'reset_attempts_after_success' and starts == 1:
-            sys.exit(0)
-        if behavior == 'close_streams_when_triggered_after_list':
-            while not os.path.exists(close_path):
-                time.sleep(0.001)
-            os.close(sys.stdin.fileno())
-            os.close(sys.stdout.fileno())
-            time.sleep(30)
-    elif method == 'tools/call':
-        call_index += 1
-        if behavior == 'crash_after_call':
-            result(message['id'])
-            sys.exit(0)
-        else:
-            threading.Thread(target=run_call, args=(message, call_index), daemon=True).start()
-    elif method == 'ping':
-        if behavior in ('silent_ping', 'success', 'fail_twice_then_success'):
-            send({'jsonrpc': '2.0', 'id': message['id'], 'result': {}})
-if behavior in ('ignore_eof', 'exit_on_eof_after_hang_initialize'):
-    with open(eof_path, 'w', encoding='utf-8') as f:
-        f.write('closed')
-if behavior == 'ignore_eof':
-    time.sleep(30)
-"#;
+const MOCK_SERVER: &str = include_str!("policy_peer.py");
 
 #[derive(Clone, Copy)]
 struct MockOptions {
@@ -775,9 +684,7 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
 
     let refreshing_entry = Arc::clone(&current_entry);
     let refresh = tokio::spawn(async move {
-        refreshing_entry
-            .refresh_tools(initial.peer.clone(), 1)
-            .await;
+        refreshing_entry.request_tool_refresh(1);
     });
     hook.reached.notified().await;
     assert!(current_entry.mark_disconnected(
@@ -2511,3 +2418,5 @@ fn one_millisecond_backoff_never_jitters_to_zero() {
         );
     }
 }
+
+include!("catalog_policy_tests.rs");
