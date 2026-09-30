@@ -430,6 +430,22 @@ class PathClassifierTests(unittest.TestCase):
         )
         self.assertEqual([], unknown)
 
+    def test_loadtest_chart_changes_select_repository_gates(self) -> None:
+        paths = subprocess.run(
+            ["git", "ls-files", "deploy/helm/lash-loadtest"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        inputs = [path for path in paths if PurePosixPath(path).suffix not in ci_plan.DOC_SUFFIXES]
+        self.assertTrue(inputs)
+        for path in inputs:
+            with self.subTest(path=path):
+                self.assertEqual(ci_plan.PathKind.TOOLING, self.kind(path))
+                for status in ("A", "M", "D"):
+                    plan = ci_plan.classify([(status, path)], "pull_request")
+                    self.assertEqual("false", plan["fail_open"])
+                    self.assertEqual("true", plan["tooling"])
+                    self.assertEqual("false", plan["stores"])
+
 
 FIXTURE_WORKFLOW = """\
 name: CI

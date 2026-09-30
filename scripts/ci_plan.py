@@ -907,6 +907,7 @@ def classify_path(path: str, root: Path | None = None) -> PathClass:
     if (
         path in TOOLING_ROOT_FILES
         or path.startswith("tools/")
+        or (path.startswith("deploy/helm/") and suffix not in DOC_SUFFIXES)
         or (len(parts) == 1 and name.startswith("MODULE.bazel"))
     ):
         return PathClass(PathKind.TOOLING)
