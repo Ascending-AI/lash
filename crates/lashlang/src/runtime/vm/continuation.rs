@@ -1766,7 +1766,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             // no earlier marks to carry across the handover blob.
             pending_tools: continuation.pending_tools,
             execution_nonce: continuation.execution_nonce,
-            resume_point: VmResumePoint::NextInstruction,
+            resume_point: continuation.resume,
             resume_loop_phase,
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,

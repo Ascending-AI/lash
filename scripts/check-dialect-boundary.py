@@ -57,7 +57,7 @@ TYPESCRIPT_PROMPT_TEXT = re.compile(
     r"</?typescript>|console\.log|Promise<|HistoryItem\[\]|Promise\.race"
 )
 
-SEAM_PROOF = re.compile(r"SeamProofDialect|(?<![\w-])seam-proof(?![\w.-])|</?seam>")
+SEAM_PROOF = re.compile(r"SeamProof(?:Dialect|Frontend)|(?<![\w-])seam-proof(?![\w.-])|</?seam>")
 SEAM_PROOF_HOME = "crates/lash/tests/"
 SEAM_PROOF_EVIDENCE_ADR = "docs/adr/0096-"
 SEAM_PROOF_EVIDENCE_PATH = "crates/lash/tests/seam_proof_dialect.rs"

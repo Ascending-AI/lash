@@ -20,7 +20,7 @@ mod compiler;
 pub use compiler::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
 };
-mod effect_value;
+pub mod effect_value;
 mod entry_points;
 mod executable_identity;
 pub use executable_identity::ExecutableIdentity;
@@ -141,7 +141,7 @@ pub use value::{
 };
 use vm::IterState;
 
-#[derive(Clone, Debug, Error, PartialEq)]
+#[derive(Clone, Debug, Error, PartialEq, serde::Serialize, serde::Deserialize)]
 #[error("{error}")]
 pub struct RuntimeFailure {
     pub error: RuntimeError,

@@ -486,6 +486,12 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         SqliteStoreSet::process_env_store(self)
     }
 
+    fn worker_recovery(
+        &self,
+    ) -> Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore> {
+        SqliteStoreSet::process_env_store(self)
+    }
+
     fn attachment_store(&self) -> Arc<dyn lash_core_execution::AttachmentStore> {
         SqliteStoreSet::attachment_store(self)
     }

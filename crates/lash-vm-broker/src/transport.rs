@@ -27,6 +27,8 @@ pub enum WorkerRead {
     /// The next bytes the worker wrote, in order. Frame boundaries are the
     /// broker's to find.
     Bytes(Vec<u8>),
+    /// A classified failure from the supervising pool.
+    Failed(InfrastructureOutcome),
     /// The stream ended, with the supervisor's evidence of how. A worker
     /// never testifies to its own end.
     Ended(SupervisorEvidence),
@@ -72,6 +74,8 @@ impl std::fmt::Debug for WorkerCheckout {
 pub enum CheckoutRefusal {
     #[error("the pool's queue is full")]
     QueueFull,
+    #[error(transparent)]
+    Infrastructure(InfrastructureOutcome),
     #[error("no worker was free within {waited:?}")]
     TimedOut { waited: Duration },
     #[error("the pool is failing queued work after repeated worker failures")]
@@ -84,10 +88,13 @@ impl CheckoutRefusal {
     /// The typed infrastructure outcome a refused checkout surfaces as: the
     /// run never started, so the owning invocation is re-driven.
     pub fn outcome(&self) -> InfrastructureOutcome {
+        if let Self::Infrastructure(outcome) = self {
+            return outcome.clone();
+        }
         InfrastructureOutcome::WorkerUnresponsive {
             silent_ms: match self {
                 Self::TimedOut { waited } => u64::try_from(waited.as_millis()).unwrap_or(u64::MAX),
-                Self::QueueFull | Self::RestartStorm | Self::Closed => 0,
+                Self::QueueFull | Self::RestartStorm | Self::Closed | Self::Infrastructure(_) => 0,
             },
         }
     }
@@ -99,13 +106,17 @@ impl CheckoutRefusal {
 pub trait WorkerSlots: Send + Sync {
     /// Checks out a worker for `owner`, waiting no longer than the pool's
     /// checkout bound.
-    async fn checkout(&self, owner: &VmOwner) -> Result<WorkerCheckout, CheckoutRefusal>;
+    async fn checkout(
+        &self,
+        owner: &VmOwner,
+        start: &lash_vm_protocol::Start,
+    ) -> Result<WorkerCheckout, CheckoutRefusal>;
 
     /// Returns a worker whose run ended cleanly (completed, failed as a
     /// guest, or parked): the pool resets it and may reuse it.
-    async fn release(&self, checkout: WorkerCheckout);
+    async fn release(&self, checkout: WorkerCheckout) -> Result<(), CheckoutRefusal>;
 
     /// Returns a worker after any failure: the pool kills and reaps it and
     /// replaces it with a fresh one. A failed worker is never reset.
-    async fn discard(&self, checkout: WorkerCheckout);
+    async fn discard(&self, checkout: WorkerCheckout) -> Result<(), CheckoutRefusal>;
 }

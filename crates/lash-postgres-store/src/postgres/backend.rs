@@ -143,6 +143,12 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         PostgresStoreSet::process_env_store(self)
     }
 
+    fn worker_recovery(
+        &self,
+    ) -> Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore> {
+        PostgresStoreSet::process_env_store(self)
+    }
+
     fn attachment_store(&self) -> Arc<dyn AttachmentStore> {
         PostgresStoreSet::attachment_store(self)
     }

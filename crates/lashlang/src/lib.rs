@@ -16,6 +16,7 @@ mod introspection;
 mod json_schema;
 mod linker;
 mod runtime;
+pub use runtime::effect_value;
 mod span;
 mod tracking;
 mod trigger;
@@ -32,7 +33,8 @@ pub(crate) use artifact::InMemoryLashlangArtifactStore;
 pub use artifact::{
     ContentHash, HostRequirements, HostRequirementsRef, LASHLANG_COMPILER_VERSION,
     LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, LashlangArtifacts, ModuleArtifact,
-    ModuleArtifactError, ModuleExports, ModuleRef, ProcessRef, host_requirements_for_program,
+    ModuleArtifactBytes, ModuleArtifactError, ModuleExports, ModuleRef, ProcessRef,
+    host_requirements_for_program,
 };
 pub use ast::{
     AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BindingVisibility, CatchClause,

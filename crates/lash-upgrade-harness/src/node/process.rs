@@ -195,8 +195,17 @@ async fn start_request(
         lashlang::LashlangHostCatalog::new(),
         lashlang::LashlangAbilities::all(),
     );
-    let linked = lash::typescript::link(SIGNAL_WAITING_PROCESS, &environment)
-        .map_err(|error| anyhow!("link the signal-waiting process: {error:?}"))?;
+    let linked = match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::CompileModule {
+            source: SIGNAL_WAITING_PROCESS.into(),
+            environment,
+            cell: false,
+        })
+        .map_err(|error| anyhow!("compile the signal-waiting process: {error}"))?
+    {
+        lash_vm_client::service::Response::Module(module) => module,
+        response => bail!("compile the signal-waiting process: {response:?}"),
+    };
     // A host pin keeps the module alive for the process (ADR 0113).
     let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
         lash_core::HostArtifactPin::mint(),
@@ -208,13 +217,11 @@ async fn start_request(
         .map_err(|error| anyhow!("publish the process module: {error}"))?;
     let process_name = linked
         .artifact
-        .ir()
-        .declarations
-        .iter()
-        .find_map(|declaration| match declaration {
-            lashlang::Declaration::Process(process) => Some(process.name.to_string()),
-            _ => None,
-        })
+        .exports()
+        .processes
+        .keys()
+        .next()
+        .cloned()
         .context("the linked module declares no process")?;
     let input = lash_lashlang_runtime::LashlangProcessInput {
         module_ref: linked.artifact.module_ref().clone(),
@@ -261,7 +268,10 @@ async fn start_request(
 
 /// Contributes the Lashlang process engine to a node's core, as the RLM
 /// protocol does for a host that runs it.
-pub(crate) struct ProcessEnginePlugin(pub(crate) lashlang::LashlangArtifacts);
+pub(crate) struct ProcessEnginePlugin(
+    pub(crate) lashlang::LashlangArtifacts,
+    pub(crate) std::sync::Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore>,
+);
 
 struct NoSessionPlugin;
 
@@ -292,6 +302,7 @@ impl lash_core::facade_support::PluginFactory for ProcessEnginePlugin {
                 lash_lashlang_runtime::LashlangProcessEngine::new(
                     self.0.clone(),
                     lash_lashlang_runtime::LashlangSurface::default(),
+                    self.1.clone(),
                 ),
             ),
         ])

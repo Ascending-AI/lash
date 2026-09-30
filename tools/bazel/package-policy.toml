@@ -492,3 +492,10 @@ store_seam = [
 [[rule]]
 packages = ["transcript-contract"]
 compile_data = ["//crates/lash-core-execution:rust_sources"]
+
+# Model-source and VM work run in the shipped helper on every test tier.
+[[rule]]
+packages = ["lash-internal-protocol-rlm", "lash-internal-lashlang-runtime", "lash-runtime", "lash-sim", "lash-internal-restate", "lash-internal-sqlite-store", "lash-internal-postgres-store", "lash-internal-conformance"]
+kinds = ["unit-test", "test", "bin-unit-test"]
+data = ["//crates/lash-vm-worker:lash-vm-worker__bin"]
+env = { LASH_VM_WORKER = "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)" }

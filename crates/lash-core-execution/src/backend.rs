@@ -163,6 +163,11 @@ impl Backend {
         self.stores().definition_store()
     }
 
+    /// Parent-owned worker accounting on this backend.
+    pub fn worker_recovery(&self) -> Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore> {
+        self.stores().worker_recovery()
+    }
+
     /// The attachment byte store sessions write through.
     pub fn attachment_store(&self) -> Arc<dyn AttachmentStore> {
         self.stores().attachment_store()
@@ -276,6 +281,9 @@ pub trait StoreSet: Send + Sync {
     /// §3.6), in the same database as the modules and environments their
     /// manifests name.
     fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore>;
+
+    /// Parent-owned recovery counters for model-code executions.
+    fn worker_recovery(&self) -> Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>;
 
     /// The attachment byte store sessions write through.
     fn attachment_store(&self) -> Arc<dyn AttachmentStore>;

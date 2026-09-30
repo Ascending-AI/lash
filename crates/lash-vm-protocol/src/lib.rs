@@ -37,8 +37,8 @@ pub use identity::BuildIdentity;
 pub use message::{
     ContextDescription, EffectKind, EffectOutcome, EffectRequest, EffectRequestId, EffectResponse,
     EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, MessageFence, MessageHeader,
-    OwnerEpoch, ParentFrame, ParentMessage, ProgramSource, Start, StartState, TransportSequence,
-    VmLimits, WorkerFrame, WorkerMessage, WorkerPhase,
+    OwnerEpoch, ParentFrame, ParentMessage, ProgramEntry, ProgramSource, Start, StartState,
+    TransportSequence, VmLimits, WorkerFrame, WorkerMessage, WorkerPhase,
 };
 pub use outcome::{InfrastructureOutcome, SupervisorEvidence, WorkerLimit};
 pub use state::{

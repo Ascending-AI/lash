@@ -24,8 +24,8 @@ and no registry: TypeScript is selected by naming `TypescriptDialect`
 (`Arc::new(TypescriptDialect)`), and a new dialect is added by implementing the
 trait and passing it at the same place.
 
-Every adapter a session uses comes from that one value: cell parsing,
-`processes.create` and module source parsing, tool call-path spelling and
+Every adapter a session uses comes from that one value: the worker frontend
+for cells, `processes.create` and module source parsing, tool call-path spelling and
 signatures, authored-example rendering, prompt vocabulary and cell tags, the
 notation of inferred value shapes, the history item definition, the execution
 section, and the stream event and diagnostic names derived from its language
@@ -49,10 +49,16 @@ field and refuses one.
 ### What a dialect implements
 
 - `language_id`: the stable id the session records.
-- `parse` and `parse_cell`: source to `lashlang::Program`, the second against
-  the live host environment, including prior globals, expired functions and
-  process handles, with typed `DialectDiagnostic` refusals (kind, message,
-  span and rendered text).
+- `worker_service`: the compiled worker entry and bounds for the source
+  frontend. That entry implements `WorkerFrontend::parse`: source to
+  `lashlang::Program`, with the live host environment for cells, including
+  prior globals, expired functions and process handles. It returns typed
+  `WorkerFrontendRefusal` outcomes with the diagnostic and policy class.
+  `worker_entry_with_frontend` is entered before host initialization. Parent
+  `parse` and `parse_cell` callbacks are removed under ADR 0123: the host
+  selects the frontend but all model-source lowering runs in its child.
+- `render_parse_diagnostic`: host-side presentation of the worker's typed
+  refusal; its default preserves the worker's rendered diagnostic.
 - `tool_call_path`: the call path a cell writes for a front-end-neutral
   `ResolvedToolBinding`, or a typed `DialectRefusal` when no cell can address
   it. Registration refuses a catalog member the selected dialect cannot call.
@@ -71,14 +77,16 @@ key `lash.tool`, transport, finish and retry copy assembled from the
 vocabulary and cell tags, and the `code` stream message that carries a cell's
 source. `RlmDialectServices` carries session resources rather than source
 semantics: artifact storage, deferred tool and trigger resolvers, trace
-configuration, execution bounds, the renderer and the session's cell or
-native-tool channel. The native-tool channel has no cell delimiter.
+configuration, the worker service, execution bounds, the renderer and the
+session's cell or native-tool channel. The native-tool channel has no cell delimiter.
 
 `scripts/check-dialect-boundary.py` fails when the TypeScript adapter's
 concrete type is used outside the adapter as more than a value a host names,
 when a retired TypeScript binding name returns, when TypeScript prompt text
 appears in shared code-mode production sources, or when the lash integration
-tests' fixture dialect is mentioned outside them.
+tests' fixture dialect or frontend is mentioned outside them. Its compiled
+frontend is registered only by its test worker binary, never by the shipped
+worker or a default registry.
 
 ## Dialect-neutral guarantees
 

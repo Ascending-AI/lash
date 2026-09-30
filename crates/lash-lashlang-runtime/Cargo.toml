@@ -24,12 +24,14 @@ name = "lash_lashlang_runtime"
 doctest = false
 
 [features]
-testing = ["lash-core/testing", "lashlang/testing"]
+testing = ["lash-vm-client/testing", "lash-core/testing", "lashlang/testing"]
 
 [lints]
 workspace = true
 
 [dependencies]
+lash-vm-client = { workspace = true }
+rmp-serde = { workspace = true }
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }

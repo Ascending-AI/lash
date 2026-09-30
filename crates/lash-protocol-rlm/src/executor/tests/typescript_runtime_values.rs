@@ -46,6 +46,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
                 process_engine_surface(surface.clone()),
+                table.backend().worker_recovery(),
             ),
         ),
     );

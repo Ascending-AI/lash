@@ -200,7 +200,11 @@ async fn run_counted(
         }),
     );
     let outcome = Box::pin(crate::process::run_lashlang_process(
-        LashlangProcessEngine::new(store, LashlangSurface::default()),
+        LashlangProcessEngine::new(
+            store,
+            LashlangSurface::default(),
+            crate::lib_tests::memory_backend().await.worker_recovery(),
+        ),
         context,
         serde_json::to_value(input).expect("process input serializes"),
     ))

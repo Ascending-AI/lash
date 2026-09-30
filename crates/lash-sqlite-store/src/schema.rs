@@ -141,6 +141,16 @@ impl SqliteDatabase {
 /// in the same transaction. Component blobs are shared and have no
 /// component-side cascade.
 pub(crate) const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS worker_recovery (
+    scope_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL,
+    attempts INTEGER NOT NULL,
+    cpu_nanos INTEGER NOT NULL,
+    replacement INTEGER NOT NULL,
+    unknown_cpu_attempts INTEGER NOT NULL,
+    in_flight INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS blobs (
     hash    TEXT PRIMARY KEY,
     content BLOB NOT NULL

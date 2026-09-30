@@ -52,8 +52,8 @@ pub enum VmExecutionStart {
 pub struct VmRunConfig {
     pub mode: ExecutionMode,
     pub bounds: ExecutionBounds,
-    /// Projected bindings. Only owned scalar projections may cross; a
-    /// projection backed by a host descriptor is refused at start.
+    /// Descriptors owned by this execution, including worker-local IPC views.
+    /// Host descriptors themselves never cross the worker wire.
     pub projected: ProjectedBindings,
     pub observe_execution: bool,
     pub trace_runtime_errors: bool,
@@ -161,6 +161,8 @@ impl RequestKind {
 /// The host's answer to the pending request.
 #[derive(Debug)]
 pub enum VmResume {
+    /// A completed effect observed durable cancellation.
+    EffectCancelled,
     Effect(Result<AbilityOutcome, ExecutionHostError>),
     CancelCheckpoint {
         cancelled: bool,
@@ -176,6 +178,7 @@ impl VmResume {
     fn kind(&self) -> &'static str {
         match self {
             Self::Effect(_) => "effect",
+            Self::EffectCancelled => "cancelled effect",
             Self::CancelCheckpoint { .. } => "cancel checkpoint",
             Self::Continue => "continue",
             Self::Park => "park",
@@ -185,8 +188,10 @@ impl VmResume {
     fn answers(&self, request: RequestKind) -> bool {
         matches!(
             (request, self),
-            (RequestKind::Effect { .. }, Self::Effect(_))
-                | (RequestKind::Effect { parkable: true }, Self::Park)
+            (
+                RequestKind::Effect { .. },
+                Self::Effect(_) | Self::EffectCancelled
+            ) | (RequestKind::Effect { parkable: true }, Self::Park)
                 | (RequestKind::CancelCheckpoint, Self::CancelCheckpoint { .. })
                 | (RequestKind::Boundary, Self::Continue | Self::Park)
                 | (RequestKind::ParkDeclined, Self::Continue)
@@ -256,8 +261,6 @@ pub enum VmStepError {
         expected: &'static str,
         found: &'static str,
     },
-    #[error("projected binding `{name}` is backed by a host descriptor, which cannot cross")]
-    HostProjection { name: String },
     #[error("a continuation parked in {parked:?} mode cannot resume a {run:?} run")]
     ContinuationModeMismatch {
         parked: ExecutionMode,
@@ -347,6 +350,10 @@ impl ExecutionHost for StepHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match self.ask(VmRequest::Effect(op)).await {
             VmResume::Effect(result) => result,
+            VmResume::EffectCancelled => {
+                self.mailbox.lock_recover().cancelled = true;
+                Err(ExecutionHostError::new("execution cancelled"))
+            }
             // `answer` admits a park only for a parkable effect, whose arm
             // stands on the operation again when it is answered this way.
             VmResume::Park => {
@@ -465,9 +472,6 @@ impl VmExecution {
         state: State,
         scratch: ExecutionScratch,
     ) -> Result<Self, VmStepError> {
-        if let Some(name) = config.projected.host_backed_name() {
-            return Err(VmStepError::HostProjection { name });
-        }
         if let VmExecutionStart::Continuation(continuation) = &start
             && continuation.mode != config.mode
         {
@@ -731,11 +735,20 @@ async fn run_process(
             }
             Ok(VmRunOutcome::Complete(outcome)) => {
                 vm.flush_profile(host);
-                return (RunEnd::Finished(outcome), None);
+                let installed = vm
+                    .into_state_parts()
+                    .and_then(|(globals, heap)| state.install_runtime(globals, heap));
+                return match installed {
+                    Ok(()) => (RunEnd::Finished(outcome), Some(state)),
+                    Err(error) => (RunEnd::Failed(failure(error)), Some(state)),
+                };
             }
             Err(failure) => {
                 vm.flush_profile(host);
-                return (RunEnd::Failed(failure), None);
+                let _ = vm
+                    .into_state_parts()
+                    .and_then(|(globals, heap)| state.install_runtime(globals, heap));
+                return (RunEnd::Failed(failure), Some(state));
             }
         }
     }

@@ -83,6 +83,7 @@ pub mod session_ingress;
 pub mod session_roots;
 pub mod trigger;
 pub mod turn_ingress;
+pub mod worker_recovery;
 
 pub use render::{
     Dialect, Placeholder, RenderError, SchemaTables, TableLayout, Vocabulary, VocabularyTerm,
@@ -121,6 +122,7 @@ pub const TABLES: &[&str] = &[
     process::wake_deliveries::TABLE,
     process::wake_redelivery_fences::TABLE,
     recovery_leader::TABLE,
+    worker_recovery::TABLE,
     trigger::deliveries::TABLE,
     trigger::mutation_receipts::TABLE,
     trigger::occurrences::TABLE,

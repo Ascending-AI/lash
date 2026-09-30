@@ -32,6 +32,10 @@ use lash_sansio::sync::MutexExt;
 mod dialect;
 use dialect::SeamProofDialect;
 
+fn worker_executable() -> &'static str {
+    env!("CARGO_BIN_EXE_lash-seam-proof-worker")
+}
+
 /// Words and forms a prompt served to this dialect must never carry: they
 /// belong to TypeScript and its JavaScript runtime.
 const TYPESCRIPT_TEXT: &[&str] = &[

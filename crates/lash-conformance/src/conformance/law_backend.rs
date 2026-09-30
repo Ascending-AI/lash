@@ -233,6 +233,9 @@ impl StoreLawStores {
 }
 
 impl crate::StoreSet for StoreLawStores {
+    fn worker_recovery(&self) -> Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore> {
+        Self::no_second_substrate("worker recovery accounting")
+    }
     fn binding_identity(&self) -> &crate::StoreBindingId {
         &self.binding
     }

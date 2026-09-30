@@ -606,13 +606,7 @@ fn draft(session_id: &SessionId, key: &str, source_key: &str) -> TriggerSubscrip
             kind: "test".to_string(),
             payload: serde_json::json!({ "process": "worker" }),
         },
-        target_identity: ProcessIdentity::for_definition(
-            lash_core::ProcessDefinitionRef::unclaimed(
-                "test",
-                serde_json::json!({ "process_name": "worker" }),
-            ),
-            Some("worker".to_string()),
-        ),
+        target_identity: ProcessIdentity::labelled("test", Some("worker".to_string())),
         event_types: Vec::new(),
         input_template,
         target_label: Some("worker".to_string()),

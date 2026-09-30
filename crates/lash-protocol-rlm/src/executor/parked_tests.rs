@@ -90,143 +90,141 @@ pub(crate) async fn execute_parked_cell_for_tests(
     code: &str,
     break_retention: bool,
 ) -> Result<ParkedCellEvidence, String> {
-    use lashlang::{GlobalPatch, Vm, VmRunOutcome};
-
+    use lash_vm_broker::{BrokeredEnd, CodeCallIdentities};
+    use lash_vm_protocol::{
+        FrameEpoch, OpaqueVmState, ProgramSource, StartState, VmOwner, VmStateKind,
+    };
+    if language != "typescript" {
+        return Err(format!("unsupported parked-cell dialect {language}"));
+    }
+    let service = state.vm.state().service().clone();
     let mut host_environment = LashlangSurface::default()
         .host_environment(ctx.tool_catalog().as_ref())
-        .map_err(|error| error.to_string())?;
-    let live_global_names = state
+        .map_err(|e| e.to_string())?;
+    host_environment =
+        host_environment.with_globals(state.vm.state().binding_names().map(str::to_string));
+    let cell = Arc::new(super::cell_run::CellRun::open(&ctx));
+    let identities: CodeCallIdentities = cell
+        .as_ref()
+        .as_ref()
+        .map_err(|e| e.to_string())?
+        .identities()
+        .code()
+        .clone();
+    let host = ParkedCellHost {
+        bridge: HostBridge::new(HostBridgeConfig {
+            cell,
+            ctx,
+            prints: Arc::new(std::sync::Mutex::new(Vec::new())),
+            lashlang_execution_trace: None,
+            host_environment: host_environment.clone(),
+            deferred_execution_grants: BTreeMap::new(),
+            cell_bindings: Default::default(),
+            workers: service.clone(),
+            artifact_store: crate::testing::memory_artifact_store().await,
+        }),
+    };
+    let owner = VmOwner::new("parked-cell-witness");
+    let start = state
         .vm
         .state()
-        .globals()
-        .keys()
-        .map(str::to_string)
-        .collect::<std::collections::BTreeSet<_>>();
-    host_environment = host_environment.with_globals(live_global_names);
-
-    let cached_program = match language {
-        "typescript" => match state
-            .vm
-            .linked_programs_mut()
-            .cached_linked_program(code, &host_environment)
-        {
-            Some(program) => program,
-            None => {
-                let program = lash_typescript::parse_with_globals(code, &host_environment.globals)
-                    .map_err(|error| error.to_string())?;
-                state
-                    .vm
-                    .linked_programs_mut()
-                    .get_or_compile_ast(code, program, &host_environment)
-                    .map_err(|error| error.to_string())?
-            }
-        },
-        other => return Err(format!("unsupported parked-cell dialect {other}")),
+        .bytes()
+        .map(|bytes| {
+            StartState::Snapshot(OpaqueVmState::seal(
+                VmStateKind::Snapshot,
+                owner.clone(),
+                lashlang::vm_contract_versions(),
+                lashlang::LASHLANG_SNAPSHOT_VERSION,
+                bytes.to_vec(),
+            ))
+        })
+        .unwrap_or(StartState::Fresh);
+    let context = lash_vm_client::RunContext {
+        environment: host_environment,
+        mode: lashlang::ExecutionMode::Process,
+        ..Default::default()
     };
-    let bridge = HostBridge::new(HostBridgeConfig {
-        cell: std::sync::Arc::new(super::cell_run::CellRun::open(&ctx)),
-        ctx,
-        prints: Arc::new(std::sync::Mutex::new(Vec::new())),
-        lashlang_execution_trace: None,
-        host_environment,
-        deferred_execution_grants: BTreeMap::new(),
-        cell_bindings: lash_lashlang_runtime::CellToolBindings::default(),
-        artifact_store: crate::testing::memory_artifact_store().await,
-    });
-    let host = ParkedCellHost { bridge };
-    let mut vm = Vm::from_state(
-        cached_program.compiled_program(),
-        state.vm.state_mut(),
-        &host,
-    )
-    .map_err(|error| error.to_string())?;
-    let parked = vm
-        .run_process_until_effect()
+    let run = |start, boundary| lash_lashlang_runtime::WorkerRun {
+        service: &service,
+        host: &host,
+        identities: identities.clone(),
+        owner: owner.clone(),
+        frame_epoch: FrameEpoch(0),
+        program: ProgramSource::Source {
+            dialect: language.into(),
+            text: code.into(),
+        },
+        context: context.clone(),
+        projected: Default::default(),
+        bounds: lashlang::ExecutionBounds::new(
+            lashlang::ExecutionBound::Unbounded,
+            lashlang::ExecutionBound::Unbounded,
+        ),
+        state: start,
+        boundary,
+    };
+    let BrokeredEnd::Suspended { checkpoint } = run(start, &|| true)
+        .run()
         .await
-        .map_err(|error| error.to_string())?;
-    if !matches!(parked, VmRunOutcome::EffectCompleted) {
-        return Err(format!(
-            "parked cell did not stop at its tool effect: {parked:?}"
-        ));
-    }
-    let continuation = vm.suspend().map_err(|error| error.to_string())?;
-    let mut wire = serde_json::to_vec(&continuation).map_err(|error| error.to_string())?;
-    let closure_root = continuation
-        .operand_stack
-        .iter()
-        .chain(continuation.slots.iter().flatten())
-        .any(|value| matches!(value, lashlang::Value::Ref(_)));
+        .map_err(|e| e.to_string())?
+    else {
+        return Err("parked cell did not stop at its tool effect".into());
+    };
+    let (wire, closure_root) = match service
+        .request(lash_vm_client::service::Request::ContinuationProbe {
+            bytes: checkpoint.vm.bytes().to_vec(),
+            remove_first_reference: break_retention,
+        })
+        .map_err(|e| e.to_string())?
+    {
+        lash_vm_client::service::Response::ContinuationProbe {
+            bytes,
+            closure_root,
+        } => (bytes, closure_root),
+        other => return Err(format!("unexpected continuation probe: {other:?}")),
+    };
     if !closure_root {
-        return Err("parked continuation did not retain a closure root".to_string());
+        return Err("parked continuation did not retain a closure root".into());
     }
-    if break_retention {
-        let mut broken = continuation.clone();
-        let root = broken
-            .operand_stack
-            .iter_mut()
-            .chain(broken.slots.iter_mut().flatten())
-            .find(|value| matches!(value, lashlang::Value::Ref(_)))
-            .expect("closure root checked above");
-        *root = lashlang::Value::Null;
-        wire = serde_json::to_vec(&broken).map_err(|error| error.to_string())?;
-    }
-    drop(vm);
-
-    let restored = lashlang::VmInstance::pristine()
-        .open_continuation(&wire)
-        .map_err(|error| error.to_string())?;
-    let mut vm = Vm::resume_from(restored, cached_program.compiled_program(), &host)
-        .map_err(|error| error.to_string())?;
-    let finish = loop {
-        match vm
-            .run_process_until_effect()
-            .await
-            .map_err(|error| error.to_string())?
-        {
-            VmRunOutcome::EffectCompleted => continue,
-            VmRunOutcome::Complete(lashlang::ExecutionOutcome::Finished(value)) => {
-                break crate::projection::flow_to_json_value(&value);
-            }
-            VmRunOutcome::Complete(other) => {
-                return Err(format!("parked cell resumed to {other:?}"));
-            }
-            VmRunOutcome::HandedOver => {
-                return Err("a parked cell has no signal wait to hand over".to_owned());
+    let bytes = wire.len();
+    let resumed = OpaqueVmState::seal(
+        VmStateKind::Continuation,
+        owner.clone(),
+        lashlang::vm_contract_versions(),
+        lashlang::VM_CONTINUATION_FORMAT_VERSION,
+        wire,
+    );
+    let finish = match run(StartState::Continuation(resumed), &|| false)
+        .run()
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        BrokeredEnd::Complete { value, .. } => {
+            // The process-mode witness owns a copy of the session globals.
+            // Its terminal state does not replace the RLM session state.
+            match rmp_serde::from_slice::<lashlang::ExecutionOutcome>(&value.0)
+                .map_err(|e| e.to_string())?
+            {
+                lashlang::ExecutionOutcome::Finished(value) => {
+                    crate::projection::flow_to_json_value(&value)
+                }
+                other => return Err(format!("parked cell resumed to {other:?}")),
             }
         }
+        BrokeredEnd::GuestError { error, .. } => {
+            return Err(rmp_serde::from_slice::<lashlang::RuntimeFailure>(&error.0)
+                .map_err(|e| e.to_string())?
+                .error
+                .to_string());
+        }
+        other => return Err(format!("parked cell resumed to {other:?}")),
     };
-    let globals = vm.into_globals().map_err(|error| error.to_string())?;
-    let existing = state
-        .vm
-        .state()
-        .globals()
-        .keys()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let retained = globals
-        .keys()
-        .map(str::to_string)
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut patches = existing
-        .into_iter()
-        .filter(|name| !retained.contains(name))
-        .map(|name| GlobalPatch::Remove { name })
-        .collect::<Vec<_>>();
-    patches.extend(globals.iter().map(|(name, value)| GlobalPatch::Insert {
-        name: name.to_string(),
-        value: value.clone(),
-    }));
-    state
-        .vm
-        .state_mut()
-        .patch_globals(patches)
-        .map_err(|error| error.to_string())?;
     if break_retention {
-        return Err("broken continuation unexpectedly resumed successfully".to_string());
+        return Err("broken continuation unexpectedly resumed successfully".into());
     }
     Ok(ParkedCellEvidence {
         finish,
-        continuation_bytes: wire.len(),
+        continuation_bytes: bytes,
         closure_root,
     })
 }

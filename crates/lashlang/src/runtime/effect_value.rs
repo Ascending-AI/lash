@@ -1,6 +1,7 @@
 //! Heapless values crossing the owned effect seam. JSON projections lose
 //! undefined, tuple identity and non-finite numbers, so this wire uses explicit
-//! variants and IEEE bits. Heap references and live descriptors cannot cross.
+//! variants and IEEE bits. Projections cross as unavailable descriptions,
+//! never as host handles. Heap references cannot cross.
 
 use super::{ImageValue, Record, ResourceHandle, Value};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -18,6 +19,12 @@ enum EffectValue {
     Tuple(Vec<EffectValue>),
     List(Vec<EffectValue>),
     Record(Vec<(String, EffectValue)>),
+    Projection {
+        name: String,
+        type_name: String,
+        reference: Option<serde_json::Value>,
+        scalar: Option<Box<EffectValue>>,
+    },
 }
 impl EffectValue {
     fn of(value: &Value, depth: usize) -> Result<Self, &'static str> {
@@ -45,9 +52,16 @@ impl EffectValue {
                     .map(|(key, value)| Ok((key.to_string(), Self::of(value, depth + 1)?)))
                     .collect::<Result<_, &'static str>>()?,
             ),
-            Value::Ref(_) | Value::Projected(_) => {
-                return Err("heap references and host descriptors cannot cross an effect frame");
-            }
+            Value::Projected(value) => Self::Projection {
+                name: value.name().to_owned(),
+                type_name: value.type_name().to_owned(),
+                reference: value.projection_ref().cloned(),
+                scalar: value
+                    .scalar_value()
+                    .map(|value| Self::of(value, depth + 1).map(Box::new))
+                    .transpose()?,
+            },
+            Value::Ref(_) => return Err("heap references cannot cross an effect frame"),
         })
     }
     fn into_value(self) -> Value {
@@ -71,6 +85,17 @@ impl EffectValue {
                     .collect::<Vec<_>>()
                     .into(),
             ),
+            Self::Projection {
+                name,
+                type_name,
+                reference,
+                scalar,
+            } => Value::Projected(match scalar {
+                Some(value) => super::ProjectedValue::scalar(name, value.into_value()),
+                None => super::ProjectedValue::unavailable_after_restore_with_projection_ref(
+                    name, type_name, reference,
+                ),
+            }),
             Self::Record(v) => {
                 let mut record = Record::new();
                 for (key, value) in v {
@@ -81,20 +106,17 @@ impl EffectValue {
         }
     }
 }
-pub(super) fn serialize<S: Serializer>(value: &Value, serializer: S) -> Result<S::Ok, S::Error> {
+pub fn serialize<S: Serializer>(value: &Value, serializer: S) -> Result<S::Ok, S::Error> {
     EffectValue::of(value, 0)
         .map_err(serde::ser::Error::custom)?
         .serialize(serializer)
 }
-pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Value, D::Error> {
+pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Value, D::Error> {
     EffectValue::deserialize(deserializer).map(EffectValue::into_value)
 }
-pub(super) mod list {
+pub mod list {
     use super::*;
-    pub(crate) fn serialize<S: Serializer>(
-        values: &[Value],
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(values: &[Value], serializer: S) -> Result<S::Ok, S::Error> {
         values
             .iter()
             .map(|value| EffectValue::of(value, 0))
@@ -102,10 +124,69 @@ pub(super) mod list {
             .map_err(serde::ser::Error::custom)?
             .serialize(serializer)
     }
-    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Vec<Value>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Value>, D::Error> {
         Vec::<EffectValue>::deserialize(deserializer)
             .map(|values| values.into_iter().map(EffectValue::into_value).collect())
+    }
+}
+
+/// Heapless record serialization preserves projection identities without reads.
+pub mod record {
+    use super::*;
+    pub fn serialize<S: Serializer>(value: &Record, serializer: S) -> Result<S::Ok, S::Error> {
+        EffectValue::of(&Value::Record(std::sync::Arc::new(value.clone())), 0)
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Record, D::Error> {
+        match EffectValue::deserialize(deserializer)?.into_value() {
+            Value::Record(record) => Ok((*record).clone()),
+            _ => Err(serde::de::Error::custom("expected a record")),
+        }
+    }
+}
+pub mod optional {
+    use super::*;
+    pub fn serialize<S: Serializer>(
+        value: &Option<Value>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value
+            .as_ref()
+            .map(|value| EffectValue::of(value, 0))
+            .transpose()
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Value>, D::Error> {
+        Option::<EffectValue>::deserialize(deserializer)
+            .map(|value| value.map(EffectValue::into_value))
+    }
+}
+pub mod map {
+    use super::*;
+    use std::collections::BTreeMap;
+    pub fn serialize<S: Serializer>(
+        value: &BTreeMap<String, Value>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value
+            .iter()
+            .map(|(key, value)| EffectValue::of(value, 0).map(|value| (key, value)))
+            .collect::<Result<BTreeMap<_, _>, _>>()
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<String, Value>, D::Error> {
+        BTreeMap::<String, EffectValue>::deserialize(deserializer).map(|values| {
+            values
+                .into_iter()
+                .map(|(key, value)| (key, value.into_value()))
+                .collect()
+        })
     }
 }

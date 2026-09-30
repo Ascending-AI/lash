@@ -164,6 +164,7 @@ captured_ports! {
     attachment_referrers: crate::AttachmentReferrers,
     module_artifacts: crate::ModuleArtifactStore,
     recovery_leader: crate::store::RecoveryLeaderStore,
+    worker_recovery: crate::store::worker_recovery::WorkerRecoveryStore,
     generation_drain: crate::store::generation_drain::GenerationDrainStore,
     artifact_cleanup: crate::store::ArtifactCleanupLedger,
     session_delete_ledger: crate::store::session_delete::SessionDeleteLedger,

@@ -563,10 +563,14 @@ fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCor
         })
         .build();
     let artifacts = lashlang::LashlangArtifacts::of_backend(&backend);
+    let worker_recovery = backend.worker_recovery();
     lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .provider(provider.into_handle())
         .model(model()?)
-        .plugin(Arc::new(process::ProcessEnginePlugin(artifacts)))
+        .plugin(Arc::new(process::ProcessEnginePlugin(
+            artifacts,
+            worker_recovery,
+        )))
         .recovery_lease(recovery_lease())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

@@ -1183,8 +1183,8 @@ async fn agent_contract_process_origin(
                     process.process_id
                 ))
             })?;
-    let artifact = artifacts
-        .get_module_artifact(&identity.module_ref)
+    let artifact = lash_vm_client::service::Service::default()
+        .inspect_artifact(artifacts, &identity.module_ref)
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| {
@@ -1198,13 +1198,13 @@ async fn agent_contract_process_origin(
         .ok_or_else(|| {
             FixedScriptRunnerError::Runtime("definition has no matching module export".into())
         })?;
-    let declaration = artifact.ir().process(process_name).ok_or_else(|| {
+    let declaration = artifact.process(process_name).ok_or_else(|| {
         FixedScriptRunnerError::Runtime(format!(
             "module artifact `{}` exports no process `{}`",
             identity.module_ref, process_name
         ))
     })?;
-    Ok(Some(if declaration.origin.is_lifted() {
+    Ok(Some(if declaration.lifted {
         "lifted"
     } else {
         "declared"

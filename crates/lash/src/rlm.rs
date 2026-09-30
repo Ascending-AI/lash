@@ -176,7 +176,7 @@ pub use lash_protocol_rlm::{
 /// The code-mode dialect seam: a host selects one [`Dialect`] where it
 /// constructs the RLM protocol; [`TypescriptDialect`] is the shipped one.
 pub use lash_protocol_rlm::{
-    CellTags, Dialect, DialectDiagnostic, DialectPromptVocabulary, DialectRefusal,
+    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal,
     DialectRefusalKind, ExecutionSectionRequest, ResolvedToolBinding, ShapeNotation,
     TypescriptDialect,
 };
@@ -230,3 +230,16 @@ fn rlm_termination_options(
         .map(|current| current.merged_with_override(&override_options))
         .unwrap_or(override_options))
 }
+
+/// One shared pool for RLM cells, process bodies, and pure language work.
+pub use lash_vm_client::service::Service as WorkerService;
+/// Host-selected worker entry, pool bounds, and execution deadlines.
+pub use lash_vm_client::{
+    Deadlines as WorkerDeadlines, PoolConfig as WorkerPoolConfig, WorkerEntry,
+};
+
+/// A source frontend lives in the worker entry the dialect selects.
+pub use lash_vm_worker::{
+    Frontend as WorkerFrontend, FrontendRefusal as WorkerFrontendRefusal,
+    build_identity as worker_build_identity, worker_entry_with_frontend,
+};

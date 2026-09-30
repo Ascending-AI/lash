@@ -132,6 +132,7 @@ async fn run_cell(
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 lashlang::LashlangArtifacts::new(store.clone()),
                 LashlangSurface::default(),
+                backend.worker_recovery(),
             ),
         ),
     );
@@ -271,7 +272,13 @@ fn a_definition_held_only_inside_a_map_is_held_by_the_frame() {
                 lash_core::FleetFormat::current(),
             )
             .expect("restore");
-        assert!(restored.vm.state_mut().remove_global("q"));
+        assert!(
+            restored
+                .vm
+                .state_mut()
+                .remove_global("q")
+                .expect("remove binding")
+        );
         assert!(
             restored.vm.state().globals().get("m").is_none(),
             "the host view omits the map"

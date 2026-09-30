@@ -1005,12 +1005,22 @@ pub(super) fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
 /// gate is the diagnostic code, not the fact that compilation failed.
 #[test]
 pub(super) fn a_wrong_program_and_a_forbidden_construct_are_classified_apart() {
-    use crate::dialect::Dialect;
-    let kind = |source: &str| {
-        crate::dialect::TypescriptDialect
-            .parse(source)
-            .expect_err("the source is rejected")
-            .kind
+    let kind = |source: &str| match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::CompileModule {
+            source: source.into(),
+            environment: Default::default(),
+            cell: true,
+        })
+        .expect("worker diagnostic")
+    {
+        lash_vm_client::service::Response::CompileRefused { policy, .. } => {
+            if policy {
+                lash_core::CellFailureKind::Policy
+            } else {
+                lash_core::CellFailureKind::Program
+            }
+        }
+        other => panic!("expected a refusal: {other:?}"),
     };
     assert_eq!(
         kind("finish(taks);"),
@@ -1101,20 +1111,28 @@ pub(super) fn typescript_method_diagnostics_consult_the_link_time_module_catalog
         lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
             .with_globals(["text"]);
 
-    use crate::dialect::Dialect;
-    let shadowed = crate::dialect::TypescriptDialect
-        .parse_cell("text.sha256({});", &environment)
-        .expect_err("the cache parse does not carry the module catalog");
+    let diagnostic = |source: &str| match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::CompileModule {
+            source: source.into(),
+            environment: environment.clone(),
+            cell: true,
+        })
+        .expect("worker diagnostic")
+    {
+        lash_vm_client::service::Response::CompileRefused {
+            error: lashlang::ModuleCompileError::Parse(diagnostic),
+            ..
+        } => diagnostic.message,
+        other => panic!("expected a parse refusal: {other:?}"),
+    };
+    let shadowed = diagnostic("text.sha256({});");
     assert_eq!(
-        shadowed.message,
+        shadowed,
         "local binding `text` shadows module `text`; rename the binding or call the module before binding"
     );
-
-    let ordinary = crate::dialect::TypescriptDialect
-        .parse_cell("const s = 'a,b'; s.anchor(',');", &environment)
-        .expect_err("an ordinary local method remains unsupported");
+    let ordinary = diagnostic("const s = 'a,b'; s.anchor(',');");
     assert_eq!(
-        ordinary.message,
+        ordinary,
         "method `anchor` is not in the TypeScript runtime surface"
     );
 }
@@ -1136,13 +1154,113 @@ impl ExecutionHost for NoopHost {
     }
 }
 
+pub(super) fn worker_compile_program(
+    program: &lashlang::Program,
+) -> Result<lash_vm_client::service::CompiledModule, String> {
+    match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::CompileAst {
+            source: String::new(),
+            program: program.clone(),
+            environment: Default::default(),
+        })
+        .map_err(|e| e.to_string())?
+    {
+        lash_vm_client::service::Response::Module(module) => Ok(*module),
+        other => Err(format!("unexpected worker compile response: {other:?}")),
+    }
+}
+pub(super) trait WorkerFixtureState {
+    fn worker_bytes(&self) -> Option<Vec<u8>>;
+    fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String>;
+}
+impl WorkerFixtureState for lash_vm_client::RemoteState {
+    fn worker_bytes(&self) -> Option<Vec<u8>> {
+        self.bytes().map(Vec::from)
+    }
+    fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+        self.install_bytes(bytes)
+    }
+}
+impl WorkerFixtureState for lashlang::State {
+    fn worker_bytes(&self) -> Option<Vec<u8>> {
+        Some(
+            self.snapshot()
+                .to_canonical_bytes()
+                .expect("fixture state encodes"),
+        )
+    }
+    fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+        *self = lashlang::State::from_snapshot(
+            lashlang::VmInstance::pristine()
+                .open_snapshot(&bytes)
+                .map_err(|e| e.to_string())?,
+        );
+        Ok(())
+    }
+}
 pub(super) async fn execute_with_projected(
-    compiled: &lashlang::CompiledProgram,
-    state: &mut lashlang::State,
+    module: &lash_vm_client::service::CompiledModule,
+    state: &mut impl WorkerFixtureState,
     projected: &ProjectedBindings,
 ) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
-    let env = ExecutionEnvironment::new(&NoopHost).with_projected_bindings(projected.clone());
-    lashlang::execute(compiled, state, &env).await
+    let service = lash_vm_client::service::Service::default();
+    let owner = lash_vm_protocol::VmOwner::new("projection-witness");
+    let snapshot = state
+        .worker_bytes()
+        .map(|bytes| {
+            lash_vm_protocol::StartState::Snapshot(lash_vm_protocol::OpaqueVmState::seal(
+                lash_vm_protocol::VmStateKind::Snapshot,
+                owner.clone(),
+                lashlang::vm_contract_versions(),
+                lashlang::LASHLANG_SNAPSHOT_VERSION,
+                bytes,
+            ))
+        })
+        .unwrap_or(lash_vm_protocol::StartState::Fresh);
+    let run = lash_lashlang_runtime::WorkerRun {
+        service: &service,
+        host: &NoopHost,
+        identities: lash_vm_broker::CodeCallIdentities::process_body(
+            lash_sansio::ProcessId::fixture("projection-witness"),
+        ),
+        owner,
+        frame_epoch: lash_vm_protocol::FrameEpoch(0),
+        program: lash_vm_protocol::ProgramSource::Artifact {
+            module_ref: module.module_ref.to_string(),
+            entry: lash_vm_protocol::ProgramEntry::Main,
+            artifact: module.artifact.bytes().to_vec(),
+        },
+        context: lash_vm_client::RunContext::default(),
+        projected: projected.clone(),
+        bounds: lashlang::ExecutionBounds::new(
+            lashlang::ExecutionBound::Unbounded,
+            lashlang::ExecutionBound::Unbounded,
+        ),
+        state: snapshot,
+        boundary: &|| false,
+    }
+    .run()
+    .await
+    .expect("worker run");
+    match run {
+        lash_vm_broker::BrokeredEnd::Complete { value, checkpoint } => {
+            state
+                .install_worker_bytes(checkpoint.vm.bytes().to_vec())
+                .expect("install worker state");
+            Ok(rmp_serde::from_slice(&value.0).expect("worker outcome"))
+        }
+        lash_vm_broker::BrokeredEnd::GuestError { error, checkpoint } => {
+            if let Some(checkpoint) = checkpoint {
+                state
+                    .install_worker_bytes(checkpoint.vm.bytes().to_vec())
+                    .expect("install worker state");
+            }
+            Err(rmp_serde::from_slice::<lashlang::RuntimeFailure>(&error.0)
+                .expect("worker guest failure")
+                .error)
+        }
+        other => panic!("unexpected worker end: {other:?}"),
+    }
 }
 
 pub(super) fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -1238,7 +1356,9 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
             .build()
             .into_runtime();
     let program = lash_typescript::parse("finish(1);").expect("valid fixture source");
-    let artifact = lashlang::ModuleArtifact::from_program(program).expect("valid fixture module");
+    let artifact = worker_compile_program(&program)
+        .expect("valid fixture module")
+        .artifact;
     let trace = foreground_lashlang_execution_trace(
         &context,
         &artifact,
@@ -1671,7 +1791,7 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
 }
 
 #[test]
-pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
+pub(super) fn execute_code_reuses_reset_worker_for_repeat_source() {
     block_on(async {
         let mut state = RlmExecutionState::new();
         let request = || ExecRequest {
@@ -1707,9 +1827,14 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
         handler.close().await.expect("close the cell's handler");
         assert!(first.error.is_none(), "{:?}", first.error);
         assert_eq!(first.terminal_finish, Some(serde_json::json!(1)));
-        let first_stats = state.vm.linked_programs().stats();
-        assert_eq!(first_stats.hits, 0);
-        assert_eq!(first_stats.misses, 1);
+        let first_stats = state
+            .vm
+            .state()
+            .service()
+            .pool()
+            .expect("worker pool")
+            .stats();
+        assert_eq!(first_stats.idle, first_stats.workers);
 
         let double =
             crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -1733,10 +1858,14 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
         handler.close().await.expect("close the cell's handler");
         assert!(second.error.is_none(), "{:?}", second.error);
         assert_eq!(second.terminal_finish, Some(serde_json::json!(1)));
-        let second_stats = state.vm.linked_programs().stats();
-        assert_eq!(second_stats.hits, 1);
-        assert_eq!(second_stats.misses, 1);
-        assert_eq!(second_stats.entries, 1);
+        let second_stats = state
+            .vm
+            .state()
+            .service()
+            .pool()
+            .expect("worker pool")
+            .stats();
+        assert_eq!(second_stats.idle, second_stats.workers);
         assert!(state.frame_held_module_refs().next().is_none());
     });
 }

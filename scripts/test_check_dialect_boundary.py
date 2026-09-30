@@ -15,6 +15,7 @@ SHARED = "crates/lash-protocol-rlm/src/rlm_support.rs"
 HOST = "examples/toolbench/src/runtime.rs"
 FIXTURE_TEST = "crates/lash/tests/seam_proof_dialect.rs"
 FIXTURE_NAME = "Seam" + "ProofDialect"
+FIXTURE_FRONTEND = "Seam" + "ProofFrontend"
 FIXTURE_ID = "seam" + "-proof"
 FIXTURE_TAG = "<" + "seam>"
 
@@ -88,6 +89,19 @@ class DialectBoundaryTests(unittest.TestCase):
             {"crates/lash-protocol-rlm/src/testing/mod.rs": f"struct {FIXTURE_NAME};\n"},
             "crates/lash-protocol-rlm/src/testing/mod.rs:1: the seam-proof test dialect",
         )
+
+    def test_the_fixture_frontend_in_a_production_worker_fails(self) -> None:
+        self.assert_fails(
+            {"crates/lash-vm-worker/src/main.rs": f"worker_entry(&{FIXTURE_FRONTEND});\n"},
+            "crates/lash-vm-worker/src/main.rs:1: the seam-proof test dialect",
+        )
+
+    def test_the_fixture_frontend_in_its_test_worker_passes(self) -> None:
+        result = self.run_check(self.tree({
+            "crates/lash/tests/seam_proof_dialect/worker.rs":
+                f"worker_entry_with_frontend(&{FIXTURE_FRONTEND});\n",
+        }))
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_the_fixture_dialect_in_a_docs_page_fails(self) -> None:
         self.assert_fails(

@@ -55,14 +55,19 @@ async fn publish_definition(world: &CrashWorld) -> Result<Published, String> {
         )],
         Vec::new(),
     );
-    let linked = lashlang::LinkedModule::link(
-        program,
-        lashlang::LashlangHostEnvironment::new(
-            lashlang::LashlangHostCatalog::new(),
-            lashlang::LashlangAbilities::default(),
-        ),
-    )
-    .map_err(|error| format!("link the process: {error:?}"))?;
+    let response = lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::LinkAst {
+            source: String::new(),
+            program,
+            environment: lashlang::LashlangHostEnvironment::new(
+                lashlang::LashlangHostCatalog::new(),
+                lashlang::LashlangAbilities::default(),
+            ),
+        })
+        .map_err(|error| format!("link the process: {error:?}"))?;
+    let lash_vm_client::service::Response::Module(linked) = response else {
+        return Err(format!("worker refused the process: {response:?}"));
+    };
     let core = world.core()?;
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
@@ -70,9 +75,10 @@ async fn publish_definition(world: &CrashWorld) -> Result<Published, String> {
         .publish_module(&pin, &linked.artifact)
         .await
         .map_err(|error| format!("publish the module: {error}"))?;
-    let identity =
-        lashlang::ProcessDefinitionIdentity::from_artifact_export(&linked.artifact, PROCESS)
-            .ok_or_else(|| "the module exports no process".to_owned())?;
+    let identity = linked
+        .artifact
+        .definition_identity(PROCESS)
+        .ok_or_else(|| "the module exports no process".to_owned())?;
     let draft = lash_core::ProcessDefinitionDraft::new(
         lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
         identity.to_process_value(),

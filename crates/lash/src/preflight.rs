@@ -160,6 +160,8 @@ pub async fn probe_store(
 /// The accumulated evidence of one walk.
 #[derive(Default)]
 struct Walk {
+    #[cfg(feature = "rlm")]
+    workers: lash_vm_client::service::Service,
     tallies: BTreeMap<DurableFormat, FormatTally>,
     drain: Vec<DrainBlocker>,
     not_scanned: Vec<NotScanned>,
@@ -361,7 +363,11 @@ impl Walk {
     }
 
     fn item(&mut self, item: &DurableItem) {
-        for extraction in extract(item) {
+        for extraction in extract(
+            item,
+            #[cfg(feature = "rlm")]
+            &self.workers,
+        ) {
             match extraction {
                 Extraction::Found { format, version } => {
                     let expected =

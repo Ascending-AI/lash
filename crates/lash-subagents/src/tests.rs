@@ -1051,8 +1051,12 @@ async fn run_seed_probe_inner(
     .with_plugin_extensions(&extensions)
     .expect("process lashlang surface should merge plugin extensions");
     let process_engine = Arc::new(
-        LashlangProcessEngine::new(artifact_store.clone(), process_surface)
-            .with_execution_trace(execution_sink, trace_context),
+        LashlangProcessEngine::new(
+            artifact_store.clone(),
+            process_surface,
+            backend.worker_recovery(),
+        )
+        .with_execution_trace(execution_sink, trace_context),
     );
     let plugins = host_plugins
         .with_extensions(extensions)

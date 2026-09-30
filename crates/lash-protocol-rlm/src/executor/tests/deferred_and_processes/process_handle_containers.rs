@@ -50,6 +50,7 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
                 process_engine_surface(surface.clone()),
+                table.backend().worker_recovery(),
             ),
         ),
     );

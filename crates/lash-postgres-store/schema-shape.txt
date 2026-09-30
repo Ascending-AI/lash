@@ -640,3 +640,12 @@ table lash_wake_redelivery_fences
   column process_id text not-null
   column session_id text not-null
   primary-key (session_id, process_id)
+table lash_worker_recovery
+  column attempts integer not-null
+  column cpu_nanos bigint not-null
+  column in_flight integer not-null
+  column replacement integer not-null
+  column revision bigint not-null
+  column scope_id text not-null
+  column unknown_cpu_attempts integer not-null
+  primary-key (scope_id)

@@ -230,7 +230,10 @@ class RunnerTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.directory.name)
         self.fake = FakeBinary(self.root)
-        self.patch_env = mock.patch.dict(os.environ, {"FAKE_ARGV_LOG": str(self.fake.argv_log)})
+        self.patch_env = mock.patch.dict(os.environ, {
+            "FAKE_ARGV_LOG": str(self.fake.argv_log),
+            "LASH_VM_WORKER": str(self.fake.path),
+        })
         self.patch_env.start()
 
     def tearDown(self) -> None:

@@ -1,5 +1,7 @@
 //! The FIG-4159 laws. See the parent module for the harness.
 
+use lash_vm_broker::OperationRequestCodec;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -469,11 +471,12 @@ pub async fn unauthorized_worker_effect_request_is_refused_without_invoking_a_to
         let identities = identities(&scope);
         let raw = |kind: EffectKind, payload: Vec<u8>| Step::Raw { kind, payload };
         let invoke = |binding: &str, operation: &str, arguments: serde_json::Value| {
-            lash_vm_broker::OperationRequest::Invoke(Invocation {
+            Invocation {
                 binding: binding.into(),
                 operation: operation.into(),
                 arguments,
-            })
+            }
+            .request()
             .encode()
             .0
         };
@@ -509,9 +512,9 @@ pub async fn unauthorized_worker_effect_request_is_refused_without_invoking_a_to
             // A handle the parent never granted.
             raw(
                 EffectKind::Await,
-                lash_vm_broker::OperationRequest::Await {
-                    handle: "forged-handle".into(),
-                }
+                lash_vm_broker::OperationRequest::Await(lashlang::Value::String(
+                    "forged-handle".into(),
+                ))
                 .encode()
                 .0,
             ),

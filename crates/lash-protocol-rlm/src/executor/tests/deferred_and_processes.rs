@@ -1528,9 +1528,17 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
         handler.close().await.expect("close the cell's handler");
         assert!(second.error.is_none(), "{:?}", second.error);
         assert_eq!(state.frame_held_module_refs().count(), 1);
-        let stats = state.vm.linked_programs().stats();
-        assert_eq!(stats.hits, 1);
-        assert_eq!(stats.misses, 1);
+        let stats = state
+            .vm
+            .state()
+            .service()
+            .pool()
+            .expect("worker pool")
+            .stats();
+        assert_eq!(
+            stats.idle, stats.workers,
+            "completed workers are reset and reusable"
+        );
     });
 }
 
@@ -1643,6 +1651,7 @@ pub(super) fn fixture_process_engines(
                 lash_lashlang_runtime::LashlangProcessEngine::new(
                     artifact_store,
                     process_engine_surface(surface),
+                    backend.worker_recovery(),
                 ),
             )),
     )
@@ -2163,6 +2172,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
                 process_engine_surface(surface.clone()),
+                table.backend().worker_recovery(),
             ),
         ),
     );
@@ -2296,6 +2306,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
                 process_engine_surface(surface.clone()),
+                table.backend().worker_recovery(),
             ),
         ),
     );

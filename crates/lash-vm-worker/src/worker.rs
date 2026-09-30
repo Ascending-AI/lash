@@ -1,54 +1,58 @@
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::PoolError;
-use crate::process::{Bootstrap, read_frame, write_frame};
+use lash_vm_client::RunContext;
+use lash_vm_client::ipc::{Bootstrap, read_frame, write_frame};
 use lash_vm_protocol::*;
 use lashlang::{
-    AbilityOp, AbilityOutcome, Entry, ExecutionBound, ExecutionBounds, ExecutionMode,
-    LashlangHostEnvironment, ModuleArtifact, RuntimeError, State, VmExecutionStart, VmInstance,
-    VmRequest, VmResume, VmRunConfig, VmStep,
+    AbilityOp, AbilityOutcome, Entry, ExecutionBound, ExecutionBounds, ModuleArtifact,
+    RuntimeError, State, VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig, VmStep,
 };
 
-/// Explicit compiler/VM descriptions, containing no host handles or grants.
-/// Encoded as JSON in a `ContextDescription` with kind `vm_run`.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RunContext {
-    pub environment: LashlangHostEnvironment,
-    pub mode: ExecutionMode,
-}
-
-pub(crate) struct Server {
+pub(crate) struct Server<'frontend> {
+    frontend: &'frontend dyn crate::Frontend,
     pipe: UnixStream,
     codec: FrameCodec,
     bootstrap: Bootstrap,
     instance: VmInstance,
-    incoming: Option<MessageFence>,
-    outgoing: MessageFence,
+    fences: Arc<Mutex<Fences>>,
     owner: Option<VmOwner>,
     pending: Option<(EffectRequestId, EffectKind)>,
-    next_effect: u64,
+    projection_namespace: String,
+    cpu_ceiling: Option<libc::rlim_t>,
 }
 
-impl Server {
+pub(crate) struct Fences {
+    pub incoming: Option<MessageFence>,
+    pub outgoing: MessageFence,
+    pub next_effect: u64,
+}
+
+impl<'frontend> Server<'frontend> {
     pub(crate) fn new(
         pipe: UnixStream,
         codec: FrameCodec,
         bootstrap: Bootstrap,
         build: BuildIdentity,
+        frontend: &'frontend dyn crate::Frontend,
     ) -> Result<Self, PoolError> {
         let mut server = Self {
+            frontend,
             pipe,
             codec,
             bootstrap,
             instance: VmInstance::pristine(),
-            incoming: None,
-            outgoing: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
+            fences: Arc::new(Mutex::new(Fences {
+                incoming: None,
+                outgoing: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
+                next_effect: 0,
+            })),
             owner: None,
             pending: None,
-            next_effect: 0,
+            projection_namespace: String::new(),
+            cpu_ceiling: None,
         };
         server.send(WorkerMessage::Ready { build })?;
         Ok(server)
@@ -58,7 +62,12 @@ impl Server {
         let bytes = self
             .codec
             .encode_worker(&WorkerFrame {
-                header: self.outgoing.next_header(),
+                header: self
+                    .fences
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .outgoing
+                    .next_header(),
                 message,
             })
             .map_err(PoolError::from)?;
@@ -68,7 +77,30 @@ impl Server {
             Instant::now() + Duration::from_secs(30),
         )
     }
+    pub(crate) fn refuse(&mut self, reason: String) -> Result<(), PoolError> {
+        self.send(WorkerMessage::Refused { reason })
+    }
     fn progress(&mut self, phase: WorkerPhase) -> Result<(), PoolError> {
+        if phase == WorkerPhase::Computing && self.cpu_ceiling.is_none() {
+            let nanos = u128::from(cpu_nanos()?) + u128::from(self.bootstrap.cpu_nanos);
+            let seconds = nanos
+                .div_ceil(1_000_000_000)
+                .try_into()
+                .map_err(|_| PoolError::InvalidConfiguration)?;
+            let limit = libc::rlimit {
+                rlim_cur: seconds,
+                rlim_max: libc::RLIM_INFINITY,
+            };
+            #[expect(
+                unsafe_code,
+                reason = "the worker sets its own CPU ceiling before guest work; it survives parent loss"
+            )]
+            let result = unsafe { libc::setrlimit(libc::RLIMIT_CPU, &limit) };
+            if result != 0 {
+                return Err(PoolError::io(std::io::Error::last_os_error()));
+            }
+            self.cpu_ceiling = Some(seconds);
+        }
         self.send(WorkerMessage::Progress {
             phase,
             cpu_nanos: cpu_nanos()?,
@@ -92,10 +124,15 @@ impl Server {
                 Err(error) => return Err(error),
             };
             let frame = self.codec.decode_parent(&bytes).map_err(PoolError::from)?;
-            if self.incoming.is_none() {
+            let mut fences = self
+                .fences
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if fences.incoming.is_none() {
                 if !matches!(
                     frame.message,
                     ParentMessage::Start(_)
+                        | ParentMessage::Prepare { .. }
                         | ParentMessage::Reset
                         | ParentMessage::Cancel
                         | ParentMessage::Shutdown
@@ -104,22 +141,24 @@ impl Server {
                         "idle worker expects Start or lifecycle control",
                     ));
                 }
-                self.incoming = Some(MessageFence::new(
+                fences.incoming = Some(MessageFence::new(
                     frame.header.lease,
                     frame.header.owner_epoch,
                     frame.header.frame_epoch,
                 ));
-                self.outgoing = MessageFence::new(
+                fences.outgoing = MessageFence::new(
                     frame.header.lease,
                     frame.header.owner_epoch,
                     frame.header.frame_epoch,
                 );
             }
-            self.incoming
+            fences
+                .incoming
                 .as_mut()
                 .ok_or_else(|| PoolError::protocol("missing lease"))?
                 .admit(&frame.header)
                 .map_err(PoolError::protocol)?;
+            drop(fences);
             if let Some(hook) = hook.as_mut() {
                 hook(&frame.message);
             }
@@ -130,19 +169,19 @@ impl Server {
                     }
                     self.owner = Some(start.owner.clone());
                     self.progress(WorkerPhase::Computing)?;
-                    match self.start(*start) {
-                        Ok(step) => self.deliver(step)?,
-                        Err(error) => {
-                            self.progress(WorkerPhase::Serializing)?;
-                            self.respond(WorkerMessage::GuestError {
-                                state: None,
-                                error: EncodedPayload(
-                                    serde_json::to_vec(&error.to_string())
-                                        .map_err(PoolError::protocol)?,
-                                ),
-                            })?;
-                        }
+                    let step = self.start(*start)?;
+                    self.deliver(step)?;
+                }
+                ParentMessage::Prepare { owner, request } => {
+                    if self.owner.is_some() {
+                        return Err(PoolError::protocol("Prepare before reset"));
                     }
+                    self.owner = Some(owner);
+                    self.progress(WorkerPhase::Computing)?;
+                    self.codec.check_payload(&request.0)?;
+                    let response = crate::service::perform(self.frontend, &mut self.instance, &request)?;
+                    self.progress(WorkerPhase::Serializing)?;
+                    self.respond(WorkerMessage::Prepared { response })?;
                 }
                 ParentMessage::EffectResponse(result) => {
                     let (id, kind) = self
@@ -167,8 +206,17 @@ impl Server {
                             | EffectKind::ParkDeclined,
                             _,
                         ) => return Err(PoolError::protocol("wrong control result")),
+                        (_, EffectOutcome::Cancelled) => VmResume::EffectCancelled,
                         (_, EffectOutcome::Value(value)) => {
-                            VmResume::Effect(Ok(self.decode(&value)?))
+                            let value: AbilityOutcome = self.decode(&value)?;
+                            let wire = Arc::new(crate::projection::Wire::new(
+                                self.pipe.try_clone().map_err(PoolError::io)?,
+                                self.codec.clone(),
+                                self.fences.clone(),
+                                self.projection_namespace.clone(),
+                            ));
+                            let value = wire.rebind_outcome(value);
+                            VmResume::Effect(Ok(value))
                         }
                         (_, EffectOutcome::Unit) => VmResume::Effect(Ok(AbilityOutcome::Unit)),
                         (_, EffectOutcome::HandedOver) => {
@@ -206,12 +254,21 @@ impl Server {
                     self.send(WorkerMessage::Cancelled)?;
                 }
                 ParentMessage::Reset => {
+                    self.cpu_ceiling = None;
                     self.instance.reset();
                     self.pending = None;
                     self.owner = None;
-                    self.next_effect = 0;
-                    self.send(WorkerMessage::ResetDone)?;
-                    self.incoming = None;
+                    self.fences
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .next_effect = 0;
+                    self.send(WorkerMessage::ResetDone {
+                        cpu_nanos: cpu_nanos()?,
+                    })?;
+                    self.fences
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .incoming = None;
                 }
                 ParentMessage::Shutdown => return Ok(()),
             }
@@ -224,7 +281,8 @@ impl Server {
         if payload.0.len() as u64 > self.bootstrap.effect {
             return Err(PoolError::protocol("effect value too large"));
         }
-        serde_json::from_slice(&payload.0).map_err(PoolError::protocol)
+        self.codec.check_payload(&payload.0)?;
+        rmp_serde::from_slice(&payload.0).map_err(PoolError::protocol)
     }
     fn start(&mut self, start: Start) -> Result<VmStep, PoolError> {
         let mut context = RunContext::default();
@@ -232,8 +290,10 @@ impl Server {
             if description.kind != "vm_run" {
                 return Err(PoolError::protocol("unknown VM context description"));
             }
-            context = serde_json::from_slice(&description.body.0).map_err(PoolError::protocol)?;
+            self.codec.check_payload(&description.body.0)?;
+            context = rmp_serde::from_slice(&description.body.0).map_err(PoolError::protocol)?;
         }
+        self.projection_namespace = context.projection_namespace;
         let execution_start = match start.state {
             StartState::Fresh => VmExecutionStart::Session,
             StartState::Snapshot(state) => {
@@ -256,11 +316,15 @@ impl Server {
         };
         let program = match start.program {
             ProgramSource::Source { dialect, text } => {
-                if dialect != "typescript" || text.len() as u64 > self.bootstrap.source {
+                if dialect != self.frontend.language_id()
+                    || text.len() as u64 > self.bootstrap.source
+                {
                     return Err(PoolError::protocol("source dialect or size refused"));
                 }
-                let ast = lash_typescript::parse_cell(&text, &context.environment)
-                    .map_err(PoolError::protocol)?;
+                let ast = self
+                    .frontend
+                    .parse(&text, Some(&context.environment))
+                    .map_err(|refusal| PoolError::protocol(refusal.error))?;
                 let linked = self
                     .instance
                     .linked_programs_mut()
@@ -278,14 +342,19 @@ impl Server {
                 if artifact.module_ref().as_str() != module_ref {
                     return Err(PoolError::protocol("artifact identity mismatch"));
                 }
-                let entry = if entry == "main" {
-                    Entry::Main
-                } else {
-                    Entry::Process(
-                        artifact
-                            .process_ref(&entry)
-                            .ok_or_else(|| PoolError::protocol("missing artifact entry"))?,
-                    )
+                let process_ref;
+                let entry = match entry {
+                    ProgramEntry::Main => Entry::Main,
+                    ProgramEntry::Process {
+                        component,
+                        position,
+                    } => {
+                        process_ref = lashlang::ProcessRef::new(
+                            lashlang::ContentHash::new(component),
+                            position,
+                        );
+                        Entry::Process(&process_ref)
+                    }
                 };
                 lashlang::compile(&artifact, entry, None).map_err(PoolError::protocol)?
             }
@@ -300,19 +369,47 @@ impl Server {
         };
         let depth = std::num::NonZeroU64::new(start.limits.max_frame_depth)
             .ok_or(PoolError::InvalidConfiguration)?;
-        self.instance
-            .start(
-                Arc::new(program),
-                execution_start,
-                VmRunConfig::new(
-                    context.mode,
-                    ExecutionBounds::new(
-                        bound(start.limits.instruction_budget)?,
-                        bound(start.limits.memory_limit_bytes)?,
-                    )
-                    .with_max_frame_depth(depth),
-                ),
+        let mut config = VmRunConfig::new(
+            context.mode,
+            ExecutionBounds::new(
+                bound(start.limits.instruction_budget)?,
+                bound(start.limits.memory_limit_bytes)?,
             )
+            .with_max_frame_depth(depth),
+        );
+        config.observe_execution = context.observe_execution;
+        config.trace_runtime_errors = true;
+        let wire = Arc::new(crate::projection::Wire::new(
+            self.pipe.try_clone().map_err(PoolError::io)?,
+            self.codec.clone(),
+            self.fences.clone(),
+            self.projection_namespace.clone(),
+        ));
+        for description in context.projected {
+            let value = match description.scalar {
+                Some(value) => lashlang::ProjectedValue::scalar(description.name.clone(), value),
+                None => lashlang::ProjectedValue::custom(
+                    format!(
+                        "worker-projection/{}/{}/{}",
+                        self.projection_namespace, description.key, description.name
+                    ),
+                    Arc::new(crate::projection::RemoteProjection {
+                        wire: wire.clone(),
+                        key: description.key,
+                        type_name: description.type_name,
+                    }),
+                ),
+            };
+            config
+                .projected
+                .try_insert(description.name, value)
+                .map_err(PoolError::protocol)?;
+        }
+        config.projected = config
+            .projected
+            .with_resolver(Arc::new(move |value| wire.resolve(value)));
+        self.instance
+            .start(Arc::new(program), execution_start, config)
             .map_err(PoolError::protocol)
     }
     fn check(&self, state: &OpaqueVmState, kind: VmStateKind) -> Result<(), PoolError> {
@@ -363,7 +460,11 @@ impl Server {
     fn respond(&mut self, message: WorkerMessage) -> Result<(), PoolError> {
         // Encode while the serialization deadline is active. Reserve the
         // header after Responding without advancing the real fence yet.
-        let mut fence = self.outgoing;
+        let mut fence = self
+            .fences
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .outgoing;
         fence.next_header();
         let header = fence.next_header();
         let encode = |message| {
@@ -379,7 +480,11 @@ impl Server {
             result => result?,
         };
         self.progress(WorkerPhase::Responding)?;
-        self.outgoing.next_header();
+        self.fences
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .outgoing
+            .next_header();
         write_frame(
             &mut self.pipe,
             &bytes,
@@ -396,8 +501,25 @@ impl Server {
         };
         self.respond(message)
     }
-    fn deliver_inner(&mut self, step: VmStep) -> Result<WorkerMessage, PoolError> {
+    fn deliver_inner(&mut self, mut step: VmStep) -> Result<WorkerMessage, PoolError> {
+        // Lazy reads use the compute phase and the same request fence.
+        if let VmStep::Complete(complete) = &mut step {
+            complete.outcome = materialize_outcome(complete.outcome.clone())?;
+        }
         self.progress(WorkerPhase::Serializing)?;
+        let observations = match &step {
+            VmStep::Suspended(step) => &step.observations,
+            VmStep::Parked(step) => &step.observations,
+            VmStep::Complete(step) => &step.observations,
+            VmStep::GuestError(step) => &step.observations,
+        };
+        if !observations.is_empty() {
+            self.send(WorkerMessage::Observations {
+                payload: EncodedPayload(
+                    rmp_serde::to_vec_named(observations).map_err(PoolError::protocol)?,
+                ),
+            })?;
+        }
         let message = match step {
             VmStep::Suspended(suspended) => {
                 let (kind, payload) = match suspended.request {
@@ -415,16 +537,19 @@ impl Server {
                             AbilityOp::Sleep(_) => EffectKind::Sleep,
                             AbilityOp::WaitSignal { .. } => EffectKind::WaitSignal,
                         };
-                        (kind, serde_json::to_vec(&op).map_err(PoolError::protocol)?)
+                        (
+                            kind,
+                            rmp_serde::to_vec_named(&op).map_err(PoolError::protocol)?,
+                        )
                     }
                     VmRequest::CancelCheckpoint(n) => (
                         EffectKind::CancelCheckpoint,
-                        serde_json::to_vec(&n).map_err(PoolError::protocol)?,
+                        rmp_serde::to_vec_named(&n).map_err(PoolError::protocol)?,
                     ),
                     VmRequest::Boundary => (EffectKind::ProcessBoundary, Vec::new()),
                     VmRequest::ParkDeclined(error) => (
                         EffectKind::ParkDeclined,
-                        serde_json::to_vec(&error.to_string()).map_err(PoolError::protocol)?,
+                        rmp_serde::to_vec_named(&error.to_string()).map_err(PoolError::protocol)?,
                     ),
                 };
                 if payload.len() as u64 > self.bootstrap.effect {
@@ -434,8 +559,15 @@ impl Server {
                     }
                     .into());
                 }
-                let id = EffectRequestId(self.next_effect);
-                self.next_effect += 1;
+                let id = {
+                    let mut fences = self
+                        .fences
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let id = EffectRequestId(fences.next_effect);
+                    fences.next_effect += 1;
+                    id
+                };
                 self.pending = Some((id, kind));
                 WorkerMessage::EffectRequest(EffectRequest {
                     id,
@@ -457,7 +589,7 @@ impl Server {
             VmStep::Complete(complete) => WorkerMessage::Complete {
                 state: self.snapshot()?,
                 value: EncodedPayload(
-                    serde_json::to_vec(&complete.outcome).map_err(PoolError::protocol)?,
+                    rmp_serde::to_vec_named(&complete.outcome).map_err(PoolError::protocol)?,
                 ),
             },
             VmStep::GuestError(error) => {
@@ -473,8 +605,7 @@ impl Server {
                     None => WorkerMessage::GuestError {
                         state: Some(self.snapshot()?),
                         error: EncodedPayload(
-                            serde_json::to_vec(&error.failure.error)
-                                .map_err(PoolError::protocol)?,
+                            rmp_serde::to_vec_named(&error.failure).map_err(PoolError::protocol)?,
                         ),
                     },
                 }
@@ -484,7 +615,7 @@ impl Server {
     }
 }
 
-fn cpu_nanos() -> Result<u64, PoolError> {
+pub(crate) fn cpu_nanos() -> Result<u64, PoolError> {
     let mut time = std::mem::MaybeUninit::<libc::timespec>::zeroed();
     // SAFETY: time points to valid writable timespec storage.
     #[expect(
@@ -500,4 +631,54 @@ fn cpu_nanos() -> Result<u64, PoolError> {
     Ok((time.tv_sec as u64)
         .saturating_mul(1_000_000_000)
         .saturating_add(time.tv_nsec as u64))
+}
+
+fn materialize_outcome(
+    outcome: lashlang::ExecutionOutcome,
+) -> Result<lashlang::ExecutionOutcome, PoolError> {
+    Ok(match outcome {
+        lashlang::ExecutionOutcome::Finished(value) => {
+            lashlang::ExecutionOutcome::Finished(materialize(value, 0)?)
+        }
+        lashlang::ExecutionOutcome::Failed(value) => {
+            lashlang::ExecutionOutcome::Failed(materialize(value, 0)?)
+        }
+        other => other,
+    })
+}
+fn materialize(value: lashlang::Value, depth: usize) -> Result<lashlang::Value, PoolError> {
+    use lashlang::{Record, Value};
+    if depth > 64 {
+        return Err(PoolError::protocol("terminal value exceeds depth bound"));
+    }
+    Ok(match value {
+        Value::Projected(value) => {
+            materialize(value.materialize().map_err(PoolError::protocol)?, depth + 1)?
+        }
+        Value::List(values) => Value::List(
+            values
+                .iter()
+                .cloned()
+                .map(|value| materialize(value, depth + 1))
+                .collect::<Result<Vec<_>, _>>()?
+                .into(),
+        ),
+        Value::Tuple(values) => Value::Tuple(
+            values
+                .iter()
+                .cloned()
+                .map(|value| materialize(value, depth + 1))
+                .collect::<Result<Vec<_>, _>>()?
+                .into(),
+        ),
+        Value::Record(values) => Value::Record(Arc::new(
+            values
+                .iter()
+                .map(|(key, value)| {
+                    materialize(value.clone(), depth + 1).map(|value| (key.to_string(), value))
+                })
+                .collect::<Result<Record, _>>()?,
+        )),
+        other => other,
+    })
 }

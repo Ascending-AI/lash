@@ -261,6 +261,7 @@ crash-matrix-restate-e2e:
   log="$artifacts/crash-matrix.log"
 
   binary="$(python3 "{{repo}}/scripts/ci/restate_suite.py" build //crates/lash-sim:crash_point_matrix__test | tail -n 1)"
+  export LASH_VM_WORKER="{{repo}}/bazel-bin/crates/lash-vm-worker/lash-vm-worker__bin"
 
   # The server redelivers a failed attempt within a quarter second of the
   # deployment coming back, and never kills or pauses one on its own: a cell

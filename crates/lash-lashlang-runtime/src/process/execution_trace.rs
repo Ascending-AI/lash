@@ -63,12 +63,12 @@ impl LashlangProcessExecutionTrace {
         clippy::expect_used,
         reason = "process admission verified the named process exists in this artifact"
     )]
-    pub(super) fn emit_started(&self, artifact: &lashlang::ModuleArtifact) {
+    pub(super) fn emit_started(&self, artifact: &lash_vm_client::InspectedArtifact) {
         self.emit(TraceLanguageExecution {
             event_key: self.event_key("started"),
             identity: self.identity(),
             payload: TraceLanguageExecutionPayload::ExecutionStarted {
-                execution_map: trace_lashlang_process_map(artifact, &self.process_name)
+                execution_map: trace_lashlang_process_map(&artifact.graph, &self.process_name)
                     .expect("admission verified the process exists in the artifact"),
             },
         });

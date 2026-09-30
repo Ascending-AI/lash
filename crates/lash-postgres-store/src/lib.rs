@@ -1585,6 +1585,8 @@ mod trigger_listing_plan_tests;
 mod trigger_store;
 #[path = "postgres/turn_ingress.rs"]
 mod turn_ingress;
+#[path = "postgres/worker_recovery.rs"]
+mod worker_recovery;
 
 pub use backend::PostgresStoreSet;
 use guarded_tx::begin_guarded;

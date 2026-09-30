@@ -165,14 +165,21 @@ pub(crate) async fn publish_process(
         )],
         Vec::new(),
     );
-    let linked = lashlang::LinkedModule::link(
-        program,
-        lashlang::LashlangHostEnvironment::new(
-            lashlang::LashlangHostCatalog::new(),
-            lashlang::LashlangAbilities::default().with_sleep(),
-        ),
-    )
-    .map_err(|error| format!("link the process: {error:?}"))?;
+    let environment = lashlang::LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        lashlang::LashlangAbilities::default().with_sleep(),
+    );
+    let linked = match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::LinkAst {
+            source: String::new(),
+            program,
+            environment,
+        })
+        .map_err(|error| format!("link the process: {error}"))?
+    {
+        lash_vm_client::service::Response::Module(module) => module,
+        response => return Err(format!("link the process: {response:?}")),
+    };
     lashlang::LashlangArtifacts::new(world.backend().module_artifacts())
         .publish_module_artifact(
             &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(

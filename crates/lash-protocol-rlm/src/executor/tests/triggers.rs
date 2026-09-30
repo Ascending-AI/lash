@@ -124,12 +124,16 @@ pub(super) async fn trigger_tool_context<'run>(
                         lashlang::LashlangLanguageFeatures::default(),
                         timer_trigger_resources(),
                     ),
+                    crate::testing::memory_backend().await.worker_recovery(),
                 ),
             )),
     );
     let builder = lash_core::testing::TestExecutionContextBuilder::new(ports)
         .provider(Arc::new(
-            lash_lashlang_runtime::register_trigger_tool_provider(artifact_store.clone()),
+            lash_lashlang_runtime::register_trigger_tool_provider(
+                lash_vm_client::service::Service::default(),
+                artifact_store.clone(),
+            ),
         ))
         .tool_catalog(lash_core::ToolCatalog::from_tool_definitions(vec![
             lash_lashlang_runtime::register_trigger_tool_definition(),
@@ -1346,6 +1350,7 @@ async fn execute_trigger_process_with_originator(
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
                 engine_surface,
+                table.backend().worker_recovery(),
             ),
         ),
     );

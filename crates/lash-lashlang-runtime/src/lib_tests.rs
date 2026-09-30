@@ -371,8 +371,12 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         waiting,
     });
     harness.install_lashlang_worker(
-        LashlangProcessEngine::new(store, LashlangSurface::default())
-            .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
+        LashlangProcessEngine::new(
+            store,
+            LashlangSurface::default(),
+            harness.backend().worker_recovery(),
+        )
+        .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
         Vec::new(),
     );
     let process_id = harness.admit(registration).await;
@@ -514,8 +518,12 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     let graph_store = Arc::new(TraceLashlangGraphStore::default());
     let sink: Arc<dyn lash_trace::TraceSink> = graph_store.clone();
     harness.install_lashlang_worker(
-        LashlangProcessEngine::new(store, LashlangSurface::default())
-            .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
+        LashlangProcessEngine::new(
+            store,
+            LashlangSurface::default(),
+            harness.backend().worker_recovery(),
+        )
+        .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
         vec![Arc::new(lash_core::plugin::StaticPluginFactory::new(
             "fixture-tools",
             lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(
@@ -869,7 +877,10 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
     let graph = lashlang::workflow_graph_from_program(&program, &lashlang::NoStatementText);
     let trace_graph =
         lashlang::workflow_graph_from_artifact(&output.artifact, &lashlang::NoStatementText);
-    let trace_map = trace_lashlang_main_map(&output.artifact);
+    let trace_map = trace_lashlang_main_map(&lashlang::workflow_graph_from_artifact(
+        &output.artifact,
+        &lashlang::NoStatementText,
+    ));
     assert_eq!(
         Some(output.artifact.source_identity()),
         trace_graph.source_identity,
@@ -953,17 +964,25 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
         args: serde_json::Map::new(),
     };
 
-    let direct = trace_lashlang_process_map(&output.artifact, "scan").expect("direct map");
-    let snapshot = trace_lashlang_process_map_snapshot(&store, &input)
-        .await
-        .expect("stored map snapshot");
+    let direct = trace_lashlang_process_map(
+        &lashlang::workflow_graph_from_artifact(&output.artifact, &lashlang::NoStatementText),
+        "scan",
+    )
+    .expect("direct map");
+    let snapshot = trace_lashlang_process_map_snapshot(
+        &lash_vm_client::service::Service::default(),
+        &store,
+        &input,
+    )
+    .await
+    .expect("stored map snapshot");
     assert_eq!(snapshot, direct);
     assert!(!snapshot.nodes.is_empty());
 
     let mut missing_process = input.clone();
     missing_process.process_name = "missing".to_string();
     assert!(matches!(
-        trace_lashlang_process_map_snapshot(&store, &missing_process).await,
+        trace_lashlang_process_map_snapshot(&lash_vm_client::service::Service::default(),&store, &missing_process).await,
         Err(TraceLanguageExecutionMapError::ProcessMissing { process_name, .. })
             if process_name == "missing"
     ));
@@ -972,7 +991,12 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
     let mut missing_artifact = input;
     missing_artifact.module_ref = lashlang::ModuleRef::new(&missing_hash);
     assert!(matches!(
-        trace_lashlang_process_map_snapshot(&store, &missing_artifact).await,
+        trace_lashlang_process_map_snapshot(
+            &lash_vm_client::service::Service::default(),
+            &store,
+            &missing_artifact
+        )
+        .await,
         Err(TraceLanguageExecutionMapError::ArtifactMissing(_))
     ));
 }
@@ -1396,6 +1420,7 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
     let site = test_start_site("child_process:scan", 1);
 
     let first = prepare_lashlang_process_start(
+        &lash_vm_client::service::Service::default(),
         artifact_store.clone(),
         Some("parent:root"),
         test_process_start(&output, site.clone(), "."),
@@ -1405,6 +1430,7 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
     .await
     .expect("first start prepares");
     let replayed = prepare_lashlang_process_start(
+        &lash_vm_client::service::Service::default(),
         artifact_store.clone(),
         Some("parent:root"),
         test_process_start(&output, site.clone(), "."),
@@ -1414,6 +1440,7 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
     .await
     .expect("replayed start prepares");
     let sibling = prepare_lashlang_process_start(
+        &lash_vm_client::service::Service::default(),
         artifact_store.clone(),
         Some("parent:root:2"),
         test_process_start(&output, test_start_site("child_process:scan", 2), "."),
@@ -1480,6 +1507,7 @@ process scan(root: str) -> str {
             bad_start.process_ref = process_mismatch.process_ref.clone();
         }
         let error = prepare_lashlang_process_start(
+            &lash_vm_client::service::Service::default(),
             store.clone(),
             Some("parent:four-shape"),
             bad_start,
@@ -1531,6 +1559,7 @@ process scan(root: str) -> str {
     );
 
     prepare_lashlang_process_start(
+        &lash_vm_client::service::Service::default(),
         store.clone(),
         Some("parent:four-shape"),
         start,
@@ -1591,7 +1620,11 @@ process scan(root: str) -> str {
             registry_available,
         );
         let run_outcome = Box::pin(crate::process::run_lashlang_process(
-            LashlangProcessEngine::new(artifact_store.clone(), LashlangSurface::default()),
+            LashlangProcessEngine::new(
+                artifact_store.clone(),
+                LashlangSurface::default(),
+                double.lash_backend().worker_recovery(),
+            ),
             context,
             payload,
         ))
@@ -1706,6 +1739,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     };
 
     prepare_lashlang_process_start(
+        &lash_vm_client::service::Service::default(),
         artifact_store.clone(),
         Some("parent:root"),
         start_with(
@@ -1722,6 +1756,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     .expect("matching immutable signature passes");
 
     let error = prepare_lashlang_process_start(
+        &lash_vm_client::service::Service::default(),
         artifact_store.clone(),
         Some("parent:root"),
         start_with(
@@ -1762,6 +1797,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         ),
     ] {
         let error = prepare_lashlang_process_start(
+            &lash_vm_client::service::Service::default(),
             artifact_store.clone(),
             Some("parent:root"),
             start_with(definition),
@@ -1787,6 +1823,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         valid.process_name,
     );
     let error = prepare_lashlang_process_start(
+        &lash_vm_client::service::Service::default(),
         artifact_store.clone(),
         Some("parent:root"),
         start_with(wrong_ref),
@@ -1849,6 +1886,7 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
     let artifact_store: LashlangArtifacts = store;
 
     prepare_lashlang_process_start(
+        &lash_vm_client::service::Service::default(),
         artifact_store,
         Some("parent:root"),
         start,
@@ -2180,6 +2218,7 @@ async fn process_rebuild_failure_is_terminal_but_artifact_io_failure_retries() {
         let engine = LashlangProcessEngine::new(
             LashlangArtifacts::new(store.clone()),
             LashlangSurface::default(),
+            double.lash_backend().worker_recovery(),
         );
         let registration = lash_core::ProcessRegistration::new(
             input.to_process_input().unwrap(),
@@ -2355,6 +2394,7 @@ async fn nested_signal_admission_registers_each_process_payload_independently() 
             .collect::<Vec<_>>();
         assert_eq!(declarations, expected, "registration for {}", process.name);
         let prepared = prepare_lashlang_process_start(
+            &lash_vm_client::service::Service::default(),
             store.clone(),
             None,
             lashlang::ProcessStart {

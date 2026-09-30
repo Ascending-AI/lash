@@ -397,7 +397,9 @@ fn a_second_front_end_gets_complete_maps_for_main_and_its_lifted_process() {
         .clone();
 
     let main_sites = compiled_sites(&output.artifact, lashlang::Entry::Main);
-    let main_map = map_sites(&trace_lashlang_main_map(&output.artifact));
+    let main_map = map_sites(&trace_lashlang_main_map(
+        &lashlang::workflow_graph_from_artifact(&output.artifact, &lashlang::NoStatementText),
+    ));
     assert!(!main_sites.is_empty());
     assert_eq!(
         main_sites.difference(&main_map).collect::<Vec<_>>(),
@@ -406,8 +408,13 @@ fn a_second_front_end_gets_complete_maps_for_main_and_its_lifted_process() {
     );
 
     let worker_sites = compiled_sites(&output.artifact, lashlang::Entry::Process(&worker_ref));
-    let worker_map =
-        map_sites(&trace_lashlang_process_map(&output.artifact, &worker).expect("worker map"));
+    let worker_map = map_sites(
+        &trace_lashlang_process_map(
+            &lashlang::workflow_graph_from_artifact(&output.artifact, &lashlang::NoStatementText),
+            &worker,
+        )
+        .expect("worker map"),
+    );
     let kinds = worker_sites
         .iter()
         .map(|(_, kind, _)| *kind)
@@ -510,8 +517,14 @@ async fn a_second_front_end_keeps_its_sites_across_relink_and_stored_reload() {
         compiled_sites(&first.artifact, lashlang::Entry::Process(&worker_ref))
     );
     assert_eq!(
-        trace_lashlang_main_map(reloaded),
-        trace_lashlang_main_map(&first.artifact)
+        trace_lashlang_main_map(&lashlang::workflow_graph_from_artifact(
+            reloaded,
+            &lashlang::NoStatementText
+        )),
+        trace_lashlang_main_map(&lashlang::workflow_graph_from_artifact(
+            &first.artifact,
+            &lashlang::NoStatementText
+        ))
     );
 }
 
@@ -546,8 +559,12 @@ async fn run_worker(
     let graph_store = Arc::new(TraceLashlangGraphStore::default());
     let sink: Arc<dyn lash_trace::TraceSink> = graph_store.clone();
     harness.install_lashlang_worker(
-        LashlangProcessEngine::new(store, LashlangSurface::default())
-            .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
+        LashlangProcessEngine::new(
+            store,
+            LashlangSurface::default(),
+            harness.backend().worker_recovery(),
+        )
+        .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
         Vec::new(),
     );
     let process_id = crate::lib_tests::register_harness_process(
@@ -609,7 +626,11 @@ async fn a_second_front_end_lifted_process_is_observed_and_redrives_identically(
     let worker = lifted_worker(&output.artifact);
     assert_eq!(graph.source_identity, output.artifact.source_identity());
 
-    let map = trace_lashlang_process_map(&output.artifact, &worker).expect("worker map");
+    let map = trace_lashlang_process_map(
+        &lashlang::workflow_graph_from_artifact(&output.artifact, &lashlang::NoStatementText),
+        &worker,
+    )
+    .expect("worker map");
     let mapped = map
         .nodes
         .iter()

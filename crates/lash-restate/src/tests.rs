@@ -325,6 +325,7 @@ fn registry_local_executor(
                 lash_lashlang_runtime::LashlangProcessEngine::new(
                     recovery_artifact_store(),
                     lash_lashlang_runtime::LashlangSurface::default(),
+                    RECOVERY_ARTIFACT_BACKEND.worker_recovery(),
                 ),
             )),
     )

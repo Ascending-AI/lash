@@ -1,12 +1,12 @@
 use super::{
-    CellTags, Dialect, DialectDiagnostic, DialectPromptVocabulary, DialectRefusal,
+    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal,
     DialectRefusalKind, ExecutionSectionRequest, ShapeNotation,
 };
 
 pub(crate) const LANGUAGE_ID: &str = "typescript";
 
-/// The TypeScript dialect: the only module in this crate that parses, links,
-/// diagnoses or prompts TypeScript. A host selects it by naming it
+/// The TypeScript host adapter selects the shipped worker frontend and
+/// spells TypeScript prompts and tool paths. A host selects it by naming it
 /// (`Arc::new(TypescriptDialect)`) where it constructs the RLM protocol.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TypescriptDialect;
@@ -16,20 +16,8 @@ impl Dialect for TypescriptDialect {
         LANGUAGE_ID
     }
 
-    fn parse(&self, source: &str) -> Result<lashlang::Program, DialectDiagnostic> {
-        lash_typescript::parse(source).map_err(|error| diagnostic(source, error))
-    }
-
-    /// Parsed with the session's live globals, which the host environment
-    /// carries: TypeScript resolves names at parse, so the names have to
-    /// arrive here.
-    fn parse_cell(
-        &self,
-        source: &str,
-        host: &lashlang::LashlangHostEnvironment,
-    ) -> Result<lashlang::Program, DialectDiagnostic> {
-        lash_typescript::parse_cell(source, host)
-            .map_err(|error| diagnostic(source, refine_method_diagnostic(source, host, error)))
+    fn worker_service(&self) -> lash_vm_client::service::Service {
+        lash_vm_client::service::Service::default()
     }
 
     /// Being a catalog member is being advertised, and the execution section
@@ -103,48 +91,6 @@ const TYPESCRIPT_CELL_TAGS: CellTags = CellTags {
     open: "<typescript>",
     close: "</typescript>",
 };
-
-/// A TypeScript rejection, classified and rendered while it is still typed.
-///
-/// Whether it refuses a construct or reports a wrong program is asked of the
-/// diagnostic, not of its code. Three codes carry both families —
-/// `TS_METHOD_UNSUPPORTED` covers `Promise.then` and `[].map()` alike — so only
-/// the site that emitted it knows, and it records the answer at construction.
-/// It is rendered against the source, not `to_string()`: the diagnostic
-/// carries a span and the model needs the line it wrote.
-fn diagnostic(source: &str, error: lash_typescript::Diagnostic) -> DialectDiagnostic {
-    DialectDiagnostic {
-        kind: if error.is_dialect_refusal() {
-            lash_core::CellFailureKind::Policy
-        } else {
-            lash_core::CellFailureKind::Program
-        },
-        rendered: lash_typescript::format_diagnostic(source, &error),
-        span: error.span.map(|span| lashlang::Span {
-            start: span.start,
-            end: span.end,
-        }),
-        message: error.message,
-    }
-}
-
-/// Re-lowers method failures with the host catalog that the cache-oriented
-/// parse entry point does not accept. Valid cells still take the single-parse
-/// path; only a method diagnostic pays this retry to distinguish a real module
-/// shadow from an ordinary local receiver.
-fn refine_method_diagnostic(
-    source: &str,
-    host: &lashlang::LashlangHostEnvironment,
-    error: lash_typescript::Diagnostic,
-) -> lash_typescript::Diagnostic {
-    if error.code != lash_typescript::DiagnosticCode::MethodUnsupported {
-        return error;
-    }
-    match lash_typescript::link(source, host) {
-        Err(contextual) if contextual.code == error.code => contextual,
-        _ => error,
-    }
-}
 
 fn is_plain_identifier(text: &str) -> bool {
     !text.is_empty()
@@ -591,6 +537,7 @@ mod tests {
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
             LashlangSurface::default(),
             RlmDialectServices {
+                workers: lash_vm_client::service::Service::default(),
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
@@ -650,6 +597,7 @@ mod tests {
                 resources,
             },
             RlmDialectServices {
+                workers: lash_vm_client::service::Service::default(),
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
@@ -732,6 +680,7 @@ mod tests {
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
             LashlangSurface::default(),
             RlmDialectServices {
+                workers: lash_vm_client::service::Service::default(),
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
@@ -795,6 +744,7 @@ mod tests {
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
             LashlangSurface::default(),
             RlmDialectServices {
+                workers: lash_vm_client::service::Service::default(),
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
@@ -881,6 +831,7 @@ mod tests {
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
             LashlangSurface::default(),
             RlmDialectServices {
+                workers: lash_vm_client::service::Service::default(),
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
@@ -1031,6 +982,7 @@ mod tests {
                     std::sync::Arc::new(crate::dialect::TypescriptDialect),
                     LashlangSurface::default(),
                     RlmDialectServices {
+                        workers: lash_vm_client::service::Service::default(),
                         artifact_store: crate::testing::memory_artifact_store().await,
                         deferred_tool_resolver: None,
                         deferred_trigger_resolver: None,

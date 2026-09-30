@@ -39,6 +39,7 @@ impl RlmRuntimeState {
         deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     ) -> Result<Self, SessionError> {
         let services = crate::dialect::RlmDialectServices {
+            workers: lash_vm_client::service::Service::default(),
             artifact_store: crate::testing::memory_artifact_store_blocking(),
             deferred_tool_resolver,
             deferred_trigger_resolver: None,

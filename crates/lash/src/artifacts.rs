@@ -71,10 +71,10 @@ impl HostArtifacts {
 
     /// Publish `artifact` and hold it under `pin`. A released pin is refused.
     #[cfg(feature = "rlm")]
-    pub async fn publish_module(
+    pub async fn publish_module<T: lashlang::ModuleArtifactBytes + ?Sized>(
         &self,
         pin: &HostArtifactPin,
-        artifact: &lashlang::ModuleArtifact,
+        artifact: &T,
     ) -> Result<()> {
         lashlang::LashlangArtifacts::new(Arc::clone(&self.modules))
             .publish_module_artifact(&claim(pin)?, artifact)

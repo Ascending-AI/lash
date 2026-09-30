@@ -130,6 +130,7 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
                                 lash_lashlang_runtime::LashlangProcessEngine::new(
                                     artifact_store,
                                     lash_lashlang_runtime::LashlangSurface::default(),
+                                    artifact_backend.worker_recovery(),
                                 ),
                             ),
                         ),

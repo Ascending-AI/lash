@@ -162,15 +162,15 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         .iter()
         .find(|process| process.params.is_empty())
         .expect("the target process takes no arguments");
-    let process_name = target.definition.process_name.clone();
+    let process_name = compiled
+        .artifact
+        .process_name_for_ref(&target.definition.process_ref)
+        .expect("target process export")
+        .to_owned();
 
     let process_input = LashlangProcessInput {
         module_ref: compiled.module_ref.clone(),
-        process_ref: compiled
-            .artifact
-            .process_ref(&process_name)
-            .expect("target process ref")
-            .clone(),
+        process_ref: target.definition.process_ref.clone(),
         host_requirements_ref: compiled.host_requirements_ref.clone(),
         process_name,
         args: serde_json::Map::new(),
@@ -225,6 +225,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
                 lashlang::LashlangLanguageFeatures::default(),
                 lashlang::LashlangHostCatalog::new(),
             ),
+            table.backend().worker_recovery(),
         )
     };
     let runtime_host = RuntimeHostConfig::new(

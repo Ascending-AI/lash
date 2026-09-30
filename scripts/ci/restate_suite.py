@@ -361,20 +361,26 @@ def build(labels: Sequence[str]) -> list[Path]:
     a Kiln fork builds through `kiln`; anything else uses the checkout's
     `--config=shared`. Only the top-level outputs are downloaded.
     """
+    worker_label = "//crates/lash-vm-worker:lash-vm-worker__bin"
+    build_labels = list(dict.fromkeys([*labels, worker_label]))
     flags = ["--remote_download_outputs=toplevel"]
     if os.environ.get("GITHUB_ACTIONS"):
         shared = os.environ.get("BAZEL_SHARED_CACHE_FLAGS")
         root = os.environ.get("BAZEL_OUTPUT_USER_ROOT")
         if not shared or not root:
             raise SystemExit("CI must configure the shared build cache before a Restate suite builds")
-        argv = ["bazel", f"--output_user_root={root}", "build", *shared.split(), *flags, *labels]
+        argv = ["bazel", f"--output_user_root={root}", "build", *shared.split(), *flags, *build_labels]
     elif os.environ.get("KILN_REPO") and shutil.which("kiln"):
-        argv = ["kiln", "build", *flags, *labels]
+        argv = ["kiln", "build", *flags, *build_labels]
     else:
-        argv = ["bazel", "build", "--config=shared", *flags, *labels]
+        argv = ["bazel", "build", "--config=shared", *flags, *build_labels]
     log(f"building {' '.join(labels)}")
     subprocess.run(argv, cwd=ROOT, check=True, stdout=sys.stderr)
     bazel_bin = (ROOT / "bazel-bin").resolve()
+    worker = bazel_bin / "crates/lash-vm-worker/lash-vm-worker__bin"
+    if not worker.is_file():
+        raise SystemExit(f"{worker_label} built, but its worker executable is missing")
+    os.environ["LASH_VM_WORKER"] = str(worker)
     outputs = []
     for label in labels:
         package, _, name = label.removeprefix("//").partition(":")
@@ -405,7 +411,7 @@ def stage_binaries(package: str, destination: Path) -> list[Path]:
     labels = package_binaries(package)
     destination.mkdir(parents=True, exist_ok=True)
     staged = []
-    for built in build(labels):
+    for built in build([*labels, "//crates/lash-vm-worker:lash-vm-worker__bin"]):
         target = destination / built.name.removesuffix("__bin")
         shutil.copyfile(built, target)
         target.chmod(0o755)
@@ -584,6 +590,8 @@ def run_one(
 def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
     if args.binary:
         binary = Path(args.binary).resolve()
+        if not os.environ.get("LASH_VM_WORKER"):
+            build(["//crates/lash-vm-worker:lash-vm-worker__bin"])
     else:
         (binary,) = build([suite.label])
     cwd = ROOT / suite.cwd

@@ -23,29 +23,27 @@ use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 /// A host selects exactly one dialect per RLM protocol by passing it to
 /// [`crate::RlmProtocolPluginFactory::new`] (or, for prompt-only use, to
 /// [`crate::RlmDriver::new`] or [`crate::RlmProjectorConfig::new`]). There is no
-/// default and no registry: every parse, tool-path spelling and prompt fragment
-/// a session produces comes from that one value, and the session records its
+/// default and no registry: the source frontend, tool-path spelling and
+/// prompt fragments a session produces comes from that one value, and the session records its
 /// [`Dialect::language_id`] so it only ever resumes under the same dialect
 /// (ADR 0096).
 ///
-/// A dialect lowers its source to a [`lashlang::Program`]; it adds no IR, VM,
-/// store or wire feature. Shared code does language-neutral work only.
+/// A dialect selects the worker that lowers its source to the shared IR;
+/// its host adapter spells prompts and tool paths. Shared code does
+/// language-neutral work only.
 pub trait Dialect: Send + Sync + 'static {
     /// The stable id the dialect names itself by. A session records it and
     /// refuses to resume under a dialect with another id.
     fn language_id(&self) -> &'static str;
 
-    /// Lowers `source` with no host: module and process source, and enough of
-    /// a cell to read what it references before its host is assembled.
-    fn parse(&self, source: &str) -> Result<lashlang::Program, DialectDiagnostic>;
+    /// The worker entry and bounds for this dialect's source frontend.
+    /// The selected frontend is compiled into that entry and parses only there.
+    fn worker_service(&self) -> lash_vm_client::service::Service;
 
-    /// Lowers one cell against the host it will link against, including the
-    /// session globals the cell may read.
-    fn parse_cell(
-        &self,
-        source: &str,
-        host: &LashlangHostEnvironment,
-    ) -> Result<lashlang::Program, DialectDiagnostic>;
+    /// Renders a typed source refusal returned by that worker.
+    fn render_parse_diagnostic(&self, diagnostic: &lashlang::ModuleCompileError) -> String {
+        diagnostic.to_string()
+    }
 
     /// The call path a cell in this dialect writes to call a bound tool, or
     /// the refusal when no cell in this dialect can address it.
@@ -73,20 +71,6 @@ pub trait Dialect: Send + Sync + 'static {
 
     /// The whole execution section of the system prompt.
     fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> String;
-}
-
-/// A dialect's refusal of a program, rendered against the source it refused.
-#[derive(Clone, Debug)]
-pub struct DialectDiagnostic {
-    /// Whether the dialect refuses a construct
-    /// ([`lash_core::CellFailureKind::Policy`]) or reports a wrong program
-    /// ([`lash_core::CellFailureKind::Program`]).
-    pub kind: lash_core::CellFailureKind,
-    /// What the dialect refused, and nothing else.
-    pub message: String,
-    pub span: Option<lashlang::Span>,
-    /// The refusal rendered against the source, with the line the model wrote.
-    pub rendered: String,
 }
 
 /// A dialect's refusal of something the host asked it to spell.
@@ -225,6 +209,7 @@ impl ShapeNotation {
 /// configuration, bounds and transport belong to the execution session.
 #[derive(Clone)]
 pub(crate) struct RlmDialectServices {
+    pub(crate) workers: lash_vm_client::service::Service,
     pub(crate) code_renderer: crate::render::CodeRendererSlot,
     pub(crate) artifact_store: LashlangArtifacts,
     pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,
@@ -273,10 +258,12 @@ impl SessionDialect {
     /// execute. The protocol driver needs one to answer questions about cells
     /// without an execution environment behind it.
     pub(crate) fn prompt_only(dialect: Arc<dyn Dialect>, surface: LashlangSurface) -> Self {
+        let workers = dialect.worker_service();
         Self {
             dialect,
             surface,
             services: RlmDialectServices {
+                workers,
                 artifact_store: lashlang::LashlangArtifacts::new(Arc::new(PromptOnlyArtifactStore)),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
@@ -320,15 +307,8 @@ impl SessionDialect {
         self.prompt_vocabulary().cell_tags
     }
 
-    /// The selected front end as `processes.create`'s parser: the rendered
-    /// refusal on failure. The process engine receives the lowered IR.
-    pub(crate) fn process_source_parser(&self) -> lash_lashlang_runtime::ProcessSourceParser {
-        let dialect = Arc::clone(&self.dialect);
-        Arc::new(move |source| {
-            dialect
-                .parse(source)
-                .map_err(|diagnostic| diagnostic.rendered)
-        })
+    pub(crate) fn worker_service(&self) -> lash_vm_client::service::Service {
+        self.services.workers.clone()
     }
 
     /// A catalog tool's call path in the selected dialect: the manifest's
@@ -640,7 +620,10 @@ impl DialectSession {
         surface: lash_lashlang_runtime::LashlangSurface,
         services: RlmDialectServices,
     ) -> Self {
-        let state = RlmExecutionState::for_engine(dialect.language_id());
+        let state = RlmExecutionState::for_engine_with_workers(
+            dialect.language_id(),
+            services.workers.clone(),
+        );
         Self {
             dialect,
             state,
@@ -748,7 +731,7 @@ impl DialectSession {
         &mut self,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
-        self.state.prune_protected_globals(protected_names);
+        self.state.prune_protected_globals(protected_names)?;
         Ok(())
     }
 
@@ -799,6 +782,10 @@ mod tests {
     struct ExtensionFixture;
 
     impl Dialect for ExtensionFixture {
+        fn worker_service(&self) -> lash_vm_client::service::Service {
+            TypescriptDialect.worker_service()
+        }
+
         fn language_id(&self) -> &'static str {
             "extension-fixture"
         }
@@ -815,21 +802,8 @@ mod tests {
             }
         }
 
-        fn parse(&self, _source: &str) -> Result<lashlang::Program, DialectDiagnostic> {
-            Err(DialectDiagnostic {
-                kind: lash_core::CellFailureKind::Program,
-                message: "fixture syntax error".to_string(),
-                span: None,
-                rendered: "fixture syntax error".to_string(),
-            })
-        }
-
-        fn parse_cell(
-            &self,
-            source: &str,
-            _host: &lashlang::LashlangHostEnvironment,
-        ) -> Result<lashlang::Program, DialectDiagnostic> {
-            self.parse(source)
+        fn render_parse_diagnostic(&self, _diagnostic: &lashlang::ModuleCompileError) -> String {
+            "fixture syntax error".to_string()
         }
 
         fn tool_call_path(&self, binding: &ResolvedToolBinding) -> Result<String, DialectRefusal> {
@@ -993,6 +967,7 @@ mod tests {
 #[cfg(test)]
 pub(crate) fn test_dialect_services() -> RlmDialectServices {
     RlmDialectServices {
+        workers: lash_vm_client::service::Service::default(),
         artifact_store: crate::testing::memory_artifact_store_blocking(),
         deferred_tool_resolver: None,
         deferred_trigger_resolver: None,

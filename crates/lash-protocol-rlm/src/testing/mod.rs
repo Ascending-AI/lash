@@ -296,6 +296,7 @@ fn engine_ports<'run>(
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 lashlang::LashlangArtifacts::new(module_store),
                 lash_lashlang_runtime::LashlangSurface::default(),
+                backend.worker_recovery(),
             ),
         ),
     );

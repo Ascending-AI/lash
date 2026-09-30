@@ -4,8 +4,8 @@
     reason = "integration test helpers fail on broken fixture assumptions"
 )]
 
+use lash_vm_client::*;
 use lash_vm_protocol::*;
-use lash_vm_worker::*;
 use lashlang::{AbilityOp, AbilityOutcome, ExecutionMode};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::mpsc;
@@ -42,9 +42,10 @@ fn start(source: &str, mode: ExecutionMode) -> Start {
             kind: "vm_run".into(),
             name: "context".into(),
             body: EncodedPayload(
-                serde_json::to_vec(&RunContext {
+                rmp_serde::to_vec_named(&RunContext {
                     environment: lashlang::testing::harness::test_environment(),
                     mode,
+                    ..RunContext::default()
                 })
                 .expect("context"),
             ),
@@ -58,7 +59,7 @@ fn answer(request: EffectRequest) -> EffectResponse {
         EffectKind::CancelCheckpoint => EffectOutcome::Checkpoint { cancelled: false },
         EffectKind::ProcessBoundary | EffectKind::ParkDeclined => EffectOutcome::Unit,
         _ => {
-            let op: AbilityOp = serde_json::from_slice(&request.payload.0).expect("operation");
+            let op: AbilityOp = rmp_serde::from_slice(&request.payload.0).expect("operation");
             let result = match op {
                 AbilityOp::ResourceOperation(op) => {
                     lashlang::testing::harness::EchoHost::perform_resource_operation(*op)
@@ -70,10 +71,10 @@ fn answer(request: EffectRequest) -> EffectResponse {
             };
             match result {
                 Ok(result) => EffectOutcome::Value(EncodedPayload(
-                    serde_json::to_vec(&result).expect("answer"),
+                    rmp_serde::to_vec_named(&result).expect("answer"),
                 )),
                 Err(error) => EffectOutcome::Failed(EncodedPayload(
-                    serde_json::to_vec(&error).expect("error"),
+                    rmp_serde::to_vec_named(&error).expect("error"),
                 )),
             }
         }
@@ -335,7 +336,7 @@ finish(plantedClosure());
         let mut input = start(probe, ExecutionMode::Foreground);
         input.owner = VmOwner::new("session-B");
         let mut context: RunContext =
-            serde_json::from_slice(&input.contexts[0].body.0).expect("context");
+            rmp_serde::from_slice(&input.contexts[0].body.0).expect("context");
         context.environment = context.environment.with_globals([
             "planted",
             "plantedClosure",
@@ -344,7 +345,7 @@ finish(plantedClosure());
             "plantedEcho",
             "plantedPattern",
         ]);
-        input.contexts[0].body.0 = serde_json::to_vec(&context).expect("context");
+        input.contexts[0].body.0 = rmp_serde::to_vec_named(&context).expect("context");
         let mut reused = checkout(&pool);
         assert_eq!(reused.pid(), pid);
         let message = reused.start(input.clone()).expect("B start");
@@ -585,7 +586,7 @@ fn helper_entry_preserves_effect_values_losslessly() {
     let mut worker = checkout(&pool);
     let (_, outcome) = complete(&mut worker, "finish([undefined, NaN, Infinity, -0]);");
     let ExecutionOutcome::Finished(Value::List(values)) =
-        serde_json::from_slice(&outcome).expect("outcome")
+        rmp_serde::from_slice(&outcome).expect("outcome")
     else {
         panic!("list");
     };
@@ -603,7 +604,8 @@ fn helper_entry_preserves_effect_values_losslessly() {
         vec![Value::Undefined, Value::Number(f64::NEG_INFINITY)].into(),
     ));
     let decoded: AbilityOutcome =
-        serde_json::from_slice(&serde_json::to_vec(&tuple).expect("tuple bytes")).expect("tuple");
+        rmp_serde::from_slice(&rmp_serde::to_vec_named(&tuple).expect("tuple bytes"))
+            .expect("tuple");
     let AbilityOutcome::Value(Value::Tuple(values)) = decoded else {
         panic!("tuple identity lost");
     };
@@ -697,4 +699,108 @@ fn state_kind_mismatch_is_refused_before_worker_dispatch() {
         assert_ne!(replacement.pid(), Some(pid));
         replacement.release().expect("replacement reset");
     }
+}
+
+#[test]
+fn effect_responses_preserve_the_checkout_kernel_cpu_ceiling() {
+    let pool = WorkerPool::new(config("cpu_ceiling")).expect("pool");
+    let mut worker = checkout(&pool);
+    complete(&mut worker, "print(1); print(2); finish(3);");
+    worker.release().expect("release");
+}
+
+#[test]
+fn expected_abandonments_and_guest_errors_leave_the_pool_available() {
+    let mut cfg = config("");
+    cfg.max_restarts = 2;
+    let pool = WorkerPool::new(cfg).expect("pool");
+    for _ in 0..4 {
+        let mut worker = checkout(&pool);
+        let message = worker
+            .start(start(
+                "finish(await tools.echo({ value: 7 }));",
+                ExecutionMode::Foreground,
+            ))
+            .expect("start");
+        assert!(matches!(message, WorkerMessage::EffectRequest(_)));
+        drop(worker);
+        let mut worker = checkout(&pool);
+        let message = worker
+            .start(start(
+                "throw new Error('guest');",
+                ExecutionMode::Foreground,
+            ))
+            .expect("start guest error");
+        assert!(matches!(
+            drive(&mut worker, message),
+            WorkerMessage::GuestError { .. }
+        ));
+        assert!(!pool.stats().restart_storm);
+    }
+    let mut worker = checkout(&pool);
+    complete(&mut worker, "finish(3);");
+    worker.release().expect("release");
+}
+
+#[test]
+#[ignore = "FIG-4275"]
+fn one_slot_process_await_releases_worker_for_the_awaited_body() {
+    let process_id = lash_core_execution::ProcessId::fixture("one-slot-awaited-body");
+    let source = format!(
+        "const handle = await tools.echo({{ value: {{ __handle__: 'lash', id: 'p.{}' }} }}); finish(await handle);",
+        process_id.as_str(),
+    );
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut worker = checkout(&pool);
+    let mut message = worker
+        .start(start(&source, ExecutionMode::Foreground))
+        .expect("start");
+    let mut requests = 0;
+    let awaited = loop {
+        requests += 1;
+        assert!(requests <= 8, "the cell reaches its process await");
+        let WorkerMessage::EffectRequest(request) = message else {
+            panic!("the cell asks for its process await: {message:?}");
+        };
+        if request.kind == EffectKind::Await {
+            break request;
+        }
+        message = worker.effect_result(answer(request)).expect("answer setup");
+    };
+    // The checkout deadline detects the dependency cycle without hanging:
+    // the awaited body needs the slot that its waiting cell still owns.
+    assert!(matches!(
+        pool.checkout(1, OwnerEpoch(1), FrameEpoch(1), ExecutionBudget::default()),
+        Err(PoolError::CheckoutTimedOut)
+    ));
+    let state = parked(worker.park().expect("a process await must park"));
+    worker.release().expect("release the waiting cell");
+    let mut body = checkout(&pool);
+    let (_, expected) = complete(&mut body, "finish(42);");
+    body.release().expect("release the awaited body");
+    let mut resumed = checkout(&pool);
+    let mut input = start(&source, ExecutionMode::Foreground);
+    input.state = StartState::Continuation(state);
+    let WorkerMessage::EffectRequest(again) = resumed.start(input).expect("resume") else {
+        panic!("the process await is reissued");
+    };
+    assert_eq!(
+        (again.kind, &again.payload),
+        (awaited.kind, &awaited.payload)
+    );
+    let response = EffectResponse {
+        id: again.id,
+        outcome: EffectOutcome::Value(EncodedPayload(
+            rmp_serde::to_vec_named(&AbilityOutcome::Value(lashlang::Value::Number(42.0)))
+                .expect("process result"),
+        )),
+    };
+    let message = resumed
+        .effect_result(response)
+        .expect("answer the process await");
+    let WorkerMessage::Complete { value, .. } = drive(&mut resumed, message) else {
+        panic!("the cell completes after its awaited body");
+    };
+    assert_eq!(value.0, expected);
+    resumed.release().expect("release resumed cell");
 }

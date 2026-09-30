@@ -581,7 +581,9 @@ impl ParentEffects for TierEffects<'_> {
                 }
                 serde_json::Value::Array(values)
             }
-            AdmittedKind::Await { .. } | AdmittedKind::Sleep { .. } => serde_json::Value::Null,
+            AdmittedKind::Await { .. }
+            | AdmittedKind::Sleep { .. }
+            | AdmittedKind::Control { .. } => serde_json::Value::Null,
         };
         Ok(Performed::outcome(EffectOutcome::Value(
             lash_vm_broker::authority::encode_value(&value),

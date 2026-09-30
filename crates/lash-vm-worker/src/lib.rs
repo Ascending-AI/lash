@@ -5,28 +5,32 @@
 //! socket. The language is the sandbox; the process contains native crashes.
 //! Pool failures fence the checkout and never retry guest execution locally.
 
-mod config;
+mod frontend;
+pub use frontend::{Frontend, FrontendRefusal};
+
 #[cfg(unix)]
 mod entry;
-mod error;
-#[cfg(unix)]
-mod pool;
 #[cfg(unix)]
 mod process;
 #[cfg(unix)]
+mod projection;
+#[cfg(unix)]
+mod service;
+#[cfg(unix)]
 mod worker;
-
-pub use config::{Deadlines, PoolConfig, WorkerEntry};
 #[cfg(unix)]
-pub use entry::worker_entry;
-pub use error::PoolError;
-#[cfg(unix)]
-pub use pool::{Checkout, ExecutionBudget, ParkOutcome, PoolStats, WorkerPool};
-#[cfg(unix)]
-pub use worker::RunContext;
-
+pub use entry::{worker_entry, worker_entry_with_frontend};
+pub use lash_vm_client::PoolError;
 #[cfg(not(unix))]
 pub fn worker_entry(_build: lash_vm_protocol::BuildIdentity) -> Result<bool, PoolError> {
+    Err(PoolError::UnsupportedPlatform)
+}
+
+#[cfg(not(unix))]
+pub fn worker_entry_with_frontend(
+    _build: lash_vm_protocol::BuildIdentity,
+    _frontend: &dyn Frontend,
+) -> Result<bool, PoolError> {
     Err(PoolError::UnsupportedPlatform)
 }
 

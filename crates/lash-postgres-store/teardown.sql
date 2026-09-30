@@ -135,3 +135,5 @@ DROP TABLE IF EXISTS lash_artifact_cleanup_obligations CASCADE;
 DROP TABLE IF EXISTS lash_release_stamp CASCADE;
 
 DROP TABLE IF EXISTS lash_catalog_identity CASCADE;
+
+DROP TABLE IF EXISTS lash_worker_recovery CASCADE;

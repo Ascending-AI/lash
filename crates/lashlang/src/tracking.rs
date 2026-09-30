@@ -129,7 +129,7 @@ pub struct LashlangExecutionCallSite {
 /// Typed provenance for a failed external effect.
 ///
 /// This is projected from the VM's host error when emitting a node terminal.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LashlangEffectFailure {
     pub class: lash_sansio::ToolFailureClass,
     pub code: String,
@@ -140,7 +140,7 @@ pub struct LashlangEffectFailure {
 }
 
 /// Why one observed Lashlang node failed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LashlangExecutionFailure {
     /// A host effect returned a typed tool failure.
     Effect(LashlangEffectFailure),
@@ -166,7 +166,7 @@ pub enum ProcessBranchSelection {
     Else,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LashlangExecutionChild {
     pub process_id: ProcessId,
     pub attempt: Option<u32>,
@@ -175,7 +175,7 @@ pub struct LashlangExecutionChild {
     pub process_name: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LashlangExecutionObservation {
     NodeStarted {
         site: LashlangExecutionSite,

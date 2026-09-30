@@ -163,6 +163,10 @@ impl lash::StoreSet for HostStores {
     fn artifact_cleanup(&self) -> Arc<dyn lash::persistence::ArtifactCleanupLedger> {
         self.inner.artifact_cleanup()
     }
+
+    fn worker_recovery(&self) -> Arc<dyn lash::persistence::WorkerRecoveryStore> {
+        self.inner.worker_recovery()
+    }
 }
 
 // ---- the host ---------------------------------------------------------------

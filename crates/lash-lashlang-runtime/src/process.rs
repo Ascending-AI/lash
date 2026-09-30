@@ -1,3 +1,7 @@
+mod segment_state;
+use segment_state::capture_segment;
+mod definition_holds;
+use definition_holds::hold_segment_definitions;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::collections::BTreeMap;
@@ -31,7 +35,10 @@ static SEGMENT_BOUNDARY_DECLINED_TOTAL: AtomicU64 = AtomicU64::new(0);
 #[cfg(any(test, feature = "testing"))]
 static EXECUTION_BOUND_EXHAUSTION_LOUD: AtomicBool = AtomicBool::new(true);
 
-fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'static str) {
+pub(crate) fn record_segment_boundary_decline(
+    error: &dyn std::fmt::Display,
+    message: &'static str,
+) {
     let declined_total = SEGMENT_BOUNDARY_DECLINED_TOTAL
         .fetch_add(1, Ordering::Relaxed)
         .saturating_add(1);
@@ -328,7 +335,7 @@ fn retired_generation(
 }
 
 pub(crate) fn validate_lashlang_process_for_run(
-    artifact: &lashlang::ModuleArtifact,
+    artifact: &lash_vm_client::InspectedArtifact,
     input: &LashlangProcessInput,
     host: LashlangHostEnvironmentCheck<'_>,
 ) -> Result<(), Box<lash_core::ProcessAwaitOutput>> {
@@ -341,11 +348,47 @@ pub(crate) fn validate_lashlang_process_for_run(
     })
 }
 
+pub async fn run_lashlang_process(
+    mut engine: LashlangProcessEngine,
+    context: lash_core::ProcessEngineRunContext<'_>,
+    payload: serde_json::Value,
+) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
+    let scope =
+        lash_vm_broker::CodeCallIdentities::process_body(context.process_id().clone()).scope();
+    let recovery = match engine.workers.begin_execution(&scope).await {
+        Ok(recovery) => recovery,
+        Err(
+            error @ (lash_vm_client::PoolError::RetryLimitExceeded
+            | lash_vm_client::PoolError::Infrastructure(
+                lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { .. },
+            )),
+        ) => {
+            return Ok(process_lashlang_failure(
+                LashlangProcessFailureCode::ProcessExecutionBoundExhausted,
+                error.to_string(),
+                None,
+            )
+            .into());
+        }
+        Err(error) => {
+            return Err(lash_core::ProcessInfraError::new(
+                lash_core::PluginError::Session(error.to_string()),
+            ));
+        }
+    };
+    engine.workers = recovery.service().clone();
+    let result = Box::pin(run_lashlang_process_scoped(engine, context, payload)).await;
+    recovery.settle().await.map_err(|error| {
+        lash_core::ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
+    })?;
+    result
+}
+
 #[expect(
     clippy::expect_used,
-    reason = "admission accepted the host environment, which the message states and the raw_host_environment branch above establishes"
+    reason = "admission accepts the host environment and the process substrate supplies attempt-bound write authority"
 )]
-pub async fn run_lashlang_process(
+async fn run_lashlang_process_scoped(
     engine: LashlangProcessEngine,
     mut context: lash_core::ProcessEngineRunContext<'_>,
     payload: serde_json::Value,
@@ -428,8 +471,8 @@ pub async fn run_lashlang_process(
     let artifact = {
         let _phase = context.named_phase("rlm_process.load_artifact");
         match engine
-            .artifact_store
-            .get_module_artifact(&input.module_ref)
+            .workers
+            .inspect_artifact(&engine.artifact_store, &input.module_ref)
             .await
         {
             Ok(Some(artifact)) => artifact,
@@ -504,25 +547,6 @@ pub async fn run_lashlang_process(
         let host_environment = host_environment.expect("admission accepted host environment");
         (tool_catalog, host_environment)
     };
-    let compiled = {
-        let _phase = context.named_phase("rlm_process.compile");
-        let compiled = engine.process_cache.lock_recover().get_or_compile(
-            &artifact,
-            &input.process_ref,
-            &input.host_requirements_ref,
-        );
-        match compiled {
-            Ok(compiled) => compiled,
-            Err(err) => {
-                return Ok(process_lashlang_failure(
-                    LashlangProcessFailureCode::ProcessCompileFailed,
-                    format!("failed to compile process `{}`: {err}", input.process_name),
-                    None,
-                )
-                .into());
-            }
-        }
-    };
     let process_id = context.process_id().clone();
     // The minted id is the opener: it is never reused, so no other process
     // can mint the identities this one uses (ADR 0099 §1).
@@ -555,7 +579,7 @@ pub async fn run_lashlang_process(
         },
     );
     lashlang_execution_trace.execution_map =
-        trace_lashlang_process_map(&artifact, &input.process_name).map(Arc::new);
+        trace_lashlang_process_map(&artifact.graph, &input.process_name).map(Arc::new);
     if is_initial_segment {
         lashlang_execution_trace.emit_started(&artifact);
     }
@@ -566,7 +590,7 @@ pub async fn run_lashlang_process(
     // advances it at the same point. The engine's live stop is lent to step
     // bodies and never read here.
     let cancellation = crate::ExecutionCancellation::new();
-    let (ctx, guard, mut state) = {
+    let (ctx, guard) = {
         let _phase = context.named_phase("rlm_process.build_context");
         let runtime_context = match context.into_runtime_context(tool_catalog) {
             Ok(runtime_context) => runtime_context,
@@ -575,12 +599,7 @@ pub async fn run_lashlang_process(
             }
         };
         let (ctx, guard) = runtime_context.into_parts();
-        let mut globals = lashlang::Record::with_capacity(input.args.len());
-        for (name, value) in input.args {
-            globals.insert(name, lashlang::from_json(value));
-        }
-        let state = lashlang::State::from_snapshot(lashlang::Snapshot::new(globals));
-        (ctx, guard, state)
+        (ctx, guard)
     };
     definition_publication::publish_exports(&ctx, &artifact).await?;
     if let Some(segment_state) = segment_state.as_mut() {
@@ -597,6 +616,7 @@ pub async fn run_lashlang_process(
         ctx,
         host_environment,
         artifact_store: engine.artifact_store(),
+        workers: engine.workers.clone(),
         processes,
         process_id: process_id.clone(),
         identities,
@@ -618,21 +638,30 @@ pub async fn run_lashlang_process(
                 )
             }),
     };
-    let env = lashlang::ExecutionEnvironment::new(&host)
-        .process()
-        .with_execution_bounds(engine.execution_bounds);
     let output = {
         let _phase = host.ctx.named_phase("rlm_process.execute");
         execute_lashlang(
-            compiled,
-            &mut state,
-            &env,
-            cancellation.clone(),
+            &engine.workers,
+            &artifact,
+            &input,
+            engine.execution_bounds,
             segment_controller.controller(),
             &host,
             (segment_state, current_program_hash),
         )
         .await
+    };
+    let output = match output {
+        Ok(output) => output,
+        Err(error) => {
+            drop(host);
+            guard.shutdown(false).await.map_err(|error| {
+                lash_core::ProcessInfraError::new(lash_core::PluginError::Session(
+                    error.to_string(),
+                ))
+            })?;
+            return Err(error);
+        }
     };
     // A body refused at its journal (FIG-3586) stopped where it diverged: it
     // writes nothing more — no summary, no group finalization — and its
@@ -659,7 +688,6 @@ pub async fn run_lashlang_process(
             adopt_held_attachments(&host, output).await?;
         }
     }
-    drop(env);
     // A process terminal is the process opener's end (ADR 0099 §7): every
     // effect group it still holds is closed and finalized, and its losers'
     // settled facts incorporated, before the terminal is handed back to be
@@ -679,10 +707,9 @@ pub async fn run_lashlang_process(
     {
         let _phase =
             lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, "rlm_process.shutdown");
-        guard
-            .shutdown(false)
-            .await
-            .map_err(lash_core::ProcessInfraError::new)?;
+        guard.shutdown(false).await.map_err(|error| {
+            lash_core::ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
+        })?;
     }
     if let Some(fault) = incorporation_fault {
         return Err(lash_core::ProcessInfraError::new(fault));
@@ -696,152 +723,140 @@ pub async fn run_lashlang_process(
 }
 
 async fn execute_lashlang(
-    compiled: Arc<lashlang::CompiledProgram>,
-    state: &mut lashlang::State,
-    env: &lashlang::ExecutionEnvironment<'_, LashlangProcessHost<'_>>,
-    cancellation: crate::ExecutionCancellation,
+    workers: &lash_vm_client::service::Service,
+    artifact: &lash_vm_client::InspectedArtifact,
+    input: &LashlangProcessInput,
+    bounds: lashlang::ExecutionBounds,
     controller: &dyn lash_core::RuntimeEffectController,
     host: &LashlangProcessHost<'_>,
     segment: (Option<LashlangSegmentState>, String),
-) -> lash_core::ProcessRunOutcome {
+) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
+    let infra = |message: String| {
+        lash_core::ProcessInfraError::new(lash_core::PluginError::Session(message))
+    };
     let (segment_state, program_hash) = segment;
-    let mut vm = if let Some(segment_state) = segment_state {
-        let resumed = worker_side::open_continuation(&segment_state.vm).and_then(|continuation| {
-            lashlang::Vm::resume_from(continuation, compiled.as_ref(), env)
-        });
-        match resumed {
-            Ok(vm) => vm,
-            Err(err) => {
-                let exhausted = err.is_execution_bound_exhausted();
-                #[cfg(any(test, feature = "testing"))]
-                assert!(
-                    !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst) || !exhausted,
-                    "confidence durable process exhausted a required Lashlang bound: {err}"
-                );
-                return process_lashlang_failure(
-                    if exhausted {
-                        LashlangProcessFailureCode::ProcessExecutionBoundExhausted
-                    } else {
-                        LashlangProcessFailureCode::ProcessSegmentResumeFailed
-                    },
-                    format!("failed to resume lashlang segment: {err}"),
-                    None,
-                )
-                .into();
-            }
-        }
-    } else {
-        match lashlang::Vm::from_state(compiled.as_ref(), state, env) {
-            Ok(vm) => vm,
-            Err(err) => {
-                return process_lashlang_failure(
-                    LashlangProcessFailureCode::ProcessSegmentResumeFailed,
-                    format!("failed to install lashlang snapshot: {err}"),
-                    None,
-                )
-                .into();
-            }
-        }
-    };
-    let mut progress = lash_core::SegmentProgress::default();
-    loop {
-        // The VM runs until an effect or its end; its cancel checkpoints are
-        // its only waits on a long stretch of pure compute, and each one is a
-        // recorded peek of the process's cancellation (FIG-3673).
-        let execution = if env.trace_runtime_errors() {
-            vm.run_process_traced_until_effect()
-                .await
-                .map_err(|failure| {
-                    let error = failure.error.clone();
-                    env.observe_runtime_failure(failure);
-                    error
-                })
-        } else {
-            vm.run_process_until_effect().await
-        };
-        if cancellation.is_cancelled() {
-            return process_lashlang_cancelled("lashlang process was cancelled").into();
-        }
-        match execution {
-            Ok(lashlang::VmRunOutcome::Complete(output)) => {
-                vm.flush_profile(env);
-                return process_lashlang_execution_result(Ok(output)).into();
-            }
-            Err(err) => {
-                vm.flush_profile(env);
-                return process_lashlang_execution_result(Err(err)).into();
-            }
-            Ok(lashlang::VmRunOutcome::EffectCompleted) => {
-                progress.effects_executed += 1;
-                let Some(reason) = controller.wants_segment_boundary(&progress) else {
-                    continue;
-                };
-                match capture_segment(&mut vm, host, reason, &program_hash) {
-                    Ok(handover) => {
-                        return lash_core::ProcessRunOutcome::SegmentBoundary(handover);
-                    }
-                    Err((error, message)) => record_segment_boundary_decline(&error, message),
-                }
-            }
-            // The drain handed the open signal wait to a successor (FIG-3799):
-            // the VM stands on the wait, and the boundary is not optional —
-            // running on would only meet the same hand-over again.
-            Ok(lashlang::VmRunOutcome::HandedOver) => {
-                return match capture_segment(
-                    &mut vm,
-                    host,
-                    lash_core::BoundaryReason::HandOver,
-                    &program_hash,
-                ) {
-                    Ok(handover) => lash_core::ProcessRunOutcome::SegmentBoundary(handover),
-                    Err((error, message)) => process_lashlang_failure(
-                        LashlangProcessFailureCode::ProcessSegmentResumeFailed,
-                        format!("{message}: {error}"),
-                        None,
-                    )
-                    .into(),
-                };
-            }
-        }
+    let owner = segment_continuation_owner(&host.process_id);
+    if let Some(state) = &segment_state {
+        hold_segment_definitions(&host.ctx, state.vm.definition_ids()).await?;
     }
-}
-
-/// The segment state a boundary hands over: the worker's continuation bytes,
-/// sealed as opaque state, beside the parent's own ledgers the next segment
-/// resumes with. An error names why the state could not be captured.
-fn capture_segment(
-    vm: &mut lashlang::Vm<'_, lashlang::ExecutionEnvironment<'_, LashlangProcessHost<'_>>>,
-    host: &LashlangProcessHost<'_>,
-    reason: lash_core::BoundaryReason,
-    program_hash: &str,
-) -> Result<lash_core::SegmentHandover, (String, &'static str)> {
-    let continuation = worker_side::capture_continuation(vm)?;
-    let segment_state = LashlangSegmentState {
-        version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: lash_vm_protocol::OpaqueVmState::seal(
-            lash_vm_protocol::VmStateKind::Continuation,
-            segment_continuation_owner(&host.process_id),
-            lashlang::vm_contract_versions(),
-            lashlang::VM_CONTINUATION_FORMAT_VERSION,
-            continuation,
-        ),
-        ordinals: host.ordinals.snapshot(&host.run),
-        started_process_ids: host.ctx.started_process_ids(),
-        incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
-        pending_summary: host.effect_summary.pending(),
-        effect_omissions: host.effect_summary.omissions(),
-        outstanding_groups: host.ctx.outstanding_groups_snapshot(),
+    let start = match segment_state {
+        Some(state) => lash_vm_protocol::StartState::Continuation(state.vm),
+        None => {
+            let mut state = lash_vm_client::RemoteState::pristine(workers.clone());
+            state
+                .defaults(
+                    input
+                        .args
+                        .iter()
+                        .map(|(k, v)| (k.clone(), lashlang::from_json(v.clone())))
+                        .collect(),
+                    Default::default(),
+                )
+                .map_err(infra)?;
+            lash_vm_protocol::StartState::Snapshot(lash_vm_protocol::OpaqueVmState::seal(
+                lash_vm_protocol::VmStateKind::Snapshot,
+                owner.clone(),
+                lashlang::vm_contract_versions(),
+                lashlang::LASHLANG_SNAPSHOT_VERSION,
+                state.bytes().unwrap_or_default().to_vec(),
+            ))
+        }
     };
-    let engine_state = serde_json::to_vec(&segment_state).map_err(|error| {
-        (
-            error.to_string(),
-            "lashlang segment continuation was not serializable; continuing",
+    let progress = std::sync::Mutex::new(lash_core::SegmentProgress::default());
+    let reason = std::sync::Mutex::new(None);
+    let boundary = || {
+        let mut progress = progress.lock_recover();
+        progress.effects_executed += 1;
+        let next = controller.wants_segment_boundary(&progress);
+        let wanted = next.is_some();
+        *reason.lock_recover() = next;
+        wanted
+    };
+    let run = crate::WorkerRun {
+        service: workers,
+        host,
+        identities: host.identities.code().clone(),
+        owner,
+        frame_epoch: lash_vm_protocol::FrameEpoch(0),
+        program: lash_vm_protocol::ProgramSource::Artifact {
+            module_ref: artifact.module_ref().to_string(),
+            entry: lash_vm_protocol::ProgramEntry::Process {
+                component: input.process_ref.component.to_string(),
+                position: input.process_ref.pos,
+            },
+            artifact: artifact.bytes().to_vec(),
+        },
+        context: lash_vm_client::RunContext {
+            environment: host.host_environment.clone(),
+            mode: lashlang::ExecutionMode::Process,
+            projected: Vec::new(),
+            observe_execution: host.observes_lashlang_execution(),
+            ..Default::default()
+        },
+        projected: lashlang::ProjectedBindings::new(),
+        bounds,
+        state: start,
+        boundary: &boundary,
+    }
+    .run()
+    .await;
+    let run = match run {
+        Ok(run) => run,
+        Err(
+            lash_vm_broker::BrokerFailure::WorkerLost {
+                outcome: lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
+                ..
+            }
+            | lash_vm_broker::BrokerFailure::Unavailable {
+                refusal:
+                    lash_vm_broker::CheckoutRefusal::Infrastructure(
+                        lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
+                    ),
+            },
+        ) => {
+            #[cfg(any(test, feature = "testing"))]
+            assert!(
+                !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst),
+                "confidence durable process exhausted a required Lashlang bound: {limit:?}"
+            );
+            return Ok(process_lashlang_failure(
+                LashlangProcessFailureCode::ProcessExecutionBoundExhausted,
+                format!("worker execution bound exhausted: {limit:?}"),
+                None,
+            )
+            .into());
+        }
+        Err(error) => return Err(infra(error.to_string())),
+    };
+    Ok(match run {
+        lash_vm_broker::BrokeredEnd::Complete { value, .. } => process_lashlang_execution_result(
+            Ok(rmp_serde::from_slice(&value.0).map_err(|e| infra(e.to_string()))?),
         )
-    })?;
-    Ok(lash_core::SegmentHandover {
-        reason,
-        program_hash: program_hash.to_owned(),
-        engine_state,
+        .into(),
+        lash_vm_broker::BrokeredEnd::GuestError { error, .. } => process_lashlang_execution_result(
+            Err(rmp_serde::from_slice::<lashlang::RuntimeFailure>(&error.0)
+                .map_err(|e| infra(e.to_string()))?
+                .error),
+        )
+        .into(),
+        lash_vm_broker::BrokeredEnd::Suspended { checkpoint } => {
+            hold_segment_definitions(&host.ctx, checkpoint.vm.definition_ids()).await?;
+            lash_core::ProcessRunOutcome::SegmentBoundary(
+                capture_segment(
+                    checkpoint.vm,
+                    host,
+                    reason
+                        .lock_recover()
+                        .take()
+                        .unwrap_or(lash_core::BoundaryReason::HandOver),
+                    &program_hash,
+                )
+                .map_err(|(error, message)| infra(format!("{message}: {error}")))?,
+            )
+        }
+        lash_vm_broker::BrokeredEnd::Cancelled => {
+            process_lashlang_cancelled("lashlang process was cancelled").into()
+        }
     })
 }
 
@@ -864,45 +879,11 @@ fn segment_continuation_expectation<'a>(
     }
 }
 
-/// The work a worker does for a process segment: decoding the continuation
-/// it resumes and encoding the one it parks. Until execution moves out of
-/// process (tsvm-d), the parent calls these in process; nothing else in this
-/// file touches VM bytes semantically.
-mod worker_side {
-    use super::LashlangProcessHost;
-
-    /// The semantic decode: guest values, regular expressions and program
-    /// checks, on the worker's own instance.
-    pub(super) fn open_continuation(
-        state: &lash_vm_protocol::OpaqueVmState,
-    ) -> Result<lashlang::VmContinuation, lashlang::ContinuationError> {
-        lashlang::VmInstance::pristine().open_continuation(state.bytes())
-    }
-
-    /// The parked VM's continuation bytes: all the worker hands back at a
-    /// boundary.
-    pub(super) fn capture_continuation(
-        vm: &mut lashlang::Vm<'_, lashlang::ExecutionEnvironment<'_, LashlangProcessHost<'_>>>,
-    ) -> Result<Vec<u8>, (String, &'static str)> {
-        let continuation = vm.suspend().map_err(|error| {
-            (
-                error.to_string(),
-                "lashlang segment boundary declined at non-capturable point",
-            )
-        })?;
-        continuation.to_bytes().map_err(|error| {
-            (
-                error.to_string(),
-                "lashlang segment continuation was not serializable; continuing",
-            )
-        })
-    }
-}
-
 struct LashlangProcessHost<'run> {
     ctx: lash_core::RuntimeExecutionContext<'run>,
     host_environment: lashlang::LashlangHostEnvironment,
     artifact_store: lashlang::LashlangArtifacts,
+    workers: lash_vm_client::service::Service,
     processes: lash_core::facade_support::ProcessEngineProcessContext,
     process_id: ProcessId,
     /// The one derivation of the ids and key namespace this tier mints,

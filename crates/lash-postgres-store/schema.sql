@@ -1148,3 +1148,13 @@ ON CONFLICT (singleton) DO NOTHING;
 INSERT INTO lash_catalog_identity (singleton, catalog_id)
 VALUES (TRUE, gen_random_uuid()::text)
 ON CONFLICT (singleton) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS lash_worker_recovery (
+    scope_id TEXT PRIMARY KEY,
+    revision BIGINT NOT NULL,
+    attempts INTEGER NOT NULL,
+    cpu_nanos BIGINT NOT NULL,
+    replacement INTEGER NOT NULL,
+    unknown_cpu_attempts INTEGER NOT NULL,
+    in_flight INTEGER NOT NULL
+);

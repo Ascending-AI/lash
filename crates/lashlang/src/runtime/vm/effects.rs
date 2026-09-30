@@ -47,8 +47,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<Option<VmOutcome>, RuntimeError> {
         // An operation issued again after a declined park resumes normally:
         // a continuation captured past it resumes at the next instruction.
+        let reissued = self.parked_on_effect();
         self.resume_point = super::VmResumePoint::NextInstruction;
-        let active = self.begin_lashlang_execution(instruction_ip);
+        let active = self.begin_lashlang_effect(instruction_ip, reissued);
         let result =
             Box::pin(self.resolve_effect_inner(effect, active.as_ref(), instruction_ip)).await;
         match (&result, active.as_ref()) {
@@ -292,14 +293,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(None)
     }
 
-    /// Whether the run stands on an operation its host parked it on, rather
-    /// than a signal wait handed to a successor segment.
+    /// Whether the next instruction reissues an operation already started.
     fn parked_on_effect(&self) -> bool {
         matches!(
             &self.resume_point,
             super::VmResumePoint::ReissueOperation {
                 operation: super::VmSuspendedOperation::ResourceOperation { .. }
-                    | super::VmSuspendedOperation::Sleep,
+                    | super::VmSuspendedOperation::Sleep
+                    | super::VmSuspendedOperation::WaitSignal { .. },
                 ..
             }
         )

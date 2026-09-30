@@ -146,6 +146,7 @@ pub mod testing;
 mod trigger_schema;
 mod triggers;
 mod turn_ingress;
+mod worker_recovery;
 
 pub use attachment_store::SqliteAttachmentStore;
 pub use backend::{IncompleteSqliteStoreSet, SqliteStoreSet, SqliteStoreSetOptions};

@@ -2279,6 +2279,7 @@ dependencies = [
  "ryu-js",
  "schemars 0.8.22",
  "serde",
+ "serde_bytes",
  "serde_ignored",
  "serde_json",
  "sha2 0.10.9",
@@ -2306,7 +2307,9 @@ dependencies = [
  "lash-internal-tool-support",
  "lash-internal-trace",
  "lash-internal-vm-broker",
+ "lash-internal-vm-client",
  "lash-internal-vm-protocol",
+ "rmp-serde",
  "serde",
  "serde_json",
  "tempfile",
@@ -2448,6 +2451,9 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "lash-internal-typescript",
+ "lash-internal-vm-broker",
+ "lash-internal-vm-client",
+ "lash-internal-vm-protocol",
  "rmp-serde",
  "serde",
  "serde_bytes",
@@ -2815,6 +2821,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "lash-internal-core-store",
+ "lash-internal-lashlang",
  "lash-internal-sansio",
  "lash-internal-vm-protocol",
  "rmp-serde",
@@ -2824,6 +2831,27 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "lash-internal-vm-client"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "lash-internal-core-execution",
+ "lash-internal-lashlang",
+ "lash-internal-vm-broker",
+ "lash-internal-vm-protocol",
+ "libc",
+ "rmp-serde",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+ "tokio",
+ "toml",
+ "uuid",
 ]
 
 [[package]]
@@ -2844,11 +2872,15 @@ dependencies = [
 name = "lash-internal-vm-worker"
 version = "0.0.0-dev"
 dependencies = [
+ "blake3",
+ "lash-internal-core-execution",
  "lash-internal-lashlang",
  "lash-internal-typescript",
+ "lash-internal-vm-client",
  "lash-internal-vm-protocol",
  "lash-internal-vm-worker",
  "libc",
+ "rmp-serde",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2985,6 +3017,8 @@ dependencies = [
  "lash-internal-tool-support",
  "lash-internal-trace",
  "lash-internal-typescript",
+ "lash-internal-vm-client",
+ "lash-internal-vm-worker",
  "rmp-serde",
  "rusqlite",
  "serde",
@@ -3030,6 +3064,7 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-subagents",
+ "lash-internal-vm-client",
  "lash-runtime",
  "rmp-serde",
  "rusqlite",
@@ -3055,6 +3090,7 @@ dependencies = [
  "lash-internal-remote-protocol",
  "lash-internal-restate",
  "lash-internal-sqlite-store",
+ "lash-internal-vm-client",
  "lash-runtime",
  "reqwest 0.13.4",
  "restate-sdk",

@@ -160,6 +160,11 @@ use lash::schema::{SchemaContract as _, SchemaProjectionPolicy as _};
 mod host_wrapping_inventory {
     use lash::persistence::ArtifactCleanupLedger as _;
     use lash::persistence::ProcessDefinitionStore as _;
+    use lash::persistence::WorkerRecoveryClaim as _;
+    use lash::persistence::WorkerRecoveryError as _;
+    use lash::persistence::WorkerRecoveryLimits as _;
+    use lash::persistence::WorkerRecoveryStore as _;
+    use lash::persistence::WorkerRecoveryTotals as _;
     use lash::plugins::ContextRegistrations as _;
     use lash::plugins::ExecutionRegistrations as _;
     use lash::plugins::OutputRegistrations as _;
@@ -202,7 +207,6 @@ mod rlm_inventory {
     // The code-mode dialect seam (ADR 0096).
     use lash::rlm::CellTags as _;
     use lash::rlm::Dialect as _;
-    use lash::rlm::DialectDiagnostic as _;
     use lash::rlm::DialectPromptVocabulary as _;
     use lash::rlm::DialectRefusal as _;
     use lash::rlm::DialectRefusalKind as _;
@@ -218,7 +222,7 @@ mod rlm_inventory {
     use lash::rlm::TypeField as _;
     use lash::rlm::TypescriptDialect as _;
     use lash::rlm::lashlang_surface_extension as _;
-    use lash::tools::link_with_deferred_resolution as _;
+    use lash::tools::compile_with_deferred_resolution as _;
 
     // The Lashlang language vocabulary, re-exported whole as `lash::rlm::lang`.
     use lash::rlm::lang::AbilityOp as _;

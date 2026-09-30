@@ -2,11 +2,9 @@
 
 ## Status
 
-Accepted. The VM instance, parent-worker protocol, worker entry, bounded
-process pool and broker are implemented. The RLM and process adapters execute
-VM functions in the host process; their integration with worker execution is
-open work under FIG-3821. This ADR describes the implemented components and
-that current adapter boundary.
+Accepted. The parent client owns the bounded pool and transport in
+`lash-vm-client`. `lash-vm-worker` owns source frontends and VM execution.
+RLM cells, durable process bodies and process creation use the worker service.
 
 ## Context
 
@@ -173,7 +171,9 @@ transport or pool:
   100,000 decode nodes; 64 MiB of cumulative charged decode allocation; 2 MiB
   of VM state; 1 MiB effect values; 64 KiB of source; and a 5-second
   no-response watchdog, which host waits pause and which is not a guest
-  execution limit.
+  execution limit. The shared adapter service admits 64 MiB VM state,
+  128 MiB frames, 256 MiB charged decode allocation and a 128 MiB queue.
+  These bounds are explicit in its pool configuration.
 - **Infrastructure outcomes.** `WorkerCrashed`, `WorkerUnresponsive`,
   `ProtocolViolation`, `PayloadTooLarge` and `WorkerLimitExceeded` are kept
   apart from guest errors. EOF or exit is supervisor evidence, never worker
@@ -212,8 +212,8 @@ belongs to the transport, which reports a silent worker as
   granted, a request kind the payload does not match, or an operation the
   broker does not serve yet. A refused request takes no ordinal. The broker
   serves resource operations, batches, awaits, sleeps and cancel
-  checkpoints; prints, finishes, failures, process events and signal waits
-  are unsupported request kinds.
+  checkpoints. The shipped adapters also serve prints, finishes, failures,
+  process events and signal waits through their admitted runtime hosts.
 - **The parent owns every counter.** `ParentLedger` gives each admitted
   request the next ordinal and derives its `ToolCallId`s through
   `CodeCallIdentities` (ADR 0117 §2), the one derivation both Lashlang
@@ -279,7 +279,7 @@ the synthetic-next tier. The broker law macro registers:
 
 ### 9. The worker entry and pool
 
-`lash-vm-worker` launches an explicitly configured entry with an empty
+`lash-vm-client` launches an explicitly configured worker entry with an empty
 environment. The entry closes inherited descriptors except its IPC socket
 before running the worker server. The pool bounds checkout, queue size,
 process count, deadlines, cumulative CPU and replacement attempts. Clean
@@ -288,12 +288,11 @@ discards it. Pool accounting stays parent-owned across redrive.
 
 This provides crash containment, rather than an OS sandbox. Lash installs no
 namespaces, seccomp, Landlock or cgroups. A native VM escape has the worker
-user's OS access. Current adapter execution in the host process does not
-acquire the worker's process containment merely by using `VmInstance`.
+user's OS access. Both adapters run model code through this process boundary.
 
-Sources: `crates/lash-vm-worker/src/process.rs:26`,
+Sources: `crates/lash-vm-client/src/ipc.rs:26`,
 `crates/lash-vm-worker/src/entry.rs:26`, and
-`crates/lash-vm-worker/src/pool.rs:9`.
+`crates/lash-vm-client/src/pool.rs`.
 
 ## Consequences
 
@@ -302,11 +301,9 @@ values. A reset drops all guest-derived state by construction. Field-by-field
 cleanup could miss a newly added state owner; keeping grants in returned guest
 state would let that state replace parent-owned bindings.
 
-The adapter boundary matters. `RlmExecutionState` owns a `VmInstance` in the
-host, and the process adapter compiles and resumes the VM locally. Their
-worker-side helper functions delimit semantic decoding, but do not create a
-process boundary. The worker and broker are available components; the full
-adapter integration depends on FIG-3821.
+RLM cells, durable process bodies, process creation, artifact inspection and
+semantic guest-state restoration run through the shared worker service.
+Parent adapters retain opaque VM bytes and worker-verified structural metadata.
 
 ## Implementation
 
@@ -318,9 +315,48 @@ adapter integration depends on FIG-3821.
   `crates/lash-vm-protocol/src/codec.rs:3` defines framing and decode charges.
 - `crates/lash-vm-broker/src/broker.rs:22` defines worker-loss recovery;
   `:391` releases a slot for a nested effect without committing the park.
-- `crates/lash-protocol-rlm/src/executor/state.rs:575` and
-  `crates/lash-lashlang-runtime/src/process.rs:507` show local adapter execution.
+- `crates/lash-protocol-rlm/src/executor/mod.rs` and
+  `crates/lash-lashlang-runtime/src/process.rs` broker worker execution.
+- `crates/lash-vm-worker/src/service.rs` owns source compilation and artifact
+  inspection; `scripts/check-vm-parent-paths.py` checks the production inventory.
 - `crates/lash-typescript/tests/corpus_laws/vm_instance.rs` pins reset and
   step/resume equivalence; `crates/lash-conformance/src/macros/vm_broker.rs:12`
   registers the broker laws; `crates/lash-vm-worker/tests/pool_laws.rs`
   exercises the physical pool.
+
+### Durable worker accounting
+
+Cells and process bodies reserve their parent-admitted code scope on the
+backend before model work starts. The reservation records consumed attempts,
+known cumulative CPU, unknown CPU attempts, and whether a worker is active.
+Worker release settles measured CPU before parent callbacks. Park/resume and
+segment handover keep the same attempt. A failed or interrupted active attempt
+requires a replacement attempt on substrate redrive; the reservation prevents
+that redrive from receiving fresh counters. Fenced settlement prevents an older
+parent from overwriting a successor's totals.
+
+Parent loss during an active attempt records its CPU as unknown. It consumes
+an attempt without inventing measured usage or preventing durable redrive.
+Repeated losses exhaust the typed attempt bound. Each attempt has a CPU cap,
+so the worst-case work bound is `(attempts × per-attempt CPU cap) + known CPU`.
+Known CPU and consumed attempts remain monotone across redrives. SQLite and
+PostgreSQL store this accounting independently of positional effect journals.
+
+An owned child also installs a kernel CPU ceiling before guest work, from its
+current process CPU and the configured execution CPU budget. It remains
+in force across every effect response and if the parent dies. Only reset for a
+new checkout installs another ceiling. Waiting for a parent response settles
+known CPU and clears the active marker before any host callback; resuming
+computation marks it active again. The kernel rounds CPU limits to seconds, so the
+per-attempt cap used in the bound above is the configured cumulative CPU budget
+plus one second. The ceiling bounds computation. The worker has the filesystem
+and network access of its OS user.
+
+### Pending await and batch parking
+
+Resource calls, sleep and signal waits suspend and release their worker before
+nested worker admission. Await and resource-operation batches currently answer
+in place. A cell awaiting a process can therefore hold the only slot while the
+awaited process queues for that slot. The ignored native law
+`one_slot_process_await_releases_worker_for_the_awaited_body` records the gap
+with a bounded checkout timeout.

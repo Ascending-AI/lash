@@ -1,6 +1,6 @@
 # VM workers
 
-`WorkerPool::new(PoolConfig::standard(WorkerEntry::helper(path)))` prewarms a
+`lash_vm_client::WorkerPool::new(PoolConfig::standard(WorkerEntry::helper(path)))` prewarms a
 credential-free helper. There is no in-process fallback. A host may instead
 register `worker_entry(immutable_host_build_identity)` as its first action and
 configure `WorkerEntry::reexec` with that same compiled identity. Register the
@@ -17,8 +17,8 @@ This does not provide OS confinement against a native escape.
 checkout owns one execution lease. `start` accepts source or stored artifact
 bytes and explicit `vm_run` descriptions encoded from `RunContext`. VM state is
 opaque in the parent; semantic decoding, linking, compilation, and execution
-happen in the worker. Effect requests carry JSON-encoded `AbilityOp`; a value
-answer carries JSON-encoded `AbilityOutcome`, and a failure carries
+happen in the worker. Effect requests carry typed MessagePack `AbilityOp`; a value
+answer carries heapless MessagePack `AbilityOutcome`, and a failure carries
 `ExecutionHostError`. Descriptions contain no grants or backing host handles.
 The parent broker must authorize requests against its admitted context.
 
@@ -26,7 +26,9 @@ The pool never retries guest execution. On infrastructure failure, it fences
 the checkout, kills and reaps the process, then replenishes its minimum.
 The broker must settle admitted operations and re-drive the owning substrate
 invocation through its real journal. Carry the parent-owned `ExecutionBudget`
-through replacement and persist its totals with VM checkpoints. CPU is charged
+through replacement. The backend's recovery store preserves known CPU,
+consumed attempts and unknown CPU attempts across substrate redrive, independently
+of positional effect journals. CPU is charged
 from process-clock progress and final `wait4` evidence, including a crash before
 the final frame. Physical cancellation does not decide the journaled winner.
 
@@ -57,9 +59,14 @@ MiB, four MiB frames, two MiB VM state, one MiB effect values, 64 KiB source,
 silence. CPU, compute, serialization, retry and restart presets are provisional
 until FIG-4162 measures the integrated path.
 
+The shipped RLM/process service currently allows 64 MiB VM state, 128 MiB
+frames, 256 MiB charged decode allocation and 128 MiB queued input. The existing
+process and conformance fixtures exceed the pool's smaller baseline presets.
+These integrated values remain provisional for FIG-4162's measurements.
+
 Effect values use explicit variants and IEEE number bits, preserving undefined,
-non-finite numbers, negative zero, tuples and record order. They cannot carry
-heap references or live projections. Frames include their 40-byte envelope in
+non-finite numbers, negative zero, tuples and record order. Projection identities use parent-owned namespaces and keys; they carry no
+backing host handles. Frames include their 40-byte envelope in
 the configured cap, and encoding stops before crossing that allocation bound.
 Linux native-process laws run in this lane. macOS has an actual-descriptor
 adapter; execution evidence on a macOS runner remains pending. Persistence,
@@ -77,3 +84,9 @@ their own immutable compiled identity.
 The native bootstrap lives in `entry.rs`. The core boundary gate allows only
 its argv read and empty-environment probe; every other ambient read in the
 worker library remains refused.
+
+RLM and process hosts share `lash_vm_client::service::Service`. The facade names
+its configuration as `lash::rlm::WorkerService`, `WorkerPoolConfig`, `WorkerEntry`
+and `WorkerDeadlines`. Pure artifact inspection and state restoration also run in
+workers. Source and VM entry points remain in `lash-vm-worker`; the parent's pool,
+framing, queue admission and opaque state client live in `lash-vm-client`.

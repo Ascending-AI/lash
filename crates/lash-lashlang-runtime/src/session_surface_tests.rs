@@ -168,6 +168,7 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
             lashlang::LashlangLanguageFeatures::default(),
             lashlang::LashlangHostCatalog::new(),
         ),
+        harness.backend().worker_recovery(),
     );
     harness.install_lashlang_worker(engine, vec![surface_plugin_factory()]);
 
@@ -380,8 +381,12 @@ async fn fig3463_a_crashed_segment_replays_its_journaled_effect_under_one_attemp
     // engine retries the segment on the same deployment, whose sink no
     // longer crashes.
     let crash: Arc<dyn lash_trace::TraceSink> = crash_sink.clone();
-    let engine = LashlangProcessEngine::new(artifact_store.clone(), LashlangSurface::default())
-        .with_execution_trace(Some(crash), lash_trace::TraceContext::default());
+    let engine = LashlangProcessEngine::new(
+        artifact_store.clone(),
+        LashlangSurface::default(),
+        harness.backend().worker_recovery(),
+    )
+    .with_execution_trace(Some(crash), lash_trace::TraceContext::default());
     harness.install_lashlang_worker(engine, vec![tool_factory]);
     let process_id = harness
         .admit(
@@ -506,8 +511,12 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
     .expect("publish failing process env");
     let registry: Arc<dyn ProcessRegistry> = harness.registry();
     let graphs = Arc::new(lash_trace::TraceLashlangGraphStore::default());
-    let engine = LashlangProcessEngine::new(artifact_store, LashlangSurface::default())
-        .with_execution_trace(Some(graphs.clone()), lash_trace::TraceContext::default());
+    let engine = LashlangProcessEngine::new(
+        artifact_store,
+        LashlangSurface::default(),
+        backend.worker_recovery(),
+    )
+    .with_execution_trace(Some(graphs.clone()), lash_trace::TraceContext::default());
     let tool_factory: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
             "fig3463-failure-tool",

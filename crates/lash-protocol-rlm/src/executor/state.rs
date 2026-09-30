@@ -3,18 +3,14 @@ use std::sync::Arc;
 
 use lash_core::SessionError;
 use lashlang::{
-    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment, DurableBaseline,
-    ExecutionScratch, SnapshotDecodeError, State as FlowState, Value as FlowValue,
-    validate_canonical_messagepack_structure,
+    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
+    SnapshotDecodeError, Value as FlowValue, validate_canonical_messagepack_structure,
 };
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 
 mod worker_envelope;
-use worker_envelope::worker_side;
 pub(crate) use worker_envelope::{RlmWorkerCapture, RlmWorkerEnvelope};
-
-use crate::projection::{prune_protected_bindings, prune_reserved_projected_bindings};
 
 use super::apply_global_defaults;
 use super::snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
@@ -531,7 +527,7 @@ enum CaptureMode {
 struct PreparedCapture {
     snapshot: lash_core::plugin::ExecutionStateSnapshot,
     persisted_globals: BTreeMap<String, PersistedValue>,
-    persisted_baseline: DurableBaseline,
+    persisted_baseline: BTreeMap<String, String>,
     leaf_keys: BTreeSet<String>,
     #[cfg(test)]
     encoded_globals: usize,
@@ -540,7 +536,7 @@ struct PreparedCapture {
 #[derive(Clone)]
 struct CaptureRollback {
     persisted_globals: BTreeMap<String, PersistedValue>,
-    persisted_baseline: DurableBaseline,
+    persisted_baseline: BTreeMap<String, String>,
     persisted_leaf_keys: BTreeSet<String>,
 }
 
@@ -550,11 +546,11 @@ struct CaptureRollback {
 /// clean after a later cell is cancelled, allowing the prior cell to disappear
 /// from the next cold snapshot.
 pub(super) struct RlmExecutionCheckpoint {
-    vm_state: FlowState,
+    vm_state: lash_vm_client::RemoteState,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
     persisted_globals: BTreeMap<String, PersistedValue>,
-    persisted_baseline: DurableBaseline,
+    persisted_baseline: BTreeMap<String, String>,
     persisted_leaf_keys: BTreeSet<String>,
     capture_dirty: bool,
     capture_rollback: Option<CaptureRollback>,
@@ -572,7 +568,7 @@ pub(super) struct RlmExecutionCheckpoint {
 /// from the worker only as a [`RlmWorkerEnvelope`] or [`RlmWorkerCapture`].
 pub struct RlmExecutionState {
     engine_id: Arc<str>,
-    pub(super) vm: lashlang::VmInstance,
+    pub(super) vm: lash_vm_client::RemoteVm,
     /// The modules the current frame holds an edge of (ADR 0113 §3.1). A
     /// cache for one frame: a module first bound in a new frame acquires
     /// that frame's edge, and a cold restore starts it empty and re-acquires.
@@ -589,7 +585,7 @@ pub struct RlmExecutionState {
     /// baseline those bodies stand for. The two move together: a capture
     /// installs both, and a rollback or checkpoint restore rewinds both.
     persisted_globals: BTreeMap<String, PersistedValue>,
-    persisted_baseline: DurableBaseline,
+    persisted_baseline: BTreeMap<String, String>,
     persisted_leaf_keys: BTreeSet<String>,
     /// Whether anything may have changed since the last installed capture: a
     /// cell ran, a patch or prune committed, the root's own records moved.
@@ -609,16 +605,23 @@ impl RlmExecutionState {
         Self::for_engine("typescript")
     }
 
+    #[cfg(test)]
     pub(crate) fn for_engine(engine_id: impl Into<Arc<str>>) -> Self {
+        Self::for_engine_with_workers(engine_id, lash_vm_client::service::Service::default())
+    }
+    pub(crate) fn for_engine_with_workers(
+        engine_id: impl Into<Arc<str>>,
+        workers: lash_vm_client::service::Service,
+    ) -> Self {
         Self {
             engine_id: engine_id.into(),
-            vm: lashlang::VmInstance::pristine(),
+            vm: lash_vm_client::RemoteVm::pristine(workers),
             frame_held_modules: None,
             deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord::default(),
             deferred_trigger_resolutions:
                 lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
             persisted_globals: BTreeMap::new(),
-            persisted_baseline: DurableBaseline::default(),
+            persisted_baseline: BTreeMap::default(),
             persisted_leaf_keys: BTreeSet::new(),
             capture_dirty: true,
             capture_rollback: None,
@@ -745,7 +748,6 @@ impl RlmExecutionState {
             return;
         };
         self.restore_execution_checkpoint(checkpoint);
-        self.vm.restore_scratch(ExecutionScratch::new());
     }
 
     /// Encode the canonical RLM root and only the leaf bodies whose logical
@@ -821,24 +823,39 @@ impl RlmExecutionState {
         fleet_format: lash_core::FleetFormat,
     ) -> Result<PreparedCapture, SessionError> {
         let complete = mode == CaptureMode::Complete;
-        let complete_baseline = DurableBaseline::default();
+        let complete_baseline = BTreeMap::new();
         // The worker captures its guest state; the parent reads the capture
         // back structurally and assembles the root from it and its own
         // authority.
-        let (capture, baseline) = worker_side::capture(
-            &self.vm,
-            if complete {
-                &complete_baseline
-            } else {
-                &self.persisted_baseline
-            },
-            fleet_format,
-        )
-        .map_err(|error| {
-            SessionError::Protocol(format!(
-                "failed to snapshot RLM execution state as canonical state: {error}"
-            ))
-        })?;
+        let parts = self
+            .vm
+            .state()
+            .capture(
+                if complete {
+                    &complete_baseline
+                } else {
+                    &self.persisted_baseline
+                },
+                fleet_format,
+            )
+            .map_err(SessionError::Protocol)?;
+        let baseline = parts.baseline;
+        let mut capture = RlmWorkerCapture {
+            state_header: ByteBuf::from(parts.header),
+            changed: BTreeMap::new(),
+            unchanged: BTreeSet::new(),
+        };
+        for (name, fragment) in parts.fragments {
+            match fragment {
+                lashlang::DurableFragment::Changed(body) => {
+                    capture.changed.insert(name, ByteBuf::from(body));
+                }
+                lashlang::DurableFragment::Unchanged => {
+                    capture.unchanged.insert(name);
+                }
+            }
+        }
+        let capture = capture.encode();
         let capture = RlmWorkerCapture::accept(&capture)
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
         // Leaves the receiver of this capture already holds. A staged but
@@ -1033,18 +1050,31 @@ impl RlmExecutionState {
             });
         }
 
-        let envelope = worker_bound_envelope(state, &parsed)?.encode();
-        // The worker installs the guest state; the parent keeps the
-        // resolutions, which never cross.
-        let baseline = worker_side::install(&mut self.vm, &envelope, fleet_format).map_err(
-            |error| match error {
-                worker_side::InstallError::Envelope(refusal) => RlmSnapshotError::FormatMismatch {
-                    details: refusal.to_string(),
-                },
-                worker_side::InstallError::Snapshot(error) => RlmSnapshotError::Lashlang(error),
-            },
-        )?;
-        prune_reserved_projected_bindings(self.vm.state_mut());
+        let envelope = worker_bound_envelope(state, &parsed)?;
+        let baseline = self
+            .vm
+            .state_mut()
+            .restore(
+                envelope.state_header.into_vec(),
+                envelope
+                    .globals
+                    .into_iter()
+                    .map(|(name, bytes)| (name, bytes.into_vec()))
+                    .collect(),
+                fleet_format,
+            )
+            .map_err(|error| match error {
+                lash_vm_client::RemoteRestoreError::Snapshot(error) => {
+                    RlmSnapshotError::Lashlang(error)
+                }
+                lash_vm_client::RemoteRestoreError::Worker(error) => {
+                    RlmSnapshotError::WorkerUnavailable(error)
+                }
+            })?;
+        self.vm
+            .state_mut()
+            .remove_names(BTreeSet::from(["history".to_string()]))
+            .map_err(|details| RlmSnapshotError::FormatMismatch { details })?;
 
         let next_live_names = self
             .vm
@@ -1066,12 +1096,24 @@ impl RlmExecutionState {
         Ok(())
     }
 
-    pub fn prune_protected_globals(&mut self, protected_names: &BTreeSet<String>) {
+    pub fn prune_protected_globals(
+        &mut self,
+        protected_names: &BTreeSet<String>,
+    ) -> Result<(), SessionError> {
         let before = self.vm.state().binding_names().count();
-        prune_protected_bindings(self.vm.state_mut(), protected_names);
+        let names = protected_names
+            .iter()
+            .cloned()
+            .chain(std::iter::once("history".to_string()))
+            .collect();
+        self.vm
+            .state_mut()
+            .remove_names(names)
+            .map_err(SessionError::Protocol)?;
         if self.vm.state().binding_names().count() != before {
             self.capture_dirty = true;
         }
+        Ok(())
     }
 
     pub fn patch_globals(

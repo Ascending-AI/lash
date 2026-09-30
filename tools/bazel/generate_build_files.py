@@ -856,11 +856,13 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
 
     has_build_script = any("custom-build" in target["kind"] for target in package["targets"])
     if has_build_script:
-        build_data = worker_identity_inputs() if package["name"] == "lash-internal-vm-worker" else []
+        build_data = worker_identity_inputs() if package["name"] in ("lash-internal-vm-worker", "lash-internal-vm-client") else []
         build_data_argument = (
             f"    extra_data = {string_list(build_data)},\n"
             '    build_script_env = {"LASH_VM_WORKER_SOURCE_ROOT": "$${pwd}"},\n'
         ) if build_data else ""
+        if package["name"] == "lash-internal-vm-client":
+            build_data_argument += '    extra_srcs = ["//crates/lash-vm-worker:rust_sources"],\n'
         chunks.append(
             "lash_rust_build_script(\n"
             "    name = \"build_script\",\n"

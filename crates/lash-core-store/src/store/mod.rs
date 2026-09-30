@@ -68,6 +68,7 @@ mod state_version;
 mod testing;
 mod usage;
 mod window_load;
+pub mod worker_recovery;
 
 use record_schema_version::record_schema_version;
 pub use record_schema_version::{

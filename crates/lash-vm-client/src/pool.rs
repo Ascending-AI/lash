@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use crate::process::Worker;
+use crate::ipc::Worker;
 use crate::{PoolConfig, PoolError};
 use lash_vm_protocol::*;
 
@@ -15,17 +15,40 @@ struct BudgetTotals {
     attempts: u32,
     cpu_nanos: u64,
     replacement: bool,
+    unknown_cpu_attempts: u32,
 }
 impl ExecutionBudget {
     pub fn totals(&self) -> (u32, Duration) {
         let totals = lock(&self.0);
         (totals.attempts, Duration::from_nanos(totals.cpu_nanos))
     }
+    pub fn recovery_totals(
+        &self,
+    ) -> lash_core_execution::store::worker_recovery::WorkerRecoveryTotals {
+        let totals = lock(&self.0);
+        lash_core_execution::store::worker_recovery::WorkerRecoveryTotals {
+            attempts: totals.attempts,
+            cpu_nanos: totals.cpu_nanos,
+            replacement: totals.replacement,
+            unknown_cpu_attempts: totals.unknown_cpu_attempts,
+        }
+    }
+    pub fn from_recovery(
+        totals: lash_core_execution::store::worker_recovery::WorkerRecoveryTotals,
+    ) -> Self {
+        Self(Arc::new(Mutex::new(BudgetTotals {
+            attempts: totals.attempts,
+            cpu_nanos: totals.cpu_nanos,
+            replacement: totals.replacement,
+            unknown_cpu_attempts: totals.unknown_cpu_attempts,
+        })))
+    }
     pub fn restored(attempts: u32, cpu: Duration) -> Self {
         Self(Arc::new(Mutex::new(BudgetTotals {
             attempts,
             cpu_nanos: nanos(cpu),
             replacement: attempts > 0,
+            unknown_cpu_attempts: 0,
         })))
     }
     fn admit(&self, config: &PoolConfig) -> Result<(), PoolError> {
@@ -194,6 +217,7 @@ impl WorkerPool {
                     pending: None,
                     resettable: false,
                     owner: None,
+                    observations: Vec::new(),
                 });
             }
             if !queued {
@@ -261,12 +285,14 @@ impl Pool {
             state.failed = true;
         }
     }
-    fn discard(&self, mut worker: Worker) -> u64 {
+    fn discard(&self, mut worker: Worker, failed: bool) -> u64 {
         let cpu = worker.terminate();
         drop(worker);
         let mut state = lock(&self.state);
         state.workers -= 1;
-        self.failed(&mut state);
+        if failed {
+            self.failed(&mut state);
+        }
         // The just-reaped slot stays reserved while its replacement starts.
         let replace = !state.failed && state.workers < self.config.min_workers;
         if replace {
@@ -338,8 +364,23 @@ pub struct Checkout {
     pending: Option<(EffectRequestId, EffectKind)>,
     resettable: bool,
     owner: Option<VmOwner>,
+    observations: Vec<EncodedPayload>,
 }
 impl Checkout {
+    pub fn take_observations(&mut self) -> Vec<EncodedPayload> {
+        std::mem::take(&mut self.observations)
+    }
+    pub fn lease(&self) -> ExecutionLease {
+        self.outgoing.next_header_copy().lease
+    }
+    pub fn interruptor(&self) -> Result<std::os::unix::net::UnixStream, PoolError> {
+        self.worker
+            .as_ref()
+            .ok_or_else(PoolError::eof)?
+            .pipe
+            .try_clone()
+            .map_err(PoolError::io)
+    }
     pub fn pid(&self) -> Option<u32> {
         self.worker.as_ref().map(Worker::pid)
     }
@@ -397,6 +438,25 @@ impl Checkout {
             self.pool.config.protocol.no_response_watchdog,
         )
     }
+    /// Performs pure compiler/state work in the worker, under this checkout.
+    pub fn prepare(
+        &mut self,
+        owner: VmOwner,
+        request: EncodedPayload,
+    ) -> Result<EncodedPayload, PoolError> {
+        if self.started {
+            return Err(PoolError::protocol("checkout already started"));
+        }
+        self.owner = Some(owner.clone());
+        self.started = true;
+        match self.exchange(
+            ParentMessage::Prepare { owner, request },
+            self.pool.config.protocol.no_response_watchdog,
+        )? {
+            WorkerMessage::Prepared { response } => Ok(response),
+            _ => Err(PoolError::protocol("pure worker work returned no response")),
+        }
+    }
     /// Host effect work may take any time. No worker/CPU deadline runs while
     /// the parent owns the pending request; this call starts a new phase.
     pub fn effect_result(&mut self, result: EffectResponse) -> Result<WorkerMessage, PoolError> {
@@ -447,7 +507,7 @@ impl Checkout {
             ParentMessage::Cancel,
             self.pool.config.deadlines.cancel_grace,
         );
-        self.discard();
+        self.discard_for(false);
         response
     }
     /// Call after clean completion or a broker-approved abandonment/park.
@@ -463,12 +523,27 @@ impl Checkout {
         )?;
         let reply = self.receive_control(self.pool.config.protocol.no_response_watchdog);
         match reply {
-            Ok(WorkerMessage::ResetDone) => {
+            Ok(WorkerMessage::ResetDone { cpu_nanos }) => {
+                if cpu_nanos < self.credited_cpu {
+                    self.discard();
+                    return Err(PoolError::protocol("reset CPU accounting regressed"));
+                }
+                if let Err(error) = self
+                    .budget
+                    .charge(cpu_nanos - self.credited_cpu, &self.pool.config)
+                {
+                    self.discard();
+                    return Err(error);
+                }
+                self.credited_cpu = cpu_nanos;
+                if let Some(worker) = &mut self.worker {
+                    worker.cpu_nanos = cpu_nanos;
+                }
                 if let Some(worker) = self.worker.take() {
                     let mut state = lock(&self.pool.state);
                     if state.failed {
                         drop(state);
-                        self.pool.discard(worker);
+                        self.pool.discard(worker, true);
                     } else {
                         state.idle.push(worker);
                         self.pool.available.notify_all();
@@ -502,7 +577,11 @@ impl Checkout {
             .codec
             .encode_parent(&frame)
             .map_err(PoolError::from)?;
-        if matches!(frame.message, ParentMessage::Start(_)) && bytes.len() > self.reservation {
+        if matches!(
+            frame.message,
+            ParentMessage::Start(_) | ParentMessage::Prepare { .. }
+        ) && bytes.len() > self.reservation
+        {
             return Err(PoolError::QueueFull { bytes: bytes.len() });
         }
         worker.send(&frame, timeout)
@@ -589,6 +668,22 @@ impl Checkout {
                             WorkerPhase::Responding => timeout,
                         };
                 }
+                WorkerMessage::Refused { reason } => return Err(PoolError::protocol(reason)),
+                WorkerMessage::Observations { payload } => {
+                    self.bound(
+                        payload.0.len() as u64,
+                        self.pool.config.protocol.decode.max_allocation_bytes,
+                    )?;
+                    let total = self
+                        .observations
+                        .iter()
+                        .try_fold(payload.0.len() as u64, |total, item| {
+                            total.checked_add(item.0.len() as u64)
+                        })
+                        .ok_or_else(|| PoolError::protocol("observation byte count overflow"))?;
+                    self.bound(total, self.pool.config.protocol.decode.max_allocation_bytes)?;
+                    self.observations.push(payload);
+                }
                 WorkerMessage::LimitExceeded { limit: exhausted } => return Err(limit(exhausted)),
                 WorkerMessage::PayloadTooLarge { limit, size } => {
                     return Err(InfrastructureOutcome::PayloadTooLarge { limit, size }.into());
@@ -632,19 +727,31 @@ impl Checkout {
                     }
                     self.resettable = !matches!(message, WorkerMessage::GuestError { .. });
                     if !self.resettable {
-                        self.discard();
+                        self.discard_for(false);
+                        lock(&self.budget.0).replacement = false;
                     }
                     // Do not consult exit status after a fully decoded terminal.
                     return Ok(message);
                 }
-                WorkerMessage::Cancelled => return Ok(WorkerMessage::Cancelled),
+                WorkerMessage::Prepared { response } => {
+                    self.resettable = true;
+                    return Ok(WorkerMessage::Prepared { response });
+                }
+                WorkerMessage::Cancelled => {
+                    self.discard_for(false);
+                    lock(&self.budget.0).replacement = false;
+                    return Ok(WorkerMessage::Cancelled);
+                }
                 _ => return Err(PoolError::protocol("unexpected worker response")),
             }
         }
     }
     fn discard(&mut self) {
+        self.discard_for(true);
+    }
+    fn discard_for(&mut self, failed: bool) {
         if let Some(worker) = self.worker.take() {
-            let cpu = self.pool.discard(worker);
+            let cpu = self.pool.discard(worker, failed);
             let _ = self
                 .budget
                 .charge(cpu.saturating_sub(self.credited_cpu), &self.pool.config);
@@ -659,6 +766,6 @@ impl Checkout {
 }
 impl Drop for Checkout {
     fn drop(&mut self) {
-        self.discard();
+        self.discard_for(false);
     }
 }

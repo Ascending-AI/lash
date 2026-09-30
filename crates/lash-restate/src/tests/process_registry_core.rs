@@ -482,6 +482,7 @@ finish(await handle);
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
                 lash_lashlang_runtime::LashlangSurface::default(),
+                artifact_backend.worker_recovery(),
             ),
         ),
     );

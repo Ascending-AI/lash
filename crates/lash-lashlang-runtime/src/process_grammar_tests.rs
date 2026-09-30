@@ -55,8 +55,12 @@ pub(crate) async fn run_sleep_process()
     let graph_store = Arc::new(TraceLashlangGraphStore::default());
     let sink: Arc<dyn lash_trace::TraceSink> = graph_store.clone();
     harness.install_lashlang_worker(
-        LashlangProcessEngine::new(store, LashlangSurface::default())
-            .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
+        LashlangProcessEngine::new(
+            store,
+            LashlangSurface::default(),
+            harness.backend().worker_recovery(),
+        )
+        .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
         Vec::new(),
     );
     let process_id = harness.admit(registration).await;

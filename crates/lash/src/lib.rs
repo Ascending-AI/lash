@@ -360,7 +360,7 @@ pub mod tools {
         DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
         DeferredResolutionRecord, DeferredToolResolver, RecordedGrantInstallError,
         Resolution as DeferredToolResolution, SharedDeferredToolResolver,
-        ToolGrant as DeferredToolGrant, link_with_deferred_resolution,
+        ToolGrant as DeferredToolGrant, compile_with_deferred_resolution,
     };
     /// The whole tool-authoring support surface: [`StaticToolProvider`] /
     /// [`StaticToolExecute`] for fixed-set providers plus the shared helpers
@@ -423,6 +423,10 @@ pub mod persistence {
     /// The artifact-cleanup ledger a [`StoreSet`](crate::StoreSet) hands out
     /// as a trait object (FIG-4373).
     pub use lash_core::store::ArtifactCleanupLedger;
+    pub use lash_core::store::worker_recovery::{
+        WorkerRecoveryClaim, WorkerRecoveryError, WorkerRecoveryLimits, WorkerRecoveryStore,
+        WorkerRecoveryTotals,
+    };
     /// The current state of an obligation a custom ledger exposes.
     pub use lash_core::store::ObligationStanding;
     /// A process park write accepted by a custom registry.

@@ -716,7 +716,7 @@ fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
             }
         )
     );
-    let Err(refusal) = super::worker_side::open_continuation(&sealed) else {
+    let Err(refusal) = worker_continuation_info(&sealed) else {
         panic!("the v10 VM continuation must be refused by the current decoder");
     };
     let details = refusal.to_string();
@@ -850,11 +850,10 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
     .expect("the sealed continuation encodes");
     let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
         .expect("the fixture carries a structurally valid current envelope");
-    let continuation = super::worker_side::open_continuation(&segment.vm)
+    let continuation = worker_continuation_info(&segment.vm)
         .expect("the worker decodes the re-enveloped continuation");
     assert_eq!(
-        continuation.iterator_stack.len(),
-        1,
+        continuation, 1,
         "the refused continuation is parked inside the predecessor loop"
     );
 }
@@ -1110,4 +1109,19 @@ fn pre_fig3571_parked_segment_is_refused_at_both_fences() {
         ),
         "unexpected error: {error}"
     );
+}
+
+fn worker_continuation_info(state: &lash_vm_protocol::OpaqueVmState) -> Result<usize, String> {
+    match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::ContinuationInfo {
+            bytes: state.bytes().to_vec(),
+        })
+        .map_err(|e| e.to_string())?
+    {
+        lash_vm_client::service::Response::ContinuationInfo { iterator_count } => {
+            Ok(iterator_count)
+        }
+        lash_vm_client::service::Response::Refused { message, .. } => Err(message),
+        other => Err(format!("unexpected continuation response: {other:?}")),
+    }
 }

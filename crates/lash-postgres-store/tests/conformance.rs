@@ -2102,3 +2102,16 @@ lash_conformance::process_prune_start_staging_tests!({
     let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessExecutionEnvStore>;
     (database_lock, registry, env_store)
 });
+
+mod worker_recovery {
+    use super::*;
+    lash_conformance::worker_recovery_tests!({
+        let Some((lock, storage)) = storage().await else {
+            return;
+        };
+        reset(storage.pool()).await;
+        let (_held, stores, _host, _runner) = double_law_backend(&storage).await;
+        let recovery = stores.worker_recovery();
+        ((lock, storage, _held), recovery)
+    });
+}

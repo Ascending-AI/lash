@@ -3,6 +3,8 @@ use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum PoolError {
+    #[error("worker recovery store failed: {message}")]
+    Recovery { message: String },
     #[error(transparent)]
     Infrastructure(#[from] InfrastructureOutcome),
     #[error("the worker queue refuses {bytes} bytes at its item or byte bound")]
@@ -22,19 +24,19 @@ pub enum PoolError {
 }
 
 impl PoolError {
-    pub(crate) fn protocol(error: impl std::fmt::Display) -> Self {
+    pub fn protocol(error: impl std::fmt::Display) -> Self {
         InfrastructureOutcome::ProtocolViolation {
             reason: error.to_string(),
         }
         .into()
     }
-    pub(crate) fn eof() -> Self {
+    pub fn eof() -> Self {
         InfrastructureOutcome::WorkerCrashed {
             evidence: SupervisorEvidence::EndOfStream,
         }
         .into()
     }
-    pub(crate) fn io(error: std::io::Error) -> Self {
+    pub fn io(error: std::io::Error) -> Self {
         match error.kind() {
             std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
                 InfrastructureOutcome::WorkerUnresponsive { silent_ms: 0 }.into()

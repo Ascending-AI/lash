@@ -70,14 +70,22 @@ finish(null);
         }
     }
 
-    fn link(self) -> Result<lashlang::ModuleArtifact> {
+    fn link(self) -> Result<lash_vm_client::InspectedArtifact> {
         let environment = lashlang::LashlangHostEnvironment::new(
             lashlang::LashlangHostCatalog::new(),
             lashlang::LashlangAbilities::all(),
         );
-        Ok(lash::typescript::link(self.source(), &environment)
-            .map_err(|error| anyhow!("link the {self:?} module: {error:?}"))?
-            .artifact)
+        match lash_vm_client::service::Service::default()
+            .request(lash_vm_client::service::Request::CompileModule {
+                source: self.source().into(),
+                environment,
+                cell: false,
+            })
+            .map_err(|error| anyhow!("link the {self:?} module: {error}"))?
+        {
+            lash_vm_client::service::Response::Module(module) => Ok(module.artifact),
+            response => Err(anyhow!("link the {self:?} module: {response:?}")),
+        }
     }
 }
 
@@ -346,8 +354,11 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
             for module in module {
                 let artifact = module.link()?;
                 let module_ref = artifact.module_ref().clone();
-                let (verified, error) = match artifacts.get_module_artifact(&module_ref).await {
-                    Ok(Some(read)) => (Some(*read == artifact), None),
+                let (verified, error) = match lash_vm_client::service::Service::default()
+                    .inspect_artifact(&artifacts, &module_ref)
+                    .await
+                {
+                    Ok(Some(read)) => (Some(read == artifact), None),
                     Ok(None) => (None, None),
                     Err(error) => (Some(false), Some(error.to_string())),
                 };

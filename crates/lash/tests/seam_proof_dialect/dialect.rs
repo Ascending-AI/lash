@@ -1,6 +1,7 @@
 //! A seam proof, not a language: the smallest code-mode dialect that shows a
-//! second front end plugs into the host through the public `Dialect` seam
-//! alone. It lives only in this test target.
+//! second front end plugs into the host through the public `Dialect` seam.
+//! The host adapter selects the compiled worker that owns its source parser.
+//! Both live only in this test target.
 //!
 //! One statement per line, two forms:
 //!
@@ -9,10 +10,9 @@
 //! give VALUE        where VALUE is NAME, NAME.FIELD or a JSON literal
 //! ```
 
-use lash::rlm::lang::{AssignTarget, Expr, Program, ResourceRefExpr, Span};
 use lash::rlm::{
-    CellTags, Dialect, DialectDiagnostic, DialectPromptVocabulary, DialectRefusal,
-    DialectRefusalKind, ExecutionSectionRequest, LashlangHostEnvironment, ResolvedToolBinding,
+    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal,
+    DialectRefusalKind, ExecutionSectionRequest, ResolvedToolBinding,
     RlmChannel, ShapeNotation,
 };
 
@@ -30,24 +30,9 @@ impl Dialect for SeamProofDialect {
         LANGUAGE_ID
     }
 
-    fn parse(&self, source: &str) -> Result<Program, DialectDiagnostic> {
-        let mut statements = Vec::new();
-        for line in source
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-        {
-            statements.push(statement(line).ok_or_else(|| refusal(source, line))?);
-        }
-        Ok(Program::block(statements))
-    }
-
-    fn parse_cell(
-        &self,
-        source: &str,
-        _host: &LashlangHostEnvironment,
-    ) -> Result<Program, DialectDiagnostic> {
-        self.parse(source)
+    fn worker_service(&self) -> lash::rlm::WorkerService {
+        let entry = lash::rlm::WorkerEntry::helper(super::worker_executable());
+        lash::rlm::WorkerService::new(lash::rlm::WorkerPoolConfig::standard(entry))
     }
 
     fn tool_call_path(&self, binding: &ResolvedToolBinding) -> Result<String, DialectRefusal> {
@@ -137,61 +122,6 @@ const NOTATION: ShapeNotation = ShapeNotation {
     record_close: ")",
 };
 
-fn statement(line: &str) -> Option<Expr> {
-    if let Some(value) = line.strip_prefix("give ") {
-        return Some(Expr::Finish(Box::new(value_expr(value.trim())?)));
-    }
-    let rest = line.strip_prefix("take ")?;
-    let (name, rest) = rest.split_once(" from ")?;
-    let (path, arguments) = rest.split_once(" WITH ")?;
-    let (module, operation) = path.trim().rsplit_once('.')?;
-    let name = name.trim();
-    if !is_name(name) || !module.split('.').all(is_name) || !is_name(operation) {
-        return None;
-    }
-    let call = Expr::ReceiverCall {
-        receiver: Box::new(Expr::ResourceRef(ResourceRefExpr::unresolved(
-            module.split('.').map(Into::into).collect(),
-        ))),
-        operation: operation.into(),
-        args: vec![json_expr(&serde_json::from_str(arguments.trim()).ok()?)],
-    };
-    Some(Expr::Assign {
-        target: AssignTarget::variable(name.into()),
-        expr: Box::new(Expr::Await(Box::new(Expr::ResultUnwrap(Box::new(call))))),
-    })
-}
-
-fn value_expr(text: &str) -> Option<Expr> {
-    if let Ok(value) = serde_json::from_str(text) {
-        return Some(json_expr(&value));
-    }
-    match text.split_once('.') {
-        Some((name, field)) if is_name(name) && is_name(field) => Some(Expr::Field {
-            target: Box::new(Expr::Variable(name.into())),
-            field: field.into(),
-        }),
-        None if is_name(text) => Some(Expr::Variable(text.into())),
-        _ => None,
-    }
-}
-
-fn json_expr(value: &serde_json::Value) -> Expr {
-    match value {
-        serde_json::Value::Null => Expr::Null,
-        serde_json::Value::Bool(value) => Expr::Bool(*value),
-        serde_json::Value::Number(value) => Expr::Number(value.as_f64().unwrap_or(f64::NAN)),
-        serde_json::Value::String(value) => Expr::String(value.as_str().into()),
-        serde_json::Value::Array(items) => Expr::List(items.iter().map(json_expr).collect()),
-        serde_json::Value::Object(fields) => Expr::Record(
-            fields
-                .iter()
-                .map(|(key, value)| (key.as_str().into(), json_expr(value)))
-                .collect(),
-        ),
-    }
-}
-
 fn is_name(text: &str) -> bool {
     text.chars()
         .next()
@@ -210,18 +140,5 @@ fn schema_notation(schema: &serde_json::Value) -> &'static str {
         Some("object") => NOTATION.record,
         Some("null") => NOTATION.null,
         _ => NOTATION.any,
-    }
-}
-
-fn refusal(source: &str, line: &str) -> DialectDiagnostic {
-    let start = source.find(line).unwrap_or(0);
-    DialectDiagnostic {
-        kind: lash_core::CellFailureKind::Program,
-        message: format!("not a seam-proof statement: `{line}`"),
-        span: Some(Span {
-            start,
-            end: start + line.len(),
-        }),
-        rendered: format!("not a seam-proof statement: `{line}`"),
     }
 }
