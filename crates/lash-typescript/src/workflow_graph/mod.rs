@@ -459,6 +459,17 @@ impl WorkflowStatementText for TypeScriptStatementText {
 /// The graph shows the authored body; the wrapper that turns an uncaught error
 /// into process failure is structure the lowerer owns, so it is rebuilt by the
 /// lowerer's one builder rather than stored.
+fn authored_return_type(origin: &lashlang::ProcessOrigin) -> Option<&lashlang::TypeExpr> {
+    match origin {
+        // TypeScript authors literals. A native declaration has always rendered
+        // without a TypeScript return annotation, with its output inferred again.
+        lashlang::ProcessOrigin::Declared => None,
+        lashlang::ProcessOrigin::Lifted {
+            declared_return_ty, ..
+        } => declared_return_ty.as_ref(),
+    }
+}
+
 fn process_wrapper(params: &[lashlang::ProcessParam], body: Expr) -> Expr {
     crate::lower::process_run_wrapper(
         Expr::Function(Box::new(lashlang::FunctionExpr {
@@ -870,6 +881,7 @@ fn splice_at(
             expr: Box::new(Expr::Block(statements)),
         };
         literal.params = process.params.clone();
+        literal.return_ty = authored_return_type(&process.origin).cloned();
         *literal.body = process_wrapper(&process.params, body);
     } else if let Some(name) = lifted_reference(expr, pending)
         && pending.spliced.contains(name.as_str())
@@ -916,6 +928,7 @@ fn splice_at(
         *expr = Expr::ProcessLiteral(Box::new(lashlang::ProcessLiteralExpr {
             params: params.to_vec(),
             hidden_args: hidden.to_vec(),
+            return_ty: authored_return_type(&process.origin).cloned(),
             body: Box::new(process_wrapper(params, body)),
         }));
     }

@@ -106,6 +106,7 @@ pub(super) struct PreviousBinding {
 #[derive(Clone, Debug)]
 pub(super) struct Completion {
     pub(super) finishes: Vec<TypeExpr>,
+    pub(super) returns: Vec<TypeExpr>,
     pub(super) can_fallthrough: bool,
 }
 
@@ -113,6 +114,7 @@ impl Completion {
     pub(super) fn fallthrough() -> Self {
         Self {
             finishes: Vec::new(),
+            returns: Vec::new(),
             can_fallthrough: true,
         }
     }
@@ -120,6 +122,7 @@ impl Completion {
     pub(super) fn terminal(finishes: Vec<TypeExpr>) -> Self {
         Self {
             finishes,
+            returns: Vec::new(),
             can_fallthrough: false,
         }
     }
@@ -132,7 +135,7 @@ pub(super) fn any_binding() -> Binding {
 pub(super) fn binding_type(binding: &Binding) -> TypeExpr {
     match binding {
         Binding::Value(ty) => ty.clone(),
-        Binding::SchemaWitness { .. } => TypeExpr::Any,
+        Binding::SchemaWitness { .. } | Binding::Function { .. } => TypeExpr::Any,
         Binding::Resource { resource_type } => TypeExpr::Ref(resource_type.as_str().into()),
     }
 }

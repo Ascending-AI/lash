@@ -1,8 +1,8 @@
-//! Turning a declared process-literal parameter type into the runtime's
+//! Turning a declared process-literal type into the runtime's
 //! type language.
 //!
-//! A process parameter's declared type is the only TypeScript annotation the
-//! runtime keeps: it becomes the parameter's type in the process signature,
+//! Process parameter and settled return annotations survive lowering:
+//! each becomes a type in the process signature,
 //! which a trigger registration is checked against before any foreground
 //! effect runs. That makes the subset it accepts a durable decision, so the
 //! conversion refuses rather than widens — an annotation the runtime cannot
@@ -31,6 +31,21 @@ pub(super) fn process_param_type(
                 "process `{process_name}` parameter `{param_name}` declares {construct}, \
                  which has no durable type"
             ),
+            Some(annotation.span),
+        )
+    })
+}
+
+/// Converts a process's settled return annotation using the same durable types
+/// as its parameters.
+pub(super) fn process_return_type(
+    process_name: &str,
+    annotation: &TypeAnnotation,
+) -> Result<TypeExpr, Diagnostic> {
+    convert(annotation).map_err(|construct| {
+        Diagnostic::refusal(
+            DiagnosticCode::ProcessReturnTypeUnsupported,
+            format!("process `{process_name}` returns {construct}, which has no durable type"),
             Some(annotation.span),
         )
     })

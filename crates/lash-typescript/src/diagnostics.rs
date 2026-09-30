@@ -59,6 +59,7 @@ pub enum DiagnosticCode {
     FunctionNotPersisted,
     NonLiftableCapture,
     ProcessParamTypeUnsupported,
+    ProcessReturnTypeUnsupported,
     TriggerSourceEventAccess,
     TriggerEventRemoved,
     TriggerInputsLiteralRequired,
@@ -140,6 +141,7 @@ impl DiagnosticCode {
         Self::FunctionNotPersisted,
         Self::NonLiftableCapture,
         Self::ProcessParamTypeUnsupported,
+        Self::ProcessReturnTypeUnsupported,
         Self::TriggerSourceEventAccess,
         Self::TriggerEventRemoved,
         Self::TriggerInputsLiteralRequired,
@@ -263,6 +265,9 @@ impl DiagnosticCode {
             Self::ProcessParamTypeUnsupported => {
                 "declare the parameter with a durable type: a primitive, an array, an object literal, a union of string literals, or a host data type"
             }
+            Self::ProcessReturnTypeUnsupported => {
+                "declare the return with a durable type, optionally wrapped in Promise"
+            }
             Self::MethodUnsupported => {
                 "use a method the dialect's standard-library contract lists for this receiver"
             }
@@ -374,6 +379,7 @@ impl DiagnosticCode {
             | Self::SourceTooLarge
             | Self::ReservedIdentifier
             | Self::ProcessParamTypeUnsupported
+            | Self::ProcessReturnTypeUnsupported
             | Self::TriggerSourceEventAccess
             | Self::TriggerEventRemoved
             | Self::TriggerInputsLiteralRequired => CodeClassification::AlwaysRefusal,
@@ -460,6 +466,7 @@ impl DiagnosticCode {
             Self::FunctionNotPersisted => "TS_FUNCTION_NOT_PERSISTED",
             Self::NonLiftableCapture => "TS_NON_LIFTABLE_CAPTURE",
             Self::ProcessParamTypeUnsupported => "TS_PROCESS_PARAM_TYPE_UNSUPPORTED",
+            Self::ProcessReturnTypeUnsupported => "TS_PROCESS_RETURN_TYPE_UNSUPPORTED",
             Self::TriggerSourceEventAccess => "TS_TRIGGER_SOURCE_EVENT_ACCESS",
             Self::TriggerEventRemoved => "TS_TRIGGER_EVENT_REMOVED",
             Self::TriggerInputsLiteralRequired => "TS_TRIGGER_INPUTS_LITERAL_REQUIRED",
@@ -729,6 +736,7 @@ mod tests {
                 include_str!("adapter/early_errors.rs"),
             ),
             ("adapter/enums.rs", include_str!("adapter/enums.rs")),
+            ("adapter/functions.rs", include_str!("adapter/functions.rs")),
             ("adapter/goal.rs", include_str!("adapter/goal.rs")),
             ("adapter/nesting.rs", include_str!("adapter/nesting.rs")),
             (

@@ -27,7 +27,15 @@ pub enum ProcessOrigin {
     /// ([`super::lifted_process_identity`]). Its last `hidden_params`
     /// parameters are the literal's hidden start arguments, not authored
     /// parameters.
-    Lifted { site: AstPath, hidden_params: u32 },
+    Lifted {
+        site: AstPath,
+        hidden_params: u32,
+        /// The authored settled output annotation. An inferred output remains
+        /// on the declaration, so rendering can infer it again without
+        /// inventing an annotation the source never declared.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        declared_return_ty: Option<crate::TypeExpr>,
+    },
 }
 
 impl ProcessOrigin {

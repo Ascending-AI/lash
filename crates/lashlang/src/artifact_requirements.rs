@@ -352,6 +352,9 @@ impl<'program> RequirementsCollector<'program> {
                     self.collect_type(&param.ty);
                     literal_scope.insert(param.name.to_string(), RequirementBinding::Value);
                 }
+                if let Some(return_ty) = &literal.return_ty {
+                    self.collect_type(return_ty);
+                }
                 self.collect_expr(&literal.body, &mut literal_scope);
                 Some(RequirementBinding::Value)
             }

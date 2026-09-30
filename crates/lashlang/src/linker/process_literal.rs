@@ -133,7 +133,22 @@ impl<'module> Linker<'module> {
         if completion.can_fallthrough {
             outputs.push(TypeExpr::Null);
         }
-        let output = union_type(outputs);
+        let inferred = union_type(outputs);
+        let output = match &literal.return_ty {
+            Some(expected) => {
+                self.validate_type_refs(expected, span)?;
+                if !self.is_type_assignable(&inferred, expected) {
+                    return Err(LinkError::IncompatibleProcessReturn {
+                        process: name.clone(),
+                        expected: format_type_expr(&self.resolve_type_aliases(expected)),
+                        actual: format_type_expr(&self.resolve_type_aliases(&inferred)),
+                        span,
+                    });
+                }
+                expected.clone()
+            }
+            None => inferred,
+        };
         let signature =
             crate::ProcessSignature::try_new(start_params, output.clone()).map_err(|source| {
                 LinkError::InvalidAst {
@@ -154,6 +169,7 @@ impl<'module> Linker<'module> {
                 label: None,
                 origin: ProcessOrigin::Lifted {
                     site: path.clone(),
+                    declared_return_ty: literal.return_ty.clone(),
                     hidden_params: u32::try_from(hidden_args.len()).unwrap_or(u32::MAX),
                 },
                 body,

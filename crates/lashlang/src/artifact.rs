@@ -1164,6 +1164,10 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
                 writer.atom(param.name.as_str());
                 write_type(writer, &param.ty);
             }
+            if let Some(return_ty) = &literal.return_ty {
+                writer.atom("return-type");
+                write_type(writer, return_ty);
+            }
             write_expr(writer, &literal.body);
         }
         Expr::Null => writer.atom("null"),

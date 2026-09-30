@@ -412,6 +412,7 @@ fn origins_are_derived(ir: &lashlang::Program, draft: &lashlang::Program) -> Vec
         let ProcessOrigin::Lifted {
             site,
             hidden_params,
+            ..
         } = &process.origin
         else {
             failures.push(format!(

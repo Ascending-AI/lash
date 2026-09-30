@@ -1320,6 +1320,13 @@ impl Lowerer {
             lashlang::ProcessLiteralExpr {
                 params,
                 hidden_args,
+                return_ty: function
+                    .return_ty
+                    .as_ref()
+                    .map(|annotation| {
+                        param_types::process_return_type(name.unwrap_or("process"), annotation)
+                    })
+                    .transpose()?,
                 body: Box::new(process_wrapper::process_run_wrapper(closure, call_args)),
             },
         )))

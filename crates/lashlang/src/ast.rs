@@ -721,6 +721,9 @@ pub struct ProcessLiteralExpr {
     /// when the process started (FIG-2998).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden_args: Vec<ProcessParam>,
+    /// The declared settled output, or `None` to infer it from the body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_ty: Option<TypeExpr>,
     pub body: Box<Expr>,
 }
 

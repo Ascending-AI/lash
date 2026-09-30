@@ -318,7 +318,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "FIG-4156: process wrapper completion infers Null for a boolean return; output inference needs a design decision"]
     fn inferred_process_signature_matches_schema_typescript_and_artifact() {
         let linked = crate::link(
             "const worker = async (query: string, retries: number): Promise<boolean> => { return true; }; finish(worker);",
@@ -372,6 +371,262 @@ mod tests {
         )
         .expect("decode retained artifact");
         assert_eq!(retained.process_type(&process.name), Some(expected));
+        assert_eq!(
+            retained.ir().declarations,
+            linked.artifact.ir().declarations
+        );
+    }
+
+    fn assert_async_output(source: &str, output: TypeExpr, schema: Value) {
+        assert_async_output_in_environment(
+            source,
+            output,
+            schema,
+            &lashlang::LashlangHostEnvironment::default(),
+        );
+    }
+
+    fn assert_async_output_in_environment(
+        source: &str,
+        output: TypeExpr,
+        schema: Value,
+        environment: &lashlang::LashlangHostEnvironment,
+    ) {
+        let linked = crate::link(source, environment).expect("link async process");
+        let process = linked
+            .artifact
+            .ir()
+            .declarations
+            .iter()
+            .find_map(|declaration| match declaration {
+                lashlang::Declaration::Process(process) => Some(process),
+                _ => None,
+            })
+            .expect("lifted process");
+        let expected = TypeExpr::Process(lashlang::ProcessType::known(
+            lashlang::ProcessSignature::try_new(vec![], output.clone()).expect("signature"),
+        ));
+        let inferred = linked
+            .artifact
+            .process_type(&process.name)
+            .expect("process type");
+        assert_eq!(inferred, expected);
+        assert_eq!(process.return_ty, Some(output.clone()));
+        let process_schema = lashlang::type_expr_to_json_schema(&inferred);
+        assert_eq!(process_schema["x-lash"]["signature"]["output"], schema);
+        let retained = lashlang::ModuleArtifact::from_store_bytes(
+            &linked.artifact.to_store_bytes().expect("encode artifact"),
+        )
+        .expect("decode artifact");
+        assert_eq!(retained.process_type(&process.name), Some(expected.clone()));
+        assert_eq!(
+            retained.ir().declarations,
+            linked.artifact.ir().declarations
+        );
+    }
+
+    #[test]
+    fn async_process_promise_boolean_signature_and_schema() {
+        assert_async_output(
+            "const worker = async (): Promise<boolean> => { return true; }; finish(worker);",
+            TypeExpr::Bool,
+            json!({"type": "boolean"}),
+        );
+    }
+
+    #[test]
+    fn async_process_promise_number_signature_and_schema() {
+        assert_async_output(
+            "const worker = async (): Promise<number> => { return 42; }; finish(worker);",
+            TypeExpr::Float,
+            json!({"type": "number"}),
+        );
+    }
+
+    #[test]
+    fn async_process_promise_string_signature_and_schema() {
+        assert_async_output(
+            "const worker = async (): Promise<string> => { return 'ready'; }; finish(worker);",
+            TypeExpr::Str,
+            json!({"type": "string"}),
+        );
+    }
+
+    #[test]
+    fn async_process_promise_object_signature_and_schema() {
+        assert_async_output(
+            "const worker = async (): Promise<{ ready: boolean }> => { return { ready: true }; }; finish(worker);",
+            TypeExpr::Object(vec![TypeField {
+                name: "ready".into(),
+                ty: TypeExpr::Bool,
+                optional: false,
+            }]),
+            json!({"type": "object", "properties": {"ready": {"type": "boolean"}}, "required": ["ready"], "additionalProperties": true}),
+        );
+    }
+
+    #[test]
+    fn async_process_promise_union_signature_and_schema() {
+        assert_async_output(
+            "const worker = async (): Promise<boolean | string> => { return true; }; finish(worker);",
+            TypeExpr::union(vec![TypeExpr::Bool, TypeExpr::Str]),
+            json!({"anyOf": [{"type": "boolean"}, {"type": "string"}]}),
+        );
+    }
+
+    #[test]
+    fn async_process_unannotated_boolean_signature_and_schema() {
+        assert_async_output(
+            "const worker = async () => { return true; }; finish(worker);",
+            TypeExpr::Bool,
+            json!({"type": "boolean"}),
+        );
+    }
+
+    #[test]
+    fn async_process_direct_boolean_annotation_signature_and_schema() {
+        assert_async_output(
+            "const worker = async (): boolean => true; finish(worker);",
+            TypeExpr::Bool,
+            json!({"type": "boolean"}),
+        );
+    }
+
+    #[test]
+    fn async_process_output_annotation_survives_workflow_rendering() {
+        for (source, output) in [
+            (
+                "const worker = async () => { return 42; }; finish(worker);",
+                TypeExpr::Int,
+            ),
+            (
+                "const worker = async (): boolean => true; finish(worker);",
+                TypeExpr::Bool,
+            ),
+            (
+                "const worker = async (): Promise<boolean | string> => { return true; }; finish(worker);",
+                TypeExpr::union(vec![TypeExpr::Bool, TypeExpr::Str]),
+            ),
+            (
+                "const worker = async (): Promise<{ ready: boolean }> => { return { ready: true }; }; finish(worker);",
+                TypeExpr::Object(vec![TypeField {
+                    name: "ready".into(),
+                    ty: TypeExpr::Bool,
+                    optional: false,
+                }]),
+            ),
+        ] {
+            let environment = lashlang::LashlangHostEnvironment::default();
+            let linked = crate::link(source, &environment).expect("link process");
+            for graph in [
+                crate::workflow_graph::workflow_graph_from_source(source).expect("source graph"),
+                crate::workflow_graph::workflow_graph_from_artifact(&linked.artifact),
+            ] {
+                let rendered =
+                    crate::workflow_graph::workflow_graph_to_source(&graph).expect("render graph");
+                let relinked =
+                    crate::link(&rendered, &environment).expect("relink rendered process");
+                let process = relinked
+                    .artifact
+                    .ir()
+                    .declarations
+                    .iter()
+                    .find_map(|declaration| match declaration {
+                        lashlang::Declaration::Process(process) => Some(process),
+                        _ => None,
+                    })
+                    .expect("rendered process");
+                assert_eq!(process.return_ty, Some(output.clone()), "{rendered}");
+            }
+        }
+    }
+
+    #[test]
+    fn async_process_awaited_tool_signature_and_schema() {
+        let mut catalog = lashlang::LashlangHostCatalog::new();
+        catalog
+            .add_module_operation(
+                ["tools"],
+                "Tools",
+                "check",
+                "tool:check",
+                TypeExpr::Any,
+                TypeExpr::Bool,
+            )
+            .expect("tool catalogue");
+        let environment =
+            lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
+        assert_async_output_in_environment(
+            "const worker = async () => { return await tools.check({}); }; finish(worker);",
+            TypeExpr::Bool,
+            json!({"type": "boolean"}),
+            &environment,
+        );
+    }
+
+    #[test]
+    fn async_process_awaited_helper_signature_and_schema() {
+        assert_async_output(
+            "const worker = async () => { return await (async (value = true) => { return true; })(); }; finish(worker);",
+            TypeExpr::Bool,
+            json!({"type": "boolean"}),
+        );
+    }
+
+    #[test]
+    fn async_process_catch_return_signature_and_schema() {
+        assert_async_output(
+            "const worker = async () => { try { throw 'failed'; } catch (error) { return true; } }; finish(worker);",
+            TypeExpr::Bool,
+            json!({"type": "boolean"}),
+        );
+    }
+
+    #[test]
+    fn async_process_finally_overrides_return_signature_and_schema() {
+        assert_async_output(
+            "const worker = async () => { try { return 'ignored'; } finally { return true; } }; finish(worker);",
+            TypeExpr::Bool,
+            json!({"type": "boolean"}),
+        );
+    }
+
+    #[test]
+    fn async_process_nested_returns_do_not_escape_signature_and_schema() {
+        assert_async_output(
+            "const worker = async () => { function nested() { return 'ignored'; } return true; }; finish(worker);",
+            TypeExpr::Bool,
+            json!({"type": "boolean"}),
+        );
+    }
+
+    #[test]
+    fn async_process_fallthrough_signature_and_schema() {
+        assert_async_output(
+            "const worker = async () => { if (true) { return true; } }; finish(worker);",
+            TypeExpr::union(vec![TypeExpr::Bool, TypeExpr::Null]),
+            json!({"anyOf": [{"type": "boolean"}, {"type": "null"}]}),
+        );
+    }
+
+    #[test]
+    fn async_process_rejects_incompatible_return_annotation() {
+        let error = crate::link(
+            "const worker = async (): Promise<boolean> => { return 42; }; finish(worker);",
+            &lashlang::LashlangHostEnvironment::default(),
+        )
+        .expect_err("incompatible output");
+        assert!(error.message.contains("bool"), "{error:?}");
+        assert!(error.message.contains("int"), "{error:?}");
+    }
+
+    #[test]
+    fn async_process_rejects_non_durable_return_annotation() {
+        let error = crate::parse(
+            "const worker = async (): Promise<() => boolean> => { return true; }; finish(worker);",
+        )
+        .expect_err("non-durable output");
+        assert_eq!(error.code.as_str(), "TS_PROCESS_RETURN_TYPE_UNSUPPORTED");
     }
 
     #[test]

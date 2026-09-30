@@ -119,6 +119,7 @@ where
         Expr::ProcessLiteral(literal) => Expr::ProcessLiteral(Box::new(ProcessLiteralExpr {
             params: literal.params,
             hidden_args: literal.hidden_args,
+            return_ty: literal.return_ty,
             body: Box::new(folder.fold_expr(*literal.body)),
         })),
         Expr::Call { function, args } => Expr::Call {

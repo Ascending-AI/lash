@@ -120,6 +120,7 @@ fn every_expr_variant() -> Vec<Expr> {
         Expr::ProcessLiteral(Box::new(ProcessLiteralExpr {
             params: Vec::new(),
             hidden_args: Vec::new(),
+            return_ty: None,
             body: Box::new(var("literal_body")),
         })),
         Expr::Call {

@@ -4,7 +4,8 @@
 only one: TypeScript is the sole RLM authoring language, and `lashlang` names
 the dialect-neutral IR and VM it lowers into (ADR 0096). SWC is
 confined to `src/adapter/`; the adapter produces a Lash-owned normalized tree,
-which lowers into `lashlang::Program`. Runtime type annotations are erased.
+which lowers into `lashlang::Program`. Process parameter and return annotations
+carry their durable signature; other runtime type annotations are erased.
 There is no dialect choice to make: no language selector, no session pin, and
 no second surface to be at parity with.
 
@@ -48,7 +49,8 @@ named rejections: `TS_DECORATOR_UNSUPPORTED` and `TS_NAMESPACE_UNSUPPORTED`.
 
 Type-level TypeScript syntax is erased, not executed: annotations, interfaces,
 type aliases, generics, `as`, `satisfies`, and postfix non-null `!` all lower to
-the same runtime program as their untyped form. `enum`, namespaces, and
+the same runtime program as their untyped form, except for process parameter
+and return annotations, which declare the durable signature. `enum`, namespaces, and
 decorators are not type-only in this contract and reject as
 `TS_ENUM_UNSUPPORTED`, `TS_NAMESPACE_UNSUPPORTED`, and
 `TS_DECORATOR_UNSUPPORTED`. The checked-in Test262 census records these
@@ -76,7 +78,12 @@ and cancelling one are catalogue tools rather than language constructs:
 `await handle` its result, `await processes.emit({ value })` emits progress
 from a run and `await processes.signal({ handle, name, payload })` sends a
 declared signal to another run. `waitSignal`, `sleep` and `finish` remain
-constructs; `finish` is cell-only. A normal return from the arrow finishes the
+constructs; `finish` is cell-only. A process return annotation declares its
+settled output type: `Promise<boolean>` and `boolean` both carry `boolean` in
+the signature, schema and retained artifact. Without an annotation, the linker
+infers the output from returns, including awaited results and a possible null
+fallthrough. Rendering a workflow preserves that output annotation.
+A normal return from the arrow finishes the
 process only after all enclosing `finally` blocks execute; an uncaught throw
 fails it. A capture the lift cannot carry by value rejects as a non-liftable
 capture.

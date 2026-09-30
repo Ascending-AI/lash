@@ -243,9 +243,10 @@ impl Session<'_, '_> {
             name_source: WorkflowNodeNameSource::Derived,
             params: literal.params.clone(),
             signals: Vec::new(),
-            return_ty: None,
+            return_ty: literal.return_ty.clone(),
             origin: ProcessOrigin::Lifted {
                 site,
+                declared_return_ty: literal.return_ty.clone(),
                 hidden_params: u32::try_from(literal.hidden_args.len()).unwrap_or(u32::MAX),
             },
             body: self.project_body(

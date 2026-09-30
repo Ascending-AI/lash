@@ -10,6 +10,7 @@ use swc_ecma_ast as swc;
 mod declarations;
 mod early_errors;
 mod enums;
+mod functions;
 mod goal;
 pub(crate) mod nesting;
 mod optional_chain;
@@ -200,6 +201,7 @@ pub(crate) struct Function {
     pub(crate) name: Option<String>,
     pub(crate) params: Vec<Pattern>,
     pub(crate) body: FunctionBody,
+    pub(crate) return_ty: Option<TypeAnnotation>,
     pub(crate) is_async: bool,
     /// An arrow has no receiver of its own: its `this` is its enclosing
     /// function's (ECMA-262 lexical `this`), and its `arguments` binds the
@@ -1111,52 +1113,6 @@ impl Adapter<'_> {
         })
     }
 
-    fn convert_function(
-        &self,
-        name: Option<String>,
-        function: &swc::Function,
-    ) -> Result<Function, Diagnostic> {
-        let span = Some(source_span(function.span));
-        if function.is_generator {
-            return Err(reject(
-                DiagnosticCode::GeneratorUnsupported,
-                "generators",
-                span,
-            ));
-        }
-        if !function.decorators.is_empty() {
-            return Err(reject(
-                DiagnosticCode::DecoratorUnsupported,
-                "decorators",
-                span,
-            ));
-        }
-        let body = function.body.as_ref().ok_or_else(|| {
-            reject_refusal(
-                DiagnosticCode::UnsupportedStatement,
-                "function declarations without bodies",
-                span,
-            )
-        })?;
-        let (params, body) = self.in_function(function.is_async, || {
-            let params = function
-                .params
-                .iter()
-                .enumerate()
-                .filter(|(index, param)| !self.is_this_parameter(*index, &param.pat))
-                .map(|(_, param)| self.convert_pattern(&param.pat))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok((params, self.convert_statements(&body.stmts)?))
-        })?;
-        Ok(Function {
-            name,
-            params,
-            body: FunctionBody::Block(body),
-            is_async: function.is_async,
-            is_arrow: false,
-        })
-    }
-
     fn convert_expr(&self, expr: &swc::Expr) -> Result<Expr, Diagnostic> {
         self.with_expression_depth(Some(source_span(expr.span())), || {
             self.convert_expr_inner(expr)
@@ -1283,6 +1239,10 @@ impl Adapter<'_> {
                     name: None,
                     params,
                     body,
+                    return_ty: function
+                        .return_type
+                        .as_ref()
+                        .map(|annotation| types::convert_return_type(&annotation.type_ann)),
                     is_async: function.is_async,
                     is_arrow: true,
                 })

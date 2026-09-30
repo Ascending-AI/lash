@@ -51,6 +51,7 @@ fn function(params: Vec<Pattern>, body: FunctionBody) -> Function {
         name: None,
         params,
         body,
+        return_ty: None,
         is_async: false,
         is_arrow: false,
     }

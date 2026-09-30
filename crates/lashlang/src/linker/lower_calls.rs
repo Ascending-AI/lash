@@ -61,9 +61,21 @@ impl<'module> Linker<'module> {
         if let Some(receiver) = &function.receiver {
             function_scope.bind(receiver, any_binding());
         }
-        let body = self
-            .lower_expr(&function.body, &path.child(0), &mut function_scope)?
-            .0;
+        let previous_completion = self.collect_completion.replace(true);
+        let lowered = self.lower_expr(&function.body, &path.child(0), &mut function_scope);
+        self.collect_completion.set(previous_completion);
+        let body = lowered?.0;
+        let completion = self
+            .completion_facts
+            .borrow()
+            .get(&path.child(0))
+            .cloned()
+            .unwrap_or_else(Completion::fallthrough);
+        let mut outputs = completion.returns;
+        if completion.can_fallthrough {
+            outputs.push(TypeExpr::Null);
+        }
+        let output = union_type(outputs);
         Ok((
             Expr::Function(Box::new(crate::ast::FunctionExpr {
                 name: function.name.clone(),
@@ -73,7 +85,7 @@ impl<'module> Linker<'module> {
                 captures,
                 body: Box::new(body),
             })),
-            any_binding(),
+            Binding::Function { output },
         ))
     }
 
@@ -84,9 +96,19 @@ impl<'module> Linker<'module> {
         path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
+        let (function, binding) = self.lower_expr(function, &path.child(0), scope)?;
+        // A freshly constructed closure has this body's return type. Deferred
+        // calls keep gradual typing: a callable's mutable results may have
+        // acquired properties since construction, or its binding may change.
+        let immediate_closure = matches!(&function, Expr::Function(_))
+            || matches!(&function, Expr::BuiltinCall { name, .. } if name.as_str() == "__typescript_closure");
+        let output = match (immediate_closure, binding) {
+            (true, Binding::Function { output }) => Binding::Value(output),
+            _ => any_binding(),
+        };
         Ok((
             Expr::Call {
-                function: Box::new(self.lower_expr(function, &path.child(0), scope)?.0),
+                function: Box::new(function),
                 args: args
                     .iter()
                     .enumerate()
@@ -96,7 +118,7 @@ impl<'module> Linker<'module> {
                     })
                     .collect::<Result<_, _>>()?,
             },
-            any_binding(),
+            output,
         ))
     }
 

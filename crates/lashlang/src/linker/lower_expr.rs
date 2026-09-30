@@ -103,6 +103,7 @@ impl<'module> Linker<'module> {
                 let inner_path = role.inner_path(path);
                 let (inner, binding) =
                     self.lower_expr_expected(inner, &inner_path, scope, expected)?;
+                self.forward_completion(path, &inner_path);
                 Ok((
                     Expr::Role {
                         role: role.clone(),
@@ -254,6 +255,7 @@ impl<'module> Linker<'module> {
                     .cloned()
                 {
                     completion.finishes.extend(child.finishes);
+                    completion.returns.extend(child.returns);
                     completion.can_fallthrough = child.can_fallthrough;
                 }
             }
@@ -262,6 +264,20 @@ impl<'module> Linker<'module> {
                 .insert(path.clone(), completion);
         }
         Ok((Expr::Block(lowered), last))
+    }
+
+    fn forward_completion(&self, path: &AstPath, inner_path: &AstPath) {
+        if self.collect_completion.get() {
+            let completion = self
+                .completion_facts
+                .borrow()
+                .get(inner_path)
+                .cloned()
+                .unwrap_or_else(Completion::fallthrough);
+            self.completion_facts
+                .borrow_mut()
+                .insert(path.clone(), completion);
+        }
     }
 
     pub(super) fn lower_label_annotated(
@@ -279,17 +295,7 @@ impl<'module> Linker<'module> {
         )?;
         let inner_path = path.child(0);
         let (expr, binding) = self.lower_expr_expected(expr, &inner_path, scope, expected)?;
-        if self.collect_completion.get() {
-            let completion = self
-                .completion_facts
-                .borrow()
-                .get(&inner_path)
-                .cloned()
-                .unwrap_or_else(Completion::fallthrough);
-            self.completion_facts
-                .borrow_mut()
-                .insert(path.clone(), completion);
-        }
+        self.forward_completion(path, &inner_path);
         Ok((
             Expr::LabelAnnotated {
                 label: label.clone(),
@@ -536,12 +542,15 @@ impl<'module> Linker<'module> {
                 .get(&else_path)
                 .cloned()
                 .unwrap_or_else(Completion::fallthrough);
+            let mut returns = then_completion.returns;
+            returns.extend(else_completion.returns);
             let mut finishes = then_completion.finishes;
             finishes.extend(else_completion.finishes);
             self.completion_facts.borrow_mut().insert(
                 path.clone(),
                 Completion {
                     finishes,
+                    returns,
                     can_fallthrough: then_completion.can_fallthrough
                         || else_completion.can_fallthrough,
                 },
@@ -1148,12 +1157,20 @@ impl<'module> Linker<'module> {
             .map(|(_, binding)| binding_type(binding))
             .collect::<Vec<_>>();
         self.validate_shaping_builtin(name.as_str(), &arg_types, scope.span)?;
+        let output = if name.as_str() == "__typescript_closure" {
+            lowered_args
+                .first()
+                .map(|(_, binding)| binding.clone())
+                .unwrap_or_else(any_binding)
+        } else {
+            Binding::Value(shaping_builtin_return_type(name.as_str(), &arg_types))
+        };
         Ok((
             Expr::BuiltinCall {
                 name: name.clone(),
                 args: lowered_args.into_iter().map(|(expr, _)| expr).collect(),
             },
-            Binding::Value(shaping_builtin_return_type(name.as_str(), &arg_types)),
+            output,
         ))
     }
 
@@ -1285,6 +1302,38 @@ impl<'module> Linker<'module> {
                     .map(|value| Box::new(value.0))
             })
             .transpose()?;
+        if self.collect_completion.get() {
+            let facts = self.completion_facts.borrow();
+            let mut completion = facts
+                .get(&path.child(0))
+                .cloned()
+                .unwrap_or_else(Completion::fallthrough);
+            if exception.catch.is_some() {
+                let catch = facts
+                    .get(&path.child(1))
+                    .cloned()
+                    .unwrap_or_else(Completion::fallthrough);
+                completion.finishes.extend(catch.finishes);
+                completion.returns.extend(catch.returns);
+                completion.can_fallthrough |= catch.can_fallthrough;
+            }
+            if exception.finally.is_some() {
+                let finally = facts
+                    .get(&path.child(finally_index))
+                    .cloned()
+                    .unwrap_or_else(Completion::fallthrough);
+                if !finally.can_fallthrough {
+                    completion = finally;
+                } else {
+                    completion.finishes.extend(finally.finishes);
+                    completion.returns.extend(finally.returns);
+                }
+            }
+            drop(facts);
+            self.completion_facts
+                .borrow_mut()
+                .insert(path.clone(), completion);
+        }
         Ok((
             Expr::Try(Box::new(crate::ast::TryExpr {
                 body: Box::new(body),
@@ -1301,10 +1350,13 @@ impl<'module> Linker<'module> {
         path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        Ok((
-            Expr::Throw(Box::new(self.lower_expr(value, &path.child(0), scope)?.0)),
-            any_binding(),
-        ))
+        let value = self.lower_expr(value, &path.child(0), scope)?.0;
+        if self.collect_completion.get() {
+            self.completion_facts
+                .borrow_mut()
+                .insert(path.clone(), Completion::terminal(Vec::new()));
+        }
+        Ok((Expr::Throw(Box::new(value)), any_binding()))
     }
 
     pub(super) fn lower_return_expr(
@@ -1313,10 +1365,18 @@ impl<'module> Linker<'module> {
         path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        Ok((
-            Expr::Return(Box::new(self.lower_expr(value, &path.child(0), scope)?.0)),
-            any_binding(),
-        ))
+        let (value, binding) = self.lower_expr(value, &path.child(0), scope)?;
+        if self.collect_completion.get() {
+            self.completion_facts.borrow_mut().insert(
+                path.clone(),
+                Completion {
+                    finishes: Vec::new(),
+                    returns: vec![binding_type(&binding)],
+                    can_fallthrough: false,
+                },
+            );
+        }
+        Ok((Expr::Return(Box::new(value)), binding))
     }
 }
 

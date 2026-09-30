@@ -3,6 +3,9 @@ use super::*;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Binding {
     Value(TypeExpr),
+    Function {
+        output: TypeExpr,
+    },
     /// A compile-time schema descriptor. This metatype is linker-only: its
     /// described shape cannot be written in Lashlang's surface type grammar.
     SchemaWitness {
@@ -370,7 +373,7 @@ impl<'module> Linker<'module> {
             .and_then(|witness| self.closed_schema_witness_binding(witness))
             .and_then(|binding| match binding {
                 Binding::SchemaWitness { described_ty } => Some(described_ty),
-                Binding::Value(_) | Binding::Resource { .. } => None,
+                Binding::Value(_) | Binding::Resource { .. } | Binding::Function { .. } => None,
             })
             .or_else(|| output_from_input.default_schema.clone())
             .unwrap_or(TypeExpr::Any)

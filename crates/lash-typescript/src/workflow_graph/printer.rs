@@ -286,9 +286,10 @@ impl<'p> Printer<'p> {
             out.push('\n');
         }
         out.push_str(&format!(
-            "const {} = async ({}) => ",
+            "const {} = async ({}){} => ",
             self.binding_identifier("process binding", binding)?,
             params.join(", "),
+            process_return_annotation(super::authored_return_type(&process.origin))?,
         ));
         let mut run_bound = authored_params(process)
             .iter()
@@ -965,8 +966,9 @@ impl<'p> Printer<'p> {
                     .map(|param| param.name.to_string())
                     .collect();
                 Ok(format!(
-                    "async ({}) => {}",
+                    "async ({}){} => {}",
                     params.join(", "),
+                    process_return_annotation(literal.return_ty.as_ref())?,
                     self.rooted_block(body, 0, &mut bound)?
                 ))
             }
@@ -1458,6 +1460,17 @@ fn attribute_assignment(
         ),
         None => (target, "=".to_string(), parts.value),
     }))
+}
+
+/// Prints the settled output as an async return annotation.
+fn process_return_annotation(ty: Option<&TypeExpr>) -> Printed {
+    match ty {
+        Some(ty) => Ok(format!(
+            ": Promise<{}>",
+            type_annotation(ty)?.unwrap_or_else(|| "unknown".to_string())
+        )),
+        None => Ok(String::new()),
+    }
 }
 
 /// The TypeScript annotation a process parameter type lowers from, or `None`

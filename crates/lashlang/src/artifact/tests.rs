@@ -577,6 +577,7 @@ fn process_origins_are_derived_never_authored() {
     let lifted = |hidden_params| crate::ProcessOrigin::Lifted {
         site: crate::AstPath::main(vec![0, 0]),
         hidden_params,
+        declared_return_ty: None,
     };
     for (program, reason) in [
         (

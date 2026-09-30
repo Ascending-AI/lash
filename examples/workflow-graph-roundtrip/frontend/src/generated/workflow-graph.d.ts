@@ -553,6 +553,10 @@ export type ProcessOrigin =
       kind: 'declared';
     }
   | {
+      /**
+       * The authored settled output annotation. An inferred output remains on the declaration, so rendering can infer it again without inventing an annotation the source never declared.
+       */
+      declared_return_ty?: TypeExpr | null;
       hidden_params: number;
       kind: 'lifted';
       site: AstPath;
@@ -660,6 +664,10 @@ export interface ProcessLiteralExpr {
    */
   hidden_args?: ProcessParam[];
   params: ProcessParam[];
+  /**
+   * The declared settled output, or `None` to infer it from the body.
+   */
+  return_ty?: TypeExpr | null;
   [k: string]: unknown;
 }
 export interface ProcessParam {

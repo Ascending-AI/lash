@@ -1159,6 +1159,17 @@
             "$ref": "#/definitions/ProcessParam"
           },
           "type": "array"
+        },
+        "return_ty": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TypeExpr"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The declared settled output, or `None` to infer it from the body."
         }
       },
       "required": [
@@ -1190,6 +1201,17 @@
           "additionalProperties": false,
           "description": "Lifted by the linker from the inline process literal at `site`, the literal's path in the program before lifting. The lifted declaration's name digests that literal's body and site ([`super::lifted_process_identity`]). Its last `hidden_params` parameters are the literal's hidden start arguments, not authored parameters.",
           "properties": {
+            "declared_return_ty": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TypeExpr"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The authored settled output annotation. An inferred output remains on the declaration, so rendering can infer it again without inventing an annotation the source never declared."
+            },
             "hidden_params": {
               "format": "uint32",
               "minimum": 0.0,

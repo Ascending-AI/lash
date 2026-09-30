@@ -41,9 +41,14 @@ pub(super) fn write_process_origin(writer: &mut HashWriter, origin: &crate::ast:
         crate::ast::ProcessOrigin::Lifted {
             site,
             hidden_params,
+            declared_return_ty,
         } => {
             writer.atom("origin-lifted");
             writer.u32(*hidden_params);
+            if let Some(return_ty) = declared_return_ty {
+                writer.atom("declared-return-type");
+                write_type(writer, return_ty);
+            }
             match site.root {
                 crate::ast::AstRoot::Main => writer.atom("main"),
                 crate::ast::AstRoot::Declaration(index) => {

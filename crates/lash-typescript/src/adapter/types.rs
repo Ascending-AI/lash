@@ -1,10 +1,9 @@
 //! Declared TypeScript types, carried from a parameter annotation to the
 //! process signature.
 //!
-//! A process-literal parameter is the one place where an annotation is
-//! load-bearing rather than decorative: it is the process's durable input
-//! shape, and a trigger registration is checked against it before any
-//! foreground effect runs (FIG-3071). Everywhere else the dialect stays
+//! Process-literal parameters and returns declare the process's durable
+//! signature. A trigger registration is checked against its input shape
+//! before any foreground effect runs (FIG-3071). Everywhere else the dialect stays
 //! structurally typed and an annotation is ignored, so this module only
 //! *records* what was written and never refuses on its own — the refusal is
 //! raised at the process, where the parameter has a name to blame.
@@ -105,6 +104,22 @@ pub(crate) fn convert_type(ty: &swc::TsType) -> TypeAnnotation {
         }
     };
     TypeAnnotation { span, shape }
+}
+
+/// The declared result of an async process is the settled value of its promise.
+pub(crate) fn convert_return_type(ty: &swc::TsType) -> TypeAnnotation {
+    match ty {
+        swc::TsType::TsParenthesizedType(inner) => convert_return_type(&inner.type_ann),
+        swc::TsType::TsTypeRef(reference)
+            if entity_name(&reference.type_name).as_deref() == Some("Promise") =>
+        {
+            match &reference.type_params {
+                Some(params) if params.params.len() == 1 => convert_return_type(&params.params[0]),
+                _ => convert_type(ty),
+            }
+        }
+        _ => convert_type(ty),
+    }
 }
 
 fn keyword_shape(kind: swc::TsKeywordTypeKind) -> TypeShape {
