@@ -985,7 +985,8 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
             ):
                 failures.append(f"lane {name!r} command may not set --message-format")
             if subcommand == "check" and not any(
-                target in command for target in ("--lib", "--all-targets", "--tests")
+                target in command
+                for target in ("--lib", "--bins", "--all-targets", "--tests")
             ):
                 failures.append(f"lane {name!r} check command lacks an explicit target context")
         for token in lane.get("features", []):
