@@ -25,6 +25,7 @@ postgres crates/lash-postgres-store/src/postgres/schema.rs::verify_within_repeat
 postgres crates/lash-postgres-store/src/postgres/schema.rs::observe_within_repeatable_read  # reads schema, compatibility, release and fleet facts in a REPEATABLE READ READ ONLY transaction; nested probes are rolled-back savepoints
 postgres crates/lash-postgres-store/src/postgres/fleet_format.rs::read_state_in_tx  # reads the fleet format in a savepoint of the read-only schema observation, then rolls the savepoint back
 postgres crates/lash-postgres-store/src/postgres/release_stamp.rs::read_state_in_tx  # reads the release stamp in a savepoint of the read-only schema observation, then rolls the savepoint back
+postgres crates/lash-postgres-store/src/postgres/migrate.rs::lock_connection  # bounds the advisory-lock wait with SET LOCAL and takes the session-scoped schema advisory lock; writes no row
 postgres crates/lash-postgres-store/src/postgres/migrate.rs::read_state_under_lock  # reads the migration stamp, ledger and release stamp in one REPEATABLE READ snapshot
 postgres crates/lash-postgres-store/src/postgres/migrate.rs::verify_changed_catalog  # the synthetic-next shape verification after a run: it reads the catalog and rolls back; each step begins at `begin_migration`
 postgres crates/lash-postgres-store/src/preflight/walk.rs::read_only_snapshot  # opens a REPEATABLE READ READ ONLY snapshot for the durable walk

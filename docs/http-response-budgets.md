@@ -45,5 +45,4 @@ The laws cover buffered and streamed inputs, advisory lengths, native HTTP
 fixtures, both OpenAI endpoints, and Restate control/attach requests. Caller
 witnesses use the current Restate turn path over SQLite memory/file and
 PostgreSQL. They also check native Restate admin and ingress decoding paths on
-the same server double. The retired in-memory store and store-journal turn host
-are not part of this contract.
+the same server double.
