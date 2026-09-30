@@ -10,8 +10,6 @@ impl StoreTestSupport for SqliteStore {
     fn decoded_row_counts_for_testing(&self) -> DecodedRowCounts {
         DecodedRowCounts {
             graph_node_bodies: self.decoded_graph_node_bodies.load(AtomicOrdering::Relaxed),
-            usage_rows: self.decoded_usage_rows.load(AtomicOrdering::Relaxed),
-            usage_holes: self.decoded_usage_holes.load(AtomicOrdering::Relaxed),
             turn_receipt_bodies: self
                 .decoded_turn_receipt_bodies
                 .load(AtomicOrdering::Relaxed),

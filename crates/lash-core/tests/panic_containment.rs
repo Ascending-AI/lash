@@ -675,7 +675,10 @@ async fn provider_panic_is_typed_and_non_retryable() {
     lash_core::panic_containment::set_loud(false);
     let mut provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let failure = provider
-        .complete(request())
+        .complete(
+            request(),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect_err("typed failure");
 
@@ -703,7 +706,10 @@ async fn manufactured_provider_panic_bypasses_text_classification() {
         ClassifierKeywordPanicProvider,
     )));
     let failure = provider
-        .complete(request())
+        .complete(
+            request(),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect_err("typed failure");
 
@@ -1423,7 +1429,10 @@ async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_mode
     let direct = std::panic::AssertUnwindSafe(async {
         match callback {
             DesugaredPanicCallback::Complete => auxiliary
-                .complete(request())
+                .complete(
+                    request(),
+                    <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+                )
                 .await
                 .map(|_| ())
                 .map_err(|failure| {

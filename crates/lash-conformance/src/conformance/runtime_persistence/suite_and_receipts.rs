@@ -74,7 +74,7 @@ pub async fn head_and_window_reads_agree_for_each_named_session(store: Arc<dyn R
     };
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         "read-agreement",
     )
     .await
@@ -161,7 +161,7 @@ pub async fn session_prompt_layer_round_trips_through_the_committed_head(
 
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         "session-prompt-layer",
     )
     .await
@@ -205,7 +205,7 @@ pub async fn session_protocol_turn_options_round_trip_through_the_committed_head
 
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         "session-protocol-turn-options",
     )
     .await
@@ -248,7 +248,7 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
 
     let initial = commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         "execution-state-initial",
     )
     .await
@@ -258,7 +258,7 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     state.set_execution_state_snapshot(Some(b"replacement-execution-state".to_vec().into()));
     let replacement = commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         "execution-state-replacement",
     )
     .await
@@ -274,7 +274,7 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     state.set_execution_state_snapshot(None);
     let cleared = commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         "execution-state-clear",
     )
     .await
@@ -324,7 +324,7 @@ pub async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn Runtim
         crate::CommitBudgetLimit::Unbounded,
         crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
     );
-    let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+    let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
     commit.graph = crate::GraphAppend::Extend {
         nodes: vec![parent, child],
     };
@@ -356,7 +356,7 @@ pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn Runtim
         crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
         crate::CommitBudgetLimit::Unbounded,
     );
-    let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+    let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
     commit.checkpoint.components.insert(
         crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
         crate::HydratedCheckpointComponent::changed(vec![0; CONFIGURED_BYTE_LIMIT * 2]),
@@ -382,7 +382,6 @@ pub(super) fn commit_budget_conformance_fixture(byte_limit: usize) -> RuntimeCom
     };
     RuntimeCommit::persisted_state_for_test_with_budget(
         &state,
-        &[],
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::bounded(byte_limit),
             crate::CommitBudgetLimit::Unbounded,
@@ -458,41 +457,6 @@ pub async fn commit_rejects_agent_frame_bytes_over_budget(store: Arc<dyn Runtime
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_usage_delta_bytes_over_budget(store: Arc<dyn RuntimeStore>) {
-    const BYTE_LIMIT: usize = 2_048;
-    let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
-    commit
-        .validate_budget()
-        .expect("the commit without a usage delta must fit");
-    commit.usage_deltas = crate::store::RuntimeUsageDelta::for_operation(
-        &commit.turn_commit.operation,
-        &[TokenLedgerEntry {
-            source: "u".repeat(BYTE_LIMIT * 2),
-            model: "budget-model".to_string(),
-            usage: TokenUsage::default(),
-            usage_disposition: Default::default(),
-        }],
-    )
-    .expect("identify the oversized usage delta");
-
-    let error = store
-        .commit_runtime_state(commit)
-        .await
-        .expect_err("usage delta bytes alone must trip the commit budget");
-    assert!(matches!(
-        error,
-        StoreError::CommitByteBudgetExceeded {
-            usage_delta_bytes,
-            max_bytes: BYTE_LIMIT,
-            ..
-        } if usage_delta_bytes > BYTE_LIMIT
-    ));
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn commit_rejects_turn_result_bytes_over_budget(store: Arc<dyn RuntimeStore>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
@@ -529,16 +493,6 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(store: Arc<
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
-    let usage = TokenLedgerEntry {
-        source: "all-families".to_string(),
-        model: "budget-model".to_string(),
-        usage: TokenUsage {
-            input_tokens: 1,
-            output_tokens: 2,
-            ..TokenUsage::default()
-        },
-        usage_disposition: Default::default(),
-    };
     // A turn's terminal commit, so it may carry the follow-on a frame switch
     // owes (ADR 0101 §3).
     let operation = crate::OperationId::turn("root", "all-families", "final");
@@ -549,7 +503,6 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(store: Arc<
     let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
         &state,
         graph,
-        &[usage],
         operation,
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::bounded(BYTE_LIMIT),
@@ -601,7 +554,7 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     let state = seed_append_receipt_state(&store).await;
     let old_leaf = state.session_graph.leaf_node_id.clone().expect("seed leaf");
 
-    let same_leaf_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let same_leaf_commit = RuntimeCommit::persisted_state_for_test(&state);
     let seed_frame_node_id = same_leaf_commit
         .current_frame_node_id
         .clone()
@@ -680,222 +633,6 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimeStore>) {
-    let state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let usage = TokenLedgerEntry {
-        source: "reasoning-only".to_string(),
-        model: "usage-model".to_string(),
-        usage: TokenUsage {
-            reasoning_output_tokens: 9,
-            ..TokenUsage::default()
-        },
-        usage_disposition: Default::default(),
-    };
-    commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state_for_test(&state, std::slice::from_ref(&usage)),
-        "reasoning-only usage seed",
-    )
-    .await
-    .expect("seed reasoning-only durable usage");
-
-    let read = store
-        .load_session_window(
-            &SessionId::from("root"),
-            crate::store::WindowSelector::Current,
-        )
-        .await
-        .expect("load reasoning-only usage")
-        .expect("reasoning-only usage session exists");
-    assert_eq!(read.usage.rows.len(), 1);
-    assert_eq!(read.usage.rows[0].source, usage.source);
-    assert_eq!(read.usage.rows[0].usage, usage.usage);
-}
-
-/// FIG-2765: the durable row, not process memory, is what says which calls were
-/// billed but never counted. Every disposition — reported, hole, correction, and
-/// an explicit zero-valued correction — must survive a store round trip with its
-/// hole identities intact, and the outstanding set must be rebuildable from the
-/// rows alone.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
-    store: Arc<dyn RuntimeStore>,
-) {
-    let state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let hole =
-        |call_id: &str, ordinal: u32, generation: Option<&str>| crate::UnreportedLedgerAttempt {
-            call_id: call_id.to_string(),
-            attempt_ordinal: ordinal,
-            generation_id: generation.map(str::to_string),
-        };
-    let rows = [
-        TokenLedgerEntry::reported(
-            "turn",
-            "openrouter/model",
-            TokenUsage {
-                input_tokens: 12,
-                ..TokenUsage::default()
-            },
-        ),
-        TokenLedgerEntry {
-            source: "turn".to_string(),
-            model: "openrouter/model".to_string(),
-            usage: TokenUsage::default(),
-            usage_disposition: crate::LedgerUsageOutcome::unreported([
-                hole("call-a", 0, Some("gen-a")),
-                hole("call-b", 2, None),
-                hole("call-c", 1, Some("gen-c")),
-            ]),
-        },
-        TokenLedgerEntry {
-            source: "turn".to_string(),
-            model: "openrouter/model".to_string(),
-            usage: TokenUsage {
-                input_tokens: 334,
-                ..TokenUsage::default()
-            },
-            usage_disposition: crate::LedgerUsageOutcome::Reconciled {
-                call_id: "call-a".to_string(),
-                attempt_ordinal: 0,
-            },
-        },
-        // An explicit zero correction is information: the provider answered and
-        // the charge really was nothing. It must not be mistaken for an empty
-        // row and dropped.
-        TokenLedgerEntry {
-            source: "turn".to_string(),
-            model: "openrouter/model".to_string(),
-            usage: TokenUsage::default(),
-            usage_disposition: crate::LedgerUsageOutcome::Reconciled {
-                call_id: "call-c".to_string(),
-                attempt_ordinal: 1,
-            },
-        },
-    ];
-    commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state_for_test(&state, &rows),
-        "usage disposition seed",
-    )
-    .await
-    .expect("seed durable usage dispositions");
-
-    let read = store
-        .load_session_window(
-            &SessionId::from("root"),
-            crate::store::WindowSelector::Current,
-        )
-        .await
-        .expect("load usage dispositions")
-        .expect("usage disposition session exists");
-    let ledger = crate::conformance::helpers::load_usage_ledger(store.as_ref(), &state.session_id)
-        .await
-        .expect("page the usage ledger");
-    assert_eq!(ledger.len(), 4, "one row per disposition");
-    let dispositions = ledger
-        .iter()
-        .map(|entry| entry.usage_disposition.clone())
-        .collect::<Vec<_>>();
-    for expected in rows.iter().map(|row| &row.usage_disposition) {
-        assert!(
-            dispositions.contains(expected),
-            "durable read lost a usage disposition: {expected:?} not in {dispositions:?}"
-        );
-    }
-
-    let outstanding = &read.usage.outstanding;
-    let keys = outstanding
-        .iter()
-        .map(|attempt| (attempt.call_id.as_str(), attempt.attempt_ordinal))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        keys,
-        vec![("call-b", 2)],
-        "corrected attempts are filled; the uncorrected hole survives the reload"
-    );
-    assert_eq!(
-        outstanding[0].generation_id, None,
-        "a hole with no generation id survives as a hole, not as missing data"
-    );
-    assert_eq!(outstanding[0].source, "turn");
-    assert_eq!(outstanding[0].model, "openrouter/model");
-
-    let report = read.usage.report();
-    assert_eq!(report.usage.usage.input_tokens, 346);
-    assert_eq!(report.usage.unreported_attempts, 1);
-    assert_eq!(report.usage.reconciled_attempts, 2);
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimeStore>) {
-    let state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let usage = [
-        TokenLedgerEntry {
-            source: "overflow".to_string(),
-            model: "usage-model".to_string(),
-            usage: TokenUsage {
-                input_tokens: i64::MAX,
-                ..TokenUsage::default()
-            },
-            usage_disposition: Default::default(),
-        },
-        TokenLedgerEntry {
-            source: "overflow".to_string(),
-            model: "usage-model".to_string(),
-            usage: TokenUsage {
-                input_tokens: 1,
-                ..TokenUsage::default()
-            },
-            usage_disposition: Default::default(),
-        },
-    ];
-    commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state_for_test(&state, &usage),
-        "usage overflow seed",
-    )
-    .await
-    .expect("seed distinct durable usage deltas");
-
-    let error = store
-        .load_session_window(
-            &SessionId::from("root"),
-            crate::store::WindowSelector::Current,
-        )
-        .await
-        .expect_err("overflowing usage rows must fail load");
-    assert!(
-        matches!(
-            &error,
-            StoreError::TokenUsageAccountingOverflow {
-                usage_source,
-                model,
-                counter: "input_tokens",
-            } if usage_source == "overflow" && model == "usage-model"
-        ),
-        "overflowing usage rows fail load as TokenUsageAccountingOverflow, got {error:?}"
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
     store: Arc<dyn RuntimeStore>,
 ) {
@@ -907,7 +644,7 @@ pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
     };
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         "turn index overflow seed",
     )
     .await
@@ -955,7 +692,7 @@ pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overfl
     };
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         "prompt subtotal overflow seed",
     )
     .await
@@ -970,76 +707,4 @@ pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overfl
             counter: "input_total_tokens"
         }
     ));
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn RuntimeStore>) {
-    let usage = TokenLedgerEntry {
-        source: "idempotent-republish".to_string(),
-        model: "usage-model".to_string(),
-        usage: crate::TokenUsage {
-            input_tokens: 11,
-            output_tokens: 7,
-            cache_read_input_tokens: 5,
-            cache_write_input_tokens: 3,
-            reasoning_output_tokens: 2,
-        },
-        usage_disposition: Default::default(),
-    };
-    let state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let first = RuntimeCommit::persisted_state_for_test(&state, std::slice::from_ref(&usage));
-    let durable_identity = first.usage_deltas[0].identity.clone();
-    let first_result = commit_runtime_state_for_test(&store, first, "usage identity first")
-        .await
-        .expect("publish first usage identity");
-
-    let mut next_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
-    next_state.head_revision = first_result.head_revision;
-    let mut republish = RuntimeCommit::persisted_state_for_test(&next_state, &[]);
-    republish.usage_deltas = vec![crate::store::RuntimeUsageDelta {
-        identity: durable_identity.clone(),
-        entry: usage.clone(),
-    }];
-    let republished = commit_runtime_state_for_test(&store, republish, "usage identity retry")
-        .await
-        .expect("republish existing usage identity");
-    assert_eq!(
-        republished.committed_usage_delta_identities,
-        vec![durable_identity]
-    );
-
-    let read = store
-        .load_session_window(
-            &SessionId::from("root"),
-            crate::store::WindowSelector::Current,
-        )
-        .await
-        .expect("load idempotent usage")
-        .expect("usage session exists");
-    let ledger = crate::conformance::helpers::load_usage_ledger(store.as_ref(), &state.session_id)
-        .await
-        .expect("page the usage ledger");
-    let matching = ledger
-        .iter()
-        .filter(|entry| entry.source == usage.source && entry.model == usage.model)
-        .collect::<Vec<_>>();
-    assert_eq!(matching.len(), 1);
-    assert_eq!(matching[0].usage, usage.usage);
-    let totals = read
-        .usage
-        .rows
-        .iter()
-        .filter(|row| row.source == usage.source && row.model == usage.model)
-        .collect::<Vec<_>>();
-    assert_eq!(totals.len(), 1);
-    assert_eq!(
-        totals[0].usage, usage.usage,
-        "the totals count the delta once"
-    );
 }

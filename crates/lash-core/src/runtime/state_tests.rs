@@ -87,7 +87,6 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
     let result_a = store
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &generation_a,
-            &[],
         ))
         .await
         .expect("persist valid generation-A state");
@@ -107,7 +106,6 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
     let result_b = store
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &generation_b,
-            &[],
         ))
         .await
         .expect("persist valid generation-B state");

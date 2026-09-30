@@ -397,6 +397,8 @@ pub mod persistence {
     /// The store halves a [`StoreSet`](crate::StoreSet) hands out as trait
     /// objects, nameable so a host can decorate a store set (FIG-4373).
     pub use lash_core::ProcessDefinitionStore;
+    pub use lash_core::RunSpecHash;
+    pub use lash_core::UsageAccountingStore;
     pub use lash_core::attachments::{
         AttachmentRootPage, AttachmentRootSource, CompleteAttachmentRoots,
     };
@@ -454,7 +456,6 @@ pub mod persistence {
         ArtifactName, ArtifactReferrer, FrameEnvironmentId, ReferrerClaim, ResolvedArtifactCleanup,
     };
     pub use lash_core::{AttachmentReferrers, AttachmentWrite, SessionReferrerState};
-    pub use lash_core::{RunSpecHash, SessionUsageTotals};
     /// Queued-work ordering values and admission-selection helpers.
     pub mod queued_work {
         /// Stable queued-work ordering values and selection helpers for store implementations.
@@ -486,8 +487,8 @@ pub mod persistence {
         HistoryBudget, HistoryCursor, HistoryNode, HistoryPage, HistoryStop, LineageStamp,
         LoadedSessionWindow, QueuedWorkStore, RuntimeStore, SessionCatalogStore,
         SessionHistoryStore, SessionLookup, SessionStore, SessionWindowRead, TurnInputStore,
-        UsageLedgerCursor, UsageLedgerPage, UsageLedgerRow, WindowAnchorViolation, WindowSelector,
-        load_session_read_view, load_session_window_state, refresh_session_window,
+        WindowAnchorViolation, WindowSelector, load_session_read_view, load_session_window_state,
+        refresh_session_window,
     };
     pub use lash_core::store::{
         AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
@@ -495,11 +496,10 @@ pub mod persistence {
         ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId, ParkReason,
         ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, ProcessPark, ProcessParkKey,
         ProcessParkQuery, RuntimeCommit, RuntimeCommitReceipt, RuntimeStoreDecorator,
-        RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
-        SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
-        TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkQuery, TurnParkTarget,
-        TurnParkWrite, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
-        validate_turn_commit_outcome_code,
+        RuntimeTurnCommitStamp, SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta,
+        SessionHeadPayload, TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkQuery,
+        TurnParkTarget, TurnParkWrite, UnparkCause, UnsettledTurnCounts,
+        commit_runtime_state_verified, validate_turn_commit_outcome_code,
     };
     /// A logical root's durable terminal evidence and the store segment that
     /// answers and binds roots (FIG-3600 S7, FIG-3607 item 8), and the
@@ -1285,11 +1285,15 @@ pub mod provider {
     };
     pub use lash_core::provider::ModelEffortValidationError;
     /// Provider completion, caching, failure, retry, and rate-limiting contracts.
+    /// A direct [`ProviderHandle::complete`](facade_support::ProviderHandle::complete)
+    /// names its [`DispatchAdmission`]: a host calling a provider outside any
+    /// turn passes `<dyn DispatchAdmission>::host_owned()` and owns that
+    /// call's accounting itself (ADR 0125).
     pub use lash_core::provider::{
-        CacheRetention, DefaultProviderFailureClassifier, ProviderCompletion,
-        ProviderCompletionError, ProviderFailureClassifier, ProviderRateLimitPermit,
-        ProviderRateLimitPolicy, ProviderRateLimiter, ProviderReliability, ProviderRetryPolicy,
-        RequestTimeout,
+        CacheRetention, DefaultProviderFailureClassifier, DispatchAdmission, DispatchRefused,
+        ProviderCompletion, ProviderCompletionError, ProviderFailureClassifier,
+        ProviderRateLimitPermit, ProviderRateLimitPolicy, ProviderRateLimiter, ProviderReliability,
+        ProviderRetryPolicy, RequestTimeout,
     };
     pub use lash_core::{
         AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,

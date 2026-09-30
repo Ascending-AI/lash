@@ -439,3 +439,10 @@ frames. A byte cap would require a separate eviction and hydration policy.
 Frame windows reuse the runtime's context boundary, while node and byte
 budgets make historical reads explicit. Fork ceilings accelerate selection;
 checked parent edges preserve ancestry authority.
+
+## Model usage accounting
+
+Usage totals and ledger reads (§8) belong to `UsageAccountingStore`, by owner,
+over the `usage_facts`, `usage_runs` and `usage_owner_retirements` tables.
+`RuntimeSessionState`, `SessionSnapshot` and `SessionWindowRead` carry no
+usage, and `SessionHistoryStore` reads none ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).

@@ -920,7 +920,7 @@ pub async fn tool_restore_policy_survives_every_rebuild_and_rollback(tier: ToolC
         .expect("seed surface populated");
     surface.generation = 42;
     seed_state.set_tool_state_snapshot(Some(surface));
-    let commit = crate::RuntimeCommit::persisted_state_for_test(&seed_state, &[]);
+    let commit = crate::RuntimeCommit::persisted_state_for_test(&seed_state);
     crate::testing::store_fixtures::commit_runtime_state_for_test(
         &store,
         commit,

@@ -10,7 +10,7 @@ impl RuntimeScenarioContext {
             .appended_nodes()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
-        let mut final_commit = RuntimeCommit::persisted_state_for_test(&self.state, &[]);
+        let mut final_commit = RuntimeCommit::persisted_state_for_test(&self.state);
         final_commit.drive_fence = Some(Box::new(self.owner_and_lease().1.clone()));
         final_commit.applied_commands = self.command_completion();
         if self.admission.is_some() || self.checkpoint_admission.is_some() {

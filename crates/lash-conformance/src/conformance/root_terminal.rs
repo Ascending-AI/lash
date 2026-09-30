@@ -195,10 +195,7 @@ pub async fn a_host_id_naming_a_terminal_root_is_answered_not_rerun(
         .derive_node_ids(&state.session_id, &operation)
         .expect("derive commit node ids");
     let mut commit = crate::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        &state,
-        graph,
-        &[],
-        operation,
+        &state, graph, operation,
     )
     .expect("build the earlier epoch's commit");
     commit.root_terminal = Some(Box::new(RootTerminalWrite {

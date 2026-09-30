@@ -6,8 +6,6 @@ use crate::{FrameNodeId, NodeId, SessionId};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DecodedRowCounts {
     pub graph_node_bodies: u64,
-    pub usage_rows: u64,
-    pub usage_holes: u64,
     pub turn_receipt_bodies: u64,
 }
 
@@ -146,12 +144,8 @@ pub fn append_request_commit_with_clock_for_testing(
     );
     let mut graph = state.pending_graph_commit();
     graph.derive_node_ids(&state.session_id, &operation)?;
-    let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        state,
-        graph,
-        &[],
-        operation,
-    )?;
+    let mut commit =
+        RuntimeCommit::persisted_state_with_graph_commit_and_operation(state, graph, operation)?;
     commit.turn_commit = stamp;
     commit.debug_assert_append_envelope_scope();
     Ok(commit)

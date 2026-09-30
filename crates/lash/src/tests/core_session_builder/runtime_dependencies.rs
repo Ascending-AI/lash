@@ -481,7 +481,6 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     source
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
-            &[],
         ))
         .await
         .expect("commit orphaned source frame");
@@ -594,7 +593,6 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     source_store
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
-            &[],
         ))
         .await
         .expect("commit fork observer source");
@@ -1014,7 +1012,6 @@ async fn duplicate_only_fork_intents_are_canonical(
     source_store
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
-            &[],
         ))
         .await?;
     let fork_node_id = source_state
@@ -1426,7 +1423,6 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     source_store
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
-            &[],
         ))
         .await
         .expect("commit fork source");

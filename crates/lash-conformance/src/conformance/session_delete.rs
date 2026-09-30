@@ -504,7 +504,7 @@ pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_set
     };
     state.ensure_agent_frame_initialized();
     store
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit the session's frame");
     let frame = ObligationKey::ArtifactCleanup {

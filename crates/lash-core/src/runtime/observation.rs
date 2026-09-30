@@ -1,6 +1,5 @@
 use crate::SessionId;
 use crate::TurnId;
-use lash_sansio::sync::MutexExt;
 mod process_lifecycle;
 pub(crate) mod replay;
 
@@ -44,7 +43,6 @@ pub struct RuntimeObservation {
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     /// The committed turn index at publication time.
     pub turn_index: usize,
-    pub usage_report: super::SessionUsageReport,
     pub tool_state: Option<crate::ToolState>,
     /// The session's active tool catalog, or the capture error. One field —
     /// an error never travels with a catalog.
@@ -70,7 +68,6 @@ impl RuntimeObservation {
         previous: Option<&RuntimeObservation>,
         revision: SessionRevision,
         read_view: crate::SessionReadView,
-        usage_report: super::SessionUsageReport,
         authority_fingerprint: Vec<u8>,
     ) -> Self {
         let tool_catalog = runtime
@@ -129,7 +126,6 @@ impl RuntimeObservation {
             read_view,
             current_frame_node_id: runtime.state.current_frame_node_id.clone(),
             turn_index: runtime.state.turn_index,
-            usage_report,
             tool_state,
             tool_catalog,
             plugin_services,
@@ -243,26 +239,12 @@ impl RuntimeObservation {
     }
 }
 
-fn export_observation_state(
-    runtime: &LashRuntime,
-) -> (crate::SessionReadView, super::SessionUsageReport, Vec<u8>) {
+fn export_observation_state(runtime: &LashRuntime) -> (crate::SessionReadView, Vec<u8>) {
     // Observation publication is synchronous. When resident state has been
     // invalidated, project only the already-adopted durable snapshot; never
     // recapture live plugin/tool state before the async reload gate runs.
     let read_view = runtime.read_view();
-    let shared_ledger = runtime.shared_token_ledger.lock_recover();
-    let mut usage = runtime.state.usage.clone();
-    let mut saturated = false;
-    for entry in shared_ledger.iter() {
-        saturated |= usage.fold_saturating(&entry.entry);
-    }
-    let mut usage_report = usage.report();
-    usage_report.saturated |= saturated;
-    (
-        read_view,
-        usage_report,
-        authority_fingerprint(&runtime.state, &usage),
-    )
+    (read_view, authority_fingerprint(&runtime.state))
 }
 
 async fn list_scope_process_handles(
@@ -348,14 +330,13 @@ impl RuntimeHandle {
         let revision = SessionRevision::from_runtime(&runtime);
         let cursor =
             live_replay_store.current_cursor(&SessionId::from(runtime.session_id()), revision);
-        let (read_view, usage_report, authority_fingerprint) = export_observation_state(&runtime);
+        let (read_view, authority_fingerprint) = export_observation_state(&runtime);
         let observation = RuntimeObservation::from_runtime(
             &runtime,
             cursor,
             None,
             revision,
             read_view,
-            usage_report,
             authority_fingerprint,
         );
         Self {
@@ -407,7 +388,7 @@ impl RuntimeHandle {
     pub fn adopt_observation_from(&self, runtime: &LashRuntime) {
         let revision = SessionRevision::from_runtime(runtime);
         let previous = self.observation.load_full();
-        let (read_view, usage_report, authority_fingerprint) = export_observation_state(runtime);
+        let (read_view, authority_fingerprint) = export_observation_state(runtime);
         let cursor = self
             .live_replay_store
             .current_cursor(&SessionId::from(runtime.session_id()), revision);
@@ -417,7 +398,6 @@ impl RuntimeHandle {
             Some(previous.as_ref()),
             revision,
             read_view,
-            usage_report,
             authority_fingerprint,
         );
         self.observation.store(Arc::new(next));
@@ -429,14 +409,13 @@ impl RuntimeHandle {
         let turn_id = (previous.revision != revision)
             .then(|| runtime.last_committed_turn_id_for_revision(revision))
             .flatten();
-        let (read_view, usage_report, authority_fingerprint) = export_observation_state(runtime);
+        let (read_view, authority_fingerprint) = export_observation_state(runtime);
         let mut next = RuntimeObservation::from_runtime(
             runtime,
             previous.cursor.clone(),
             Some(previous.as_ref()),
             revision,
             read_view.clone(),
-            usage_report,
             authority_fingerprint,
         );
         let payload = if previous.revision < revision {
@@ -741,10 +720,7 @@ impl RuntimeHandle {
     clippy::expect_used,
     reason = "crate-owned state encodes into an in-memory buffer"
 )]
-fn authority_fingerprint(
-    state: &super::RuntimeSessionState,
-    usage: &crate::SessionUsageTotals,
-) -> Vec<u8> {
+fn authority_fingerprint(state: &super::RuntimeSessionState) -> Vec<u8> {
     // The resident graph contributes its shape, not its serialized nodes:
     // graph bodies are immutable durable history, and every production
     // mutation moves the leaf, the node count, or another covered field, so
@@ -764,7 +740,6 @@ fn authority_fingerprint(
         &state.protocol_turn_options,
         &state.authority,
         &state.checkpoint_components,
-        usage,
         &state.checkpoint_ref,
         state.head_revision,
         persisted_nodes_digest,

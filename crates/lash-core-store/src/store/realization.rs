@@ -123,11 +123,6 @@ mod tests {
                     .or(commit.graph_base_leaf_node_id.as_ref())
                     .cloned(),
                 realized_node_timestamps,
-                committed_usage_delta_identities: commit
-                    .usage_deltas
-                    .iter()
-                    .map(|delta| delta.identity.clone())
-                    .collect(),
                 failure_evidence: commit.failure_evidence.clone(),
                 outcome: commit.outcome.clone(),
                 pending_follow_on: None,
@@ -209,7 +204,7 @@ mod tests {
             ..Default::default()
         };
 
-        commit_runtime_state_verified(&store, RuntimeCommit::persisted_state_for_test(&state, &[]))
+        commit_runtime_state_verified(&store, RuntimeCommit::persisted_state_for_test(&state))
             .await
             .expect("the bounded commit should be admitted");
 
@@ -233,7 +228,7 @@ mod tests {
             ..Default::default()
         };
         let budget = super::super::CommitBudget::bounded(1024 * 1024, 1);
-        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
         commit.adopted_intent_rows = 2;
 
         let error = commit_runtime_state_verified(&store, commit)
@@ -262,7 +257,7 @@ mod tests {
         let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
         ));
-        let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let commit = RuntimeCommit::persisted_state_for_test(&state);
 
         let missing_error =
             commit_runtime_state_verified(&FacadeTestStore::default(), commit.clone())
@@ -316,7 +311,7 @@ mod tests {
 
         commit_runtime_state_verified(
             &store,
-            RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget),
+            RuntimeCommit::persisted_state_for_test_with_budget(&state, budget),
         )
         .await
         .expect("the unbounded commit should be admitted");
@@ -340,12 +335,10 @@ mod tests {
         };
         state.ensure_agent_frame_initialized();
 
-        let err = commit_runtime_state_verified(
-            &store,
-            RuntimeCommit::persisted_state_for_test(&state, &[]),
-        )
-        .await
-        .expect_err("a loose store must fail before its first commit");
+        let err =
+            commit_runtime_state_verified(&store, RuntimeCommit::persisted_state_for_test(&state))
+                .await
+                .expect_err("a loose store must fail before its first commit");
 
         assert!(matches!(
             err,
@@ -382,7 +375,7 @@ mod tests {
                 ),
             },
         };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state);
         commit.graph = super::super::GraphAppend::Extend {
             nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
                 .map(|index| crate::SessionNodeRecord {
@@ -421,11 +414,9 @@ mod tests {
             materialized_session: Some(state.session_id.clone()),
             ..Default::default()
         };
-        let _ = commit_runtime_state_verified(
-            &store,
-            RuntimeCommit::persisted_state_for_test(&state, &[]),
-        )
-        .await;
+        let _ =
+            commit_runtime_state_verified(&store, RuntimeCommit::persisted_state_for_test(&state))
+                .await;
     }
 
     #[tokio::test]
@@ -439,12 +430,10 @@ mod tests {
             replayed: true,
             ..Default::default()
         };
-        let receipt = commit_runtime_state_verified(
-            &store,
-            RuntimeCommit::persisted_state_for_test(&state, &[]),
-        )
-        .await
-        .unwrap();
+        let receipt =
+            commit_runtime_state_verified(&store, RuntimeCommit::persisted_state_for_test(&state))
+                .await
+                .unwrap();
         assert!(receipt.receipt_replayed);
         assert_eq!(receipt.head_revision, state.head_revision);
     }

@@ -456,10 +456,7 @@ async fn sqlite_prompt_probe_store(
         ))
     };
     store
-        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
-            &state,
-            &[],
-        ))
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit SQLite prompt probe head");
     (stores, backend, store)

@@ -212,15 +212,6 @@ pub enum PluginError {
         /// Backend diagnostic describing the malformed field or payload.
         message: String,
     },
-    /// A store response confirmed usage identities outside the set staged by
-    /// this operation. Applying it would discard unrelated usage.
-    #[error(
-        "store confirmed {confirmed_count} usage identities, but only {staged_count} were staged"
-    )]
-    UnstagedUsageConfirmation {
-        confirmed_count: usize,
-        staged_count: usize,
-    },
     /// A backend-owned authoritative clock produced a value before the Unix
     /// epoch, outside the runtime clock contract.
     #[error("{clock} returned a pre-Unix-epoch millisecond value: {epoch_ms}")]
@@ -414,7 +405,6 @@ impl PluginError {
             | Self::AppendOperationIdentityConflict { .. }
             | Self::AppendReceiptRequestedNodeCountCorrupt { .. }
             | Self::StoredDataCorrupt { .. }
-            | Self::UnstagedUsageConfirmation { .. }
             | Self::ClockBeforeUnixEpoch { .. }
             | Self::ProcessNotVisible { .. }
             | Self::NotASessionRuntime { .. }
@@ -476,7 +466,6 @@ impl PluginError {
             | Self::AppendOperationIdentityConflict { .. }
             | Self::AppendReceiptRequestedNodeCountCorrupt { .. }
             | Self::StoredDataCorrupt { .. }
-            | Self::UnstagedUsageConfirmation { .. }
             | Self::ClockBeforeUnixEpoch { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::ProcessChangeCursorPruned { .. }

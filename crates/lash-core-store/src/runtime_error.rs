@@ -418,6 +418,13 @@ pub enum RuntimeErrorCode {
     RuntimeEffectToolChildRequestOpener,
     RuntimeEffectToolChildRequestVersion,
     RuntimeEffectToolSettlementVersion,
+    /// A provider call was dispatched outside any spending effect's usage run
+    /// (ADR 0125): nothing would account for it, so it is refused before
+    /// dispatch.
+    UsageRunMissing,
+    /// Admitting a spending effect's usage run to storage failed. The attempt
+    /// ends retryably and journals nothing; the engine runs it again.
+    UsageAdmissionFault,
     RuntimeEffectWrongOutcome,
     /// Process-local; repaired by restart, not by same-process retry.
     RuntimeEffectControllerTaskClosed,
@@ -776,6 +783,8 @@ impl RuntimeErrorCode {
                 "runtime_effect_tool_child_request_admission"
             }
             Self::RuntimeEffectToolChildRequestOpener => "runtime_effect_tool_child_request_opener",
+            Self::UsageRunMissing => "usage_run_missing",
+            Self::UsageAdmissionFault => "usage_admission_fault",
             Self::RuntimeEffectToolChildRequestVersion => {
                 "runtime_effect_tool_child_request_version"
             }
@@ -992,6 +1001,8 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectToolChildRequestAdmission,
         Self::RuntimeEffectToolChildRequestOpener,
         Self::RuntimeEffectToolChildRequestVersion,
+        Self::UsageRunMissing,
+        Self::UsageAdmissionFault,
         Self::RuntimeEffectInvocationSubject,
         Self::RuntimeEffectScopeMismatch,
         Self::RuntimeEffectLocalExecutorMismatch,
@@ -1226,6 +1237,8 @@ impl RuntimeErrorCode {
                 Self::RuntimeEffectToolChildRequestAdmission
             }
             "runtime_effect_tool_child_request_opener" => Self::RuntimeEffectToolChildRequestOpener,
+            "usage_run_missing" => Self::UsageRunMissing,
+            "usage_admission_fault" => Self::UsageAdmissionFault,
             "runtime_effect_tool_child_request_version" => {
                 Self::RuntimeEffectToolChildRequestVersion
             }

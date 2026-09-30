@@ -139,7 +139,6 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
         };
         let commit = lash_core::store::RuntimeCommit::persisted_state_with_operation_for_testing(
             &state,
-            &[],
             lash_core::store::OperationId::turn(
                 session_id.clone(),
                 lash_core::TurnId::from("parked-turn"),
@@ -588,7 +587,7 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         ))
     };
     state.ensure_agent_frame_initialized();
-    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state);
     commit.drive_fence = Some(Box::new(lease.clone()));
     commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
         commit: lash_core::store::TurnCommitId::new(root.clone(), 0),

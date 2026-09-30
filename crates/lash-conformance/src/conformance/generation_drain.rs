@@ -142,7 +142,7 @@ impl AdmittedRoot {
         };
         state.ensure_agent_frame_initialized();
         let root = self.root.clone();
-        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
         commit.drive_fence = Some(Box::new(self.lease.clone()));
         commit.root_terminal = Some(Box::new(crate::store::RootTerminalWrite {
             commit: crate::store::TurnCommitId::new(root.clone(), 0),

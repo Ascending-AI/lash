@@ -58,6 +58,26 @@ pub trait EffectHost: AwaitEventResolver {
     /// handler recreation for as long as issued keys remain recoverable.
     fn turn_control_binding_id(&self) -> String;
 
+    /// Deliver every usage settlement the owner's executions issued, then
+    /// retire the owner (ADR 0125): from here on no provider attempt is
+    /// admitted under it, and its remaining open runs are
+    /// `unknown(owner_retired)`. Idempotent. Session deletion and process
+    /// prune call it before anything of the owner is removed.
+    async fn drain_usage_accounting(
+        &self,
+        owner: &crate::RuntimeOwner,
+    ) -> Result<crate::UsageOwnerRetired, RuntimeError>;
+
+    /// After an execution of `owner` was killed or lost: deliver the usage
+    /// settlements it issued, then resolve its runs still open
+    /// `unknown(execution_ended)` (ADR 0125). Answers how many it resolved.
+    /// Idempotent.
+    async fn retire_usage_execution(
+        &self,
+        owner: &crate::RuntimeOwner,
+        scope: &ExecutionScope,
+    ) -> Result<u64, RuntimeError>;
+
     /// Release a terminal root's wait-index rows after the scope-close sink
     /// records its end. `committed_turn` is the physical turn whose commit
     /// ended the root, when one did: that commit still owes its turn's

@@ -870,62 +870,6 @@ impl PostgresStore {
             plan.actual_head_revision(),
             plan.next_head_revision(),
         )?;
-        for entry in &commit.usage_deltas {
-            let entry_ordinal = i64::try_from(entry.identity.entry_ordinal).map_err(|_| {
-                StoreError::Backend(
-                    "usage delta ordinal does not fit PostgreSQL BIGINT".to_string(),
-                )
-            })?;
-            let (reconciled_call_id, reconciled_attempt_ordinal) =
-                match &entry.entry.usage_disposition {
-                    lash_core_execution::LedgerUsageOutcome::Reconciled {
-                        call_id,
-                        attempt_ordinal,
-                    } => (Some(call_id.as_str()), Some(i64::from(*attempt_ordinal))),
-                    _ => (None, None),
-                };
-            let inserted_seq: Option<i64> =
-                sqlx::query_scalar(session_sql().usage_postgres.insert.sql())
-                    .bind(commit.session_id.as_str())
-                    .bind(&entry.identity.operation_storage_key)
-                    .bind(entry_ordinal)
-                    .bind(
-                        i32::try_from(entry.identity.payload_encoding_version).map_err(|_| {
-                            StoreError::Backend(
-                                "usage payload encoding version does not fit PostgreSQL INTEGER"
-                                    .to_string(),
-                            )
-                        })?,
-                    )
-                    .bind(&entry.identity.payload_hash)
-                    .bind(&entry.entry.source)
-                    .bind(&entry.entry.model)
-                    .bind(entry.entry.usage.input_tokens)
-                    .bind(entry.entry.usage.output_tokens)
-                    .bind(entry.entry.usage.cache_read_input_tokens)
-                    .bind(entry.entry.usage.cache_write_input_tokens)
-                    .bind(entry.entry.usage.reasoning_output_tokens)
-                    .bind(reconciled_call_id)
-                    .bind(reconciled_attempt_ordinal)
-                    .fetch_optional(&mut **tx)
-                    .await
-                    .map_err(store_sqlx_error)?;
-            if let (Some(seq), lash_core_execution::LedgerUsageOutcome::Unreported { attempts }) =
-                (inserted_seq, &entry.entry.usage_disposition)
-            {
-                for attempt in attempts {
-                    sqlx::query(session_sql().usage_holes.insert.sql())
-                        .bind(commit.session_id.as_str())
-                        .bind(seq)
-                        .bind(&attempt.call_id)
-                        .bind(i64::from(attempt.attempt_ordinal))
-                        .bind(attempt.generation_id.as_deref())
-                        .execute(&mut **tx)
-                        .await
-                        .map_err(store_sqlx_error)?;
-                }
-            }
-        }
         for (node, facts) in commit.graph.nodes().iter().zip(plan.planned_node_facts()) {
             let node_json = node.encode_storage_body(encoded_under).map_err(|err| {
                 StoreError::Backend(format!("failed to encode graph node body: {err}"))

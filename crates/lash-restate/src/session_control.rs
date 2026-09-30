@@ -177,6 +177,22 @@ pub(crate) async fn end_lost_root_runs(
                     ?loss,
                     "Restate lost a root's execution; the root ends substrate-lost"
                 );
+                // The lost run's open usage runs can never settle: its
+                // settlements, if any, precede this on the owner's object.
+                if let Err(error) = recovery_request(
+                    deadline,
+                    crate::usage_accounting::retire_root_usage(
+                        ingress,
+                        namespace,
+                        &target.session,
+                        &target.root,
+                    ),
+                )
+                .await
+                {
+                    pass.failed
+                        .push((key.clone(), format!("retire root usage: {error}")));
+                }
                 pass.ended.push(target.clone());
             }
             Ok(None) => pass.unchanged += 1,
@@ -483,6 +499,14 @@ impl RestateSessionControl {
                         .kill_invocation(&invocation.invocation_id())
                         .await
                         .map_err(refusal)?;
+                    crate::usage_accounting::retire_root_usage(
+                        &self.ingress,
+                        &self.namespace,
+                        &session,
+                        &root,
+                    )
+                    .await
+                    .map_err(refusal)?;
                     report.released.push(RootRef { session, root });
                 }
             }
@@ -662,6 +686,18 @@ impl SessionControlEngine for RestateSessionControl {
             }
             _ => false,
         };
+        // A killed execution recalls none of the settlements it sent; what it
+        // admitted and never recorded is resolved `unknown(execution_ended)`
+        // behind them (ADR 0125). Idempotent, so a release with nothing held
+        // retires nothing.
+        crate::usage_accounting::retire_root_usage(
+            &self.ingress,
+            &self.namespace,
+            &target.session,
+            &target.root,
+        )
+        .await
+        .map_err(refusal)?;
         // The store already ended the root: the session's drive stopped
         // behind its park admits what follows it once resumed.
         self.resume_session_drives(&target.session).await?;

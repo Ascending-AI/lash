@@ -74,7 +74,7 @@ pub async fn commit_conformance_state(
         "commit",
     );
     let (commit, new_node_ids) =
-        crate::RuntimeCommit::persisted_state_with_operation(state, &[], operation)?;
+        crate::RuntimeCommit::persisted_state_with_operation(state, operation)?;
     let result = store.commit_runtime_state(commit).await?;
     state.apply_persisted_commit_result(result);
     state.mark_node_ids_persisted(new_node_ids);

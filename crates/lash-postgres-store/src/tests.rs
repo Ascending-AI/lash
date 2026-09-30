@@ -39,9 +39,7 @@ async fn persisted_record_decode_store(
         ))
     };
     store
-        .commit_runtime_state(
-            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
-        )
+        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("seed persisted-record decode session");
     (session_id, store)
@@ -207,7 +205,7 @@ async fn seed_failure_evidence_session(
             lash_core_execution::TurnBudget::Unbounded,
         ))
     };
-    let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state);
     commit.failure_evidence = vec![lash_core_execution::TurnFailureEvidence {
         partial_output: Some(lash_core_execution::TurnFailurePartialOutput::Complete {
             text: "settled partial output".to_string(),
@@ -421,7 +419,7 @@ async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
     first_state.ensure_agent_frame_initialized();
     let second_state = first_state.clone();
     let (first_commit, _) =
-        lash_core_execution::RuntimeCommit::persisted_state_for_test(&first_state, &[])
+        lash_core_execution::RuntimeCommit::persisted_state_for_test(&first_state)
             .with_operation(lash_core_execution::OperationId::turn(
                 &session_id,
                 "first-racer",
@@ -429,7 +427,7 @@ async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
             ))
             .expect("build first racing commit");
     let (second_commit, _) =
-        lash_core_execution::RuntimeCommit::persisted_state_for_test(&second_state, &[])
+        lash_core_execution::RuntimeCommit::persisted_state_for_test(&second_state)
             .with_operation(lash_core_execution::OperationId::turn(
                 &session_id,
                 "second-racer",
@@ -555,7 +553,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
         .await
         .expect("delete before first commit");
     let error = stale_store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect_err("stale first commit must not resurrect the session");
     assert!(matches!(
@@ -909,9 +907,7 @@ async fn admitted_input_fixture(
         ))
     };
     let seeded = store
-        .commit_runtime_state(
-            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
-        )
+        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("seed the fixture head");
     state.head_revision = seeded.head_revision;
@@ -1048,7 +1044,7 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
     let error = store
         .commit_runtime_state(
             lash_core_execution::testing::store_fixtures::settling_commit_for_test(
-                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state),
                 &fence,
                 settlement,
             ),
@@ -1383,14 +1379,13 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
             lash_core_execution::TurnBudget::Unbounded,
         ))
     };
-    let (seed_commit, _) =
-        lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
-            .with_operation(lash_core_execution::OperationId::turn(
-                &session_id,
-                "statement-pin-seed",
-                "final",
-            ))
-            .expect("build statement-pin seed commit");
+    let (seed_commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
+        .with_operation(lash_core_execution::OperationId::turn(
+            &session_id,
+            "statement-pin-seed",
+            "final",
+        ))
+        .expect("build statement-pin seed commit");
     let seed_receipt = store
         .commit_runtime_state(seed_commit)
         .await
@@ -1452,14 +1447,13 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
         .await
         .expect("reset statement statistics before the head-commit measurement");
     state.head_revision = seed_receipt.head_revision;
-    let (measured_commit, _) =
-        lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
-            .with_operation(lash_core_execution::OperationId::turn(
-                &session_id,
-                "statement-pin-commit",
-                "final",
-            ))
-            .expect("build statement-pin commit");
+    let (measured_commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
+        .with_operation(lash_core_execution::OperationId::turn(
+            &session_id,
+            "statement-pin-commit",
+            "final",
+        ))
+        .expect("build statement-pin commit");
     store
         .commit_runtime_state(measured_commit)
         .await
@@ -1595,9 +1589,7 @@ async fn postgres_gc_sweep_statement_count_is_dead_set_invariant_when_configured
         ))
     };
     store
-        .commit_runtime_state(
-            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
-        )
+        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("seed gc statement-pin checkpoint");
     let live_blob_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM lash_blobs")
@@ -1759,7 +1751,7 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
         };
         store
             .commit_runtime_state(
-                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state),
             )
             .await
             .expect("seed the parked session");

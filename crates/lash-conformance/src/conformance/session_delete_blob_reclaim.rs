@@ -104,7 +104,7 @@ async fn committed_checkpoint(
         .leaf_node_id
         .clone()
         .expect("initialized session has a leaf");
-    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     commit.checkpoint.components.insert(
         "conformance/session-delete-owned".to_string(),
         crate::HydratedCheckpointComponent::changed(
@@ -178,7 +178,7 @@ pub(super) async fn commit_content_aliased_checkpoint_roots(
         ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
-    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     commit.checkpoint.components.insert(
         "conformance/content-aliased-root".to_string(),
         crate::HydratedCheckpointComponent::changed(aliased_root_bytes),
@@ -254,7 +254,7 @@ async fn advance_checkpoint(
     let mut snapshot = state.to_snapshot();
     snapshot.turn_index += 1;
     state.adopt_snapshot(snapshot);
-    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     if !retain_owned_component {
         commit
             .checkpoint
@@ -809,7 +809,7 @@ async fn attachment_prefix_retention(
             }),
         )]),
     });
-    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     commit.committed_attachment_ids = vec![reference.id.clone()];
     let receipt = store.commit_runtime_state(commit).await.unwrap();
     let leaf_node_id = receipt.committed_leaf_node_id.unwrap();

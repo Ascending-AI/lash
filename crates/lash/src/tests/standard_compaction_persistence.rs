@@ -871,7 +871,12 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
     }
 
     for expected_summary in expected_summaries {
-        let usage_before = session.usage_report().usage.usage.output_tokens;
+        let usage_before = settled_usage(&session)
+            .await?
+            .report()
+            .usage
+            .usage
+            .output_tokens;
         assert!(
             Box::pin(
                 session
@@ -889,13 +894,19 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
                 .content()
                 .contains(expected_summary)
         );
-        // The administrative compaction owns no turn, so its direct completion
-        // usage settles in the commit that applies its command.
-        let usage_after = session.usage_report().usage.usage.output_tokens;
+        // The administrative compaction owns no turn; its direct completion
+        // is its own spending effect, delivered once it is journaled
+        // (ADR 0125).
+        let usage_after = settled_usage(&session)
+            .await?
+            .report()
+            .usage
+            .usage
+            .output_tokens;
         assert_eq!(
             usage_after,
             usage_before + 1,
-            "the summarizer's usage must settle at the compaction's commit"
+            "the summarizer's usage is delivered with its effect"
         );
     }
     Ok(())
@@ -1980,7 +1991,12 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
         .id("standard-compaction-commit-failure-two")
         .output()
         .await?;
-    let usage_before = session.usage_report().usage.usage.output_tokens;
+    let usage_before = settled_usage(&session)
+        .await?
+        .report()
+        .usage
+        .usage
+        .output_tokens;
     let calls_before = provider_calls.load(Ordering::SeqCst);
 
     commit_failure.store(true, Ordering::SeqCst);
@@ -2017,7 +2033,12 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
         "the retry reads the journaled summary back"
     );
     assert_eq!(
-        session.usage_report().usage.usage.output_tokens,
+        settled_usage(&session)
+            .await?
+            .report()
+            .usage
+            .usage
+            .output_tokens,
         usage_before + 1,
         "the summarizer's billed usage settles exactly once"
     );

@@ -83,7 +83,7 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
     };
     handles
         .runtime
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("materialize negative-head session row");
     let target = FenceIntegrityTarget::SessionHeadRevision {

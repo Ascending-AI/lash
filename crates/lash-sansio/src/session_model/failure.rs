@@ -280,6 +280,11 @@ pub enum TurnFailureCode {
     /// The websocket closed before the response completed.
     WebsocketClosedBeforeCompleted,
 
+    // ─── usage accounting ────────────────────────────────────────────────
+    /// The call's usage owner was drained (its session deleted or its
+    /// process pruned), so no provider attempt may spend under it (ADR 0125).
+    UsageOwnerRetired,
+
     /// A code from a vocabulary this type does not own, retained verbatim:
     /// provider and transport error codes, plugin abort codes, kernel
     /// `RuntimeErrorCode` spellings, and arms authored by a newer build.
@@ -378,6 +383,7 @@ impl TurnFailureCode {
             Self::WebsocketReceive => "websocket_receive",
             Self::WebsocketProtocol => "websocket_protocol",
             Self::WebsocketClosedBeforeCompleted => "websocket_closed_before_completed",
+            Self::UsageOwnerRetired => "usage_owner_retired",
             Self::Other(spelling) => spelling,
         }
     }
@@ -485,6 +491,7 @@ impl TurnFailureCode {
             "websocket_receive" => Self::WebsocketReceive,
             "websocket_protocol" => Self::WebsocketProtocol,
             "websocket_closed_before_completed" => Self::WebsocketClosedBeforeCompleted,
+            "usage_owner_retired" => Self::UsageOwnerRetired,
             other => Self::Other(other.to_string()),
         }
     }
@@ -571,6 +578,7 @@ impl TurnFailureCode {
         Self::WebsocketReceive,
         Self::WebsocketProtocol,
         Self::WebsocketClosedBeforeCompleted,
+        Self::UsageOwnerRetired,
     ];
 }
 
@@ -1194,6 +1202,7 @@ mod tests {
             TurnFailureCode::WebsocketReceive,
             TurnFailureCode::WebsocketProtocol,
             TurnFailureCode::WebsocketClosedBeforeCompleted,
+            TurnFailureCode::UsageOwnerRetired,
         ];
         for code in codes {
             assert_eq!(TurnFailureCode::from_wire(code.as_str()), code);

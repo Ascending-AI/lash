@@ -226,3 +226,12 @@ observation tests, event-page SQL pins, and event-batch conformance.
 Store laws use SQLite file, SQLite memory, and PostgreSQL. Host laws use the
 in-process Restate server double, live Restate, and lash-sim's in-process effect
 host. Upgrade proofs use synthetic-next.
+
+## Model usage accounting
+
+The pre-journal limit is an explicit liability, not silent loss. A provider
+attempt is dispatched only under an admitted usage run, so a charge the
+journal cannot describe (a body re-run after an unrecorded fault, an execution
+killed between its entry and its send, facts too large to journal beside a
+poison entry) is an `unknown` run with a reason, readable through
+`LashCore::owner_usage` ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).

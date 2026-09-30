@@ -275,7 +275,6 @@ finish(result);"#,
         root         exec      cell.ok                 calls=2
         root         outcome   turn.final_value        value={"ok":true}
         root         commit    checkpoint.commit       rev=0->1
-        root                     usage                 entries=2 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
         root                     turn_state            stored logical=370B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"embed_tools":{"generation":0,"values":{}},"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}}}
@@ -411,18 +410,15 @@ finish(result);"#,
         root         exec      cell.ok                 calls=2
         root         outcome   turn.final_value        value={"len":2}
         root         commit    checkpoint.commit       rev=0->1
-        root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=246B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
-        session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=373B
         session-001              tool_state            stored logical=<opaque>
         session-001              plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}}}
         session-001  commit    checkpoint.commit       rev=1->2
-        session-001              usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=373B
         session-001              tool_state            ref (unchanged)
         session-001              plugin_state          ref (unchanged)
@@ -482,7 +478,6 @@ finish(result);"#,
         root         exec      cell.ok                 calls=2
         root         outcome   turn.final_value        value={"parent":"done"}
         root         commit    checkpoint.commit       rev=0->1
-        root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=246B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}}}
@@ -552,18 +547,15 @@ finish(result);"#,
         root         tool      tool.result             name="spawn_agent" outcome=failure call=call-001
         root         exec      cell.failed             calls=1 failure="program" error="`?` unwrapped failed module operation: child boom --> line 2, column 22 …"
         root         commit    checkpoint.commit       rev=0->1
-        root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=246B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
-        session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=378B
         session-001              tool_state            stored logical=<opaque>
         session-001              plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}}}
         session-001  commit    checkpoint.commit       rev=1->2
-        session-001              usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=378B
         session-001              tool_state            ref (unchanged)
         session-001              plugin_state          ref (unchanged)
@@ -664,7 +656,6 @@ finish({ joined: [leftValue, rightValue] });"#,
         root         exec      cell.ok                 calls=4
         root         outcome   turn.final_value        value={"joined":["left","right"]}
         root         commit    checkpoint.commit       rev=0->1
-        root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=246B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}}}
@@ -790,7 +781,7 @@ fn legacy_scenario_seeds_remain_registered() {
     clippy::disallowed_methods,
     reason = "isolated test processes keep inline snapshots independent"
 )]
-fn registered_scenarios_emit_typed_transcripts_with_usage() -> Result<()> {
+fn registered_scenarios_emit_typed_transcripts() -> Result<()> {
     for coverage in AGENT_SCENARIO_COVERAGE {
         let module = if coverage.test_name == PLUGIN_OPERATIONS.test_name {
             "plugin_operations"

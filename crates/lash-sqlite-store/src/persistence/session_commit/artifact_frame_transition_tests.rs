@@ -202,7 +202,7 @@ async fn commit_frame_opens(
     state: &mut lash_core_execution::RuntimeSessionState,
     transition: Option<lash_core_execution::store::FrameTransition>,
 ) {
-    let mut commit = RuntimeCommit::persisted_state_for_test(state, &[]);
+    let mut commit = RuntimeCommit::persisted_state_for_test(state);
     let appended = commit
         .graph
         .nodes()
@@ -410,7 +410,7 @@ async fn a_switch_carrying_a_module_its_frame_does_not_hold_fails_closed() {
         open_resident_frame(&mut state, "successor", &clock),
     );
     for forged in ["never-stored", "held-by-a-host-pin"] {
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state);
         commit.frame_transition = Some(lash_core_execution::store::FrameTransition {
             ended: first.clone(),
             successor: successor.clone(),

@@ -1174,3 +1174,11 @@ needs its rank, discharge and projection authority (§4).
 - **The bound is a reservation protocol, not a number.** §9 names the
   accounting units and their release conditions, and mid-aggregate VM
   suspension is not necessary.
+
+## Model usage accounting
+
+Tool-child usage rides on no settlement and is not charged at
+incorporation (§13). Each `ToolAttempt` entry's usage run delivers the facts
+of its nested calls through the accounting continuation of [ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md), and a
+nested call's unreported attempt is a fact. Settlements, captures and the
+incorporation ledger carry no usage.

@@ -140,7 +140,6 @@ pub async fn an_obsolete_executor_never_ends_its_successors_root(
                     if overtake {
                         lash_core::testing::runtime_helpers::advance_session_head(
                             &recording,
-                            &[],
                             |state| state.policy = policy,
                         )
                         .await;

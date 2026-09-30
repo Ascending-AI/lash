@@ -76,3 +76,9 @@ behavior-transcript format.
 - [Core testing exports](../../crates/lash-core/src/testing/mod.rs#L26) and
   [facade export](../../crates/lash/src/testing.rs#L83).
 - [Accepted checkpoint observation](../../crates/lash-core/src/testing/checkpoint_observer.rs#L369).
+
+## Model usage accounting
+
+A `commit` line carries no usage, and `Entry::commit` takes none: model usage
+is owner-scoped accounting delivered per call ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)), so the accounting laws,
+not a transcript line, catch a usage-accounting change.

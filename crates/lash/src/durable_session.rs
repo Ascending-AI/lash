@@ -98,9 +98,15 @@ pub struct DurableSession {
     /// The resolver a [`send`](Self::send) judges a spec's route against
     /// before the input is accepted (FIG-3877).
     provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
+    /// The deployment's usage ledger, read by [`usage`](Self::usage).
+    usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
 }
 
 impl DurableSession {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a catalog-opened Durable Session takes each deployment port it reads through"
+    )]
     pub(crate) fn from_catalog(
         session_id: SessionId,
         catalog: Arc<dyn DeploymentStore>,
@@ -109,6 +115,7 @@ impl DurableSession {
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
+        usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
     ) -> Self {
         Self {
             ops: DurableSessionOps::new(
@@ -124,6 +131,7 @@ impl DurableSession {
             effect_host,
             live_replay_store,
             provider_resolver,
+            usage_accounting,
         }
     }
 
@@ -142,6 +150,7 @@ impl DurableSession {
         live_replay_store: Arc<dyn LiveReplayStore>,
         catalog: Arc<dyn DeploymentStore>,
         provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
+        usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
     ) -> Self {
         Self {
             ops: DurableSessionOps::new(
@@ -157,7 +166,18 @@ impl DurableSession {
             effect_host,
             live_replay_store,
             provider_resolver,
+            usage_accounting,
         }
+    }
+
+    /// The session's model usage, read from the deployment's usage ledger
+    /// (ADR 0125). A durable read: it opens nothing and drives nothing, and it
+    /// answers for a live, parked or deleted-but-retained session alike.
+    pub async fn usage(&self) -> Result<lash_core::OwnerUsage> {
+        self.usage_accounting
+            .load_owner_usage(&lash_core::RuntimeOwner::Session(self.session_id.clone()))
+            .await
+            .map_err(Into::into)
     }
 
     /// The session's store, its queue operations and its send ports: what a

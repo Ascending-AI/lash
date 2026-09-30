@@ -103,6 +103,7 @@ mod session_driver;
 mod session_reconcile;
 mod turn;
 mod turn_handler;
+mod usage_accounting;
 mod wire;
 pub use wire::{CallDecodeError, JsonDecodeError, JsonDecodeLimits};
 
@@ -110,6 +111,11 @@ pub use restate_sdk;
 
 pub use compat::{
     COMPAT_KEY, Call, ObjectCompat, RESTATE_WIRE, RESTATE_WIRE_VERSION, Reply, VersionRange,
+};
+
+pub use usage_accounting::{
+    LashUsageAccounting, USAGE_ACCOUNTING_WIRE_VERSION, UsageAccountingSettle,
+    UsageExecutionRetirement, UsageOwnerDrain, UsageOwnerRetiredWire,
 };
 
 pub use controller::{

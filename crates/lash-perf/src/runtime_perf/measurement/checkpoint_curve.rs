@@ -220,7 +220,6 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
         lash_core::testing::stage_execution_state_components(&mut runtime_state, initial_snapshot)?;
         let seed_commit = RuntimeCommit::persisted_state_for_test_with_budget(
             &runtime_state,
-            &[],
             lash_core::CommitBudget::bounded(
                 CHECKPOINT_CURVE_COMMIT_BYTES,
                 CHECKPOINT_CURVE_COMMIT_ROWS,
@@ -271,7 +270,6 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                     )?;
                     let commit = RuntimeCommit::persisted_state_for_test_with_budget(
                         &fixture.runtime_state,
-                        &[],
                         lash_core::CommitBudget::bounded(
                             CHECKPOINT_CURVE_COMMIT_BYTES,
                             CHECKPOINT_CURVE_COMMIT_ROWS,

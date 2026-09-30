@@ -484,14 +484,7 @@ pub(super) async fn replay_divergence_mid_turn_fails_the_attempt_retryably_and_c
         "the fixture must suspend with its runtime-effect run unresolved"
     );
 
-    let recorded = RecordedRuntimeEffect {
-        envelope: Arc::new(
-            fig1142_llm_envelope(1)
-                .canonical_form()
-                .expect("canonical first-incarnation envelope"),
-        ),
-        outcome: Ok(fig793_llm_outcome()),
-    };
+    let recorded = fig1142_recorded_llm_call();
     let replay = encode_run_replay(
         workflow_key,
         &input,
@@ -565,14 +558,7 @@ pub(super) async fn an_effect_journal_entry_of_another_generation_parks_before_t
     .expect("capture the model-call run");
     executions.store(0, Ordering::SeqCst);
 
-    let recorded = RecordedRuntimeEffect {
-        envelope: Arc::new(
-            fig1142_llm_envelope(1)
-                .canonical_form()
-                .expect("canonical model-call envelope"),
-        ),
-        outcome: Ok(fig793_llm_outcome()),
-    };
+    let recorded = fig1142_recorded_llm_call();
     let current = journal_entry_value(recorded.clone());
     assert_eq!(
         current["effect_journal_version"],
@@ -1995,6 +1981,7 @@ pub(super) async fn fig793_pre_fix_suspended_llm_run(
                 .expect("canonical FIG-793 LLM envelope"),
         ),
         outcome: Ok(fig793_llm_outcome()),
+        usage: None,
     };
     (endpoint, suspended, journal_entry_value(recorded))
 }

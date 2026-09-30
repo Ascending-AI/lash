@@ -49,6 +49,7 @@ impl RuntimeEffectLocalRunner for LanguageRuntimeValueRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::LanguageRuntimeValue { operation } = envelope.command else {
             return Err(RuntimeEffectControllerError::new(
@@ -80,6 +81,7 @@ impl RuntimeEffectLocalRunner for RunSealRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
             RuntimeEffectCommand::LanguageRuntimeValue { operation }

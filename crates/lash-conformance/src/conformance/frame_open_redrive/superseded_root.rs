@@ -189,7 +189,7 @@ impl LawSession {
             .into(),
             origin: None,
         }]);
-        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
         commit.drive_fence = Some(Box::new(fence));
         self.store
             .commit_runtime_state(commit)

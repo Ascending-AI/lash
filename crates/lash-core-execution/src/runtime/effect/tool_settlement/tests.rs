@@ -3,84 +3,12 @@ use super::*;
 use crate::MessageRole;
 use lash_sansio::core_support::ModelToolReturnCoreSupport;
 
-fn attempt(ordinal: u32, input_tokens: i64) -> crate::AttemptRecord {
-    attempt_with(
-        ordinal,
-        crate::AttemptOutcome::Completed,
-        Some(input_tokens),
-    )
-}
-
-fn attempt_with(
-    ordinal: u32,
-    outcome: crate::AttemptOutcome,
-    input_tokens: Option<i64>,
-) -> crate::AttemptRecord {
-    crate::AttemptRecord {
-        ordinal,
-        outcome,
-        protocol_position: crate::ProtocolPosition::ResponseObserved,
-        retry_budget_consumed: false,
-        retry_decision: None,
-        error: None,
-        evidence: None,
-        generation_disposition: None,
-        usage: input_tokens.map(|input_tokens| crate::llm::types::LlmUsage {
-            input_tokens,
-            output_tokens: 0,
-            cache_read_input_tokens: 0,
-            cache_write_input_tokens: 0,
-            reasoning_output_tokens: 0,
-        }),
-        usage_disposition: crate::AttemptUsageOutcome::default(),
-    }
-}
-
-fn call_record(id: &str, attempts: &[(u32, i64)]) -> crate::LlmCallRecord {
-    crate::LlmCallRecord {
-        call_id: LlmCallId(id.to_string()),
-        label: None,
-        replay_drops: Vec::new(),
-        attempts: attempts
-            .iter()
-            .map(|(ordinal, usage)| attempt(*ordinal, *usage))
-            .collect(),
-    }
-}
-
-fn call_record_of(id: &str, attempts: Vec<crate::AttemptRecord>) -> crate::LlmCallRecord {
-    crate::LlmCallRecord {
-        call_id: LlmCallId(id.to_string()),
-        label: None,
-        replay_drops: Vec::new(),
-        attempts,
-    }
-}
-
-fn spent(input: i64) -> TokenUsage {
-    TokenUsage {
-        input_tokens: input,
-        ..Default::default()
-    }
-}
-
 fn message(content: &str) -> PluginMessage {
     PluginMessage {
         id: None,
         role: MessageRole::Assistant,
         origin: None,
         parts: vec![crate::Part::text(String::new(), content.to_string(), None)],
-    }
-}
-
-fn delta(attempt: u32, call_id: &str, provider_attempt: u32, usage: TokenUsage) -> ToolUsageDelta {
-    ToolUsageDelta {
-        attempt,
-        llm_call_id: LlmCallId(call_id.to_string()),
-        provider_attempt,
-        source: "test-source".to_string(),
-        model: "test-model".to_string(),
-        usage,
     }
 }
 
@@ -107,7 +35,6 @@ fn settlement() -> ToolSettlement {
         possession: Vec::new(),
         triggers: Vec::new(),
         checkpoint_messages: Vec::new(),
-        usage: Vec::new(),
         stream: crate::runtime::effect::RecordedChildStream::default(),
         model_return: model_return(),
     }
@@ -142,14 +69,6 @@ fn an_attempt_capture_is_empty_only_when_it_holds_no_fact_at_all() {
             ..Default::default()
         }
         .is_empty()
-    );
-    assert!(
-        !ToolAttemptCapture {
-            usage: vec![delta(1, "call", 1, spent(3))],
-            ..Default::default()
-        }
-        .is_empty(),
-        "usage known at cancel is a fact and survives"
     );
 }
 
@@ -195,7 +114,6 @@ fn a_settlement_round_trips_and_refuses_an_unknown_field() {
         possession: vec![crate::process_id_for_test("process:indexer")],
         triggers: vec![trigger()],
         checkpoint_messages: vec![message("committed")],
-        usage: vec![delta(1, "call-7", 2, spent(11))],
         ..settlement()
     };
     let json = serde_json::to_string(&settled).expect("a settlement serializes");
@@ -224,7 +142,6 @@ fn an_attempt_capture_round_trips_and_refuses_an_unknown_field() {
     let capture = ToolAttemptCapture {
         version: TOOL_ATTEMPT_CAPTURE_VERSION,
         messages: vec![message("committed")],
-        usage: vec![delta(2, "call-7", 1, spent(4))],
     };
     let json = serde_json::to_string(&capture).expect("a capture serializes");
     let decoded: ToolAttemptCapture = serde_json::from_str(&json).expect("a capture decodes");
@@ -234,167 +151,4 @@ fn an_attempt_capture_round_trips_and_refuses_an_unknown_field() {
     value["surprise"] = serde_json::json!(1);
     serde_json::from_value::<ToolAttemptCapture>(value)
         .expect_err("an unknown field is refused, never dropped");
-}
-
-/// §13: a spend is identified by its attempt and ADR 0032's `(LlmCallId,
-/// provider-attempt ordinal)` pair so a re-attached fact can be recognised —
-/// one fact per sealed provider attempt, so a billed failure and the retry
-/// that replaced it each carry their own spend rather than a summed one.
-#[test]
-fn the_ledger_records_a_spend_with_its_full_identity() {
-    let ledger = ToolUsageLedger::for_attempt(2);
-    ledger.record(
-        &call_record("call-a", &[(1, 3), (2, 5)]),
-        "test-source",
-        "test-model",
-    );
-    assert_eq!(
-        ledger.take(),
-        vec![
-            ToolUsageDelta {
-                attempt: 2,
-                llm_call_id: LlmCallId("call-a".to_string()),
-                provider_attempt: 1,
-                source: "test-source".to_string(),
-                model: "test-model".to_string(),
-                usage: spent(3),
-            },
-            ToolUsageDelta {
-                attempt: 2,
-                llm_call_id: LlmCallId("call-a".to_string()),
-                provider_attempt: 2,
-                source: "test-source".to_string(),
-                model: "test-model".to_string(),
-                usage: spent(5),
-            },
-        ]
-    );
-    assert!(
-        ledger.take().is_empty(),
-        "taking the ledger leaves it empty, so a second read cannot double-count"
-    );
-}
-
-/// An aggregate ledger (`attempt` 0) takes journaled deltas back verbatim, so a
-/// replayed attempt's capture restores into the child's settlement unchanged.
-#[test]
-fn the_aggregate_ledger_restores_journaled_deltas() {
-    let ledger = ToolUsageLedger::new();
-    ledger.extend(vec![
-        delta(1, "call-a", 1, spent(3)),
-        delta(2, "call-a", 2, spent(7)),
-    ]);
-    assert_eq!(
-        ledger.take(),
-        vec![
-            delta(1, "call-a", 1, spent(3)),
-            delta(2, "call-a", 2, spent(7))
-        ]
-    );
-}
-
-/// ADR 0032's two sides in one record: `Some(0)` is not `None`. A provider
-/// attempt that reports zero spend made a statement — billed at zero — and
-/// the ledger keeps it as a fact; only an attempt that reports nothing at
-/// all contributes no row.
-#[test]
-fn an_explicit_zero_spend_is_a_fact_and_an_absent_report_is_not() {
-    let ledger = ToolUsageLedger::new();
-    ledger.record(
-        &call_record_of(
-            "call-a",
-            vec![
-                attempt_with(1, crate::AttemptOutcome::Completed, Some(0)),
-                attempt_with(2, crate::AttemptOutcome::Failed, None),
-            ],
-        ),
-        "test-source",
-        "test-model",
-    );
-    assert_eq!(
-        ledger.take(),
-        vec![delta(0, "call-a", 1, TokenUsage::default())],
-        "the zero-spend report emits its delta; the unreported attempt emits none"
-    );
-}
-
-/// The ledger is shared, not copied: a clone handed to a nested future records
-/// into the same accumulator the driver reads at the child's exit.
-#[test]
-fn a_cloned_ledger_records_into_the_same_accumulator() {
-    let ledger = ToolUsageLedger::new();
-    let nested = ledger.clone();
-    nested.record(
-        &call_record("call-a", &[(1, 2)]),
-        "test-source",
-        "test-model",
-    );
-    assert_eq!(ledger.take().len(), 1);
-}
-
-/// §13's headline case: a provider attempt that billed and failed and the
-/// retry that succeeded are two spends. The ledger keys a delta off the sealed
-/// record's attempts — not the call's terminal outcome — so a billed failure
-/// is kept next to, never instead of, the billed retry.
-#[test]
-fn a_billed_failed_attempt_and_its_successful_retry_are_two_facts() {
-    let ledger = ToolUsageLedger::for_attempt(1);
-    ledger.record(
-        &call_record_of(
-            "call-a",
-            vec![
-                attempt_with(1, crate::AttemptOutcome::Failed, Some(10)),
-                attempt_with(2, crate::AttemptOutcome::Completed, Some(41)),
-            ],
-        ),
-        "test-source",
-        "test-model",
-    );
-    assert_eq!(
-        ledger.take(),
-        vec![
-            delta(1, "call-a", 1, spent(10)),
-            delta(1, "call-a", 2, spent(41)),
-        ]
-    );
-}
-
-/// A call aborted after the provider billed it is still a spend: the sealed
-/// record's attempt carries usage and the ledger keeps it — the capture
-/// exists nowhere else once the error path returns.
-#[test]
-fn a_billed_aborted_attempt_is_a_fact() {
-    let ledger = ToolUsageLedger::for_attempt(2);
-    ledger.record(
-        &call_record_of(
-            "call-a",
-            vec![attempt_with(1, crate::AttemptOutcome::Aborted, Some(9))],
-        ),
-        "test-source",
-        "test-model",
-    );
-    assert_eq!(ledger.take(), vec![delta(2, "call-a", 1, spent(9))]);
-}
-
-/// A failed attempt that never reached the provider reports `None` and
-/// contributes no row: unbilled is a fact about billing, not a zero spend.
-#[test]
-fn an_unbilled_failed_attempt_records_nothing() {
-    let ledger = ToolUsageLedger::new();
-    ledger.record(
-        &call_record_of(
-            "call-a",
-            vec![
-                attempt_with(1, crate::AttemptOutcome::Failed, None),
-                attempt_with(2, crate::AttemptOutcome::Completed, Some(3)),
-            ],
-        ),
-        "test-source",
-        "test-model",
-    );
-    assert_eq!(
-        ledger.take(),
-        vec![delta(0, "call-a", 2, spent(3))],
-        "only the billed attempt is a fact"
-    );
 }

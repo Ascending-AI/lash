@@ -9,19 +9,28 @@
 //!   iteration. Right for live counters.
 //! - **[`TurnReport::usage`]**: per-turn snapshot at completion, the session's
 //!   own LLM tokens. Right for "what did this message cost."
-//! - **[`SessionUsageReport`]** (`session.usage_report()`): aggregate
-//!   across the whole session, broken down by `source` × `model`. Right for
-//!   dashboards and "session so far."
+//! - **[`OwnerUsage`]** (`session.usage().await`, `core.owner_usage(..)`):
+//!   the durable ledger of one owner (a session or a process), across every
+//!   call made for it, broken down by `source` × `model`. Right for billing,
+//!   dashboards and "session so far." [`OwnerUsage::report`] renders it as a
+//!   [`SessionUsageReport`].
+//!
+//! Model usage is engine-owned accounting (ADR 0125). Each spending effect
+//! (a turn's model call, a direct completion, a tool attempt) is one usage
+//! run: admitted to storage before its first provider attempt, and settled
+//! with the facts of every attempt it dispatched once its outcome is
+//! journaled. Delivery survives the turn ending, forks, parks, deletion and
+//! a lost runtime. [`UsageCompleteness`] says how far the ledger can be
+//! trusted: an open run is delivery still pending, an unknown run dispatched
+//! and its amount will never be known.
 //!
 //! Absence is not zero (ADR 0031). A provider call the runtime aborted at an
 //! RLM cell boundary, or that failed mid-stream, may end before the provider
-//! reports usage; it was still billed. Such attempts carry a typed
-//! `usage_disposition` on their attempt record and the ledger gets an
-//! `Unreported` row for them even at zero usage, so
-//! [`UsageTotals::unreported_attempts`] tells a host how many calls the
-//! counters do not cover. `session.reconcile_unreported_usage()` asks the
-//! provider after the fact and appends `Reconciled` correction rows
-//! ([`LedgerUsageOutcome`]) that the totals sum.
+//! reports usage; it was still billed. Such attempts are recorded as
+//! unreported facts, so [`UsageTotals::unreported_attempts`] tells a host how
+//! many calls the counters do not cover. `session.reconcile_unreported_usage()`
+//! asks the provider after the fact and appends one correction per recovered
+//! attempt, which the totals sum.
 //!
 //! Usage buckets are provider-normalized before they reach these surfaces:
 //! `input_tokens` is uncached ordinary input, `cache_read_input_tokens` is
@@ -35,16 +44,17 @@
 //! [`TurnReport::usage`]: crate::TurnReport::usage
 
 pub use lash_core::{
-    LedgerUsageOutcome, TokenLedgerEntry, TokenUsage, TokenUsageOverflow,
-    facade_support::ReconciledUsageAttempt, facade_support::SessionUsageReport,
-    facade_support::UnreportedUsageAttempt, facade_support::UsageReconciliationReport,
-    facade_support::UsageReportRow, facade_support::UsageTotals, facade_support::diff_token_ledger,
-    facade_support::diff_usage_reports,
+    OutstandingUsageAttempt, OwnerUsage, OwnerUsageRow, TokenUsage, TokenUsageOverflow,
+    UsageCompleteness, UsageDisposition, UsageFactCursor, UsageFactPage, UsageFactRecord,
+    UsageOwnerRetired, UsageRunCursor, UsageRunFilter, UsageRunPage, UsageRunRecord, UsageRunState,
+    UsageUnknownReason, facade_support::ReconciledUsageAttempt, facade_support::SessionUsageReport,
+    facade_support::UsageReconciliationReport, facade_support::UsageReportRow,
+    facade_support::UsageTotals, facade_support::diff_usage_reports,
 };
 
 /// Well-known source labels used by the runtime and first-party plugins.
 ///
-/// The `source` field on [`TokenLedgerEntry`] is a free-form string; the
+/// The `source` field on a usage fact is a free-form string; the
 /// runtime does not interpret the value. Plugins may use additional labels of
 /// their own.
 pub mod sources {

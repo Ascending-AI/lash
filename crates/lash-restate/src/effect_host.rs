@@ -70,6 +70,10 @@ pub struct RestateEffectHost {
     /// `MayReplay`: the cleanup executor waits rather than sever what a
     /// replay may still read.
     journal_authority: Arc<OnceLock<RestateJournalAuthority>>,
+    /// The ledger the deployment's accounting continuation projects into,
+    /// bound once by the engine that owns the store set (ADR 0125). Unbound,
+    /// a continuation handler fails retryably and waits for it.
+    usage_accounting: Arc<OnceLock<Arc<dyn lash_core::UsageAccountingStore>>>,
 }
 
 impl RestateEffectHost {
@@ -122,7 +126,21 @@ impl RestateEffectHost {
             )),
             turn_control_binding_id,
             journal_authority: Arc::new(OnceLock::new()),
+            usage_accounting: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// Bind the ledger this deployment's accounting continuation projects
+    /// into, once; a later binding is ignored.
+    pub fn bind_usage_accounting(&self, store: Arc<dyn lash_core::UsageAccountingStore>) {
+        let _ = self.usage_accounting.set(store);
+    }
+
+    /// The cell the continuation's handlers read the bound ledger from.
+    pub(crate) fn usage_accounting_cell(
+        &self,
+    ) -> Arc<OnceLock<Arc<dyn lash_core::UsageAccountingStore>>> {
+        Arc::clone(&self.usage_accounting)
     }
 
     /// Bind the reads [`EffectHost::journal_replay`] answers from, once; a
@@ -304,6 +322,43 @@ impl AwaitEventResolver for RestateEffectHost {
 impl EffectHost for RestateEffectHost {
     fn turn_control_binding_id(&self) -> String {
         self.turn_control_binding_id.to_string()
+    }
+
+    async fn drain_usage_accounting(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+    ) -> Result<lash_core::UsageOwnerRetired, RuntimeError> {
+        let ingress = &self.controller.await_event_ingress;
+        crate::usage_accounting::drain_usage_owner(&ingress.ingress, &ingress.namespace, owner)
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::UsageAdmissionFault,
+                    format!("usage accounting drain of {owner} failed: {error}"),
+                )
+            })
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+        scope: &ExecutionScope,
+    ) -> Result<u64, RuntimeError> {
+        let key = crate::usage_accounting::execution_scope_key(scope)?;
+        let ingress = &self.controller.await_event_ingress;
+        crate::usage_accounting::retire_usage_execution(
+            &ingress.ingress,
+            &ingress.namespace,
+            owner,
+            &key,
+        )
+        .await
+        .map_err(|error| {
+            RuntimeError::new(
+                RuntimeErrorCode::UsageAdmissionFault,
+                format!("usage execution retirement of {owner} failed: {error}"),
+            )
+        })
     }
 
     async fn retire_closed_root_waits(

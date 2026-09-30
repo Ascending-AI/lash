@@ -241,8 +241,7 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
         ),
         DurableFormat::AppendRequestIdentity
         | DurableFormat::RecordConfigRequestIdentity
-        | DurableFormat::CreateSessionRequestIdentity
-        | DurableFormat::UsageLedgerRequestIdentity => SurfaceRelation::Unwalkable(
+        | DurableFormat::CreateSessionRequestIdentity => SurfaceRelation::Unwalkable(
             "identity, not a stamp: recomputed and compared when a retried request replays, \
              never read back at rest",
         ),

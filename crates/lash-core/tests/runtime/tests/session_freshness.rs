@@ -227,7 +227,7 @@ async fn freshness_hydrates_when_revision_changed() {
     let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, &double, 2)).await;
-    let head = advance_session_head(store.as_ref(), &[], |_| {}).await;
+    let head = advance_session_head(store.as_ref(), |_| {}).await;
     let full_loads_before = store.load_session_count();
 
     runtime
@@ -265,7 +265,7 @@ async fn resident_refresh_adopts_the_durable_head_prompt() {
     let head_prompt = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Advanced durable value", "THE HEAD WINS"),
     );
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.policy.prompt = head_prompt.clone();
     })
     .await;
@@ -288,7 +288,7 @@ async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_pat
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, &double, 2)).await;
 
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.policy.prompt = lash_core::PromptLayer::new().with_contribution(
             lash_core::PromptContribution::guidance("Durable base", "KEEP THE DURABLE PROMPT"),
         );
@@ -354,7 +354,7 @@ async fn resident_refresh_adopts_the_durable_head_model() {
         .context_window_tokens(65_536)
         .build()
         .expect("advanced durable model");
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.policy.model = head_model.clone();
     })
     .await;
@@ -394,7 +394,7 @@ async fn resident_refresh_publishes_the_durable_head_subagent_context_to_live_pl
         depth: 1,
         max_depth: 3,
     };
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.authority.subagent = Some(head_subagent.clone());
     })
     .await;
@@ -444,7 +444,7 @@ async fn resident_refresh_adopts_the_durable_head_provider_id() {
     )
     .await;
 
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.policy.provider_id = "advanced-durable-provider".to_string();
     })
     .await;
@@ -705,7 +705,7 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
     let head_prompt = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Advanced durable value", "THE HEAD WINS"),
     );
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.policy.model = head_model.clone();
         state.policy.prompt = head_prompt.clone();
     })
@@ -804,100 +804,5 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
     assert!(
         runtime.resident_session.graph_loaded_from_store(),
         "the reload settles graph_loaded_from_store"
-    );
-}
-
-/// FIG-2782: the checkpoint-adopt path owns its own rehydration of the
-/// outstanding usage-attempt registry, and nothing else covers it.
-///
-/// Session construction rebuilds the registry from the durable ledger it opened
-/// on, so every reopen witness stays green even with the adopt-path rebuild
-/// deleted. This drives the other order: a live handle whose registry is empty
-/// adopts a head that already carries holes, while a resident correction that
-/// has not settled into any durable row is layered on top. The rebuilt set must
-/// be the durable holes minus the ones the resident correction already fills,
-/// which is only true if the adopt path rebuilds it at all.
-#[tokio::test(flavor = "multi_thread")]
-async fn checkpoint_adopt_rehydrates_outstanding_usage_attempts_from_the_adopted_head() {
-    let double = kernel_double(SEED + 19, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, &double, 2)).await;
-    let model = runtime.state().effective_policy().model.id.clone();
-
-    // Durable holes committed outside this handle: two billed attempts whose
-    // usage never arrived, carried by one accumulating `(source, model)` row.
-    let durable_holes = lash_core::TokenLedgerEntry {
-        source: "turn".to_string(),
-        model: model.clone(),
-        usage: lash_core::TokenUsage::default(),
-        usage_disposition: lash_core::LedgerUsageOutcome::unreported([
-            lash_core::UnreportedLedgerAttempt {
-                call_id: "fig2782-call-alpha".to_string(),
-                attempt_ordinal: 1,
-                generation_id: Some("gen-alpha".to_string()),
-            },
-            lash_core::UnreportedLedgerAttempt {
-                call_id: "fig2782-call-beta".to_string(),
-                attempt_ordinal: 1,
-                generation_id: Some("gen-beta".to_string()),
-            },
-        ]),
-    };
-
-    // A resident correction for one of those holes: recorded on the shared
-    // ledger by a reconciliation that has not ridden a commit boundary yet, so
-    // it exists only in memory while its hole is still durable.
-    runtime.shared_token_ledger.lock_recover().push(
-        lash_core::runtime::session_manager::PendingTokenLedgerEntry::unstaged(
-            lash_core::TokenLedgerEntry {
-                source: "turn".to_string(),
-                model: model.clone(),
-                usage: lash_core::TokenUsage {
-                    input_tokens: 334,
-                    ..lash_core::TokenUsage::default()
-                },
-                usage_disposition: lash_core::LedgerUsageOutcome::Reconciled {
-                    call_id: "fig2782-call-beta".to_string(),
-                    attempt_ordinal: 1,
-                },
-            },
-        ),
-    );
-
-    assert!(
-        runtime.unreported_usage_attempts().is_empty(),
-        "the live handle must start with nothing registered, or the adopt is not what fills it"
-    );
-
-    // An external writer lands the usage holes on the durable head.
-    let advanced = advance_session_head(store.as_ref(), &[durable_holes], |_| {}).await;
-    let head_before_adopt = runtime.state().head_revision;
-
-    runtime
-        .refresh_session_graph_from_store()
-        .await
-        .expect("adopt the advanced durable head");
-
-    assert!(
-        runtime.state().head_revision > head_before_adopt,
-        "the adopt must actually advance the head, or the adopt path never ran"
-    );
-    assert_eq!(runtime.state().head_revision, advanced.head_revision);
-    assert_eq!(
-        runtime.unreported_usage_attempts(),
-        [lash_core::facade_support::UnreportedUsageAttempt {
-            call_id: "fig2782-call-alpha".to_string(),
-            attempt_ordinal: 1,
-            source: "turn".to_string(),
-            model: model.clone(),
-            generation_id: Some("gen-alpha".to_string()),
-        }],
-        "the adopted head must rebuild the outstanding set: every durable hole, \
-         minus the one the resident correction already fills"
-    );
-    assert_eq!(
-        runtime.shared_token_ledger.lock_recover().len(),
-        1,
-        "rebuilding from the resident correction must not consume it"
     );
 }

@@ -1,9 +1,8 @@
 use super::*;
-use lash_core_execution::runtime::{SessionUsageTotals, UnreportedUsageAttempt, UsageTotalRow};
 use lash_core_execution::store::{
     AnchorUnavailable, FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget,
     HistoryCursor, HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore,
-    SessionWindowRead, UsageLedgerCursor, UsageLedgerPage, UsageLedgerRow, WindowSelector,
+    SessionWindowRead, WindowSelector,
 };
 use lash_core_execution::store_backend_support::{
     HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode,
@@ -246,7 +245,6 @@ fn window(
     selector: WindowSelector,
     fleet: lash_core_execution::FleetFormat,
     decoded: &AtomicU64,
-    holes: &AtomicU64,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
     live(conn, session)?;
     let Some(meta) = try_load_session_head_meta_from_conn(conn, session, fleet)? else {
@@ -405,7 +403,6 @@ fn window(
     } else {
         lash_core_execution::SessionGraph::default()
     };
-    let usage = usage_totals(conn, session, holes)?;
     SessionWindowRead::new(
         session.clone(),
         revision,
@@ -414,7 +411,6 @@ fn window(
         graph,
         checkpoint_ref,
         checkpoint,
-        usage,
     )
     .map(Some)
 }
@@ -429,9 +425,8 @@ impl SessionHistoryStore for SqliteStore {
         let session = session_id.clone();
         let fleet = self.conn.fleet();
         let decoded = Arc::clone(&self.decoded_graph_node_bodies);
-        let holes = Arc::clone(&self.decoded_usage_holes);
         self.read_connection()
-            .read(move |conn| Ok(window(conn, &session, selector, fleet, &decoded, &holes)))
+            .read(move |conn| Ok(window(conn, &session, selector, fleet, &decoded)))
             .await
             .map_err(sqlite_error)?
     }
@@ -503,39 +498,6 @@ impl SessionHistoryStore for SqliteStore {
                     )
                 })())
             })
-            .await
-            .map_err(sqlite_error)?
-    }
-    async fn load_usage_totals(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<SessionUsageTotals, StoreError> {
-        let session = session_id.clone();
-        let holes = Arc::clone(&self.decoded_usage_holes);
-        self.read_connection()
-            .read(move |conn| {
-                Ok((|| {
-                    live(conn, &session)?;
-                    usage_totals(conn, &session, &holes)
-                })())
-            })
-            .await
-            .map_err(sqlite_error)?
-    }
-    async fn load_usage_ledger_page(
-        &self,
-        session_id: &SessionId,
-        after: Option<&UsageLedgerCursor>,
-        limit: NonZeroU32,
-    ) -> Result<UsageLedgerPage, StoreError> {
-        if let Some(cursor) = after {
-            cursor.check_session(session_id)?;
-        }
-        let session = session_id.clone();
-        let after = after.map(UsageLedgerCursor::after_seq);
-        let decoded = Arc::clone(&self.decoded_usage_rows);
-        self.read_connection()
-            .read(move |conn| Ok(usage_page(conn, &session, after, limit, &decoded)))
             .await
             .map_err(sqlite_error)?
     }
@@ -761,239 +723,6 @@ fn ancestors(
     })
 }
 
-fn usage_totals(
-    conn: &Connection,
-    session: &SessionId,
-    decoded_holes: &AtomicU64,
-) -> Result<SessionUsageTotals, StoreError> {
-    let mut totals = SessionUsageTotals::default();
-    // Fold ordered rows in Rust: SQLite's integer SUM fails before we can
-    // report the typed counter overflow required by the store contract.
-    let mut stmt=conn.prepare_cached("SELECT source,model,input_tokens,output_tokens,cache_read_input_tokens,cache_write_input_tokens,reasoning_output_tokens,(reconciled_call_id IS NOT NULL) FROM usage_deltas AS usage WHERE session_id=?1 AND (input_tokens<>0 OR output_tokens<>0 OR cache_read_input_tokens<>0 OR cache_write_input_tokens<>0 OR reasoning_output_tokens<>0 OR reconciled_call_id IS NOT NULL OR EXISTS(SELECT 1 FROM usage_delta_holes AS hole WHERE hole.session_id=usage.session_id AND hole.seq=usage.seq)) ORDER BY source,model,seq").map_err(sqlite_error)?;
-    let rows = stmt
-        .query_map(params![session.as_str()], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, i64>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, i64>(6)?,
-                row.get::<_, bool>(7)?,
-            ))
-        })
-        .map_err(sqlite_error)?;
-    for row in rows {
-        let (
-            source,
-            model,
-            input_tokens,
-            output_tokens,
-            cache_read_input_tokens,
-            cache_write_input_tokens,
-            reasoning_output_tokens,
-            reconciled,
-        ) = row.map_err(sqlite_error)?;
-        let usage = lash_core_execution::TokenUsage {
-            input_tokens,
-            output_tokens,
-            cache_read_input_tokens,
-            cache_write_input_tokens,
-            reasoning_output_tokens,
-        };
-        let overflow =
-            |overflow: lash_sansio::TokenUsageOverflow| StoreError::TokenUsageAccountingOverflow {
-                usage_source: source.clone(),
-                model: model.clone(),
-                counter: overflow.counter(),
-            };
-        usage.checked_total().map_err(&overflow)?;
-        if totals
-            .rows
-            .last()
-            .is_none_or(|last| last.source != source || last.model != model)
-        {
-            totals.rows.push(UsageTotalRow {
-                source: source.clone(),
-                model: model.clone(),
-                ..UsageTotalRow::default()
-            });
-        }
-        let total = totals
-            .rows
-            .last_mut()
-            .ok_or_else(|| corrupt("TokenLedgerEntry", "missing usage total"))?;
-        total.usage = total.usage.checked_add(&usage).map_err(&overflow)?;
-        total.reconciled_attempts = total
-            .reconciled_attempts
-            .checked_add(u64::from(reconciled))
-            .ok_or_else(|| corrupt("TokenLedgerEntry", "too many reconciled attempts"))?;
-    }
-    let mut stmt=conn.prepare_cached("SELECT usage.source,usage.model,hole.call_id,hole.attempt_ordinal,hole.generation_id,EXISTS(SELECT 1 FROM usage_deltas AS correction WHERE correction.session_id=?1 AND correction.reconciled_call_id=hole.call_id AND correction.reconciled_attempt_ordinal=hole.attempt_ordinal) FROM usage_delta_holes AS hole JOIN usage_deltas AS usage ON usage.seq=hole.seq AND usage.session_id=hole.session_id WHERE hole.session_id=?1 ORDER BY hole.call_id,hole.attempt_ordinal,hole.seq").map_err(sqlite_error)?;
-    let rows = stmt
-        .query_map(params![session.as_str()], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, bool>(5)?,
-            ))
-        })
-        .map_err(sqlite_error)?;
-    let mut seen =
-        std::collections::BTreeMap::<(String, u32), (String, String, Option<String>)>::new();
-    for row in rows {
-        let (source, model, call, ordinal, generation, reconciled) = row.map_err(sqlite_error)?;
-        let ordinal = u32::try_from(ordinal)
-            .map_err(|_| corrupt("TokenLedgerEntry", "invalid attempt ordinal"))?;
-        let key = (call.clone(), ordinal);
-        if let Some(prior) = seen.get(&key) {
-            if prior != &(source.clone(), model.clone(), generation.clone()) {
-                return Err(corrupt(
-                    "TokenLedgerEntry",
-                    "hole attribution differs across usage rows",
-                ));
-            }
-            continue;
-        }
-        seen.insert(key, (source.clone(), model.clone(), generation.clone()));
-        let total = totals
-            .rows
-            .iter_mut()
-            .find(|total| total.source == source && total.model == model)
-            .ok_or_else(|| corrupt("TokenLedgerEntry", "hole has no usage aggregate"))?;
-        total.unreported_attempts += 1;
-        if !reconciled {
-            totals.outstanding.push(UnreportedUsageAttempt {
-                call_id: call,
-                attempt_ordinal: ordinal,
-                source,
-                model,
-                generation_id: generation,
-            });
-            decoded_holes.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-    Ok(totals)
-}
-
-fn usage_page(
-    conn: &Connection,
-    session: &SessionId,
-    after: Option<u64>,
-    limit: NonZeroU32,
-    decoded: &AtomicU64,
-) -> Result<UsageLedgerPage, StoreError> {
-    live(conn, session)?;
-    let mut stmt=conn.prepare_cached("SELECT seq,operation_storage_key,source,model,input_tokens,output_tokens,cache_read_input_tokens,cache_write_input_tokens,reasoning_output_tokens,reconciled_call_id,reconciled_attempt_ordinal FROM usage_deltas WHERE session_id=?1 AND seq>?2 ORDER BY seq LIMIT ?3").map_err(sqlite_error)?;
-    let rows = stmt
-        .query_map(
-            params![
-                session.as_str(),
-                after
-                    .map(|n| i64::try_from(n).unwrap_or(i64::MAX))
-                    .unwrap_or(0),
-                i64::from(limit.get()) + 1
-            ],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, i64>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, Option<i64>>(10)?,
-                ))
-            },
-        )
-        .map_err(sqlite_error)?;
-    let mut rows = rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?;
-    let more = rows.len() > limit.get() as usize;
-    if more {
-        rows.pop();
-    }
-    let mut hole_stmt=conn.prepare_cached("SELECT call_id,attempt_ordinal,generation_id FROM usage_delta_holes WHERE session_id=?1 AND seq=?2 ORDER BY call_id,attempt_ordinal").map_err(sqlite_error)?;
-    let mut output = Vec::new();
-    for (
-        seq,
-        operation_storage_key,
-        source,
-        model,
-        input_tokens,
-        output_tokens,
-        cache_read_input_tokens,
-        cache_write_input_tokens,
-        reasoning_output_tokens,
-        reconciled_call_id,
-        reconciled_ordinal,
-    ) in rows
-    {
-        let holes = hole_stmt
-            .query_map(params![session.as_str(), seq], |row| {
-                Ok(lash_core_execution::runtime::UnreportedLedgerAttempt {
-                    call_id: row.get(0)?,
-                    attempt_ordinal: u32::try_from(row.get::<_, i64>(1)?)
-                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                    generation_id: row.get(2)?,
-                })
-            })
-            .map_err(sqlite_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(sqlite_error)?;
-        let disposition = match (reconciled_call_id, reconciled_ordinal) {
-            (Some(call), Some(ordinal)) if holes.is_empty() => {
-                lash_core_execution::LedgerUsageOutcome::Reconciled {
-                    call_id: call,
-                    attempt_ordinal: u32::try_from(ordinal)
-                        .map_err(|_| corrupt("TokenLedgerEntry", "invalid reconciled ordinal"))?,
-                }
-            }
-            (None, None) if !holes.is_empty() => {
-                lash_core_execution::LedgerUsageOutcome::unreported(holes)
-            }
-            (None, None) => lash_core_execution::LedgerUsageOutcome::Reported,
-            _ => {
-                return Err(corrupt(
-                    "TokenLedgerEntry",
-                    "reconciliation columns disagree with holes",
-                ));
-            }
-        };
-        output.push(UsageLedgerRow {
-            seq: nonnegative("TokenLedgerEntry", "seq", seq)?,
-            operation_storage_key,
-            entry: lash_core_execution::TokenLedgerEntry {
-                source,
-                model,
-                usage: lash_core_execution::TokenUsage {
-                    input_tokens,
-                    output_tokens,
-                    cache_read_input_tokens,
-                    cache_write_input_tokens,
-                    reasoning_output_tokens,
-                },
-                usage_disposition: disposition,
-            },
-        });
-        decoded.fetch_add(1, Ordering::Relaxed);
-    }
-    let next = if more {
-        output
-            .last()
-            .map(|row| UsageLedgerCursor::new(session.clone(), row.seq))
-    } else {
-        None
-    };
-    Ok(UsageLedgerPage { rows: output, next })
-}
 fn failure_page(
     conn: &Connection,
     session: &SessionId,

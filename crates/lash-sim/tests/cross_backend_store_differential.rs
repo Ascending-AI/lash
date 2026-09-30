@@ -29,8 +29,8 @@ use lash_core::{
     QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeStore,
     RuntimeTurnCommitStamp, SessionCatalogStore as _, SessionCreationHead, SessionHistoryRecord,
     SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
-    StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnInput, TurnInputApplication,
-    TurnInputIngress, TurnInputStateKind,
+    StoreError, TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputIngress,
+    TurnInputStateKind,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -215,7 +215,6 @@ enum StoreOperation {
         graph: GraphSpec,
         turn_commit: Option<TurnCommitSpec>,
         checkpoint: CheckpointSpec,
-        usage: bool,
         adopt_attachment: bool,
     },
     /// A turn's terminal head write over the pending follow-on fact
@@ -508,7 +507,6 @@ fn commit(label: &'static str, expected_head_revision: u64, graph: GraphSpec) ->
         graph,
         turn_commit: None,
         checkpoint: CheckpointSpec::Empty,
-        usage: false,
         adopt_attachment: false,
     }
 }
@@ -593,7 +591,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
                         turn_id: "nodeless-leaf-move",
                     }),
                     checkpoint: CheckpointSpec::Empty,
-                    usage: false,
                     adopt_attachment: false,
                 },
             ],
@@ -625,7 +622,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     graph: append(vec![original()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
                     checkpoint: CheckpointSpec::Empty,
-                    usage: false,
                     adopt_attachment: false,
                 },
                 StoreOperation::Commit {
@@ -634,7 +630,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     graph: append(vec![original()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
                     checkpoint: CheckpointSpec::Empty,
-                    usage: false,
                     adopt_attachment: false,
                 },
                 StoreOperation::Commit {
@@ -643,7 +638,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     graph: append(vec![mutated()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
                     checkpoint: CheckpointSpec::Empty,
-                    usage: false,
                     adopt_attachment: false,
                 },
             ],
@@ -708,7 +702,6 @@ fn runtime_commit(
     turn_commit: Option<TurnCommitSpec>,
     current_frame_node_id: Option<lash_core::FrameNodeId>,
     checkpoint: HydratedSessionCheckpoint,
-    usage_deltas: Vec<TokenLedgerEntry>,
     committed_attachment_ids: Vec<AttachmentId>,
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
@@ -717,7 +710,7 @@ fn runtime_commit(
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &usage_deltas);
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state);
     commit.expected_head_revision = expected_head_revision;
     commit.graph = materialize_graph(session_id, graph);
     commit.current_frame_node_id = commit
@@ -910,21 +903,6 @@ fn admission_observability_wake(session_id: &SessionId) -> lash_core::runtime::P
     }
 }
 
-fn differential_usage_delta() -> TokenLedgerEntry {
-    TokenLedgerEntry {
-        source: "differential".to_string(),
-        model: "test/model".to_string(),
-        usage: TokenUsage {
-            input_tokens: 21,
-            output_tokens: 12,
-            cache_read_input_tokens: 4,
-            cache_write_input_tokens: 3,
-            reasoning_output_tokens: 2,
-        },
-        usage_disposition: Default::default(),
-    }
-}
-
 #[expect(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
@@ -975,14 +953,6 @@ enum RawDurableReader {
         session_id: SessionId,
         store: Option<Arc<dyn RuntimeStore>>,
     },
-}
-
-fn usage_delta_observation(entry: TokenLedgerEntry) -> UsageDeltaObservation {
-    UsageDeltaObservation {
-        source: entry.source,
-        model: entry.model,
-        usage: entry.usage,
-    }
 }
 
 fn session_meta_observation(meta: SessionMeta) -> SessionMetaObservation {
@@ -1244,7 +1214,6 @@ impl BackendRunner {
                 self.current_frame_node_id.clone(),
                 HydratedSessionCheckpoint::default(),
                 Vec::new(),
-                Vec::new(),
             ),
             fence,
             settlement,
@@ -1328,7 +1297,6 @@ impl BackendRunner {
                 graph,
                 turn_commit,
                 checkpoint,
-                usage,
                 adopt_attachment,
                 ..
             } => {
@@ -1339,10 +1307,6 @@ impl BackendRunner {
                     *turn_commit,
                     self.current_frame_node_id.clone(),
                     checkpoint_from_spec(*checkpoint, self.checkpoint_component_refs.as_ref()),
-                    (*usage)
-                        .then(differential_usage_delta)
-                        .into_iter()
-                        .collect(),
                     (*adopt_attachment)
                         .then(differential_attachment_id)
                         .into_iter()
@@ -1370,7 +1334,6 @@ impl BackendRunner {
                     None,
                     self.current_frame_node_id.clone(),
                     HydratedSessionCheckpoint::default(),
-                    Vec::new(),
                     Vec::new(),
                 );
                 let (frame, leaf) = head
@@ -1857,7 +1820,7 @@ impl BackendRunner {
                 };
                 let error = handle
                     .store
-                    .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+                    .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
                     .await
                     .expect_err("stale handle commit must be fenced");
                 self.assert_session_deleted(&error, "stale-handle commit");

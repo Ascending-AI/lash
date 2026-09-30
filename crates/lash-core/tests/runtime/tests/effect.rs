@@ -1022,11 +1022,15 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     assert!(recorder.records().iter().any(|record| {
         record.kind == RuntimeEffectKind::Direct && record.replay_key == expected_replay_key
     }));
-    let ledger = runtime.shared_token_ledger.lock_recover();
-    assert_eq!(ledger.len(), 1);
-    assert_eq!(ledger[0].source, "direct-test");
-    assert_eq!(ledger[0].model, "mock-model");
-    assert_eq!(ledger[0].usage.input_tokens, 7);
+    // The recording double answers the direct effect itself: no provider was
+    // dispatched, so no usage run was admitted and nothing is accounted. Only
+    // a dispatched call is spend (ADR 0125).
+    let usage = settled_runtime_usage(&runtime).await;
+    assert!(
+        usage.rows.is_empty(),
+        "a canned answer is no paid call: {usage:?}"
+    );
+    assert_eq!(usage.completeness, lash_core::UsageCompleteness::default());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1087,9 +1091,8 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
         record.kind == RuntimeEffectKind::Direct && record.turn_id.as_deref() == Some("turn-direct")
     }));
 
-    // A direct effect must record usage into the shared in-memory ledger only;
-    // that ledger is drained and persisted exactly once by the owning turn's
-    // final commit. The direct path must NOT issue its own out-of-band
+    // A direct effect's usage is its own run's accounting, delivered with the
+    // effect (ADR 0125). The direct path must NOT issue its own out-of-band
     // `commit_runtime_state` mid-turn: doing so races the owning turn's
     // head-revision CAS.
     assert_eq!(
@@ -1097,9 +1100,15 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
         0,
         "in-turn direct completion must not commit runtime state out-of-band"
     );
-    let ledger = runtime.shared_token_ledger.lock_recover();
-    assert_eq!(ledger.len(), 1);
-    assert_eq!(ledger[0].usage.input_tokens, 7);
+    // The recording double answers the direct effect itself: no provider was
+    // dispatched, so no usage run was admitted and nothing is accounted. Only
+    // a dispatched call is spend (ADR 0125).
+    let usage = settled_runtime_usage(&runtime).await;
+    assert!(
+        usage.rows.is_empty(),
+        "a canned answer is no paid call: {usage:?}"
+    );
+    assert_eq!(usage.completeness, lash_core::UsageCompleteness::default());
 }
 
 #[tokio::test(flavor = "multi_thread")]

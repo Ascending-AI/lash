@@ -72,7 +72,7 @@ use super::executor::{
 };
 use super::live_openers::{LiveOpenerContext, LiveOpenerRegistry};
 use super::tool_child::ToolChildRequest;
-use super::tool_settlement::{ToolSettlement, ToolUsageLedger};
+use super::tool_settlement::ToolSettlement;
 use crate::tool_dispatch::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome};
 use crate::{
     AdmittedScope, EffectOpener, ProcessExecutionEnvStore, ToolCatalog, ToolChildExecutionTraceHook,
@@ -672,6 +672,7 @@ impl RuntimeEffectLocalRunner for BoundToolChildRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let binding = envelope_group_child_binding(&envelope)?;
         let RuntimeEffectCommand::ToolInvocation { request } = envelope.command else {
@@ -758,6 +759,7 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         // Boxed: the driver future carries the whole dispatch, and a group
         // child is spawned per member — 21 kB of stack per pending child is a
@@ -858,7 +860,6 @@ pub(crate) fn rebind_child_dispatch<'run>(
     request: &ToolChildRequest,
     controller: ScopedEffectController<'run>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
-    usage_ledger: &ToolUsageLedger,
 ) -> Result<ToolDispatchContext<'run>, RuntimeEffectControllerError> {
     // The subagent context the serving plugins were built under decides how
     // deep a nested spawn may recurse, and plugins cannot be rebound. A lent
@@ -906,17 +907,18 @@ pub(crate) fn rebind_child_dispatch<'run>(
     // the child's cancel decision commits refuses at the substrate. This is
     // the authority boundary; everything else on this list is attribution.
     child.effect_controller = controller.clone();
-    // Child-local buffers. Their contents ride the child's outcome (§6, §13),
-    // so a child that wrote into the opener's buffers would put its facts
+    // Child-local buffers. Their contents ride the child's outcome (§6), so a
+    // child that wrote into the opener's buffers would put its facts
     // somewhere its settlement cannot carry them from.
     child.checkpoint_messages = crate::tool_dispatch::CheckpointMessageBuffer::default();
     child.trigger_outcomes = crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
     // The lent direct-completion client, rebound to the child's recorded
     // authority. What is lent is the live completion *transport*; what is
     // rebound is everything that decides whose call it is — the recorded
-    // session, environment, lineage, admitted controller and usage ledger —
-    // so a managed-LLM call the child makes is journaled under the child's
-    // facts, never the opener's (ADR 0099 §3, §13).
+    // session, environment, lineage and admitted controller — so a
+    // managed-LLM call the child makes is journaled under the child's facts,
+    // never the opener's (ADR 0099 §3). Its spend is accounted by the usage
+    // run of the attempt it runs inside (ADR 0125).
     child.direct_completions = lent.direct_completions.bind_tool_child(
         &request.scope.owner.runtime_owner(),
         &execution_env_spec,
@@ -926,7 +928,6 @@ pub(crate) fn rebind_child_dispatch<'run>(
             .parent_invocation()
             .and_then(|parent| parent.attribution.turn_id.clone()),
         request.lineage.parent_invocation().cloned(),
-        usage_ledger.clone(),
     )?;
     Ok(child)
 }
@@ -1091,13 +1092,11 @@ async fn run_tool_child<'run>(
         None => controller,
     };
     let cancel = live.cancellation().child_token();
-    let usage_ledger = ToolUsageLedger::new();
     let dispatch = Arc::new(rebind_child_dispatch(
         live.dispatch().as_ref(),
         request,
         controller,
         execution_env_spec,
-        &usage_ledger,
     )?);
 
     // The cancellation trio is computed once, here, from the *recorded*
@@ -1167,7 +1166,6 @@ async fn run_tool_child<'run>(
     settlement
         .triggers
         .extend(dispatch.trigger_outcomes.drain());
-    settlement.usage.extend(usage_ledger.take());
     if let Some(recorder) = resolved.recorder {
         let mut stream = recorder.finish();
         // What the child's own journaled record holds is referenced, not

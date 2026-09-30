@@ -11,6 +11,7 @@ use crate::RuntimeEffectController;
 
 pub(super) struct InvocationEffectHost {
     pub(super) inner: Arc<dyn RuntimeEffectController>,
+    pub(super) usage_accounting: Arc<dyn crate::UsageAccountingStore>,
 }
 
 #[async_trait::async_trait]
@@ -79,6 +80,30 @@ impl crate::AwaitEventResolver for InvocationEffectHost {
 
 #[async_trait::async_trait]
 impl crate::EffectHost for InvocationEffectHost {
+    async fn drain_usage_accounting(
+        &self,
+        owner: &crate::RuntimeOwner,
+    ) -> Result<crate::UsageOwnerRetired, crate::RuntimeError> {
+        crate::conformance::effect_host::retire_usage_owner_now(
+            self.usage_accounting.as_ref(),
+            owner,
+        )
+        .await
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        owner: &crate::RuntimeOwner,
+        scope: &crate::ExecutionScope,
+    ) -> Result<u64, crate::RuntimeError> {
+        crate::conformance::effect_host::retire_usage_execution_now(
+            self.usage_accounting.as_ref(),
+            owner,
+            scope,
+        )
+        .await
+    }
+
     async fn journal_replay(
         &self,
         _journal: &crate::EffectJournalIdentity,

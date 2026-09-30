@@ -15,6 +15,7 @@ async fn authorizes_bounded_duplicate_billing_and_projects_typed_trace() {
                 max_unsafe_retries: 1,
                 max_duplicate_cost_tokens: Some(10),
             },
+            <dyn DispatchAdmission>::host_owned(),
         )
         .await
         .expect("bounded duplicate billing authorizes one retry");
@@ -53,6 +54,7 @@ async fn duplicate_cost_bound_denies_and_projects_typed_trace() {
                 max_unsafe_retries: 1,
                 max_duplicate_cost_tokens: Some(9),
             },
+            <dyn DispatchAdmission>::host_owned(),
         )
         .await
         .expect_err("ten billed tokens exceed a nine-token duplicate bound");
@@ -93,6 +95,7 @@ async fn configured_unsafe_retry_limit_is_hard_clamped_to_five() {
                 max_unsafe_retries: 200,
                 max_duplicate_cost_tokens: None,
             },
+            <dyn DispatchAdmission>::host_owned(),
         )
         .await
         .expect_err("the sixth unsafe retry must be denied by the hard clamp");
@@ -124,6 +127,7 @@ async fn unsafe_retry_honors_retry_after_and_excessive_delay_fails_fast() {
                 max_unsafe_retries: 1,
                 max_duplicate_cost_tokens: None,
             },
+            <dyn DispatchAdmission>::host_owned(),
         )
         .await
         .expect("unsafe retry honors bounded server delay");
@@ -142,6 +146,7 @@ async fn unsafe_retry_honors_retry_after_and_excessive_delay_fails_fast() {
                 max_unsafe_retries: 1,
                 max_duplicate_cost_tokens: None,
             },
+            <dyn DispatchAdmission>::host_owned(),
         )
         .await
         .expect_err("unsafe retry delay beyond the cap fails immediately");

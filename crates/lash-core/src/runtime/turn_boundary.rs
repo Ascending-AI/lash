@@ -18,8 +18,6 @@ use std::sync::Arc;
 
 mod materialize;
 use materialize::*;
-mod accepted_commit;
-pub(super) use accepted_commit::AcceptedTurnCommit;
 mod execution_state;
 use execution_state::*;
 pub(in crate::runtime) use execution_state::{
@@ -31,13 +29,13 @@ mod recorded_assembly;
 pub use recorded_assembly::RecordedTurnAssembly;
 #[cfg(feature = "testing")]
 pub use recorded_assembly::classify_output_state;
-type FinalCommitResult = Result<
-    (
-        Vec<crate::store::RuntimeUsageDeltaIdentity>,
-        crate::TurnCancelInputOutcome,
-    ),
-    StoreError,
->;
+type FinalCommitResult = Result<crate::TurnCancelInputOutcome, StoreError>;
+
+fn execution_state_capture_error(err: crate::SessionError) -> StoreError {
+    StoreError::ExecutionStateCaptureFailed {
+        message: err.to_string(),
+    }
+}
 
 #[derive(Debug)]
 pub(super) struct ProgressBoundaryResult {
@@ -270,7 +268,7 @@ impl TurnBoundary {
         if let Some(session) = session.as_deref_mut() {
             probe_execution_state_capture(session)
                 .await
-                .map_err(accepted_commit::execution_state_capture_error)?;
+                .map_err(execution_state_capture_error)?;
         }
         self.apply_prepared_messages(messages);
         let plugins = session
@@ -383,7 +381,6 @@ impl TurnBoundary {
         &mut self,
         returned_turn: &mut AssembledTurn,
         session: Option<&mut Session>,
-        usage_deltas: &[crate::store::RuntimeUsageDelta],
         ingress_settlement: TurnIngressSettlement,
         pending_follow_on: Option<crate::store::PendingFollowOn>,
         interrupted_turn_input_turn_id: Option<TurnId>,
@@ -392,7 +389,7 @@ impl TurnBoundary {
         turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
         turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
-    ) -> Result<AcceptedTurnCommit, StoreError> {
+    ) -> Result<(), StoreError> {
         // Record the outcome before capturing execution state: a second author
         // that conflicts refuses here, with nothing captured and nothing
         // written.
@@ -421,11 +418,11 @@ impl TurnBoundary {
                         })?;
                     frame_switch_execution_state_update(session, &successor, &initial_nodes)
                         .await
-                        .map_err(accepted_commit::execution_state_capture_error)?
+                        .map_err(execution_state_capture_error)?
                 } else {
                     capture_execution_state_update(session)
                         .await
-                        .map_err(accepted_commit::execution_state_capture_error)?
+                        .map_err(execution_state_capture_error)?
                 };
                 let plugins = Arc::clone(session.plugins());
                 (store, Some(plugins), execution_state_update)
@@ -452,7 +449,6 @@ impl TurnBoundary {
                 execution_state_update,
                 agent_frame_switch_materializes,
                 store: store.as_ref(),
-                usage_deltas,
                 failure_evidence: &returned_turn.failure_evidence,
                 outcome: &returned_turn.outcome,
                 ingress_settlement,
@@ -471,10 +467,10 @@ impl TurnBoundary {
             commit_result.is_ok(),
         )
         .await;
-        let (confirmed_usage, turn_cancel_input_outcome) = commit_result?;
+        let turn_cancel_input_outcome = commit_result?;
         returned_turn.state = self.final_state_mut().to_snapshot();
         returned_turn.turn_cancel_input_outcome = turn_cancel_input_outcome;
-        Ok(AcceptedTurnCommit::new(confirmed_usage))
+        Ok(())
     }
 
     pub(super) fn into_final_state(self) -> RuntimeSessionState {
@@ -584,7 +580,6 @@ impl TurnBoundary {
             execution_state_update,
             agent_frame_switch_materializes,
             store,
-            usage_deltas,
             failure_evidence,
             outcome,
             ingress_settlement,
@@ -612,9 +607,6 @@ impl TurnBoundary {
         // switch, cleared by the follow-on's own terminal commit (ADR 0101
         // §3). A store-less session keeps the same fact resident.
         state.pending_follow_on = pending_follow_on.map(Box::new);
-        for delta in usage_deltas {
-            state.usage.fold_checked(&delta.entry)?;
-        }
         if let Some(plugins) = plugins {
             state.capture_plugin_states(plugins);
         }
@@ -692,7 +684,6 @@ impl TurnBoundary {
                 commit_budget,
                 store,
                 graph,
-                usage_deltas,
                 failure_evidence,
                 crate::store::TurnCommitOutcome::from_terminal(outcome),
                 operation,
@@ -713,13 +704,7 @@ impl TurnBoundary {
             // No store will ever rehydrate this commit: the accepted execution
             // stays resident for the next same-frame restore (FIG-2521).
             state.discard_runtime_snapshots_retaining_accepted_execution();
-            Ok((
-                usage_deltas
-                    .iter()
-                    .map(|delta| delta.identity.clone())
-                    .collect(),
-                Default::default(),
-            ))
+            Ok(Default::default())
         }
     }
 
@@ -734,7 +719,6 @@ impl TurnBoundary {
         commit_budget: crate::CommitBudget,
         store: &crate::store::SessionStore,
         mut graph: GraphAppend,
-        usage_deltas: &[crate::store::RuntimeUsageDelta],
         failure_evidence: &[crate::TurnFailureEvidence],
         outcome: crate::store::TurnCommitOutcome,
         operation: crate::OperationId,
@@ -786,16 +770,14 @@ impl TurnBoundary {
             .collect::<Vec<_>>();
         let frame_transition =
             committed_frame_transition(state, ended, carries, &committing, &persisted_node_ids)?;
-        let mut commit =
-            RuntimeCommit::persisted_state_with_graph_commit_and_staged_usage_and_budget(
-                state,
-                graph,
-                usage_deltas,
-                operation,
-                commit_budget,
-                store.fleet_format(),
-            )?
-            .with_committed_attachments(committed_attachment_ids);
+        let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
+            state,
+            graph,
+            operation,
+            commit_budget,
+            store.fleet_format(),
+        )?
+        .with_committed_attachments(committed_attachment_ids);
         commit.failure_evidence = failure_evidence.to_vec();
         commit.outcome = Some(outcome);
         commit.adopted_intent_rows = adopted_intent_rows;
@@ -858,11 +840,10 @@ impl TurnBoundary {
                 Err(err) => return Err(err),
             }
         };
-        let committed_usage_delta_identities = result.committed_usage_delta_identities.clone();
         let turn_cancel_input_outcome = result.turn_cancel_input_outcome.clone();
         state.apply_persisted_commit_result(result);
         state.mark_node_ids_persisted(persisted_node_ids);
-        Ok((committed_usage_delta_identities, turn_cancel_input_outcome))
+        Ok(turn_cancel_input_outcome)
     }
 }
 

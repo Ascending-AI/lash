@@ -393,13 +393,16 @@ mod tests {
                 let trace_events = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
                 let trace_sink = Arc::clone(&trace_events);
                 let response = provider
-                    .complete(provider_request(
-                        &model.id,
-                        variation,
-                        LlmProviderTraceSender::new(move |event| {
-                            trace_sink.lock_recover().push(event);
-                        }),
-                    ))
+                    .complete(
+                        provider_request(
+                            &model.id,
+                            variation,
+                            LlmProviderTraceSender::new(move |event| {
+                                trace_sink.lock_recover().push(event);
+                            }),
+                        ),
+                        <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+                    )
                     .await
                     .unwrap_or_else(|error| {
                         panic!(

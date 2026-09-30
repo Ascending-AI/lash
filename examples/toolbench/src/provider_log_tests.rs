@@ -89,7 +89,10 @@ async fn retries_honor_count_and_exponential_backoff() {
             retries,
             vec![Err(transient()); retries as usize + 1],
         )
-        .complete(request())
+        .complete(
+            request(),
+            <dyn lash::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .unwrap_err();
         assert_eq!(failure.call_record.attempts.len(), retries as usize + 1);
@@ -136,7 +139,10 @@ async fn request_shape_errors_are_not_retried_and_failed_rows_keep_rich_errors()
                 json!({"api_key":"test-secret","text":"é".repeat(5000)}).to_string(),
             );
         let failure = handle(&telemetry.capture, 3, vec![Err(error)])
-            .complete(request())
+            .complete(
+                request(),
+                <dyn lash::provider::DispatchAdmission>::host_owned(),
+            )
             .await
             .unwrap_err();
         assert_eq!(failure.call_record.attempts.len(), 1);
@@ -167,7 +173,10 @@ async fn retry_after_is_honored_without_extra_courtesy_attempts() {
         .with_http_status(429)
         .with_headers([("retry-after", "1")]);
     let failure = handle(&capture, 1, vec![Err(error.clone()), Err(error)])
-        .complete(request())
+        .complete(
+            request(),
+            <dyn lash::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .unwrap_err();
     assert_eq!(failure.call_record.attempts.len(), 2);
@@ -191,7 +200,13 @@ async fn partial_costs_survive_retries_and_charge_safety_refusal_is_visible() {
             ..Default::default()
         });
     let mut provider = handle(&telemetry.capture, 1, vec![Err(error.clone())]);
-    let failure = provider.complete(request()).await.unwrap_err();
+    let failure = provider
+        .complete(
+            request(),
+            <dyn lash::provider::DispatchAdmission>::host_owned(),
+        )
+        .await
+        .unwrap_err();
     record(
         &telemetry,
         TurnEvent::ModelCallRecorded {
@@ -228,6 +243,7 @@ async fn partial_costs_survive_retries_and_charge_safety_refusal_is_visible() {
                 max_unsafe_retries: 1,
                 max_duplicate_cost_tokens: None,
             },
+            <dyn lash::provider::DispatchAdmission>::host_owned(),
         )
         .await
         .unwrap();
@@ -305,7 +321,8 @@ async fn cancellation_during_backoff_keeps_the_failed_call_and_its_cost() {
                 lash::ChargeSafetyPolicy::AcceptDuplicateBilling {
                     max_unsafe_retries: 1,
                     max_duplicate_cost_tokens: None
-                }
+                },
+                <dyn lash::provider::DispatchAdmission>::host_owned()
             )
         )
         .await
@@ -326,7 +343,10 @@ async fn empty_response_keeps_cost_from_raw_usage_even_without_partial_response(
         .with_retry_verdict(TransportRetryVerdict::NotRetryable)
         .with_raw(r#"{"id":"gen-empty","usage":{"cost":0.00010212,"prompt_tokens":1098,"completion_tokens":11}}"#);
     let failure = handle(&telemetry.capture, 3, vec![Err(error)])
-        .complete(request())
+        .complete(
+            request(),
+            <dyn lash::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .unwrap_err();
     record(

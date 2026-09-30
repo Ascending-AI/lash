@@ -368,7 +368,6 @@ impl SurfaceRunner {
                 });
                 let commit = RuntimeCommit::persisted_state_with_operation_for_testing(
                     &state,
-                    &[],
                     lash_core::store::OperationId::turn(
                         session,
                         surface_parked_turn_id(*key),

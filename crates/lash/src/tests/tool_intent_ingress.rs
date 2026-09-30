@@ -854,6 +854,29 @@ impl lash_core::AwaitEventResolver for KeyJournalController {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for KeyJournalController {
+    /// This controller-owned tier keeps no usage ledger, so it cannot
+    /// retire an owner's accounting.
+    async fn drain_usage_accounting(
+        &self,
+        _owner: &lash_core::RuntimeOwner,
+    ) -> std::result::Result<lash_core::UsageOwnerRetired, lash_core::RuntimeError> {
+        Err(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::UsageAdmissionFault,
+            "the key-journal controller keeps no usage ledger",
+        ))
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        _owner: &lash_core::RuntimeOwner,
+        _scope: &lash_core::ExecutionScope,
+    ) -> std::result::Result<u64, lash_core::RuntimeError> {
+        Err(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::UsageAdmissionFault,
+            "the key-journal controller keeps no usage ledger",
+        ))
+    }
+
     async fn journal_replay(
         &self,
         _journal: &lash_sansio::EffectJournalIdentity,
@@ -968,6 +991,29 @@ impl lash_core::AwaitEventResolver for AdmissionCrashController {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for AdmissionCrashController {
+    /// This controller-owned tier keeps no usage ledger, so it cannot
+    /// retire an owner's accounting.
+    async fn drain_usage_accounting(
+        &self,
+        _owner: &lash_core::RuntimeOwner,
+    ) -> std::result::Result<lash_core::UsageOwnerRetired, lash_core::RuntimeError> {
+        Err(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::UsageAdmissionFault,
+            "the admission-crash controller keeps no usage ledger",
+        ))
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        _owner: &lash_core::RuntimeOwner,
+        _scope: &lash_core::ExecutionScope,
+    ) -> std::result::Result<u64, lash_core::RuntimeError> {
+        Err(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::UsageAdmissionFault,
+            "the admission-crash controller keeps no usage ledger",
+        ))
+    }
+
     async fn journal_replay(
         &self,
         _journal: &lash_sansio::EffectJournalIdentity,

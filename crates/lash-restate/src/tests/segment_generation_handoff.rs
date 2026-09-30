@@ -371,6 +371,7 @@ impl Roll {
         let continuations = stores.process_continuations();
         let sessions = stores.session_store_factory();
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
+        host.bind_usage_accounting(stores.usage_accounting());
         let log = SegmentLog::default();
         let gated = Arc::new(GatedContinuations::new(Arc::clone(&continuations)));
         let runner_n = Arc::new(BuildRunner::new(

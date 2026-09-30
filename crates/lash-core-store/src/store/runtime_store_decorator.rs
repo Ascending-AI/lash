@@ -80,8 +80,6 @@ macro_rules! runtime_store_operations {
                 [session] fn load_session_window(&self, session_id: &SessionId, selector: WindowSelector) -> Result<Option<SessionWindowRead>, StoreError>;
                 [session] fn load_ancestors(&self, session_id: &SessionId, anchor: HistoryAnchor, budget: HistoryBudget) -> Result<HistoryPage, StoreError>;
                 [session] fn contains_active_ancestor(&self, session_id: &SessionId, node_id: &crate::NodeId) -> Result<bool, StoreError>;
-                [session] fn load_usage_totals(&self, session_id: &SessionId) -> Result<crate::usage::SessionUsageTotals, StoreError>;
-                [session] fn load_usage_ledger_page(&self, session_id: &SessionId, after: Option<&UsageLedgerCursor>, limit: NonZeroU32) -> Result<UsageLedgerPage, StoreError>;
                 [session] fn load_failure_evidence_page(&self, session_id: &SessionId, after: Option<&FailureEvidenceCursor>, limit: NonZeroU32) -> Result<FailureEvidencePage, StoreError>;
             }
             TurnInputStore {

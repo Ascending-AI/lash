@@ -23,7 +23,7 @@ impl RuntimeScenarioContext {
         foreign
             .completed_batches
             .extend(admission.queued.as_ref().map(|queued| queued.completion()));
-        let mut commit = RuntimeCommit::persisted_state_for_test(&self.state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&self.state);
         commit.drive_fence = Some(Box::new(self.owner_and_lease().1.clone()));
         commit.ingress = Some(foreign);
         let err = self
@@ -46,7 +46,7 @@ impl RuntimeScenarioContext {
         self.state.turn_index = self.state.turn_index.saturating_add(1);
         let result = self
             .store()
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&self.state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&self.state))
             .await
             .expect("released advisory lease must not reject a current-head commit");
         self.state.head_revision = result.head_revision;
@@ -56,7 +56,7 @@ impl RuntimeScenarioContext {
         stale_state.turn_index = stale_state.turn_index.saturating_add(1);
         let err = self
             .store()
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&stale_state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&stale_state))
             .await
             .expect_err("stale head must reject the follow-up commit");
         assert!(

@@ -367,6 +367,21 @@ impl EffectHost for LayeredEffectHost {
         self.inner.turn_control_binding_id()
     }
 
+    async fn drain_usage_accounting(
+        &self,
+        owner: &crate::RuntimeOwner,
+    ) -> Result<crate::UsageOwnerRetired, RuntimeError> {
+        self.inner.drain_usage_accounting(owner).await
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        owner: &crate::RuntimeOwner,
+        scope: &ExecutionScope,
+    ) -> Result<u64, RuntimeError> {
+        self.inner.retire_usage_execution(owner, scope).await
+    }
+
     async fn retire_closed_root_waits(
         &self,
         session_id: &SessionId,

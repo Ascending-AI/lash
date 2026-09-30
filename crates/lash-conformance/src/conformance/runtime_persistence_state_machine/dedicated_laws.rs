@@ -181,7 +181,7 @@ async fn law_admitted_work_settles_exactly_once(
     .await?;
     let mut state = state_with_tool_generation(0);
     let commit = final_commit(
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         &fence,
         completing("settles-once", &admission),
     );
@@ -209,7 +209,7 @@ async fn law_admitted_work_settles_exactly_once(
         "settled work remained live"
     );
     state.apply_persisted_commit_result(first);
-    let (second_settlement, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
+    let (second_settlement, _) = RuntimeCommit::persisted_state_for_test(&state)
         .with_operation(crate::OperationId::new(
             crate::ExecutionScope::runtime_operation("runtime-persistence-law:second-settlement"),
             "commit",
@@ -271,7 +271,7 @@ async fn law_a_resumed_root_keeps_its_admission_across_fences(
         .map_err(TestCaseError::fail)?;
     let stale_result = store
         .commit_runtime_state(final_commit(
-            RuntimeCommit::persisted_state_for_test(&state_with_tool_generation(31), &[]),
+            RuntimeCommit::persisted_state_for_test(&state_with_tool_generation(31)),
             &predecessor,
             completing("resumed", &admitted),
         ))
@@ -293,7 +293,7 @@ async fn law_a_resumed_root_keeps_its_admission_across_fences(
     );
     store
         .commit_runtime_state(final_commit(
-            RuntimeCommit::persisted_state_for_test(&state_with_tool_generation(32), &[]),
+            RuntimeCommit::persisted_state_for_test(&state_with_tool_generation(32)),
             &successor,
             completing("resumed", &resumed),
         ))
@@ -334,14 +334,14 @@ async fn law_head_cas_serializes_competing_commits(
     )
     .await?;
 
-    let (loser, _) = RuntimeCommit::persisted_state_for_test(&state_with_tool_generation(41), &[])
+    let (loser, _) = RuntimeCommit::persisted_state_for_test(&state_with_tool_generation(41))
         .with_operation(crate::OperationId::new(
             crate::ExecutionScope::runtime_operation("runtime-persistence-law:cas-loser"),
             "commit",
         ))
         .map_err(fail)?;
     let loser = final_commit(loser, &fence, completing("cas", &admission));
-    let (winner, _) = RuntimeCommit::persisted_state_for_test(&state_with_tool_generation(42), &[])
+    let (winner, _) = RuntimeCommit::persisted_state_for_test(&state_with_tool_generation(42))
         .with_operation(crate::OperationId::new(
             crate::ExecutionScope::runtime_operation("runtime-persistence-law:cas-winner"),
             "commit",
@@ -407,7 +407,7 @@ async fn law_stale_settlement_cannot_damage_successor(
         .map_err(TestCaseError::fail)?;
     let stale_result = store
         .commit_runtime_state(final_commit(
-            RuntimeCommit::persisted_state_for_test(&state, &[]),
+            RuntimeCommit::persisted_state_for_test(&state),
             &predecessor,
             subset,
         ))
@@ -446,7 +446,7 @@ async fn law_stale_settlement_cannot_damage_successor(
     let live = seal(&store, 3).await?;
     store
         .commit_runtime_state(final_commit(
-            RuntimeCommit::persisted_state_for_test(&state, &[]),
+            RuntimeCommit::persisted_state_for_test(&state),
             &live,
             completing("damage", &resumed),
         ))
@@ -500,7 +500,7 @@ async fn law_turn_inputs_apply_once_in_order(
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let commit = final_commit(
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         &fence,
         settlement,
     );

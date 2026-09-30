@@ -717,65 +717,6 @@ impl SqliteStore {
                     let stored_checkpoint =
                         Self::put_checkpoint_conn(tx, &commit.checkpoint, blob_profile, fleet)?;
 
-                    if !commit.usage_deltas.is_empty() {
-                        let mut stmt = tx
-                            .prepare(session_sql().usage_sqlite.insert.sql())
-                            .map_err(sqlite_error)?;
-                        for entry in &commit.usage_deltas {
-                            let (reconciled_call_id, reconciled_attempt_ordinal) =
-                                match &entry.entry.usage_disposition {
-                                    lash_core_execution::LedgerUsageOutcome::Reconciled {
-                                        call_id,
-                                        attempt_ordinal,
-                                    } => (Some(call_id.as_str()), Some(i64::from(*attempt_ordinal))),
-                                    lash_core_execution::LedgerUsageOutcome::Reported
-                                    | lash_core_execution::LedgerUsageOutcome::Unreported { .. } =>
-                                        (None, None),
-                                };
-                            let entry_ordinal = i64::try_from(entry.identity.entry_ordinal)
-                                .map_err(|_| {
-                                    StoreError::Backend(
-                                        "usage delta ordinal does not fit SQLite INTEGER"
-                                            .to_string(),
-                                    )
-                                })?;
-                            let inserted = stmt.execute(params![
-                                commit.session_id.as_str(),
-                                entry.identity.operation_storage_key,
-                                entry_ordinal,
-                                i64::from(entry.identity.payload_encoding_version),
-                                entry.identity.payload_hash,
-                                entry.entry.source,
-                                entry.entry.model,
-                                entry.entry.usage.input_tokens,
-                                entry.entry.usage.output_tokens,
-                                entry.entry.usage.cache_read_input_tokens,
-                                entry.entry.usage.cache_write_input_tokens,
-                                entry.entry.usage.reasoning_output_tokens,
-                                reconciled_call_id,
-                                reconciled_attempt_ordinal,
-                            ])
-                            .map_err(sqlite_error)?;
-                            if inserted != 0 {
-                                let seq = tx.last_insert_rowid();
-                                for hole in entry.entry.usage_disposition.unreported_attempt_descriptors() {
-                                    crate::conn::cached_execute(
-                                        tx,
-                                        session_sql().usage_holes.insert.sql(),
-                                        params![
-                                            commit.session_id.as_str(),
-                                            seq,
-                                            hole.call_id,
-                                            i64::from(hole.attempt_ordinal),
-                                            hole.generation_id,
-                                        ],
-                                    )
-                                    .map_err(sqlite_error)?;
-                                }
-                            }
-                        }
-                    }
-
                     insert_graph_nodes_conn(tx, &commit.session_id, commit.graph.nodes(), &plan)?;
                     let meta = plan.head_meta(stored_checkpoint.checkpoint_ref.clone());
                     // Divergence ruling (FIG-3381): SQLite carries no CAS

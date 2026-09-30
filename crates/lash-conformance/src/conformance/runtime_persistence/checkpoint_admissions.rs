@@ -29,7 +29,7 @@ where
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.set_execution_state_snapshot(Some(b"known-execution-state".to_vec().into()));
-    let mut first_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut first_commit = RuntimeCommit::persisted_state_for_test(&state);
     first_commit.checkpoint.components.extend([
         (
             "arbitrary/unchanged".to_string(),
@@ -82,7 +82,7 @@ where
     let mut ordinary_turn_projection = state.to_snapshot();
     ordinary_turn_projection.turn_index += 1;
     state.adopt_snapshot(ordinary_turn_projection.clone());
-    let second_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let second_commit = RuntimeCommit::persisted_state_for_test(&state);
     let carried = second_commit
         .checkpoint
         .components
@@ -129,7 +129,7 @@ where
     // deletion. The arbitrary store-law mutations remain direct because the
     // runtime intentionally has no typed owner for those keys.
     state.set_execution_state_snapshot(None);
-    let mut third_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut third_commit = RuntimeCommit::persisted_state_for_test(&state);
     third_commit
         .checkpoint
         .components
@@ -214,7 +214,7 @@ where
     .await
     .expect("reload current state before rejection laws")
     .expect("current checkpoint state before rejection laws");
-    let mut unknown = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut unknown = RuntimeCommit::persisted_state_for_test(&state);
     unknown.checkpoint.components.insert(
         "arbitrary/unknown-ref".to_string(),
         crate::HydratedCheckpointComponent::Unchanged {
@@ -242,7 +242,7 @@ where
             if key == "arbitrary/unknown-ref"
     ));
 
-    let mut mismatch = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut mismatch = RuntimeCommit::persisted_state_for_test(&state);
     mismatch.checkpoint.components.insert(
         "arbitrary/versioned".to_string(),
         crate::HydratedCheckpointComponent::Changed {
@@ -281,7 +281,7 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimeStor
         session_id: SessionId::from("checkpoint-unknown-ref"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state);
     commit.checkpoint.components.insert(
         "arbitrary/unknown-ref".to_string(),
         crate::HydratedCheckpointComponent::Unchanged {
@@ -333,7 +333,6 @@ pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn Runt
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
         crate::GraphAppend::Extend { nodes: vec![node] },
-        &[],
     );
     let expected_leaf_node_id = commit
         .graph
@@ -415,7 +414,7 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
         let mut settlement = IngressSettlement::new(TurnId::from(turn_id));
         settlement.completed_inputs.push(admitted.completion());
         let mut commit = final_commit(
-            RuntimeCommit::persisted_state_for_test(&state, &[]),
+            RuntimeCommit::persisted_state_for_test(&state),
             &fence,
             settlement,
         );

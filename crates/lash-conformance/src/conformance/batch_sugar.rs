@@ -1493,19 +1493,23 @@ async fn durable_cancel_snapshot(law: &SugarTurn) -> serde_json::Value {
         .await
         .expect("reread the durable transcript")
         .expect("the cancelled session has a head");
+    // The session's durable accounting (ADR 0125): every fact its owner
+    // holds, in ledger order.
+    let accounting = law.stores.usage_accounting();
+    let owner = crate::RuntimeOwner::Session(law.session_id.clone());
     let mut ledger = Vec::new();
     let mut cursor = None;
     loop {
-        let page = store
-            .load_usage_ledger_page(
-                &law.session_id,
+        let page = accounting
+            .load_usage_fact_page(
+                &owner,
                 cursor.as_ref(),
                 std::num::NonZeroU32::new(128).expect("nonzero page size"),
             )
             .await
             .expect("reread durable accounting");
-        for row in page.rows {
-            ledger.push(serde_json::json!({ "seq": row.seq, "operation": row.operation_storage_key, "entry": row.entry }));
+        for fact in page.facts {
+            ledger.push(serde_json::to_value(&fact).expect("encode the durable fact"));
         }
         cursor = page.next;
         if cursor.is_none() {
@@ -1515,7 +1519,6 @@ async fn durable_cancel_snapshot(law: &SugarTurn) -> serde_json::Value {
     serde_json::json!({
         "finals": law.witness.recorded.finals(law.host.as_ref(), law.admitted()).await,
         "transcript": read.window.nodes,
-        "usage": read.usage,
         "ledger": ledger,
     })
 }

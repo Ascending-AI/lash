@@ -211,7 +211,7 @@ struct LashlangSegmentState {
     started_process_ids: Vec<ProcessId>,
     /// The once-only settlement incorporation ledger (FIG-3411): a successor
     /// segment incorporates against the same set so a redrive cannot
-    /// re-apply a settlement or re-charge a usage delta.
+    /// re-apply a settlement.
     incorporation_ledger: lash_core::session::IncorporationLedger,
     /// Effect occurrences within the durable summary's per-node cap that no
     /// boundary has committed yet (FIG-3571). The successor segment commits

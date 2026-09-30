@@ -204,9 +204,8 @@ async fn commit_with_attachment_refs(
             "commit-with-attachment-refs",
         )
     };
-    let (commit, _) =
-        RuntimeCommit::persisted_state_with_operation_and_staged_usage(&mut state, &[], operation)
-            .map_err(|error| error.to_string())?;
+    let (commit, _) = RuntimeCommit::persisted_state_with_operation(&mut state, operation)
+        .map_err(|error| error.to_string())?;
     let commit = commit.with_committed_attachments([attachment.id.clone()]);
     let result = store
         .commit_runtime_state(commit.clone())

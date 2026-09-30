@@ -13,7 +13,6 @@ use lash_sansio::SessionId;
 
 // No attachment_store_*_tests!: those laws certify the separate FileAttachmentStore component.
 // No live_replay_tests!: live replay is an in-process cache, not PostgreSQL-backed storage.
-// No append_usage_cancellation_tests!: exactly-once cancellation requires the SQLite worker seam.
 // No runtime_persistence_clock_tests!: the backend clock is PostgreSQL-owned and not controllable.
 // No queued-lane resolver macro: engine pacing belongs to Restate, not a persistence store.
 
@@ -122,6 +121,8 @@ mod session_close;
 mod session_delete_blob_reclaim;
 #[path = "conformance/session_ingress.rs"]
 mod session_ingress;
+#[path = "conformance/usage_accounting.rs"]
+mod usage_accounting;
 #[path = "conformance/wake_delivery.rs"]
 mod wake_delivery;
 
@@ -605,29 +606,6 @@ lash_conformance::append_tombstone_tests!({
     )
 });
 
-lash_conformance::append_receipt_envelope_tests!({
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres mixed-envelope receipt conformance: database is not configured"
-        );
-        return;
-    };
-    reset(storage.pool()).await;
-    storage
-        .store()
-        .admit_session(
-            &lash_core_execution::testing::store_fixtures::root_session_request(&SessionId::from(
-                "root",
-            )),
-        )
-        .await
-        .expect("admit append-receipt root");
-    (
-        _database_lock,
-        Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
-    )
-});
-
 lash_conformance::append_receipt_rewrite_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres old-format receipt conformance: database is not configured");
@@ -1096,7 +1074,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         };
         completion_store
             .commit_runtime_state(finishing_root(
-                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state),
                 &lease,
                 "wake-source-root",
                 &admission,
@@ -1248,7 +1226,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     .state;
     store
         .commit_runtime_state(finishing_root(
-            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state),
             &second_lease,
             "wake-source-second-root",
             &second_admission,
@@ -1404,7 +1382,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     };
     let operation = lash_core_execution::OperationId::turn(SESSION_ID, TURN_ID, "final");
     let operation_key = operation.storage_key().expect("canonical operation key");
-    let (commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
+    let (commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
         .with_committed_attachments(vec![clock_intent.attachment_id.clone()])
         .with_operation(operation)
         .expect("stamp clock test commit");
@@ -1454,37 +1432,28 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = current_schema()
-           AND table_name = 'lash_usage_deltas'
+           AND table_name = 'lash_usage_facts'
            AND column_name = 'payload_hash'",
     )
     .fetch_one(&pool)
     .await
     .expect("payload_hash column exists");
     assert_eq!(payload_hash_nullable, "NO");
-    let payload_encoding_version_nullable: String = sqlx::query_scalar(
-        "SELECT is_nullable FROM information_schema.columns
-         WHERE table_schema = current_schema()
-           AND table_name = 'lash_usage_deltas'
-           AND column_name = 'payload_encoding_version'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("payload_encoding_version column exists");
-    assert_eq!(payload_encoding_version_nullable, "NO");
     let usage_identity_constraint: String = sqlx::query_scalar(
         "SELECT pg_get_constraintdef(oid)
          FROM pg_constraint
-         WHERE conrelid = 'lash_usage_deltas'::regclass
+         WHERE conrelid = 'lash_usage_facts'::regclass
            AND contype = 'u'",
     )
     .fetch_one(&pool)
     .await
-    .expect("read usage identity uniqueness constraint");
+    .expect("read usage fact identity uniqueness constraint");
     assert!(
         usage_identity_constraint.contains(
-            "session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash"
+            "owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind"
         ),
-        "usage identity uniqueness must include the payload encoding version and canonical hash: {usage_identity_constraint}"
+        "a usage fact's identity is its owner, effect, call, attempt and kind (ADR 0125): \
+         {usage_identity_constraint}"
     );
     // A newer catalog whose floor passed every version this build reads, in
     // its tier, must refuse adoption.
@@ -2126,3 +2095,36 @@ async fn postgres_attachment_materialization_turn_witnesses() {
     lash_conformance::attachment_materialization_turn_witnesses("postgres", host, stores, runner)
         .await;
 }
+
+lash_conformance::usage_ledger_store_tests!({
+    let Some((lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let snapshot_pool = storage.pool().clone();
+    let snapshot: lash_conformance::UsageLedgerSnapshot = Arc::new(move || {
+        let pool = snapshot_pool.clone();
+        Box::pin(async move {
+            let tables: Vec<String> = sqlx::query_scalar("SELECT tablename::text FROM pg_tables WHERE schemaname = current_schema() AND tablename LIKE 'lash_%' AND tablename NOT LIKE 'lash_usage_%' ORDER BY tablename")
+                .fetch_all(&pool).await.unwrap();
+            let mut snapshot = Vec::new();
+            for table in tables {
+                let mut rows: Vec<String> =
+                    sqlx::query_scalar(&format!("SELECT to_jsonb(t)::text FROM \"{table}\" AS t"))
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap();
+                rows.sort();
+                snapshot.push((table, rows.join("\n")));
+            }
+            snapshot
+        })
+    });
+    let store = Arc::new(storage.store());
+    let fixture = lash_conformance::UsageLedgerStoreFixture {
+        accounting: store.clone(),
+        factory: store,
+        snapshot,
+    };
+    ((lock, storage), fixture)
+});

@@ -12,12 +12,12 @@ use crate::support::{
     ProviderHandle, Result, RuntimeErrorCode, RuntimeHandle, RuntimeObservation,
     RuntimeSessionState, SessionAdmin, SessionCreationHead, SessionCursor, SessionError,
     SessionObservation, SessionObservationSubscription, SessionPolicy, SessionReadView,
-    SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest, SessionUsageReport,
-    ToolManifest, ToolState, TurnInput, build_plugin_host, refuse_foreign_backend_factories,
+    SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest, ToolManifest, ToolState,
+    TurnInput, build_plugin_host, refuse_foreign_backend_factories,
 };
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
-use lash_core::runtime::{UnreportedUsageAttempt, UsageReconciliationReport};
+use lash_core::runtime::UsageReconciliationReport;
 use lash_core::{LiveReplayStoreError, SessionObservationEvent, facade_support::LiveReplayGap};
 use lash_remote_protocol::{
     RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
@@ -219,6 +219,7 @@ impl SessionBuilder {
             Arc::clone(&self.core.env.core.control.effect_host),
             live_replay_store,
             Arc::clone(&self.core.env.core.providers.provider_resolver),
+            self.core.backend.usage_accounting(),
         )
     }
 
@@ -308,6 +309,7 @@ impl SessionBuilder {
             Arc::clone(&self.core.live_replay_store),
             catalog,
             Arc::clone(&self.core.env.core.providers.provider_resolver),
+            self.core.backend.usage_accounting(),
         ))
     }
 
@@ -1100,6 +1102,7 @@ impl LashSession {
             Arc::clone(&self.runtime.live_replay_store),
             self.binding.catalog(),
             self.binding.provider_resolver(),
+            self.binding.usage_accounting(),
         )
     }
 
@@ -1125,32 +1128,31 @@ impl LashSession {
         self.runtime.observe().read_view.clone()
     }
 
-    pub fn usage_report(&self) -> SessionUsageReport {
-        self.runtime.observe().usage_report.clone()
-    }
-
-    /// Attempts of finished turns whose provider usage never arrived after a
-    /// protocol abort or a failure, not yet reconciled. Each is already
-    /// counted in [`usage_report`](Self::usage_report) as an unreported row;
-    /// [`reconcile_unreported_usage`](Self::reconcile_unreported_usage) fills
-    /// them.
-    pub async fn unreported_usage_attempts(&self) -> Vec<UnreportedUsageAttempt> {
-        let writer = self.runtime.writer();
-        let runtime = writer.lock().await;
-        runtime.unreported_usage_attempts().to_vec()
+    /// The session's model usage, read from the deployment's usage ledger
+    /// (ADR 0125): every call made for this session, by this runtime or any
+    /// other. `completeness.is_settled()` says whether every run has been
+    /// delivered; a host that reads after a turn and wants the turn's calls
+    /// counted waits for it.
+    pub async fn usage(&self) -> Result<lash_core::OwnerUsage> {
+        self.binding
+            .usage_accounting()
+            .load_owner_usage(&lash_core::RuntimeOwner::Session(SessionId::from(
+                self.runtime.observe().session_id(),
+            )))
+            .await
+            .map_err(Into::into)
     }
 
     /// Ask the session's provider for the usage of every unreported attempt
-    /// and append one correction row per recovered generation. Host-invoked
-    /// (a billing sweep, an idle hook), never on the turn's hot path; each
-    /// lookup is bounded by the provider. Attempts the provider cannot resolve
-    /// stay registered and return as `unresolved`.
+    /// the ledger holds for this session, and append one correction per
+    /// recovered generation. Host-invoked (a billing sweep, an idle hook),
+    /// never on the turn's hot path; each lookup is bounded by the provider.
+    /// Attempts the provider cannot resolve stay outstanding and return as
+    /// `unresolved`.
     pub async fn reconcile_unreported_usage(&self) -> Result<UsageReconciliationReport> {
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
-        let report = runtime.reconcile_unreported_usage().await?;
-        self.runtime.publish_resident_from(&runtime);
-        Ok(report)
+        Ok(runtime.reconcile_unreported_usage().await?)
     }
 
     pub async fn set_turn_phase_probe(
@@ -1265,10 +1267,6 @@ impl ObservableSession {
 
     pub fn read_view(&self) -> SessionReadView {
         self.snapshot().read_view.clone()
-    }
-
-    pub fn usage_report(&self) -> SessionUsageReport {
-        self.snapshot().usage_report.clone()
     }
 
     pub fn tool_state(&self) -> Option<ToolState> {

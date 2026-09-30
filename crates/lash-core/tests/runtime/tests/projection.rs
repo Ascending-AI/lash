@@ -89,12 +89,8 @@ impl lash_core::plugin::ProtocolSessionPlugin for AppendRollbackProtocolSession 
         self.protocol_dirty.store(true, Ordering::SeqCst);
         if self.advance_store_head {
             // Another writer lands a commit while the append is in flight.
-            lash_core::testing::runtime_helpers::advance_session_head(
-                self.store.as_ref(),
-                &[],
-                |_| {},
-            )
-            .await;
+            lash_core::testing::runtime_helpers::advance_session_head(self.store.as_ref(), |_| {})
+                .await;
         }
         Ok(())
     }
@@ -643,7 +639,9 @@ async fn completed_turns_are_persisted_in_session_graph() {
     assert_eq!(messages[0].parts[0].content(), "where did this go?");
     assert_eq!(messages[1].parts[0].content(), "Stored answer");
     let _checkpoint = read.checkpoint.expect("checkpoint");
-    let ledger = read.usage.rows;
+    // The turn's usage is the owner's accounting, beside the window rather
+    // than in it (ADR 0125).
+    let ledger = settled_runtime_usage(&runtime).await.rows;
     assert_eq!(ledger.len(), 1);
     assert_eq!(ledger[0].source, "turn");
     assert_eq!(ledger[0].model, standard_test_policy().model.id);

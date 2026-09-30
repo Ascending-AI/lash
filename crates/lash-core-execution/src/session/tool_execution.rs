@@ -994,11 +994,6 @@ impl RuntimeExecutionContext<'_> {
             crate::tool_dispatch::CheckpointMessageBuffer::default();
         resumed_dispatch.trigger_outcomes =
             crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
-        let usage_ledger = crate::runtime::ToolUsageLedger::new();
-        resumed_dispatch.direct_completions = resumed_dispatch
-            .direct_completions
-            .clone()
-            .with_usage_ledger(usage_ledger.clone());
         let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
             &resumed_dispatch,
             ids,
@@ -1018,7 +1013,6 @@ impl RuntimeExecutionContext<'_> {
         let capture = crate::runtime::ToolAttemptCapture {
             version: crate::runtime::TOOL_ATTEMPT_CAPTURE_VERSION,
             messages: resumed_dispatch.checkpoint_messages.drain(),
-            usage: usage_ledger.take(),
         };
         if !capture.is_empty() {
             captures.push(capture);

@@ -245,7 +245,6 @@ async fn end_oracle_root(
             None,
             HydratedSessionCheckpoint::default(),
             Vec::new(),
-            Vec::new(),
         ),
         fence,
         settlement,

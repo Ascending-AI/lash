@@ -4,7 +4,6 @@ use std::sync::atomic::Ordering;
 impl CurrentOwnerCapability {
     pub(in crate::runtime::session_manager) async fn append_session_nodes(
         &self,
-        usage: &UsageCapability,
         background: &ProcessCapability,
         session_id: &SessionId,
         request: crate::AppendSessionNodesRequest,
@@ -39,14 +38,6 @@ impl CurrentOwnerCapability {
             &request.operation_id,
             "append-session-nodes",
         );
-        // Host-scoped services persist the shared usage ledger with every
-        // store write they make.
-        debug_assert!(usage.persist_to_store);
-        let mut staged_usage = Some(
-            usage
-                .stage_token_ledger(&mut state, &operation)
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?,
-        );
         let append_stamp = crate::RuntimeTurnCommitStamp::append_session_nodes(
             operation.clone(),
             request.requires_ancestor_node_id.as_deref(),
@@ -79,15 +70,11 @@ impl CurrentOwnerCapability {
             .leaf_node_id()
             .cloned()
             .unwrap_or_else(|| crate::NodeId::new(String::new()));
-        let usage_deltas = staged_usage
-            .as_ref()
-            .map_or(&[][..], |staged| staged.deltas());
         state.capture_plugin_states(&self.plugins);
         let mut commit =
-            crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_staged_usage_and_budget(
+            crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
                 &state,
                 graph,
-                usage_deltas,
                 operation,
                 self.host.core.durability.commit_budget,
                 self.fleet_format(),
@@ -136,11 +123,6 @@ impl CurrentOwnerCapability {
         };
         let receipt_replayed = result.receipt_replayed;
         let committed_leaf_node_id = result.committed_leaf_node_id.clone();
-        if let Some(staged) = staged_usage.take() {
-            staged
-                .confirm_identities(&result.committed_usage_delta_identities)
-                .map_err(super::usage::plugin_error_from_usage_confirmation)?;
-        }
         let node_ids =
             super::super::state::resolve_append_node_ids(&result, locally_derived_node_ids)
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;

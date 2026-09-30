@@ -1586,10 +1586,6 @@ fn drain_area_witnesses() {
     let _ = <dyn lash::persistence::SessionHistoryStore>::load_ancestors;
     // W0537: lash::persistence::SessionHistoryStore::contains_active_ancestor [function]
     let _ = <dyn lash::persistence::SessionHistoryStore>::contains_active_ancestor;
-    // W0538: lash::persistence::SessionHistoryStore::load_usage_totals [function]
-    let _ = <dyn lash::persistence::SessionHistoryStore>::load_usage_totals;
-    // W0539: lash::persistence::SessionHistoryStore::load_usage_ledger_page [function]
-    let _ = <dyn lash::persistence::SessionHistoryStore>::load_usage_ledger_page;
     // W0540: lash::persistence::SessionHistoryStore::load_failure_evidence_page [function]
     let _ = <dyn lash::persistence::SessionHistoryStore>::load_failure_evidence_page;
     // W0541: lash::persistence::WindowSelector [enum]
@@ -1635,10 +1631,6 @@ fn drain_area_witnesses() {
     // W0552: lash::persistence::SessionWindowRead::checkpoint [field]
     field_witness(|value: &lash::persistence::SessionWindowRead| {
         let _ = &value.checkpoint;
-    });
-    // W0553: lash::persistence::SessionWindowRead::usage [field]
-    field_witness(|value: &lash::persistence::SessionWindowRead| {
-        let _ = &value.usage;
     });
     // W0554: lash::persistence::HistoryAnchor [enum]
     type_witness::<lash::persistence::HistoryAnchor>();
@@ -1734,32 +1726,6 @@ fn drain_area_witnesses() {
     variant_witness(|value: &lash::persistence::AnchorUnavailable| {
         matches!(value, lash::persistence::AnchorUnavailable::Tombstoned)
     });
-    // W0582: lash::persistence::UsageLedgerPage [struct]
-    type_witness::<lash::persistence::UsageLedgerPage>();
-    // W0583: lash::persistence::UsageLedgerPage::rows [field]
-    field_witness(|value: &lash::persistence::UsageLedgerPage| {
-        let _ = &value.rows;
-    });
-    // W0584: lash::persistence::UsageLedgerPage::next [field]
-    field_witness(|value: &lash::persistence::UsageLedgerPage| {
-        let _ = &value.next;
-    });
-    // W0585: lash::persistence::UsageLedgerRow [struct]
-    type_witness::<lash::persistence::UsageLedgerRow>();
-    // W0586: lash::persistence::UsageLedgerRow::seq [field]
-    field_witness(|value: &lash::persistence::UsageLedgerRow| {
-        let _ = &value.seq;
-    });
-    // W0587: lash::persistence::UsageLedgerRow::operation_storage_key [field]
-    field_witness(|value: &lash::persistence::UsageLedgerRow| {
-        let _ = &value.operation_storage_key;
-    });
-    // W0588: lash::persistence::UsageLedgerRow::entry [field]
-    field_witness(|value: &lash::persistence::UsageLedgerRow| {
-        let _ = &value.entry;
-    });
-    // W0589: lash::persistence::UsageLedgerCursor [struct]
-    type_witness::<lash::persistence::UsageLedgerCursor>();
     // W0590: lash::persistence::FailureEvidencePage [struct]
     type_witness::<lash::persistence::FailureEvidencePage>();
     // W0591: lash::persistence::FailureEvidencePage::settlements [field]

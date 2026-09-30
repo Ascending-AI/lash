@@ -504,9 +504,6 @@ fn abandon_to_open_buffers(
     }
     for capture in captures {
         context.checkpoint_messages.enqueue(capture.messages);
-        if let Some(ledger) = context.direct_completions.usage_ledger() {
-            ledger.extend(capture.usage);
-        }
     }
 }
 

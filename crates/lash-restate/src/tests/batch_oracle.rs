@@ -66,14 +66,20 @@ impl ConformanceTurnRunner for MutatingRunner {
                         .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
                 )
                 .expect("open the law's durable accounting database");
-                let changed = connection.execute("INSERT INTO usage_deltas (
-                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash,
-                    source, model, input_tokens, output_tokens, cache_read_input_tokens,
-                    cache_write_input_tokens, reasoning_output_tokens, reconciled_call_id, reconciled_attempt_ordinal)
-                    SELECT session_id, operation_storage_key || ':late-duplicate', entry_ordinal,
-                    payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens,
+                let changed = connection
+                    .execute(
+                        "INSERT INTO usage_facts (
+                    owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind,
+                    disposition, run_id, llm_call_id, source, model, input_tokens, output_tokens,
                     cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens,
-                    reconciled_call_id, reconciled_attempt_ordinal FROM usage_deltas WHERE input_tokens > 0 LIMIT 1", [])
+                    generation_id, payload_hash, recorded_at_ms)
+                    SELECT owner_kind, owner_id, effect_key || ':late-duplicate', call_ordinal,
+                    provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, model,
+                    input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens,
+                    reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms
+                    FROM usage_facts WHERE input_tokens > 0 LIMIT 1",
+                        [],
+                    )
                     .expect("inject a duplicate durable charge");
                 assert_eq!(
                     changed, 1,
@@ -95,11 +101,14 @@ fn factories() -> lash_conformance::BatchSugarFactories {
 }
 
 async fn rejects_late_mutation(mutation: LateMutation, expected: &str) {
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("SQLite fixture");
+    let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
+        HarnessServer::in_process(),
+        lash_core::StoreSet::usage_accounting(&stores),
+    )
+    .await;
     let runner = Arc::new(MutatingRunner {
         inner: harness.turn_runner(),
         server: harness.server_double().expect("double"),
@@ -192,11 +201,6 @@ async fn sqlite_double_fixture(
     let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
         unreachable!("the fixture selects the double");
     };
-    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-        seed,
-        always_replay,
-    })
-    .await;
     let directory = tempfile::tempdir().expect("SQLite file fixture directory");
     let stores = if file {
         lash_sqlite_store::SqliteStoreSet::open(directory.path())
@@ -207,6 +211,14 @@ async fn sqlite_double_fixture(
             .await
             .expect("SQLite memory fixture")
     };
+    let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
+        HarnessServer::InProcess {
+            seed,
+            always_replay,
+        },
+        lash_core::StoreSet::usage_accounting(&stores),
+    )
+    .await;
     (harness, directory, Arc::new(stores))
 }
 
@@ -284,8 +296,13 @@ async fn live_recorded_batch_boundaries_on_current_stores() {
             )),
         ),
     ];
-    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::Live).await;
     for (storage, stores) in stores {
+        // Each store set is its law's ledger, so each gets its own endpoint.
+        let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
+            HarnessServer::Live,
+            stores.usage_accounting(),
+        )
+        .await;
         recorded_boundaries(&harness, stores, storage).await;
     }
 }
@@ -328,10 +345,13 @@ async fn postgres_double_fixture(
     let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
         unreachable!("the fixture selects the double");
     };
-    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-        seed,
-        always_replay,
-    })
+    let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
+        HarnessServer::InProcess {
+            seed,
+            always_replay,
+        },
+        stores.usage_accounting(),
+    )
     .await;
     (harness, directory, stores)
 }

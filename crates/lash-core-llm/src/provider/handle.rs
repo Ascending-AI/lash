@@ -252,10 +252,16 @@ impl ProviderHandle {
     pub async fn complete(
         &mut self,
         mut request: LlmRequest,
+        admission: &dyn DispatchAdmission,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let sideband = self.prepare_completion(&mut request);
-        self.complete_prepared(request, sideband, crate::ChargeSafetyPolicy::default())
-            .await
+        self.complete_prepared(
+            request,
+            sideband,
+            crate::ChargeSafetyPolicy::default(),
+            admission,
+        )
+        .await
     }
 
     /// Completes a request under an explicit live charge-safety policy.
@@ -270,9 +276,10 @@ impl ProviderHandle {
         &mut self,
         mut request: LlmRequest,
         charge_safety: crate::ChargeSafetyPolicy,
+        admission: &dyn DispatchAdmission,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let sideband = self.prepare_completion(&mut request);
-        self.complete_prepared(request, sideband, charge_safety)
+        self.complete_prepared(request, sideband, charge_safety, admission)
             .await
     }
 
@@ -321,6 +328,7 @@ impl ProviderHandle {
         request: LlmRequest,
         sideband: ProviderCompletionSideband,
         charge_safety: crate::ChargeSafetyPolicy,
+        admission: &dyn DispatchAdmission,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let call_id = call_id_for_scope(&request.scope);
         let serving_route = sideband.serving_route();
@@ -346,6 +354,35 @@ impl ProviderHandle {
         let mut budget = RetryBudget::default();
         let mut records = Vec::new();
         loop {
+            let attempt_ordinal = records.len() as u32 + 1;
+            // The accounting obligation exists before the attempt can be
+            // billed (ADR 0125): a refused attempt is never dispatched.
+            if let Err(refused) = admission
+                .admit_dispatch(&ProviderDispatch {
+                    call_id: &call_id,
+                    attempt_ordinal,
+                    model: &request.model,
+                })
+                .await
+            {
+                let error = refused.into_transport_error();
+                records.push(failure_attempt_record(
+                    attempt_ordinal,
+                    &error,
+                    false,
+                    ProtocolPosition::NoResponse,
+                    None,
+                ));
+                return Err(ProviderCompletionError {
+                    error,
+                    call_record: Box::new(LlmCallRecord {
+                        call_id,
+                        label: None,
+                        replay_drops: sideband.replay_drops(),
+                        attempts: records,
+                    }),
+                });
+            }
             let _permit = self
                 .components
                 .rate_limiter
@@ -394,7 +431,7 @@ impl ProviderHandle {
                         .as_ref()
                         .map(|_| response.usage.clone());
                     records.push(AttemptRecord {
-                        ordinal: records.len() as u32 + 1,
+                        ordinal: attempt_ordinal,
                         outcome,
                         protocol_position: success_protocol_position(&response, outcome),
                         retry_budget_consumed: true,
@@ -510,7 +547,7 @@ impl ProviderHandle {
                     };
                     let unsafe_retry = charge_safety_decision.is_some();
                     records.push(failure_attempt_record(
-                        records.len() as u32 + 1,
+                        attempt_ordinal,
                         recorded_failure,
                         consumed,
                         protocol_position,

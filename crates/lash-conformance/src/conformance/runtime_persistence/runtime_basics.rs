@@ -42,7 +42,7 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
 
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         "commit-round-trip",
     )
     .await
@@ -103,7 +103,7 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
                     .expect("derived test frame identity is non-empty"),
             ),
             graph: crate::GraphAppend::Extend { nodes: vec![node] },
-            ..RuntimeCommit::persisted_state_for_test(&state, &[])
+            ..RuntimeCommit::persisted_state_for_test(&state)
         };
         commit
             .with_operation(crate::OperationId::new(
@@ -209,7 +209,7 @@ pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<
     let alpha = state_for("alpha");
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&alpha, &[]),
+        RuntimeCommit::persisted_state_for_test(&alpha),
         "commit-alpha",
     )
     .await
@@ -217,10 +217,9 @@ pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<
 
     let unknown = SessionId::from("never-admitted");
     let refused_commit = store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(
-            &state_for(unknown.as_str()),
-            &[],
-        ))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state_for(
+            unknown.as_str(),
+        )))
         .await
         .expect_err("a session the catalog never admitted cannot commit");
     assert!(
@@ -268,7 +267,7 @@ pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<
     let beta = state_for("beta");
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&beta, &[]),
+        RuntimeCommit::persisted_state_for_test(&beta),
         "commit-beta",
     )
     .await
@@ -306,7 +305,7 @@ pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimeStore>) {
+pub async fn load_hydrates_checkpoint(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("hydrated"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -317,22 +316,9 @@ pub async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimeStore>) {
     state.set_plugin_state(Some(PluginState {
         plugins: Default::default(),
     }));
-    let usage = TokenLedgerEntry {
-        source: "turn".to_string(),
-        model: "mock-model".to_string(),
-        usage: TokenUsage {
-            input_tokens: 11,
-            output_tokens: 7,
-            cache_read_input_tokens: 3,
-            cache_write_input_tokens: 0,
-            reasoning_output_tokens: 5,
-        },
-        usage_disposition: Default::default(),
-    };
-
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[usage]),
+        RuntimeCommit::persisted_state_for_test(&state),
         "hydrate",
     )
     .await
@@ -356,8 +342,6 @@ pub async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimeStore>) {
             .generation(),
         9
     );
-    assert_eq!(read.usage.rows.len(), 1);
-    assert_eq!(read.usage.rows[0].usage.input_tokens, 11);
 }
 
 #[expect(
@@ -389,7 +373,7 @@ pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimeStore>) 
         session_graph: graph,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let commit = RuntimeCommit::persisted_state_for_test(&state);
     let expected_node_ids = commit
         .graph
         .nodes()

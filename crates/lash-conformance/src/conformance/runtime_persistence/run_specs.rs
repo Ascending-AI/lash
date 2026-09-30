@@ -279,13 +279,9 @@ fn steering_commit(
     graph
         .derive_node_ids(&state.session_id, &operation)
         .expect("derive commit node ids");
-    let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        state,
-        graph,
-        &[],
-        operation,
-    )
-    .expect("build the commit");
+    let mut commit =
+        RuntimeCommit::persisted_state_with_graph_commit_and_operation(state, graph, operation)
+            .expect("build the commit");
     commit.pending_follow_on = pending_follow_on;
     commit
 }
@@ -360,7 +356,7 @@ pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(store: Arc<dy
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let recorded = crate::ResolvedRun {
-        base: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
+        base: RuntimeCommit::persisted_state_for_test(&state).config,
         spec: Some(recorded_hash),
         resolved: None,
         capabilities: std::collections::BTreeMap::new(),

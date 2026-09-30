@@ -239,6 +239,7 @@ pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
 )]
 async fn recover_turn_cancel_closure(
     store: Arc<dyn RuntimeStore>,
+    usage_accounting: Arc<dyn crate::UsageAccountingStore>,
     effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
 ) {
@@ -274,6 +275,7 @@ async fn recover_turn_cancel_closure(
             .expect("the journaled controller names its promise authority"),
         Arc::new(InvocationEffectHost {
             inner: effect_controller,
+            usage_accounting,
         }) as Arc<dyn crate::AwaitEventResolver>,
     );
     let admitted_scope = crate::ExecutionScope::turn(&identity.session_id, &identity.turn_id);
@@ -391,7 +393,7 @@ async fn recover_turn_cancel_closure(
                     crate::TurnBudget::Unbounded,
                 ))
             });
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state)
             .deferring_interrupted_turn_inputs(identity.turn_id.clone(), Some(evidence));
         commit.interrupted_turn_cancel_intent = Some(observed);
         commit.turn_cancel_closure_settlement = Some(settlement);
@@ -511,6 +513,7 @@ pub async fn cold_process_real_turn_driver(
         if action.is_cancel_crash() {
             let host: Arc<dyn crate::EffectHost> = Arc::new(InvocationEffectHost {
                 inner: Arc::clone(&effect_controller),
+                usage_accounting: stores.usage_accounting(),
             });
             let receipt = crate::TurnWorkDriver::for_session(
                 host,
@@ -535,7 +538,13 @@ pub async fn cold_process_real_turn_driver(
             ));
         }
     } else if action == ColdProcessTurnAction::CancelRecover {
-        recover_turn_cancel_closure(store, effect_controller, &identity).await;
+        recover_turn_cancel_closure(
+            store,
+            stores.usage_accounting(),
+            effect_controller,
+            &identity,
+        )
+        .await;
         return;
     } else if action == ColdProcessTurnAction::PeerReclaim {
         let owner =

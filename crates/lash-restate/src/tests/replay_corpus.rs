@@ -124,6 +124,7 @@ fn drive_sleep_envelope(context: Arc<ReplayableRecordingContext>, replaying: boo
             RecordedRuntimeEffect {
                 envelope: Arc::new(canonical.clone()),
                 outcome: Ok(RuntimeEffectOutcome::Sleep),
+                usage: None,
             },
         )]));
     }

@@ -374,7 +374,6 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
     suspend-tool  resume    session.resume
     suspend-tool  tool      suspend.tool.resume     name="await_tool"
     suspend-tool  commit    checkpoint.commit       rev=0->1
-    suspend-tool              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     suspend-tool              turn_state            stored logical=179B
     suspend-tool              tool_state            stored logical=<opaque>
     suspend-tool              plugin_state          stored {"embed_tools":{"generation":0,"values":{}},"lash.triggers":{"generation":0,"values":{}},"standard_protocol":{"generation":0,"values":{}}}
@@ -487,7 +486,10 @@ async fn fixed_texts_provider_response_shape_mutation_guard() {
     let mut provider =
         fixed_texts_provider("lash-sim-fixed-text-guard", vec!["facade response text"]);
     let response = provider
-        .complete(openai_compatible_request(false))
+        .complete(
+            openai_compatible_request(false),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect("fixed text provider response");
 
@@ -505,7 +507,10 @@ async fn fixed_texts_provider_response_shape_mutation_guard() {
 async fn rlm_final_value_provider_response_shape_mutation_guard() {
     let mut provider = rlm_final_value_provider();
     let response = provider
-        .complete(openai_compatible_request(true))
+        .complete(
+            openai_compatible_request(true),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect("rlm final-value provider response");
 
@@ -520,7 +525,10 @@ async fn rlm_final_value_provider_response_shape_mutation_guard() {
 async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
     let mut provider = pending_tool_roundtrip_provider();
     let tool_response = provider
-        .complete(openai_compatible_request(false))
+        .complete(
+            openai_compatible_request(false),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect("pending tool provider tool-call response");
     assert!(
@@ -533,7 +541,10 @@ async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
     );
 
     let final_response = provider
-        .complete(openai_compatible_request(false))
+        .complete(
+            openai_compatible_request(false),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect("pending tool provider final response");
     assert_eq!(final_response.full_text(), "done");

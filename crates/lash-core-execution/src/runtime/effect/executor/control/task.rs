@@ -203,6 +203,7 @@ impl EffectControllerTaskRequest {
 
 pub(in crate::runtime::effect::executor) struct RemoteLocalExecutionRequest {
     pub(in crate::runtime::effect::executor) envelope: RuntimeEffectEnvelope,
+    pub(in crate::runtime::effect::executor) usage_run: Option<crate::UsageRun>,
     pub(in crate::runtime::effect::executor) response:
         oneshot::Sender<Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>,
 }
@@ -422,7 +423,9 @@ impl RuntimeEffectController for EffectTaskController {
                     let Some((executor, _)) = local_execution.take() else {
                         unreachable!("local execution request requires a local executor");
                     };
-                    let result = executor.execute_forwarded(request.envelope).await;
+                    let result = executor
+                        .execute_forwarded(request.envelope, request.usage_run)
+                        .await;
                     let _ = request.response.send(result);
                 }
             }

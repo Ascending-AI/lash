@@ -95,7 +95,6 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
     };
     let mut switch = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
-        &[],
         crate::OperationId::turn(&request.session_id, "matrix-switch", "final"),
     );
     switch.pending_follow_on = Some(owed.clone());
@@ -246,7 +245,6 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
     assert!(admitted.is_none());
     let mut unrelated = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
-        &[],
         crate::OperationId::turn(&request.session_id, "unrelated", "final"),
     );
     unrelated.pending_follow_on = None;
@@ -263,7 +261,6 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
     );
     let mut terminal = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
-        &[],
         crate::OperationId::turn(&request.session_id, &owed.follow_on_turn_id, "final"),
     );
     terminal.pending_follow_on = None;
@@ -485,7 +482,6 @@ async fn commit_session_command_run_with(
         .clone();
     let mut commit = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
-        &[],
         crate::OperationId::new(
             crate::ExecutionScope::queue_drain(&request.session_id, first_batch_id),
             "session-command",

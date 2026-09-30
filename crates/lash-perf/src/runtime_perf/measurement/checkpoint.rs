@@ -168,7 +168,6 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             )?;
             let initial_commit = RuntimeCommit::persisted_state_for_test_with_budget(
                 &runtime_state,
-                &[],
                 lash_core::CommitBudget::bounded(8 * 1024 * 1024, 2_048),
             );
             let initial_result = store.commit_runtime_state(initial_commit).await?;
@@ -221,7 +220,6 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
         lash_core::testing::stage_execution_state_components(&mut runtime_state, snapshot)?;
         let commit = RuntimeCommit::persisted_state_for_test_with_budget(
             &runtime_state,
-            &[],
             lash_core::CommitBudget::bounded(8 * 1024 * 1024, 2_048),
         );
 

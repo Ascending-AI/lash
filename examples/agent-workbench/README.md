@@ -405,7 +405,7 @@ unsupported MIME/source combination returns the typed `unsupported_attachment_ca
 refusal before wire serialization. The same bytes remain available at
 `GET /api/attachments/{attachment_id}` across a workbench restart.
 That retrieval route is deliberately not session-gated so reloads and retired sessions still render: the unguessable SHA-256 content address is an unexpiring bearer capability with no session data in its URL, blobs outlive sessions pending ADR 0024 reclamation, and hosts MUST gate the route if their ids are not content addresses or ids can reach viewers who may not read the blob.
-`GET /api/state` includes the canonical `session.usage_report()` projection; the left rail
+`GET /api/state` includes the session's durable usage (`core.owner_usage(..).report()`); the left rail
 renders its total plus input/output counters. Run the model-free SQLite persistence
 gate with `just agent-workbench-attachment-usage-gate <port>`.
 

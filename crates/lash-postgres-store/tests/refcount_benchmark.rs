@@ -60,7 +60,7 @@ async fn commit_state(
     state: &RuntimeSessionState,
     key: &str,
 ) -> (String, String) {
-    let (commit, _) = RuntimeCommit::persisted_state_for_test(state, &[])
+    let (commit, _) = RuntimeCommit::persisted_state_for_test(state)
         .with_operation(operation(&state.session_id, key))
         .expect("stamp benchmark commit");
     let root_node_id = commit
@@ -106,7 +106,7 @@ async fn append_child(store: &Arc<dyn RuntimeStore>, session_id: &SessionId, key
     state
         .session_graph
         .append_plugin("refcount-benchmark", serde_json::json!({ "key": key }));
-    let (commit, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
+    let (commit, _) = RuntimeCommit::persisted_state_for_test(&state)
         .with_operation(operation(&state.session_id, key))
         .expect("stamp benchmark child commit");
     store
@@ -238,7 +238,7 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn DeploymentStore>, run
             "refcount-benchmark",
             serde_json::json!({ "sample": sample }),
         );
-        let (commit, _) = RuntimeCommit::persisted_state_for_test(&mover_state, &[])
+        let (commit, _) = RuntimeCommit::persisted_state_for_test(&mover_state)
             .with_operation(operation(&SessionId::from(mover_id), "head-move"))
             .expect("stamp wide head move");
         let started = Instant::now();
@@ -281,7 +281,7 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn DeploymentStore>, run
             "refcount-benchmark",
             serde_json::json!({ "sample": sample }),
         );
-        let (commit, _) = RuntimeCommit::persisted_state_for_test(&deep_mover_state, &[])
+        let (commit, _) = RuntimeCommit::persisted_state_for_test(&deep_mover_state)
             .with_operation(operation(&SessionId::from(deep_mover_id), "head-move"))
             .expect("stamp deep head move");
         let started = Instant::now();

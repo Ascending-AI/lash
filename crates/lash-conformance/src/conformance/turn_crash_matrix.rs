@@ -1011,6 +1011,7 @@ async fn try_build_runtime_with_lease_timings(
     );
     let effect_host: Arc<dyn crate::EffectHost> = Arc::new(InvocationEffectHost {
         inner: Arc::clone(&effect_controller),
+        usage_accounting: stores.usage_accounting(),
     });
     Box::pin(try_build_runtime_over_host(
         stores,

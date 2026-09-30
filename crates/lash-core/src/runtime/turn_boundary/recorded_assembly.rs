@@ -27,11 +27,6 @@ pub struct RecordedTurnAssembly {
     /// cell order, from each cell's recorded response.
     pub(in crate::runtime) retained_outputs: Vec<crate::RetainedOutput>,
     pub(in crate::runtime) llm_calls: Vec<crate::LlmCallRecord>,
-    /// Leading `llm_calls` whose counted response usage `token_usage` already
-    /// carries: one `TokenUsage` event fires per counted response, and an
-    /// uncounted call can only trail the last counted one because a failed or
-    /// discarded response ends the call sequence.
-    pub(in crate::runtime) usage_counted_calls: usize,
     pub(in crate::runtime) failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub(in crate::runtime) token_usage: TokenUsage,
     pub(in crate::runtime) last_llm_usage: Option<TokenUsage>,
@@ -54,7 +49,6 @@ impl RecordedTurnAssembly {
             omitted: None,
             retained_outputs: Vec::new(),
             llm_calls: Vec::new(),
-            usage_counted_calls: 0,
             failure_evidence: Vec::new(),
             token_usage: TokenUsage::default(),
             last_llm_usage: None,
@@ -119,7 +113,6 @@ impl RecordedTurnAssembly {
             } => {
                 self.token_usage = cumulative.clone();
                 self.last_llm_usage = Some(usage.clone());
-                self.usage_counted_calls = self.usage_counted_calls.saturating_add(1);
             }
             SessionStreamEvent::Error { message, envelope } => {
                 let issue = if let Some(envelope) = envelope {

@@ -371,10 +371,6 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             SurfaceRelation::Unwalkable(REQUEST_IDENTITY),
         ),
         (
-            DurableFormat::UsageLedgerRequestIdentity,
-            SurfaceRelation::Unwalkable(REQUEST_IDENTITY),
-        ),
-        (
             DurableFormat::ToolChildRequest,
             SurfaceRelation::Unwalkable(TOOL_JOURNAL),
         ),
@@ -504,7 +500,6 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         DurableFormat::AppendRequestIdentity,
         DurableFormat::RecordConfigRequestIdentity,
         DurableFormat::CreateSessionRequestIdentity,
-        DurableFormat::UsageLedgerRequestIdentity,
         DurableFormat::ToolChildRequest,
         DurableFormat::ToolSettlement,
         DurableFormat::ToolAttemptCapture,

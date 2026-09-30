@@ -292,7 +292,6 @@ pub struct RuntimeCommitBudgetMeasurement {
     pub follow_on_bytes: usize,
     /// Persisted JSON encoding of the selected Agent Frame identity.
     pub agent_frame_bytes: usize,
-    pub usage_delta_bytes: usize,
     /// Persisted JSON encoding of the durable turn result stamp.
     pub turn_result_bytes: usize,
     /// Saturating sum of the budgeted components.
@@ -315,7 +314,6 @@ pub fn measure_runtime_commit_budget(
         attachment_referrer_bytes: measurement.attachment_referrer_bytes,
         follow_on_bytes: measurement.follow_on_bytes,
         agent_frame_bytes: measurement.agent_frame_bytes,
-        usage_delta_bytes: measurement.usage_delta_bytes,
         turn_result_bytes: measurement.turn_result_bytes,
         total_bytes: measurement.total_bytes,
     })
@@ -512,7 +510,17 @@ impl Provider for TestProvider {
     }
 
     async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        (self.complete)(request).await
+        let mut response = (self.complete)(request).await?;
+        // A scripted answer that carries counters is one its provider
+        // reported, and a real provider reports them beside its own raw usage
+        // record: without one the attempt is unreported by the provider
+        // (ADR 0031), and its usage is no accounting fact (ADR 0125).
+        if response.provider_usage.is_none()
+            && response.usage != crate::llm::types::LlmUsage::default()
+        {
+            response.provider_usage = serde_json::to_value(&response.usage).ok();
+        }
+        Ok(response)
     }
 
     async fn reconcile_usage(

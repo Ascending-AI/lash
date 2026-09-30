@@ -662,17 +662,6 @@ impl RlmProtocolScenario {
                 .count(),
             observed.checkpoints.len()
         );
-        assert_eq!(
-            rendered
-                .lines()
-                .filter(|line| line.contains("  commit    "))
-                .count(),
-            rendered
-                .lines()
-                .filter(|line| line.contains("  usage                 entries="))
-                .count(),
-            "every checkpoint line carries typed usage"
-        );
         observed
     }
 }

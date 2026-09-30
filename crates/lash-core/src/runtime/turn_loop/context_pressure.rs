@@ -350,7 +350,6 @@ impl LashRuntime {
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 &mut self.state,
-                &[],
                 write.frame_operation(),
                 self.host.core.durability.commit_budget,
                 fleet_format,

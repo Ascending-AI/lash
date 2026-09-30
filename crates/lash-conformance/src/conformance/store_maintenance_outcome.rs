@@ -317,7 +317,7 @@ async fn commit_generation(
     state.set_tool_state_snapshot(Some(
         crate::ToolState::default().with_generation_for_conformance(generation),
     ));
-    let commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     super::runtime_persistence::commit_runtime_state_for_test(
         store,
         commit,

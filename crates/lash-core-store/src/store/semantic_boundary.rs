@@ -19,18 +19,6 @@ pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 /// moves with [`RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION`] for the same
 /// reasons.
 pub const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
-/// Encoding version of the usage-ledger semantic-boundary request identity.
-///
-/// Version 2 (FIG-2765): staged usage rows carry their usage disposition through
-/// the usage-payload identity, so a retried usage-ledger commit whose rows gained
-/// a hole or a correction no longer matches a v1 receipt. Version 3 (FIG-2765 fix
-/// round): the v4 payload identity projects each hole's descriptor instead of a
-/// count, moving every unreported row's payload hash again. The projection and
-/// domain are unchanged; the version is the fence. Version 4 (FIG-2880) carries
-/// the same explicit resident-tool authority as the other boundary operations.
-/// Version 5 accounts for the cancellation-dependent commit fields.
-pub const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 5;
-
 /// Refuse settlement or evidence content on a semantic-boundary commit.
 ///
 /// The canonical request encoding deliberately excludes these fields, so a
@@ -69,7 +57,7 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
 ///
 /// The projection is what the boundary caller asked the store to write:
 /// operation identity, session binding, the persisted config, the appended
-/// graph content, and staged usage identities. The rebuilt baseline —
+/// graph content. The rebuilt baseline —
 /// checkpoint components, the CAS revision, and the derived frame pointer —
 /// is deliberately excluded so a retry rebuilt after the head has advanced
 /// still encodes the same request.
@@ -83,7 +71,6 @@ struct SemanticBoundaryRequestIntent<'a> {
     /// operations advance the head, exactly the retry window this identity
     /// exists to answer — so it is excluded like the CAS revision.
     appended_payloads: Vec<super::identity_projection::NodePayloadIntent<'a>>,
-    usage_deltas: &'a [crate::store::RuntimeUsageDelta],
 }
 
 fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<String, StoreError> {
@@ -104,9 +91,8 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         graph,
         graph_base_leaf_node_id: _, // resident head fact, not request content
         checkpoint: _,              // rebuilt baseline, not the request
-        usage_deltas,
-        failure_evidence: _, // refused non-empty by validation
-        outcome: _,          // semantic boundaries do not commit a turn terminal
+        failure_evidence: _,        // refused non-empty by validation
+        outcome: _,                 // semantic boundaries do not commit a turn terminal
         turn_commit,
         ingress: _,                             // refused present by validation
         applied_commands: _,                    // refused present by validation
@@ -129,7 +115,6 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
             .iter()
             .map(|node| (&node.payload).into())
             .collect(),
-        usage_deltas,
     };
     let value = serde_json::to_value(&projection).map_err(|err| {
         StoreError::Backend(format!(
@@ -162,10 +147,6 @@ pub(super) fn semantic_boundary_request_identity(
             CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION,
             crate::stable_hash::blake3_hex("lash-create-session-request/v1", encoded.as_bytes()),
         ),
-        Operation::UsageLedger => (
-            USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
-            crate::stable_hash::blake3_hex("lash-usage-ledger-request/v1", encoded.as_bytes()),
-        ),
     })
 }
 
@@ -184,7 +165,6 @@ mod semantic_boundary_request_identity_tests {
         };
         RuntimeCommit::persisted_state_with_operation_for_testing(
             &state,
-            &[],
             OperationId::new(
                 crate::ExecutionScope::runtime_operation(format!(
                     "session:root:boundary:{boundary}"
@@ -214,7 +194,6 @@ mod semantic_boundary_request_identity_tests {
         let rows = [
             ("record-config", "protocol-materialization", 3),
             ("create-session", "child-1", 3),
-            ("usage-ledger", "child-turn", 5),
         ]
         .into_iter()
         .map(|(key, boundary, expected_version)| {
@@ -280,7 +259,7 @@ mod semantic_boundary_request_identity_tests {
     }
 
     #[test]
-    fn semantic_boundary_identity_covers_config_usage_and_operation() {
+    fn semantic_boundary_identity_covers_config_and_operation() {
         let commit = stamped_record_config_commit();
         let (_, original) =
             semantic_boundary_request_identity(&commit, SemanticBoundaryOperation::RecordConfig)
@@ -295,32 +274,8 @@ mod semantic_boundary_request_identity_tests {
         .expect("changed-config identity");
         assert_ne!(original, changed, "config participates in the identity");
 
-        let mut changed_usage = commit.clone();
-        changed_usage.usage_deltas = RuntimeUsageDelta::for_operation(
-            &changed_usage.turn_commit.operation,
-            &[crate::TokenLedgerEntry {
-                source: "turn".to_string(),
-                model: "model".to_string(),
-                usage: crate::TokenUsage {
-                    input_tokens: 1,
-                    output_tokens: 2,
-                    cache_read_input_tokens: 0,
-                    cache_write_input_tokens: 0,
-                    reasoning_output_tokens: 0,
-                },
-                usage_disposition: Default::default(),
-            }],
-        )
-        .expect("stage usage");
-        let (_, changed) = semantic_boundary_request_identity(
-            &changed_usage,
-            SemanticBoundaryOperation::RecordConfig,
-        )
-        .expect("changed-usage identity");
-        assert_ne!(original, changed, "usage identities participate");
-
         let (_, foreign) =
-            semantic_boundary_request_identity(&commit, SemanticBoundaryOperation::UsageLedger)
+            semantic_boundary_request_identity(&commit, SemanticBoundaryOperation::CreateSession)
                 .expect("foreign-family identity");
         assert_ne!(
             original, foreign,
@@ -474,7 +429,7 @@ mod semantic_boundary_request_identity_tests {
                 "old",
                 "new",
                 &record_config(1, "same-request"),
-                &semantic(SemanticBoundaryOperation::UsageLedger, 1, "same-request"),
+                &semantic(SemanticBoundaryOperation::CreateSession, 1, "same-request"),
             ),
             RuntimeCommitConflict,
             "identities compare only inside one operation family"

@@ -1,7 +1,6 @@
 use super::*;
 use crate::SessionId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
-use lash_sansio::sync::MutexExt;
 
 impl LashRuntime {
     pub fn session_id(&self) -> &str {
@@ -112,20 +111,6 @@ impl LashRuntime {
         let mut state = self.state.clone();
         edit(&mut state);
         self.install_resident_state(state);
-    }
-
-    /// Test hook: records `usage` on the runtime's shared pending usage
-    /// ledger under `source` and `model`, as a host-side model call outside
-    /// every turn does, so the runtime holds pending usage its next park
-    /// flushes.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn record_pending_usage_for_test(
-        &self,
-        source: &str,
-        model: &str,
-        usage: &crate::TokenUsage,
-    ) {
-        session_manager::record_token_usage_shared(&self.shared_token_ledger, source, model, usage);
     }
 
     /// Publish the resident authority to the live plugin session.
@@ -292,61 +277,65 @@ impl LashRuntime {
         Ok(state)
     }
 
-    pub fn usage_report(&self) -> SessionUsageReport {
-        let mut totals = self.state.usage.clone();
-        let drained = self.shared_token_ledger.lock_recover();
-        let mut saturated = false;
-        for entry in drained.iter() {
-            saturated |= totals.fold_saturating(&entry.entry);
-        }
-        let mut report = totals.report();
-        report.saturated |= saturated;
-        report
+    /// The session's model usage, read from the engine-owned ledger
+    /// (ADR 0125). A durable read keyed by the session's owner: it covers every
+    /// call made for the session, whichever runtime or engine ran it.
+    pub async fn usage(&self) -> Result<crate::OwnerUsage, SessionError> {
+        let owner = crate::RuntimeOwner::Session(self.state.session_id.clone());
+        self.host
+            .core
+            .usage_accounting()
+            .store
+            .load_owner_usage(&owner)
+            .await
+            .map_err(|source| SessionError::Store {
+                context: "failed to load session usage".to_string(),
+                source,
+            })
     }
 
-    /// Attempts of finished turns whose usage never arrived after an abort or
-    /// failure and have not been reconciled (ADR 0031). The ledger already
-    /// carries them as unreported rows; this is their attribution.
-    pub fn unreported_usage_attempts(&self) -> &[UnreportedUsageAttempt] {
-        &self.unreported_usage_attempts
-    }
-
-    /// Ask the session's provider for the usage of every registered
-    /// unreported attempt and append one `Reconciled` correction row per
-    /// recovered generation (FIG-2765).
+    /// Ask the session's provider for the usage of every unreported attempt the
+    /// ledger holds for this session, and append one correction per recovered
+    /// generation (ADR 0125, FIG-2765).
     ///
     /// Host-invoked and never on the turn hot path: each lookup is bounded by
-    /// the provider (timeout plus one retry). Rows are append-only; the
-    /// unreported row written at turn end is never rewritten, and
-    /// [`UsageTotals::unreported_attempts`] derives the outstanding hole from
-    /// both. Corrections ride the shared pending ledger and persist at the
-    /// next usage-ledger boundary like live usage does. Attempts the provider
-    /// cannot resolve stay registered and come back as `unresolved`.
+    /// the provider (timeout plus one retry). The outstanding attempts are
+    /// read from the store, so any host can reconcile, and a correction is an
+    /// idempotent append: a retried correction is a no-op. An attempt without
+    /// a generation id, one the provider has no record of, one whose lookup
+    /// failed and one whose correction conflicts with a stored one come back
+    /// as `unresolved`.
     pub async fn reconcile_unreported_usage(
         &mut self,
     ) -> Result<UsageReconciliationReport, SessionError> {
         let mut report = UsageReconciliationReport::default();
-        if self.unreported_usage_attempts.is_empty() {
+        let session_id = self.state.session_id.clone();
+        let owner = crate::RuntimeOwner::Session(session_id.clone());
+        let accounting = self.host.core.usage_accounting();
+        let outstanding = accounting
+            .store
+            .load_owner_usage(&owner)
+            .await
+            .map_err(|source| SessionError::Store {
+                context: "failed to load outstanding usage attempts".to_string(),
+                source,
+            })?
+            .outstanding;
+        if outstanding.is_empty() {
             return Ok(report);
         }
-        let session_id = self.state.session_id.clone();
         let policy = self.state.effective_policy().clone();
         let mut provider = self
             .host
             .resolve_session_policy(&session_id, policy)?
             .binding
             .provider;
-        // Cancellation safety (FIG-2765): the registry is NOT drained up front.
-        // Dropping this future mid-lookup must leave every unfinished attempt
-        // registered, so we iterate a snapshot and remove each key only after
-        // its correction is on the shared ledger, with no await in between.
-        let pending = self.unreported_usage_attempts.clone();
-        for attempt in pending {
-            let Some(generation_id) = attempt.generation_id.as_deref() else {
+        for attempt in outstanding {
+            let Some(generation_id) = attempt.generation_id.clone() else {
                 report.unresolved.push(attempt);
                 continue;
             };
-            match provider.reconcile_usage(generation_id).await {
+            match provider.reconcile_usage(&generation_id).await {
                 Ok(Some(reconciled)) => {
                     let crate::llm::types::LlmUsage {
                         input_tokens,
@@ -362,32 +351,51 @@ impl LashRuntime {
                         cache_write_input_tokens,
                         reasoning_output_tokens,
                     };
-                    session_manager::record_reconciled_usage_shared(
-                        &self.shared_token_ledger,
-                        &attempt.source,
-                        &attempt.model,
-                        &usage,
-                        &attempt.call_id,
-                        attempt.attempt_ordinal,
-                    );
-                    // Synchronous with the append above: no await may separate
-                    // recording the correction from retiring the attempt.
-                    self.unreported_usage_attempts.retain(|registered| {
-                        registered.call_id != attempt.call_id
-                            || registered.attempt_ordinal != attempt.attempt_ordinal
-                    });
-                    report.reconciled.push(ReconciledUsageAttempt {
-                        attempt,
-                        usage,
-                        provider_usage: reconciled.provider_usage,
-                    });
+                    let correction = crate::UsageCorrection {
+                        effect: attempt.effect.clone(),
+                        call_ordinal: attempt.call_ordinal,
+                        provider_attempt: attempt.provider_attempt,
+                        usage: usage.clone(),
+                        generation_id: generation_id.clone(),
+                    };
+                    let now_ms = crate::ClockWallTime::timestamp_ms(accounting.clock.as_ref());
+                    match accounting
+                        .store
+                        .append_usage_corrections(&owner, std::slice::from_ref(&correction), now_ms)
+                        .await
+                    {
+                        Ok(_) => report.reconciled.push(ReconciledUsageAttempt {
+                            attempt,
+                            usage,
+                            provider_usage: reconciled.provider_usage,
+                        }),
+                        Err(crate::UsageAppendError::Store(source)) => {
+                            return Err(SessionError::Store {
+                                context: "failed to append a usage correction".to_string(),
+                                source,
+                            });
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                session_id = %session_id,
+                                llm_call_id = ?attempt.llm_call_id,
+                                call_ordinal = attempt.call_ordinal,
+                                provider_attempt = attempt.provider_attempt,
+                                generation_id,
+                                error = %error,
+                                "usage correction refused; attempt stays unreported"
+                            );
+                            report.unresolved.push(attempt);
+                        }
+                    }
                 }
                 Ok(None) => report.unresolved.push(attempt),
                 Err(error) => {
                     tracing::warn!(
                         session_id = %session_id,
-                        call_id = %attempt.call_id,
-                        attempt_ordinal = attempt.attempt_ordinal,
+                        llm_call_id = ?attempt.llm_call_id,
+                        call_ordinal = attempt.call_ordinal,
+                        provider_attempt = attempt.provider_attempt,
                         generation_id,
                         error = %error,
                         "usage reconciliation lookup failed; attempt stays unreported"
@@ -568,10 +576,6 @@ impl LashRuntime {
         })?;
         Box::pin(self.adopt_resident_state(adopted)).await?;
         self.resident_session.mark_graph_head_current();
-        // The adopted head is authoritative for usage too: rebuild the attempts
-        // this session still owes usage for from the durable totals plus the
-        // resident rows that have not been confirmed into them yet.
-        self.rehydrate_unreported_usage_attempts();
         Ok(())
     }
 
@@ -611,18 +615,6 @@ impl LashRuntime {
         Ok(())
     }
 
-    /// Rebuild the pending-attempt registry from the durable usage totals and
-    /// the unconfirmed resident rows layered on top. Confirmed resident rows
-    /// are already folded into `state.usage`, and folding holes by identity
-    /// rather than by count means seeing a hole twice cannot double-count it.
-    pub(in crate::runtime) fn rehydrate_unreported_usage_attempts(&mut self) {
-        let mut totals = self.state.usage.clone();
-        for pending in self.shared_token_ledger.lock_recover().iter() {
-            totals.fold_saturating(&pending.entry);
-        }
-        self.unreported_usage_attempts = totals.outstanding;
-    }
-
     pub fn runtime_session_services(
         &self,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
@@ -638,7 +630,7 @@ impl LashRuntime {
             }
             ResidentSessionState::Valid => {}
         }
-        Ok(Arc::new(RuntimeSessionServices::new(self, true, None)?))
+        Ok(Arc::new(RuntimeSessionServices::new(self, None)?))
     }
 
     /// This session's tool-execution context for a group tool child whose
@@ -673,7 +665,6 @@ impl LashRuntime {
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         Ok(Arc::new(RuntimeSessionServices::new(
             self,
-            true,
             held_drive_fence,
         )?))
     }
@@ -1551,7 +1542,6 @@ impl LashRuntime {
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 commit_state,
-                &[],
                 operation,
                 self.host.core.durability.commit_budget,
                 fleet_format,
@@ -1690,6 +1680,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for ReadSessionC
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::ReadSessionCommandRun { .. } = &envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(

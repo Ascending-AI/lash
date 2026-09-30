@@ -513,10 +513,7 @@ fn root_final_commit(
         .derive_node_ids(&state.session_id, &operation)
         .expect("nodes");
     let mut commit = crate::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        state,
-        graph,
-        &[],
-        operation,
+        state, graph, operation,
     )
     .expect("commit");
     commit.root_terminal = Some(Box::new(RootTerminalWrite {

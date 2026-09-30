@@ -875,7 +875,7 @@ pub(crate) async fn reset_chat(
         turn_input_applications: Vec::new(),
         turn_failure_settlements: Vec::new(),
         unknown_turn_terminals: Vec::new(),
-        usage: session.usage_report(),
+        usage: session.usage().await.map_err(AppError::internal)?.report(),
         pending_approvals: state.approvals.pending().map_err(AppError::internal)?,
     }))
 }

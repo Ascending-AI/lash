@@ -1,18 +1,17 @@
 //! Content-level durable-state oracles.
 //!
-//! The independent checkpoint checker (`state_checker`) and the usage
-//! conservation law (`usage_oracle`) compare lash against itself: counts,
-//! totals, and lash's own submitted usage rows. A fact lash never records is
-//! invisible to both. These oracles compare three independently obtained
-//! views instead:
+//! The independent checkpoint checker (`state_checker`) compares lash
+//! against itself: counts and totals. A fact lash never records is invisible
+//! to it. These oracles compare three independently obtained views instead:
 //!
 //! * **emitted** — what the scripted provider put on the wire and what the
 //!   scripted tools returned, decoded by this module from the wire script
 //!   itself, never through a lash provider adapter;
-//! * **committed** — the per-delta usage rows lash submitted at the commit seam;
-//! * **reopened** — the session graph and token ledger read back through a
-//!   fresh store handle after the run (a fresh SQLite factory on the SQLite
-//!   lane, so that read is genuinely cold).
+//! * **delivered** — the per-attempt usage facts the engine delivered for the
+//!   session's owner (ADR 0125), paged fact by fact;
+//! * **reopened** — the session graph and the owner's aggregated usage read
+//!   back through a fresh store handle after the run (a fresh SQLite factory
+//!   on the SQLite lane, so that read is genuinely cold).
 //!
 //! # Documented projections
 //!
@@ -28,7 +27,7 @@
 //!   rendered with the standard renderer's default parameters. A cut includes
 //!   a head and tail within the shared character and line limits, plus a
 //!   notice naming the retained full output.
-//! * Usage is decoded per provider convention into the ledger buckets:
+//! * Usage is decoded per provider convention into the accounting buckets:
 //!   OpenAI reports prompt tokens inclusive of cached ones (input = prompt −
 //!   cached) and reasoning inside the completion count; Anthropic reports input
 //!   and cache buckets on `message_start` and output on `message_delta` (later
@@ -37,7 +36,7 @@
 //!   wire reports wins, as it does for the providers.
 //!
 //! Only provider-*reported* usage is in scope. An attempt whose wire carries no
-//! usage is an unreported hole (FIG-2765), classified elsewhere; its ledger row
+//! usage is an unreported attempt (FIG-2765), classified elsewhere; its fact
 //! carries a non-reported disposition and is excluded from both sides.
 //!
 //! # The two laws
@@ -46,31 +45,32 @@
 //!
 //! [`durable_content`] checks that every committed assistant message and tool
 //! result equals what was emitted, and that the reported usage of every
-//! *completed* attempt reaches the ledger as its own delta. On sessions where no attempt failed after reporting usage, the
-//! committed deltas and the reopened ledger equal the emitted usage exactly.
+//! *completed* attempt reaches the accounting as its own fact. On sessions
+//! where no attempt failed after reporting usage, the delivered facts and the
+//! reopened owner total equal the emitted usage exactly.
 //!
 //! [`failed_attempt_usage_ledgered`] is the same usage law extended to failed
 //! attempts: every attempt that reported usage, including one that then
-//! failed, reaches the ledger as its own delta. FIG-3514's fix made it hold.
+//! failed, reaches the accounting as its own fact. FIG-3514's fix made it
+//! hold.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
-use lash_core::DeploymentStore;
+use lash_core::{DeploymentStore, UsageAccountingStore};
 use lash_protocol_standard::{BuiltinToolOutputRenderer, ToolOutputRenderer, ToolRenderParams};
 use lash_sansio::SessionId;
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::provider::ProviderWireScript;
-use crate::store::CheckpointWriteEvent;
 use crate::trace::OracleVerdict;
 
 pub const DURABLE_CONTENT_ORACLE: &str = "sim.oracle.durable-content.v1";
 pub const FAILED_ATTEMPT_USAGE_ORACLE: &str = "sim.oracle.failed-attempt-usage-ledgered.v1";
 
-/// The ledger's usage buckets, in this module's own representation so the
-/// oracle does not borrow lash's usage type.
+/// The accounting's usage buckets, in this module's own representation so
+/// the oracle does not borrow lash's usage type.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct UsageBuckets {
     pub input_tokens: i64,
@@ -93,12 +93,16 @@ impl UsageBuckets {
         "reasoning_output_tokens",
     ];
 
-    fn from_ledger_usage(usage: &Value) -> Result<Self, String> {
+    /// Decode the accounting's usage from its JSON rendering, so the oracle
+    /// reads the counters by name rather than through lash's type.
+    fn from_accounting_usage(usage: &lash_core::TokenUsage) -> Result<Self, String> {
+        let usage = serde_json::to_value(usage)
+            .map_err(|err| format!("accounting usage does not encode: {err}"))?;
         let field = |name: &str| {
             usage
                 .get(name)
                 .and_then(Value::as_i64)
-                .ok_or_else(|| format!("ledger usage has no integer `{name}`: {usage}"))
+                .ok_or_else(|| format!("accounting usage has no integer `{name}`: {usage}"))
         };
         Ok(Self {
             input_tokens: field(Self::FIELDS[0])?,
@@ -197,8 +201,9 @@ pub struct ReopenedSession {
     /// The `ToolCallId` each committed tool result answers, in the order of
     /// `tool_results`.
     pub result_call_ids: Vec<String>,
-    /// Summed usage of the provider-reported ledger rows.
-    pub reported_ledger_total: UsageBuckets,
+    /// The owner's aggregated usage over its provider-reported and reconciled
+    /// facts, read through the accounting's totals rather than its fact pages.
+    pub reported_usage_total: UsageBuckets,
 }
 
 /// Everything the content oracles need about one session.
@@ -207,9 +212,9 @@ pub struct SessionContent {
     pub session: String,
     pub emitted_attempts: Vec<EmittedAttempt>,
     pub emitted_tool_results: Vec<ToolResultContent>,
-    /// Provider-reported usage deltas submitted at the commit seam, one per
-    /// delta, across every commit of the session.
-    pub committed_usage: Vec<UsageBuckets>,
+    /// The session owner's provider-reported usage facts, one per attempt,
+    /// as the engine delivered them.
+    pub delivered_usage: Vec<UsageBuckets>,
     /// `None` when the store holds no session under this id.
     pub reopened: Option<ReopenedSession>,
 }
@@ -427,47 +432,101 @@ fn google_usage(usage: &Value) -> UsageBuckets {
     }
 }
 
-/// The provider-reported usage deltas `session` submitted across its commits.
-pub fn committed_usage(
-    writes: &[CheckpointWriteEvent],
-    session: &str,
-) -> Result<Vec<UsageBuckets>, String> {
-    let mut deltas = Vec::new();
-    for write in writes
-        .iter()
-        .filter(|write| write.attribution.is_none() && write.attributed_session() == session)
-    {
-        let Some(state) = &write.state else {
-            continue;
-        };
-        for row in state
-            .submitted_usage_rows
-            .as_array()
-            .ok_or_else(|| format!("`{session}` submitted usage rows are not an array"))?
-        {
-            if is_reported(row) {
-                deltas.push(UsageBuckets::from_ledger_usage(
-                    row.get("usage").unwrap_or(&Value::Null),
-                )?);
-            }
+/// Fresh handles on one engine's storage, for reading its sessions back.
+#[derive(Clone)]
+pub struct ReopenHandles {
+    pub sessions: std::sync::Arc<dyn DeploymentStore>,
+    pub usage: std::sync::Arc<dyn UsageAccountingStore>,
+}
+
+impl ReopenHandles {
+    pub fn over(backend: &lash_core::Backend) -> Self {
+        Self {
+            sessions: backend.session_store_factory(),
+            usage: backend.usage_accounting(),
         }
     }
-    Ok(deltas)
 }
 
-/// A ledger row is provider-reported unless it names another disposition.
-fn is_reported(row: &Value) -> bool {
-    row.get("usage_disposition")
-        .is_none_or(|disposition| disposition.as_str() == Some("reported"))
+/// How long a read waits for the engine to deliver a session's open runs.
+const DELIVERY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Wait until every usage run `session`'s owner admitted is resolved:
+/// delivery is asynchronous to the turn (ADR 0125), so a read taken the
+/// moment a turn ends can precede its last settlement.
+async fn await_settled_usage(
+    usage: &dyn UsageAccountingStore,
+    session: &str,
+) -> Result<lash_core::OwnerUsage, String> {
+    let owner = lash_core::RuntimeOwner::Session(SessionId::from(session.to_string()));
+    let deadline = std::time::Instant::now() + DELIVERY_WAIT;
+    loop {
+        let read = usage
+            .load_owner_usage(&owner)
+            .await
+            .map_err(|err| format!("read `{session}` usage: {err}"))?;
+        if read.completeness.is_settled() {
+            return Ok(read);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "`{session}` usage did not settle within {DELIVERY_WAIT:?}: {:?}",
+                read.completeness
+            ));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 }
 
-/// Read the committed history through explicit graph and usage pages.
+/// The provider-reported usage facts the engine delivered for `session`'s
+/// owner, one per attempt. A zero report carries no charge and is outside
+/// both sides of every comparison, as it is on the emitted side.
+#[expect(
+    clippy::expect_used,
+    reason = "the fixed fact page limit is a nonzero constant"
+)]
+pub async fn delivered_usage(
+    usage: &dyn UsageAccountingStore,
+    session: &str,
+) -> Result<Vec<UsageBuckets>, String> {
+    await_settled_usage(usage, session).await?;
+    let owner = lash_core::RuntimeOwner::Session(SessionId::from(session.to_string()));
+    let mut facts = Vec::new();
+    let mut after = None;
+    loop {
+        let page = usage
+            .load_usage_fact_page(
+                &owner,
+                after.as_ref(),
+                std::num::NonZeroU32::new(256).expect("nonzero page size"),
+            )
+            .await
+            .map_err(|err| format!("page `{session}` usage facts: {err}"))?;
+        for fact in page.facts {
+            if fact.disposition == lash_core::UsageDisposition::Reported {
+                let buckets = UsageBuckets::from_accounting_usage(&fact.usage)?;
+                if !buckets.is_zero() {
+                    facts.push(buckets);
+                }
+            }
+        }
+        match page.next {
+            Some(next) => after = Some(next),
+            None => break,
+        }
+    }
+    Ok(facts)
+}
+
+/// Read the committed history through explicit graph pages, and the owner's
+/// settled usage through the accounting's totals.
 #[expect(
     clippy::expect_used,
     reason = "the fixed history page limits are nonzero constants"
 )]
 pub async fn reopen_session(
     store: &dyn DeploymentStore,
+    usage: &dyn UsageAccountingStore,
     session_id: &str,
 ) -> Result<Option<ReopenedSession>, String> {
     use lash_core::store::{HistoryAnchor, HistoryBudget};
@@ -508,25 +567,6 @@ pub async fn reopen_session(
                 .map_err(|err| lash_core::StoreError::Backend(err.to_string()))
         })
         .map_err(|err| format!("reopened `{session_id}` graph does not encode: {err}"))?;
-    let mut ledger_rows = Vec::new();
-    let mut after = None;
-    loop {
-        let page = store
-            .load_usage_ledger_page(
-                &session_id,
-                after.as_ref(),
-                NonZeroU32::new(256).expect("nonzero page size"),
-            )
-            .await
-            .map_err(|err| format!("page reopened `{session_id}` usage: {err}"))?;
-        ledger_rows.extend(page.rows.into_iter().map(|row| row.entry));
-        match page.next {
-            Some(next) => after = Some(next),
-            None => break,
-        }
-    }
-    let ledger = serde_json::to_value(ledger_rows)
-        .map_err(|err| format!("reopened `{session_id}` ledger does not encode: {err}"))?;
     let mut reopened = ReopenedSession::default();
     let messages = active_path_messages(&graph, session_id.as_str())?;
     let provider_call_ids = messages
@@ -602,15 +642,10 @@ pub async fn reopen_session(
         reopened.assistant_messages.push(committed);
         reopened.call_ids.push(call_ids);
     }
-    for row in ledger.as_array().map(Vec::as_slice).unwrap_or_default() {
-        if is_reported(row) {
-            reopened.reported_ledger_total =
-                reopened
-                    .reported_ledger_total
-                    .saturating_add(UsageBuckets::from_ledger_usage(
-                        row.get("usage").unwrap_or(&Value::Null),
-                    )?);
-        }
+    for row in await_settled_usage(usage, session_id.as_str()).await?.rows {
+        reopened.reported_usage_total = reopened
+            .reported_usage_total
+            .saturating_add(UsageBuckets::from_accounting_usage(&row.usage)?);
     }
     Ok(Some(reopened))
 }
@@ -655,9 +690,9 @@ pub fn durable_content(sessions: &[SessionContent]) -> OracleVerdict {
 /// The per-attempt usage law extended to attempts that failed after reporting
 /// usage; see the module docs.
 ///
-/// An attempt that reported all-zero usage carries no charge, and the runtime
-/// writes no ledger delta for a zero usage on any path (the cumulative write
-/// skips it too), so zero reports are outside both sides of the comparison.
+/// An attempt that reported all-zero usage carries no charge, so zero reports
+/// are outside both sides of the comparison ([`delivered_usage`] drops them
+/// too).
 pub fn failed_attempt_usage_ledgered(sessions: &[SessionContent]) -> OracleVerdict {
     let mut checked = 0usize;
     for session in sessions.iter().filter(|s| s.has_failed_reported_attempt()) {
@@ -669,14 +704,18 @@ pub fn failed_attempt_usage_ledgered(sessions: &[SessionContent]) -> OracleVerdi
             .collect::<Vec<_>>();
         if let Err(message) = require_same_multiset(
             &reported,
-            &session.committed_usage,
+            &session.delivered_usage,
             &format!(
-                "`{}` every reported attempt's usage, failed attempts included, vs committed deltas",
+                "`{}` every reported attempt's usage, failed attempts included, vs delivered facts",
                 session.session
             ),
         )
         .and_then(|()| {
-            require_ledger_total(session, &reported, "every reported attempt, failed included")
+            require_reopened_total(
+                session,
+                &reported,
+                "every reported attempt, failed included",
+            )
         }) {
             return OracleVerdict::failed(FAILED_ATTEMPT_USAGE_ORACLE, message);
         }
@@ -690,7 +729,7 @@ pub fn failed_attempt_usage_ledgered(sessions: &[SessionContent]) -> OracleVerdi
     }
     OracleVerdict::passed(
         FAILED_ATTEMPT_USAGE_ORACLE,
-        format!("{checked} session(s) ledgered every failed attempt's reported usage"),
+        format!("{checked} session(s) delivered every failed attempt's reported usage"),
     )
 }
 
@@ -707,7 +746,7 @@ impl fmt::Display for ContentCounts {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} assistant messages, {} tool results and {} reported attempt usages matched byte for byte after reopen across {} sessions ({} with exact per-attempt ledgers)",
+            "{} assistant messages, {} tool results and {} reported attempt usages matched byte for byte after reopen across {} sessions ({} with exact per-attempt accounting)",
             self.messages,
             self.tool_results,
             self.usage_attempts,
@@ -775,8 +814,8 @@ fn check_durable_content(sessions: &[SessionContent]) -> Result<ContentCounts, S
             ));
         }
 
-        // An all-zero report carries no charge and the runtime writes no
-        // delta for it on any path (see `failed_attempt_usage_ledgered`).
+        // An all-zero report carries no charge and is outside both sides
+        // (see `failed_attempt_usage_ledgered`).
         let completed_usage = completed
             .iter()
             .filter_map(|attempt| attempt.usage)
@@ -784,25 +823,25 @@ fn check_durable_content(sessions: &[SessionContent]) -> Result<ContentCounts, S
             .collect::<Vec<_>>();
         if session.has_failed_reported_attempt() {
             // A failed attempt's reported usage is FIG-3514's law; here every
-            // completed attempt's usage must still be its own committed delta.
+            // completed attempt's usage must still be its own delivered fact.
             require_subset(
                 &completed_usage,
-                &session.committed_usage,
+                &session.delivered_usage,
                 &format!(
-                    "`{}` completed attempts' usage vs committed deltas",
+                    "`{}` completed attempts' usage vs delivered facts",
                     session.session
                 ),
             )?;
         } else {
             require_same_multiset(
                 &completed_usage,
-                &session.committed_usage,
+                &session.delivered_usage,
                 &format!(
-                    "`{}` reported attempt usage vs committed deltas",
+                    "`{}` reported attempt usage vs delivered facts",
                     session.session
                 ),
             )?;
-            require_ledger_total(session, &completed_usage, "every reported attempt")?;
+            require_reopened_total(session, &completed_usage, "every reported attempt")?;
             counts.exact_usage_sessions += 1;
         }
 
@@ -819,7 +858,7 @@ fn check_durable_content(sessions: &[SessionContent]) -> Result<ContentCounts, S
     Ok(counts)
 }
 
-fn require_ledger_total(
+fn require_reopened_total(
     session: &SessionContent,
     attempts: &[UsageBuckets],
     what: &str,
@@ -832,11 +871,11 @@ fn require_ledger_total(
     let reopened = session
         .reopened
         .as_ref()
-        .map(|reopened| reopened.reported_ledger_total)
+        .map(|reopened| reopened.reported_usage_total)
         .unwrap_or_default();
     if reopened != expected {
         return Err(format!(
-            "`{}` reopened ledger total diverged from {what}: emitted={expected:?} ledger={reopened:?}",
+            "`{}` reopened usage total diverged from {what}: emitted={expected:?} reopened={reopened:?}",
             session.session
         ));
     }
@@ -869,7 +908,7 @@ fn require_subset(
     for usage in emitted {
         let Some(index) = remaining.iter().position(|candidate| candidate == usage) else {
             return Err(format!(
-                "{what}: emitted {usage:?} has no committed delta among {committed:?}"
+                "{what}: emitted {usage:?} has no delivered fact among {committed:?}"
             ));
         };
         remaining.swap_remove(index);
@@ -1028,11 +1067,11 @@ mod tests {
                 attempt("e\u{301}", Some(usage(u32::MAX.into(), 0)), true),
             ],
             emitted_tool_results: vec![tool_result("{\"payload\":\"\\u0000\"}")],
-            committed_usage: vec![usage(u32::MAX.into(), 0), usage(1 << 40, 3)],
+            delivered_usage: vec![usage(u32::MAX.into(), 0), usage(1 << 40, 3)],
             reopened: Some(ReopenedSession {
                 assistant_messages: vec![message("caf\u{e9} \u{0} \u{1f980}"), message("e\u{301}")],
                 tool_results: vec![tool_result("{\"payload\":\"\\u0000\"}")],
-                reported_ledger_total: usage((1 << 40) + i64::from(u32::MAX), 3),
+                reported_usage_total: usage((1 << 40) + i64::from(u32::MAX), 3),
                 call_ids: Vec::new(),
                 result_call_ids: Vec::new(),
             }),
@@ -1040,7 +1079,7 @@ mod tests {
     }
 
     /// A session whose first attempt reported usage and then failed, and whose
-    /// retry completed. Today only the retry's usage reaches the ledger.
+    /// retry completed, as FIG-3514 found it: only the retry's usage delivered.
     fn retried_like_today() -> SessionContent {
         SessionContent {
             session: "probe".to_string(),
@@ -1049,11 +1088,11 @@ mod tests {
                 attempt("done", Some(usage(9, 4)), true),
             ],
             emitted_tool_results: Vec::new(),
-            committed_usage: vec![usage(9, 4)],
+            delivered_usage: vec![usage(9, 4)],
             reopened: Some(ReopenedSession {
                 assistant_messages: vec![message("done")],
                 tool_results: Vec::new(),
-                reported_ledger_total: usage(9, 4),
+                reported_usage_total: usage(9, 4),
                 call_ids: Vec::new(),
                 result_call_ids: Vec::new(),
             }),
@@ -1093,10 +1132,10 @@ mod tests {
         );
 
         let mut summed_delta = healthy();
-        summed_delta.committed_usage = vec![usage((1 << 40) + i64::from(u32::MAX), 3)];
+        summed_delta.delivered_usage = vec![usage((1 << 40) + i64::from(u32::MAX), 3)];
         let verdict = durable_content(&[summed_delta]);
         assert!(
-            verdict.message.contains("vs committed deltas"),
+            verdict.message.contains("vs delivered facts"),
             "{}",
             verdict.message
         );
@@ -1106,10 +1145,10 @@ mod tests {
             .reopened
             .as_mut()
             .expect("reopened")
-            .reported_ledger_total = usage(1, 1);
+            .reported_usage_total = usage(1, 1);
         let verdict = durable_content(&[ledger_drift]);
         assert!(
-            verdict.message.contains("reopened ledger total"),
+            verdict.message.contains("reopened usage total"),
             "{}",
             verdict.message
         );
@@ -1137,10 +1176,10 @@ mod tests {
         assert!(today.is_passed(), "{}", today.message);
 
         let mut lost_completion = retried_like_today();
-        lost_completion.committed_usage.clear();
+        lost_completion.delivered_usage.clear();
         let verdict = durable_content(&[healthy(), lost_completion]);
         assert!(
-            verdict.message.contains("has no committed delta"),
+            verdict.message.contains("has no delivered fact"),
             "{}",
             verdict.message
         );
@@ -1157,12 +1196,12 @@ mod tests {
         );
 
         let mut fixed = retried_like_today();
-        fixed.committed_usage = vec![usage(7, 0), usage(9, 4)];
+        fixed.delivered_usage = vec![usage(7, 0), usage(9, 4)];
         fixed
             .reopened
             .as_mut()
             .expect("reopened")
-            .reported_ledger_total = usage(16, 4);
+            .reported_usage_total = usage(16, 4);
         let verdict = failed_attempt_usage_ledgered(&[healthy(), fixed.clone()]);
         assert!(verdict.is_passed(), "{}", verdict.message);
         // The fixed shape still satisfies the registered law, so registering
@@ -1175,9 +1214,9 @@ mod tests {
 
     #[test]
     fn failed_attempt_law_ignores_a_zero_usage_report() {
-        // A failed attempt that reported all-zero usage owes no delta: the
-        // runtime ledgers no zero usage on any path, so a session whose only
-        // failed report is zero leaves nothing for the law to check.
+        // A failed attempt that reported all-zero usage owes no charge, and
+        // both sides drop zero reports, so a session whose only failed report
+        // is zero leaves nothing for the law to check.
         let mut zero = retried_like_today();
         zero.emitted_attempts[0].usage = Some(usage(0, 0));
         let only_zero = failed_attempt_usage_ledgered(&[healthy(), zero.clone()]);
@@ -1188,12 +1227,12 @@ mod tests {
         );
 
         let mut fixed = retried_like_today();
-        fixed.committed_usage = vec![usage(7, 0), usage(9, 4)];
+        fixed.delivered_usage = vec![usage(7, 0), usage(9, 4)];
         fixed
             .reopened
             .as_mut()
             .expect("reopened")
-            .reported_ledger_total = usage(16, 4);
+            .reported_usage_total = usage(16, 4);
         let verdict = failed_attempt_usage_ledgered(&[healthy(), fixed, zero]);
         assert!(verdict.is_passed(), "{}", verdict.message);
     }

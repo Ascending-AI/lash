@@ -1312,6 +1312,54 @@ impl LashCore {
         self.live_replay_store.current_cursor(session_id, revision)
     }
 
+    /// The model usage of one owner (a session or a process), read from the
+    /// deployment's usage ledger (ADR 0125).
+    ///
+    /// Like [`Self::sessions`], it opens no session and drives nothing, so it
+    /// answers for a live, parked, refused, deleted-but-retained or
+    /// pruned-but-retained owner alike.
+    pub async fn owner_usage(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+    ) -> Result<lash_core::OwnerUsage> {
+        self.backend
+            .usage_accounting()
+            .load_owner_usage(owner)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// One page of an owner's usage facts in ledger order. `next` is `Some`
+    /// only when more facts exist.
+    pub async fn usage_fact_page(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+        after: Option<&lash_core::UsageFactCursor>,
+        limit: std::num::NonZeroU32,
+    ) -> Result<lash_core::UsageFactPage> {
+        self.backend
+            .usage_accounting()
+            .load_usage_fact_page(owner, after, limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// One page of an owner's usage runs: the admitted dispatch liabilities,
+    /// filtered by `filter`. `next` is `Some` only when more runs exist.
+    pub async fn usage_run_page(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+        filter: lash_core::UsageRunFilter,
+        after: Option<&lash_core::UsageRunCursor>,
+        limit: std::num::NonZeroU32,
+    ) -> Result<lash_core::UsageRunPage> {
+        self.backend
+            .usage_accounting()
+            .load_usage_run_page(owner, filter, after, limit)
+            .await
+            .map_err(Into::into)
+    }
+
     /// Enumerate every durable session catalog entry.
     ///
     /// This is a read-only catalog query. It does not open sessions, hydrate

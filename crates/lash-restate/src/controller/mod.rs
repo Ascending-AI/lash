@@ -665,6 +665,37 @@ where
     ) -> Result<lash_core::JournalReplay, RuntimeError> {
         Ok(lash_core::JournalReplay::MayReplay)
     }
+
+    /// The deployment host drains an owner through ingress; a handler-scoped
+    /// controller would put the drain in its own journal, where a replay
+    /// could order it before settles its caller has not sent yet.
+    async fn drain_usage_accounting(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+    ) -> Result<lash_core::UsageOwnerRetired, RuntimeError> {
+        Err(RuntimeError::new(
+            RuntimeErrorCode::EngineEffectController,
+            format!(
+                "a handler-scoped Restate controller does not drain usage owner {owner}; the \
+                 deployment effect host does"
+            ),
+        ))
+    }
+
+    /// See [`drain_usage_accounting`](Self::drain_usage_accounting).
+    async fn retire_usage_execution(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+        _scope: &ExecutionScope,
+    ) -> Result<u64, RuntimeError> {
+        Err(RuntimeError::new(
+            RuntimeErrorCode::EngineEffectController,
+            format!(
+                "a handler-scoped Restate controller does not retire usage executions of {owner}; \
+                 the deployment effect host does"
+            ),
+        ))
+    }
 }
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
@@ -1523,10 +1554,12 @@ fn resolution_trace_label(resolution: &Resolution) -> lash_trace::TraceDurableWa
     }
 }
 
+/// Run a journaled effect's body, beginning a spending body's usage run: the
+/// answer carries what the controller journals beside the outcome.
 async fn execute_restate_journaled_effect(
     envelope: RuntimeEffectEnvelope,
     local_executor: RuntimeEffectLocalExecutor<'_>,
-) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+) -> lash_core::RecordedEffectExecution {
     let RuntimeEffectEnvelope {
         invocation,
         command,
@@ -1534,12 +1567,20 @@ async fn execute_restate_journaled_effect(
     } = envelope;
     match command {
         RuntimeEffectCommand::Trigger { command } => {
-            refuse_unhonored_group_membership(group.as_deref(), "restate trigger")?;
-            local_executor.execute_trigger(invocation, *command).await
+            let outcome =
+                match refuse_unhonored_group_membership(group.as_deref(), "restate trigger") {
+                    Ok(()) => local_executor.execute_trigger(invocation, *command).await,
+                    Err(refusal) => Err(refusal),
+                };
+            lash_core::RecordedEffectExecution {
+                outcome,
+                usage: None,
+                admission_fault: None,
+            }
         }
         command => {
             local_executor
-                .execute(RuntimeEffectEnvelope {
+                .execute_recording_usage(RuntimeEffectEnvelope {
                     invocation,
                     command,
                     group,

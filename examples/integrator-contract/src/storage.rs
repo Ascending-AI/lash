@@ -254,20 +254,6 @@ impl SessionHistoryStore for Integrator {
     ) -> Result<bool, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn load_usage_totals(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<SessionUsageTotals, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn load_usage_ledger_page(
-        &self,
-        session_id: &SessionId,
-        after: Option<&UsageLedgerCursor>,
-        limit: NonZeroU32,
-    ) -> Result<UsageLedgerPage, StoreError> {
-        unreachable!("external signature witness")
-    }
     async fn load_failure_evidence_page(
         &self,
         session_id: &SessionId,

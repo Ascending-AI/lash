@@ -1959,7 +1959,13 @@ async fn openrouter_handle_records_failed_request_id_then_served_model_evidence(
     let mut req = request(Vec::new());
     req.model = "openrouter/auto".to_string();
 
-    let completion = handle.complete(req).await.expect("retry succeeds");
+    let completion = handle
+        .complete(
+            req,
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
+        .await
+        .expect("retry succeeds");
     assert_eq!(completion.call_record.attempts.len(), 2);
     let failed = &completion.call_record.attempts[0];
     assert_eq!(failed.outcome, lash_core::AttemptOutcome::Failed);
@@ -2151,9 +2157,10 @@ async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await;
 
     assert_eq!(
@@ -2188,9 +2195,10 @@ async fn responses_handle_does_not_retry_opaque_reasoning_output() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await;
 
     assert_eq!(

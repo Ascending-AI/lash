@@ -158,7 +158,7 @@ pub(crate) async fn head_commit(
         head_revision: revision,
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+    crate::RuntimeCommit::persisted_state_for_test(&state)
 }
 
 /// Land `root`'s final commit settling `settlement` under `fence`, over the

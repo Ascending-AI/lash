@@ -347,6 +347,10 @@ impl RuntimeErrorCode {
             // the child request names an inconsistent call id.
             // the child request names an inconsistent opener.
             Self::RuntimeEffectToolChildRequestOpener => Terminal,
+            // a dispatch site outside every usage run is wiring, not the attempt.
+            Self::UsageRunMissing => Terminal,
+            // the ledger store faulted; the identical admission succeeds later.
+            Self::UsageAdmissionFault => Retryable,
             // the child request version is unsupported.
             Self::RuntimeEffectToolChildRequestVersion => Terminal,
             // the invocation names an inconsistent subject.

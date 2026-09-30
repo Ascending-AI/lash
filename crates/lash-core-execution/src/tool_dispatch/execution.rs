@@ -405,11 +405,6 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
     let capture = crate::runtime::ToolAttemptCapture {
         version: crate::runtime::TOOL_ATTEMPT_CAPTURE_VERSION,
         messages: context.checkpoint_messages.drain(),
-        usage: context
-            .direct_completions
-            .usage_ledger()
-            .map(|ledger| ledger.take())
-            .unwrap_or_default(),
     };
     Ok(crate::ToolAttemptEffectOutcome {
         launch,

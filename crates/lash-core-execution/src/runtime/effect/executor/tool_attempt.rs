@@ -9,9 +9,14 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
         matches!(command, RuntimeEffectCommand::ToolAttempt { .. })
     }
 
+    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
+        self.dispatch.direct_completions.usage_accounting()
+    }
+
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::ToolAttempt {
             call,
@@ -35,7 +40,7 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
             .with_tool_attempt_parent_invocation(
                 envelope.invocation.clone().into_runtime_invocation(),
             )
-            .with_usage_ledger(crate::runtime::ToolUsageLedger::for_attempt(attempt));
+            .with_usage_run(usage_run);
         dispatch.trigger_outcomes = crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
         // Attempt-local buffers: what this attempt commits is drained into the
         // journaled capture, never read out of a buffer it shares with

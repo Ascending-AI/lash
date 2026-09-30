@@ -173,3 +173,9 @@ Acquiring a runtime for a poll would perform reconciliation without an
 execution need. Inferring execution completion from a queue row disappearing
 would confuse claimed, cancelled and completed work; handles and observation
 carry the outcome instead.
+
+## Model usage accounting
+
+A live session's usage is a durable read (`LashSession::usage()`, async), not
+an in-memory ledger, and it answers the same as `DurableSession::usage()` for
+the same owner ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).

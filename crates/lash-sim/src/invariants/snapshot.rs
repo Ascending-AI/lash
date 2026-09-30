@@ -460,6 +460,7 @@ impl StoreSnapshot {
         stores: &lash_sqlite_store::SqliteStoreSet,
     ) -> Result<(), String> {
         let factory = stores.session_store_factory();
+        let usage = lash_core::StoreSet::usage_accounting(stores);
         let sessions = read(
             stores,
             SqliteDatabase::DurableCore,
@@ -468,7 +469,8 @@ impl StoreSnapshot {
         )?;
         for session in sessions.iter().map(|row| required(row, "session_id")) {
             let Ok(Some(reopened)) =
-                crate::content_oracle::reopen_session(factory.as_ref(), &session).await
+                crate::content_oracle::reopen_session(factory.as_ref(), usage.as_ref(), &session)
+                    .await
             else {
                 continue;
             };

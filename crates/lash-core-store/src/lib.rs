@@ -116,9 +116,6 @@ pub(crate) use store::{
     HydratedCheckpointComponent, OperationId, RuntimeStore, SessionMeta, StoreError,
 };
 pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlement};
-pub(crate) use usage::{
-    LedgerUsageOutcome, SessionUsageTotals, TokenLedgerEntry, UnreportedLedgerAttempt,
-};
 
 pub(crate) use execution_state::{
     ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState, PluginOptions,
@@ -280,3 +277,7 @@ pub(crate) use lash_sansio::attachment::AttachmentCreateMeta;
 
 pub(crate) use runtime_error::RuntimeErrorCause;
 pub(crate) use session_policy::GenerationOverlay;
+
+pub mod usage_accounting;
+pub use store::usage_accounting::UsageAccountingStore;
+pub use usage_accounting::*;

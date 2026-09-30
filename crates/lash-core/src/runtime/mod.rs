@@ -84,16 +84,7 @@ pub use process_runtime::{ProcessRuntimeContext, ProcessRuntimePorts};
 #[doc(hidden)]
 pub use session_manager::RuntimeSessionServices;
 #[cfg(any(test, feature = "testing"))]
-pub use session_manager::append_receipt_mixed_usage_envelope_conformance;
-#[cfg(any(test, feature = "testing"))]
-pub use session_manager::append_usage_cancellation_exactly_once_conformance;
-#[cfg(any(test, feature = "testing"))]
 pub use session_manager::take_spawned_child_runtimes;
-#[cfg(any(test, feature = "testing"))]
-pub use session_manager::{
-    PendingTokenLedgerEntry, StagedTokenLedger, record_reconciled_usage_shared,
-    record_token_usage_shared, record_unreported_attempts_shared, stage_token_ledger_shared,
-};
 mod session_ops;
 use lash_core_store::session_store_factory_types;
 pub use session_store_factory_types::{
@@ -378,10 +369,8 @@ pub use turn_queue::{
 };
 use usage::nonzero_usage;
 pub use usage::{
-    LedgerUsageOutcome, ReconciledUsageAttempt, SessionUsageReport, SessionUsageTotals,
-    TokenLedgerEntry, UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageOutcomeError,
-    UsageReconciliationReport, UsageReportRow, UsageTotalRow, UsageTotals, diff_token_ledger,
-    diff_usage_reports, outstanding_unreported_attempts,
+    ReconciledUsageAttempt, SessionUsageReport, UsageReconciliationReport, UsageReportRow,
+    UsageTotals, diff_usage_reports,
 };
 
 // Turn-execution vocabulary. These types and the phase-probe trait carry no
@@ -508,11 +497,6 @@ pub struct LashRuntime {
     state: RuntimeSessionState,
     pub runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub runtime_lease_executor_id: String,
-    /// Session-scoped token cost ledger. Shared by ALL
-    /// `RuntimeSessionServices` instances created from this runtime
-    /// (both per-turn and async maintenance). Entries accumulate here
-    /// and are drained into `state.token_ledger` at turn-commit time.
-    pub shared_token_ledger: Arc<std::sync::Mutex<Vec<session_manager::PendingTokenLedgerEntry>>>,
     pub process_sync_needed: Arc<AtomicBool>,
     pub turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     /// How far this handle's resident session has travelled with the durable
@@ -530,11 +514,6 @@ pub struct LashRuntime {
     /// host on the paths that have no return value to give it (FIG-3367); the
     /// facade reads it as `LashSession::tool_restore_report()`.
     pub tool_restore_report: Option<crate::ToolRestoreReport>,
-    /// Attempts whose usage never arrived after an abort or failure, not yet
-    /// reconciled (FIG-2765). Runtime-resident: persisted holes live in the
-    /// ledger's unreported rows; this is the attribution a later
-    /// [`LashRuntime::reconcile_unreported_usage`] needs.
-    pub unreported_usage_attempts: Vec<UnreportedUsageAttempt>,
     /// Whether the running direct turn replays the journaled initial drive
     /// set (ADR 0069 §6). A superseded one cedes the turn at commit under
     /// any generation: if its rows were reclaimed while the turn was down,

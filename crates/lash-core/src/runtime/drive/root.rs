@@ -669,6 +669,7 @@ impl RuntimeEffectLocalRunner for RecoverFollowOnRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::RecoverFollowOn {
             follow_on,
@@ -914,6 +915,7 @@ impl RuntimeEffectLocalRunner for HeadlessRootStepRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let bound = match (&self.step, &envelope.command) {
             (
@@ -1055,6 +1057,7 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::InspectAdmittedHead { root, head } = &envelope.command
         else {
@@ -1181,6 +1184,7 @@ impl RuntimeEffectLocalRunner for AdmitRootRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::AdmitRoot { head } = &envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(

@@ -157,4 +157,5 @@ The generated region below is checked against the live filenames and headings.
 | 0122 | [A stopped turn's uncommitted tail lives only on the live stream](0122-a-stopped-turns-uncommitted-tail-lives-only-on-the-live-stream.md) |
 | 0123 | [Model code runs in resettable worker processes](0123-model-code-runs-in-resettable-worker-processes.md) |
 | 0124 | [Attachments are kept alive only by their referrers](0124-attachments-are-kept-alive-only-by-their-referrers.md) |
+| 0125 | [Model usage is engine-owned accounting delivered per call](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md) |
 <!-- adr-index:end -->

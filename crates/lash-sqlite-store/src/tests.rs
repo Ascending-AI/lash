@@ -465,14 +465,14 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
             &SessionId::from(format!("sqlite-checkpoint-depth-{depth}")),
         )
         .await;
-        let mut seed = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut seed = RuntimeCommit::persisted_state_for_test(&state);
         seed.checkpoint = checkpoint_with_changed_components(depth);
         let seeded = store
             .commit_runtime_state(seed)
             .await
             .expect("seed checkpoint component bodies");
         state.head_revision = seeded.head_revision;
-        let mut unchanged = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut unchanged = RuntimeCommit::persisted_state_for_test(&state);
         unchanged.checkpoint = checkpoint_with_unchanged_components(&seeded.manifest);
         assert!(
             unchanged
@@ -566,7 +566,7 @@ async fn real_locked_catalog_surfaces_typed_contention() {
         .execute_batch("BEGIN IMMEDIATE")
         .expect("hold catalog writer lock");
     let result = store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await;
     locker
         .execute_batch("ROLLBACK")

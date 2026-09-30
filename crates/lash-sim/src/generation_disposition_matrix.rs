@@ -336,7 +336,10 @@ async fn run(
     let transport = Arc::new(ScriptedLlmHttpTransport::new(dialect.script()).expect("script"));
     let mut provider = dialect.provider(transport.clone(), cap, Vec::new());
     let result = provider
-        .complete(request)
+        .complete(
+            request,
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .map(|completion| {
             let body = completion
@@ -776,7 +779,10 @@ async fn route_headers_are_sent_or_refused_before_io() {
             vec![("x-matrix-route".into(), "selected".into())],
         );
         let completion = provider
-            .complete(dialect.request())
+            .complete(
+                dialect.request(),
+                <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+            )
             .await
             .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
         assert_eq!(
@@ -803,7 +809,10 @@ async fn route_headers_are_sent_or_refused_before_io() {
             vec![("CoNtEnT-TyPe".into(), "other".into())],
         );
         let error = provider
-            .complete(dialect.request())
+            .complete(
+                dialect.request(),
+                <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+            )
             .await
             .expect_err("header conflict");
         assert_eq!(
@@ -832,7 +841,10 @@ async fn thinking_visibility_and_summary_have_distinct_receipts() {
         options.expose_thinking = true;
         provider.set_options(options);
         let completion = provider
-            .complete(dialect.request())
+            .complete(
+                dialect.request(),
+                <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+            )
             .await
             .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
         let receipt = completion.generation_disposition.expect("receipt");
@@ -879,7 +891,10 @@ async fn receipt_survives_a_failure_after_send() {
     let mut request = dialect.request();
     request.generation.temperature = Some(NonNegativeFiniteF64::new(0.25).expect("finite"));
     let error = provider
-        .complete(request)
+        .complete(
+            request,
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect_err("provider failure");
     assert_eq!(transport.exchanges().expect("exchanges").len(), 1);
@@ -930,7 +945,12 @@ async fn websocket_generation_settings_have_the_same_dispositions_as_sse() {
         );
         let mut request = dialect.request();
         let expected = setting.apply(&mut request);
-        let result = provider.complete(request).await;
+        let result = provider
+            .complete(
+                request,
+                <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+            )
+            .await;
         let captured = server.captured();
         if setting.supported(dialect) {
             let completion = result.unwrap_or_else(|error| panic!("{setting:?}: {error}"));

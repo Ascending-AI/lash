@@ -209,7 +209,8 @@ class Journey:
             "FROM session_meta ORDER BY session_id",
             "lineage": "SELECT session_id, ancestor_session_id, fork_node_id, fork_generation "
             "FROM fork_lineage ORDER BY session_id, ancestor_session_id",
-            "usage": "SELECT session_id, model, input_tokens, output_tokens FROM usage_deltas ORDER BY seq",
+            "usage": "SELECT owner_id, model, input_tokens, output_tokens FROM usage_facts "
+            "WHERE owner_kind = 'session' ORDER BY seq",
         }
         if not self.session_db.exists():
             return {name: [] for name in tables}

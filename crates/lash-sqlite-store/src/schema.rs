@@ -235,39 +235,77 @@ CREATE TABLE IF NOT EXISTS fork_lineage (
     PRIMARY KEY (session_id, ancestor_session_id)
 );
 
-CREATE TABLE IF NOT EXISTS usage_deltas (
-    seq                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id            TEXT NOT NULL,
-    operation_storage_key TEXT NOT NULL,
-    entry_ordinal         INTEGER NOT NULL,
-    payload_encoding_version INTEGER NOT NULL,
-    payload_hash          TEXT NOT NULL,
-    source               TEXT NOT NULL,
-    model                TEXT NOT NULL,
-    input_tokens         INTEGER NOT NULL,
-    output_tokens        INTEGER NOT NULL,
+CREATE TABLE IF NOT EXISTS usage_facts (
+    seq                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_kind               TEXT NOT NULL CONSTRAINT ck_usage_facts_owner_kind CHECK (owner_kind IN ('session', 'process')),
+    owner_id                 TEXT NOT NULL,
+    effect_key               TEXT NOT NULL,
+    call_ordinal             INTEGER NOT NULL CONSTRAINT ck_usage_facts_call_ordinal CHECK (call_ordinal >= 0),
+    provider_attempt         INTEGER NOT NULL CONSTRAINT ck_usage_facts_provider_attempt CHECK (provider_attempt >= 0),
+    fact_kind                TEXT NOT NULL,
+    disposition              TEXT NOT NULL,
+    run_id                   TEXT,
+    llm_call_id              TEXT NOT NULL,
+    source                   TEXT NOT NULL,
+    model                    TEXT NOT NULL,
+    input_tokens             INTEGER NOT NULL,
+    output_tokens            INTEGER NOT NULL,
     cache_read_input_tokens  INTEGER NOT NULL,
     cache_write_input_tokens INTEGER NOT NULL,
-    reasoning_output_tokens     INTEGER NOT NULL,
-    reconciled_call_id TEXT,
-    reconciled_attempt_ordinal INTEGER,
-    CONSTRAINT ck_usage_deltas_reconciled_pair CHECK ((reconciled_call_id IS NULL) = (reconciled_attempt_ordinal IS NULL)),
-    UNIQUE (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
+    reasoning_output_tokens  INTEGER NOT NULL,
+    generation_id            TEXT,
+    payload_hash             TEXT NOT NULL,
+    recorded_at_ms           INTEGER NOT NULL,
+    CONSTRAINT ck_usage_facts_kind CHECK (
+        (fact_kind = 'attempt' AND disposition IN ('reported', 'unreported') AND run_id IS NOT NULL)
+     OR (fact_kind = 'correction' AND disposition = 'reconciled' AND run_id IS NULL AND generation_id IS NOT NULL)),
+    CONSTRAINT ck_usage_facts_unreported_zero CHECK (disposition <> 'unreported' OR (
+        input_tokens = 0 AND output_tokens = 0 AND cache_read_input_tokens = 0
+        AND cache_write_input_tokens = 0 AND reasoning_output_tokens = 0)),
+    CONSTRAINT uq_usage_facts_identity UNIQUE (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind)
 );
-CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
-    ON usage_deltas(session_id, seq);
+CREATE INDEX IF NOT EXISTS idx_usage_facts_owner_seq
+    ON usage_facts(owner_kind, owner_id, seq);
+CREATE INDEX IF NOT EXISTS idx_usage_facts_unreported
+    ON usage_facts(owner_kind, owner_id, effect_key, call_ordinal, provider_attempt)
+    WHERE disposition = 'unreported';
 
-CREATE TABLE IF NOT EXISTS usage_delta_holes (
-    session_id TEXT NOT NULL,
-    seq INTEGER NOT NULL,
-    call_id TEXT NOT NULL,
-    attempt_ordinal INTEGER NOT NULL,
-    generation_id TEXT,
-    PRIMARY KEY (session_id, seq, call_id, attempt_ordinal),
-    FOREIGN KEY (seq) REFERENCES usage_deltas(seq) ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS usage_runs (
+    owner_kind          TEXT NOT NULL CONSTRAINT ck_usage_runs_owner_kind CHECK (owner_kind IN ('session', 'process')),
+    owner_id            TEXT NOT NULL,
+    effect_key          TEXT NOT NULL,
+    run_id              TEXT NOT NULL,
+    execution_scope_key TEXT NOT NULL,
+    source              TEXT NOT NULL,
+    model               TEXT NOT NULL,
+    admitted_at_ms      INTEGER NOT NULL,
+    state               TEXT NOT NULL,
+    unknown_reason      TEXT,
+    conflict_detail     TEXT,
+    resolved_at_ms      INTEGER,
+    PRIMARY KEY (owner_kind, owner_id, effect_key, run_id),
+    CONSTRAINT ck_usage_runs_state CHECK (
+        (state = 'open' AND unknown_reason IS NULL AND conflict_detail IS NULL AND resolved_at_ms IS NULL)
+     OR (state = 'settled' AND unknown_reason IS NULL AND conflict_detail IS NULL AND resolved_at_ms IS NOT NULL)
+     OR (state = 'unknown' AND conflict_detail IS NULL AND resolved_at_ms IS NOT NULL
+         AND unknown_reason IN ('superseded_run', 'call_without_record', 'facts_unjournalable',
+                                'execution_ended', 'owner_retired'))
+     OR (state = 'conflicted' AND unknown_reason IS NULL AND conflict_detail IS NOT NULL
+         AND resolved_at_ms IS NOT NULL))
 );
-CREATE INDEX IF NOT EXISTS idx_usage_delta_holes_attempt
-    ON usage_delta_holes(session_id, call_id, attempt_ordinal);
+CREATE INDEX IF NOT EXISTS idx_usage_runs_open_owner
+    ON usage_runs(owner_kind, owner_id, admitted_at_ms) WHERE state = 'open';
+CREATE INDEX IF NOT EXISTS idx_usage_runs_open_scope
+    ON usage_runs(owner_kind, owner_id, execution_scope_key) WHERE state = 'open';
+CREATE INDEX IF NOT EXISTS idx_usage_runs_unresolved
+    ON usage_runs(owner_kind, owner_id, effect_key, run_id) WHERE state IN ('unknown', 'conflicted');
+
+CREATE TABLE IF NOT EXISTS usage_owner_retirements (
+    owner_kind    TEXT NOT NULL CONSTRAINT ck_usage_owner_retirements_owner_kind CHECK (owner_kind IN ('session', 'process')),
+    owner_id      TEXT NOT NULL,
+    retired_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (owner_kind, owner_id)
+);
 
 CREATE TABLE IF NOT EXISTS session_meta (
     session_id                       TEXT PRIMARY KEY,

@@ -134,7 +134,6 @@ fn write_receipt(fleet: FleetFormat) -> Vec<u8> {
         manifest: SessionCheckpoint::for_fleet(FleetFormat::current()),
         committed_leaf_node_id: None,
         realized_node_timestamps: Vec::new(),
-        committed_usage_delta_identities: Vec::new(),
         failure_evidence: Vec::new(),
         outcome: None,
         pending_follow_on: None,
@@ -201,7 +200,6 @@ fn write_turn_options(fleet: FleetFormat) -> Vec<u8> {
         crate::ProtocolTurnOptions::from_payload(serde_json::json!({"mode": "law"}));
     let commit = super::RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
-        &[],
         super::OperationId::new(
             crate::ExecutionScope::runtime_operation("guarded-turn-options"),
             "commit",

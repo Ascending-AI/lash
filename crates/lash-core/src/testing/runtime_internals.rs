@@ -26,7 +26,7 @@ pub use crate::runtime::turn_queue::{
     AdmissionBoundary, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkPayload,
     SessionCommandSettlement, process_wake_batch_draft,
 };
-pub use crate::runtime::usage::{merge_ledger_entry_saturating, nonzero_usage};
+pub use crate::runtime::usage::nonzero_usage;
 pub use crate::runtime::{RecordedTurnAssembly, classify_output_state};
 pub use crate::session::Session;
 /// `session_model::transport_stream_events` is crate-private; the relocated

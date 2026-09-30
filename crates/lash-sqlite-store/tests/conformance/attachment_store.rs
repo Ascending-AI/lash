@@ -140,7 +140,6 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
     .expect("session put records an intent and stores the bytes");
     let mut commit = lash_core_execution::store::RuntimeCommit::persisted_state_for_test(
         &state_referencing(&session_id, &held),
-        &[],
     );
     commit.committed_attachment_ids = vec![held.id.clone()];
     session

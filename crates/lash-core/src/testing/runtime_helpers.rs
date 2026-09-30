@@ -458,7 +458,25 @@ fn mock_provider_with_kind(kind: &'static str, calls: Vec<MockCall>) -> TestProv
                         tx.send(event.clone());
                     }
                 }
-                call.response
+                // A real provider returns the usage its stream reported on
+                // the completed response too; the attempt's record, and so
+                // its accounting fact, is built from that response.
+                let streamed_usage =
+                    call.stream_events
+                        .iter()
+                        .rev()
+                        .find_map(|event| match event {
+                            LlmStreamEvent::Usage(usage) => Some(usage.clone()),
+                            _ => None,
+                        });
+                call.response.map(|mut response| {
+                    if response.usage == crate::llm::types::LlmUsage::default()
+                        && let Some(usage) = streamed_usage
+                    {
+                        response.usage = usage;
+                    }
+                    response
+                })
             }
         })
         .build()
@@ -564,7 +582,6 @@ pub struct EmptyTools;
 /// Returns the head that commit wrote.
 pub async fn advance_session_head(
     store: &RecordingStore,
-    usage_deltas: &[crate::TokenLedgerEntry],
     change: impl FnOnce(&mut RuntimeSessionState),
 ) -> crate::SessionHeadMeta {
     let session_id = store
@@ -600,7 +617,7 @@ pub async fn advance_session_head(
     // The bound turn owns the head (FIG-4202): a writer that moves it while
     // a root is bound presents the root's own drive fence, as a second
     // execution of that root would. Before the first seal nothing owns it.
-    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, usage_deltas);
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     commit.drive_fence = crate::store::current_drive_fence(store, &session_id)
         .await
         .expect("read the session's drive fence")

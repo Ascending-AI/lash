@@ -51,7 +51,6 @@ pub mod state_checker;
 pub mod store;
 pub mod trace;
 mod transcript;
-mod usage_oracle;
 
 fn sim_process_owner() -> lash_core::LeaseOwnerIdentity {
     static INCARNATION: std::sync::OnceLock<String> = std::sync::OnceLock::new();

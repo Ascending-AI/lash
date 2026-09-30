@@ -10,17 +10,16 @@ impl RuntimeSessionServices {
         effect_controller: crate::ScopedEffectController<'a>,
         turn_id: Option<&'a crate::TurnId>,
         position: DirectExecutionPosition,
-        usage_sink: Option<crate::runtime::effect::ToolUsageLedger>,
+        usage_run: Option<crate::UsageRun>,
     ) -> DirectInvocationContext<'a> {
         DirectInvocationContext {
             current: &self.current,
-            usage_capability: &self.usage,
             effect_controller,
             turn_id,
             position,
             replay_ordinals: self.direct_replay_ordinals.as_ref(),
             unkeyed_in_flight: self.direct_unkeyed_in_flight.as_ref(),
-            usage_sink,
+            usage_run,
         }
     }
 }
@@ -53,7 +52,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         effect_controller: crate::ScopedEffectController<'_>,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
-        usage_sink: Option<&crate::runtime::effect::ToolUsageLedger>,
+        usage_run: Option<&crate::UsageRun>,
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
         self.direct
             .invoke_direct_completion(
@@ -61,7 +60,7 @@ impl DirectCompletionService for RuntimeSessionServices {
                     effect_controller,
                     turn_id,
                     position,
-                    usage_sink.cloned(),
+                    usage_run.cloned(),
                 ),
                 request,
                 usage_source,
@@ -77,7 +76,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
-        usage_sink: Option<&crate::runtime::effect::ToolUsageLedger>,
+        usage_run: Option<&crate::UsageRun>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         self.direct
             .invoke_direct_llm_completion(
@@ -85,7 +84,7 @@ impl DirectCompletionService for RuntimeSessionServices {
                     effect_controller,
                     turn_id,
                     position,
-                    usage_sink.cloned(),
+                    usage_run.cloned(),
                 ),
                 request,
                 usage_source,
@@ -94,18 +93,16 @@ impl DirectCompletionService for RuntimeSessionServices {
             .await
     }
 
-    /// The session token ledger, lent to settlement incorporation
-    /// (FIG-3411): the same `UsageCapability` the live path records through,
-    /// so a settlement delta charges under exactly the `(source, model)` a
-    /// live call would have used.
-    fn usage_charge_sink(&self) -> Option<Arc<dyn crate::session::UsageChargeSink>> {
-        Some(Arc::new(self.usage.clone()))
+    /// The session's backend ledger: a tool attempt's usage run is admitted
+    /// to and settled in it (ADR 0125).
+    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
+        Some(self.current.host.core.usage_accounting())
     }
 
     /// Rebinds this service to a tool child's recorded authority.
     ///
-    /// The transport — the managed session, the provider registry, the live
-    /// token ledger — is lent unchanged; what is rebound is everything that
+    /// The transport — the managed session and the provider registry — is
+    /// lent unchanged; what is rebound is everything that
     /// decides whose call it is. `current.policy` is replaced with the
     /// child's recorded environment policy so provider and budget resolution
     /// answer under the facts the child was admitted with, and a service
@@ -124,17 +121,15 @@ impl DirectCompletionService for RuntimeSessionServices {
 
 pub(in crate::runtime::session_manager) struct DirectInvocationContext<'a> {
     current: &'a CurrentOwnerCapability,
-    usage_capability: &'a UsageCapability,
     effect_controller: crate::ScopedEffectController<'a>,
     turn_id: Option<&'a TurnId>,
     position: DirectExecutionPosition,
     replay_ordinals: &'a std::sync::Mutex<BTreeMap<String, u64>>,
     unkeyed_in_flight: &'a std::sync::Mutex<std::collections::BTreeSet<String>>,
-    /// The tool-child usage accumulator every sealed call record is captured
-    /// into before its outcome is projected — failure and abort records
-    /// included, because a billed attempt is a spend even when the call
-    /// returns an error.
-    usage_sink: Option<crate::runtime::effect::ToolUsageLedger>,
+    /// The usage run of the tool attempt this completion runs inside, when
+    /// its position is `ToolAttempt`: the call is one of that run's calls,
+    /// because it journals no effect of its own (ADR 0125).
+    usage_run: Option<crate::UsageRun>,
 }
 
 impl DirectInvocationContext<'_> {
@@ -267,7 +262,8 @@ impl DirectCompletionCapability {
     }
 
     /// Runs a planned direct effect across the journal/controller boundary and
-    /// applies usage/trace bookkeeping, yielding the raw provider response.
+    /// applies trace bookkeeping, yielding the raw provider response. The
+    /// effect's usage run accounts the call; nothing here records usage.
     async fn run_direct_effect(
         &self,
         context: &DirectInvocationContext<'_>,
@@ -293,6 +289,11 @@ impl DirectCompletionCapability {
             provider,
             current.policy.charge_safety.clone(),
             Arc::clone(&current.host.core.durability.attachment_store),
+            crate::runtime::effect::DirectUsage {
+                accounting: current.host.core.usage_accounting(),
+                owner: current.runtime_owner(),
+                source: usage_source,
+            },
             replay_trace,
         );
         let outcome = match context.position {
@@ -302,18 +303,14 @@ impl DirectCompletionCapability {
                     .execute_effect(envelope, local_executor)
                     .await?
             }
-            DirectExecutionPosition::ToolAttempt => local_executor.execute(envelope).await?,
+            DirectExecutionPosition::ToolAttempt => {
+                local_executor
+                    .execute_within_run(envelope, context.usage_run.clone())
+                    .await?
+            }
         };
-        super::direct_outcome::apply_direct_outcome(
-            current,
-            context.usage_capability,
-            &request,
-            &usage_source,
-            caused_by.as_ref(),
-            outcome,
-            context.usage_sink.as_ref(),
-        )
-        .await
+        super::direct_outcome::apply_direct_outcome(current, &request, caused_by.as_ref(), outcome)
+            .await
     }
 
     pub(in crate::runtime::session_manager) async fn invoke_direct_completion(

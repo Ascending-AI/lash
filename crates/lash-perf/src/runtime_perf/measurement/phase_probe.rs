@@ -563,7 +563,7 @@ async fn run_once_inner(
             phase_probe.defer_named_close("trigger.occurrence_to_delivery");
         }
 
-        let before_turn_usage = runtime.usage_report();
+        let before_turn_usage = runtime.settled_usage_report().await?;
         if let Some(variant) = catalog_variant {
             let (manifest_count, rendered_bytes) = runtime.tool_catalog_metrics()?;
             extra_counters.lock_recover().insert(
@@ -778,27 +778,24 @@ async fn run_once_inner(
                 Ok(())
             },
             |_, _, tail| {
-                let cumulative_usage = runtime.usage_report();
-                let usage_delta_entries = lash_core::facade_support::diff_usage_reports(
-                    &before_turn_usage,
-                    &cumulative_usage,
-                )
-                .map_err(anyhow::Error::msg)?;
                 let mut phase_profile = phase_probe.take_completed();
                 phase_profile.extend(std::mem::take(&mut tail.phase_profile));
                 tail.phase_profile = phase_profile;
-                tail.usage_delta = SessionUsageReport::from_entries(&usage_delta_entries);
-                tail.cumulative_usage = cumulative_usage;
                 Ok(())
             },
         )
         .await?;
+        let cumulative_usage = runtime.settled_usage_report().await?;
+        let usage_delta =
+            lash_core::facade_support::diff_usage_reports(&before_turn_usage, &cumulative_usage)
+                .map_err(anyhow::Error::msg)?;
+        run.record_last_turn_usage(usage_delta, cumulative_usage);
     }
 
     let (state, cumulative_usage) = run
         .export(async {
             let state = runtime.export_state().await;
-            let cumulative_usage = runtime.usage_report();
+            let cumulative_usage = runtime.settled_usage_report().await?;
             Ok((state, cumulative_usage))
         })
         .await?;

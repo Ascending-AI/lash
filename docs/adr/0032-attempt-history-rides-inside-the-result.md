@@ -58,3 +58,10 @@ durable billing evidence. Hosts own any supplementary live telemetry archive.
 - [Runtime call result](../../crates/lash-core/src/runtime/turn_driver/local_effects.rs) and [turn report vocabulary](../../crates/lash-core-execution/src/runtime/vocabulary.rs).
 - [Failure-code decoding](../../crates/lash-sansio/src/session_model/failure.rs).
 - [Cached-prefix validation](../../crates/lash-provider-openai/src/codex/continuation.rs).
+
+## Model usage accounting
+
+The facts a usage run delivers are projected from the attempt history of each
+call's sealed record, one per attempt the dispatch gate admitted. The recorded
+usage rides beside the effect's outcome in its journal entry, outside the
+outcome, so an `Err` outcome keeps its spend ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).

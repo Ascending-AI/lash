@@ -97,7 +97,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     source_state.session_id = SessionId::from(SOURCE_SESSION.to_string());
     source_state.ensure_agent_frame_initialized();
     source
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&source_state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&source_state))
         .await
         .expect("commit retained continuation frame");
     let retained_node_id = source_state

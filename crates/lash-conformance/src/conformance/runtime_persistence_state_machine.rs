@@ -17,14 +17,14 @@ use crate::store::{
 use crate::{
     LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputDraft,
     PluginNamespaceState, PluginState, QueuedWorkBatch, QueuedWorkBatchDraft, RuntimeCommit,
-    RuntimeSessionState, RuntimeStore, RuntimeUsageDeltaIdentity, StoreError, ToolState, TurnId,
-    TurnInput, TurnInputIngress, facade_support::ToolStateFacadeOps,
+    RuntimeSessionState, RuntimeStore, StoreError, ToolState, TurnId, TurnInput, TurnInputIngress,
+    facade_support::ToolStateFacadeOps,
 };
 use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestRunner};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::Arc;
 mod attachment_conservation;
@@ -34,16 +34,11 @@ mod generator;
 mod pending_input_read_model;
 #[cfg(test)]
 mod tests;
-mod usage_conservation;
 pub use attachment_conservation::RuntimePersistenceStateMachineHandles;
 use attachment_conservation::{apply_attachment_operation, assert_attachment_conservation};
 use counterexample::persist_counterexample;
 use dedicated_laws::assert_dedicated_laws;
 use generator::{component_selection, generated_case, plugin_state};
-use usage_conservation::{
-    assert_usage_conservation, confirm_usage, record_usage, register_committed_usage,
-    replay_usage_receipt, stage_usage,
-};
 const SESSION_ID: &str = "runtime-persistence-property";
 
 /// The property session's identity where a typed one is wanted; the `&str`
@@ -86,17 +81,6 @@ pub enum RuntimePersistenceOp {
     CancelTurnInput {
         selection: u8,
     },
-    RecordUsage {
-        slot: u8,
-        value: u8,
-    },
-    StageUsage {
-        replay_last_commit: bool,
-    },
-    ConfirmUsage {
-        selection: u8,
-    },
-    ReplayUsageReceipt,
     CommitWithAttachmentRefs {
         new_session: bool,
         session_selection: u8,
@@ -185,15 +169,6 @@ struct ReferenceModel {
     root_sequence: u64,
     applications: Vec<crate::TurnInputApplication>,
     components: ComponentModel,
-    pending_usage: Arc<
-        std::sync::Mutex<Vec<lash_core::testing::conformance_support::PendingTokenLedgerEntry>>,
-    >,
-    staged_usage: Option<lash_core::testing::conformance_support::StagedTokenLedger>,
-    staged_usage_operation: Option<crate::OperationId>,
-    pending_usage_confirmations: Vec<PendingUsageConfirmation>,
-    durable_usage: HashMap<RuntimeUsageDeltaIdentity, crate::TokenLedgerEntry>,
-    recorded_usage: crate::TokenUsage,
-    last_usage_commit: Option<RuntimeCommit>,
     attachment_sessions: Vec<attachment_conservation::ModeledAttachmentSession>,
     attachment_ids_to_reprobe: BTreeSet<crate::AttachmentId>,
     live_uncommitted_attachment_refs: BTreeSet<crate::AttachmentId>,
@@ -205,10 +180,6 @@ struct ReferenceModel {
     wake_sequence: u64,
 }
 
-struct PendingUsageConfirmation {
-    staged: lash_core::testing::conformance_support::StagedTokenLedger,
-    identities: Vec<RuntimeUsageDeltaIdentity>,
-}
 /// The run-shape counter alphabet. `RunShape`, `RunShapeTotals`, the
 /// required-shape table, and the report all derive from this one enum, so a
 /// new counter cannot be counted without being gated and reported.
@@ -231,10 +202,6 @@ enum RunShapeCounter {
     InputApplications,
     InputCancellations,
     RootReleases,
-    UsageRecords,
-    UsageStages,
-    UsageConfirmations,
-    UsageReceiptReplays,
     AttachmentCommits,
     AttachmentWritePuts,
     AttachmentReceiptReplays,
@@ -267,10 +234,6 @@ impl run_shape::Counter for RunShapeCounter {
         Self::InputApplications,
         Self::InputCancellations,
         Self::RootReleases,
-        Self::UsageRecords,
-        Self::UsageStages,
-        Self::UsageConfirmations,
-        Self::UsageReceiptReplays,
         Self::AttachmentCommits,
         Self::AttachmentWritePuts,
         Self::AttachmentReceiptReplays,
@@ -303,10 +266,6 @@ impl run_shape::Counter for RunShapeCounter {
             Self::InputApplications => "input_applications",
             Self::InputCancellations => "input_cancellations",
             Self::RootReleases => "root_releases",
-            Self::UsageRecords => "usage_records",
-            Self::UsageStages => "usage_stages",
-            Self::UsageConfirmations => "usage_confirmations",
-            Self::UsageReceiptReplays => "usage_receipt_replays",
             Self::AttachmentCommits => "attachment_commits",
             Self::AttachmentWritePuts => "attachment_intent_puts",
             Self::AttachmentReceiptReplays => "attachment_receipt_replays",
@@ -433,11 +392,6 @@ async fn replay_case(
             .await
             .map_err(|reason| {
                 TestCaseError::fail(format!("model agreement at step {step}: {reason}"))
-            })?;
-        assert_usage_conservation(handles.runtime.as_ref(), &model)
-            .await
-            .map_err(|reason| {
-                TestCaseError::fail(format!("usage conservation at step {step}: {reason}"))
             })?;
         assert_attachment_conservation(&handles, &mut model)
             .await
@@ -606,10 +560,6 @@ async fn apply_operation(
                 }
             }
         }
-        RecordUsage { slot, value } => record_usage(model, shape, *slot, *value)?,
-        StageUsage { replay_last_commit } => stage_usage(model, shape, seed, *replay_last_commit)?,
-        ConfirmUsage { selection } => confirm_usage(model, shape, *selection)?,
-        ReplayUsageReceipt => replay_usage_receipt(store, model, shape).await?,
         attachment_operation @ (CommitWithAttachmentRefs { .. }
         | PutAttachmentWrite { .. }
         | ReplayAttachmentCommit { .. }
@@ -755,6 +705,11 @@ async fn admit_work(
         let AdmittedHead::Batch(head_id) = &head else {
             return Ok(());
         };
+        // With no live fence (the worker just crashed) nothing was asked to
+        // admit, so nothing can have been refused.
+        if model.current_fence.is_none() {
+            return Ok(());
+        }
         let head_seq = open
             .iter()
             .find(|batch| batch.batch_id == *head_id)
@@ -1000,48 +955,16 @@ async fn commit_operation(
             settlement.completed_inputs.push(inputs.completion());
         }
     }
-    let mut staged_usage = model.staged_usage.take();
-    let mut staged_usage_operation = model.staged_usage_operation.take();
-    let staged_replays_last_commit = match (
-        staged_usage_operation.as_ref(),
-        model.last_usage_commit.as_ref(),
-    ) {
-        (Some(staged), Some(last)) => {
-            staged.storage_key().map_err(|error| error.to_string())?
-                == last
-                    .turn_commit
-                    .operation
-                    .storage_key()
-                    .map_err(|error| error.to_string())?
-        }
-        _ => false,
-    };
-    if staged_replays_last_commit {
-        model.staged_usage = staged_usage.take();
-        model.staged_usage_operation = staged_usage_operation.take();
-    }
-    let submitted_usage = staged_usage
-        .as_ref()
-        .map(|staged| staged.deltas().to_vec())
-        .unwrap_or_default();
-    let operation = if let Some(operation) = staged_usage_operation.clone() {
-        operation
-    } else {
-        model.operation_sequence += 1;
-        crate::OperationId::new(
-            crate::ExecutionScope::runtime_operation(format!(
-                "runtime-persistence-property:{seed}:{}",
-                model.operation_sequence
-            )),
-            "commit",
-        )
-    };
-    let (mut commit, _) = RuntimeCommit::persisted_state_with_operation_and_staged_usage(
-        &mut state,
-        &submitted_usage,
-        operation,
-    )
-    .map_err(|error| error.to_string())?;
+    model.operation_sequence += 1;
+    let operation = crate::OperationId::new(
+        crate::ExecutionScope::runtime_operation(format!(
+            "runtime-persistence-property:{seed}:{}",
+            model.operation_sequence
+        )),
+        "commit",
+    );
+    let (mut commit, _) = RuntimeCommit::persisted_state_with_operation(&mut state, operation)
+        .map_err(|error| error.to_string())?;
     if stale_head {
         commit.expected_head_revision = model
             .head_revision
@@ -1074,11 +997,8 @@ async fn commit_operation(
     }
     let owned_by_root = commit.drive_fence.is_none() && model.has_session && model.root.is_some();
     let before = session_snapshot(store).await?;
-    let committed_envelope = commit.clone();
     let result = store.commit_runtime_state(commit).await;
     if stale_head {
-        model.staged_usage = staged_usage;
-        model.staged_usage_operation = staged_usage_operation;
         if !matches!(result, Err(StoreError::HeadRevisionConflict { .. })) {
             return Err(format!(
                 "stale expected head was not rejected by HeadRevisionConflict: {result:?}"
@@ -1089,8 +1009,6 @@ async fn commit_operation(
         return Ok(());
     }
     if owned_by_root {
-        model.staged_usage = staged_usage;
-        model.staged_usage_operation = staged_usage_operation;
         if !matches!(result, Err(StoreError::SessionHeadOwned { .. })) {
             return Err(format!(
                 "a commit outside the drive was not refused while a root is bound: {result:?}"
@@ -1109,20 +1027,6 @@ async fn commit_operation(
     }
     if result.turn_input_applications != expected_applications {
         return Err("commit returned different turn-input applications".to_string());
-    }
-    register_committed_usage(
-        model,
-        &submitted_usage,
-        &result.committed_usage_delta_identities,
-    )?;
-    if let Some(staged) = staged_usage {
-        model
-            .pending_usage_confirmations
-            .push(PendingUsageConfirmation {
-                staged,
-                identities: result.committed_usage_delta_identities.clone(),
-            });
-        model.last_usage_commit = Some(committed_envelope);
     }
     model.head_revision = result.head_revision;
     model.has_session = true;
@@ -1353,7 +1257,7 @@ fn fresh_commit(
 ) -> Result<RuntimeCommit, String> {
     let state = modeled_state(model);
     model.operation_sequence += 1;
-    RuntimeCommit::persisted_state_for_test(&state, &[])
+    RuntimeCommit::persisted_state_for_test(&state)
         .with_operation(crate::OperationId::new(
             crate::ExecutionScope::runtime_operation(format!(
                 "runtime-persistence-property:{seed}:{label}:{}",
@@ -1669,7 +1573,6 @@ async fn session_snapshot(store: &dyn RuntimeStore) -> Result<serde_json::Value,
             "graph": loaded.window,
             "checkpoint_ref": loaded.checkpoint_ref,
             "checkpoint": checkpoint,
-            "usage": loaded.usage,
         })
     });
     Ok(serde_json::json!({

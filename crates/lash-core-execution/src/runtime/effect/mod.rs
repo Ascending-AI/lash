@@ -40,7 +40,6 @@ pub use recorded_stream::{
 mod tool_settlement;
 pub use tool_settlement::{
     TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_SETTLEMENT_VERSION, ToolAttemptCapture, ToolSettlement,
-    ToolUsageDelta, ToolUsageLedger,
 };
 mod drive_outcome;
 mod outcome;
@@ -88,7 +87,9 @@ pub use validation::{
     validate_replayed_effect_envelope,
 };
 
-pub use executor::{AdmittedProcess, EffectControllerTaskRequest, ProcessRunner, ServedOnly};
+pub use executor::{
+    AdmittedProcess, DirectUsage, EffectControllerTaskRequest, ProcessRunner, ServedOnly,
+};
 pub use executor::{
     EffectControllerTaskRequests, EffectTaskController, drive_effect_controller_task,
     effect_groups_unsupported,

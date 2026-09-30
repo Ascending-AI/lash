@@ -561,10 +561,7 @@ pub async fn a_root_commit_racing_a_close_is_refused_stale_fence(
         .derive_node_ids(&id, &operation)
         .expect("derive node ids");
     let mut commit = crate::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        &state,
-        graph,
-        &[],
-        operation,
+        &state, graph, operation,
     )
     .expect("build racing commit");
     commit.drive_fence = Some(Box::new(fence));

@@ -205,7 +205,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
             attempt_count: 1,
         },
     };
-    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     commit.failure_evidence = vec![failure_evidence.clone()];
     writer
         .commit_runtime_state(commit)
@@ -535,7 +535,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
     };
     state.ensure_agent_frame_initialized();
     stale
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("seed a checkpoint on the handle that will go stale");
     stale
@@ -629,7 +629,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
     );
 
     let error = stale
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect_err("a stale handle must not resurrect a deleted session");
     assert!(
@@ -676,7 +676,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
     assert_session_id_was_used_and_deleted(recreate_error, &request.session_id);
 
     let stale_error = stale
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect_err("the pre-delete handle must remain fenced after refused recreation");
     assert!(
@@ -899,21 +899,10 @@ async fn session_store_factory_rejects_writes_after_delete(
     state.ensure_agent_frame_initialized();
     assert_deleted_write(
         stale
-            .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
-                &state,
-                &[crate::TokenLedgerEntry {
-                    source: "write-after-delete".to_string(),
-                    model: "write-after-delete-model".to_string(),
-                    usage: crate::TokenUsage {
-                        input_tokens: 1,
-                        ..Default::default()
-                    },
-                    usage_disposition: Default::default(),
-                }],
-            ))
+            .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
             .await,
         &request.session_id,
-        "usage-bearing runtime commit",
+        "runtime commit",
     );
 
     factory
@@ -1250,10 +1239,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     };
     first_state.ensure_agent_frame_initialized();
     first
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
-            &first_state,
-            &[],
-        ))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&first_state))
         .await
         .expect("commit graph parent owner frame");
     let foreign_parent = first_state
@@ -1268,7 +1254,6 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     let second_result = second
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &second_state,
-            &[],
         ))
         .await
         .expect("commit intruder's own frame");
@@ -1300,7 +1285,6 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     let commit = crate::RuntimeCommit::persisted_state_with_graph_commit(
         &state,
         crate::GraphAppend::Extend { nodes: vec![child] },
-        &[],
     );
     let child_node_id = commit.graph.nodes()[0].node_id.clone();
     let error = second
@@ -1362,18 +1346,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .clone()
         .expect("source root leaf");
     let first = source
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
-            &state,
-            &[crate::TokenLedgerEntry {
-                source: "source-only".to_string(),
-                model: "fork-model".to_string(),
-                usage: crate::TokenUsage {
-                    input_tokens: 7,
-                    ..Default::default()
-                },
-                usage_disposition: Default::default(),
-            }],
-        ))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit fork root");
     state.apply_persisted_commit_result(first);
@@ -1545,10 +1518,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         Some(&[0xFA, 0xCE][..]),
         "fork inherits the retained continuation checkpoint"
     );
-    assert!(
-        branch_read.usage.rows.is_empty(),
-        "usage is execution-scoped and must not cross a fork"
-    );
     let mut branch_state =
         crate::conformance::helpers::load_window_state(branch.store(), branch.session_id())
             .await
@@ -1674,7 +1643,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     )
     .expect("delete-session fixture graph is valid");
     created
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit graph chain before delete");
     created

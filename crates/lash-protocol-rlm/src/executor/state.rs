@@ -424,7 +424,7 @@ pub(super) fn measure_snapshot(
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state);
     commit.checkpoint.components.insert(
         "execution_state".to_string(),
         lash_core::HydratedCheckpointComponent::changed(

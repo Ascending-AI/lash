@@ -42,13 +42,9 @@ fn commit_as(
     graph
         .derive_node_ids(&state.session_id, &operation)
         .expect("derive commit node ids");
-    let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        state,
-        graph,
-        &[],
-        operation,
-    )
-    .expect("build the commit");
+    let mut commit =
+        RuntimeCommit::persisted_state_with_graph_commit_and_operation(state, graph, operation)
+            .expect("build the commit");
     commit.pending_follow_on = pending_follow_on;
     commit
 }

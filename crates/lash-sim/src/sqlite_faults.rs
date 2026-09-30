@@ -961,7 +961,7 @@ fn stamped_commit(
     state: &RuntimeSessionState,
     operation_suffix: &str,
 ) -> Result<RuntimeCommit, ScenarioFailure> {
-    RuntimeCommit::persisted_state_for_test(state, &[])
+    RuntimeCommit::persisted_state_for_test(state)
         .with_operation(OperationId::turn(
             &state.session_id,
             format!("{}-fault-{operation_suffix}", backend.name()),

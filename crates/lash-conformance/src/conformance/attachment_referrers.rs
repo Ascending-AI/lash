@@ -321,7 +321,7 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
     // A later turn retains its own output, and its commit names it.
     let committed_text = "committed turn output\n".repeat(500);
     let committed = retain(committed_text.clone(), "committed-turn").await;
-    let commit = RuntimeCommit::persisted_state_for_test(&state(SESSION), &[])
+    let commit = RuntimeCommit::persisted_state_for_test(&state(SESSION))
         .with_committed_attachments([committed.reference.id.clone()]);
     store.commit_runtime_state(commit).await.unwrap();
 
@@ -377,7 +377,7 @@ pub async fn commit_and_enqueue_acquire_session_edges_all_or_nothing(h: Attachme
         .unwrap();
     let absent = AttachmentId::parse("atomic-z-absent").unwrap();
     let current = state("receiver");
-    let commit = RuntimeCommit::persisted_state_for_test(&current, &[])
+    let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([id.clone(), absent.clone()]);
     assert!(matches!(
         receiver.commit_runtime_state(commit).await,
@@ -400,8 +400,8 @@ pub async fn commit_and_enqueue_acquire_session_edges_all_or_nothing(h: Attachme
             .unwrap()
             .contains(&session_referrer)
     );
-    let commit = RuntimeCommit::persisted_state_for_test(&current, &[])
-        .with_committed_attachments([id.clone()]);
+    let commit =
+        RuntimeCommit::persisted_state_for_test(&current).with_committed_attachments([id.clone()]);
     receiver.commit_runtime_state(commit).await.unwrap();
     assert!(
         receiver
@@ -503,7 +503,7 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
             }),
         )]),
     });
-    let commit = RuntimeCommit::persisted_state_for_test(&current, &[])
+    let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([reference.id.clone()]);
     let receipt = store.commit_runtime_state(commit).await.unwrap();
     let leaf = receipt.committed_leaf_node_id.unwrap();
@@ -591,7 +591,7 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
             }),
         )]),
     });
-    let commit = RuntimeCommit::persisted_state_for_test(&current, &[])
+    let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([reference.id.clone()]);
     let receipt = store.commit_runtime_state(commit).await.unwrap();
     let node = receipt.committed_leaf_node_id.unwrap();

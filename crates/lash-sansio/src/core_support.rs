@@ -81,6 +81,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-tool-schema-cache/v2",
     "lash-turn-input/v2",
     "lash-usage-ledger-request/v1",
+    "lash-usage-fact-payload/v4",
     "lash-workflow-edge/v2",
     "lash-workflow-node/v2",
     "lash-workflow-node/v3",
@@ -416,6 +417,11 @@ mod blake3_domain_tests {
         "lash-runtime-effect-envelope/v2",
         "lash-runtime-usage-payload/v2",
         "lash-runtime-usage-payload/v3",
+        // FIG-4236: usage is engine-owned accounting; the runtime-commit usage
+        // payload and the usage-ledger boundary request are deleted, and their
+        // tags stay reserved.
+        "lash-runtime-usage-payload/v4",
+        "lash-usage-ledger-request/v1",
         "lash-tool-intent-payload/v2",
         "lash-lashlang-execution-site/v2",
         // FIG-3863: the process lease format is deleted, but its hash tag

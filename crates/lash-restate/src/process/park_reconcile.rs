@@ -270,7 +270,20 @@ pub(crate) async fn end_lost_process_runs(
         )
         .await
         {
-            Ok(Some(process_id)) => pass.ended.push(process_id),
+            Ok(Some(process_id)) => {
+                // The lost segment's open usage runs can never settle
+                // (ADR 0125).
+                if let Err(error) = crate::session_control::recovery_request(
+                    deadline,
+                    crate::usage_accounting::retire_process_usage(ingress, namespace, &process_id),
+                )
+                .await
+                {
+                    pass.failed
+                        .push((run.id.clone(), format!("retire process usage: {error}")));
+                }
+                pass.ended.push(process_id)
+            }
             Ok(None) => pass.unchanged += 1,
             Err(error) => pass.failed.push((run.id.clone(), error.to_string())),
         }

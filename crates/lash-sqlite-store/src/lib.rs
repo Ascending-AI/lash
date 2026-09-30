@@ -206,8 +206,6 @@ pub struct SqliteStore {
     readers: Vec<SqliteConnection>,
     next_reader: AtomicU64,
     decoded_graph_node_bodies: Arc<AtomicU64>,
-    decoded_usage_rows: Arc<AtomicU64>,
-    decoded_usage_holes: Arc<AtomicU64>,
     decoded_turn_receipt_bodies: Arc<AtomicU64>,
     clock: Arc<dyn lash_core_execution::Clock>,
     artifact_publication_pause: Mutex<Option<lash_core_execution::ArtifactPublicationPause>>,
@@ -610,3 +608,5 @@ mod read_failure_tests;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+mod usage_accounting;

@@ -607,9 +607,6 @@ pub struct SessionSnapshot {
     /// a snapshot does not write this field; the resident component set wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_state_ref: Option<crate::store::BlobRef>,
-    /// The session's usage totals (ADR 0112 §8).
-    #[serde(default)]
-    pub usage: crate::SessionUsageTotals,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_ref: Option<crate::store::BlobRef>,
 }
@@ -631,7 +628,6 @@ impl SessionSnapshot {
             plugin_state_ref: None,
             plugin_state_generations: Default::default(),
             execution_state_ref: None,
-            usage: crate::SessionUsageTotals::default(),
             checkpoint_ref: None,
         }
     }

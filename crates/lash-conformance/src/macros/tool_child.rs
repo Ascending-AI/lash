@@ -481,7 +481,7 @@ macro_rules! tool_child_invocation_tests {
                 "tool-child-deferred-commit-point"
             ),
             (
-                group_accounting_conserves_each_incorporated_rank,
+                group_incorporation_replays_exactly_the_recorded_ranks,
                 "tool-child-group-prefix-incorporation"
             ),
             (

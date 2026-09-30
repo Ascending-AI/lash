@@ -56,7 +56,7 @@ use lash_core_execution::{
     ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
     ProcessStartOutcome, ProcessStarted, SessionCommitStore, SessionListFilter, SessionMeta,
     SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest, SessionView, StoreError,
-    StoreMaintenance, TokenLedgerEntry, VacuumReport, facade_support::ProcessStartPlan,
+    StoreMaintenance, VacuumReport, facade_support::ProcessStartPlan,
     facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
     facade_support::registry_transitions,
 };
@@ -687,10 +687,6 @@ pub struct PostgresStore {
     #[cfg(any(test, feature = "testing"))]
     decoded_graph_node_bodies: Arc<std::sync::atomic::AtomicU64>,
     #[cfg(any(test, feature = "testing"))]
-    decoded_usage_rows: Arc<std::sync::atomic::AtomicU64>,
-    #[cfg(any(test, feature = "testing"))]
-    decoded_usage_holes: Arc<std::sync::atomic::AtomicU64>,
-    #[cfg(any(test, feature = "testing"))]
     decoded_turn_receipts: Arc<std::sync::atomic::AtomicU64>,
     #[cfg(test)]
     checkpoint_probe_count: Arc<std::sync::atomic::AtomicUsize>,
@@ -1306,10 +1302,6 @@ impl PostgresStorage {
             #[cfg(any(test, feature = "testing"))]
             decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(any(test, feature = "testing"))]
-            decoded_usage_rows: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
-            decoded_usage_holes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
             decoded_turn_receipts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(test)]
             checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -1652,3 +1644,6 @@ mod acquire_timeout_tests {
         );
     }
 }
+
+#[path = "postgres/usage_accounting.rs"]
+mod usage_accounting;

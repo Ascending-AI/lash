@@ -331,7 +331,7 @@ pub(super) async fn run_once_trace_jsonl(
         let phase_probe = Arc::new(RuntimePerfPhaseProbe::default());
         runtime.set_turn_phase_probe(phase_probe.clone()).await;
 
-        let before_turn_usage = runtime.usage_report();
+        let before_turn_usage = runtime.settled_usage_report().await?;
         run.turn_then(
             turn_index,
             async {
@@ -379,25 +379,22 @@ pub(super) async fn run_once_trace_jsonl(
                 })
             },
             |_, _, tail| {
-                let cumulative_usage = runtime.usage_report();
-                let usage_delta_entries = lash_core::facade_support::diff_usage_reports(
-                    &before_turn_usage,
-                    &cumulative_usage,
-                )
-                .map_err(anyhow::Error::msg)?;
                 tail.phase_profile = phase_probe.take_completed();
-                tail.usage_delta = SessionUsageReport::from_entries(&usage_delta_entries);
-                tail.cumulative_usage = cumulative_usage;
                 Ok(())
             },
         )
         .await?;
+        let cumulative_usage = runtime.settled_usage_report().await?;
+        let usage_delta =
+            lash_core::facade_support::diff_usage_reports(&before_turn_usage, &cumulative_usage)
+                .map_err(anyhow::Error::msg)?;
+        run.record_last_turn_usage(usage_delta, cumulative_usage);
     }
 
     let (state, cumulative_usage) = run
         .export(async {
             let state = runtime.export_state().await;
-            let cumulative_usage = runtime.usage_report();
+            let cumulative_usage = runtime.settled_usage_report().await?;
             Ok((state, cumulative_usage))
         })
         .await?;

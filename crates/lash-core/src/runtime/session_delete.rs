@@ -99,6 +99,11 @@ pub struct SessionDeleteReport {
 /// idempotent and the next attempt starts over.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionDeleteFailure {
+    /// The effect host did not drain the session's usage accounting: its
+    /// settlements are not all delivered yet, or its owner is not retired
+    /// (ADR 0125). Nothing of the session was deleted; the relay retries.
+    #[error("usage accounting: {message}")]
+    UsageAccounting { message: String },
     /// The process registry did not delete the session's process state.
     #[error("process state: {source}")]
     Process { source: Box<crate::PluginError> },
@@ -123,6 +128,8 @@ impl SessionDeleteFailure {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::Process { source } | Self::Triggers { source } => source.is_retryable(),
+            // An undelivered drain is delivery still in flight.
+            Self::UsageAccounting { .. } => true,
             Self::Waits { source } | Self::Journal { source } => source.is_retryable(),
             Self::Storage(_) => false,
         }
@@ -132,6 +139,7 @@ impl SessionDeleteFailure {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::Process { source } | Self::Triggers { source } => source.is_terminal(),
+            Self::UsageAccounting { .. } => false,
             Self::Waits { source } | Self::Journal { source } => source.is_terminal(),
             Self::Storage(_) => false,
         }
@@ -312,6 +320,12 @@ pub async fn delete_session(
 /// Every step is idempotent; the storage delete, which removes the row the
 /// session's delete obligation lives on, is last.
 ///
+/// Usage accounting drains first (ADR 0125): the close already killed the
+/// session's turn executions, so the drain reaches the owner's continuation
+/// after every settlement they sent, and retires the owner so a still-running
+/// group child is refused before it dispatches. The facts outlive the delete
+/// until retention reclaims them.
+///
 /// # Errors
 ///
 /// The first step that failed; the steps before it stand.
@@ -319,6 +333,13 @@ pub async fn physically_delete(
     administration: &SessionAdministration,
     session_id: &SessionId,
 ) -> Result<SessionDeleteReport, SessionDeleteFailure> {
+    administration
+        .effect_host()
+        .drain_usage_accounting(&crate::RuntimeOwner::Session(session_id.clone()))
+        .await
+        .map_err(|error| SessionDeleteFailure::UsageAccounting {
+            message: error.to_string(),
+        })?;
     let process = match administration.process() {
         Some(process) => Some(
             process

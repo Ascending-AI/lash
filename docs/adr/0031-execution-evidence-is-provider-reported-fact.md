@@ -50,3 +50,13 @@ zero-filling missing usage are rejected because they manufacture facts.
 - [Evidence and attempt usage types](../../crates/lash-sansio/src/llm/types.rs).
 - [Usage ledger and correction folding](../../crates/lash-core-store/src/usage.rs).
 - [Host-invoked reconciliation](../../crates/lash-core/src/runtime/session_api.rs) and [OpenRouter accounting lookup](../../crates/lash-provider-openai/src/openrouter.rs).
+
+## Model usage accounting
+
+The ledger identity is effect-keyed:
+`(owner, effect, call_ordinal, provider_attempt, kind)`. `LlmCallId` is not
+unique per session (every session direct call is `"{session}:direct"`), so
+it rides on the fact as attribution only. An unreported attempt keeps this
+ADR's typed meaning and is an `unreported` fact; `UnreportedByProvider`
+records nothing. A correction is its own fact kind, appended by
+`append_usage_corrections` ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).

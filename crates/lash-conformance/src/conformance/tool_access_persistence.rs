@@ -90,7 +90,7 @@ pub async fn session_tool_access_durable_recovery(
         state.authority.tool_access.clone(),
         "restricted-empty-before-recovery",
     );
-    open.commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+    open.commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit restricted-empty authority");
     drop(open);

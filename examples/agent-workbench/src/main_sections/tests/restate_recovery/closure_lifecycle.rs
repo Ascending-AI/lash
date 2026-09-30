@@ -116,7 +116,7 @@ async fn consume_closure_by_commit(
             lash::TurnBudget::Unbounded,
         ))
     };
-    let mut commit = lash::persistence::RuntimeCommit::persisted_state_for_test(&state, &[])
+    let mut commit = lash::persistence::RuntimeCommit::persisted_state_for_test(&state)
         .deferring_interrupted_turn_inputs(
             authorization.turn_id().clone(),
             settlement.effective_cancellation().cloned(),
@@ -183,6 +183,21 @@ impl lash::runtime::AwaitEventResolver for RestateParticipantCrashHost {
 
 #[async_trait::async_trait]
 impl lash::durability::EffectHost for RestateParticipantCrashHost {
+    async fn drain_usage_accounting(
+        &self,
+        owner: &lash_core_execution::RuntimeOwner,
+    ) -> Result<lash_core_execution::UsageOwnerRetired, lash::runtime::RuntimeError> {
+        self.inner.drain_usage_accounting(owner).await
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        owner: &lash_core_execution::RuntimeOwner,
+        scope: &lash_core_execution::ExecutionScope,
+    ) -> Result<u64, lash::runtime::RuntimeError> {
+        self.inner.retire_usage_execution(owner, scope).await
+    }
+
     async fn journal_replay(
         &self,
         journal: &lash::durability::EffectJournalIdentity,

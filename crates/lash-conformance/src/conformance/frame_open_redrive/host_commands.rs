@@ -794,11 +794,12 @@ pub async fn terminal_callback_append_does_not_deadlock(
 
 /// A park is recoverable (FIG-4202). While a root holds its pressure
 /// summary, a clean host runtime parks without writing anything, and one
-/// holding pending usage is refused busy, naming the bound root as the
-/// head's owner, with nothing written: the refusal hands its runtime back
-/// with its pending usage. Once the bound turn's boundary passed, the same
-/// runtime parks, and its usage stands beside everything the bound turn
-/// committed.
+/// holding a pending note is refused busy, naming the bound root as the
+/// head's owner, with nothing written: the refusal hands its runtime back.
+/// Once the bound turn's boundary passed, the same runtime parks, and
+/// everything the bound turn committed stands. A host runtime holds no
+/// pending model usage to lose: the engine delivers each call's usage on
+/// its own (ADR 0125).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -809,8 +810,7 @@ pub async fn dirty_park_while_busy_is_recoverable_and_loses_nothing(
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    const USAGE_SOURCE: &str = "host-side-call";
-    const USAGE_MODEL: &str = "dirty-park-model";
+    const PENDING_NOTE: &str = "the refused park's pending note";
     let probe = HostPluginProbe::default();
     let (law, model, hold) = bound_turn_session(
         prefix,
@@ -821,21 +821,6 @@ pub async fn dirty_park_while_busy_is_recoverable_and_loses_nothing(
         &probe,
     )
     .await;
-    let usage = crate::TokenUsage {
-        input_tokens: 17,
-        output_tokens: 5,
-        ..crate::TokenUsage::default()
-    };
-    let host_usage = |store: Arc<dyn crate::RuntimeStore>, session_id: crate::SessionId| async move {
-        crate::conformance::helpers::load_usage_ledger(store.as_ref(), &session_id)
-            .await
-            .expect("read the usage ledger")
-            .into_iter()
-            .filter(|entry| entry.source == USAGE_SOURCE && entry.model == USAGE_MODEL)
-            .map(|entry| entry.usage)
-            .collect::<Vec<_>>()
-    };
-
     let refused_runtime = std::sync::OnceLock::new();
     let while_held = hold.while_held(async {
         let before = law.head().await.head_revision;
@@ -849,8 +834,20 @@ pub async fn dirty_park_while_busy_is_recoverable_and_loses_nothing(
             "a clean park writes nothing"
         );
 
-        let dirty = build_runtime(&law.parts, None).await;
-        dirty.record_pending_usage_for_test(USAGE_SOURCE, USAGE_MODEL, &usage);
+        let mut dirty = build_runtime(&law.parts, None).await;
+        dirty.edit_resident_state_for_test(|state| {
+            state.append_active_conversation_messages(&[crate::Message {
+                id: "dirty-park-pending-note".to_string(),
+                role: crate::MessageRole::Assistant,
+                parts: vec![crate::Part::text(
+                    "dirty-park-pending-note.p0".to_string(),
+                    PENDING_NOTE.to_string(),
+                    None,
+                )]
+                .into(),
+                origin: None,
+            }]);
+        });
         let Err(refused) = Box::pin(dirty.park()).await else {
             panic!("a dirty park while the bound turn owns the head is busy");
         };
@@ -873,12 +870,6 @@ pub async fn dirty_park_while_busy_is_recoverable_and_loses_nothing(
             "the refused park wrote nothing"
         );
         assert!(
-            host_usage(Arc::clone(&law.store), law.session_id.clone())
-                .await
-                .is_empty(),
-            "the refused park wrote no usage"
-        );
-        assert!(
             refused_runtime.set(refused.runtime).is_ok(),
             "one refused park"
         );
@@ -899,11 +890,6 @@ pub async fn dirty_park_while_busy_is_recoverable_and_loses_nothing(
 
     let path = active_path(&law.head().await.graph);
     position_of_once(&path, "answer 2");
-    assert_eq!(
-        host_usage(Arc::clone(&law.store), law.session_id.clone()).await,
-        vec![usage],
-        "the usage the refused runtime held stands, once"
-    );
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);
 }
 

@@ -1052,6 +1052,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for DeliveryAdmi
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::AdmitTriggerDelivery { .. } = &envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(
@@ -1083,6 +1084,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for BoundDeliver
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::AdmitTriggerDelivery { .. } = &envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(

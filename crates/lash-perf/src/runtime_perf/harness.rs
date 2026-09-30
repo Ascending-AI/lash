@@ -216,15 +216,30 @@ impl BenchmarkRuntime {
         restate
     }
 
+    /// The session's settled usage report. Accounting delivery is eventual
+    /// (ADR 0125), so this waits, bounded, until no run is still open.
     #[expect(
         clippy::expect_used,
         reason = "the benchmark session is taken by set_up before any measurement can read it; the accessor is the panicking half of the Option field"
     )]
-    pub(crate) fn usage_report(&self) -> lash::usage::SessionUsageReport {
-        self.session
-            .as_ref()
-            .expect("benchmark session")
-            .usage_report()
+    pub(crate) async fn settled_usage_report(
+        &self,
+    ) -> anyhow::Result<lash::usage::SessionUsageReport> {
+        let session = self.session.as_ref().expect("benchmark session");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let usage = session.usage().await?;
+            if usage.completeness.is_settled() {
+                return Ok(usage.report());
+            }
+            if std::time::Instant::now() >= deadline {
+                anyhow::bail!(
+                    "benchmark usage still has {} open runs after 10s",
+                    usage.completeness.open_runs
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
     }
 
     #[expect(

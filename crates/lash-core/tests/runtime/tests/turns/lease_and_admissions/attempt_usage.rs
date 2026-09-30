@@ -1,4 +1,4 @@
-//! Per-attempt usage ledgering tests, extracted from `lease_and_admissions.rs` —
+//! Per-attempt usage accounting tests, extracted from `lease_and_admissions.rs` —
 //! the parent sits on the 2500-line test budget
 //! `scripts/check-production-file-size.py` enforces. A real module rather
 //! than an `include!`, so `cargo fmt` keeps walking it.
@@ -7,7 +7,7 @@ use super::*;
 use lash_core::testing::TestTurnDrive as _;
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
+pub(super) async fn failed_attempt_partial_usage_is_a_fact() {
     let double = kernel_double(0xa771, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -75,7 +75,7 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
             }
         })
         .build();
-    // The SQLite store itself, so the test reads its raw usage journal.
+    // The store the runtime commits through.
     let store = double
         .stores()
         .open_store()
@@ -105,25 +105,10 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
     assert_eq!(assembled.assistant_output.safe_text, "success");
 
     // The failed attempt's billed usage and the successful retry's usage are
-    // two facts: the durable journal holds one delta each, and the report
-    // sums both.
-    let deltas = lash_core::store::SessionHistoryStore::load_usage_ledger_page(
-        store.as_ref(),
-        &SessionId::from("root"),
-        None,
-        std::num::NonZeroU32::new(100).expect("a nonzero page"),
-    )
-    .await
-    .expect("load the durable usage journal")
-    .rows
-    .into_iter()
-    .map(|row| row.entry)
-    .collect::<Vec<_>>();
-    assert_eq!(
-        deltas.len(),
-        2,
-        "one delta per reported attempt: {deltas:?}"
-    );
+    // two facts of the owner's accounting, and the report sums both.
+    let report = settled_runtime_usage(&runtime).await.report();
+    let deltas = root_usage_facts(&runtime).await;
+    assert_eq!(deltas.len(), 2, "one fact per reported attempt: {deltas:?}");
     assert_eq!(
         deltas
             .iter()
@@ -138,13 +123,12 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
             .sum::<i64>(),
         7
     );
-    let report = runtime.usage_report();
     assert_eq!(report.usage.usage.input_tokens, 31);
     assert_eq!(report.usage.usage.output_tokens, 7);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
+pub(super) async fn all_attempts_failed_partial_usage_are_facts() {
     let double = kernel_double(0xa772, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -192,7 +176,7 @@ pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
             }
         })
         .build();
-    // The SQLite store itself, so the test reads its raw usage journal.
+    // The store the runtime commits through.
     let store = double
         .stores()
         .open_store()
@@ -229,25 +213,11 @@ pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
     assert_eq!(assembled.llm_calls.len(), 1);
     assert_eq!(assembled.llm_calls[0].attempts.len(), 2);
 
-    // No response was ever counted into the turn's cumulative usage, so each
-    // failed attempt's reported partial usage lands as its own delta.
-    let deltas = lash_core::store::SessionHistoryStore::load_usage_ledger_page(
-        store.as_ref(),
-        &SessionId::from("root"),
-        None,
-        std::num::NonZeroU32::new(100).expect("a nonzero page"),
-    )
-    .await
-    .expect("load the durable usage journal")
-    .rows
-    .into_iter()
-    .map(|row| row.entry)
-    .collect::<Vec<_>>();
-    assert_eq!(
-        deltas.len(),
-        2,
-        "one delta per reported attempt: {deltas:?}"
-    );
+    // No response was ever counted into the turn's cumulative usage, and
+    // each failed attempt's reported partial usage is its own fact.
+    let report = settled_runtime_usage(&runtime).await.report();
+    let deltas = root_usage_facts(&runtime).await;
+    assert_eq!(deltas.len(), 2, "one fact per reported attempt: {deltas:?}");
     assert_eq!(
         deltas
             .iter()
@@ -255,7 +225,24 @@ pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
             .sum::<i64>(),
         21
     );
-    let report = runtime.usage_report();
     assert_eq!(report.usage.usage.input_tokens, 21);
     assert_eq!(report.usage.usage.output_tokens, 4);
+}
+
+/// The root session's reported usage facts, once delivery has settled.
+async fn root_usage_facts(runtime: &LashRuntime) -> Vec<lash_core::UsageFactRecord> {
+    settled_runtime_usage(runtime).await;
+    runtime
+        .host
+        .core
+        .usage_accounting()
+        .store
+        .load_usage_fact_page(
+            &lash_core::RuntimeOwner::Session(SessionId::from("root")),
+            None,
+            std::num::NonZeroU32::new(100).expect("a nonzero page"),
+        )
+        .await
+        .expect("load the owner's usage facts")
+        .facts
 }

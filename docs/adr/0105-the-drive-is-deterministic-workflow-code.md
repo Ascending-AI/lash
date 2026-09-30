@@ -440,3 +440,9 @@ Controller adapters own journal validation and durable wait races, while core
 owns commit and terminal evidence. The contract applies to drivers and engines;
 opaque tool bodies are recorded execution. Changes under the pre-1.0 freeze
 carry no cross-build compatibility guarantee.
+
+## Model usage accounting
+
+The fenced commit (§9) carries no usage and stages none. Usage is
+engine-owned accounting that never reads the head or the drive fence
+([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).

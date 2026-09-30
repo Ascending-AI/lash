@@ -152,7 +152,7 @@ pub enum StoreError {
     )]
     CommitNodeBudgetExceeded { node_count: usize, max_nodes: usize },
     #[error(
-        "runtime commit carries {total_bytes} budgeted payload bytes, exceeding the {max_bytes}-byte transaction budget (session config: {session_config_bytes}, graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_referrer_bytes}, pending follow-on: {follow_on_bytes}, agent frame: {agent_frame_bytes}, usage deltas: {usage_delta_bytes}, durable turn result: {turn_result_bytes})"
+        "runtime commit carries {total_bytes} budgeted payload bytes, exceeding the {max_bytes}-byte transaction budget (session config: {session_config_bytes}, graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_referrer_bytes}, pending follow-on: {follow_on_bytes}, agent frame: {agent_frame_bytes}, durable turn result: {turn_result_bytes})"
     )]
     CommitByteBudgetExceeded {
         session_config_bytes: usize,
@@ -161,7 +161,6 @@ pub enum StoreError {
         attachment_referrer_bytes: usize,
         follow_on_bytes: usize,
         agent_frame_bytes: usize,
-        usage_delta_bytes: usize,
         turn_result_bytes: usize,
         total_bytes: usize,
         max_bytes: usize,
@@ -630,13 +629,6 @@ pub enum StoreError {
         kind: &'static str,
         source_key: String,
     },
-    #[error(
-        "store confirmed {confirmed_count} usage identities, but only {staged_count} were staged"
-    )]
-    UnstagedUsageConfirmation {
-        confirmed_count: usize,
-        staged_count: usize,
-    },
     #[error("monotonic counter `{counter}` cannot advance past {current}")]
     MonotonicCounterOverflow { counter: &'static str, current: u64 },
     #[error(
@@ -959,7 +951,6 @@ impl StoreError {
             | Self::DriveEpochUnavailable { .. }
             | Self::DriveFenceSessionMismatch { .. }
             | Self::IngressReservedSourceKey { .. }
-            | Self::UnstagedUsageConfirmation { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::PendingTurnInputSourceKeyConflict { .. }
             | Self::PendingTurnInputIdConflict { .. }
@@ -1076,7 +1067,6 @@ impl StoreError {
             Self::DriveEpochUnavailable { .. } => "DriveEpochUnavailable",
             Self::DriveFenceSessionMismatch { .. } => "DriveFenceSessionMismatch",
             Self::IngressReservedSourceKey { .. } => "IngressReservedSourceKey",
-            Self::UnstagedUsageConfirmation { .. } => "UnstagedUsageConfirmation",
             Self::MonotonicCounterOverflow { .. } => "MonotonicCounterOverflow",
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
             Self::PendingTurnInputIdConflict { .. } => "PendingTurnInputIdConflict",

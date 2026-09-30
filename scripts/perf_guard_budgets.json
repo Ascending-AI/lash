@@ -2683,15 +2683,11 @@
               "budget_ms": 1.37,
               "required": true
             },
-            "store_hardening.identity.usage_delta": {
-              "budget_ms": 5.667,
-              "required": true
-            },
             "store_hardening.memory.append_receipt_replay": {
               "budget_ms": 19.322,
               "required": true
             },
-            "store_hardening.memory.append_receipt_usage_fresh": {
+            "store_hardening.memory.append_receipt_fresh": {
               "budget_ms": 28.751,
               "required": true
             },
@@ -2739,7 +2735,7 @@
               "budget_ms": 152.308,
               "required": true
             },
-            "store_hardening.postgres.append_receipt_usage_fresh": {
+            "store_hardening.postgres.append_receipt_fresh": {
               "budget_ms": 513.112,
               "required": true
             },
@@ -2795,7 +2791,7 @@
               "budget_ms": 57.313,
               "required": true
             },
-            "store_hardening.sqlite.append_receipt_usage_fresh": {
+            "store_hardening.sqlite.append_receipt_fresh": {
               "budget_ms": 70.801,
               "required": true
             },

@@ -405,3 +405,11 @@ checks terminal publication. `crates/lash/src/tests/obligation_relays.rs`
 checks core relay assembly. The session-delete finalizer is covered by
 `crates/lash/src/tests/core_session_builder/session_delete_finalizer.rs` and
 `crates/lash-sim/tests/session_delete_bounds.rs`.
+
+## Model usage accounting
+
+`SessionDelete`'s delivery (§4) first drains the session's accounting
+(`EffectHost::drain_usage_accounting`), before any session state is deleted;
+a drain failure is retryable like every other step. The engine-to-store
+direction of that drain is the accounting continuation of [ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md), not an
+`ObligationKind`: there is no usage obligation kind and no SQL relay.

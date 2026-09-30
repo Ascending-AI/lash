@@ -6,96 +6,6 @@ use lash_sansio::sync::MutexExt;
 const SEED: u64 = 0x5_a503;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn durable_turn_commit_rejects_token_usage_overflow() {
-    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let overflowing_call = || MockCall {
-        stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
-            input_tokens: i64::MAX,
-            output_tokens: 0,
-            cache_read_input_tokens: 0,
-            cache_write_input_tokens: 0,
-            reasoning_output_tokens: 0,
-        })],
-        response: Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: "accounted".to_string(),
-                response_meta: None,
-            }],
-            response_metadata: Default::default(),
-            ..LlmResponse::default()
-        }),
-    };
-    let transport = mock_provider(vec![overflowing_call(), overflowing_call()]);
-    let store = double_unbound_recording_store(&double).await;
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        Arc::new(EmptyTools),
-        transport,
-        test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimeStore>,
-    )
-    .await;
-    runtime.edit_resident_state_for_test(|state| {
-        state
-            .usage
-            .fold_checked(&lash_core::TokenLedgerEntry {
-                source: "turn".to_string(),
-                model: "mock-model".to_string(),
-                usage: lash_core::TokenUsage {
-                    input_tokens: 1,
-                    ..lash_core::TokenUsage::default()
-                },
-                usage_disposition: Default::default(),
-            })
-            .expect("fold the resident usage");
-    });
-    let handler = double
-        .open_handler(AdmittedScope::turn(
-            SessionId::from("root"),
-            TurnId::from("usage-overflow"),
-        ))
-        .await
-        .expect("open the scope's handler");
-    let error = runtime
-        .drive_turn(
-            TurnInput::text("account this turn"),
-            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
-        )
-        .await
-        .expect_err("overflow must reject the durable commit");
-    handler.close().await.expect("close the scope's handler");
-
-    assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
-    assert_eq!(
-        error.message,
-        "token usage counter `input_tokens` overflowed while accumulating (turn, mock-model)"
-    );
-    assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
-    let handler = double
-        .open_handler(AdmittedScope::turn(
-            SessionId::from("root"),
-            TurnId::from("usage-overflow-next-turn"),
-        ))
-        .await
-        .expect("open the scope's handler");
-    let next_error = runtime
-        .drive_turn(
-            TurnInput::text("the poisoned ledger must fail closed again"),
-            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
-        )
-        .await
-        .expect_err("the unconfirmed overflowing row must poison the next turn");
-    handler.close().await.expect("close the scope's handler");
-    assert_eq!(
-        next_error.code,
-        lash_core::RuntimeErrorCode::StoreCommitFailed
-    );
-    assert_eq!(next_error.message, error.message);
-    assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
     let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
@@ -1030,7 +940,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
         .session_graph
         .validate_resident_integrity()
         .unwrap();
-    let config = lash_core::RuntimeCommit::persisted_state_for_test(&replacement, &[]).config;
+    let config = lash_core::RuntimeCommit::persisted_state_for_test(&replacement).config;
     let mut checkpoint = lash_core::HydratedSessionCheckpoint::default();
     checkpoint.turn_state.turn_index = usize::MAX;
     // The durable read a store answers for the switched head: the window
@@ -1073,7 +983,6 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
             window,
             Some("new-checkpoint".to_string().into()),
             Some(checkpoint),
-            Default::default(),
         )
         .expect("a well-formed window read"),
     );
@@ -1109,11 +1018,11 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
     }
 }
 
-// A turn commit whose reply is lost after the store applied it must not keep
-// its staged usage pending: the durable journal already carries those rows,
-// and a live ledger that adds both counts the turn twice.
+// A turn commit whose reply is lost after the store applied it must not
+// count its calls twice: each call's usage is the owner's accounting,
+// delivered once with its effect, never staged on the commit (ADR 0125).
 #[tokio::test(flavor = "multi_thread")]
-async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
+async fn ambiguous_turn_commit_does_not_double_count_usage() {
     let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     struct LostCommitReplyStore {
@@ -1191,92 +1100,34 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
     handler.close().await.expect("close the scope's handler");
     assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
 
-    // The commit landed: the durable journal already holds the turn's usage.
-    let durable = session_view(inner_store.clone(), "root")
-        .load_usage_totals()
-        .await
-        .expect("load the durable usage");
-    assert_eq!(
-        durable
-            .rows
-            .iter()
-            .map(|row| row.usage.input_tokens)
-            .sum::<i64>(),
-        12
-    );
-    // Its staged copies are gone: nothing pending can count them again.
-    assert!(
-        runtime.shared_token_ledger.lock_recover().is_empty(),
-        "a landed commit's staged rows must be discarded: {:?}",
-        runtime.shared_token_ledger.lock_recover()
-    );
+    // The call's usage is the owner's accounting, delivered with its effect
+    // (ADR 0125): the lost commit reply leaves nothing to count again.
+    let report = settled_runtime_usage(&runtime).await.report();
+    assert_eq!(report.usage.usage.input_tokens, 12);
+    assert_eq!(report.usage.usage.output_tokens, 4);
 
     runtime
         .refresh_session_graph_from_store()
         .await
         .expect("reload the landed head");
-    let report = runtime.usage_report();
-    assert_eq!(report.usage.usage.input_tokens, 12);
-    assert_eq!(report.usage.usage.output_tokens, 4);
-
-    let handle = RuntimeHandle::new(runtime);
-    let observation = handle.observe();
-    assert_eq!(observation.usage_report.usage.usage.input_tokens, 12);
-    assert_eq!(observation.usage_report.usage.usage.output_tokens, 4);
-
-    {
-        let mut runtime = handle.runtime.lock().await;
-        let handler = double
-            .open_handler(AdmittedScope::turn(
-                SessionId::from("root"),
-                TurnId::from("after-ambiguous-commit-turn"),
-            ))
-            .await
-            .expect("open the scope's handler");
-        runtime
-            .drive_turn(
-                TurnInput::text("account the next turn"),
-                lash_core::facade_support::TurnOptions::new(
-                    CancellationToken::new(),
-                    handler.scoped(),
-                ),
-            )
-            .await
-            .expect("the next turn commits normally");
-        handler.close().await.expect("close the scope's handler");
-        handle.publish_from(&runtime);
-        // The resident ledger matches the durable journal exactly: the lost
-        // reply's usage is not folded in a second time.
-        let resident_input = runtime
-            .state()
-            .usage
-            .rows
-            .iter()
-            .map(|row| row.usage.input_tokens)
-            .sum::<i64>();
-        assert_eq!(resident_input, 17);
-        let resident_output = runtime
-            .state()
-            .usage
-            .rows
-            .iter()
-            .map(|row| row.usage.output_tokens)
-            .sum::<i64>();
-        assert_eq!(resident_output, 6);
-    }
-    let observation = handle.observe();
-    assert_eq!(observation.usage_report.usage.usage.input_tokens, 17);
-    assert_eq!(observation.usage_report.usage.usage.output_tokens, 6);
-    let durable = session_view(inner_store.clone(), "root")
-        .load_usage_totals()
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("after-ambiguous-commit-turn"),
+        ))
         .await
-        .expect("load the durable usage");
-    assert_eq!(
-        durable
-            .rows
-            .iter()
-            .map(|row| row.usage.input_tokens)
-            .sum::<i64>(),
-        17
-    );
+        .expect("open the scope's handler");
+    runtime
+        .drive_turn(
+            TurnInput::text("account the next turn"),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        )
+        .await
+        .expect("the next turn commits normally");
+    handler.close().await.expect("close the scope's handler");
+    // Each paid call counts once: the lost reply's call is not counted a
+    // second time by the next turn.
+    let report = settled_runtime_usage(&runtime).await.report();
+    assert_eq!(report.usage.usage.input_tokens, 17);
+    assert_eq!(report.usage.usage.output_tokens, 6);
 }

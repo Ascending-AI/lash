@@ -223,3 +223,19 @@ pub use wake_delivery::*;
 
 mod worker_recovery;
 pub use worker_recovery::*;
+
+pub mod usage_ledger;
+pub use usage_ledger::{UsageLedgerSnapshot, UsageLedgerStoreFixture};
+mod usage_accounting;
+pub use usage_accounting::{
+    NoContinuationFaults, UsageAccountingTier, UsageContinuationFaults, UsageCrashEnding,
+    UsageCrashPoint, a_settlement_retried_after_its_projection_counts_once,
+    committed_turn_totals_are_preserved,
+    each_paid_attempt_counts_once_under_any_boundary_grouping_and_replay, usage_crash_cell,
+    usage_crash_p1_committed_cancelled, usage_crash_p1_committed_completed,
+    usage_crash_p1_committed_failed, usage_crash_p1_forked, usage_crash_p1_parked_forever,
+    usage_crash_p1_session_deleted, usage_crash_p2_committed_cancelled,
+    usage_crash_p2_committed_completed, usage_crash_p2_committed_failed, usage_crash_p2_forked,
+    usage_crash_p2_parked_forever, usage_crash_p2_session_deleted,
+    usage_of_an_unfinished_root_is_read_without_driving,
+};

@@ -138,6 +138,7 @@ impl RestateEngine {
             admin.clone(),
             Arc::clone(&stores),
         ));
+        effect_host.bind_usage_accounting(stores.usage_accounting());
         let session_work = Arc::new(RestateSessionWork::new(
             RestateIngressClient::new(connection.clone()),
             crate::RestateSessionDriverSlot::new(),

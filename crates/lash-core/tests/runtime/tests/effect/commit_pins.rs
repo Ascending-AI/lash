@@ -102,7 +102,7 @@ async fn code_execution_turn_commits_the_pinned_bytes() {
     assert_commit_pins(
         "code execution",
         &commits,
-        &["1cf8f6754e4465e7186ccd90e53b2aa9a54f4677cd06953a1d1ae10a613574bd"],
+        &["eeec64ff682367fd22fa94917417caf4717765dd3a3ee5593ec54dc34d869f99"],
     );
 }
 
@@ -125,7 +125,7 @@ async fn cancel_observed_after_the_model_call_commits_the_pinned_bytes() {
     assert_commit_pins(
         "cancel after the model call",
         &commits,
-        &["43cbfdf86c8c3f7226a766f6ca1603661cb631a9ee57bb581347aa43e09f8134"],
+        &["fc1b9c77104db1f6e1db9911496579750f28815547d8253154609f75e08001f5"],
     );
 }
 
@@ -149,6 +149,6 @@ async fn after_step_cancel_at_the_step_boundary_commits_the_pinned_bytes() {
     assert_commit_pins(
         "after-step cancel",
         &commits,
-        &["bc9e079d51ba77e5307911f0ea92c6daf938ccaba96952591e2ad44285fc5b6f"],
+        &["73a36ac6f989431ef733cc0a462eb3c1f109621fc1467d29e84a5e2a431855c8"],
     );
 }

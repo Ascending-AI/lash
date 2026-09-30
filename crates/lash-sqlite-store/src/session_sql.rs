@@ -2,7 +2,7 @@
 //!
 //! Every statement this store issues over `session_meta` and its two child
 //! tables, `session_head`, `graph_nodes`, `node_anchors`, `fork_lineage`,
-//! `runtime_turn_commits`, `deleted_sessions`, `usage_deltas`,
+//! `runtime_turn_commits`, `deleted_sessions`,
 //! `release_stamp` and `checkpoint_blob_refs` is either one of
 //! `lash_store_sql::session`'s shared statements or one of the backend-only
 //! statements declared here. No other module in this crate spells one.
@@ -36,7 +36,6 @@ use lash_store_sql::session::{
     fork_lineage::ForkLineageStatements, graph_nodes::GraphNodeStatements,
     meta::SessionMetaStatements, meta_pending_observer_intents::ObserverIntentStatements,
     node_anchors::NodeAnchorStatements, turn_commits::TurnCommitStatements,
-    usage_delta_holes::UsageDeltaHoleStatements, usage_deltas::UsageDeltaStatements,
 };
 
 lash_store_sql::statements! {
@@ -555,17 +554,6 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    /// `usage_deltas` statements only SQLite issues.
-    pub(crate) struct UsageDeltaSqliteStatements @ "usage_delta" {
-        /// PostgreSQL spells the same decision `ON CONFLICT ...
-        /// DO NOTHING` over the identity columns.
-        insert = "INSERT OR IGNORE INTO usage_deltas (
-                                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, reconciled_call_id, reconciled_attempt_ordinal
-                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)";
-    }
-}
-
-lash_store_sql::statements! {
     /// `deleted_sessions` statements only SQLite issues.
     pub(crate) struct DeletedSessionSqliteStatements @ "deleted_session" {
         /// Reads a row and lets the caller ask whether one came back;
@@ -693,11 +681,6 @@ pub(crate) struct SessionSql {
     pub(crate) turn_commits: TurnCommitStatements,
     /// `runtime_turn_commits` statements only SQLite issues.
     pub(crate) turn_commits_sqlite: TurnCommitSqliteStatements,
-    /// `usage_deltas` statements both backends issue verbatim.
-    pub(crate) usage: UsageDeltaStatements,
-    pub(crate) usage_holes: UsageDeltaHoleStatements,
-    /// `usage_deltas` statements only SQLite issues.
-    pub(crate) usage_sqlite: UsageDeltaSqliteStatements,
     /// `deleted_sessions` statements only SQLite issues.
     pub(crate) deleted_sqlite: DeletedSessionSqliteStatements,
     /// `checkpoint_blob_refs` statements only SQLite issues.
@@ -719,9 +702,6 @@ static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
         lineage: ForkLineageStatements::render(dialect),
         turn_commits: TurnCommitStatements::render(dialect),
         turn_commits_sqlite: TurnCommitSqliteStatements::render(dialect),
-        usage: UsageDeltaStatements::render(dialect),
-        usage_holes: UsageDeltaHoleStatements::render(dialect),
-        usage_sqlite: UsageDeltaSqliteStatements::render(dialect),
         deleted_sqlite: DeletedSessionSqliteStatements::render(dialect),
         checkpoint_edges: CheckpointBlobRefSqliteStatements::render(dialect),
         release_stamp: ReleaseStampStatements::render(dialect),

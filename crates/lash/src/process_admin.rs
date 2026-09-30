@@ -793,6 +793,30 @@ impl Processes {
             .await?;
         for process_id in prunable {
             let process_scope = lash_core::ExecutionScope::process(process_id.clone());
+            // Usage accounting drains before the journal goes (ADR 0125): the
+            // process's settlements are delivered and its owner retired, so
+            // nothing admitted after this spends under a pruned process. A
+            // process runtime spends under its own owner only.
+            let owner = lash_core::RuntimeOwner::Process(process_id.clone());
+            if let Err(err) = self
+                .core
+                .env
+                .core
+                .control
+                .effect_host
+                .drain_usage_accounting(&owner)
+                .await
+            {
+                tracing::warn!(
+                    failure_stage = "drain_process_usage_accounting",
+                    cutoff_epoch_ms,
+                    process_id = %process_id,
+                    %owner,
+                    error = %err,
+                    "process retention failed"
+                );
+                return Err(err.into());
+            }
             // This is the cancellation-admission serialization point. The
             // factory checks every persisted closure and writes the scope
             // tombstone under the same backend fence later authorization

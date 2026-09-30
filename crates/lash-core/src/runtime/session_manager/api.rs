@@ -122,7 +122,6 @@ impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
         Box::pin(self.services.current.append_session_nodes(
-            &self.services.usage,
             &self.services.processes,
             session_id,
             request,

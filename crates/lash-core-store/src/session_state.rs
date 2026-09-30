@@ -662,13 +662,6 @@ pub struct RuntimeSessionState {
     pub authority: Box<RuntimeSessionAuthority>,
     #[serde(skip, default)]
     pub checkpoint_components: RuntimeCheckpointComponents,
-    /// Cost-accounting totals. Every LLM call (parent turns, subagent
-    /// children, compaction, observers, background helpers) folds into one
-    /// row per `(source, model)`, plus the holes still owed usage (ADR 0112
-    /// §8). Separate from `token_usage`, which tracks context-window
-    /// accounting only.
-    #[serde(default)]
-    pub usage: crate::SessionUsageTotals,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_ref: Option<crate::store::BlobRef>,
     /// Store head revision observed by the runtime. Revision zero is the
@@ -712,7 +705,6 @@ impl RuntimeSessionState {
             protocol_turn_options: crate::ProtocolTurnOptions::default(),
             authority: Box::default(),
             checkpoint_components: RuntimeCheckpointComponents::complete_empty(),
-            usage: crate::SessionUsageTotals::default(),
             checkpoint_ref: None,
             head_revision: 0,
             config_revision: 0,
@@ -754,7 +746,6 @@ impl RuntimeSessionState {
             protocol_turn_options: snapshot.protocol_turn_options,
             authority: Box::default(),
             checkpoint_components,
-            usage: snapshot.usage,
             checkpoint_ref: snapshot.checkpoint_ref,
             head_revision: 0,
             config_revision: 0,
@@ -787,7 +778,6 @@ impl RuntimeSessionState {
                 .cloned()
                 .unwrap_or_default(),
             execution_state_ref: self.execution_state_ref().cloned(),
-            usage: self.usage.clone(),
             checkpoint_ref: self.checkpoint_ref.clone(),
         }
     }
@@ -807,14 +797,7 @@ impl RuntimeSessionState {
         self.token_usage = snapshot.token_usage;
         self.last_prompt_usage = snapshot.last_prompt_usage;
         self.protocol_turn_options = snapshot.protocol_turn_options;
-        self.usage = snapshot.usage;
         self.checkpoint_ref = snapshot.checkpoint_ref;
-    }
-
-    /// The per-source report over the session's usage totals, for protocol and administration
-    /// embedders.
-    pub fn usage_report(&self) -> super::usage::SessionUsageReport {
-        self.usage.report()
     }
 
     /// The current frame's shared projection (ADR 0112 §9).
@@ -1571,7 +1554,6 @@ pub fn adopt_durable_head(
         window,
         checkpoint_ref,
         checkpoint,
-        usage,
     } = head;
     state.session_id = session_id;
     state.persisted_node_ids = window
@@ -1591,7 +1573,6 @@ pub fn adopt_durable_head(
         RuntimeCheckpointComponents::complete_empty()
     };
     state.checkpoint_ref = checkpoint_ref;
-    state.usage = usage;
     state.head_revision = head_revision;
     adopt_session_config(state, &config);
     state.authority.committed_config = None;

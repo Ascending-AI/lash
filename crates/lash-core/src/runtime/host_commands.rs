@@ -17,8 +17,9 @@
 //!   when its required ancestor left the active path.
 //! - A plugin command or task runs its plugin's code only here, after
 //!   admission. Its services join the command as in-turn services join a
-//!   turn: its graph appends and usage ride the command's commit, with its
-//!   runtime events and plugin state. A task's effects are journaled under
+//!   turn: its graph appends ride the command's commit, with its runtime
+//!   events and plugin state, and its model usage is delivered by the engine
+//!   per call (ADR 0125). A task's effects are journaled under
 //!   the command's own queue-drain scope, so a redrive of the unsettled
 //!   command replays them.
 //! - A frame open opens the frame in the commit that settles it and restarts
@@ -253,8 +254,7 @@ impl LashRuntime {
             Arc::clone(&self.host.core.clock),
         );
         // The operation's services join the command as in-turn services join
-        // a turn: its appends ride the command's commit and its usage waits
-        // in the shared ledger for it.
+        // a turn: its appends ride the command's commit.
         let services = self.runtime_session_services_for_turn(Some(drive_fence), &draft)?;
         let session_id = self.state.session_id.clone();
         let Some(session) = self.session.as_ref() else {
@@ -462,8 +462,7 @@ impl LashRuntime {
     }
 
     /// Commit the resident state as the command's one commit (F2): whatever
-    /// the command put in resident state, the shared ledger's staged usage
-    /// and the command's settlement with the outcome `outcome` derives from
+    /// the command put in resident state and the command's settlement with the outcome `outcome` derives from
     /// the committed state and its persisted node ids, under the command
     /// root's fence.
     ///
@@ -546,23 +545,13 @@ impl LashRuntime {
             || self.command_operation(&batch_id),
             |stamp| stamp.operation.clone(),
         );
-        let staged =
-            session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
-                .map_err(super::runtime_error_from_store_commit)?;
-        for delta in staged.deltas() {
-            self.state
-                .usage
-                .fold_checked(&delta.entry)
-                .map_err(super::runtime_error_from_store_commit)?;
-        }
         if let Some(session) = self.session.as_ref() {
             self.state.capture_plugin_states(session.plugins());
         }
         let fleet_format = self.fleet_format();
         let (mut commit, persisted_node_ids) =
-            crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
+            crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 &mut self.state,
-                staged.deltas(),
                 operation,
                 self.host.core.durability.commit_budget,
                 fleet_format,
@@ -590,9 +579,6 @@ impl LashRuntime {
         ));
         match store.commit_runtime_state_verified(commit).await {
             Ok(result) => {
-                staged
-                    .confirm_identities(&result.committed_usage_delta_identities)
-                    .map_err(super::runtime_error_from_store_commit)?;
                 let receipt_replayed = result.receipt_replayed;
                 self.state.apply_persisted_commit_result(result);
                 self.state.mark_node_ids_persisted(persisted_node_ids);
@@ -608,9 +594,6 @@ impl LashRuntime {
                 Ok(Ok(CommandCommit::Landed))
             }
             Err(error) => {
-                // The journaled drive re-records the billed usage when a
-                // redrive applies the command, so the staged rows go.
-                staged.discard_staged();
                 self.invalidate_resident_session_state();
                 match error {
                     crate::StoreError::SessionCommandWithdrawn { .. } => {

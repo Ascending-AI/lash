@@ -53,7 +53,9 @@ mod runtime {
             sqlite_recording_backend, sqlite_recording_backend_with_clock, unbound_recording_store,
             unbound_recording_store_with_clock, unbound_store,
         };
-        pub(crate) use crate::runtime_support::{durable_state, durable_window, session_view};
+        pub(crate) use crate::runtime_support::{
+            durable_state, durable_window, session_view, settled_runtime_usage,
+        };
         pub(crate) use lash_core::llm::transport::LlmTransportError;
         pub(crate) use lash_core::llm::types::{LlmProviderTraceEvent, LlmUsage};
         pub(crate) use lash_core::plugin::StaticPluginFactory;
@@ -77,6 +79,5 @@ mod runtime {
         mod stream_accumulator;
         mod stream_evidence;
         mod tracing;
-        mod usage;
     }
 }

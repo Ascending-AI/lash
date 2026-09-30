@@ -73,6 +73,7 @@ impl RuntimeEffectLocalRunner for AdmitDriveRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::AdmitDrive { request } = &envelope.command else {
             return Err(executor_mismatch("drive admission", &envelope));
@@ -338,6 +339,7 @@ impl RuntimeEffectLocalRunner for SealDriveRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::SealDriveAdmission { admitted } = &envelope.command else {
             return Err(executor_mismatch("drive seal", &envelope));

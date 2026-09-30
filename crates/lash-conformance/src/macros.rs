@@ -9,6 +9,7 @@ mod tool_call_identity;
 mod tool_child;
 mod turn_crash;
 mod turn_ingress;
+mod usage_accounting;
 mod vm_broker;
 
 /// Expansion machinery for the runtime-persistence registration macros.
@@ -116,17 +117,11 @@ macro_rules! runtime_persistence_tests {
             (commit_rejects_carried_nondefault_byte_budget, "root"),
             (commit_rejects_follow_on_bytes_over_budget, "root"),
             (commit_rejects_agent_frame_bytes_over_budget, "root"),
-            (commit_rejects_usage_delta_bytes_over_budget, "root"),
             (commit_rejects_turn_result_bytes_over_budget, "root"),
             (commit_with_every_payload_family_inside_budget_succeeds, "root"),
-            (load_hydrates_checkpoint_and_usage, "hydrated"),
-            (load_retains_reasoning_only_usage, "root"),
-            (load_retains_usage_dispositions_and_rebuilds_outstanding_attempts, "root"),
+            (load_hydrates_checkpoint, "hydrated"),
             (checkpoint_restore_rejects_turn_index_without_increment_headroom, "root"),
             (checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows, "root"),
-            (load_rejects_token_usage_overflow, "root"),
-            (usage_delta_identity_is_idempotent_across_commits, "root"),
-            (usage_ordinal_reuse_with_different_payload_survives_receipt_replay, "root"),
             (execution_state_replace_then_clear_removes_the_live_checkpoint_ref, "execution-state-replace-then-clear"),
             (checkpoint_rejects_unknown_component_ref, "checkpoint-unknown-ref"),
             (session_read_loads_persisted_history, "branchy"),
@@ -1919,25 +1914,6 @@ macro_rules! append_tombstone_tests {
     };
 }
 
-#[macro_export]
-macro_rules! append_receipt_envelope_tests {
-    ($fixture:block) => {
-        $crate::append_receipt_envelope_tests!(@catalogue $fixture; [
-            (append_receipt_mixed_usage_envelope, "append-receipt-mixed-usage"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, store) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(store).await;
-            }
-        )*
-    };
-}
-
 /// The fixture supplies a store plus the backend's own persisted-receipt rewrite, applied
 /// outside the runtime.
 #[macro_export]
@@ -1975,27 +1951,6 @@ macro_rules! append_receipt_identity_corruption_tests {
                 let (_guard, store, corrupt) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, corrupt).await;
-            }
-        )*
-    };
-}
-
-/// Register cancelled-append usage publication. The fixture supplies a store
-/// plus the backend's own commit-seam pause.
-#[macro_export]
-macro_rules! append_usage_cancellation_tests {
-    ($fixture:block) => {
-        $crate::append_usage_cancellation_tests!(@catalogue $fixture; [
-            (append_usage_cancellation_publishes_exactly_once, "append-usage-cancellation"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, store, arm_and_wait) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(store, arm_and_wait).await;
             }
         )*
     };
@@ -2179,5 +2134,36 @@ macro_rules! wake_delivery_isolation_tests {
                 $crate::registration_macro_support::$law(factory, registry, clock, backend).await;
             }
         )*
+    };
+}
+
+/// Owner-scoped usage accounting laws. The fixture returns its guard and store handles.
+#[macro_export]
+macro_rules! usage_ledger_store_tests {
+    ($fixture:block) => {
+        mod usage_ledger {
+            use super::*;
+            $crate::usage_ledger_store_tests!(@register $fixture;
+                identical_settlement_retry_is_a_no_op,
+                conflicting_payload_is_a_typed_conflict_and_appends_nothing,
+                a_correction_has_its_own_identity,
+                each_fact_counts_once_under_any_grouping_order_and_repeat,
+                admission_is_idempotent_and_retirement_fences_it,
+                settlement_resolves_superseded_runs_unknown,
+                a_late_settlement_supersedes_retirement,
+                accounting_writes_never_touch_head_fence_or_receipts,
+                retention_reclaims_only_retired_owners_before_the_horizon,
+                reads_select_by_owner_without_a_committed_turn,
+            );
+        }
+    };
+    (@register $fixture:block; $($law:ident),+ $(,)?) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_guard, fixture) = $fixture;
+                $crate::usage_ledger::$law(&fixture).await;
+            }
+        )+
     };
 }

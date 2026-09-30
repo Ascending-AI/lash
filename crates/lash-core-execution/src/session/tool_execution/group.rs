@@ -886,9 +886,8 @@ impl RuntimeExecutionContext<'_> {
     /// FIG-3411 seam: returns one settled child's completed call and emits its
     /// activity events.
     ///
-    /// The once-only channels — possession, committed checkpoint messages,
-    /// trigger receipts, and usage deltas charged once per
-    /// `UsageDeltaIdentity` (ADR 0099 §6/§13) — are incorporated by the
+    /// The once-only channels — possession, committed checkpoint messages and
+    /// trigger receipts (ADR 0099 §6) — are incorporated by the
     /// consumer through `incorporate_group_prefix`, which journals the
     /// `IncorporateGroupSettlements` record covering the consumed prefix
     /// (FIG-3411 part 2). Presentation is taken verbatim from
