@@ -345,7 +345,9 @@ macro_rules! process_registry_tests {
                 (list_processes_filters_by_until_scope_and_pending_cancel, "until-scope-cancel-filters"),
                 (process_change_feed_never_misses_concurrent_terminal_writers, "concurrent-terminal-feed"),
                 (session_delete_preserves_process_bytes, "session-delete-bytes"),
-                (refolded_process_record_matches_hot_projection, "hot-refold"),
+                (record_fold_and_retention_hold_for_every_registry_writer, "registry-writer-fold-retention"),
+                (signals_refuse_undeclared_invalid_and_terminal_sends, "signal-refusals"),
+                (work_wait_seam_covers_unknown_pruned_departed_and_external_processes, "work-wait-matrix"),
                 (tombstones_make_pruned_processes_distinguishable, "tombstones"),
                 (a_start_key_after_prune_starts_a_new_process, "start-key-after-prune"),
                 (watched_process_registry_start_key_after_prune_starts_a_new_process, "watched-start-key-after-prune"),
@@ -949,7 +951,7 @@ macro_rules! process_continuation_store_tests {
 macro_rules! process_trigger_retention_tests {
     ($fixture:block) => {
         $crate::process_trigger_retention_tests!(@catalogue $fixture; [
-            (process_trigger_retention, "process-trigger-retention"),
+            (trigger_capture_route_and_compaction_refusal_matrix, "trigger-capture-compaction-matrix"),
             (trigger_delivery_recovery, "trigger-delivery-recovery"),
             (trigger_delivery_pinned_recovery, "trigger-delivery-pinned-recovery"),
             (trigger_delivery_refusal, "trigger-delivery-refusal"),
@@ -1405,6 +1407,7 @@ macro_rules! session_store_factory_tests {
         ]);
         $crate::session_store_factory_tests!(@turn_cancel $fixture; [
             (session_meta_records_the_process_that_owns_it, "session-meta-owning-process"),
+            (ingress_follow_on_fork_and_command_coalescing_matrix, "ingress-follow-on-fork-commands"),
             (turn_cancel_exact_replay_preserves_different_pending_authorization, "turn-cancel-exact-replay"),
             (turn_cancel_closure_settlement_is_fenced_and_non_overwritable, "turn-cancel-closure-settlement"),
             (turn_cancel_scope_retirement_serializes_with_authorization, "turn-cancel-scope-retirement"),

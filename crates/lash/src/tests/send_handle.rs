@@ -54,13 +54,20 @@ async fn fixture_over(
     batch: usize,
     layer: impl FnOnce(lash_core::Backend) -> lash_core::Backend,
 ) -> Result<Fixture> {
+    fixture_over_with_batching(crate::QueuedWorkBatchingConfig::new(batch), layer).await
+}
+
+async fn fixture_over_with_batching(
+    batching: crate::QueuedWorkBatchingConfig,
+    layer: impl FnOnce(lash_core::Backend) -> lash_core::Backend,
+) -> Result<Fixture> {
     let double = restate_double(SEED).await;
     let backend = layer(double.lash_backend());
     let release = Arc::new(Notify::new());
     let calls = Arc::new(AtomicUsize::new(0));
     let core = LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(batch))
+        .queued_work_batching(batching)
         .provider(scripted_provider(Arc::clone(&release), Arc::clone(&calls)))
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -1208,15 +1215,18 @@ fn assert_identity_conflict(refused: std::result::Result<Vec<crate::SendHandle>,
 /// is answered by the root that applied it (FIG-3842). Resending the batch
 /// answers the same inputs and runs nothing again. A batch naming an
 /// accepted id with other content, or one id twice, accepts nothing.
-async fn a_batch_answers_one_handle_per_input_in_request_order() -> Result<()> {
-    let fixture = fixture(4).await?;
-    let session = fixture
+async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Result<()> {
+    let fixture = fixture_over_with_batching(
+        crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_admission(1),
+        |backend| backend,
+    )
+    .await?;
+    fixture
         .core
         .session("send-batch")
-        .created()
-        .await
-        .open()
+        .create(crate::SessionCreation::default())
         .await?;
+    let session = fixture.core.session("send-batch").open().await?;
     let batch = || {
         [
             ("batch-a", TurnInput::text("first")),
@@ -1251,6 +1261,10 @@ async fn a_batch_answers_one_handle_per_input_in_request_order() -> Result<()> {
         );
     }
     let calls = fixture.calls.load(Ordering::SeqCst);
+    assert_eq!(
+        calls, 3,
+        "the configured input cap drives one input per root"
+    );
 
     let resent = session.send_batch(batch()).await?;
     assert_eq!(
@@ -1295,6 +1309,81 @@ async fn a_batch_answers_one_handle_per_input_in_request_order() -> Result<()> {
         );
     }
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    // These are the current creating, resident, and store-only entry verbs.
+    let created = fixture
+        .core
+        .session("send-entry-matrix")
+        .create(crate::SessionCreation::default())
+        .await?;
+    let held = created.send(TurnInput::text(HELD)).id("entry-held").await?;
+    provider_called(&fixture, calls + 1).await;
+    let live = fixture.core.session("send-entry-matrix").open().await?;
+    let durable = fixture.core.session("send-entry-matrix").durable().await?;
+    let entries = vec![
+        live.send(TurnInput::text("resident input"))
+            .id("entry-live")
+            .await?,
+        durable
+            .send(TurnInput::text("durable input"))
+            .id("entry-durable")
+            .await?,
+        live.durable()
+            .send(TurnInput::text("resident durable input"))
+            .id("entry-live-durable")
+            .await?,
+    ];
+    let snapshots = entries
+        .iter()
+        .map(|handle| handle.receipt().clone())
+        .collect::<Vec<_>>();
+    let cancelled = durable
+        .send_batch([
+            ("entry-cancel-a", TurnInput::text("cancel a")),
+            ("entry-cancel-b", TurnInput::text("cancel b")),
+        ])
+        .await?;
+    for handle in cancelled {
+        assert!(matches!(
+            handle.cancel().await?,
+            crate::CancelReceipt::Withdrawn(_)
+        ));
+        assert_eq!(handle.outcome().await?.status, crate::TurnStatus::Cancelled);
+    }
+    let pending = durable.pending_turn_inputs().await?;
+    assert_eq!(
+        pending.len(),
+        4,
+        "held root and three uncancelled admissions remain"
+    );
+    for (entry, snapshot) in entries.iter().zip(&snapshots) {
+        assert_eq!(
+            entry.receipt(),
+            snapshot,
+            "receipt remains its acceptance snapshot while queued"
+        );
+        let row = pending
+            .iter()
+            .find(|row| row.input.input_id == entry.input_id())
+            .expect("each entry durably admitted");
+        assert_eq!(row.input.session_id, snapshot.session_id);
+        assert_eq!(row.input.source_key, snapshot.source_key);
+    }
+    fixture.release.notify_one();
+    assert_eq!(held.outcome().await?.status, crate::TurnStatus::Answered);
+    for (entry, snapshot) in entries.into_iter().zip(&snapshots) {
+        let id = entry.id().expect("host id").clone();
+        assert_eq!(entry.outcome().await?.status, crate::TurnStatus::Answered);
+        let retry = durable
+            .send(TurnInput::text(match id.as_str() {
+                "entry-live" => "resident input",
+                "entry-durable" => "durable input",
+                _ => "resident durable input",
+            }))
+            .id(id)
+            .await?;
+        assert_eq!(retry.receipt(), snapshot);
+    }
+    assert!(durable.pending_turn_inputs().await?.is_empty());
     Ok(())
 }
 
@@ -1389,8 +1478,8 @@ macro_rules! send_handle_laws {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_batch_answers_one_handle_per_input_in_request_order() -> Result<()> {
-                super::a_batch_answers_one_handle_per_input_in_request_order().await
+            async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Result<()> {
+                super::all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -217,6 +217,7 @@ pub(super) struct RecordingContext {
     pub(super) scope_effect_begins: AtomicUsize,
     pub(super) scope_group_records: AtomicUsize,
     pub(super) awaited_replay_keys: Mutex<Vec<String>>,
+    pub(super) awaited_requests: Mutex<Vec<RestateDurableWaitAwaitRequest>>,
     awaited_events: Mutex<HashMap<String, Resolution>>,
     durable_events: Mutex<HashMap<String, Resolution>>,
     durable_event_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
@@ -737,6 +738,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         'ctx: 'run,
     {
         self.awaited_replay_keys.lock_recover().push(replay_key);
+        self.awaited_requests.lock_recover().push(request.clone());
         let context = Arc::clone(self);
         Box::pin(async move {
             let address = request.address();

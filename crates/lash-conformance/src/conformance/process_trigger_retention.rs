@@ -28,7 +28,7 @@ pub struct ProcessTriggerRetentionHandles {
     pub process_env: Arc<dyn crate::ProcessExecutionEnvStore>,
 }
 
-pub async fn process_trigger_retention<F, Fut>(make: F)
+pub async fn trigger_capture_route_and_compaction_refusal_matrix<F, Fut>(make: F)
 where
     F: Fn() -> Fut,
     Fut: Future<Output = ProcessTriggerRetentionHandles>,
@@ -44,6 +44,7 @@ where
         "process_trigger_retention reused one trigger-store Arc"
     );
     drop((first, second));
+    Box::pin(captured_delivery_refusals(make().await)).await;
     deleted_session_frontier_authorizes_trigger_owner_reclamation(make().await).await;
     process_prune_preserves_trigger_mutation_receipts(make().await).await;
     zero_match_occurrence_is_reclaimed_at_delivery_reconciliation(make().await).await;
@@ -1912,4 +1913,268 @@ async fn the_narrow_delivery_worklist_agrees_with_the_delivery_table(
         2,
         "the law is vacuous unless both bound reservations reached the delivery table"
     );
+}
+
+struct CapturedRouteProbe {
+    captured: crate::TriggerSourceCapture,
+    refusal: std::sync::Mutex<Option<crate::TriggerRouteRefusal>>,
+    calls: std::sync::atomic::AtomicUsize,
+}
+#[async_trait::async_trait]
+impl crate::TriggerRouteRestorer for CapturedRouteProbe {
+    async fn restore(
+        &self,
+        capture: &crate::TriggerSourceCapture,
+    ) -> Result<(), crate::TriggerRouteRefusal> {
+        assert_eq!(
+            capture, &self.captured,
+            "delivery restores the reserved route"
+        );
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        match self
+            .refusal
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+        {
+            Some(refusal) => Err(refusal),
+            None => Ok(()),
+        }
+    }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture establishes each result"
+)]
+async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
+    let session = SessionId::from("captured-route-matrix");
+    let spec = crate::ProcessExecutionEnvSpec::new(
+        crate::PluginOptions::default(),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    );
+    let env_ref = spec.stable_ref().expect("environment identity");
+    handles
+        .process_env
+        .publish_process_execution_env(
+            &crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
+                crate::HostArtifactPin::mint(),
+            ))
+            .expect("host pin"),
+            &env_ref,
+            &spec.to_store_bytes().expect("encode environment"),
+        )
+        .await
+        .expect("publish environment");
+    let captured = crate::TriggerSourceCapture::provider(
+        ["old", "constructor"],
+        crate::LashSchema::new(
+            serde_json::json!({"type":"object", "required":["old"], "properties":{"old":{"type":"boolean"}}, "additionalProperties":false}),
+        ),
+        "old-provider",
+        serde_json::json!({"route":"old"}),
+    );
+    let mut original = TriggerSubscriptionDraft {
+        env_ref,
+        source_capture: captured.clone(),
+        source: serde_json::json!({"old":true}),
+        name: Some("subscription-label".to_string()),
+        target_label: Some("process-label".to_string()),
+        ..draft(&session, "capture-key", "capture-source")
+    };
+    original.target_identity.label = original.target_label.clone();
+    handles
+        .triggers
+        .execute_command(
+            "capture-register",
+            TriggerCommand::Register {
+                owner_scope: owner(&session),
+                actor: actor(&session),
+                draft: original.clone(),
+            },
+        )
+        .await
+        .expect("register call")
+        .expect("register captured contract");
+    let mut reserved = Vec::new();
+    for key in [
+        "captured-valid",
+        "captured-invalid-source",
+        "captured-invalid-payload",
+        "captured-revoked",
+    ] {
+        let receipt = handles
+            .triggers
+            .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+                "ui.button.pressed",
+                "capture-source",
+                serde_json::json!({"button":"Blue"}),
+                key,
+            ))
+            .await
+            .expect("reserve occurrence");
+        assert_eq!(receipt.reservations.len(), 1);
+        reserved.push(receipt.reservations[0].clone());
+    }
+    handles
+        .triggers
+        .execute_command(
+            "capture-update",
+            TriggerCommand::Update {
+                owner_scope: owner(&session),
+                actor: actor(&session),
+                subscription_key: "capture-key".to_string(),
+                expected_revision: 1,
+                draft: TriggerSubscriptionDraft {
+                    source_capture: crate::TriggerSourceCapture::resident(
+                        ["new", "constructor"],
+                        crate::LashSchema::any(),
+                    ),
+                    target_label: Some("new-process-label".to_string()),
+                    ..original
+                },
+            },
+        )
+        .await
+        .expect("update call")
+        .expect("update live contract");
+    let restorer = Arc::new(CapturedRouteProbe {
+        captured,
+        refusal: std::sync::Mutex::new(Some(crate::TriggerRouteRefusal::Unavailable {
+            provider_id: "old-provider".to_string(),
+            message: "retry".to_string(),
+        })),
+        calls: Default::default(),
+    });
+    let router = lash_core::facade_support::TriggerRouter::new(
+        handles.triggers.clone(),
+        crate::ProcessWorkWiring::without_process_work(handles.registry.clone()),
+    )
+    .with_route_restorer(restorer.clone())
+    .with_process_artifacts(
+        handles.process_env.clone(),
+        crate::ProcessEngineRegistry::new().with_registration(
+            crate::ProcessEngineRegistration::accepting(Arc::new(TriggerTargetEngine)),
+        ),
+    );
+    let first = &reserved[0];
+    let recover = || {
+        router.recover_delivery(
+            &first.occurrence.occurrence_id,
+            &first.subscription.subscription_id,
+        )
+    };
+    assert!(matches!(
+        recover().await,
+        Err(lash_core::triggers::TriggerDeliveryRecoveryError::Retryable(_))
+    ));
+    let start_key = lash_core::facade_support::trigger_delivery_start_key(first);
+    assert!(
+        handles
+            .registry
+            .get_process_by_start_key(&start_key)
+            .await
+            .expect("unavailable leaves no process")
+            .is_none()
+    );
+    *restorer.refusal.lock().expect("probe lock") = None;
+    let started = recover().await.expect("retry captured delivery");
+    assert_eq!(recover().await.expect("repeat captured delivery"), started);
+    let record = handles
+        .registry
+        .get_process(&started)
+        .await
+        .expect("read captured process")
+        .expect("captured process");
+    assert_eq!(record.identity.label.as_deref(), Some("process-label"));
+    assert_eq!(
+        first.subscription.name.as_deref(),
+        Some("subscription-label")
+    );
+    assert_eq!(
+        restorer.calls.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "bound retry restores no route"
+    );
+    for (index, invalid) in [(1, "source"), (2, "payload")] {
+        let mut reservation = reserved[index].clone();
+        if index == 1 {
+            reservation.occurrence.source = Some(serde_json::json!({"new":true}));
+        } else {
+            reservation.occurrence.payload = serde_json::json!({"button":42});
+        }
+        // The production preparation seam validates the exact reserved occurrence.
+        let controller = crate::testing::UnavailableEffectController;
+        let scoped = crate::ScopedEffectController::borrowed(
+            &controller,
+            crate::admit(crate::ExecutionScope::runtime_operation(format!(
+                "capture-{invalid}"
+            ))),
+        )
+        .expect("scope refusal");
+        let refusal = router
+            .start_delivery(&reservation, handles.registry.clone(), &scoped)
+            .await
+            .expect_err("invalid captured occurrence refused");
+        assert!(
+            refusal.to_string().contains(if index == 1 {
+                "captured source contract"
+            } else {
+                "invalid payload"
+            }),
+            "{refusal}"
+        );
+        assert!(
+            handles
+                .registry
+                .get_process_by_start_key(&lash_core::facade_support::trigger_delivery_start_key(
+                    &reservation
+                ))
+                .await
+                .expect("refused start")
+                .is_none()
+        );
+    }
+    *restorer.refusal.lock().expect("probe lock") = Some(crate::TriggerRouteRefusal::Revoked {
+        provider_id: "old-provider".to_string(),
+        message: "revoked".to_string(),
+    });
+    let revoked = &reserved[3];
+    assert!(matches!(
+        router
+            .recover_delivery(
+                &revoked.occurrence.occurrence_id,
+                &revoked.subscription.subscription_id
+            )
+            .await,
+        Err(lash_core::triggers::TriggerDeliveryRecoveryError::Refused(
+            _
+        ))
+    ));
+    let controller = crate::testing::UnavailableEffectController;
+    let scoped = crate::ScopedEffectController::borrowed(
+        &controller,
+        crate::admit(crate::ExecutionScope::runtime_operation(
+            "capture-emit-failure",
+        )),
+    )
+    .expect("scope emit");
+    let report = router
+        .emit(
+            crate::TriggerOccurrenceRequest::new(
+                "ui.button.pressed",
+                "capture-source",
+                serde_json::json!({"button":"Blue"}),
+                "capture-emit-error",
+            ),
+            &scoped,
+        )
+        .await
+        .expect("downstream start errors remain per-delivery outcomes");
+    assert_eq!(report.deliveries.len(), 1);
+    assert!(matches!(
+        report.deliveries[0].outcome,
+        crate::TriggerDeliveryEmitOutcome::Failed { .. }
+    ));
+    assert!(report.deliveries[0].process_id.is_none());
 }

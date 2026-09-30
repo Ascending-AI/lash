@@ -119,6 +119,10 @@ impl TestTurnCancelGate {
             .contains(session_id)
     }
 
+    pub(crate) fn registrations_created(&self) -> usize {
+        self.state.lock_recover().next_registration_id
+    }
+
     pub(crate) fn registration_count(&self) -> usize {
         self.state.lock_recover().registrations.len()
     }

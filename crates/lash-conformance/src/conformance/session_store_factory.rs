@@ -24,6 +24,7 @@ mod attachment_fence;
 mod config_commands;
 pub use config_commands::{
     cancelled_session_config_settlement_is_typed,
+    ingress_follow_on_fork_and_command_coalescing_matrix,
     session_config_settlement_pending_returns_without_wait,
     superseded_config_settlement_adopts_the_newer_head,
 };
@@ -102,7 +103,6 @@ where
     session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
     turn_cancel::turn_cancel_undelivered_crash_matrix(make()).await;
     session_store_factory_admissible_queued_work_peek(make()).await;
-    config_commands::session_store_factory_coalesces_config_command_runs(make()).await;
     config_commands::session_store_factory_bounds_config_command_runs(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;

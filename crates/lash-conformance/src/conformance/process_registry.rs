@@ -471,13 +471,142 @@ pub(super) fn plain_event_type(name: &str) -> ProcessEventType {
     }
 }
 
-pub async fn refolded_process_record_matches_hot_projection(registry: Arc<dyn ProcessRegistry>) {
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture establishes each result"
+)]
+pub async fn record_fold_and_retention_hold_for_every_registry_writer(
+    registry: Arc<dyn ProcessRegistry>,
+) {
     refolded_process_record_matches_stored_projection(
         Arc::clone(&registry),
-        registry,
+        registry.clone(),
         "process-refold-hot",
     )
     .await;
+    let base = registry
+        .register_process(registration("refold-departure"))
+        .await
+        .expect("register external writer");
+    registry
+        .record_caller_departure(&base.id)
+        .await
+        .expect("abandon the external caller");
+    assert_refold_matches_stored_projection(&registry, &base, &base.id, "caller departure").await;
+    registry
+        .complete_process(
+            &base.id,
+            settled_success(serde_json::Value::Null),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("reconcile abandoned caller");
+    assert_refold_matches_stored_projection(&registry, &base, &base.id, "external reconciliation")
+        .await;
+    for (name, output) in [
+        (
+            "failed",
+            settled_failure(
+                crate::ToolFailureClass::Execution,
+                "refold_failure",
+                "failed",
+            ),
+        ),
+        ("cancelled", settled_cancellation("cancelled")),
+        (
+            "abandoned",
+            ProcessAwaitOutput::Abandoned {
+                evidence: Box::new(crate::AbandonEvidence {
+                    writer: crate::AbandonWriter::Producer,
+                    owner: None,
+                    epoch_ms: 1,
+                }),
+                control: None,
+            },
+        ),
+    ] {
+        let terminal_base = registry
+            .register_process(registration(&format!("refold-{name}")))
+            .await
+            .expect("register terminal writer");
+        registry
+            .complete_process(
+                &terminal_base.id,
+                output.clone(),
+                ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("terminal variant commits");
+        let stored = registry
+            .get_process(&terminal_base.id)
+            .await
+            .expect("read terminal variant")
+            .expect("terminal variant retained");
+        assert_eq!(stored.outcome, Some(output));
+        assert_eq!(stored.status.label(), name);
+        assert_refold_matches_stored_projection(&registry, &terminal_base, &terminal_base.id, name)
+            .await;
+    }
+    let (_, terminal_cursor) = registry
+        .processes_changed_since(crate::ProcessChangeCursor::initial(), 1000)
+        .await
+        .expect("project terminal writers");
+    assert_eq!(
+        registry
+            .prune_terminal_processes(
+                u64::MAX,
+                None,
+                ProjectionWatermark::UpTo(crate::ProcessChangeCursor::initial())
+            )
+            .await
+            .expect("prune behind projector")
+            .pruned_processes,
+        0
+    );
+    assert!(
+        registry
+            .get_process(&base.id)
+            .await
+            .expect("watermark retains row")
+            .is_some()
+    );
+    assert_eq!(
+        registry
+            .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::UpTo(terminal_cursor))
+            .await
+            .expect("prune projected writers")
+            .pruned_processes,
+        5
+    );
+    assert!(matches!(
+        registry.get_process(&base.id).await,
+        Err(PluginError::ProcessNoLongerRetained { .. })
+    ));
+    assert_eq!(
+        registry
+            .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(terminal_cursor), None)
+            .await
+            .expect("retain unseen deletions"),
+        0
+    );
+    let (_, deletion_cursor) = registry
+        .processes_changed_since(terminal_cursor, 1000)
+        .await
+        .expect("project deletions");
+    assert_eq!(
+        registry
+            .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor), None)
+            .await
+            .expect("compact projected deletions"),
+        5
+    );
+    assert!(
+        registry
+            .get_process(&base.id)
+            .await
+            .expect("compacted absence")
+            .is_none()
+    );
 }
 
 pub async fn process_event_pages_reject_out_of_range_sequences(registry: Arc<dyn ProcessRegistry>) {
@@ -1000,6 +1129,23 @@ async fn refolded_process_record_matches_stored_projection(
         .await
         .expect("record refold first start");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "first start").await;
+    writer
+        .park_process_with_authority(
+            process_id,
+            crate::store::ParkReason::ReplayDivergence {
+                message: "refold park".to_string(),
+            }
+            .into(),
+            &authority,
+        )
+        .await
+        .expect("park refold process");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "park entered").await;
+    writer
+        .begin_parked_rerun_with_authority(process_id, &authority)
+        .await
+        .expect("begin parked rerun");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "parked rerun").await;
     let wait = WaitState {
         since_ms: base.created_at_ms,
         kind: WaitKind::Signal {
@@ -1052,6 +1198,29 @@ async fn refolded_process_record_matches_stored_projection(
     );
     assert_refold_matches_stored_projection(&reader, &base, process_id, "signal replayed").await;
     writer
+        .append_event_with_authority(
+            process_id,
+            ProcessEventAppendRequest::new("signal.ready", serde_json::json!("authorized append")),
+            &authority,
+        )
+        .await
+        .expect("authorized event writer");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "authorized append").await;
+    let batch = writer
+        .append_events(
+            process_id,
+            vec![
+                ProcessEventAppendRequest::new("signal.ready", serde_json::json!("batch first")),
+                ProcessEventAppendRequest::new("signal.ready", serde_json::json!("batch second")),
+            ],
+            &authority,
+        )
+        .await
+        .expect("batch event writer");
+    assert_eq!(batch.len(), 2);
+    assert_eq!(batch[1].event.sequence, batch[0].event.sequence + 1);
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "batch append").await;
+    writer
         .add_observer(
             &SessionId::from("refold-observer"),
             process_id,
@@ -1061,8 +1230,31 @@ async fn refolded_process_record_matches_stored_projection(
         .expect("add refold observer");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "observer added").await;
     writer
-        .remove_observer(
+        .transfer_observers(
             &SessionId::from("refold-observer"),
+            &SessionId::from("refold-transferred"),
+            std::slice::from_ref(process_id),
+            crate::ProcessObserverBy::host("refold-transfer"),
+        )
+        .await
+        .expect("transfer observer");
+    assert!(
+        !reader
+            .is_observer(&SessionId::from("refold-observer"), process_id)
+            .await
+            .expect("old observer absent")
+    );
+    assert!(
+        reader
+            .is_observer(&SessionId::from("refold-transferred"), process_id)
+            .await
+            .expect("new observer present")
+    );
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "observer transferred")
+        .await;
+    writer
+        .remove_observer(
+            &SessionId::from("refold-transferred"),
             process_id,
             crate::ProcessObserverBy::host("refold-remove"),
         )
@@ -1070,9 +1262,72 @@ async fn refolded_process_record_matches_stored_projection(
         .expect("remove refold observer");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "observer removed").await;
     writer
-        .complete_process(
+        .retarget_subscription(process_id, Some("refold-wake"))
+        .await
+        .expect("retarget wake subscription");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "wake retarget").await;
+    writer
+        .request_process_cancel(
+            process_id,
+            crate::CancelOrigin::OperatorRequested,
+            "refold-operator".to_string(),
+            None,
+        )
+        .await
+        .expect("record cancellation");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "cancel requested").await;
+    let faults = Arc::new(crate::testing::ProcessRegistryFaults::new(writer.clone()));
+    let watched = lash_core::facade_support::watch_process_registry(faults.clone());
+    let sink = Arc::new(RefoldSink::default());
+    let _sink_guard = watched.add_event_sink(sink.clone());
+    let before = reader
+        .full_event_window(process_id, 0)
+        .await
+        .expect("event preimage");
+    faults.fail_next_event_append(PluginError::Session("injected failed commit".to_string()));
+    assert!(
+        watched
+            .registry()
+            .append_event(
+                process_id,
+                ProcessEventAppendRequest::new("signal.ready", serde_json::json!("failed"))
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        sink.0.lock().expect("sink lock").is_empty(),
+        "a failed append publishes no event"
+    );
+    assert_eq!(
+        serde_json::to_value(
+            reader
+                .full_event_window(process_id, 0)
+                .await
+                .expect("failed append log")
+        )
+        .expect("serialize log"),
+        serde_json::to_value(before).expect("serialize preimage")
+    );
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "failed append").await;
+    watched
+        .registry()
+        .append_event(
+            process_id,
+            ProcessEventAppendRequest::new("signal.ready", serde_json::json!("committed")),
+        )
+        .await
+        .expect("positive publication control");
+    assert_eq!(sink.0.lock().expect("sink lock").len(), 1);
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "published append").await;
+    writer
+        .complete_process_with_prelude(
             process_id,
             settled_success(serde_json::json!({"refolded": true})),
+            vec![ProcessEventAppendRequest::new(
+                "signal.ready",
+                serde_json::json!("terminal prelude"),
+            )],
             ProcessCompletionAuthority::workflow_key(format!("refold:{process_id}")),
         )
         .await
@@ -1926,4 +2181,263 @@ pub async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) 
 
 pub async fn caller_departed_rows_are_reclaimed_by_retention(registry: Arc<dyn ProcessRegistry>) {
     caller_departure::caller_departed_rows_are_reclaimed_by_retention(registry).await;
+}
+
+#[derive(Default)]
+struct RefoldSink(std::sync::Mutex<Vec<crate::ProcessEvent>>);
+#[async_trait::async_trait]
+impl crate::ProcessEventSink for RefoldSink {
+    async fn emit(&self, event: &crate::ProcessEvent) {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .push(event.clone());
+    }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture establishes each result"
+)]
+pub async fn signals_refuse_undeclared_invalid_and_terminal_sends(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let base = registry
+        .register_process(
+            registration("signal-refusal-matrix").with_extra_event_types([ProcessEventType {
+                name: "signal.ready".to_string(),
+                payload_schema: LashSchema::new(serde_json::json!({"type":"integer"})),
+                semantics: Default::default(),
+            }]),
+        )
+        .await
+        .expect("register typed signal");
+    for (name, payload, reason) in [
+        ("signal.missing", serde_json::json!(1), "undeclared"),
+        ("signal.ready", serde_json::json!("invalid"), "invalid"),
+    ] {
+        let error = registry
+            .append_event(&base.id, ProcessEventAppendRequest::new(name, payload))
+            .await
+            .expect_err("signal refused");
+        assert!(
+            matches!(error, PluginError::Session(ref message) if message.contains(reason)),
+            "{error:?}"
+        );
+        assert_eq!(
+            registry
+                .get_process(&base.id)
+                .await
+                .expect("unchanged record"),
+            Some(base.clone())
+        );
+        assert!(
+            registry
+                .full_event_window(&base.id, 0)
+                .await
+                .expect("unchanged log")
+                .is_empty()
+        );
+    }
+    let key = lash_core::runtime::process_signal_wait_key(&base.id, "ready", 1);
+    let request =
+        ProcessEventAppendRequest::new("signal.ready", serde_json::json!(7)).with_replay_key(key);
+    let first = registry
+        .append_event(&base.id, request.clone())
+        .await
+        .expect("valid signal");
+    registry
+        .complete_process(
+            &base.id,
+            settled_success(serde_json::json!("done")),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("terminal writer");
+    let terminal = registry
+        .get_process(&base.id)
+        .await
+        .expect("terminal record");
+    let events = registry
+        .full_event_window(&base.id, 0)
+        .await
+        .expect("terminal log");
+    assert_eq!(
+        serde_json::to_value(
+            registry
+                .append_event(&base.id, request)
+                .await
+                .expect("recorded signal replays after terminal")
+                .event
+        )
+        .expect("serialize replay"),
+        serde_json::to_value(first.event).expect("serialize original")
+    );
+    assert!(matches!(
+        registry
+            .append_event(
+                &base.id,
+                ProcessEventAppendRequest::new("signal.ready", serde_json::json!(8))
+                    .with_replay_key(lash_core::runtime::process_signal_wait_key(
+                        &base.id, "ready", 2
+                    ))
+            )
+            .await,
+        Err(PluginError::ProcessAlreadyTerminal {
+            status: ProcessStatus::Completed,
+            ..
+        })
+    ));
+    assert_eq!(
+        registry
+            .get_process(&base.id)
+            .await
+            .expect("terminal preimage preserved"),
+        terminal
+    );
+    assert_eq!(
+        serde_json::to_value(
+            registry
+                .full_event_window(&base.id, 0)
+                .await
+                .expect("terminal log preserved")
+        )
+        .expect("serialize log"),
+        serde_json::to_value(events).expect("serialize preimage")
+    );
+}
+
+struct ReattachingWorkPort {
+    process_id: ProcessId,
+    output: ProcessAwaitOutput,
+    waits: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessWorkSubstrate for ReattachingWorkPort {
+    async fn deliver_process_start(&self, _: &ProcessRecord) -> Result<(), PluginError> {
+        Err(PluginError::Invoke("unexpected start delivery".to_string()))
+    }
+
+    async fn await_process_terminal(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<crate::ProcessTerminalWait, PluginError> {
+        assert_eq!(
+            process_id, &self.process_id,
+            "reattachment preserves the explicit id"
+        );
+        match self.waits.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
+            0 => Ok(crate::ProcessTerminalWait::Reattach),
+            1 => Ok(crate::ProcessTerminalWait::Terminal(self.output.clone())),
+            _ => Err(PluginError::Invoke("external attach refused".to_string())),
+        }
+    }
+
+    async fn deliver_cancel(
+        &self,
+        _: &ProcessId,
+        _: &crate::CancelRequest,
+        _: &str,
+    ) -> Result<(), PluginError> {
+        Err(PluginError::Invoke(
+            "unexpected cancel delivery".to_string(),
+        ))
+    }
+
+    async fn publish_process_terminal(
+        &self,
+        _: &ProcessId,
+        _: &ProcessAwaitOutput,
+        _: &str,
+    ) -> Result<(), PluginError> {
+        Err(PluginError::Invoke(
+            "unexpected terminal publication".to_string(),
+        ))
+    }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture establishes each result"
+)]
+pub async fn work_wait_seam_covers_unknown_pruned_departed_and_external_processes(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    use crate::ProcessWorkSubstrate as _;
+    let work = crate::NoProcessWork::for_registry(registry.clone());
+    // This backend owns a process absent from the local registry. Await must
+    // use the port and preserve its error, without a registry polling fallback.
+    let port = Arc::new(ReattachingWorkPort {
+        process_id: ProcessId::fixture("external-backend-only"),
+        output: settled_success(serde_json::json!({"backend":"authoritative"})),
+        waits: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let await_backend = || {
+        crate::RuntimeEffectLocalExecutor::processes(registry.clone(), port.clone())
+            .into_process()
+            .expect("production process executor")
+            .execute(crate::ProcessCommand::Await {
+                process_id: port.process_id.clone(),
+            })
+    };
+    assert!(matches!(
+        await_backend().await.expect("reattached terminal"),
+        crate::ProcessEffectOutcome::Await { output } if *output == port.output
+    ));
+    assert_eq!(port.waits.load(std::sync::atomic::Ordering::SeqCst), 2);
+    let refusal = await_backend()
+        .await
+        .expect_err("backend refusal is authoritative");
+    assert!(
+        refusal.to_string().contains("external attach refused"),
+        "{refusal}"
+    );
+    assert_eq!(port.waits.load(std::sync::atomic::Ordering::SeqCst), 3);
+    let unknown = ProcessId::fixture("wait-unknown");
+    assert!(
+        matches!(work.await_process_terminal(&unknown).await, Err(PluginError::ProcessUnknown { process_id }) if process_id == unknown)
+    );
+    let external = registry
+        .register_process(registration("wait-external"))
+        .await
+        .expect("external process");
+    let output = settled_success(serde_json::json!({"external":true}));
+    let completion = async {
+        registry
+            .complete_process(
+                &external.id,
+                output.clone(),
+                ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("external completion");
+    };
+    let (wait, ()) = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        tokio::join!(work.await_process_terminal(&external.id), completion)
+    })
+    .await
+    .expect("external wait bounded");
+    assert_eq!(
+        wait.expect("external result"),
+        crate::ProcessTerminalWait::Terminal(output)
+    );
+    registry
+        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune external");
+    assert!(
+        matches!(work.await_process_terminal(&external.id).await.expect("pruned information"), crate::ProcessTerminalWait::Terminal(ProcessAwaitOutput::NoLongerRetained { terminal_label, .. }) if terminal_label == "completed")
+    );
+    let departed = registry
+        .register_process(registration("wait-departed"))
+        .await
+        .expect("departed process");
+    registry
+        .record_caller_departure(&departed.id)
+        .await
+        .expect("caller departure");
+    assert!(
+        matches!(work.await_process_terminal(&departed.id).await, Err(PluginError::ProcessCallerDeparted { process_id }) if process_id == departed.id)
+    );
 }

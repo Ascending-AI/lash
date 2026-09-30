@@ -63,7 +63,7 @@ impl crate::store::RuntimeStoreDecorator for PausedConfigSettlementStore {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn session_store_factory_coalesces_config_command_runs(
+pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
     factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
@@ -75,6 +75,49 @@ pub(super) async fn session_store_factory_coalesces_config_command_runs(
         .admit_view(&request)
         .await
         .expect("create config-command conformance store");
+    let mut state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        ..crate::RuntimeSessionState::new(request.config.session_policy())
+    };
+    state.ensure_agent_frame_initialized();
+    let owed = crate::store::PendingFollowOn {
+        follow_on_turn_id: TurnId::from("matrix-switch:agent-frame:1"),
+        frame_id: state
+            .current_frame_node_id
+            .clone()
+            .expect("initialized frame"),
+        task: "follow-on matrix task".to_string(),
+        options: None,
+        resolved_run: None,
+        chain_depth: 3,
+        attempts: 2,
+    };
+    let mut switch = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
+        &state,
+        &[],
+        crate::OperationId::turn(&request.session_id, "matrix-switch", "final"),
+    );
+    switch.pending_follow_on = Some(owed.clone());
+    state.apply_persisted_commit_result(
+        store
+            .commit_runtime_state(switch.clone())
+            .await
+            .expect("switch writes follow-on"),
+    );
+    state.mark_node_ids_persisted(switch.graph.nodes().iter().map(|node| node.node_id.clone()));
+    let replay = store
+        .commit_runtime_state(switch)
+        .await
+        .expect("switch receipt replays");
+    assert_eq!(replay.pending_follow_on, Some(owed.clone()));
+    let input = store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &request.session_id,
+            crate::TurnInputIngress::NextTurn,
+            crate::TurnInput::text("queued behind follow-on"),
+        ))
+        .await
+        .expect("input behind follow-on");
     for model in ["config-a", "config-b", "config-c"] {
         store
             .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
@@ -95,6 +138,79 @@ pub(super) async fn session_store_factory_coalesces_config_command_runs(
             .await
             .expect("enqueue config command");
     }
+    let separator = store
+        .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+            &request.session_id,
+            crate::DeliveryPolicy::AfterCurrentTurnCommit,
+            crate::SessionCommand::RefreshToolCatalog {
+                reason: "separator".to_string(),
+            },
+        ))
+        .await
+        .expect("enqueue separator");
+    let last = store
+        .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+            &request.session_id,
+            crate::DeliveryPolicy::AfterCurrentTurnCommit,
+            crate::SessionCommand::ApplyConfigPatch {
+                patch: Box::new(crate::runtime::ApplyConfigPatch::default()),
+            },
+        ))
+        .await
+        .expect("enqueue later patch");
+    let node = store
+        .load_session_head_meta()
+        .await
+        .expect("switch head")
+        .expect("head")
+        .leaf_node_id
+        .expect("switch leaf");
+    let fork_id = SessionId::from("follow-on-matrix-fork");
+    factory
+        .fork_session(&crate::ForkSessionRequest {
+            session_id: fork_id.clone(),
+            node_id: node,
+            pending_observer_intents: Vec::new(),
+            relation: crate::SessionRelation::Root,
+            policy: request.config.session_policy(),
+        })
+        .await
+        .expect("fork switched head");
+    let fork = factory
+        .live_view(&fork_id)
+        .await
+        .expect("lookup fork")
+        .expect("fork store");
+    assert!(
+        fork.load_session_head_meta()
+            .await
+            .expect("fork head")
+            .expect("head")
+            .pending_follow_on
+            .is_none(),
+        "fork owes no source follow-on"
+    );
+    assert_eq!(
+        store
+            .load_session_head_meta()
+            .await
+            .expect("source head")
+            .expect("head")
+            .pending_follow_on,
+        Some(owed.clone())
+    );
+    assert!(
+        fork.list_pending_turn_inputs()
+            .await
+            .expect("fork input disposition")
+            .is_empty()
+    );
+    assert!(
+        fork.list_queued_work()
+            .await
+            .expect("fork command disposition")
+            .is_empty()
+    );
     let owner = crate::LeaseOwnerIdentity::opaque(
         "config-command-coalescing",
         "config-command-coalescing:incarnation",
@@ -111,6 +227,64 @@ pub(super) async fn session_store_factory_coalesces_config_command_runs(
         .expect("claim config-command session lease")
         .acquired()
         .expect("config-command session lease");
+    assert!(
+        store
+            .open_session_command_run(&lease)
+            .await
+            .expect("blocked commands")
+            .is_empty()
+    );
+    let admitted = crate::testing::store_fixtures::admit_root_for_test(
+        store.store(),
+        &lease,
+        &TurnId::from("blocked-root"),
+        crate::store::AdmittedHead::Input(input.input_id.clone()),
+    )
+    .await
+    .expect("follow-on blocks idle input");
+    assert!(admitted.is_none());
+    let mut unrelated = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
+        &state,
+        &[],
+        crate::OperationId::turn(&request.session_id, "unrelated", "final"),
+    );
+    unrelated.pending_follow_on = None;
+    let refusal = store
+        .commit_runtime_state(unrelated)
+        .await
+        .expect_err("unrelated commit cannot clear a follow-on");
+    assert!(
+        matches!(
+            refusal,
+            crate::StoreError::FollowOnPending { attempts: 2, .. }
+        ),
+        "{refusal:?}"
+    );
+    let mut terminal = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
+        &state,
+        &[],
+        crate::OperationId::turn(&request.session_id, &owed.follow_on_turn_id, "final"),
+    );
+    terminal.pending_follow_on = None;
+    store
+        .commit_runtime_state(terminal)
+        .await
+        .expect("follow-on terminal clears obligation");
+    assert!(
+        store
+            .load_session_head_meta()
+            .await
+            .expect("cleared head")
+            .expect("head")
+            .pending_follow_on
+            .is_none()
+    );
+    let before_revision = store
+        .load_session_head_meta()
+        .await
+        .expect("head")
+        .expect("head")
+        .head_revision;
     let run = store
         .open_session_command_run(&lease)
         .await
@@ -133,6 +307,49 @@ pub(super) async fn session_store_factory_coalesces_config_command_runs(
         .map(|batch| batch.batch_id.clone())
         .collect::<Vec<_>>();
     commit_session_command_run(store.store(), &request, &lease, run).await;
+    assert_eq!(
+        store
+            .load_session_head_meta()
+            .await
+            .expect("coalesced head")
+            .expect("head")
+            .head_revision,
+        before_revision + 1
+    );
+    let next = store
+        .open_session_command_run(&lease)
+        .await
+        .expect("separator run");
+    assert_eq!(
+        next.iter().map(|batch| &batch.batch_id).collect::<Vec<_>>(),
+        vec![&separator.batch_id]
+    );
+    commit_session_command_run(store.store(), &request, &lease, next).await;
+    let next = store
+        .open_session_command_run(&lease)
+        .await
+        .expect("later patch run");
+    assert_eq!(
+        next.iter().map(|batch| &batch.batch_id).collect::<Vec<_>>(),
+        vec![&last.batch_id]
+    );
+    commit_session_command_run(store.store(), &request, &lease, next).await;
+    assert!(
+        store
+            .open_session_command_run(&lease)
+            .await
+            .expect("empty command lane")
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .list_pending_turn_inputs()
+            .await
+            .expect("input retained")[0]
+            .input
+            .input_id,
+        input.input_id
+    );
     for batch_id in completed_batch_ids {
         assert!(
             store

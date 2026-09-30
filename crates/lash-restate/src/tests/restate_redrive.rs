@@ -1,5 +1,8 @@
 use super::*;
 
+mod drive_fixtures;
+use drive_fixtures::{drive_envelope, execute_drive, registered};
+
 /// A terminal process run's suspension tail: the terminal pair, then the
 /// `lash.process.parent-end` pair applied right after terminal completion
 /// (FIG-3822), then complete-promise, call, and suspension.
@@ -2440,90 +2443,6 @@ pub(super) async fn segment_handover_records_the_successor_external_reference() 
 
 /// The inputs an execution under `live_generation` would compose: the
 /// enqueue instant stands in for everything a live read could observe.
-fn journaled_drive_inputs(live_generation: u64) -> lash_core::AdmittedTurnInputs {
-    let session_id = SessionId::from("session");
-    lash_core::AdmittedTurnInputs {
-        session_id: session_id.clone(),
-        mode: lash_core::TurnInputAdmissionMode::NextTurn,
-        inputs: vec![lash_core::PendingTurnInput {
-            input_id: lash_core::InputId::from("in_7"),
-            session_id,
-            enqueue_seq: 7,
-            source_key: None,
-            state: lash_core::TurnInputState::DeferredNextTurn,
-            enqueued_at_ms: live_generation,
-            input: lash_core::TurnInput::text("deploy staging"),
-            run_spec: None,
-        }],
-        applications: Vec::new(),
-    }
-}
-
-fn drive_envelope() -> RuntimeEffectEnvelope {
-    let acceptance = lash_core::runtime::causal::turn_acceptance_effect_invocation(
-        &durable_turn_scope("session", "turn"),
-        &SessionId::from("session"),
-        &lash_core::TurnId::from("turn"),
-    );
-    RuntimeEffectEnvelope::new(
-        lash_core::runtime::causal::turn_input_drive_effect_invocation(&acceptance),
-        RuntimeEffectCommand::AdmitRoot {
-            head: lash_core::store::AdmittedHead::Input(lash_core::InputId::from("in_7")),
-        },
-    )
-}
-
-async fn execute_drive(
-    context: &Arc<ReplayableRecordingContext>,
-    live_generation: u64,
-    local_runs: &Arc<AtomicUsize>,
-) -> lash_core::store::RootAdmission {
-    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(context));
-    match controller
-        .execute_effect(
-            drive_envelope(),
-            RuntimeEffectLocalExecutor::testing({
-                let local_runs = Arc::clone(local_runs);
-                move |_envelope| async move {
-                    local_runs.fetch_add(1, Ordering::SeqCst);
-                    Ok(RuntimeEffectOutcome::AdmitRoot {
-                        answer: lash_core::store::RootAdmissionAnswer::Admitted {
-                            admission: Box::new(lash_core::store::RootAdmission {
-                                head: lash_core::store::AdmittedHead::Input(
-                                    lash_core::InputId::from("in_7"),
-                                ),
-                                inputs: Some(Box::new(journaled_drive_inputs(live_generation))),
-                                queued: None,
-                                // What this execution would read from the live
-                                // head: a replay must not see it (FIG-3682).
-                                base: lash_core::store::SessionHeadRef {
-                                    generation: 1,
-                                    revision: live_generation,
-                                    leaf: None,
-                                    checkpoint: None,
-                                },
-                                turn_index: live_generation + 1,
-                                // Likewise the generation: a replay keeps the one
-                                // the first execution admitted under (FIG-3571).
-                                generation: Some(lash_core::ExecutableGeneration::new(format!(
-                                    "blake3:live-{live_generation}"
-                                ))),
-                            }),
-                        },
-                    })
-                }
-            }),
-        )
-        .await
-        .expect("the drive effect runs as a journaled Restate run")
-        .into_root_admission()
-        .expect("the drive effect returns an admission")
-    {
-        lash_core::store::RootAdmissionAnswer::Admitted { admission } => *admission,
-        refused => panic!("the drive effect admits its head: {refused:?}"),
-    }
-}
-
 /// FIG-3532: the initial drive set of an accepted turn input is a journaled
 /// Restate run. A replay under a later drive epoch returns the admission the
 /// first execution journaled and never runs the live admission again.
@@ -2579,14 +2498,96 @@ fn accepted_turn_input_drive_envelope_hash_is_independent_of_lease_generation() 
     }
 }
 
-/// Registers `registration` and answers the id its registrar minted.
-async fn registered(
-    registry: &dyn ProcessRegistry,
-    registration: &ProcessRegistration,
-) -> ProcessId {
-    registry
-        .register_process(registration.clone())
-        .await
-        .expect("register the process")
-        .id
+#[tokio::test]
+async fn wait_variants_preserve_key_deadline_and_cancel_journal_geometry() {
+    let scope = durable_turn_scope("session", "turn");
+    let process = ProcessId::fixture("wait-matrix-process");
+    let variants = [
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("wait-matrix-tool")),
+        AwaitEventWaitIdentity::process_signal(process.clone(), "ready", 1),
+        AwaitEventWaitIdentity::process_signal(process, "ready", 2),
+        AwaitEventWaitIdentity::TurnCancelGate,
+        AwaitEventWaitIdentity::TurnTerminal,
+        AwaitEventWaitIdentity::TurnCancelEscalation,
+        AwaitEventWaitIdentity::Custom {
+            key: "wait-matrix-custom".to_string(),
+        },
+    ];
+    let mut keys = std::collections::HashSet::new();
+    for wait in variants {
+        let key = test_restate_await_event_key(&scope, wait).expect("derive variant key");
+        assert!(
+            keys.insert(key.key_id.clone()),
+            "signal ordinals and wait variants do not alias"
+        );
+        for observe in [false, true] {
+            for has_deadline in [false, true] {
+                let context = Arc::new(ReplayableRecordingContext::default());
+                let controller = RestateRuntimeEffectController::new_for_test(context.clone());
+                let resolution = Resolution::Ok(serde_json::json!({"variant":key.key_id}));
+                context
+                    .events
+                    .resolve_durable_event(RestateDurableWaitResolveRequest {
+                        key: key.clone(),
+                        resolution: resolution.clone(),
+                    });
+                let invocation = runtime_invocation(RuntimeEffectKind::AwaitEvent, "wait-matrix");
+                let replay_key = invocation.effect_replay_key().to_owned();
+                for replaying in [false, true] {
+                    context.replaying.store(replaying, Ordering::SeqCst);
+                    let deadline = has_deadline.then(|| {
+                        std::time::Instant::now()
+                            + Duration::from_secs(if replaying { 120 } else { 60 })
+                    });
+                    let outcome = controller
+                        .execute_effect(
+                            RuntimeEffectEnvelope::new(
+                                invocation.clone(),
+                                RuntimeEffectCommand::AwaitEvent { key: key.clone() },
+                            ),
+                            RuntimeEffectLocalExecutor::await_event(
+                                tokio_util::sync::CancellationToken::new(),
+                                deadline,
+                            )
+                            .with_turn_cancel_observation(observe)
+                            .with_turn_cancel_scope(scope.clone()),
+                        )
+                        .await
+                        .expect("wait variant completes and replays");
+                    assert!(
+                        matches!(outcome, RuntimeEffectOutcome::AwaitEvent {resolution: ref actual} if actual == &resolution)
+                    );
+                }
+                let requests = context.events.awaited_requests.lock_recover();
+                assert_eq!(requests.len(), 2);
+                let first = serde_json::to_value(&requests[0]).expect("serialize first request");
+                assert_eq!(
+                    serde_json::to_value(&requests[1]).expect("serialize replay"),
+                    first,
+                    "redrive preserves key and original absolute deadline"
+                );
+                assert_eq!(requests[0].key, key);
+                assert_eq!(requests[0].deadline.is_some(), has_deadline);
+                assert_eq!(
+                    context.records.lock_recover().len(),
+                    usize::from(has_deadline)
+                );
+                assert_eq!(
+                    context.runs.lock_recover().len(),
+                    if has_deadline { 2 } else { 0 },
+                    "no-deadline waits journal no extra run"
+                );
+                assert_eq!(
+                    context.events.turn_cancel_gate.registrations_created(),
+                    if observe { 2 } else { 0 },
+                    "observation selects wait-plus-gate geometry"
+                );
+                assert_eq!(context.events.turn_cancel_gate.registration_count(), 0);
+                assert_eq!(
+                    context.events.awaited_replay_keys.lock_recover().as_slice(),
+                    [replay_key.clone(), replay_key]
+                );
+            }
+        }
+    }
 }
