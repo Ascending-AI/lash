@@ -162,3 +162,161 @@ pub(super) async fn a_completion_authority_for_the_wrong_input_class_is_refused(
         );
     }
 }
+
+#[expect(clippy::expect_used, reason = "conformance fixture assertions")]
+pub(super) async fn terminal_completion_replay_keeps_original_authority_and_writes_nothing(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    for external in [true, false] {
+        for carrier in [None, Some(0), Some(2)] {
+            let authorities = [
+                ProcessCompletionAuthority::external_owner(),
+                ProcessCompletionAuthority::workflow_key("original-workflow"),
+                ProcessCompletionAuthority::WorkflowKeyRecovery {
+                    workflow_key: "original-recovery".into(),
+                    segment_ordinal: carrier.unwrap_or(0),
+                },
+            ];
+            for original in &authorities {
+                if external != matches!(original, ProcessCompletionAuthority::ExternalOwner) {
+                    continue;
+                }
+                let record = registry
+                    .register_process(if external {
+                        registration("terminal-authority-external")
+                    } else {
+                        executed_registration("terminal-authority-engine")
+                    })
+                    .await
+                    .expect("register authority case");
+                let id = record.id;
+                if let Some(ordinal) = carrier {
+                    registry
+                        .set_external_ref(
+                            &id,
+                            crate::ProcessExternalRef {
+                                backend: "restate".into(),
+                                id: "carrier".into(),
+                                metadata: None,
+                                segment_ordinal: Some(ordinal),
+                            },
+                        )
+                        .await
+                        .expect("record segment carrier");
+                }
+                let output = settled_success(serde_json::json!({"original": true}));
+                let committed = registry
+                    .complete_process(&id, output.clone(), original.clone())
+                    .await
+                    .expect("original authority commits");
+                let before = serde_json::to_value(&*committed).expect("serialize retained process");
+                let events = registry
+                    .full_event_window(&id, 0)
+                    .await
+                    .expect("original events");
+                let evidence = completion_authority_evidence(&registry, &id).await;
+                let publication = registry
+                    .terminal_publication(&id)
+                    .await
+                    .expect("original publication");
+                let replay_authorities = [
+                    ProcessCompletionAuthority::external_owner(),
+                    ProcessCompletionAuthority::workflow_key("different-workflow"),
+                    ProcessCompletionAuthority::WorkflowKeyRecovery {
+                        workflow_key: "different-recovery".into(),
+                        segment_ordinal: 0,
+                    },
+                    ProcessCompletionAuthority::WorkflowKeyRecovery {
+                        workflow_key: "different-recovery".into(),
+                        segment_ordinal: 2,
+                    },
+                    ProcessCompletionAuthority::WorkflowKeyRecovery {
+                        workflow_key: "different-recovery".into(),
+                        segment_ordinal: 3,
+                    },
+                ];
+                for authority in replay_authorities {
+                    let wrong_class =
+                        external != matches!(authority, ProcessCompletionAuthority::ExternalOwner);
+                    let superseded = !external
+                        && matches!(authority,
+                        ProcessCompletionAuthority::WorkflowKeyRecovery { segment_ordinal, .. }
+                            if carrier.unwrap_or(0) > segment_ordinal);
+                    for proposed in [
+                        output.clone(),
+                        settled_success(serde_json::json!({"drifted": true})),
+                    ] {
+                        let result = registry
+                            .complete_process_with_prelude(
+                                &id,
+                                proposed.clone(),
+                                vec![crate::ProcessEventAppendRequest::new(
+                                    "replay.must.not.append",
+                                    serde_json::json!({"changed": true}),
+                                )],
+                                authority.clone(),
+                            )
+                            .await;
+                        if wrong_class {
+                            assert!(
+                                matches!(result, Err(PluginError::Session(_))),
+                                "wrong class refused before replay: {result:?}"
+                            );
+                        } else if superseded {
+                            assert!(
+                                matches!(result, Err(PluginError::ProcessHandedOver { ref process_id, segment_ordinal: 2 }) if process_id == id),
+                                "later segment refuses replay: {result:?}"
+                            );
+                        } else {
+                            let result = result.expect("valid repeat returns retained terminal");
+                            assert_eq!(
+                                serde_json::to_value(&*result).expect("serialize replay"),
+                                before
+                            );
+                            assert!(if proposed == output {
+                                matches!(
+                                    result,
+                                    crate::ProcessCompletionOutcome::AlreadyApplied { .. }
+                                )
+                            } else {
+                                matches!(result, crate::ProcessCompletionOutcome::Superseded { .. })
+                            });
+                        }
+                        assert_eq!(
+                            serde_json::to_value(
+                                registry
+                                    .get_process(&id)
+                                    .await
+                                    .expect("read process")
+                                    .expect("process retained")
+                            )
+                            .expect("serialize process"),
+                            before
+                        );
+                        assert_eq!(
+                            serde_json::to_value(
+                                registry
+                                    .full_event_window(&id, 0)
+                                    .await
+                                    .expect("read events")
+                            )
+                            .expect("serialize events"),
+                            serde_json::to_value(&events).expect("serialize original events")
+                        );
+                        assert_eq!(
+                            completion_authority_evidence(&registry, &id).await,
+                            evidence
+                        );
+                        assert_eq!(
+                            registry
+                                .terminal_publication(&id)
+                                .await
+                                .expect("read publication"),
+                            publication
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

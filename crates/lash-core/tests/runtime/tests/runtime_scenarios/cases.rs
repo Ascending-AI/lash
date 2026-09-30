@@ -785,6 +785,12 @@ impl lash_core::LiveReplayStore for PublicationFailureStore {
     fn trim_session(&self, session: &SessionId) -> Result<(), lash_core::LiveReplayStoreError> {
         self.inner.trim_session(session)
     }
+    fn invalidate_session(
+        &self,
+        session: &SessionId,
+    ) -> Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.invalidate_session(session)
+    }
 }
 
 #[tokio::test]

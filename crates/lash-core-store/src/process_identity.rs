@@ -12,11 +12,16 @@ use std::fmt;
 /// (ADR 0107). Minting reads the clock and the random source; the durable
 /// drive never calls it, it reads the id back off the start's recorded result.
 #[must_use]
+#[expect(
+    clippy::expect_used,
+    reason = "Uuid::now_v7 always returns a version-7 UUID with the RFC variant"
+)]
 pub fn mint_process_id() -> ProcessId {
     ProcessId::minted(
         lash_sansio::identity::ProcessIdRegistrar::REGISTRAR,
         uuid::Uuid::now_v7().as_u128(),
     )
+    .expect("UUIDv7 generator supplies valid process-id bits")
 }
 
 /// Where a process registrar's minted ids come from.
@@ -48,13 +53,21 @@ impl ProcessIdMint {
     /// mint gives its `ordinal`th registration, counting from 1.
     #[doc(hidden)]
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "the fixture pins the version and RFC variant bits"
+    )]
     pub fn sequential_id_for_testing(ordinal: u64) -> ProcessId {
         // Version 7 in the version nibble and the RFC 4122 variant, around a
         // counter where UUIDv7 carries its random bits.
         ProcessId::minted(
             lash_sansio::identity::ProcessIdRegistrar::REGISTRAR,
-            u128::from(ordinal) | (0x7_u128 << 76) | (0b10_u128 << 62),
+            (u128::from(ordinal) & ((1_u128 << 62) - 1))
+                | ((u128::from(ordinal) >> 62) << 64)
+                | (0x7_u128 << 76)
+                | (0b10_u128 << 62),
         )
+        .expect("sequential fixture supplies valid process-id bits")
     }
 
     /// Mint the id of one newly registered process.

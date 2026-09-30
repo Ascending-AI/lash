@@ -808,6 +808,16 @@ impl LiveConformanceHarness {
         )
     }
 
+    pub(super) fn tool_call_identity_runner(
+        &self,
+    ) -> Arc<dyn lash_conformance::ToolCallIdentityRunner> {
+        super::live_turn_probe::LiveTurnRunner::shared(
+            self.connection.clone(),
+            self.admin.clone(),
+            Arc::clone(&self.process_runner),
+        )
+    }
+
     /// The endpoint's ingress connection: a law sends to the same Restate
     /// the endpoint's handlers serve.
     pub(super) fn connection(&self) -> RestateConnection {

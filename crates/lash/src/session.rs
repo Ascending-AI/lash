@@ -1363,7 +1363,9 @@ impl Stream for SessionObservationStream {
                     self.cursor = event.cursor.clone();
                     return Poll::Ready(Some(Ok(SessionObservationStreamItem::Event(event))));
                 }
-                Poll::Ready(Some(Err(LiveReplayStoreError::SubscriberLagged(_)))) => {
+                Poll::Ready(Some(Err(
+                    LiveReplayStoreError::SubscriberLagged(_) | LiveReplayStoreError::Closed,
+                ))) => {
                     self.subscription = None;
                     continue;
                 }

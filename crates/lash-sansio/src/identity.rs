@@ -263,8 +263,13 @@ impl ProcessId {
     /// The id for one freshly minted UUIDv7, minted by the process registrar
     /// inside the transaction that registers the process.
     #[doc(hidden)]
-    pub fn minted(_registrar: ProcessIdRegistrar, uuid_v7: u128) -> Self {
-        Self::from_minted(uuid_v7)
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidProcessId`] if the bits do not encode UUID version 7 and the
+    /// RFC 9562 variant.
+    pub fn minted(_registrar: ProcessIdRegistrar, uuid_v7: u128) -> Result<Self, InvalidProcessId> {
+        Self::parse(&format!("{PROCESS_ID_PREFIX}{uuid_v7:032x}"))
     }
 
     pub(crate) fn from_minted(uuid_v7: u128) -> Self {
@@ -377,6 +382,42 @@ string_identity!(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_public_process_id_mint_round_trips_through_parse() {
+        let registrar = ProcessIdRegistrar::REGISTRAR;
+        for payload in [0, 1, u128::MAX, 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210] {
+            for version in 0..16_u128 {
+                for variant in 0..4_u128 {
+                    let bits = (payload & !(0xf_u128 << 76) & !(0b11_u128 << 62))
+                        | (version << 76)
+                        | (variant << 62);
+                    let minted = ProcessId::minted(registrar, bits);
+                    if version == 7 && variant == 2 {
+                        let id = minted.expect("UUIDv7 with the RFC variant mints");
+                        assert_eq!(
+                            ProcessId::parse(id.as_str()).expect("public mint parses"),
+                            id
+                        );
+                        assert_eq!(
+                            serde_json::from_str::<ProcessId>(&serde_json::to_string(&id).unwrap())
+                                .unwrap(),
+                            id
+                        );
+                    } else {
+                        assert!(minted.is_err(), "invalid bits must refuse: {bits:032x}");
+                    }
+                }
+            }
+        }
+        for label in ["", "process", "p_0", "東京", "\0"] {
+            let id = ProcessId::fixture(label);
+            assert_eq!(
+                ProcessId::parse(id.as_str()).expect("fixture mint parses"),
+                id
+            );
+        }
+    }
 
     /// Each identity is spelled out by hand rather than looped over the macro:
     /// a round trip through the generated impls would agree with itself even if

@@ -28,6 +28,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                 .as_deref()
                 .map(|request| request.origin),
         );
+        authority.validate(&record)?;
         if record.is_terminal() {
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(lash_core_execution::ProcessCompletionOutcome::from_stored(
@@ -35,7 +36,6 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                 &await_output,
             ));
         }
-        authority.validate(&record)?;
         let occurred_at_ms = self.clock.timestamp_ms();
         let mut batch = ProcessEventBatch::for_fleet(self.fence.fleet());
         for request in prelude {

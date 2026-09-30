@@ -646,6 +646,9 @@ impl LiveReplayStore for Integrator {
     fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         unreachable!("external signature witness")
     }
+    fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
+        unreachable!("external signature witness")
+    }
 }
 
 #[lash::async_trait]

@@ -367,6 +367,7 @@ macro_rules! process_registry_tests {
                 (a_terminal_write_arms_its_publication_once, "process-terminal-publication"),
                 (a_completion_authority_matching_its_input_class_commits, "completion-authority-granted"),
                 (a_completion_authority_for_the_wrong_input_class_is_refused, "completion-authority-refused"),
+                (terminal_completion_replay_keeps_original_authority_and_writes_nothing, "terminal-completion-authority-replay"),
                 (a_session_scope_closes_only_through_its_close_row, "session-scope-close"),
                 (a_turn_scope_ends_through_its_recorded_ledger_row, "turn-parent-end"),
                 (an_abandoned_consumer_hold_fences_registration, "abandoned-consumer-hold"),
@@ -913,7 +914,7 @@ macro_rules! retention_tests {
 macro_rules! observer_intent_tests {
     ($fixture:block) => {
         $crate::observer_intent_tests!(@catalogue $fixture; [
-            (fork_observer_intent_transient_failure, "fork-observer-intent"),
+            (fork_observer_transient_failure_retains_intent_until_publication, "fork-observer-intent"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -2097,5 +2098,20 @@ macro_rules! effect_host_await_event_witness_tests {
                 $attrs $fixture; $kind $law, $label
             );
         )*
+    };
+}
+
+/// Register the durable queue's post-mutation observation recovery law.
+#[macro_export]
+macro_rules! queue_observation_tests {
+    ($fixture:block) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn queue_head_read_failure_publishes_recoverable_gap() {
+            let (_guard, backend) = $fixture;
+            $crate::registration_macro_support::queue_head_read_failure_publishes_recoverable_gap(
+                backend,
+            )
+            .await;
+        }
     };
 }

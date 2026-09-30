@@ -2435,3 +2435,13 @@ pub async fn work_wait_seam_covers_unknown_pruned_departed_and_external_processe
         matches!(work.await_process_terminal(&departed.id).await, Err(PluginError::ProcessCallerDeparted { process_id }) if process_id == departed.id)
     );
 }
+
+/// Completion validates authority even when replay returns a retained terminal.
+pub async fn terminal_completion_replay_keeps_original_authority_and_writes_nothing(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    completion_authority::terminal_completion_replay_keeps_original_authority_and_writes_nothing(
+        registry,
+    )
+    .await;
+}

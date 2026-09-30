@@ -34,6 +34,17 @@ pub use drift::*;
 pub use laws::*;
 pub use replay::*;
 
+/// Runs repeated crashes in one invocation, preserving its retained call binding.
+#[async_trait::async_trait]
+pub trait ToolCallIdentityRunner: crate::ConformanceTurnRunner {
+    async fn run_crashes_then_redriven_turn(
+        &self,
+        admitted: crate::AdmittedScope,
+        crashing: Vec<crate::ConformanceTurnAttempt>,
+        redrive: crate::ConformanceTurnAttempt,
+    );
+}
+
 /// What a registering tier hands every tool-call identity law.
 #[derive(Clone)]
 pub struct ToolCallIdentityTier {
@@ -43,7 +54,7 @@ pub struct ToolCallIdentityTier {
     pub effect_host: Arc<dyn crate::EffectHost>,
     pub stores: Arc<dyn crate::StoreSet>,
     /// Runs each turn, and crashes and redrives it.
-    pub runner: Arc<dyn crate::ConformanceTurnRunner>,
+    pub runner: Arc<dyn ToolCallIdentityRunner>,
     /// The RLM protocol plugin factories the code-cell laws run under: the
     /// part of the tier this crate cannot construct.
     pub rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
@@ -565,7 +576,7 @@ impl World {
             .push((opening.to_string(), Arc::new(responses)));
     }
 
-    pub(crate) fn runner(&self) -> &Arc<dyn crate::ConformanceTurnRunner> {
+    pub(crate) fn runner(&self) -> &Arc<dyn ToolCallIdentityRunner> {
         &self.tier.runner
     }
 

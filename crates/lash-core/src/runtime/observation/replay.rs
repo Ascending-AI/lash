@@ -618,6 +618,14 @@ pub trait LiveReplayStore: Send + Sync {
     /// This must be fast and nonblocking from the runtime's point of view.
     fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor;
 
+    /// Mark this session's replay continuity unavailable without inventing a
+    /// revision. Existing cursors must return `Gap(Unavailable)` and active
+    /// subscriptions must close so observers reload their authoritative snapshot.
+    /// A cursor acquired after that snapshot establishes fresh continuity.
+    /// Pending publications must not restore continuity across this gap.
+    /// This must be fast and nonblocking from the runtime's point of view.
+    fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError>;
+
     /// This must be fast and nonblocking from the runtime's point of view.
     fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError>;
 }
@@ -1187,6 +1195,27 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             revision,
             live_position,
         )
+    }
+
+    fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
+        let mut sessions = self.sessions.lock_recover();
+        let buffer = sessions
+            .entry(session_id.clone())
+            .or_insert_with(LiveReplaySessionBuffer::new);
+        let unavailable_through = buffer.tail_position.checked_add(1).ok_or_else(|| {
+            LiveReplayStoreError::Store("live replay position overflow".to_string())
+        })?;
+        let recovered_position = unavailable_through.checked_add(1).ok_or_else(|| {
+            LiveReplayStoreError::Store("live replay position overflow".to_string())
+        })?;
+        buffer.events.clear();
+        buffer.delivered_activity_positions.clear();
+        buffer.reservations.clear();
+        buffer.unavailable_through = unavailable_through;
+        buffer.tail_position = recovered_position;
+        buffer.settled_position = recovered_position;
+        buffer.sender = None;
+        Ok(())
     }
 
     fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {

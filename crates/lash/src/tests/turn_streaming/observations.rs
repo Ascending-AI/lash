@@ -1,5 +1,10 @@
 use super::*;
 
+#[path = "observation_recovery.rs"]
+mod recovery;
+
+pub(super) use recovery::observation_assistant_delta;
+
 fn bid() -> lash_core::llm::types::StreamBlockIdentity {
     lash_core::llm::types::StreamBlockIdentity::new("text:0", 0)
 }
@@ -1400,6 +1405,13 @@ impl lash_core::LiveReplayStore for FailingAppendReplayStore {
         self.inner.current_cursor(session_id, revision)
     }
 
+    fn invalidate_session(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.invalidate_session(session_id)
+    }
+
     fn trim_session(
         &self,
         session_id: &SessionId,
@@ -1979,6 +1991,13 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
         self.inner.current_cursor(session_id, revision)
     }
 
+    fn invalidate_session(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.invalidate_session(session_id)
+    }
+
     fn trim_session(
         &self,
         session_id: &SessionId,
@@ -2385,20 +2404,6 @@ pub(super) async fn recoverable_chat_conformance_disconnect_does_not_cancel_serv
     let result = turn.await.expect("join turn")?;
     assert!(matches!(result.result.outcome, TurnOutcome::Finished(_)));
     Ok(())
-}
-
-pub(super) fn observation_assistant_delta(
-    event: &lash_core::SessionObservationEvent,
-) -> Option<String> {
-    match &event.payload {
-        lash_core::SessionObservationEventPayload::TurnActivity(activity) => {
-            match &activity.event {
-                TurnEvent::AssistantProseDelta { text, .. } => Some(text.to_string()),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
 }
 
 pub(super) fn remote_observation_assistant_delta(

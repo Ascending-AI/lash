@@ -882,6 +882,22 @@ lash_conformance::observer_intent_tests!({
     )
 });
 
+lash_conformance::queue_observation_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres queue observation conformance: \
+             LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    let (attachments, stores) = pg_law_stores(&storage);
+    (
+        (database_lock, attachments),
+        lash_conformance::recording_backend_over(stores),
+    )
+});
+
 lash_conformance::session_graph_append_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(

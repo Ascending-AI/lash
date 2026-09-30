@@ -518,7 +518,7 @@ lash_conformance::tool_call_identity_tests!(
             prefix: format!("restate-tool-call-identity-{}", harness.run_nonce()),
             effect_host: harness.endpoint_host(),
             stores: harness.law_stores(),
-            runner: harness.turn_runner(),
+            runner: harness.tool_call_identity_runner(),
             rlm: vec![drift_law_rlm_factory()],
         };
         (harness, tier)

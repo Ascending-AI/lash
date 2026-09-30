@@ -32,3 +32,16 @@ fn a_process_execution_environment_rejects_unknown_fields() {
         "the refusal names the unknown field: {error}"
     );
 }
+
+#[test]
+fn sequential_process_id_mint_preserves_every_ordinal_and_parses() {
+    let ordinals = [0, 1, (1 << 62) - 1, 1 << 62, 1 << 63, u64::MAX];
+    let ids = ordinals.map(ProcessIdMint::sequential_id_for_testing);
+    for (index, id) in ids.iter().enumerate() {
+        assert_eq!(ProcessId::parse(id.as_str()).unwrap(), *id);
+        assert!(
+            !ids[..index].contains(id),
+            "different ordinals mint different ids"
+        );
+    }
+}

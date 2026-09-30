@@ -101,22 +101,13 @@ impl DurableSessionOps {
         self.ingress.current_ask(item_id).await
     }
 
-    /// A head that cannot be read is not an error for a best-effort
-    /// publication; it degrades to [`EMPTY_HEAD_REVISION`], which mints a
-    /// cursor a reconnect resolves through gap recovery rather than losing the
-    /// event silently.
-    async fn publication_revision(&self, store: &crate::store::SessionStore) -> SessionRevision {
-        match store.load_session_head_meta().await {
-            Ok(meta) => revision_of_head(meta),
-            Err(err) => {
-                tracing::warn!(
-                    session_id = %self.session_id,
-                    error = %err,
-                    "failed to read committed head for a queue observation event; publishing at the empty-head revision",
-                );
-                EMPTY_HEAD_REVISION
-            }
-        }
+    /// A failed head read proves no revision. Invalidate replay continuity
+    /// after durable success so observers recover from their cursor gap.
+    async fn publication_revision(
+        &self,
+        store: &crate::store::SessionStore,
+    ) -> Result<SessionRevision, crate::StoreError> {
+        store.load_session_head_meta().await.map(revision_of_head)
     }
 
     /// Publish one `QueueChanged` event, best-effort, after durable success.
@@ -131,7 +122,19 @@ impl DurableSessionOps {
     ) {
         let revision = match revision {
             Some(revision) => revision,
-            None => self.publication_revision(store).await,
+            None => match self.publication_revision(store).await {
+                Ok(revision) => revision,
+                Err(error) => {
+                    tracing::warn!(session_id = %self.session_id, %error,
+                        "failed to read queue observation head; invalidating replay continuity");
+                    if let Err(error) = self.live_replay_store.invalidate_session(&self.session_id)
+                    {
+                        tracing::warn!(session_id = %self.session_id, %error,
+                            "failed to invalidate queue observation replay continuity");
+                    }
+                    return;
+                }
+            },
         };
         let drafts = vec![LiveReplayEventDraft::new(
             None::<String>,

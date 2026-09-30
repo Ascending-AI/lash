@@ -292,7 +292,11 @@ impl RuntimeExecutionContext<'_> {
 
         // Each child's request is bound to its identity before anything of
         // the group is journaled (ADR 0117 §7).
-        let retained_payloads = self.bind_retained_requests(&group_key, children).await?;
+        let requests = children
+            .iter()
+            .map(|child| child.tool().map(|leaf| (&leaf.call.call, &leaf.admission)))
+            .collect::<Vec<_>>();
+        let retained_payloads = self.bind_retained_requests(&group_key, &requests).await?;
 
         // Live trace/activity is the opener's (ToolSettlement plan rule 3):
         // started events are emitted here, at formation, exactly as the batch
@@ -425,22 +429,19 @@ impl RuntimeExecutionContext<'_> {
     /// refused before any effect, through the binding-drift refusal a drifted
     /// tool meets (ADR 0116 §2.2), so the turn parks; the id is never reminted
     /// to fit.
-    async fn bind_retained_requests(
+    pub(crate) async fn bind_retained_requests(
         &self,
         group_key: &str,
-        children: &[PreparedGroupChild],
+        requests: &[Option<(&crate::PreparedToolCall, &ToolChildAdmission)>],
     ) -> Result<Vec<Option<serde_json::Value>>, crate::RuntimeEffectControllerError> {
-        let formed = children
+        let formed = requests
             .iter()
-            .map(|child| {
-                child.tool().map(|leaf| {
-                    let call = &leaf.call.call;
-                    (call, retained_request_digest(call, &leaf.admission))
-                })
+            .map(|request| {
+                request.map(|(call, admission)| (call, retained_request_digest(call, admission)))
             })
             .collect::<Vec<_>>();
         if formed.iter().all(Option::is_none) {
-            return Ok(vec![None; children.len()]);
+            return Ok(vec![None; requests.len()]);
         }
         let live = serde_json::Value::Array(
             formed

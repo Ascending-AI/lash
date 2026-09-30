@@ -39,6 +39,7 @@ pub use super::process_references::*;
 pub use super::process_registry::status_filters::*;
 pub use super::process_registry::*;
 pub use super::process_trigger_retention::*;
+pub use super::queue_observation::*;
 pub use super::queued_after_commit_redrive::*;
 pub use super::retention::*;
 pub use super::root_answers_its_rows::*;

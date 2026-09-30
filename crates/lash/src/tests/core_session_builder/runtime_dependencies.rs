@@ -723,8 +723,13 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         .expect("load transient-failure fork metadata")
         .expect("transient-failure fork metadata exists");
     assert!(
-        transient_meta.pending_observer_intents.is_empty(),
-        "fork_at must consume transiently unavailable observer intents"
+        transient_meta.pending_observer_intents
+            == vec![
+                lash_core::facade_support::SessionObserverIntent::host_requested(
+                    fork_visible_process_id.clone()
+                )
+            ],
+        "fork_at must retain transiently unavailable observer intents"
     );
 
     let published_meta = branch_store

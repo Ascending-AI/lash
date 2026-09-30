@@ -862,6 +862,10 @@ mod tests {
             self.inner.current_cursor(session_id, revision)
         }
 
+        fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
+            self.inner.invalidate_session(session_id)
+        }
+
         fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
             self.inner.trim_session(session_id)
         }
@@ -904,6 +908,10 @@ mod tests {
             revision: SessionRevision,
         ) -> SessionCursor {
             SessionCursor::new("panic-replay-incarnation", session_id, revision, 0)
+        }
+
+        fn invalidate_session(&self, _session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
+            Ok(())
         }
 
         fn trim_session(&self, _session_id: &SessionId) -> Result<(), LiveReplayStoreError> {

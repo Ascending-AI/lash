@@ -37,6 +37,15 @@ There are three authorities:
 variants are rejected for externally-owned processes. There is no default
 authority and no process-lease completion path.
 
+Authority validation precedes terminal replay inside the same transaction.
+A wrong input-class authority is refused even when a terminal already exists;
+a recovery authority for a superseded segment returns `ProcessHandedOver`.
+A valid repeat returns the original retained outcome and authority evidence,
+without applying its prelude, appending events, changing the record, or
+rearming publication. An equal outcome is `AlreadyApplied`; a changed proposal
+is `Superseded`. Repeating under another valid workflow key never replaces
+the original key in the terminal evidence.
+
 Process execution writes use `ProcessExecutionWriteAuthority`, reconstructed
 from the engine invocation identity and bound to the admitted attempt. The
 registry checks it against the retained started fact before accepting a start,

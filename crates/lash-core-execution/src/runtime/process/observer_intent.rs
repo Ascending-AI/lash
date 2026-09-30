@@ -16,15 +16,12 @@ pub enum SessionObserverIntentSource<'a> {
     Unstored(Vec<SessionObserverIntent>),
 }
 
-/// Publish and consume every pending process-observer intent for a session.
+/// Publish pending process-observer intents and clear them after settlement.
 ///
-/// Observer publication is best effort per process. The returned results cover
-/// every host-selected intent, including exact runs selected for a fork.
-/// Unknown, pruned, or temporarily unavailable processes never prevent the
-/// durable intent set from reaching its fully settled empty form. This is
-/// deliberate: hosts can add an observer again after a transient failure,
-/// while retaining an intent would make settlement behavior depend on which
-/// session-creation path happened to publish it.
+/// A retryable publication retains the whole unresolved selector, including
+/// observers already published, until every publication succeeds. Missing or
+/// pruned processes settle separately with their typed outcomes. A failed
+/// metadata clear leaves the durable selector available for wholesale replay.
 pub async fn reconcile_session_process_observer_intents(
     process_registry: Option<&dyn ProcessRegistry>,
     session_id: &SessionId,
@@ -56,7 +53,24 @@ pub async fn reconcile_session_process_observer_intents(
     let results =
         apply_process_observers(process_registry, session_id, &pending_observer_intents).await;
 
-    if let Some((store, meta)) = persisted {
+    if let Some((store, mut meta)) = persisted {
+        if results.iter().any(|receipt| {
+            matches!(
+                receipt.outcome,
+                SessionObservedProcessOutcome::Unavailable { .. }
+            )
+        }) {
+            meta.pending_observer_intents = pending_observer_intents
+                .into_iter()
+                .zip(&results)
+                .filter_map(|(intent, receipt)| match receipt.outcome {
+                    SessionObservedProcessOutcome::NotFound
+                    | SessionObservedProcessOutcome::NoLongerRetained { .. } => None,
+                    SessionObservedProcessOutcome::Observed
+                    | SessionObservedProcessOutcome::Unavailable { .. } => Some(intent),
+                })
+                .collect();
+        }
         store.save_session_meta(meta).await?;
     }
 

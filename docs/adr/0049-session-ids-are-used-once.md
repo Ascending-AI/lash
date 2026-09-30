@@ -214,8 +214,11 @@ in the shared conformance law rather than papered over.
   life.
 - Fork materialization followed by observer publication spans transaction
   domains. The fork relation retains the selected process ids as durable apply
-  intent until every idempotent observer event commits. A crash burns no
-  visibility choice: opening the single-use fork id replays the pending intent,
+  intent until every retryable observer publication succeeds and the intent
+  clear commits. `Unavailable` retains the unresolved selector, including
+  already-published observers, so replay reasserts it wholesale. `NotFound`
+  and `NoLongerRetained` settle that selection with their typed outcomes and
+  need no retry. A crash burns no visibility choice: opening the single-use fork id replays the pending intent,
   and that id can never alias a later session lifetime. Replay reasserts the
   resolved selector wholesale: an observer removed before the intent is
   cleared can be added again, because clearing the durable host decision is

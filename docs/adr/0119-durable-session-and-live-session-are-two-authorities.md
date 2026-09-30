@@ -152,7 +152,13 @@ warned and never fails the mutation. The published revision is the committed
 head read back from the store (`load_session_head_meta`), not
 `read_session_state_version`, which is an encoding marker: a cursor minted from
 the marker corrupts reconnect. A store with no committed head publishes at the
-defined empty-head revision, zero.
+defined empty-head revision, zero. A failed head read proves no revision:
+publication invalidates the session's replay continuity without stamping a
+queue event or a cursor with a fabricated revision. Existing cursors return
+`Gap(Unavailable)` on replay or subscription, and live subscribers close so
+their existing recovery path reloads the authoritative observation. The
+durable queue mutation remains successful. A recovered snapshot establishes
+a new cursor beyond the gap; later publications use the actual head again.
 
 There is no new observation hub. Cross-process visibility of these events is
 therefore exactly the property of the configured Live Replay store, which is

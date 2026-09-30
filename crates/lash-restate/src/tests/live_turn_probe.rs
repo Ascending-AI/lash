@@ -565,7 +565,7 @@ impl LiveTurnRunner {
         connection: crate::RestateConnection,
         admin: super::effect_group_conformance::HarnessAdmin,
         process_runner: std::sync::Arc<super::effect_group_conformance::LawProcessRunner>,
-    ) -> std::sync::Arc<dyn lash_conformance::ConformanceTurnRunner> {
+    ) -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self {
             connection,
             admin,
@@ -967,5 +967,32 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
             std::sync::Arc::clone(watched.registry()),
         ));
         lash_core::ProcessWorkWiring::new(watched, port)
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_conformance::ToolCallIdentityRunner for LiveTurnRunner {
+    async fn run_crashes_then_redriven_turn(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        crashing: Vec<lash_conformance::ConformanceTurnAttempt>,
+        redrive: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        let mut attempts = crashing
+            .into_iter()
+            .map(|attempt| QueuedAttempt {
+                attempt,
+                crashing: true,
+                crash: None,
+                repeats_on_retry: false,
+            })
+            .collect::<Vec<_>>();
+        attempts.push(QueuedAttempt {
+            attempt: redrive,
+            crashing: false,
+            crash: None,
+            repeats_on_retry: false,
+        });
+        self.run_attempts(admitted, attempts).await;
     }
 }

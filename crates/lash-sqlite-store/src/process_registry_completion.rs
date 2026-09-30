@@ -37,17 +37,17 @@ pub(super) async fn complete_process(
                         .as_deref()
                         .map(|request| request.origin),
                 );
+                // Validate the authority against the row's input class
+                // *inside* the transaction that appends, so a concurrent
+                // complete→prune→re-register with a different input class cannot
+                // slip between the check and the append.
+                authority.validate(&record)?;
                 if record.is_terminal() {
                     return Ok(lash_core_execution::ProcessCompletionOutcome::from_stored(
                         record,
                         &await_output,
                     ));
                 }
-                // Validate the authority against the row's input class
-                // *inside* the transaction that appends, so a concurrent
-                // complete→prune→re-register with a different input class cannot
-                // slip between the check and the append.
-                authority.validate(&record)?;
                 let mut batch = ProcessEventBatch::for_fleet(fleet_format);
                 for request in prelude {
                     batch.stage(tx, &mut record, request, now, wake_delivery_config)?;

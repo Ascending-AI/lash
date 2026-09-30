@@ -706,3 +706,61 @@ fn in_memory_replay_subscription_reports_gap_after_ttl_trim() {
         LiveReplaySubscribeOutcome::Gap(LiveReplayGapReason::Trimmed)
     ));
 }
+
+#[tokio::test]
+async fn invalidation_fences_pending_publications_and_recovers_after_the_gap() {
+    use futures_util::StreamExt as _;
+    let store = InMemoryLiveReplayStore::default();
+    let session_id = SessionId::from("invalidation");
+    let revision = SessionRevision::new(7);
+    let start = store.current_cursor(&session_id, revision);
+    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) =
+        store.subscribe_after_cursor(&start).unwrap()
+    else {
+        panic!("healthy subscription");
+    };
+    let pending = store
+        .prepare_publication(
+            &session_id,
+            revision,
+            vec![LiveReplayEventDraft::new(
+                None::<String>,
+                activity("pending"),
+            )],
+        )
+        .unwrap();
+    let reserved = pending.latest_cursor().clone();
+    store.invalidate_session(&session_id).unwrap();
+    assert!(store.publish_prepared(pending).is_err());
+    for cursor in [&start, &reserved] {
+        assert!(matches!(
+            store.replay_after_cursor(cursor),
+            Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
+        ));
+        assert!(matches!(
+            store.subscribe_after_cursor(cursor),
+            Ok(LiveReplaySubscribeOutcome::Gap(
+                LiveReplayGapReason::Unavailable
+            ))
+        ));
+    }
+    assert!(matches!(
+        subscription.next().await,
+        Some(Err(LiveReplayStoreError::Closed))
+    ));
+    let recovered = store.current_cursor(&session_id, revision);
+    let live = store
+        .prepare_publication(
+            &session_id,
+            revision,
+            vec![LiveReplayEventDraft::new(
+                None::<String>,
+                activity("after-resync"),
+            )],
+        )
+        .unwrap();
+    store.publish_prepared(live).unwrap();
+    assert!(
+        matches!(store.replay_after_cursor(&recovered), Ok(LiveReplayOutcome::Replayed(events)) if events.len() == 1 && events[0].revision() == revision)
+    );
+}

@@ -763,6 +763,12 @@ lash_conformance::observer_intent_tests!({
     (backend, law_backend)
 });
 
+lash_conformance::queue_observation_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let law_backend = backend.as_backend();
+    (backend, law_backend)
+});
+
 lash_conformance::session_graph_append_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let factory = backend.store().await as Arc<dyn DeploymentStore>;

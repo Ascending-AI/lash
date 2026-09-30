@@ -30,6 +30,8 @@ macro_rules! tool_call_identity_tests {
             compaction_keeps_identity_and_distinguishes_fresh_calls);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             retained_payload_drift_is_refused_before_effects);
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
+            retained_call_identity_refuses_name_arguments_and_authority_drift_before_effects);
     };
     (@law [$($attr:tt)*] $fixture:block; $law:ident) => {
         $($attr)*

@@ -279,3 +279,16 @@ pub fn prepared_tool_attempt<'run>(
 ) -> crate::RuntimeEffectLocalExecutor<'run> {
     crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(dispatch, call.context, completion_key)
 }
+
+/// The request binding used by tool-group formation, before child effects.
+pub async fn bind_retained_tool_requests(
+    context: &crate::RuntimeExecutionContext<'_>,
+    group_key: &str,
+    requests: &[(
+        &crate::PreparedToolCall,
+        &crate::runtime::effect::ToolChildAdmission,
+    )],
+) -> Result<Vec<Option<serde_json::Value>>, crate::RuntimeEffectControllerError> {
+    let requests = requests.iter().copied().map(Some).collect::<Vec<_>>();
+    context.bind_retained_requests(group_key, &requests).await
+}
