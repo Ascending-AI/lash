@@ -100,7 +100,7 @@ async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegis
 /// that the generated fragment lands where the query means it to.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_waiting_processes_are_live_not_prunable_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         eprintln!("skipping PostgreSQL waiting-retention regression: database URL is not set");
         return;
     };

@@ -621,41 +621,6 @@ pub(crate) async fn get_checkpoint_tx(
     }))
 }
 
-#[cfg(test)]
-pub(crate) async fn count_checkpoint_data_statements<F: std::future::Future>(
-    stats_pool: &sqlx::postgres::PgPool,
-    future: F,
-) -> (F::Output, usize) {
-    sqlx::query(
-        "SELECT pg_stat_statements_reset(0, (SELECT oid FROM pg_database WHERE datname = current_database()), 0)",
-    )
-        .execute(stats_pool)
-        .await
-        .expect("reset PostgreSQL statement statistics");
-
-    let output = future.await;
-    let calls = sqlx::query_scalar::<_, i64>(
-        "SELECT calls
-         FROM pg_stat_statements
-         WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
-           AND query NOT LIKE '%pg_stat_statements%'",
-    )
-    .fetch_all(stats_pool)
-    .await
-    .expect("read PostgreSQL statement statistics");
-    let count = calls
-        .into_iter()
-        .try_fold(0usize, |total, calls| {
-            let calls =
-                usize::try_from(calls).expect("PostgreSQL statement calls are non-negative");
-            total
-                .checked_add(calls)
-                .ok_or("PostgreSQL statement count fits usize")
-        })
-        .expect("PostgreSQL statement count fits usize");
-    (output, count)
-}
-
 /// `fleet` is the store's recorded `F`: the head-meta JSON admits the
 /// `[N-1, N]` reader window `F` names (FIG-3796).
 pub(crate) async fn load_session_head_meta_tx(

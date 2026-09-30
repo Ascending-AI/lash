@@ -75,15 +75,16 @@ impl IsolatedSchema {
 // database interaction.
 const SHARED_DATABASE_LOCK_KEY: i64 = 0x4c41_5348_5f50_4754;
 
-/// Reset the shared database to a clean slate for one test.
+/// Reset fixture rows to a clean slate before a law builds its hosts.
 ///
 /// The configured database outlives every test process that touches it, so a
 /// test whose scenario ids are deterministic — every conformance law — must
 /// not see a previous run's journaled rows: a replayed `completed` row serves
 /// its terminal without re-running the body the law is watching for.
 ///
-/// Call this while holding [`SharedDatabaseLock`], before the test builds any
-/// host over the database, so the truncate cannot race another test's worlds.
+/// Shared-database callers hold [`SharedDatabaseLock`]. Conformance callers
+/// own an isolated database for the law, including its reopen factories, so
+/// their truncate cannot race another law's worlds.
 ///
 /// The truncate set derives from the live catalog rather than a
 /// hand-maintained table list: a new `lash_*` table can no longer silently

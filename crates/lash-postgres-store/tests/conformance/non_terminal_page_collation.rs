@@ -41,7 +41,7 @@ async fn registered_and_paged_ids(registry: &dyn ProcessRegistry) -> (Vec<String
 
 #[tokio::test]
 async fn non_terminal_page_order_is_byte_ordered_on_both_backends() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         return;
     };
     reset(storage.pool()).await;
@@ -64,7 +64,7 @@ async fn non_terminal_page_order_is_byte_ordered_on_both_backends() {
 
 #[tokio::test]
 async fn process_family_columns_and_registry_scan_index_pin_c_collation() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         return;
     };
     for table in [

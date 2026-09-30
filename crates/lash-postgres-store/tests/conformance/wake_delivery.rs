@@ -26,7 +26,7 @@ impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector
 }
 
 lash_conformance::wake_delivery_crash_tests!({
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres wake-delivery crash matrix: LASH_POSTGRES_DATABASE_URL is not set"
         );
@@ -55,7 +55,7 @@ lash_conformance::wake_delivery_crash_tests!({
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (
-        _database_lock,
+        _database_fixture,
         factory,
         registry,
         clock,
@@ -67,7 +67,7 @@ lash_conformance::wake_delivery_crash_tests!({
 });
 
 lash_conformance::wake_delivery_ordering_tests!({
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres wake ordering-group conformance: \
              LASH_POSTGRES_DATABASE_URL is not set"
@@ -80,7 +80,7 @@ lash_conformance::wake_delivery_ordering_tests!({
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (
-        _database_lock,
+        _database_fixture,
         registry as Arc<dyn ProcessRegistry>,
         Arc::new(PostgresWakeDeliveryOrderingGroupFaultInjector {
             pool: storage.pool().clone(),
@@ -133,7 +133,7 @@ impl lash_conformance::WakeDeliveryIsolationBackend for PostgresWakeDeliveryIsol
 }
 
 lash_conformance::wake_delivery_isolation_tests!({
-    let Some((database_lock, storage)) = storage().await else {
+    let Some((database_fixture, storage)) = storage().await else {
         panic!("wake isolation conformance requires LASH_POSTGRES_DATABASE_URL");
     };
     reset(storage.pool()).await;
@@ -147,7 +147,7 @@ lash_conformance::wake_delivery_isolation_tests!({
     let (factory, registry) =
         lash_conformance::WakeDeliveryIsolationBackend::reopen(backend.as_ref()).await;
     (
-        database_lock,
+        database_fixture,
         factory,
         registry,
         clock,

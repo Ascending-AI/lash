@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_cross_session_attachment_adoption_conformance() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         return;
     };
     reset(storage.pool()).await;
@@ -18,7 +18,7 @@ async fn postgres_cross_session_attachment_adoption_conformance() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_attachment_condemnation_enumeration_conformance() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         return;
     };
     reset(storage.pool()).await;

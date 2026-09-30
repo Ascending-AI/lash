@@ -4,10 +4,11 @@ lash_conformance::abandoned_attachment_recovery_tests!({
     let Some(database_url) = database_url() else {
         return;
     };
-    let database_lock = SharedDatabaseLock::acquire(&database_url).await;
+    let database_fixture = IsolatedDatabase::create(&database_url).await;
+    let database_url = database_fixture.url().to_owned();
     let bytes_root = tempfile::tempdir().expect("attachment bytes root");
     let make_bytes = super::attachment_bytes(&bytes_root);
-    ((database_lock, bytes_root), move || {
+    ((database_fixture, bytes_root), move || {
         let database_url = database_url.clone();
         let make_bytes = Arc::clone(&make_bytes);
         async move {
@@ -35,7 +36,8 @@ lash_conformance::attachment_condemnation_recovery_tests!({
     let Some(database_url) = database_url() else {
         return;
     };
-    let database_lock = SharedDatabaseLock::acquire(&database_url).await;
+    let database_fixture = IsolatedDatabase::create(&database_url).await;
+    let database_url = database_fixture.url().to_owned();
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect initial Postgres attachment condemnation authority");
@@ -44,7 +46,7 @@ lash_conformance::attachment_condemnation_recovery_tests!({
     let bytes_root = tempfile::tempdir().expect("attachment bytes root");
     let make_bytes = super::attachment_bytes(&bytes_root);
     (
-        (database_lock, bytes_root),
+        (database_fixture, bytes_root),
         Arc::new(storage.session_store_factory()),
         make_bytes,
         move || async move {
@@ -58,7 +60,7 @@ lash_conformance::attachment_condemnation_recovery_tests!({
 });
 
 lash_conformance::attachment_stalled_retry_tests!({
-    let Some((database_lock, storage)) = storage().await else {
+    let Some((database_fixture, storage)) = storage().await else {
         return;
     };
     reset(storage.pool()).await;
@@ -66,5 +68,5 @@ lash_conformance::attachment_stalled_retry_tests!({
     let factory = Arc::new(storage.session_store_factory().with_clock(clock.clone()));
     let bytes_root = tempfile::tempdir().expect("attachment bytes root");
     let make_bytes = super::attachment_bytes(&bytes_root);
-    ((database_lock, bytes_root), factory, make_bytes, clock)
+    ((database_fixture, bytes_root), factory, make_bytes, clock)
 });
