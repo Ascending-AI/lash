@@ -877,7 +877,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         failure.partial.scanned_blob_count, 1,
         "the refusal must carry the report accumulated before it: {failure:?}"
     );
-    lash_core_execution::AttachmentStore::get(&backend, &attachment.id)
+    lash_core_execution::AttachmentStore::get(&backend, &attachment.id, 32 * 1024 * 1024)
         .await
         .expect("live committed blob survives the refused sweep");
 }

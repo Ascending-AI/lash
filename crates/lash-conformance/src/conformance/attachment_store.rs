@@ -114,7 +114,10 @@ async fn attachment_put_get_round_trips_bytes_and_meta(store: Arc<dyn Attachment
         .put(bytes.clone(), attachment_meta())
         .await
         .expect("put attachment");
-    let stored = store.get(&reference.id).await.expect("get attachment");
+    let stored = store
+        .get(&reference.id, 32 * 1024 * 1024)
+        .await
+        .expect("get attachment");
 
     assert_eq!(stored.bytes, bytes, "bytes must round-trip unchanged");
     assert_eq!(reference.byte_len, bytes.len() as u64);
@@ -232,7 +235,10 @@ async fn attachment_head_reflects_put_and_refreshes_timestamp(store: Arc<dyn Att
 )]
 async fn attachment_get_unknown_is_not_found(store: Arc<dyn AttachmentStore>) {
     let err = store
-        .get(&AttachmentId::parse("sha256:does-not-exist").expect("valid attachment id"))
+        .get(
+            &AttachmentId::parse("sha256:does-not-exist").expect("valid attachment id"),
+            32 * 1024 * 1024,
+        )
         .await
         .expect_err("get of an unknown id must fail");
     assert!(
@@ -252,13 +258,13 @@ async fn attachment_delete_removes_content_and_is_idempotent(store: Arc<dyn Atta
         .expect("put attachment to delete");
     // Present before delete.
     store
-        .get(&reference.id)
+        .get(&reference.id, 32 * 1024 * 1024)
         .await
         .expect("content present before delete");
 
     store.delete(&reference.id).await.expect("delete content");
     let err = store
-        .get(&reference.id)
+        .get(&reference.id, 32 * 1024 * 1024)
         .await
         .expect_err("content must be gone after delete");
     assert!(
@@ -434,7 +440,7 @@ async fn attachment_store_survives_reopen(factory: ReopenableAttachmentStore) {
         .expect("put attachment before reopen");
     let reopened = factory
         .reopen
-        .get(&reference.id)
+        .get(&reference.id, 32 * 1024 * 1024)
         .await
         .expect("get attachment after reopen");
     assert_eq!(reopened.bytes, vec![4u8, 3, 2, 1]);
@@ -532,8 +538,9 @@ mod tests {
         async fn get(
             &self,
             id: &AttachmentId,
+            max_bytes: u64,
         ) -> Result<crate::StoredAttachment, AttachmentStoreError> {
-            self.inner.get(id).await
+            self.inner.get(id, max_bytes).await
         }
 
         async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -603,8 +610,9 @@ mod tests {
         async fn get(
             &self,
             id: &AttachmentId,
+            max_bytes: u64,
         ) -> Result<crate::StoredAttachment, AttachmentStoreError> {
-            self.inner.get(id).await
+            self.inner.get(id, max_bytes).await
         }
 
         async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {

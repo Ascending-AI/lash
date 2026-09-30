@@ -599,7 +599,11 @@ impl AttachmentStore for Integrator {
     ) -> Result<AttachmentRef, AttachmentStoreError> {
         unreachable!("external signature witness")
     }
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
         unreachable!("external signature witness")
     }
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {

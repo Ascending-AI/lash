@@ -99,6 +99,10 @@ pub enum AttachmentStoreError {
         "attachment is {byte_len} bytes, exceeding the configured {max_bytes}-byte attachment limit"
     )]
     SizeLimitExceeded { byte_len: u64, max_bytes: u64 },
+    #[error("attachment read reached {byte_len} bytes, exceeding the {max_bytes}-byte read limit")]
+    ReadLimitExceeded { byte_len: u64, max_bytes: u64 },
+    #[error("attachment materialization exceeds the {max_bytes}-byte request budget")]
+    RequestBudgetExceeded { max_bytes: u64 },
     #[error("attachment store I/O failed at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -275,7 +279,13 @@ pub trait AttachmentStore: Send + Sync {
     ///
     /// Namespaced-storage implementors must apply the trait-level id-shape
     /// guard before deriving any path or key from `id`.
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError>;
+    /// Enforce `max_bytes` against actual content before allocating retained
+    /// bytes. Metadata may reject early but cannot establish this bound.
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError>;
 
     /// Idempotent: deleting an absent blob is a no-op.
     /// This is the primitive mark-and-sweep GC uses to reclaim unreferenced content;
@@ -1431,7 +1441,11 @@ impl AttachmentStore for UnavailableAttachmentStore {
         })
     }
 
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        _max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
         Err(AttachmentStoreError::NotFound(id.clone()))
     }
 
@@ -1509,6 +1523,21 @@ pub enum AttachmentHolder {
     Ephemeral,
     Runtime(crate::runtime_owner::RuntimeOwner),
 }
+/// Read limits, independent of put admission and retained-history policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttachmentReadPolicy {
+    pub max_blob_bytes: u64,
+    /// Unique retained buffer capacity plus provider encoding allowance per occurrence.
+    /// This bounds attachment payload work, not the allocator or the full prompt.
+    pub max_request_bytes: u64,
+}
+impl AttachmentReadPolicy {
+    pub const DEFAULT: Self = Self {
+        max_blob_bytes: 32 * 1024 * 1024,
+        max_request_bytes: 128 * 1024 * 1024,
+    };
+}
+
 /// Attachment bytes held by a session execution, a process record, or one
 /// session upload. Pending writes precede byte publication; completion records
 /// upload evidence. Reads resolve content addresses; deletion releases only
@@ -1518,6 +1547,7 @@ pub struct RuntimeAttachmentStore {
     referrers: Arc<dyn AttachmentReferrers>,
     holder: AttachmentHolder,
     max_attachment_bytes: Option<u64>,
+    read_policy: AttachmentReadPolicy,
     upload_expiry_ms: u64,
     output_retention: lash_sansio::OutputRetentionPolicy,
     execution: Mutex<Option<BoundAttachmentExecution>>,
@@ -1563,6 +1593,7 @@ impl RuntimeAttachmentStore {
             referrers,
             holder: AttachmentHolder::Runtime(owner),
             max_attachment_bytes: None,
+            read_policy: AttachmentReadPolicy::DEFAULT,
             upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
             output_retention: lash_sansio::OutputRetentionPolicy::DEFAULT,
             execution: Mutex::new(None),
@@ -1575,6 +1606,7 @@ impl RuntimeAttachmentStore {
             referrers: Arc::new(NoopAttachmentReferrers),
             holder: AttachmentHolder::Ephemeral,
             max_attachment_bytes: None,
+            read_policy: AttachmentReadPolicy::DEFAULT,
             upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
             output_retention: lash_sansio::OutputRetentionPolicy::DEFAULT,
             execution: Mutex::new(None),
@@ -1597,6 +1629,16 @@ impl RuntimeAttachmentStore {
     pub fn with_max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
         self.max_attachment_bytes = max_attachment_bytes;
         self
+    }
+    pub fn with_read_policy(mut self, policy: AttachmentReadPolicy) -> Self {
+        self.read_policy = policy;
+        self
+    }
+    pub fn read_policy(&self) -> AttachmentReadPolicy {
+        self.read_policy
+    }
+    pub fn reconfigured_read_policy(&self, policy: AttachmentReadPolicy) -> Self {
+        self.reconfigured().with_read_policy(policy)
     }
     pub fn max_attachment_bytes(&self) -> Option<u64> {
         self.max_attachment_bytes
@@ -1650,6 +1692,7 @@ impl RuntimeAttachmentStore {
             referrers: Arc::clone(&self.referrers),
             holder: self.holder.clone(),
             max_attachment_bytes: self.max_attachment_bytes,
+            read_policy: self.read_policy,
             upload_expiry_ms: self.upload_expiry_ms,
             output_retention: self.output_retention,
             execution: Mutex::new(self.execution.lock_recover().clone()),
@@ -1849,7 +1892,7 @@ impl RuntimeAttachmentStore {
     }
 
     pub async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.backend.get(id).await
+        self.backend.get(id, self.read_policy.max_blob_bytes).await
     }
     /// The claims whose stored attachment this holder's process record
     /// holds. A process terminal must show this provenance before a value it
@@ -1970,29 +2013,9 @@ impl AttachmentReferrers for PersistenceReferrersAdapter {
     }
 }
 
-pub async fn resolve_llm_request_attachments(
-    mut request: crate::llm::types::LlmRequest,
-    store: &RuntimeAttachmentStore,
-) -> Result<crate::llm::types::LlmRequest, AttachmentStoreError> {
-    for attachment in request
-        .attachments()
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>()
-    {
-        let crate::AttachmentSource::Stored { attachment_ref } = attachment else {
-            continue;
-        };
-        if request.resolved_stored.contains_key(&attachment_ref.id) {
-            continue;
-        }
-        let stored = store.get(&attachment_ref.id).await?;
-        request
-            .resolved_stored
-            .insert(attachment_ref.id.clone(), stored.bytes);
-    }
-    Ok(request)
-}
+#[path = "attachments/materialization.rs"]
+mod materialization;
+pub use materialization::resolve_llm_request_attachments;
 
 pub fn attachment_materialization_notice(
     snapshot: &crate::provider::AttachmentCapabilitySnapshot,
@@ -2112,3 +2135,7 @@ mod referrer_failure_tests;
 pub mod test_capability;
 #[cfg(any(test, feature = "testing"))]
 pub use test_capability::attachment_test_capability;
+
+#[cfg(test)]
+#[path = "attachments/read_budget_tests.rs"]
+mod read_budget_tests;

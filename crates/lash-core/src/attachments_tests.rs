@@ -311,7 +311,10 @@ async fn explicit_factory_root_set_keeps_committed_blob() {
     assert_eq!(report.reclaimed_count, 0);
     assert!(report.failed_ids.is_empty());
     assert!(report.deleted_while_referenced.is_empty());
-    backend.get(&id).await.expect("committed blob survives");
+    backend
+        .get(&id, 32 * 1024 * 1024)
+        .await
+        .expect("committed blob survives");
 }
 
 /// Deliberately faulty snapshot projection over a factory that really does hold
@@ -415,7 +418,7 @@ async fn condemn_cas_spares_a_live_blob_every_read_shaped_guard_missed() {
     );
     assert!(report.deleted_while_referenced.is_empty());
     backend
-        .get(&id)
+        .get(&id, 32 * 1024 * 1024)
         .await
         .expect("the committed blob survives a blind snapshot and a blind probe");
 }
@@ -444,8 +447,12 @@ impl AttachmentStore for DeleteFailingAttachmentStore {
         self.inner.put(bytes, meta).await
     }
 
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.inner.get(id).await
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
+        self.inner.get(id, max_bytes).await
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -568,7 +575,7 @@ async fn gc_refuses_an_empty_root_set_with_a_deletion_eligible_blob() {
         "the refusal must carry the report accumulated before it: {error:?}"
     );
     backend
-        .get(&attachment.id)
+        .get(&attachment.id, 32 * 1024 * 1024)
         .await
         .expect("refused sweep preserves the blob");
 }
@@ -597,7 +604,7 @@ async fn gc_explicit_authorization_permits_an_empty_root_set_sweep() {
 
     assert_eq!(report.reclaimed_count, 1);
     assert!(matches!(
-        backend.get(&attachment.id).await,
+        backend.get(&attachment.id, 32 * 1024 * 1024).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
 }
@@ -626,7 +633,7 @@ async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
 
     assert_eq!(report.reclaimed_count, 0);
     backend
-        .get(&attachment.id)
+        .get(&attachment.id, 32 * 1024 * 1024)
         .await
         .expect("fresh blob survives");
 }
@@ -668,7 +675,7 @@ async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protect
         )
     );
     backend
-        .get(&attachment.id)
+        .get(&attachment.id, 32 * 1024 * 1024)
         .await
         .expect("fresh blob survives degraded sweep");
 }
@@ -716,9 +723,12 @@ async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
     .expect("healthy non-empty-root sweep");
 
     assert_eq!(report.reclaimed_count, 1);
-    backend.get(&live.id).await.expect("live blob survives");
+    backend
+        .get(&live.id, 32 * 1024 * 1024)
+        .await
+        .expect("live blob survives");
     assert!(matches!(
-        backend.get(&orphan.id).await,
+        backend.get(&orphan.id, 32 * 1024 * 1024).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
 }
@@ -785,7 +795,7 @@ async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
     );
     assert_eq!(
         backend
-            .get(&reference.id)
+            .get(&reference.id, 32 * 1024 * 1024)
             .await
             .expect("bytes remain")
             .bytes,
@@ -847,7 +857,11 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
     .expect("sweep with b holding a ref");
     assert_eq!(report.reclaimed_count, 0, "b still references the blob");
     assert_eq!(
-        backend.get(&ref_b.id).await.expect("blob alive").bytes,
+        backend
+            .get(&ref_b.id, 32 * 1024 * 1024)
+            .await
+            .expect("blob alive")
+            .bytes,
         vec![5, 5, 5]
     );
 
@@ -865,7 +879,7 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
     .expect("sweep with no refs");
     assert_eq!(report.reclaimed_count, 1);
     assert!(matches!(
-        backend.get(&ref_b.id).await,
+        backend.get(&ref_b.id, 32 * 1024 * 1024).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
 }
@@ -900,7 +914,11 @@ async fn gc_spares_a_blob_its_upload_still_holds() {
     .expect("sweep");
     assert_eq!(report.reclaimed_count, 0, "an upload edge is a live ref");
     assert_eq!(
-        backend.get(&reference.id).await.expect("kept").bytes,
+        backend
+            .get(&reference.id, 32 * 1024 * 1024)
+            .await
+            .expect("kept")
+            .bytes,
         vec![3, 1, 4]
     );
 }
@@ -942,7 +960,7 @@ async fn gc_collects_a_blob_whose_upload_ended() {
         "a blob no referrer holds is a collectable orphan"
     );
     assert!(matches!(
-        backend.get(&orphan.id).await,
+        backend.get(&orphan.id, 32 * 1024 * 1024).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
     assert!(manifest.live_ids().is_empty());
@@ -971,7 +989,11 @@ async fn gc_delete_recheck_spares_blob_refreshed_after_snapshot() {
         ) -> Result<AttachmentRef, AttachmentStoreError> {
             unreachable!("test does not put through this store")
         }
-        async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+        async fn get(
+            &self,
+            id: &AttachmentId,
+            _max_bytes: u64,
+        ) -> Result<StoredAttachment, AttachmentStoreError> {
             Err(AttachmentStoreError::NotFound(id.clone()))
         }
         async fn delete(&self, _id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -1051,7 +1073,11 @@ impl AttachmentStore for StaleHeadStore {
     ) -> Result<AttachmentRef, AttachmentStoreError> {
         unreachable!("test does not put through this store")
     }
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        _max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
         Err(AttachmentStoreError::NotFound(id.clone()))
     }
     async fn delete(&self, _id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -1230,8 +1256,12 @@ impl AttachmentStore for WindowHookedStore {
     ) -> Result<AttachmentRef, AttachmentStoreError> {
         self.inner.put(bytes, meta).await
     }
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.inner.get(id).await
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
+        self.inner.get(id, max_bytes).await
     }
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
         *self.delete_calls.lock_recover() += 1;
@@ -1459,7 +1489,7 @@ async fn same_content_put_inside_the_delete_window_survives() {
     assert_eq!(
         fixture
             .backend
-            .get(&id)
+            .get(&id, 32 * 1024 * 1024)
             .await
             .expect("the write that landed in the delete window survives")
             .bytes,
@@ -1532,7 +1562,12 @@ async fn writer_after_delete_arming_restores_the_deleted_digest() {
         report.deleted_while_referenced
     );
     assert_eq!(
-        fixture.backend.get(&id).await.expect("survives").bytes,
+        fixture
+            .backend
+            .get(&id, 32 * 1024 * 1024)
+            .await
+            .expect("survives")
+            .bytes,
         bytes
     );
 }
@@ -1586,7 +1621,7 @@ async fn a_live_peers_condemnation_defers_and_a_dead_peers_is_adopted() {
     assert_eq!(*backend.delete_calls.lock_recover(), 0);
     fixture
         .backend
-        .get(&id)
+        .get(&id, 32 * 1024 * 1024)
         .await
         .expect("a deferred digest keeps its bytes");
 
@@ -1654,7 +1689,7 @@ async fn a_stuck_execution_retains_the_blob() {
     assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
     fixture
         .backend
-        .get(&reference.id)
+        .get(&reference.id, 32 * 1024 * 1024)
         .await
         .expect("the blob a stuck execution roots survives");
 }

@@ -2226,3 +2226,58 @@ async fn live_group_rank_allocator_refuses_exhaustion_without_a_reservation() {
     harness.rank_allocator_exhaustion().await;
     harness.finish().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires isolated native Restate and PostgreSQL services"]
+async fn live_attachment_materialization_turn_witnesses() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+    let directory = tempfile::tempdir().expect("file store directory");
+    let attachments = tempfile::tempdir().expect("PostgreSQL attachments");
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "service fixture reads its isolated PostgreSQL URL"
+    )]
+    let url = std::env::var("LASH_POSTGRES_DATABASE_URL").expect("PostgreSQL URL");
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+        .await
+        .expect("PostgreSQL storage");
+    let stores: Vec<(&str, Arc<dyn lash_core::StoreSet>)> = vec![
+        (
+            "memory",
+            Arc::new(
+                lash_sqlite_store::SqliteStoreSet::memory()
+                    .await
+                    .expect("SQLite memory"),
+            ),
+        ),
+        (
+            "file",
+            Arc::new(
+                lash_sqlite_store::SqliteStoreSet::open(directory.path())
+                    .await
+                    .expect("SQLite file"),
+            ),
+        ),
+        (
+            "postgres",
+            Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                &storage,
+                Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+                    attachments.path(),
+                )),
+            )),
+        ),
+    ];
+    for (name, stores) in stores {
+        let prefix = format!("native-attachment-budget-{}-{name}", harness.run_nonce());
+        lash_conformance::attachment_materialization_turn_witnesses(
+            &prefix,
+            harness.endpoint_host(),
+            stores,
+            harness.turn_runner(),
+        )
+        .await;
+    }
+    harness.finish().await;
+}

@@ -76,7 +76,7 @@ pub(crate) mod helpers {
         assert_eq!(report.scanned_blob_count, 1);
         assert_eq!(report.reclaimed_count, 0);
         assert!(report.deleted_while_referenced.is_empty());
-        crate::AttachmentStore::get(&*backend, &attachment.id)
+        crate::AttachmentStore::get(&*backend, &attachment.id, 32 * 1024 * 1024)
             .await
             .expect("committed blob survives");
     }

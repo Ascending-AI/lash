@@ -58,8 +58,9 @@ impl lash::persistence::AttachmentStore for DeleteFailingWorkbenchAttachmentStor
     async fn get(
         &self,
         id: &lash::attachments::AttachmentId,
+        max_bytes: u64,
     ) -> Result<lash::persistence::StoredAttachment, lash::persistence::AttachmentStoreError> {
-        self.inner.get(id).await
+        self.inner.get(id, max_bytes).await
     }
 
     async fn delete(
@@ -444,7 +445,10 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
     // a zero that a swallowed failure could also have produced.
     assert_eq!(protected.sweep, SweepOutcome::NothingToDo);
     attachment_store
-        .get(&orphan.id)
+        .get(
+            &orphan.id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
         .await
         .expect("the retention window kept the unreferenced blob");
 
@@ -485,10 +489,19 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
     assert_eq!(echoed.empty_root_set, EmptyRootSetAuthorization::Refuse);
 
     attachment_store
-        .get(&referenced_id)
+        .get(
+            &referenced_id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
         .await
         .expect("the committed turn's attachment survives the sweep");
-    match attachment_store.get(&orphan.id).await {
+    match attachment_store
+        .get(
+            &orphan.id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
+        .await
+    {
         Err(lash::persistence::AttachmentStoreError::NotFound(id)) => assert_eq!(id, orphan.id),
         other => panic!("the unreferenced blob must be gone, got {other:?}"),
     }
@@ -554,7 +567,10 @@ async fn store_maintenance_serves_incomplete_sweep_with_failure_counts_inner() {
     assert_eq!(summary["condemn_deferred_count"], 0);
     assert_eq!(summary["failed_ids"], json!([orphan.id.to_string()]));
     inner
-        .get(&orphan.id)
+        .get(
+            &orphan.id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
         .await
         .expect("the failed delete leaves the blob intact");
 
@@ -630,7 +646,10 @@ async fn store_maintenance_refuses_an_empty_root_set_inner() {
         refused.message
     );
     attachment_store
-        .get(&blob_id)
+        .get(
+            &blob_id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
         .await
         .expect("the refused sweep deleted nothing");
 
@@ -648,7 +667,13 @@ async fn store_maintenance_refuses_an_empty_root_set_inner() {
         .expect("the authorized pass reports its sweep");
     // The blob the refusal spared is deleted once the host asserts it meant to.
     assert_eq!(summary.reclaimed_count, 1);
-    match attachment_store.get(&blob_id).await {
+    match attachment_store
+        .get(
+            &blob_id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
+        .await
+    {
         Err(lash::persistence::AttachmentStoreError::NotFound(id)) => assert_eq!(id, blob_id),
         other => panic!("the authorized sweep must delete the blob, got {other:?}"),
     }
@@ -719,6 +744,12 @@ fn store_maintenance_serves_stalled_delete_counts() {
             listed[0].stalled,
             Some(lash::persistence::AttachmentDeleteStallReason::Refused)
         );
-        inner.get(&orphan.id).await.expect("stalled bytes remain");
+        inner
+            .get(
+                &orphan.id,
+                lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            )
+            .await
+            .expect("stalled bytes remain");
     });
 }

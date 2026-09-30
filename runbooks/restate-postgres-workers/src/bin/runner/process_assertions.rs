@@ -780,7 +780,10 @@ pub(super) async fn assert_attachments_round_trip(
         // Blob storage is flat and content-addressed; the committing session's
         // hold is asserted through its referrer edge below, not the object key.
         let stored = store
-            .get(&id)
+            .get(
+                &id,
+                lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            )
             .await
             .with_context(|| format!("read worker attachment `{id}` from S3"))?;
         anyhow::ensure!(

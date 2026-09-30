@@ -311,7 +311,10 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
     );
     sweep().await;
     assert!(
-        backend.get(&crashed.reference.id).await.is_ok(),
+        backend
+            .get(&crashed.reference.id, 32 * 1024 * 1024)
+            .await
+            .is_ok(),
         "a still-committable turn's retained output survives the sweep"
     );
 
@@ -332,13 +335,17 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
     assert!(report.reclaimed_count >= 1, "{report:?}");
     assert!(
         matches!(
-            backend.get(&crashed.reference.id).await,
+            backend.get(&crashed.reference.id, 32 * 1024 * 1024).await,
             Err(AttachmentStoreError::NotFound(_))
         ),
         "the crashed turn's retained output is reclaimed once its execution ends unnamed"
     );
     assert_eq!(
-        backend.get(&committed.reference.id).await.unwrap().bytes,
+        backend
+            .get(&committed.reference.id, 32 * 1024 * 1024)
+            .await
+            .unwrap()
+            .bytes,
         committed_text.into_bytes(),
         "the committed reference resolves to the exact retained bytes"
     );
@@ -532,7 +539,14 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
         vec![referrer.clone()]
     );
     assert_eq!(sweep().await.reclaimed_count, 0);
-    assert_eq!(bytes.get(&reference.id).await.unwrap().bytes, vec![42]);
+    assert_eq!(
+        bytes
+            .get(&reference.id, 32 * 1024 * 1024)
+            .await
+            .unwrap()
+            .bytes,
+        vec![42]
+    );
 
     h.factory.unpin(&leaf).await.unwrap();
     assert_eq!(
@@ -891,11 +905,11 @@ async fn partial_attachment_enumeration(h: AttachmentReferrerHandles, truncate_p
         "partial enumeration must stop typed before destruction"
     );
     bytes
-        .get(&protected.id)
+        .get(&protected.id, 32 * 1024 * 1024)
         .await
         .expect("omitted referrer's live bytes survive");
     bytes
-        .get(&visible.id)
+        .get(&visible.id, 32 * 1024 * 1024)
         .await
         .expect("visible live bytes survive");
 }

@@ -914,7 +914,7 @@ async fn attachment_prefix_retention(
         "receipt pruning cannot leak the settled execution's bytes"
     );
     assert!(matches!(
-        bytes.get(&orphan.id).await,
+        bytes.get(&orphan.id, 32 * 1024 * 1024).await,
         Err(crate::AttachmentStoreError::NotFound(_))
     ));
     assert_eq!(
@@ -959,7 +959,7 @@ async fn attachment_prefix_retention(
         "{backend_name}: last reader gone collects orphan"
     );
     assert!(matches!(
-        bytes.get(&reference.id).await,
+        bytes.get(&reference.id, 32 * 1024 * 1024).await,
         Err(crate::AttachmentStoreError::NotFound(_))
     ));
 }

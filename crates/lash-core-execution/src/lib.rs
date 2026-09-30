@@ -487,8 +487,8 @@ pub mod sansio {
 }
 
 pub use attachments::{
-    AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore,
-    AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
+    AttachmentGcFence, AttachmentReadPolicy, AttachmentReclamationPolicy, AttachmentRootSet,
+    AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
     EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_sansio::llm::types::{

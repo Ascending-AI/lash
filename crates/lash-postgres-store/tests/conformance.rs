@@ -2115,3 +2115,14 @@ mod worker_recovery {
         ((lock, storage, _held), recovery)
     });
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_attachment_materialization_turn_witnesses() {
+    let Some((_lock, storage)) = storage().await else {
+        panic!("attachment turn witness requires PostgreSQL");
+    };
+    reset(storage.pool()).await;
+    let (_guard, stores, host, runner) = double_law_backend(&storage).await;
+    lash_conformance::attachment_materialization_turn_witnesses("postgres", host, stores, runner)
+        .await;
+}

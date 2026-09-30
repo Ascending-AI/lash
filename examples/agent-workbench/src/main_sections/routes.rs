@@ -220,7 +220,14 @@ pub(crate) async fn retrieve_attachment(
     // a bad request, never a store lookup.
     let parsed_id = lash::attachments::AttachmentId::parse(attachment_id)
         .map_err(|err| AppError::bad_request(err.to_string()))?;
-    let stored = match state.attachment_store.get(&parsed_id).await {
+    let stored = match state
+        .attachment_store
+        .get(
+            &parsed_id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
+        .await
+    {
         Ok(stored) => stored,
         Err(lash::persistence::AttachmentStoreError::NotFound(_)) => {
             return Err(AppError::not_found(format!(
@@ -301,6 +308,7 @@ pub(crate) async fn send_turn(
                 // request rather than a store lookup.
                 &lash::attachments::AttachmentId::parse(attachment_id)
                     .map_err(|err| AppError::bad_request(err.to_string()))?,
+                lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
             )
             .await
         {

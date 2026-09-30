@@ -757,6 +757,7 @@ pub struct LashCoreBuilder {
     commit_budget: Option<facade_support::CommitBudget>,
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     max_attachment_bytes: Option<Option<u64>>,
+    attachment_read_policy: Option<lash_core::AttachmentReadPolicy>,
     attachment_upload_expiry: Option<std::time::Duration>,
     output_retention: Option<lash_core::OutputRetentionPolicy>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
@@ -788,6 +789,7 @@ impl LashCoreBuilder {
             commit_budget: None,
             queued_work_batching: None,
             max_attachment_bytes: None,
+            attachment_read_policy: None,
             attachment_upload_expiry: None,
             output_retention: None,
             process_wake_delivery_policy: None,
@@ -843,6 +845,13 @@ impl LashCoreBuilder {
     /// This deployment limit is independent from [`Self::commit_budget`].
     pub fn max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
         self.max_attachment_bytes = Some(max_attachment_bytes);
+        self
+    }
+
+    /// Bound actual attachment reads and aggregate request materialization,
+    /// including provider encoding. Independent of put and history limits.
+    pub fn attachment_read_policy(mut self, policy: lash_core::AttachmentReadPolicy) -> Self {
+        self.attachment_read_policy = Some(policy);
         self
     }
 

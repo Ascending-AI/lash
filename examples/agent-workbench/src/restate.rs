@@ -624,7 +624,7 @@ pub(crate) async fn workbench_turn_input(
             .map_err(|err| AppError::bad_request(err.to_string()))?;
         let stored = state
             .attachment_store
-            .get(&attachment_id)
+            .get(&attachment_id, lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes)
             .await
             // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
             .map_err(AppError::internal)?;

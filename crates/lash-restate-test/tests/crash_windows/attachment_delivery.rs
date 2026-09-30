@@ -792,7 +792,10 @@ async fn delivery_law(storage: Storage, live: bool) {
             harness
                 .backend()
                 .attachment_store()
-                .get(&attachment.id)
+                .get(
+                    &attachment.id,
+                    lash_core::AttachmentReadPolicy::DEFAULT.max_blob_bytes
+                )
                 .await
                 .is_ok(),
             "producer bytes remain available"

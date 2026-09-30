@@ -19,3 +19,9 @@ crate::attachment_store_reopenable_tests!({
         AttachmentStorePersistence::Durable,
     )
 });
+
+#[tokio::test]
+async fn file_attachment_materialization_read_budgets() {
+    let dir = tempfile::tempdir().expect("directory");
+    attachment_materialization_read_budgets(Arc::new(FileAttachmentStore::new(dir.path()))).await;
+}

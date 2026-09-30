@@ -520,7 +520,7 @@ async fn blob_present(fixture: &Fixture, id: &AttachmentId) -> bool {
         .double
         .lash_backend()
         .attachment_store()
-        .get(id)
+        .get(id, 32 * 1024 * 1024)
         .await
         .is_ok()
 }

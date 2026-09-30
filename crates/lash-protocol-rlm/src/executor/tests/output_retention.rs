@@ -156,7 +156,7 @@ pub(super) fn a_cells_retained_outputs_replay_verbatim_under_a_changed_policy() 
             .expect("the cell finished with its value");
         let stored = backend
             .attachment_store()
-            .get(&finish.reference.id)
+            .get(&finish.reference.id, 32 * 1024 * 1024)
             .await
             .expect("the retained final value is stored");
         assert_eq!(
@@ -165,7 +165,7 @@ pub(super) fn a_cells_retained_outputs_replay_verbatim_under_a_changed_policy() 
         );
         let printed = backend
             .attachment_store()
-            .get(&print.reference.id)
+            .get(&print.reference.id, 32 * 1024 * 1024)
             .await
             .expect("the retained print is stored");
         assert_eq!(

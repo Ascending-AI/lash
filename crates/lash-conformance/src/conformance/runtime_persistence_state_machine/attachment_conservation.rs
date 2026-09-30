@@ -480,7 +480,7 @@ pub(super) async fn assert_attachment_conservation(
         if expected_live {
             handles
                 .attachment_backend
-                .get(&attachment_id)
+                .get(&attachment_id, 32 * 1024 * 1024)
                 .await
                 .map_err(|error| {
                     format!(

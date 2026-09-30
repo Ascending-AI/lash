@@ -60,7 +60,7 @@ async fn unsupported_root_enumeration_aborts_sweep_and_preserves_blob() {
         ) if source.to_string().contains("live_attachment_refs")
     ));
     backend
-        .get(&reference.id)
+        .get(&reference.id, 32 * 1024 * 1024)
         .await
         .expect("aborted sweep leaves blob intact");
 }

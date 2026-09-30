@@ -251,7 +251,7 @@ pub async fn empty_root_set_refusal_returns_its_partial_report(
         0,
         "{backend}: a refusal reclaims nothing: {failure:?}"
     );
-    crate::AttachmentStore::get(attachments.as_ref(), &orphan.id)
+    crate::AttachmentStore::get(attachments.as_ref(), &orphan.id, 32 * 1024 * 1024)
         .await
         .expect("the refused sweep left the blob in place");
 }

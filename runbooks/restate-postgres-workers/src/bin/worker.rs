@@ -848,7 +848,12 @@ async fn topology_attachment(
         let core = state.build_core()?;
         let session = core.session(session_id.clone()).open().await?;
         let id = lash::attachments::AttachmentId::parse(&attachment_id)?;
-        let stored = lash::persistence::AttachmentStore::get(&s3_store_from_env()?, &id).await?;
+        let stored = lash::persistence::AttachmentStore::get(
+            &s3_store_from_env()?,
+            &id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
+        .await?;
         let committed: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM lash_attachment_referrer_edges
              WHERE referrer_kind = 'session' AND referrer_id = $1 AND attachment_id = $2)",
@@ -891,7 +896,12 @@ async fn load_attachment(
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, String)> {
     let attempt = async {
         let id = lash::attachments::AttachmentId::parse(&attachment_id)?;
-        let stored = lash::persistence::AttachmentStore::get(&s3_store_from_env()?, &id).await?;
+        let stored = lash::persistence::AttachmentStore::get(
+            &s3_store_from_env()?,
+            &id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
+        .await?;
         let committed: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM lash_attachment_referrer_edges
              WHERE referrer_kind = 'session' AND referrer_id = $1 AND attachment_id = $2)",

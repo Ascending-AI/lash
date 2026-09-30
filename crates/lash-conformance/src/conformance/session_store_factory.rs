@@ -1839,7 +1839,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
         report.deleted_while_referenced
     );
     assert!(matches!(
-        crate::AttachmentStore::get(backend.as_ref(), &orphan.id).await,
+        crate::AttachmentStore::get(backend.as_ref(), &orphan.id, 32 * 1024 * 1024).await,
         Err(crate::AttachmentStoreError::NotFound(_))
     ));
     if crate::AttachmentRootSet::fence(&*factory) == crate::AttachmentGcFence::BestEffort {

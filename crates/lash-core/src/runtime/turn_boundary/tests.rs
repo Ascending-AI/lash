@@ -1106,7 +1106,7 @@ async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs(
 
     assert_eq!(report.reclaimed_count, 0);
     assert_eq!(
-        crate::AttachmentStore::get(backend.as_ref(), &attachment.id)
+        crate::AttachmentStore::get(backend.as_ref(), &attachment.id, 32 * 1024 * 1024)
             .await
             .expect("replayed exec attachment survives GC")
             .bytes,

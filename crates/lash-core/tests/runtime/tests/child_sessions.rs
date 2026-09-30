@@ -414,7 +414,11 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
     let id = lash_core::attachments::content_id(&[4, 2, 4, 2]);
     // The blob lives exactly once in the shared, flat backend...
     assert_eq!(
-        bytes.get(&id).await.expect("child attachment bytes").bytes,
+        bytes
+            .get(&id, lash_core::AttachmentReadPolicy::DEFAULT.max_blob_bytes)
+            .await
+            .expect("child attachment bytes")
+            .bytes,
         vec![4, 2, 4, 2]
     );
     // The committing session holds what its turn wrote (FIG-653), while

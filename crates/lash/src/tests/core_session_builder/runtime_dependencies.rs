@@ -1465,3 +1465,30 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn attachment_read_policy_survives_facade_builder_reconfiguration() -> Result<()> {
+    let policy = lash_core::AttachmentReadPolicy {
+        max_blob_bytes: 37,
+        max_request_bytes: 4096,
+    };
+    let core = explicit_ephemeral_facets(peer_coherence_builder().await)
+        .attachment_read_policy(policy)
+        .max_attachment_bytes(Some(19))
+        .attachment_upload_expiry(std::time::Duration::from_secs(13))
+        .build(crate::testing::runtime_lease_owner())?;
+    assert_eq!(
+        core.env.core.durability.attachment_store.read_policy(),
+        policy
+    );
+    let replacement = core
+        .env
+        .core
+        .clone()
+        .with_backend(core.env.core.backend().clone());
+    assert_eq!(
+        replacement.durability.attachment_store.read_policy(),
+        policy
+    );
+    Ok(())
+}

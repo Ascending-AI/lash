@@ -174,7 +174,7 @@ async fn sweep_without_grace(backend: &lash_core::Backend) {
 async fn stored_text(backend: &lash_core::Backend, reference: &lash_core::AttachmentRef) -> String {
     let stored = backend
         .attachment_store()
-        .get(&reference.id)
+        .get(&reference.id, 32 * 1024 * 1024)
         .await
         .expect("the retained attachment survives the sweep");
     assert_eq!(stored.bytes.len() as u64, reference.byte_len);

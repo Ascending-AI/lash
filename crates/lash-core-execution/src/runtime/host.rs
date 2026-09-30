@@ -267,6 +267,7 @@ impl RuntimeHostConfig {
         self.durability.attachment_store = Arc::new(
             crate::RuntimeAttachmentStore::ephemeral(backend.attachment_store())
                 .with_max_attachment_bytes(max_attachment_bytes)
+                .with_read_policy(self.durability.attachment_store.read_policy())
                 .with_upload_expiry_ms(upload_expiry_ms)
                 .with_output_retention(output_retention),
         );
@@ -316,6 +317,15 @@ impl RuntimeHostConfig {
             self.durability
                 .attachment_store
                 .reconfigured_max_attachment_bytes(max_attachment_bytes),
+        );
+        self
+    }
+
+    pub fn with_attachment_read_policy(mut self, policy: crate::AttachmentReadPolicy) -> Self {
+        self.durability.attachment_store = Arc::new(
+            self.durability
+                .attachment_store
+                .reconfigured_read_policy(policy),
         );
         self
     }

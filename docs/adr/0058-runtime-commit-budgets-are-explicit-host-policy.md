@@ -48,6 +48,31 @@ Attachment admission is separately configurable through
 `Some(max_bytes)` rejects an oversized in-memory attachment before manifest or
 backend work. This is a separate payload limit, not a third commit dimension.
 
+### Attachment read and materialization budgets
+
+`AttachmentReadPolicy` is independent of put admission and history retention.
+The default is 32 MiB per blob and 128 MiB per request; hosts can configure it
+through `LashCoreBuilder::attachment_read_policy`. Session rebuilds, backend
+replacement and process runtimes keep the configured policy.
+
+`AttachmentStore::get` requires an actual-byte limit. File reads use bounded
+scratch buffers; S3 consumes chunks and checks before copying them into retained
+storage. Buffer growth is geometric and capped by the read limit. Neither relies on reported object size. SQLite returns the actual
+length and conditionally projects the BLOB only when it fits, within one query.
+
+Before provider dispatch, resolution charges each unique retained blob buffer capacity once
+and every attachment occurrence for encoding. Inline and pre-resolved bytes
+are subject to the same budget. Each occurrence reserves four base64-sized
+copies plus JSON envelope and escaped MIME/label bytes. URL and provider-file
+strings also reserve escaped copies. Repeated IDs share retained bytes while
+each provider occurrence still has its encoding charge. The remaining budget,
+including expansion, determines the limit passed into each backend read.
+
+These are attachment payload-work bounds, not a claim about whole-process RSS,
+allocator bookkeeping, a backend's network chunk, or non-attachment prompt
+content. A refusal settles as `AttachmentResolutionFailed` before provider
+dispatch. Read refusal does not change retained history or attachment ownership.
+
 ### Reference sizing curve
 
 A 1 MiB logical-byte bound and a 512-row bound are documented starting points,

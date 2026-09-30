@@ -31,13 +31,13 @@ pub(super) async fn attachment_namespace(store: Arc<dyn AttachmentStore>) {
         // The constructor is part of every backend's contract. Even a future
         // backend must never receive a malformed namespace component.
         if let Ok(id) = AttachmentId::parse(&raw) {
-            let _ = store.get(&id).await;
+            let _ = store.get(&id, 32 * 1024 * 1024).await;
             panic!("hostile attachment id reached backend lookup: {raw:?}");
         }
     }
     assert_eq!(
         store
-            .get(&reference.id)
+            .get(&reference.id, 32 * 1024 * 1024)
             .await
             .expect("canary survives")
             .bytes,
