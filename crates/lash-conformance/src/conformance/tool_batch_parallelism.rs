@@ -65,7 +65,9 @@ use lash_sansio::sync::MutexExt as _;
 
 use pretty_assertions::assert_eq;
 
-/// How long one scenario's turn may take before the law gives up on it.
+mod budget;
+
+/// How long activation may stall while planned leaves have not started.
 ///
 /// This is the law's only clock, and it is a deadlock budget, not a scheduling
 /// assumption: a leaf that is merely slow to be scheduled must never fail the
@@ -556,19 +558,25 @@ impl Rendezvous {
         self.log.in_flight.fetch_sub(1, Ordering::SeqCst);
     }
 
-    /// Ends the scenario's deadlock budget: records which planned leaves had
-    /// not started, then lets every waiter through so the group drains
-    /// rather than parking its children forever. The first expiry wins.
-    fn expire(&self, budget: Duration) {
+    /// Expires only if no start advanced the observed count and members are
+    /// still missing. The check and missing-member snapshot share the start
+    /// lock, so a start racing the timer cannot produce a false expiry.
+    fn expire_if_activation_stalled(&self, started: usize, budget: Duration) -> bool {
         {
             let mut shared = self.shared.lock_recover();
+            if shared.started.len() != started {
+                return false;
+            }
+            let never_started: Vec<_> = self
+                .expected
+                .iter()
+                .filter(|leaf| !shared.started.contains(leaf))
+                .cloned()
+                .collect();
+            if never_started.is_empty() {
+                return false;
+            }
             if shared.expired.is_none() {
-                let never_started = self
-                    .expected
-                    .iter()
-                    .filter(|leaf| !shared.started.contains(leaf))
-                    .cloned()
-                    .collect();
                 shared.expired = Some(ExpiredBudget {
                     budget,
                     never_started,
@@ -576,6 +584,7 @@ impl Rendezvous {
             }
         }
         self.release();
+        true
     }
 
     /// How many leaf starts the log holds.
@@ -987,32 +996,15 @@ async fn run_scenario(
             })
         }),
     );
-    // The deadlock budget runs here as well as inside the turn: a handler
-    // that suspends while its group waits is not running, so no clock inside
-    // it can expire, and a turn whose members never all start would never
-    // resume to notice. Out here it is a budget without progress: it expires
-    // once a whole budget passes in which no further member started while
-    // some never did. A serial tier cannot start a second member, so it
-    // expires one budget after its first; a tier that starts its members
-    // slowly — one replaying its journal between starts — is slow, never
-    // wrong (FIG-3423). Expiring releases the members, so the group drains,
-    // the turn resumes and ends, and the observations still report the
-    // members that had not started in time.
+    // A suspended handler runs no clock, so its activation budget also runs
+    // here. Both layers use the same progress rule. After expiry, the released
+    // members drain and the handler returns the missing-member observation.
     tokio::pin!(turn);
-    let mut started = state.rendezvous.started_count();
-    loop {
-        tokio::select! {
-            () = &mut turn => break,
-            () = tokio::time::sleep(schedule.budget) => {
-                let now = state.rendezvous.started_count();
-                if now == started && !state.rendezvous.never_started().is_empty() {
-                    state.rendezvous.expire(schedule.budget);
-                    (&mut turn).await;
-                    break;
-                }
-                started = now;
-            }
-        }
+    if budget::run_with_activation_budget(&mut turn, &state.rendezvous, schedule.budget)
+        .await
+        .is_none()
+    {
+        (&mut turn).await;
     }
     let observed = observed_rx
         .recv()
@@ -1349,24 +1341,19 @@ async fn drive_turn(
     };
     let mut input = crate::TurnInput::text("run the planned group");
     input.trace_turn_id = Some(turn_id);
-    // The turn is bounded, and this is the law's only clock: the leaves wait
-    // on the rendezvous without a wall-clock bound, so this budget bounds a
-    // true deadlock and nothing else (FIG-3423). Its expiry is the report a
-    // serial tier gets — the leaves that never started — and it also catches
-    // a producer whose group never reached the leaves at all, a process that
-    // is registered and never run, say.
-    let Ok(turn) = tokio::time::timeout(
-        budget,
+    // Bound stalled activation, preserving a progressing or fully activated
+    // group even when its turn outlasts one budget. The suite runner owns the
+    // absolute process timeout.
+    let Some(turn) = budget::run_with_activation_budget(
         runtime.drive_turn(
             input,
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), turn_scope),
         ),
+        &world.state.rendezvous,
+        budget,
     )
     .await
     else {
-        // Whatever never overlapped is let through, so the group's children
-        // drain rather than park on this scenario forever.
-        world.state.rendezvous.expire(budget);
         return ScenarioEnd::DeadlockBudgetExpired { budget };
     };
     let turn = turn.expect("run the tool-group parallelism conformance turn");
