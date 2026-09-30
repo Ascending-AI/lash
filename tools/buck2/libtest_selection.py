@@ -8,7 +8,6 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from urllib.parse import unquote, urlparse
 import xml.etree.ElementTree as ET
 
 from junit_xml import CASE, LIBTEST, read_log
@@ -99,30 +98,6 @@ def require_execution(text):
     return count
 
 
-def check_bazel_events(path):
-    count = results = 0
-    for line in Path(path).read_text().splitlines():
-        event = json.loads(line)
-        if "testResult" not in event:
-            continue
-        results += 1
-        outputs = event["testResult"].get("testActionOutput", [])
-        reports = [output for output in outputs if output.get("name") == "test.xml"]
-        if len(reports) != 1:
-            raise ValueError("a test result has no unique test.xml execution report")
-        uri = urlparse(reports[0].get("uri", ""))
-        if uri.scheme != "file" or uri.netloc not in ("", "localhost"):
-            raise ValueError(
-                "the local store gate requires a local test.xml execution report: "
-                + reports[0].get("uri", "")
-            )
-        root = ET.parse(unquote(uri.path)).getroot()
-        count += sum(execution_count(node.text or "") for node in root.iter("system-out"))
-    if results == 0 or count == 0:
-        raise ValueError("no non-ignored test execution observed in the selected shard union")
-    print(f"PASS: {count} non-ignored test executions across {results} test results")
-
-
 def check_buck2_report(path):
     report = json.loads(Path(path).read_text())
     if report.get("schema") != 1 or report.get("session_complete") is not True:
@@ -143,13 +118,24 @@ def check_buck2_report(path):
     print(f"PASS: {count} non-ignored test executions across {len(results)} test results")
 
 
+def check_batch(report_path, members, args):
+    if not selected(args):
+        return
+    names = Counter()
+    for binary in members:
+        names.update(discovered([binary, *args]))
+    if not names:
+        raise ValueError("no executable tests matched the batch arguments")
+    validate_selectors(args, names)
+    root = ET.parse(report_path).getroot()
+    require_execution("\n".join(node.text or "" for node in root.iter("system-out")))
+
+
 def main(argv):
     mode, path, *command = argv[1:]
     try:
         if mode == "runner":
             check_runner(path, command)
-        elif mode == "bazel":
-            check_bazel_events(path)
         elif mode == "buck2":
             check_buck2_report(path)
         elif mode == "cargo":
@@ -158,17 +144,17 @@ def main(argv):
             require_execution(read_log(path))
         elif mode == "batch":
             manifest, *args = command
-            if selected(args):
-                names = Counter()
-                for member in Path(manifest).read_text().splitlines():
-                    if member:
-                        binary = str(Path(os.environ["TEST_SRCDIR"]) / member)
-                        names.update(discovered([binary, *args]))
-                if not names:
-                    raise ValueError("no executable tests matched the batch arguments")
-                validate_selectors(args, names)
-                root = ET.parse(path).getroot()
-                require_execution("\n".join(node.text or "" for node in root.iter("system-out")))
+            members = [
+                str(Path(os.environ["TEST_SRCDIR"]) / member)
+                for member in Path(manifest).read_text().splitlines()
+                if member
+            ]
+            check_batch(path, members, args)
+        elif mode == "batch-members":
+            member_count = int(command[0])
+            if member_count < 1 or len(command) < member_count + 1:
+                raise ValueError("invalid Buck2 batch member count")
+            check_batch(path, command[1:member_count + 1], command[member_count + 1:])
         else:
             raise ValueError(f"unknown execution check: {mode}")
     except (ValueError, OSError, ET.ParseError, subprocess.CalledProcessError) as error:

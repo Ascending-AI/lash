@@ -12,6 +12,7 @@ set -uo pipefail
 export BUILD_WORKSPACE_DIRECTORY=.
 export INSTA_WORKSPACE_ROOT=.
 junit_xml="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/junit_xml.py"
+libtest_selection="${junit_xml%/*}/libtest_selection.py"
 xml=${XML_OUTPUT_FILE:?the test runner sets XML_OUTPUT_FILE}
 
 logs="${TEST_TMPDIR:-$(mktemp -d)}/batch-logs"
@@ -106,11 +107,15 @@ if [ "${#failures[@]}" -eq 0 ]; then
             cat "$log"
             if ((list_only)); then
                 grep -Eq ': (test|benchmark)$' "$log" && matched=1
-            else
-                grep -Eq 'running [1-9][0-9]* tests?|test result: .* ([1-9][0-9]* passed|[1-9][0-9]* ignored)' "$log" && matched=1
             fi
         done
-        if ((!matched && !help_only)); then
+        if ((!list_only && !help_only)); then
+            python3 "$libtest_selection" batch-members "$xml" \
+                "$member_count" "${members[@]}" "${args[@]}" || {
+                echo "FAIL: no tests matched the batch arguments with non-ignored execution" >&2
+                exit 1
+            }
+        elif ((!matched && !help_only)); then
             echo "FAIL: no tests matched the batch arguments" >&2
             exit 1
         fi

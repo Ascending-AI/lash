@@ -54,8 +54,7 @@ another backend.
 `synthetic-next` builds N and N+1 from the same source with different advertised
 read/write ranges. It is an upgrade configuration over SQLite, PostgreSQL and
 Restate, not a new store. `just _upgrade-harness-builds` resolves the exact
-feature variants from `crates/lash-upgrade-harness/BUILD.bazel` and
-`crates/lashctl/BUILD.bazel`. `just e2e-rolling` runs the rolling harness;
+feature variants from `tools/buck2/target-inventory.json`. `just e2e-rolling` runs the rolling harness;
 `just phase-a` runs its selected fault/rollback legs. The harness uses separate
 node processes, a SQLite directory, PostgreSQL and a live Restate server.
 CI's functional E2E board invokes these recipes. Normal feature-lane checks

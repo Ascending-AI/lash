@@ -10,7 +10,7 @@ import unittest
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLS = ROOT / "tools/bazel"
+TOOLS = ROOT / "tools/buck2"
 
 MEMBER = r'''#!/usr/bin/env python3
 import json, os, sys
@@ -128,17 +128,17 @@ class Fixture(unittest.TestCase):
         return self.run_command(["bash", str(TOOLS / "test_xml_runner.sh"), str(self.member), *args])
 
     def batch(self, *args):
-        manifest = self.root / "manifest"
-        members = "member\n"
+        members = [self.member]
         if self.env.get("FIXTURE_BATCH_EMPTY_MEMBER") == "1":
             empty = self.root / "empty"
             empty.write_text(MEMBER.replace('names = json.loads', 'os.environ["FIXTURE_CASES"] = "[]"\nnames = json.loads'))
             empty.chmod(0o755)
-            members += "empty\n"
-        manifest.write_text(members)
-        self.env.update(TEST_SRCDIR=str(self.root), TEST_WORKSPACE=".",
-                        LASH_BATCH_MANIFEST=str(manifest), LASH_BATCH_JOBS="1")
-        return self.run_command(["bash", str(TOOLS / "test_batch_runner.sh"), *args])
+            members.append(empty)
+        self.env.update(TEST_SRCDIR=str(self.root), TEST_WORKSPACE=".", LASH_BATCH_JOBS="1")
+        return self.run_command([
+            "bash", str(TOOLS / "test_batch_runner.sh"), str(len(members)),
+            *(str(member) for member in members), *args,
+        ])
 
     def gate(self, suite, trusted=True, **cache_env):
         hermetic = self.root / "hermetic-build"
@@ -321,47 +321,6 @@ class CargoStoreGateTests(Fixture):
                 self.assert_passed(result)
                 for name in names:
                     self.assertIn(f"test {name} ... ok", result.stdout)
-
-
-class BazelExecutionReportTests(Fixture):
-    def verify(self, outputs):
-        events = self.root / "events.json"
-        events.write_text(json.dumps({"testResult": {"testActionOutput": outputs}}) + "\n")
-        return self.run_command(["python3", str(TOOLS / "libtest_selection.py"), "bazel", str(events)])
-
-    def report(self):
-        return {"name": "test.xml", "uri": Path(self.env["XML_OUTPUT_FILE"]).as_uri()}
-
-    def test_local_report_counts_observed_execution(self):
-        self.env["XML_OUTPUT_FILE"] = str(self.root / "report with spaces.xml")
-        self.assert_passed(self.single("law"))
-        report = self.report()
-        for uri in (report["uri"], report["uri"].replace("file:///", "file://localhost/")):
-            with self.subTest(uri=uri):
-                result = self.verify([{**report, "uri": uri}])
-                self.assert_passed(result)
-                self.assertIn("PASS: 1 non-ignored test executions across 1 test results", result.stdout)
-
-    def test_remote_report_is_refused_with_its_uri(self):
-        uri = "bytestream://fixture/kiln/blobs/report/0"
-        self.assert_failed(self.verify([{"name": "test.xml", "uri": uri}]),
-                           f"requires a local test.xml execution report: {uri}")
-
-    def test_zero_execution_report_is_refused(self):
-        self.env["FIXTURE_CASES"] = "[]"
-        self.assert_passed(self.single())
-        self.assert_failed(self.verify([self.report()]),
-                           "no non-ignored test execution observed in the selected shard union")
-
-    def test_missing_report_entry_is_refused(self):
-        self.assert_failed(self.verify([]), "no unique test.xml execution report")
-
-    def test_missing_local_report_is_refused(self):
-        self.assert_failed(self.verify([self.report()]), "No such file or directory")
-
-    def test_duplicate_report_entries_are_refused(self):
-        self.assert_failed(self.verify([self.report(), self.report()]),
-                           "no unique test.xml execution report")
 
 
 if __name__ == "__main__":

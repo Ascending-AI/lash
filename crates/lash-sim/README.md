@@ -310,8 +310,8 @@ is `dev-deferred`.
 `chaos-soak` job run it for 90 minutes. Each epoch writes its case name, seed,
 active step or check phase, elapsed
 wall time and recovery progress directly to stderr, outside libtest capture.
-Bazel also retains a separate progress file per case and epoch in
-`test.outputs`. Steps have a 60-second watchdog; each epoch has a four-minute
+Buck2 also retains a separate progress file per case and epoch in the test
+report's undeclared-output directory. Steps have a 60-second watchdog; each epoch has a four-minute
 watchdog capped by the remaining soak duration. Open-ended runs stop admitting
 new epochs when less than a full epoch budget remains. A timeout records terminal
 and obligation state before bounded shutdown, then fails with its seed,

@@ -276,9 +276,9 @@ class JudgedBuildGeometryTests(unittest.TestCase):
             encoding="utf-8",
         )
         failures = self.run_gate()
-        self.assertTrue(any("Bazel-opt-equivalent" in f for f in failures), failures)
+        self.assertTrue(any("Buck2 optimized configuration" in f for f in failures), failures)
 
-    def test_optimized_profile_flags_match_bazel_opt(self) -> None:
+    def test_optimized_profile_flags_match_the_repository_profile(self) -> None:
         rules = self.root / "tools/buck2/lash_rust.bzl"
         text = rules.read_text(encoding="utf-8")
         self.assertIn('"-Copt-level=3",', text)

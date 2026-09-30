@@ -28,6 +28,10 @@ for ((i = 0; i < 200; i++)); do
     sleep 0.01
 done
 
+if ((code == 0)) && [[ ! -e "$xml" ]]; then
+    python3 "${BASH_SOURCE[0]%/*}/libtest_selection.py" runner "$log" "$@" || code=$?
+fi
+
 if [[ ! -e "$xml" ]]; then
     name=${TEST_BINARY#./}
     name=${name#../}

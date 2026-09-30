@@ -240,7 +240,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_live_store_tests_compile_remotely_but_execute_locally_uncached(self) -> None:
         text = (ROOT / "scripts/ci/store-tests.sh").read_text()
-        self.assertIn("scripts/hermetic-build.sh test", text)
+        self.assertIn('"${HERMETIC_BUILD:-scripts/hermetic-build.sh}" test', text)
         self.assertIn("--local-test-execution", text)
         self.assertIn("--no-test-cache", text)
         self.assertIn('inventory["service_test_targets"]', text)

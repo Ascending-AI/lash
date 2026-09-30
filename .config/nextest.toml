@@ -27,8 +27,8 @@
 # the slots stay free for the rest of the workspace.
 #
 # Scope note, so the group is not mistaken for a CI win it does not currently
-# deliver: every nextest call site today runs service-less (the workspace job in
-# `.github/workflows/ci.yml` and `scripts/push-gate.sh`, which unsets
+# deliver: every nextest call site today runs service-less (the untrusted Cargo
+# fallback in `.github/workflows/ci.yml` and `scripts/push-gate.sh`, which unsets
 # `LASH_POSTGRES_DATABASE_URL` outright), so these tests all self-skip and the
 # group does nothing there. The jobs that do have services — `Test Postgres
 # store`, `Test S3 store` — run `cargo test`, not nextest. The group pays off
@@ -93,7 +93,7 @@ test-group = "docker-services"
 # five fault-matrix chunk tests, each a 3-9 minute serial run that forks real
 # `cargo` invocations of its own, run by the trunk-only `Test heavy suites` CI
 # job under `profile.ci-heavy`. The lash-sim runner/minimizer fixture cases are
-# no longer excluded: they are deterministic compute, so the Bazel partition
+# no longer excluded: they are deterministic compute, so the Buck2 partition
 # executes them as cached actions on every trusted event and hiding them here
 # would leave the Cargo path (untrusted forks) with no run of them at all. The
 # trybuild `ui` binary is excluded WITHOUT a heavy-side run: the
@@ -102,11 +102,9 @@ test-group = "docker-services"
 # same defect. Keep this expression and the `ci-heavy` default-filter exact
 # complements over the heavy set.
 #
-# Trusted main CI runs this profile only for the agent-workbench binary, whose
-# Node.js browser projection gate keeps it Cargo-owned
-# (`tools/bazel/workbench_nextest_filter.txt`). Fork and Dependabot pull
-# requests omit that expression and therefore retain this profile's
-# full-workspace behavior.
+# This profile is the untrusted Cargo fallback. CI constructs its exact package
+# selection in `.github/workflows/ci.yml`; when the workbench scope is unchanged,
+# that command excludes `agent-workbench` as well.
 default-filter = '''
   not (
       (
@@ -169,9 +167,9 @@ slow-timeout = { period = "600s", terminate-after = 1 }
 # These five cases are the only tests Cargo still owns for their own sake: each
 # forks a real `cargo test ... -- --list` against the workspace to prove the
 # confidence gate's name filters still select tests, which is a claim about
-# Cargo's selection and cannot be proved without Cargo. The Bazel label
+# Cargo's selection and cannot be proved without Cargo. The Buck2 label
 # `//crates/lash-core:lash-core__unit_test` skips them by name for the same
-# reason (see tools/bazel/generate_build_files.py).
+# reason (see `tools/buck2/package-policy.toml`).
 [profile.ci-heavy]
 fail-fast = false
 flaky-result = "fail"

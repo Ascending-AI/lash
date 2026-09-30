@@ -77,6 +77,12 @@ class BatchRunnerTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("no tests matched", result.stderr)
 
+    def test_ignored_only_selection_requires_an_execution(self):
+        result, observed = self.invoke("--ignored")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(observed, [["--ignored"], ["--ignored"]])
+        self.assertIn("no executable tests matched", result.stderr)
+
     def test_plain_success_stays_compact_and_failure_prints_its_member(self):
         success, observed = self.invoke()
         self.assertEqual(success.returncode, 0)
