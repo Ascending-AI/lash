@@ -593,19 +593,44 @@ test-changed base='origin/main':
 # Opt-in durable-store and session-graph property soak. PostgreSQL executes
 # when its standard LASH_POSTGRES_DATABASE_URL configuration is present.
 store-contract-soak cases='256':
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance_memory__test -- store_contract_state_machine --nocapture
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance__test -- store_contract_state_machine --nocapture
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-postgres-store:conformance__test -- store_contract_state_machine --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance_memory__test -- session_graph_state_machine --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance__test -- session_graph_state_machine --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-postgres-store:conformance__test -- session_graph_state_machine --nocapture
+  #!/usr/bin/env bash
+  set -euo pipefail
+  service=()
+  if [[ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]]; then
+    service=(--local-test-execution --no-test-cache --test_env=LASH_POSTGRES_DATABASE_URL --test_env=LASH_REQUIRE_POSTGRES=1)
+  fi
+  run_property_soak() {
+    local setting="$1" label="$2" selector="$3"
+    kiln test --test_timeout=1200 --test_output=all \
+      "--test_env=${setting}={{cases}}" "--test_arg=${selector}" \
+      --test_arg=--nocapture "${service[@]}" "$label"
+  }
+  run_property_soak LASH_STORE_CONTRACT_PROPTEST_CASES //crates/lash-sqlite-store:conformance_memory__test store_contract_state_machine
+  run_property_soak LASH_STORE_CONTRACT_PROPTEST_CASES //crates/lash-sqlite-store:conformance__test store_contract_state_machine
+  run_property_soak LASH_STORE_CONTRACT_PROPTEST_CASES //crates/lash-postgres-store:conformance__test store_contract_state_machine
+  run_property_soak LASH_SESSION_GRAPH_PROPTEST_CASES //crates/lash-sqlite-store:conformance_memory__test session_graph_state_machine
+  run_property_soak LASH_SESSION_GRAPH_PROPTEST_CASES //crates/lash-sqlite-store:conformance__test session_graph_state_machine
+  run_property_soak LASH_SESSION_GRAPH_PROPTEST_CASES //crates/lash-postgres-store:conformance__test session_graph_state_machine
 
 # Opt-in runtime-persistence property soak. PostgreSQL executes when its
 # standard LASH_POSTGRES_DATABASE_URL configuration is present.
 runtime-persistence-soak cases='256':
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance_memory__test -- runtime_persistence_state_machine --nocapture
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance__test -- runtime_persistence_state_machine --nocapture
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-postgres-store:conformance__test -- runtime_persistence_state_machine --nocapture
+  #!/usr/bin/env bash
+  set -euo pipefail
+  service=()
+  if [[ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]]; then
+    service=(--local-test-execution --no-test-cache --test_env=LASH_POSTGRES_DATABASE_URL --test_env=LASH_REQUIRE_POSTGRES=1)
+  fi
+  run_property_soak() {
+    local label="$1"
+    kiln test --test_timeout=1200 --test_output=all \
+      "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES={{cases}}" \
+      --test_arg=runtime_persistence_state_machine --test_arg=--nocapture \
+      "${service[@]}" "$label"
+  }
+  run_property_soak //crates/lash-sqlite-store:conformance_memory__test
+  run_property_soak //crates/lash-sqlite-store:conformance__test
+  run_property_soak //crates/lash-postgres-store:conformance__test
 
 # The release gate's chaos soak (FIG-3873): randomized lash-sim workloads
 # under deployment kills, leader-lease loss and rolling deploys on the Restate
@@ -614,12 +639,26 @@ runtime-persistence-soak cases='256':
 # prints the `LASH_CHAOS_SOAK_*` settings that replay it alone. release.yml's
 # `chaos-soak` job runs the same test under Cargo.
 chaos-soak duration='90m' seed='':
-  LASH_CHAOS_SOAK_DURATION="{{duration}}" LASH_CHAOS_SOAK_SEED="{{seed}}" kiln run //crates/lash-sim:chaos_soak__test -- chaos_soak_release --exact --ignored --nocapture
+  kiln test --test_timeout=6000 --test_output=all \
+    '--test_env=LASH_CHAOS_SOAK_DURATION={{duration}}' \
+    '--test_env=LASH_CHAOS_SOAK_SEED={{seed}}' \
+    --test_arg=chaos_soak_release --test_arg=--exact --test_arg=--ignored \
+    --test_arg=--nocapture //crates/lash-sim:chaos_soak__test
 
 # Opt-in three-backend raw durable-state soak. Requires the standard Postgres
 # configuration and logs the operation kinds omitted by each bounded seed.
 cross-backend-store-soak cases='64' seed='852':
-  LASH_REQUIRE_POSTGRES=1 LASH_CROSS_BACKEND_CASES="{{cases}}" LASH_CROSS_BACKEND_SEED="{{seed}}" kiln run //crates/lash-sim:cross_backend_store_differential__test -- generated_cross_backend_surface_differential_agrees --nocapture --include-ignored
+  #!/usr/bin/env bash
+  set -euo pipefail
+  : "${LASH_POSTGRES_DATABASE_URL:?cross-backend-store-soak requires an explicit LASH_POSTGRES_DATABASE_URL}"
+  kiln test --local-test-execution --no-test-cache \
+    --test_timeout=1200 --test_output=all \
+    --test_env=LASH_POSTGRES_DATABASE_URL --test_env=LASH_REQUIRE_POSTGRES=1 \
+    '--test_env=LASH_CROSS_BACKEND_CASES={{cases}}' \
+    '--test_env=LASH_CROSS_BACKEND_SEED={{seed}}' \
+    --test_arg=generated_cross_backend_surface_differential_agrees \
+    --test_arg=--nocapture --test_arg=--include-ignored \
+    //crates/lash-sim:cross_backend_store_differential__test
 
 # The runtime leg gates on allocation ceilings and phase inventory only;
 # wall-clock budgets print as advisories (see scripts/perf_guard_budgets.json,

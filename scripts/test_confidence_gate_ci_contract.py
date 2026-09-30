@@ -1016,16 +1016,38 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertIn(
                 f"--test conformance_memory \\\n      {leaf}", scenario_harnesses
             )
-            for package, target in (
-                ("lash-sqlite-store", "conformance_memory__test"),
-                ("lash-sqlite-store", "conformance__test"),
-                ("lash-postgres-store", "conformance__test"),
-            ):
-                self.assertIn(
-                    f"kiln run //crates/{package}:{target} -- {leaf}",
-                    justfile,
-                )
             self.assertNotIn(f"conformance::tests::{leaf}", scenario_harnesses)
+        store_soak = justfile.split("store-contract-soak cases='256':", 1)[1].split(
+            "# Opt-in runtime-persistence property soak", 1
+        )[0]
+        runtime_soak = justfile.split(
+            "runtime-persistence-soak cases='256':", 1
+        )[1].split("# The release gate's chaos soak", 1)[0]
+        for body in (store_soak, runtime_soak):
+            self.assertIn("kiln test --test_timeout=1200 --test_output=all", body)
+            self.assertIn(
+                "service=(--local-test-execution --no-test-cache "
+                "--test_env=LASH_POSTGRES_DATABASE_URL "
+                "--test_env=LASH_REQUIRE_POSTGRES=1)",
+                body,
+            )
+        for leaf, body in (
+            ("store_contract_state_machine", store_soak),
+            ("session_graph_state_machine", store_soak),
+            ("runtime_persistence_state_machine", runtime_soak),
+        ):
+            if body is store_soak:
+                self.assertIn('"--test_arg=${selector}"', body)
+                self.assertIn(f" {leaf}", body)
+            else:
+                self.assertIn(f"--test_arg={leaf}", body)
+        for target in (
+            "//crates/lash-sqlite-store:conformance_memory__test",
+            "//crates/lash-sqlite-store:conformance__test",
+            "//crates/lash-postgres-store:conformance__test",
+        ):
+            self.assertIn(target, store_soak)
+            self.assertIn(target, runtime_soak)
         self.assertIn("default_runtime_persistence_cases=32", scenario_harnesses)
         self.assertIn("default_runtime_persistence_cases=256", scenario_harnesses)
         self.assertEqual(
@@ -1039,6 +1061,196 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn('LASH_CROSS_BACKEND_SOAK_CASES:-64', cross_backend_soak)
         self.assertIn('LASH_CROSS_BACKEND_CASES="$cases"', cross_backend_soak)
         self.assertIn("cross-backend-store-soak cases='64' seed='852':", justfile)
+        just_cross_backend = justfile.split(
+            "cross-backend-store-soak cases='64' seed='852':", 1
+        )[1].split("# The runtime leg gates", 1)[0]
+        self.assertIn("${LASH_POSTGRES_DATABASE_URL:?", just_cross_backend)
+        self.assertIn(
+            "kiln test --local-test-execution --no-test-cache", just_cross_backend
+        )
+        self.assertIn("--test_env=LASH_POSTGRES_DATABASE_URL", just_cross_backend)
+        self.assertIn("--test_env=LASH_REQUIRE_POSTGRES=1", just_cross_backend)
+        self.assertIn("--test_output=all", just_cross_backend)
+        self.assertIn("--test_timeout=1200", just_cross_backend)
+
+    def test_active_test_callers_use_the_test_interface(self) -> None:
+        sources = {"justfile": JUSTFILE.read_text(encoding="utf-8")}
+        sources.update(
+            {
+                str(path.relative_to(ROOT)): path.read_text(encoding="utf-8")
+                for path in (ROOT / "scripts").rglob("*.sh")
+            }
+        )
+        for path, source in sources.items():
+            with self.subTest(path=path):
+                self.assertIsNone(
+                    re.search(r"\bkiln run\s+[^\n]*:[^\s]*__test\b", source),
+                    f"{path} tries to run a Buck2 test wrapper as a binary",
+                )
+        justfile = sources["justfile"]
+        self.assertIn("kiln run //examples/toolbench:toolbench", justfile)
+        chaos = justfile.split("chaos-soak duration='90m' seed='':", 1)[1].split(
+            "# Opt-in three-backend", 1
+        )[0]
+        self.assertIn("kiln test --test_timeout=6000 --test_output=all", chaos)
+        for value in (
+            "LASH_CHAOS_SOAK_DURATION={{duration}}",
+            "LASH_CHAOS_SOAK_SEED={{seed}}",
+            "--test_arg=chaos_soak_release",
+            "--test_arg=--exact",
+            "--test_arg=--ignored",
+        ):
+            self.assertIn(value, chaos)
+        attachment = sources["scripts/agent-workbench-attachment-usage-gate.sh"]
+        self.assertIn("kiln test --test_timeout=300 --test_output=all", attachment)
+        self.assertIn("--test_arg=attachment_usage_gate", attachment)
+        self.assertIn("--test_arg=--exact", attachment)
+
+    def test_soak_callers_forward_only_declared_runtime_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = pathlib.Path(directory)
+            calls = temporary / "calls.jsonl"
+            kiln = temporary / "kiln"
+            kiln.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "with open(os.environ['KILN_STUB_LOG'], 'a') as output:\n"
+                "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n",
+                encoding="utf-8",
+            )
+            kiln.chmod(0o755)
+            environment = dict(os.environ)
+            environment["PATH"] = str(temporary) + os.pathsep + environment["PATH"]
+            environment["KILN_STUB_LOG"] = str(calls)
+            environment.pop("LASH_POSTGRES_DATABASE_URL", None)
+            environment.pop("LASH_REQUIRE_POSTGRES", None)
+
+            def run(
+                *arguments: str, **extra: str
+            ) -> tuple[subprocess.CompletedProcess, list[list[str]]]:
+                calls.unlink(missing_ok=True)
+                result = subprocess.run(
+                    ["just", *arguments],
+                    cwd=ROOT,
+                    env=environment | extra,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                rows = (
+                    [
+                        json.loads(line)
+                        for line in calls.read_text(encoding="utf-8").splitlines()
+                    ]
+                    if calls.exists()
+                    else []
+                )
+                return result, rows
+
+            result, rows = run("store-contract-soak", "7")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(rows), 6)
+            for arguments in rows:
+                self.assertEqual(arguments[0], "test")
+                self.assertIn("--test_timeout=1200", arguments)
+                self.assertIn("--test_output=all", arguments)
+                self.assertIn("--test_arg=--nocapture", arguments)
+                self.assertNotIn("--local-test-execution", arguments)
+                self.assertNotIn("--no-test-cache", arguments)
+            self.assertEqual(
+                sum(
+                    "--test_env=LASH_STORE_CONTRACT_PROPTEST_CASES=7" in row
+                    for row in rows
+                ),
+                3,
+            )
+            self.assertEqual(
+                sum(
+                    "--test_env=LASH_SESSION_GRAPH_PROPTEST_CASES=7" in row
+                    for row in rows
+                ),
+                3,
+            )
+
+            database = "postgres://fixture.invalid/database"
+            result, rows = run(
+                "runtime-persistence-soak",
+                "9",
+                LASH_POSTGRES_DATABASE_URL=database,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(rows), 3)
+            for arguments in rows:
+                for argument in (
+                    "--local-test-execution",
+                    "--no-test-cache",
+                    "--test_env=LASH_POSTGRES_DATABASE_URL",
+                    "--test_env=LASH_REQUIRE_POSTGRES=1",
+                    "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES=9",
+                ):
+                    self.assertIn(argument, arguments)
+                self.assertNotIn(database, arguments)
+
+            result, rows = run("cross-backend-store-soak", "5", "17")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(rows, [])
+            result, rows = run(
+                "cross-backend-store-soak",
+                "5",
+                "17",
+                LASH_POSTGRES_DATABASE_URL=database,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(rows), 1)
+            for argument in (
+                "--local-test-execution",
+                "--no-test-cache",
+                "--test_env=LASH_POSTGRES_DATABASE_URL",
+                "--test_env=LASH_REQUIRE_POSTGRES=1",
+                "--test_env=LASH_CROSS_BACKEND_CASES=5",
+                "--test_env=LASH_CROSS_BACKEND_SEED=17",
+                "--test_arg=--include-ignored",
+            ):
+                self.assertIn(argument, rows[0])
+            self.assertNotIn(database, rows[0])
+
+            result, rows = run("chaos-soak", "2m", "42")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(rows), 1)
+            for argument in (
+                "--test_timeout=6000",
+                "--test_output=all",
+                "--test_env=LASH_CHAOS_SOAK_DURATION=2m",
+                "--test_env=LASH_CHAOS_SOAK_SEED=42",
+                "--test_arg=chaos_soak_release",
+                "--test_arg=--exact",
+                "--test_arg=--ignored",
+            ):
+                self.assertIn(argument, rows[0])
+
+            calls.unlink(missing_ok=True)
+            result = subprocess.run(
+                ["bash", "scripts/agent-workbench-attachment-usage-gate.sh", "3030"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rows = [
+                json.loads(line)
+                for line in calls.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(rows), 1)
+            for argument in (
+                "--test_timeout=300",
+                "--test_output=all",
+                "--test_arg=attachment_usage_gate",
+                "--test_arg=--exact",
+                "--test_arg=--test-threads=1",
+            ):
+                self.assertIn(argument, rows[0])
 
     def test_failure_artifacts_are_attempt_qualified(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
