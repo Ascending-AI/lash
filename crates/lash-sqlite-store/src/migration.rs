@@ -44,11 +44,12 @@ use std::time::{Duration, Instant, SystemTime};
 
 use lash_core_execution::compat::{self, CompatRefusal, CompatStamp};
 use lash_core_execution::{Clock, StoreError};
-use rusqlite::{Connection, OpenFlags, Transaction};
+use rusqlite::Transaction;
 use serde::{Deserialize, Serialize};
 
 use crate::SqliteDatabase;
 use crate::compat::{AdvanceStep, advance_set_observed};
+use crate::conn::SqliteConnection;
 use crate::location::SqliteLocation;
 
 /// One step of the migration catalog: the DDL that moves `database` from
@@ -426,7 +427,7 @@ impl Backup {
 /// Migrate the store at `location` when any database is older than this
 /// build writes, or finish what an interrupted migration started. A memory
 /// store is always this process's own build's, so it never migrates.
-pub(crate) fn migrate_on_open(
+pub(crate) async fn migrate_on_open(
     location: &SqliteLocation,
     backup: &SqliteMigrationBackup,
     busy_timeout: Duration,
@@ -450,6 +451,7 @@ pub(crate) fn migrate_on_open(
         probe,
     }
     .run()
+    .await
     .map_err(Stop::into_store_error)
 }
 
@@ -475,7 +477,7 @@ impl Migration<'_> {
         self.root.join(database.file_name())
     }
 
-    fn run(&self) -> Result<(), Stop> {
+    async fn run(&self) -> Result<(), Stop> {
         // Store-set open already refused partial sets. Only a fresh root
         // skips migration so the component installers can create it.
         if SqliteDatabase::ALL
@@ -486,14 +488,14 @@ impl Migration<'_> {
         }
         let identity = self.location.identity();
         if self.pending(&identity)?.is_none()
-            && matches!(self.plan(&self.stamps()?)?, Plan::Nothing)
+            && matches!(self.plan(&self.stamps().await?)?, Plan::Nothing)
         {
             return Ok(());
         }
-        let _migrator = self.exclusive()?;
+        let _migrator = self.exclusive().await?;
         // Decided again under the lock: another process's migration may have
         // finished while this one waited for it.
-        self.run_exclusive(identity)
+        self.run_exclusive(identity).await
     }
 
     /// Serialize the store's migrators across processes: an exclusive
@@ -501,7 +503,7 @@ impl Migration<'_> {
     /// migration or restore ends. It is not a database file, so taking and
     /// releasing it leaves SQLite's own locks alone. Another migrator is
     /// waited for up to the busy timeout.
-    fn exclusive(&self) -> Result<std::fs::File, Stop> {
+    async fn exclusive(&self) -> Result<std::fs::File, Stop> {
         let path = self.root.join(MIGRATOR_LOCK);
         let file = open_lock_file(&path)?;
         let deadline = Instant::now() + self.busy_timeout;
@@ -509,7 +511,7 @@ impl Migration<'_> {
             match file.try_lock() {
                 Ok(()) => return Ok(file),
                 Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(10));
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 }
                 Err(std::fs::TryLockError::WouldBlock) => {
                     return Err(Stop::Failed(storage(format!(
@@ -525,8 +527,8 @@ impl Migration<'_> {
         }
     }
 
-    fn run_exclusive(&self, identity: String) -> Result<(), Stop> {
-        let stamps = self.stamps()?;
+    async fn run_exclusive(&self, identity: String) -> Result<(), Stop> {
+        let stamps = self.stamps().await?;
         if let Some(pending) = self.pending(&identity)? {
             match pending.manifest.state {
                 BackupState::Restoring => {
@@ -534,12 +536,12 @@ impl Migration<'_> {
                         "an earlier open's migration failed and its restore was interrupted"
                             .to_owned()
                     });
-                    return self.restore(pending, failure, &identity);
+                    return self.restore(pending, failure, &identity).await;
                 }
                 BackupState::BackingUp => remove_directory(&pending.directory)?,
                 BackupState::Migrating if self.owns(&pending)? => {
                     if self.advanced(&pending, &stamps)? {
-                        return self.resume(pending);
+                        return self.resume(pending).await;
                     }
                     // Nothing committed, so the store is what it was, or
                     // newer if another build wrote it since: a fresh backup
@@ -554,20 +556,20 @@ impl Migration<'_> {
         }
         match self.plan(&stamps)? {
             Plan::Nothing => Ok(()),
-            Plan::Fresh(databases) => self.fresh(identity, databases),
+            Plan::Fresh(databases) => self.fresh(identity, databases).await,
         }
     }
 
     /// Each database's stamp, read-only.
-    fn stamps(&self) -> Result<Vec<(SqliteDatabase, Option<CompatStamp>)>, Stop> {
+    async fn stamps(&self) -> Result<Vec<(SqliteDatabase, Option<CompatStamp>)>, Stop> {
         let mut stamps = Vec::with_capacity(SqliteDatabase::ALL.len());
         for database in SqliteDatabase::ALL {
-            let connection = Connection::open_with_flags(
-                self.location.target(database).uri(),
-                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-            )?;
-            connection.busy_timeout(self.busy_timeout)?;
-            let stamp = crate::compat::read(&connection, database)?.map(|(stamp, _)| stamp);
+            let stamp = SqliteConnection::migration_stamp(
+                &self.location.target(database),
+                database,
+                self.busy_timeout,
+            )
+            .await?;
             stamps.push((database, stamp));
         }
         Ok(stamps)
@@ -645,9 +647,9 @@ impl Migration<'_> {
         Ok(false)
     }
 
-    fn fresh(&self, identity: String, databases: Vec<BackedUpDatabase>) -> Result<(), Stop> {
+    async fn fresh(&self, identity: String, databases: Vec<BackedUpDatabase>) -> Result<(), Stop> {
         for database in SqliteDatabase::ALL {
-            self.own(database)?;
+            self.own(database).await?;
             self.probe.at(SqliteMigrationStep::Owned(database))?;
         }
         let mut backup = self.start_backup(identity, databases)?;
@@ -668,15 +670,15 @@ impl Migration<'_> {
             #[cfg(feature = "testing")]
             Err(crashed @ Stop::Crashed(_)) => return Err(crashed),
         };
-        self.advance(backup, Some(&copied))
+        self.advance(backup, Some(&copied)).await
     }
 
-    fn resume(&self, backup: Backup) -> Result<(), Stop> {
+    async fn resume(&self, backup: Backup) -> Result<(), Stop> {
         for database in SqliteDatabase::ALL {
-            self.own(database)?;
+            self.own(database).await?;
             self.probe.at(SqliteMigrationStep::Owned(database))?;
         }
-        self.advance(backup, None)
+        self.advance(backup, None).await
     }
 
     /// Copy every database into the backup, in [`SqliteDatabase::ALL`] order,
@@ -705,50 +707,53 @@ impl Migration<'_> {
     /// Lock the store in order, migrate each database from its stamp and
     /// commit in order. `copied` is the fresh path's record of each copy:
     /// a live file that changed since is refused before anything is written.
-    fn advance(
+    async fn advance(
         &self,
         mut backup: Backup,
         copied: Option<&[(u64, SystemTime)]>,
     ) -> Result<(), Stop> {
-        let stopped: std::cell::RefCell<Option<Stop>> = std::cell::RefCell::new(None);
-        let committed = std::cell::Cell::new(0_usize);
-        // The advance speaks rusqlite errors; the migration's own stop rides
-        // beside it and is what the caller sees.
-        let stop = |stop: Stop| {
-            *stopped.borrow_mut() = Some(stop);
-            crate::sqlite_conversion_error(storage("the migration stopped".to_owned()))
-        };
-        let result = advance_set_observed(
-            self.location,
-            self.busy_timeout,
-            |database, tx| {
-                self.migrate_database(&backup, database, tx, copied)
-                    .map_err(stop)
-            },
-            |step| {
-                let step = match step {
-                    AdvanceStep::Locked(database) => SqliteMigrationStep::Locked(database),
-                    AdvanceStep::Committed(database) => {
-                        committed.set(committed.get() + 1);
-                        SqliteMigrationStep::Committed(database)
-                    }
-                };
-                self.probe.at(step).map_err(stop)
-            },
-        );
-        let failure = match result {
-            Ok(()) => {
-                backup.record(BackupState::Migrated)?;
-                self.probe.at(SqliteMigrationStep::Completed)?;
-                self.prune(&backup.manifest.store);
-                return Ok(());
-            }
-            Err(error) => stopped.into_inner().unwrap_or_else(|| Stop::from(error)),
+        let (failure, committed) = {
+            let stopped: std::cell::RefCell<Option<Stop>> = std::cell::RefCell::new(None);
+            let committed = std::cell::Cell::new(0_usize);
+            // The advance speaks rusqlite errors; the migration's own stop rides
+            // beside it and is what the caller sees.
+            let stop = |stop: Stop| {
+                *stopped.borrow_mut() = Some(stop);
+                crate::sqlite_conversion_error(storage("the migration stopped".to_owned()))
+            };
+            let result = advance_set_observed(
+                self.location,
+                self.busy_timeout,
+                |database, tx| {
+                    self.migrate_database(&backup, database, tx, copied)
+                        .map_err(stop)
+                },
+                |step| {
+                    let step = match step {
+                        AdvanceStep::Locked(database) => SqliteMigrationStep::Locked(database),
+                        AdvanceStep::Committed(database) => {
+                            committed.set(committed.get() + 1);
+                            SqliteMigrationStep::Committed(database)
+                        }
+                    };
+                    self.probe.at(step).map_err(stop)
+                },
+            );
+            let failure = match result {
+                Ok(()) => {
+                    backup.record(BackupState::Migrated)?;
+                    self.probe.at(SqliteMigrationStep::Completed)?;
+                    self.prune(&backup.manifest.store);
+                    return Ok(());
+                }
+                Err(error) => stopped.into_inner().unwrap_or_else(|| Stop::from(error)),
+            };
+            (failure, committed.get())
         };
         match failure {
             #[cfg(feature = "testing")]
             crashed @ Stop::Crashed(_) => Err(crashed),
-            Stop::Failed(error) if committed.get() == 0 => {
+            Stop::Failed(error) if committed == 0 => {
                 // Every transaction rolled back, so the store is as it was
                 // backed up (or as another writer left it): no restore.
                 remove_directory(&backup.directory)?;
@@ -756,7 +761,7 @@ impl Migration<'_> {
             }
             Stop::Failed(error) => {
                 let identity = backup.manifest.store.clone();
-                self.restore(backup, error.to_string(), &identity)
+                self.restore(backup, error.to_string(), &identity).await
             }
         }
     }
@@ -847,30 +852,16 @@ impl Migration<'_> {
     /// write-ahead log, which SQLite does only for the last connection. A
     /// log that stays means another connection holds the database: wait for
     /// it up to the busy timeout, then refuse.
-    fn own(&self, database: SqliteDatabase) -> Result<(), Stop> {
+    async fn own(&self, database: SqliteDatabase) -> Result<(), Stop> {
         let live = self.live(database);
         let log = sidecar(&live, "-wal");
         let deadline = Instant::now() + self.busy_timeout;
         loop {
-            {
-                let connection = Connection::open_with_flags(
-                    self.location.target(database).uri(),
-                    OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI,
-                )?;
-                connection.busy_timeout(self.busy_timeout)?;
-                // Reading the catalog rolls back a hot journal first.
-                connection.query_row("SELECT COUNT(*) FROM sqlite_schema", [], |row| {
-                    row.get::<_, i64>(0)
-                })?;
-                let mode: String =
-                    connection.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
-                if mode.eq_ignore_ascii_case("wal") {
-                    connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
-                        row.get::<_, i64>(0)
-                    })?;
-                }
-                connection.close().map_err(|(_, error)| Stop::from(error))?;
-            }
+            SqliteConnection::checkpoint_for_migration(
+                &self.location.target(database),
+                self.busy_timeout,
+            )
+            .await?;
             if !log.exists() {
                 return Ok(());
             }
@@ -880,7 +871,7 @@ impl Migration<'_> {
                     location: self.root.to_path_buf(),
                 }));
             }
-            std::thread::sleep(Duration::from_millis(10));
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
 
@@ -919,12 +910,17 @@ impl Migration<'_> {
     /// order, and report `failure`. Each replacement is a synced copy renamed
     /// over the live file, so a crash leaves each database either as it was or
     /// restored, and the next open finishes the rest.
-    fn restore(&self, mut backup: Backup, failure: String, identity: &str) -> Result<(), Stop> {
+    async fn restore(
+        &self,
+        mut backup: Backup,
+        failure: String,
+        identity: &str,
+    ) -> Result<(), Stop> {
         backup.manifest.failure = Some(failure.clone());
         backup.record(BackupState::Restoring)?;
         self.probe.at(SqliteMigrationStep::RestoreStarted)?;
         for database in SqliteDatabase::ALL {
-            self.own(database)?;
+            self.own(database).await?;
             self.probe.at(SqliteMigrationStep::Owned(database))?;
         }
         for database in SqliteDatabase::ALL {

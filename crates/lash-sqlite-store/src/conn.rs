@@ -610,6 +610,63 @@ impl SqliteConnection {
         })
     }
 
+    /// Read a migration stamp without provisioning or changing the database.
+    pub(crate) async fn migration_stamp(
+        target: &DatabaseTarget,
+        database: SqliteDatabase,
+        busy_timeout: Duration,
+    ) -> rusqlite::Result<Option<lash_core_execution::compat::CompatStamp>> {
+        let connection = flatten(Self::open_readonly(target).await.map(Ok))?;
+        let result = connection
+            .call(move |c| {
+                c.busy_timeout(busy_timeout)?;
+                crate::compat::read(c, database).map(|row| row.map(|(stamp, _)| stamp))
+            })
+            .await;
+        let closed = flatten(connection.inner.close().await.map(Ok));
+        let stamp = result?;
+        closed?;
+        Ok(stamp)
+    }
+
+    /// Recover a hot journal and checkpoint committed pages before a migration
+    /// copies the database. No installer, journal-mode switch or row write runs;
+    /// the connection closes before the caller checks whether another owner
+    /// still holds the WAL.
+    pub(crate) async fn checkpoint_for_migration(
+        target: &DatabaseTarget,
+        busy_timeout: Duration,
+    ) -> rusqlite::Result<()> {
+        let connection = AsyncConnection::open_with_flags(
+            target.uri(),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )
+        .await?;
+        let result = flatten(
+            connection
+                .call(move |c| {
+                    c.busy_timeout(busy_timeout)?;
+                    c.query_row("SELECT COUNT(*) FROM sqlite_schema", [], |row| {
+                        row.get::<_, i64>(0)
+                    })?;
+                    let mode: String = c.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+                    if mode.eq_ignore_ascii_case("wal") {
+                        c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                            row.get::<_, i64>(0)
+                        })?;
+                    }
+                    Ok(())
+                })
+                .await
+                .map(Ok),
+        );
+        let closed = flatten(connection.close().await.map(Ok));
+        result?;
+        closed
+    }
+
     /// The closure returns `rusqlite::Result<T>`; this method flattens tokio-rusqlite's
     /// wrapper so callers handle a single `rusqlite::Error`.
     /// Use for single statements, read queries, and `execute_batch`.

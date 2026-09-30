@@ -242,6 +242,7 @@ impl SqliteStoreSet {
             clock.as_ref(),
             probe,
         )
+        .await
         .map_err(|error| tokio_rusqlite::Error::Error(crate::sqlite_conversion_error(error)))?;
         crate::compat::check_set(&location).map_err(tokio_rusqlite::Error::Error)?;
         let database = |database| {
