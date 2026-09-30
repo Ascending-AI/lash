@@ -27,6 +27,7 @@
 
 use std::sync::Arc;
 
+use lash_core::runtime::attachment_delivery::{DeliveryAcquisition, source_gone_output};
 use lash_core::{AwaitEventKey, ProcessAwaitOutput, ProcessId, Resolution};
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::HandlerResult;
@@ -113,21 +114,37 @@ impl LashProcessAttach for LashProcessAttachImpl {
         .await;
         // A terminal is a fact, not an error of the wait: a failed or cancelled
         // process resolves its waiters successfully with that terminal as the
-        // value, exactly as the inline await path returns it. Only a terminal
-        // this workflow could not observe at all becomes an error resolution,
-        // so the parked call reports why instead of hanging.
+        // value, exactly as the inline await path returns it.
         let resolution = match output {
-            Ok(reply) => match serde_json::to_value(
-                self.acquire_delivered(&ctx, &key, reply.into_body())
-                    .await?,
-            ) {
-                Ok(value) => Resolution::Ok(value),
-                Err(error) => Resolution::Err(lash_core::runtime::ExternalCompletionError {
-                    code: lash_core::TurnFailureCode::from_wire("process_terminal_encode").into(),
-                    message: error.to_string(),
-                    raw: None,
-                }),
-            },
+            Ok(reply) => {
+                let output = reply.into_body();
+                let delivered = match self.acquire_delivered(&ctx, &key, &output).await? {
+                    DeliveryAcquisition::Held => Ok(output),
+                    DeliveryAcquisition::SourceGone { digest } => Ok(source_gone_output(&digest)),
+                    DeliveryAcquisition::ReceiverEnded { .. } => return Ok(Reply::at(wire, ())),
+                    DeliveryAcquisition::Refused { refusal } => Err(refusal),
+                };
+                match delivered {
+                    Ok(output) => match serde_json::to_value(output) {
+                        Ok(value) => Resolution::Ok(value),
+                        Err(error) => {
+                            Resolution::Err(lash_core::runtime::ExternalCompletionError {
+                                code: lash_core::TurnFailureCode::from_wire(
+                                    "process_terminal_encode",
+                                )
+                                .into(),
+                                message: error.to_string(),
+                                raw: None,
+                            })
+                        }
+                    },
+                    Err(refusal) => Resolution::Err(lash_core::runtime::ExternalCompletionError {
+                        code: (&refusal.code).into(),
+                        message: refusal.message,
+                        raw: None,
+                    }),
+                }
+            }
             Err(error) => Resolution::Err(lash_core::runtime::ExternalCompletionError {
                 code: lash_core::TurnFailureCode::from_wire("process_terminal_unobservable").into(),
                 message: error.to_string(),
@@ -152,45 +169,31 @@ impl LashProcessAttach for LashProcessAttachImpl {
 
 impl LashProcessAttachImpl {
     /// Acquire the waiter's referrer edge on every stored attachment
-    /// `output` delivers, in one journaled step, and answer the value the
-    /// key resolves with: `output`, or a typed source-gone or receiver-ended
-    /// verdict. A transient store fault retries without recording a result;
-    /// a permanent store refusal is recorded once.
+    /// `output` delivers, recording its typed acquisition verdict once.
+    /// Only a transient storage fault retries without recording a result.
     async fn acquire_delivered(
         &self,
         ctx: &WorkflowContext<'_>,
         key: &AwaitEventKey,
-        output: ProcessAwaitOutput,
-    ) -> HandlerResult<ProcessAwaitOutput> {
+        output: &ProcessAwaitOutput,
+    ) -> HandlerResult<DeliveryAcquisition> {
         let attachments = Arc::clone(&self.attachments);
         let receiver = key.scope.clone();
+        let output = output.clone();
         let restate_sdk::serde::Json(delivered) = ctx
-            .run_json_or_retry_send::<
-                Result<ProcessAwaitOutput, lash_core::RuntimeEffectControllerError>,
-                _,
-            >(
+            .run_json_or_retry_send::<DeliveryAcquisition, _>(
                 PROCESS_ATTACH_ACQUIRE_STEP.to_string(),
                 async move {
-                    match lash_core::runtime::attachment_delivery::deliver_output(
+                    lash_core::runtime::attachment_delivery::acquire_delivered_attachments(
                         attachments.as_ref(),
                         &receiver,
-                        output,
+                        &output,
                     )
                     .await
-                    {
-                        Ok(delivered) => Ok(Ok(delivered)),
-                        Err(error) => {
-                            let error = lash_core::RuntimeEffectControllerError::from(error);
-                            if error.is_terminal() {
-                                Ok(Err(error))
-                            } else {
-                                Err(error.to_string())
-                            }
-                        }
-                    }
+                    .map_err(|error| error.to_string())
                 },
             )
             .await?;
-        delivered.map_err(|error| crate::process::handler_error_from_plugin(error.into()))
+        Ok(delivered)
     }
 }

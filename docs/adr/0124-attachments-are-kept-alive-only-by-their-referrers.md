@@ -130,6 +130,10 @@ terminal output needs the row anyway.
   `process-attach-acquire` in `LashProcessAttach`, in-process the
   `AttachTerminal` task. The waiter's journal records the value when the key
   resolves; `release_consumer_hold` runs after.
+  The detached resolver journals acquisition refusals as typed results. An
+  ended receiver abandons delivery and completes without resolving or
+  recreating its wait. Compatibility and other permanent refusals resolve an
+  error for a live receiver; only transient store faults retry the acquisition.
 - **Direct awaits and process-to-process delivery.** A direct
   `ProcessCommand::Await` is re-expressed as `AttachTerminal` plus a durable
   wait on a derived key, so every terminal reaches its receiver through the

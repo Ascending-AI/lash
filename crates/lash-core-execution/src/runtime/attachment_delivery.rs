@@ -11,6 +11,7 @@
 use crate::AttachmentReferrers;
 use crate::{AttachmentId, ExecutionScope, PluginError, ProcessAwaitOutput};
 use lash_core_store::artifact_referrer::{ArtifactCleanupPlan, ArtifactReferrer, ReferrerClaim};
+use serde::{Deserialize, Serialize};
 
 /// Stored attachment ids of a process terminal output, sorted and
 /// deduplicated. Only a settled output carries a value; an abandoned or
@@ -54,7 +55,8 @@ pub fn receiving_claim(scope: &ExecutionScope) -> Result<ReferrerClaim, PluginEr
 }
 
 /// What acquiring a delivered value's attachments found.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum DeliveryAcquisition {
     /// The receiver holds every stored attachment the value names.
     Held,
@@ -62,12 +64,17 @@ pub enum DeliveryAcquisition {
     SourceGone { digest: AttachmentId },
     /// The receiver is fenced and acquires no attachment edge.
     ReceiverEnded { referrer: ArtifactReferrer },
+    /// A permanent refusal whose typed cause is recorded with the delivery.
+    Refused {
+        refusal: crate::RuntimeEffectControllerError,
+    },
 }
 
 /// Acquire `receiving_claim(receiver)` on every stored attachment `output`
 /// delivers. An attachment the store holds no evidence for answers
 /// `SourceGone`; a fenced receiver answers `ReceiverEnded`. Other store
-/// failures retain their typed controller classification.
+/// refusals are successful, typed acquisition results. Only transient
+/// storage faults leave the acquisition unrecorded for retry.
 pub async fn acquire_delivered_attachments(
     attachments: &dyn AttachmentReferrers,
     receiver: &ExecutionScope,
@@ -77,12 +84,20 @@ pub async fn acquire_delivered_attachments(
     if ids.is_empty() {
         return Ok(DeliveryAcquisition::Held);
     }
-    let claim = receiving_claim(receiver)?;
+    let claim = match receiving_claim(receiver) {
+        Ok(claim) => claim,
+        Err(error) => {
+            return Ok(DeliveryAcquisition::Refused {
+                refusal: error.into(),
+            });
+        }
+    };
     acquire_under(attachments, &claim, &ids).await
 }
 
 /// Acquire `claim` on `ids`, distinguishing a missing source from an ended
-/// receiver. Other store failures retain their classification and cause.
+/// receiver. Permanent refusals retain their classification and cause as
+/// results; transient storage faults remain errors.
 pub async fn acquire_under(
     attachments: &dyn AttachmentReferrers,
     claim: &ReferrerClaim,
@@ -100,13 +115,18 @@ pub async fn acquire_under(
             Ok(DeliveryAcquisition::ReceiverEnded { referrer })
         }
         Err(error) => {
+            let transient = error.is_transient();
             let mut error = crate::RuntimeEffectControllerError::from(error);
             error.message = format!(
                 "failed to acquire the delivered attachments under `{}`: {}",
                 claim.referrer().canonical_id(),
                 error.message
             );
-            Err(PluginError::RuntimeEffectController(error))
+            if transient {
+                Err(PluginError::RuntimeEffectController(error))
+            } else {
+                Ok(DeliveryAcquisition::Refused { refusal: error })
+            }
         }
     }
 }
@@ -153,6 +173,9 @@ pub async fn deliver_output(
         DeliveryAcquisition::Held => Ok(output),
         DeliveryAcquisition::SourceGone { digest } => Ok(source_gone_output(&digest)),
         DeliveryAcquisition::ReceiverEnded { referrer } => Ok(receiver_ended_output(&referrer)),
+        DeliveryAcquisition::Refused { refusal } => {
+            Err(PluginError::RuntimeEffectController(refusal))
+        }
     }
 }
 
@@ -176,6 +199,9 @@ pub async fn publish_process_terminal(
         DeliveryAcquisition::Held => Ok(output),
         DeliveryAcquisition::SourceGone { digest } => Ok(source_gone_output(&digest)),
         DeliveryAcquisition::ReceiverEnded { referrer } => Err(receiver_ended_error(referrer)),
+        DeliveryAcquisition::Refused { refusal } => {
+            Err(PluginError::RuntimeEffectController(refusal))
+        }
     }
 }
 
@@ -194,6 +220,9 @@ pub async fn acquire_completion_output(
             Err(PluginError::ProcessOutputAttachmentUnavailable { digest })
         }
         DeliveryAcquisition::ReceiverEnded { referrer } => Err(receiver_ended_error(referrer)),
+        DeliveryAcquisition::Refused { refusal } => {
+            Err(PluginError::RuntimeEffectController(refusal))
+        }
     }
 }
 
@@ -212,6 +241,9 @@ pub async fn acquire_start_input(
             record.id
         ))),
         DeliveryAcquisition::ReceiverEnded { referrer } => Err(receiver_ended_error(referrer)),
+        DeliveryAcquisition::Refused { refusal } => {
+            Err(PluginError::RuntimeEffectController(refusal))
+        }
     }
 }
 

@@ -348,27 +348,22 @@ impl Harness {
                         .count(),
                     1
                 );
-                if let Some(expected) = expected {
+                if name == "process-attach-acquire" {
+                    use lash_core::runtime::attachment_delivery::DeliveryAcquisition;
                     let results = journal
                         .iter()
                         .filter_map(|entry| entry.run_completion())
                         .filter_map(Result::ok)
                         .filter_map(|value| {
-                            serde_json::from_slice::<
-                                Result<
-                                    lash_core::ProcessAwaitOutput,
-                                    lash_core::RuntimeEffectControllerError,
-                                >,
-                            >(&value)
-                            .ok()
+                            serde_json::from_slice::<DeliveryAcquisition>(&value).ok()
                         })
-                        .filter_map(Result::ok)
                         .collect::<Vec<_>>();
-                    assert_eq!(
-                        results,
-                        std::slice::from_ref(expected),
-                        "one completed acquisition verdict"
-                    );
+                    assert_eq!(results.len(), 1, "one completed acquisition verdict");
+                    match results.as_slice() {
+                        [DeliveryAcquisition::Held] => assert!(expected.is_some()),
+                        [DeliveryAcquisition::ReceiverEnded { .. }] => assert!(expected.is_none()),
+                        verdict => panic!("unexpected delivery acquisition: {verdict:?}"),
+                    }
                 } else {
                     let results = journal
                         .iter()
@@ -825,7 +820,7 @@ async fn delivery_law(storage: Storage, live: bool) {
             if case == 2 { 2 } else { 1 },
             "only StorageFailure retries"
         );
-        let delivered = if case == 2 {
+        if case == 2 {
             let resolution = harness
                 .backend()
                 .effect_host()
@@ -836,18 +831,13 @@ async fn delivery_law(storage: Storage, live: bool) {
                 resolution,
                 lash_core::Resolution::Ok(serde_json::to_value(&terminal).unwrap())
             );
-            terminal
-        } else {
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(
-                lash_core::ToolFailure::runtime(
-                    lash_core::ToolFailureClass::Internal,
-                    "process_result_receiver_ended",
-                    claim.referrer().canonical_id(),
-                ),
-            ))
-        };
+        }
         harness
-            .assert_run(attach.as_str(), "process-attach-acquire", Some(&delivered))
+            .assert_run(
+                attach.as_str(),
+                "process-attach-acquire",
+                (case == 2).then_some(&terminal),
+            )
             .await;
         drop(core);
         harness.finish().await;
@@ -869,8 +859,12 @@ async fn contrast_law(storage: Storage) {
         std::slice::from_ref(&attachment.id),
     )
     .await
-    .map_err(lash_core::RuntimeEffectControllerError::from)
-    .unwrap_err();
+    .unwrap();
+    let lash_core::runtime::attachment_delivery::DeliveryAcquisition::Refused { refusal: error } =
+        error
+    else {
+        panic!("compatibility refusal is a typed acquisition result: {error:?}");
+    };
     assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreIncompatible);
     assert!(error.is_terminal());
     assert!(!error.clone().into_runtime_error().is_retryable());

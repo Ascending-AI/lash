@@ -152,3 +152,11 @@ timeout_seconds = 180
 [suites.process-await.live.server_env]
 # The laws prune after the await and resume a suspended handler's journal.
 RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT = "100ms"
+
+[suites.attachment-attach]
+label = "//crates/lash-restate:lash-restate__unit_test"
+cwd = "crates/lash-restate"
+filters = ["tests::attachment_attach_redrive::live_restate_"]
+endpoints = ["AA"]
+shards = 1
+timeout_seconds = 120

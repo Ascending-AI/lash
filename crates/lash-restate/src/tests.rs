@@ -1529,6 +1529,7 @@ impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
     }
 }
 
+mod attachment_attach_redrive;
 mod batch_oracle;
 mod cancellation_and_effects;
 mod cancelled_turn_withheld_input_on_the_double;
