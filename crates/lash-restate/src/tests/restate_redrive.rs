@@ -1496,14 +1496,15 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
 
 #[tokio::test]
 pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_prefix() {
-    let store = memory_trigger_store().await;
+    // One store set: a delivery's start registers against its row (FIG-4369).
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("store set");
+    let store = stores.trigger_store();
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("process-exec-env store set")
-            .process_env_store();
+        stores.process_env_store();
     let process_env_ref =
         lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let registration = store
@@ -1533,7 +1534,7 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
         registration,
         lash_core::TriggerCommandOutcome::Mutation { .. }
     ));
-    let registry = process_registry();
+    let registry: Arc<dyn lash_core::ProcessRegistry> = stores.process_registry();
     let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
         registry_process_wiring(Arc::clone(&registry)),
@@ -1683,10 +1684,11 @@ pub(super) async fn register_fig811_subscription(
 
 #[tokio::test]
 pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order() {
-    let store = lash_sqlite_store::SqliteStoreSet::memory()
+    // One store set: a delivery's start registers against its row (FIG-4369).
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
-        .expect("open SQLite trigger store")
-        .trigger_store();
+        .expect("store set");
+    let store = stores.trigger_store();
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
     let _alpha_id = register_fig811_subscription(
@@ -1720,12 +1722,9 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
         "the FIG-811 fixture must contain exactly its alpha and beta subscriptions"
     );
 
-    let registry = process_registry();
+    let registry: Arc<dyn lash_core::ProcessRegistry> = stores.process_registry();
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("process-exec-env store set")
-            .process_env_store();
+        stores.process_env_store();
     // The fixture environment every subscription draft here records.
     lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let router = lash_core::facade_support::TriggerRouter::new(
@@ -1863,7 +1862,11 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
 #[tokio::test]
 pub(super) async fn fig811_independent_client_retry_reports_the_started_delivery_without_a_second_process()
  {
-    let store = memory_trigger_store().await;
+    // One store set: a delivery's start registers against its row (FIG-4369).
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("store set");
+    let store = stores.trigger_store();
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
     register_fig811_subscription(
@@ -1873,12 +1876,9 @@ pub(super) async fn fig811_independent_client_retry_reports_the_started_delivery
         &source_key,
     )
     .await;
-    let registry = process_registry();
+    let registry: Arc<dyn lash_core::ProcessRegistry> = stores.process_registry();
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("process-exec-env store set")
-            .process_env_store();
+        stores.process_env_store();
     // The fixture environment every subscription draft here records.
     lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let router = lash_core::facade_support::TriggerRouter::new(

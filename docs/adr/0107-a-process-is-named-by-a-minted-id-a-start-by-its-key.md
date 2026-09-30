@@ -114,6 +114,15 @@ therefore converges on the process retained under that key. Binding also
 settles the delivery obligation, as specified in
 [ADR 0109](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md) §3.
 
+A bound delivery never mints again, although §2 lets a key register afresh
+once its process is pruned. A delivery's key finds nothing after the bound
+process is pruned, while the binding outlives it. When the key finds nothing,
+the registrar reads the delivery's binding in the same transaction. A bound
+delivery registers nothing and refuses as `TriggerDeliveryBound`, and its
+emitter answers the bound process (FIG-4369). The binding is written once, and
+a bind precedes the prune of its process, so the check sees every bind whose
+process the key no longer finds.
+
 Evidence: `crates/lash-core-execution/src/triggers/router.rs:666`.
 
 ### 6. Durable identity shapes

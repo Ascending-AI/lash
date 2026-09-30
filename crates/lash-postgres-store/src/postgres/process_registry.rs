@@ -262,6 +262,34 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                 existing,
             ));
         }
+        // A delivery's key finds its process only while that process is
+        // retained. A delivery already bound, or gone, had its process
+        // pruned, and starts nothing: its row is read in this transaction,
+        // after the key found nothing, so a bind and prune that committed
+        // since this start's ingest are seen here (ADR 0107 §5, FIG-4369).
+        if let Some(pin) = trigger_delivery_pin.as_ref() {
+            let row: Option<Option<String>> = sqlx::query_scalar(
+                crate::trigger_store::trigger_sql()
+                    .delivery
+                    .select_bound_process_id
+                    .sql(),
+            )
+            .bind(pin.occurrence_id.as_str())
+            .bind(pin.subscription_id.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+            let binding = match row {
+                None => lash_core_execution::runtime::TriggerDeliveryBinding::Absent,
+                Some(None) => lash_core_execution::runtime::TriggerDeliveryBinding::Unbound,
+                Some(Some(process_id)) => {
+                    lash_core_execution::runtime::TriggerDeliveryBinding::Bound(
+                        crate::stored_process_id(&process_id)?,
+                    )
+                }
+            };
+            lash_core_execution::runtime::check_trigger_delivery_start(pin, binding)?;
+        }
         let unprepared = registration.clone();
         let registration =
             lash_core_execution::runtime::prepare_process_registration(registration)?;

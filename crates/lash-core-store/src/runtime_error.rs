@@ -269,6 +269,14 @@ pub enum RuntimeErrorCode {
     /// A host rail was handed a start key of a family lash derives for its
     /// own start paths (ADR 0107): a host mints only host keys.
     StartKeyFamilyRefused,
+    /// A trigger delivery's start found no retained process under its key,
+    /// and the delivery already bound to one (ADR 0107 §5, FIG-4369): the
+    /// bound process was pruned, and the start registers nothing.
+    TriggerDeliveryBound,
+    /// A trigger delivery's start found no retained process under its key,
+    /// and no delivery row (FIG-4369): retention removed the delivery once
+    /// its bound process was pruned, and the start registers nothing.
+    TriggerDeliveryRetired,
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose terminal target has been replaced by a retention tombstone.
     ProcessNoLongerRetained,
@@ -668,6 +676,8 @@ impl RuntimeErrorCode {
             Self::DurableIdentityConflict => "durable_identity_conflict",
             Self::ProcessStartKeyConflict => "process_start_key_conflict",
             Self::StartKeyFamilyRefused => "start_key_family_refused",
+            Self::TriggerDeliveryBound => "trigger_delivery_bound",
+            Self::TriggerDeliveryRetired => "trigger_delivery_retired",
             Self::ProcessNoLongerRetained => "process_no_longer_retained",
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
             Self::ProcessSignalWaitCancelled => "process_signal_wait_cancelled",
@@ -918,6 +928,8 @@ impl RuntimeErrorCode {
         Self::DurableIdentityConflict,
         Self::ProcessStartKeyConflict,
         Self::StartKeyFamilyRefused,
+        Self::TriggerDeliveryBound,
+        Self::TriggerDeliveryRetired,
         Self::ProcessNoLongerRetained,
         Self::ProcessRegistryUnavailable,
         Self::ProcessSignalWaitCancelled,
@@ -1112,6 +1124,8 @@ impl RuntimeErrorCode {
             "durable_identity_conflict" => Self::DurableIdentityConflict,
             "process_start_key_conflict" => Self::ProcessStartKeyConflict,
             "start_key_family_refused" => Self::StartKeyFamilyRefused,
+            "trigger_delivery_bound" => Self::TriggerDeliveryBound,
+            "trigger_delivery_retired" => Self::TriggerDeliveryRetired,
             "process_no_longer_retained" => Self::ProcessNoLongerRetained,
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
             "process_signal_wait_cancelled" => Self::ProcessSignalWaitCancelled,
@@ -1720,7 +1734,8 @@ impl RuntimeEffectControllerError {
     /// value whose output retention faulted (FIG-1643) — and a
     /// drive's admission and seal, a root's resolution (its spec read and its
     /// definition lookup, FIG-3838), a root's scope close and a session's close,
-    /// whose store faults are the attempt's (FIG-3600), and a process command
+    /// whose store faults are the attempt's (FIG-3600), a trigger delivery's
+    /// admission, whose binding read is the attempt's (FIG-4369), and a process command
     /// that marked its registry fault retryable (a session deletion's process
     /// cleanup, after its close) can consume derivation retry authority, as
     /// can any step whose cancellation watch was lost
@@ -1742,6 +1757,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::CloseRootScope
                 | RuntimeEffectKind::BeginSessionClose
+                | RuntimeEffectKind::AdmitTriggerDelivery
                 | RuntimeEffectKind::Process
         ) || self.code == RuntimeErrorCode::TransientCancelWatch
         {

@@ -65,6 +65,29 @@ pub enum PluginError {
     /// refusal names the key and nothing of the process it is bound to.
     #[error("process start key `{start_key}` is bound to another start")]
     StartKeyConflict { start_key: crate::StartKey },
+    /// A trigger delivery's start found no retained process under its key,
+    /// and the delivery already bound to `process_id` (ADR 0107 §5,
+    /// FIG-4369). The bound process was pruned, so its key finds nothing; the
+    /// registrar read the binding in the transaction that checked the key and
+    /// registered nothing.
+    #[error(
+        "trigger delivery `{occurrence_id}`/`{subscription_id}` is already bound to process `{process_id}`"
+    )]
+    TriggerDeliveryBound {
+        occurrence_id: String,
+        subscription_id: String,
+        process_id: ProcessId,
+    },
+    /// A trigger delivery's start found no retained process under its key,
+    /// and no delivery row: retention removed the delivery once its bound
+    /// process was pruned (FIG-4369). The registrar registered nothing.
+    #[error(
+        "trigger delivery `{occurrence_id}`/`{subscription_id}` is no longer reserved: its process was pruned and the delivery retired"
+    )]
+    TriggerDeliveryRetired {
+        occurrence_id: String,
+        subscription_id: String,
+    },
     /// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]
     InvalidToolDiscovery { operation: String },
@@ -372,6 +395,8 @@ impl PluginError {
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
             | Self::State(_)
+            | Self::TriggerDeliveryBound { .. }
+            | Self::TriggerDeliveryRetired { .. }
             | Self::InvalidToolDiscovery { .. }
             | Self::InvalidBatchMaximum { .. }
             | Self::ResidentToolContractUnavailable { .. }
@@ -465,6 +490,8 @@ impl PluginError {
             | Self::InvalidTriggerTarget { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
+            | Self::TriggerDeliveryBound { .. }
+            | Self::TriggerDeliveryRetired { .. }
             | Self::SessionAlreadyExists { .. }
             | Self::ProcessCancelConflict { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }

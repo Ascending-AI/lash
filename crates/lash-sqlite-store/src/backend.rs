@@ -271,17 +271,15 @@ impl SqliteStoreSet {
         // Each database carries its own copy of `F`, which its writer fence
         // reads (ADR 0115 §1.2); `check_set` above refused a set whose copies
         // disagree.
-        let process_registry = Arc::new(
-            SqliteProcessRegistry::open_at(
-                &registry,
-                Arc::clone(&clock),
-                #[cfg(feature = "testing")]
-                None,
-            )
-            .await?
-            .with_wake_delivery_config(options.wake_delivery)
-            .with_process_id_mint_for_testing(options.process_id_mint.clone()),
-        );
+        let process_registry = SqliteProcessRegistry::open_at(
+            &registry,
+            Arc::clone(&clock),
+            #[cfg(feature = "testing")]
+            None,
+        )
+        .await?
+        .with_wake_delivery_config(options.wake_delivery)
+        .with_process_id_mint_for_testing(options.process_id_mint.clone());
         crate::lifecycle::attach_process_registry(
             &process_env_store.conn,
             registry.target(),
@@ -292,6 +290,13 @@ impl SqliteStoreSet {
         let process_env_store = Arc::new(process_env_store);
         let trigger_store =
             Arc::new(SqliteTriggerStore::open_at(&triggers, Arc::clone(&clock)).await?);
+        // The registry reads a delivery's binding when it registers the
+        // delivery's start (FIG-4369).
+        let process_registry = Arc::new(
+            process_registry
+                .with_attached_trigger_store(&triggers)
+                .await?,
+        );
         let attachment_store = Arc::new(SqliteAttachmentStore::for_store(&process_env_store));
         let recovery_leader = Arc::new(crate::recovery_leader::SqliteRecoveryLeader::new(
             process_env_store.conn.clone(),

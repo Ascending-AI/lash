@@ -24,6 +24,9 @@ pub(crate) enum Schema {
     Main,
     /// A bound process registry, attached to a storage connection.
     ProcessRegistry,
+    /// The store set's trigger store, attached to its process registry's
+    /// connection.
+    TriggerStore,
 }
 
 impl Schema {
@@ -32,13 +35,14 @@ impl Schema {
         match self {
             Self::Main => "main",
             Self::ProcessRegistry => "process_registry",
+            Self::TriggerStore => "trigger_store",
         }
     }
 
     /// The deployment layout in which this database holds every table
     /// `lash-store-sql` owns.
     ///
-    /// Total rather than partial on purpose: the three databases this enum
+    /// Total rather than partial on purpose: the databases this enum
     /// names are each provisioned with the tables the statements rendered for
     /// them address, and a single-file deployment reaches all of them through
     /// `main`. A family whose statements span two databases declares its own
@@ -47,6 +51,7 @@ impl Schema {
         match self {
             Self::Main => MAIN_LAYOUT,
             Self::ProcessRegistry => PROCESS_REGISTRY_LAYOUT,
+            Self::TriggerStore => TRIGGER_STORE_LAYOUT,
         }
     }
 
@@ -66,5 +71,12 @@ const MAIN_LAYOUT: TableLayout = TableLayout::new(&[SchemaTables::new(
 /// A bound process registry, attached to this connection.
 const PROCESS_REGISTRY_LAYOUT: TableLayout = TableLayout::new(&[SchemaTables::new(
     Schema::ProcessRegistry.qualifier(),
+    lash_store_sql::TABLES,
+)]);
+
+/// A store set's trigger store, attached to its process registry's
+/// connection.
+const TRIGGER_STORE_LAYOUT: TableLayout = TableLayout::new(&[SchemaTables::new(
+    Schema::TriggerStore.qualifier(),
     lash_store_sql::TABLES,
 )]);

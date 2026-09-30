@@ -1088,6 +1088,51 @@ pub fn check_retained_start(
     }
 }
 
+/// What a registrar read of a trigger delivery's row answered, in the
+/// transaction that found no retained process under the delivery's start key
+/// (FIG-4369).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TriggerDeliveryBinding {
+    /// The delivery is reserved and awaits its process.
+    Unbound,
+    /// The delivery is bound to this process.
+    Bound(ProcessId),
+    /// No delivery row remains: retention removed the delivery after its
+    /// bound process was pruned.
+    Absent,
+}
+
+/// Admit a trigger delivery's start whose key found no retained process
+/// against its delivery's row, read in the same transaction (ADR 0107 §5,
+/// FIG-4369).
+///
+/// A delivery starts one process. Its key finds that process only while the
+/// process is retained, and a bind precedes the prune of its process, so a
+/// key that finds nothing while the delivery is bound or gone means the
+/// delivery's process was pruned. That start registers nothing.
+///
+/// # Errors
+///
+/// [`PluginError::TriggerDeliveryBound`] for a bound delivery, and
+/// [`PluginError::TriggerDeliveryRetired`] for one whose row is gone.
+pub fn check_trigger_delivery_start(
+    pin: &crate::TriggerDeliveryPin,
+    binding: TriggerDeliveryBinding,
+) -> Result<(), PluginError> {
+    match binding {
+        TriggerDeliveryBinding::Unbound => Ok(()),
+        TriggerDeliveryBinding::Bound(process_id) => Err(PluginError::TriggerDeliveryBound {
+            occurrence_id: pin.occurrence_id.clone(),
+            subscription_id: pin.subscription_id.clone(),
+            process_id,
+        }),
+        TriggerDeliveryBinding::Absent => Err(PluginError::TriggerDeliveryRetired {
+            occurrence_id: pin.occurrence_id.clone(),
+            subscription_id: pin.subscription_id.clone(),
+        }),
+    }
+}
+
 pub fn require_event_replay(
     process_id: &ProcessId,
     request: &ProcessEventAppendRequest,

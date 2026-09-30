@@ -228,6 +228,10 @@ impl RuntimeErrorCode {
             Self::ProcessStartKeyConflict => Terminal,
             // the key's family is fixed by how it was derived.
             Self::StartKeyFamilyRefused => Terminal,
+            // a delivery's binding is written once.
+            Self::TriggerDeliveryBound => Terminal,
+            // the delivery's row is gone, and only a new reservation starts.
+            Self::TriggerDeliveryRetired => Terminal,
             // the target was replaced by a retention tombstone.
             Self::ProcessNoLongerRetained => Terminal,
             // a newer incarnation durably superseded this one.

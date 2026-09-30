@@ -378,7 +378,6 @@ macro_rules! process_registry_tests {
                 (consumer_hold_prevents_destructive_prune_until_settlement, "consumer-hold-retention"),
                 (later_segment_recovery_refuses_without_terminal_mutation, "later-segment-recovery"),
                 (every_execution_write_refuses_a_superseded_invocation_without_mutation, "invocation-write-matrix"),
-                (a_trigger_delivery_pin_holds_its_row_until_released, "trigger-delivery-pin"),
                 (scopes_that_collide_in_rendering_share_no_ledger_key, "colliding-scope-keys"),
                 (an_unrecorded_turn_parent_is_reported_until_its_row_is_written, "unrecorded-turn-parents"),
                 (a_session_close_reaps_the_turn_scopes_that_never_became_roots, "never-root-turn-scopes"),
@@ -962,6 +961,8 @@ macro_rules! process_trigger_retention_tests {
             (trigger_capture_route_and_compaction_refusal_matrix, "trigger-capture-compaction-matrix"),
             (trigger_delivery_recovery, "trigger-delivery-recovery"),
             (trigger_delivery_pinned_recovery, "trigger-delivery-pinned-recovery"),
+            (trigger_delivery_pin, "trigger-delivery-pin"),
+            (trigger_delivery_start_admission, "trigger-delivery-start-admission"),
             (trigger_delivery_refusal, "trigger-delivery-refusal"),
         ]);
     };

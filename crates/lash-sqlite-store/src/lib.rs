@@ -256,6 +256,9 @@ pub struct SqliteProcessRegistry {
     location: DatabaseLocation,
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_execution::ProcessIdMint,
+    /// Whether registration reads the store set's trigger deliveries, which
+    /// a delivery's start is checked against (FIG-4369).
+    trigger_delivery_bindings: process_registry::TriggerDeliveryBindings,
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {

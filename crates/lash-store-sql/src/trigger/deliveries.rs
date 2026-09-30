@@ -64,6 +64,15 @@ crate::statements! {
              WHERE occurrence_id = ?1 AND subscription_id = ?2
                AND (process_id IS NULL OR process_id = ?3)";
 
+        /// The process delivery `?1`/`?2` is bound to: `NULL` while its
+        /// reservation is unbound, no row once the delivery is gone. A process
+        /// registrar reads it in the transaction that checks the delivery's
+        /// start key, so a delivery whose bound process was pruned starts
+        /// nothing (FIG-4369).
+        select_bound_process_id = "SELECT process_id
+             FROM trigger_deliveries
+             WHERE occurrence_id = ?1 AND subscription_id = ?2";
+
         /// The reservations occurrence `?1` already holds, for an ingress that
         /// found the occurrence durable and is reporting it again.
         select_snapshots_by_occurrence = "SELECT process_id, created_at_ms, subscription_snapshot_json

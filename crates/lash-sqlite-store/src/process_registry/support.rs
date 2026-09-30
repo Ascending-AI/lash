@@ -378,7 +378,30 @@ impl SqliteProcessRegistry {
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             location: location.clone(),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            trigger_delivery_bindings: super::TriggerDeliveryBindings::Detached,
         })
+    }
+
+    /// Attach the store set's trigger store at `triggers` to this registry's
+    /// connection, so a delivery's start is registered against the
+    /// delivery's binding (FIG-4369).
+    pub(crate) async fn with_attached_trigger_store(
+        mut self,
+        triggers: &DatabaseLocation,
+    ) -> tokio_rusqlite::Result<Self> {
+        let name = triggers.target().open_name();
+        self.conn
+            .call(move |conn| {
+                crate::conn::cached_execute(
+                    conn,
+                    crate::connection_sql::ATTACH_TRIGGER_STORE,
+                    params![name],
+                )
+                .map(|_| ())
+            })
+            .await?;
+        self.trigger_delivery_bindings = super::TriggerDeliveryBindings::Attached;
+        Ok(self)
     }
 
     /// Mint registered process ids from `mint` instead of at random: a fixture
