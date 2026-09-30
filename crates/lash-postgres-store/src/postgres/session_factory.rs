@@ -1295,13 +1295,7 @@ pub(crate) async fn delete_session_tx(
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
-        tx,
-        candidates,
-        &checkpoint_refs,
-        report,
-    )
-    .await
+    crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(tx, candidates, report).await
 }
 
 /// Deletes process-owned runtime sessions as one batch inside the process
@@ -1414,7 +1408,6 @@ pub(crate) async fn delete_process_sessions_tx(
         crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
             tx,
             candidates,
-            &checkpoint_refs,
             &mut report,
         )
         .await?;

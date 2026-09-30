@@ -56,9 +56,8 @@ lash_store_sql::statements! {
         /// Reclaim the session-delete candidate `?1` if nothing still roots it.
         ///
         /// Forks from PostgreSQL's counterpart on the artifact clause: only
-        /// SQLite keeps an `artifact_refs` pointer table, so only SQLite has a
-        /// fourth kind of root to rule out. The head table also forks by name,
-        /// `session_head` here and `lash_sessions` there.
+        /// SQLite keeps an `artifact_refs` pointer table. The head table also
+        /// forks by name, `session_head` here and `lash_sessions` there.
         reclaim_session_candidate = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
                AND NOT EXISTS (
@@ -70,22 +69,16 @@ lash_store_sql::statements! {
                    WHERE anchor.checkpoint_ref = candidate.hash
                )
                AND NOT EXISTS (
+                   SELECT 1 FROM session_meta AS meta
+                   WHERE meta.admission_base_checkpoint_ref = candidate.hash
+               )
+               AND NOT EXISTS (
                    SELECT 1 FROM artifact_refs AS artifact
                    WHERE artifact.blob_ref = candidate.hash
                )
                AND NOT EXISTS (
                    SELECT 1 FROM checkpoint_blob_refs AS edge
                    WHERE edge.blob_ref = candidate.hash
-                     AND (
-                         EXISTS (
-                             SELECT 1 FROM session_head AS head
-                             WHERE head.checkpoint_ref = edge.checkpoint_ref
-                         )
-                         OR EXISTS (
-                             SELECT 1 FROM node_anchors AS anchor
-                             WHERE anchor.checkpoint_ref = edge.checkpoint_ref
-                         )
-                     )
                )";
 
         /// One preflight page of sessions that have published a checkpoint

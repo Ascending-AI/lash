@@ -73,18 +73,12 @@ lash_store_sql::statements! {
                    WHERE anchor.checkpoint_ref = candidate.hash
                )
                AND NOT EXISTS (
+                   SELECT 1 FROM session_meta AS meta
+                   WHERE meta.admission_base_checkpoint_ref = candidate.hash
+               )
+               AND NOT EXISTS (
                    SELECT 1 FROM checkpoint_blob_refs AS edge
                    WHERE edge.blob_ref = candidate.hash
-                     AND (
-                         EXISTS (
-                             SELECT 1 FROM sessions AS head
-                             WHERE head.checkpoint_ref = edge.checkpoint_ref
-                         )
-                         OR EXISTS (
-                             SELECT 1 FROM node_anchors AS anchor
-                             WHERE anchor.checkpoint_ref = edge.checkpoint_ref
-                         )
-                     )
                )";
 
         /// The stored bytes for every content address in `?1`, in one round

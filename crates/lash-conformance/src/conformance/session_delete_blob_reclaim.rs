@@ -238,6 +238,231 @@ async fn assert_components_exist(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn advance_checkpoint(
+    store: &Arc<dyn crate::RuntimeStore>,
+    session_id: &SessionId,
+    retain_owned_component: bool,
+) -> crate::store::RuntimeCommitReceipt {
+    let mut state = super::helpers::load_window_state(store, session_id)
+        .await
+        .expect("hydrate the current head")
+        .expect("the session has a committed head");
+    let mut snapshot = state.to_snapshot();
+    snapshot.turn_index += 1;
+    state.adopt_snapshot(snapshot);
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    if !retain_owned_component {
+        commit
+            .checkpoint
+            .components
+            .remove("conformance/session-delete-owned");
+    }
+    lash_core::testing::store_fixtures::commit_runtime_state_for_test(
+        store,
+        commit,
+        "session-delete-advance",
+    )
+    .await
+    .expect("advance the session head")
+}
+
+/// Superseded checkpoints must not leave edges to reclaimed shared components.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn session_delete_reclaims_after_head_advances<F>(backend: &str, make: F)
+where
+    F: Fn() -> SessionDeleteBlobHandles,
+{
+    let handles = make();
+    let first =
+        committed_checkpoint(&handles.factory, &SessionId::from("delete-advanced-head")).await;
+    let second = advance_checkpoint(&first.store, &first.request.session_id, true).await;
+    let third = advance_checkpoint(&first.store, &first.request.session_id, true).await;
+    assert_ne!(first.checkpoint_ref, second.checkpoint_ref);
+    assert_ne!(second.checkpoint_ref, third.checkpoint_ref);
+    let shared = first.manifest.components["conformance/session-delete-owned"]
+        .blob_ref
+        .clone();
+    assert_eq!(
+        third
+            .manifest
+            .component_ref("conformance/session-delete-owned"),
+        Some(&shared),
+        "{backend}: the advanced head shares a component with both dead roots"
+    );
+    for root in [&first.checkpoint_ref, &second.checkpoint_ref] {
+        if let Some(exists) = handles
+            .probe
+            .checkpoint_component_edge_exists(root, &shared)
+            .await
+        {
+            assert!(
+                exists,
+                "{backend}: the fixture must contain a dead-root edge"
+            );
+        }
+    }
+    let report = handles
+        .factory
+        .delete_session(&first.request.session_id)
+        .await
+        .expect("delete a session whose head advanced twice");
+    assert!(report.deleted_blob_count > 0);
+    assert!(
+        handles
+            .factory
+            .is_deleted(&first.request.session_id)
+            .await
+            .expect("read deletion"),
+        "{backend}: deletion must reach Deleted"
+    );
+    assert_components_exist(
+        backend,
+        handles.probe.as_ref(),
+        &first.component_refs,
+        false,
+    )
+    .await;
+    for root in [&first.checkpoint_ref, &second.checkpoint_ref] {
+        if let Some(exists) = handles
+            .probe
+            .checkpoint_component_edge_exists(root, &shared)
+            .await
+        {
+            assert!(
+                !exists,
+                "{backend}: reclaim must sever the dead-root edge in its transaction"
+            );
+        }
+    }
+}
+
+/// A surviving admission protects its checkpoint and components during another session's delete.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn session_delete_preserves_admission_base_blobs<F>(backend: &str, make: F)
+where
+    F: Fn() -> SessionDeleteBlobHandles,
+{
+    use lash_core::testing::RuntimeStoreTestDriveExt as _;
+    for advance_source in [false, true] {
+        let handles = make();
+        let source = committed_checkpoint(
+            &handles.factory,
+            &SessionId::from("delete-admission-source"),
+        )
+        .await;
+        let fork_id = SessionId::from("delete-admission-survivor");
+        handles
+            .factory
+            .fork_session(&crate::ForkSessionRequest {
+                pending_observer_intents: Vec::new(),
+                session_id: fork_id.clone(),
+                node_id: source.leaf_node_id.clone().into(),
+                relation: crate::SessionRelation::Root,
+                policy: source.request.config.session_policy(),
+            })
+            .await
+            .expect("fork the admission's base");
+        let fork = handles
+            .factory
+            .live_view(&fork_id)
+            .await
+            .expect("open fork")
+            .expect("live fork");
+        let base_window = fork
+            .load_session_window(crate::store::WindowSelector::Current)
+            .await
+            .expect("read base window")
+            .expect("base exists");
+        let base = crate::store::SessionHeadRef {
+            generation: fork
+                .store()
+                .read_session_state_version(&fork_id)
+                .await
+                .expect("read generation"),
+            revision: base_window.head_revision,
+            leaf: base_window.window.leaf_node_id.clone(),
+            checkpoint: base_window.checkpoint_ref,
+        };
+        let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+            fork.store(),
+            &fork_id,
+            "session-delete-admission-base",
+        )
+        .await;
+        fork.store()
+            .retain_admission_base(&lease, &base)
+            .await
+            .expect("retain admission base");
+        fork.store()
+            .supersede_drive_epoch_for_test(&lease)
+            .await
+            .expect("release base lease");
+        advance_checkpoint(fork.store(), &fork_id, false).await;
+        if advance_source {
+            advance_checkpoint(&source.store, &source.request.session_id, true).await;
+        }
+        handles
+            .factory
+            .delete_session(&source.request.session_id)
+            .await
+            .expect("delete the source while the fork retains an admission base");
+        assert!(
+            handles.probe.blob_exists(&source.checkpoint_ref).await,
+            "{backend}: an admission base is a root even without a head or anchor"
+        );
+        let shared = &source.manifest.components["conformance/session-delete-owned"].blob_ref;
+        assert!(
+            handles.probe.blob_exists(shared).await,
+            "{backend}: retain the base's exclusive component"
+        );
+        if let Some(exists) = handles
+            .probe
+            .checkpoint_component_edge_exists(&source.checkpoint_ref, shared)
+            .await
+        {
+            assert!(
+                exists,
+                "{backend}: the admission root's projection must remain"
+            );
+        }
+        let replay = fork
+            .load_session_window(crate::store::WindowSelector::Admitted(base.clone()))
+            .await
+            .expect("hydrate the surviving admission base")
+            .expect("admitted window");
+        assert_eq!(replay.checkpoint_ref, Some(source.checkpoint_ref));
+        assert_eq!(
+            replay
+                .checkpoint
+                .expect("hydrated base")
+                .component_ref("conformance/session-delete-owned"),
+            Some(shared)
+        );
+        handles
+            .factory
+            .delete_session(&fork_id)
+            .await
+            .expect("delete the final admission owner");
+        assert!(
+            handles
+                .factory
+                .is_deleted(&fork_id)
+                .await
+                .expect("read final deletion")
+        );
+    }
+}
+
 /// Prove session deletion reclaims only blobs whose final exact edge it severs.
 ///
 /// Integrator class (ADR 0051): **conformance-suite embedders** run this against

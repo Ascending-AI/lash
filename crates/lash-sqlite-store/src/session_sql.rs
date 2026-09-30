@@ -608,10 +608,13 @@ lash_store_sql::statements! {
                        WHERE meta.admission_base_checkpoint_ref = edge.checkpoint_ref
                    )";
 
-        /// Sever checkpoint `?1`'s outgoing edges when the owner transaction
-        /// removed its final head or anchor.
-        delete_unrooted_for_checkpoint = "DELETE FROM checkpoint_blob_refs AS edge
-                     WHERE edge.checkpoint_ref = ?1
+        /// Sever dead-root edges touching the reclaim candidates in JSON `?1`.
+        ///
+        /// Both outgoing and incoming edges go before any blob delete. The
+        /// rooting predicates match `delete_unrooted`, including admissions.
+        delete_unrooted_for_candidates = "DELETE FROM checkpoint_blob_refs AS edge
+                     WHERE (edge.checkpoint_ref IN (SELECT value FROM json_each(?1))
+                            OR edge.blob_ref IN (SELECT value FROM json_each(?1)))
                        AND NOT EXISTS (
                            SELECT 1 FROM session_head AS head
                            WHERE head.checkpoint_ref = edge.checkpoint_ref
@@ -619,6 +622,10 @@ lash_store_sql::statements! {
                        AND NOT EXISTS (
                            SELECT 1 FROM node_anchors AS anchor
                            WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                       )
+                       AND NOT EXISTS (
+                           SELECT 1 FROM session_meta AS meta
+                           WHERE meta.admission_base_checkpoint_ref = edge.checkpoint_ref
                        )";
     }
 }

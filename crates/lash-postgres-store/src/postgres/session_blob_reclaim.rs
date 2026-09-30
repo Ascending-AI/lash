@@ -52,23 +52,20 @@ pub(crate) async fn lock_session_blob_candidates_tx(
 pub(crate) async fn reclaim_session_checkpoint_blobs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     candidates: std::collections::BTreeSet<String>,
-    checkpoint_refs: &std::collections::BTreeSet<String>,
     report: &mut lash_core_execution::SessionBlobReclaimReport,
 ) -> Result<(), StoreError> {
-    if !checkpoint_refs.is_empty() {
-        let checkpoint_ref_vec = checkpoint_refs.iter().cloned().collect::<Vec<_>>();
-        // Sever every outgoing edge of every root that stopped being a live
-        // root in this owner transaction before any blob delete. A root may
-        // remain as another root's opaque component, so deleting roots one at
-        // a time cannot provide this ordering. Shared live roots keep both
-        // their row and projection edges.
+    if !candidates.is_empty() {
+        let candidate_vec = candidates.iter().cloned().collect::<Vec<_>>();
+        // A superseded root outside this session can still reference a
+        // candidate. Sever its dead edges as well as the candidates' outgoing
+        // edges before deleting any blob; surviving roots retain their edges.
         sqlx::query(
             session_sql()
                 .checkpoint_edges
-                .delete_unrooted_for_checkpoints
+                .delete_unrooted_for_candidates
                 .sql(),
         )
-        .bind(checkpoint_ref_vec)
+        .bind(candidate_vec)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;

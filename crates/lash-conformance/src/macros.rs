@@ -1032,6 +1032,8 @@ macro_rules! session_delete_blob_reclaim_tests {
     ($fixture:block) => {
         $crate::session_delete_blob_reclaim_tests!(@catalogue $fixture; [
             (session_delete_blob_reclaim_conformance, "session-delete-blob-reclaim"),
+            (session_delete_reclaims_after_head_advances, "session-delete-advanced-head"),
+            (session_delete_preserves_admission_base_blobs, "session-delete-admission-base"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

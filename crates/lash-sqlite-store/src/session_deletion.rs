@@ -299,18 +299,18 @@ pub(super) async fn delete_session_from_catalog(
                 [],
             )
             .map_err(sqlite_error)?;
-            if let Some(checkpoint_ref) = checkpoint_ref.as_ref() {
-                // Sever this root's outgoing projection before any blob delete
-                // when the owner transaction removed its final head/anchor.
-                // The root bytes may remain as another root's opaque component;
-                // its projection no longer has a live root owner in that case.
+            if !candidates.is_empty() {
+                // A superseded root outside this session can still reference
+                // a candidate. Apply GC's root rules to every touching edge
+                // before deleting any blob; surviving roots retain their edges.
+                let candidate_json = crate::codec::encode_json(&candidates)?;
                 crate::conn::cached_execute(
                     tx,
                     session_sql()
                         .checkpoint_edges
-                        .delete_unrooted_for_checkpoint
+                        .delete_unrooted_for_candidates
                         .sql(),
-                    params![checkpoint_ref],
+                    params![candidate_json],
                 )
                 .map_err(sqlite_error)?;
             }
