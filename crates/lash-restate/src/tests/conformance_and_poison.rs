@@ -934,6 +934,16 @@ mod on_the_server_double {
         (harness, "restate", fixture)
     });
 
+    // A child's invocation dies before its seat and outlives its retention:
+    // the double's operator kills and purges it, and dispatches its successor.
+    lash_conformance::tool_child_successor_tests!({
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let fixture = harness.tool_child_law_fixture();
+        let expire = harness.child_invocation_expiry();
+        (harness, "restate", fixture, expire)
+    });
+
     lash_conformance::turn_runner_tests!({
         let harness =
             LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;

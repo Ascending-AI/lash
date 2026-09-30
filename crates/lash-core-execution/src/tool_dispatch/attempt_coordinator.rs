@@ -526,24 +526,49 @@ struct TerminalAttemptSettlement<'settlement> {
     triggers: Vec<ToolTriggerEffectOutcome>,
 }
 
-/// The sealed settlement a §4 boundary commit persists as its drain input:
-/// the record the drain projects onto and the declared intents, so a
-/// committed-but-undrained row carries everything its recovery needs.
-#[derive(serde::Serialize)]
-struct GroupChildDrainInput<'settlement> {
-    record: &'settlement ToolCallRecord,
-    intents: &'settlement crate::ToolIntents,
-    recorded_call_id: &'settlement lash_sansio::ToolCallId,
-}
-
-/// The owned decode of [`GroupChildDrainInput`]: what a re-driven attempt
-/// that lost the §4 point drains instead of whatever it re-derived — the
-/// committed settlement is the durable fact, not the replay.
-#[derive(serde::Deserialize)]
-struct SealedGroupChildDrainInput {
+/// A group child's terminal as its §4 commit seals it: everything its drain,
+/// its projection and its settlement need. The point retains it as the
+/// committed final's drain input, so any later invocation of the child — a
+/// redrive that reaches the boundary again, or a successor whose attach
+/// expired — drains exactly what the winner committed, never what it
+/// re-derived, and never re-runs the attempt (W6, W7, W15).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SealedToolFinal {
+    /// The attempt invocation that minted the declared intents, whose
+    /// identities derive from it. `None` for a deferred completion's
+    /// terminal: a parked attempt declares no intents, so it has none to mint.
+    minting_emission: Option<RuntimeInvocation>,
+    /// The identity the committed attempt recorded, which intent admission
+    /// uses.
+    recorded_call_id: lash_sansio::ToolCallId,
     record: ToolCallRecord,
     intents: crate::ToolIntents,
-    recorded_call_id: lash_sansio::ToolCallId,
+    attempts: Vec<lash_trace::TraceRetryAttempt>,
+    captures: Vec<crate::runtime::ToolAttemptCapture>,
+    triggers: Vec<ToolTriggerEffectOutcome>,
+}
+
+impl SealedToolFinal {
+    fn drain_input(&self, replay_key: &str) -> Result<String, crate::RuntimeEffectControllerError> {
+        serde_json::to_string(self).map_err(|error| {
+            crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                format!("sealed drain input for {replay_key} does not encode: {error}"),
+            )
+        })
+    }
+
+    fn from_drain_input(
+        drain_input: &str,
+        replay_key: &str,
+    ) -> Result<Self, crate::RuntimeEffectControllerError> {
+        serde_json::from_str(drain_input).map_err(|error| {
+            crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                format!("committed drain input for {replay_key} does not decode: {error}"),
+            )
+        })
+    }
 }
 
 async fn settle_terminal_attempt(
@@ -555,49 +580,87 @@ async fn settle_terminal_attempt(
         child_trace_hook,
         recorded_call_id,
         group_child,
-        mut record,
-        mut intents,
+        record,
+        intents,
         attempts,
         captures,
         triggers,
     } = settlement;
-    let mut recorded_call_id = recorded_call_id.clone();
-    let controller = context.effect_controller.controller();
-    let drain_admission = commit_group_child_boundary(
-        context,
-        group_child.as_ref(),
-        &mut record,
-        &mut intents,
-        &mut recorded_call_id,
-    )
-    .await?;
-    // The §5 barrier: admitted drains emit their nested semantic commands in
-    // rank order, so a committed sibling ranked below this child that has not
-    // seated holds this drain back until it does. The host waits on its own
-    // wakes for those seats; the dispatch clock plays no part. A child that
-    // won its own commit with no intent to drain emits nothing, so it does
-    // not wait (FIG-4308); a commit this attempt did not win proves nothing
-    // about what the winner declared, so that child waits.
-    if let Some(admission) = &drain_admission
-        && (!admission.won_commit || !intents.is_empty())
+    let sealed = SealedToolFinal {
+        minting_emission: Some(minting_emission.clone().into_runtime_invocation()),
+        recorded_call_id: recorded_call_id.clone(),
+        record: *record,
+        intents,
+        attempts,
+        captures,
+        triggers,
+    };
+    let (sealed, drain_admission) =
+        commit_group_child_boundary(context, group_child.as_ref(), sealed).await?;
+    drain_sealed_final(context, sealed, drain_admission.as_ref(), child_trace_hook).await
+}
+
+/// Drains a committed final and projects its intent outcomes onto its record.
+///
+/// The §5 barrier: admitted drains emit their nested semantic commands in rank
+/// order, so a committed sibling ranked below this child that has not seated
+/// holds this drain back until it does. The host waits on its own wakes for
+/// those seats; the dispatch clock plays no part. The sealed final is the one
+/// the point holds, so what it declared is known whichever invocation
+/// committed it: a final with no intent to drain emits nothing and does not
+/// wait (FIG-4308).
+async fn drain_sealed_final(
+    context: &ToolDispatchContext<'_>,
+    sealed: SealedToolFinal,
+    drain_admission: Option<&GroupChildDrainAdmission>,
+    child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
+) -> Result<ToolDispatchOutcome, crate::RuntimeEffectControllerError> {
+    let SealedToolFinal {
+        minting_emission,
+        recorded_call_id,
+        mut record,
+        intents,
+        attempts,
+        captures,
+        triggers,
+    } = sealed;
+    if let Some(admission) = drain_admission
+        && !intents.is_empty()
     {
-        controller
+        context
+            .effect_controller
+            .controller()
             .await_group_child_drain_admission(&admission.group_key, admission.rank)
             .await?;
     }
-    let mut intent_context = context.clone();
-    intent_context.parent_invocation = Some(minting_emission.clone().into_runtime_invocation());
-    intent_context.observation_call_key = None;
-    let intent_outcomes = super::execute_final_tool_intents(
-        &intent_context,
-        &recorded_call_id,
-        &intents,
-        child_trace_hook,
-    )
-    .await?;
-    project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
+    let intent_outcomes = match minting_emission {
+        Some(minting_emission) => {
+            let mut intent_context = context.clone();
+            intent_context.parent_invocation = Some(minting_emission);
+            intent_context.observation_call_key = None;
+            let intent_outcomes = super::execute_final_tool_intents(
+                &intent_context,
+                &recorded_call_id,
+                &intents,
+                child_trace_hook,
+            )
+            .await?;
+            project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
+            intent_outcomes
+        }
+        None if intents.is_empty() => Vec::new(),
+        None => {
+            return Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                format!(
+                    "the committed final of `{recorded_call_id}` declares intents but names \
+                     no attempt that minted them"
+                ),
+            ));
+        }
+    };
     Ok(ToolDispatchOutcome {
-        record: *record,
+        record,
         attempts,
         intents,
         intent_outcomes,
@@ -613,9 +676,6 @@ pub(crate) struct GroupChildDrainAdmission {
     group_key: String,
     /// The rank the §4 point reserved for the child.
     rank: u64,
-    /// Whether this attempt's commit won the point (`Committed`) rather than
-    /// finding it already held (`AlreadyCommitted`).
-    won_commit: bool,
 }
 
 /// The §4 boundary: a group child's final record commits the moment the child
@@ -624,28 +684,28 @@ pub(crate) struct GroupChildDrainAdmission {
 ///
 /// Every terminal of a group child crosses this one boundary — an attempt that
 /// finished inline (`settle_terminal_attempt`) and a parked attempt whose
-/// deferred completion resolved (the invocation driver's resume). The rank it
-/// reserves is the child's place in the settlement order and the order sibling
-/// drains are admitted in (§5), so a child that deferred its boundary to a
-/// later step would take its place in the settlement order by when that step
-/// ran, not by when it settled.
+/// deferred completion resolved (the invocation driver's resume, through
+/// [`commit_deferred_group_child`]). The rank it reserves is the child's place
+/// in the settlement order and the order sibling drains are admitted in (§5),
+/// so a child that deferred its boundary to a later step would take its place
+/// in the settlement order by when that step ran, not by when it settled.
 ///
 /// Only a group child carries the address of its own replay row into
 /// settlement; every other caller passes `None` and pays no boundary work at
-/// all. `AlreadyCommitted` replaces the re-derived settlement with the sealed
-/// drain input the winner committed — the committed settlement is the durable
-/// fact, not the replay (W6/W7). A `CancelDecided` answer is the group's
-/// arbitration losing this child's final: the typed refusal is the whole
-/// record, and nothing mints beneath it.
-pub(crate) async fn commit_group_child_boundary(
+/// all. The commit carries the sealed final as its drain input, and
+/// `AlreadyCommitted` answers the one the winner sealed, which replaces this
+/// caller's — the committed settlement is the durable fact, not the replay
+/// (W6/W7). A `CancelDecided` answer is the group's arbitration losing this
+/// child's final: the typed refusal is the whole record, and nothing mints
+/// beneath it.
+async fn commit_group_child_boundary(
     context: &ToolDispatchContext<'_>,
     group_child: Option<&GroupChildCoordination>,
-    record: &mut ToolCallRecord,
-    intents: &mut crate::ToolIntents,
-    recorded_call_id: &mut lash_sansio::ToolCallId,
-) -> Result<Option<GroupChildDrainAdmission>, crate::RuntimeEffectControllerError> {
+    sealed: SealedToolFinal,
+) -> Result<(SealedToolFinal, Option<GroupChildDrainAdmission>), crate::RuntimeEffectControllerError>
+{
     let Some(address) = group_child.map(|child| &child.child) else {
-        return Ok(None);
+        return Ok((sealed, None));
     };
     let scope_id = address
         .execution_scope
@@ -653,20 +713,7 @@ pub(crate) async fn commit_group_child_boundary(
         .map_err(crate::RuntimeEffectControllerError::from)?
         .key()
         .to_string();
-    let drain_input = serde_json::to_string(&GroupChildDrainInput {
-        record,
-        intents,
-        recorded_call_id,
-    })
-    .map_err(|error| {
-        crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-            format!(
-                "sealed drain input for {} does not encode: {error}",
-                address.replay_key
-            ),
-        )
-    })?;
+    let drain_input = sealed.drain_input(&address.replay_key)?;
     match context
         .effect_controller
         .controller()
@@ -677,40 +724,18 @@ pub(crate) async fn commit_group_child_boundary(
         })
         .await?
     {
-        crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped => Ok(None),
+        crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped => Ok((sealed, None)),
         crate::runtime::effect::EffectGroupChildCommitOutcome::Committed { group_key, rank } => {
-            Ok(Some(GroupChildDrainAdmission {
-                group_key,
-                rank,
-                won_commit: true,
-            }))
+            Ok((sealed, Some(GroupChildDrainAdmission { group_key, rank })))
         }
         crate::runtime::effect::EffectGroupChildCommitOutcome::AlreadyCommitted {
             group_key,
             rank,
-            drain_input: sealed,
-        } => {
-            if let Some(sealed) = sealed {
-                let sealed: SealedGroupChildDrainInput =
-                    serde_json::from_str(&sealed).map_err(|error| {
-                        crate::RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                            format!(
-                                "committed drain input for {} does not decode: {error}",
-                                address.replay_key
-                            ),
-                        )
-                    })?;
-                *record = sealed.record;
-                *intents = sealed.intents;
-                *recorded_call_id = sealed.recorded_call_id;
-            }
-            Ok(Some(GroupChildDrainAdmission {
-                group_key,
-                rank,
-                won_commit: false,
-            }))
-        }
+            drain_input,
+        } => Ok((
+            SealedToolFinal::from_drain_input(&drain_input, &address.replay_key)?,
+            Some(GroupChildDrainAdmission { group_key, rank }),
+        )),
         crate::runtime::effect::EffectGroupChildCommitOutcome::CancelDecided {
             group_key, ..
         } => Err(crate::RuntimeEffectControllerError::new(
@@ -723,6 +748,65 @@ pub(crate) async fn commit_group_child_boundary(
             ),
         )),
     }
+}
+
+/// A deferred child's §4 boundary: its resolved completion is its terminal,
+/// and it commits here as an inline terminal does. A parked attempt declares
+/// no intents, so there is no drain to admit behind the barrier: the discharge
+/// seats the rank. The outcome is the committed final, whichever invocation
+/// committed it.
+pub(crate) async fn commit_deferred_group_child(
+    context: &ToolDispatchContext<'_>,
+    group_child: &GroupChildCoordination,
+    outcome: ToolDispatchOutcome,
+) -> Result<ToolDispatchOutcome, crate::RuntimeEffectControllerError> {
+    let ToolDispatchOutcome {
+        record,
+        attempts,
+        intents,
+        intent_outcomes,
+        captures,
+        triggers,
+    } = outcome;
+    let sealed = SealedToolFinal {
+        minting_emission: None,
+        recorded_call_id: record.call_id.clone(),
+        record,
+        intents,
+        attempts,
+        captures,
+        triggers,
+    };
+    let (sealed, _) = commit_group_child_boundary(context, Some(group_child), sealed).await?;
+    Ok(ToolDispatchOutcome {
+        record: sealed.record,
+        attempts: sealed.attempts,
+        intents: sealed.intents,
+        intent_outcomes,
+        captures: sealed.captures,
+        triggers: sealed.triggers,
+    })
+}
+
+/// Finishes a group child whose final an earlier invocation committed at the
+/// §4 point and never seated: its drain runs from the drain input the point
+/// retained, at the §5 barrier of the rank that commit reserved, and the
+/// attempt never runs again (ADR 0099 §5, W7, W15).
+pub(crate) async fn drain_committed_group_child(
+    context: &ToolDispatchContext<'_>,
+    committed: &crate::runtime::effect::CommittedGroupChildFinal,
+) -> Result<ToolDispatchOutcome, crate::RuntimeEffectControllerError> {
+    let sealed = SealedToolFinal::from_drain_input(&committed.drain_input, &committed.group_key)?;
+    drain_sealed_final(
+        context,
+        sealed,
+        Some(&GroupChildDrainAdmission {
+            group_key: committed.group_key.clone(),
+            rank: committed.rank,
+        }),
+        None,
+    )
+    .await
 }
 
 /// Whether `outcome` is the attempt's declared process start at

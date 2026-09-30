@@ -192,7 +192,10 @@ async fn group_checkpoint(engine: &Engine) -> GroupCheckpoint {
         "EffectGroupIndex",
         &key,
         "commit_child",
-        json!({"replay_key": request.shape.replay_keys[0].clone()}),
+        json!({
+            "replay_key": request.shape.replay_keys[0].clone(),
+            "committed": {"type": "held"},
+        }),
     )
     .await;
     let second: serde_json::Value = object(
@@ -200,7 +203,10 @@ async fn group_checkpoint(engine: &Engine) -> GroupCheckpoint {
         "EffectGroupIndex",
         &key,
         "commit_child",
-        json!({"replay_key": request.shape.replay_keys[1].clone()}),
+        json!({
+            "replay_key": request.shape.replay_keys[1].clone(),
+            "committed": {"type": "held"},
+        }),
     )
     .await;
     assert_eq!(first["type"], "committed");
@@ -410,7 +416,10 @@ async fn recover_group(engine: &Engine, checkpoint: GroupCheckpoint) {
         "EffectGroupIndex",
         &key,
         "commit_child",
-        json!({"replay_key": request.shape.replay_keys[2].clone()}),
+        json!({
+            "replay_key": request.shape.replay_keys[2].clone(),
+            "committed": {"type": "held"},
+        }),
     )
     .await;
     assert_eq!(late_commit["type"], "cancel_decided");

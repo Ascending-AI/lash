@@ -657,8 +657,24 @@ pub struct GroupChildFinalCommit {
     pub scope_id: String,
     /// The child's replay key — its durable identity.
     pub replay_key: String,
-    /// The sealed drain input — the declared intents and projection data a
-    /// recovery replays instead of re-running the attempt.
+    /// The sealed drain input — the child's committed terminal: its record,
+    /// its declared intents and the attempt facts its settlement carries. The
+    /// point retains it with the commit, so any later invocation of the child
+    /// drains exactly this instead of re-running the attempt.
+    pub drain_input: String,
+}
+
+/// A group child's final that an earlier invocation committed at the §4 point
+/// and never seated: what an invocation that cannot run the child — a
+/// successor whose attach expired — drains and seats in its place (ADR 0099
+/// §5, W7). The tool's attempts never run again (W15).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommittedGroupChildFinal {
+    /// The group the final committed in.
+    pub group_key: String,
+    /// The rank the winning commit reserved.
+    pub rank: u64,
+    /// The drain input the winning commit sealed.
     pub drain_input: String,
 }
 
@@ -689,7 +705,7 @@ pub enum EffectGroupChildCommitOutcome {
         /// The rank the winning commit reserved.
         rank: u64,
         /// The drain input the winning commit recorded.
-        drain_input: Option<String>,
+        drain_input: String,
     },
     /// Refused: the cancel disposition already committed at the §4 point
     /// (W6/W7). The late final may journal nothing — no terminal, no

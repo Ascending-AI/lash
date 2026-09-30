@@ -12,6 +12,7 @@ pub(crate) mod effect_journal;
 mod group_child_cancel;
 mod group_commit;
 use group_child_cancel::group_child_cancelled;
+pub(crate) use group_commit::committed_final_is_not_a_tool_terminal;
 mod group_read;
 pub(crate) mod journal_budget;
 mod journaled_effect;
@@ -977,9 +978,8 @@ where
     /// that group's index takes the commit. The serialized object handler —
     /// not any state this controller holds — is the linearization point, so
     /// a cancel decision racing the commit is fenced inside the index. The
-    /// Restate index does not retain `drain_input`: the durable publication
-    /// obligation is the committed-but-unseated child plus the dispatch
-    /// workflow's own redrive, so `AlreadyCommitted` reports it `None`.
+    /// index retains `drain_input` as the child's committed final, and
+    /// `AlreadyCommitted` answers the one the winner sealed (ADR 0099 §5).
     async fn commit_group_child_final(
         &self,
         commit: lash_core::facade_support::GroupChildFinalCommit,

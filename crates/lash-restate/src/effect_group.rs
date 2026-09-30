@@ -48,6 +48,13 @@ const INDEX_STATE_KEY: &str = "effect-group/v1/state";
 /// per-child handler reads (FIG-4068): written once at open, read only where
 /// children are rebuilt, and cleared when retirement completes.
 const MEMBERSHIP_STATE_KEY: &str = "effect-group/v1/membership";
+/// The final a child's winning commit offered, one key per position, apart
+/// from the index record every handler reads: a tool child's is its sealed
+/// drain input, which only a later commit of the same child reads. Written
+/// with the commit, and cleared when retirement completes.
+fn committed_final_state_key(position: usize) -> String {
+    format!("effect-group/v1/committed-final/{position}")
+}
 
 mod drain_barrier;
 mod group_waits;
@@ -71,7 +78,7 @@ pub(crate) use protocol::EFFECT_GROUP_STATE_FAMILY;
 #[cfg(test)]
 pub(crate) use protocol::EFFECT_GROUP_STATE_FORMATS;
 pub use protocol::{EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_STATE_FORMAT_VERSION};
-use protocol::{load_index, load_index_shared, load_membership};
+use protocol::{load_committed_final, load_index, load_index_shared, load_membership};
 use rank_run::served_run;
 pub(crate) use reopen::{content_checked_shape_mismatch, content_mismatch};
 pub(crate) use wire::btree_map_as_pairs;
@@ -660,9 +667,18 @@ impl EffectGroupState for EffectGroupStateImpl {
                 ));
             }
             Some(EffectGroupChildCommitState::Committed { rank }) => {
+                let committed = load_committed_final(&ctx, &committed_final_state_key(position))
+                    .await?
+                    .ok_or_else(|| {
+                        TerminalError::new(format!(
+                            "effect group {group_key} child {position} is committed at rank \
+                         {rank} but retains no committed final; the two commit in one \
+                         handler"
+                        ))
+                    })?;
                 return Ok(Reply::at(
                     wire,
-                    EffectGroupCommitChildResponse::AlreadyCommitted { rank },
+                    EffectGroupCommitChildResponse::AlreadyCommitted { rank, committed },
                 ));
             }
             None => {}
@@ -671,6 +687,12 @@ impl EffectGroupState for EffectGroupStateImpl {
         live.commit_states
             .insert(position, EffectGroupChildCommitState::Committed { rank });
         store_index(&ctx, object.writer, record);
+        object_state::set_stamped(
+            &ctx,
+            &committed_final_state_key(position),
+            object.writer,
+            request.committed,
+        );
         Ok(Reply::at(
             wire,
             EffectGroupCommitChildResponse::Committed { rank },
@@ -1128,14 +1150,18 @@ impl EffectGroupState for EffectGroupStateImpl {
         };
         let response = match record.lifecycle {
             EffectGroupLifecycle::Retired {
-                cleanup: EffectGroupCleanup::Pending { .. },
+                cleanup: EffectGroupCleanup::Pending { facts, .. },
             } => {
                 record.lifecycle = EffectGroupLifecycle::Retired {
                     cleanup: EffectGroupCleanup::Complete,
                 };
                 store_index(&ctx, object.writer, record);
-                // Nothing rebuilds a child of a tombstone.
+                // Nothing rebuilds a child of a tombstone, and nothing seats
+                // one of its committed finals.
                 ctx.clear(MEMBERSHIP_STATE_KEY);
+                for position in 0..facts.children() {
+                    ctx.clear(&committed_final_state_key(position));
+                }
                 EffectGroupFinishRetirementResponse::Finished
             }
             EffectGroupLifecycle::Retired {

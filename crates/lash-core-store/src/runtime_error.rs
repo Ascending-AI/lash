@@ -383,6 +383,12 @@ pub enum RuntimeErrorCode {
     /// original's retention expired; the retained invocation is gone and the
     /// child is never re-run under a fresh identity (ADR 0099 §8).
     RuntimeEffectGroupChildAttachExpired,
+    /// A child's final was committed at the group's durable linearization
+    /// point by an invocation that ended before its seat, and the invocation
+    /// seating it cannot realize that final: the committed outcome and any
+    /// intents it declared are reported lost rather than replaced by the
+    /// seating invocation's own refusal (ADR 0099 §5).
+    RuntimeEffectGroupChildCommittedFinalLost,
     /// Drain deferred while this host still works the group or its children.
     /// Retry succeeds once it finishes; permanent refusal uses
     /// `RuntimeEffectGroupShape`.
@@ -754,6 +760,9 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectGroupChildAttachExpired => {
                 "runtime_effect_group_child_attach_expired"
             }
+            Self::RuntimeEffectGroupChildCommittedFinalLost => {
+                "runtime_effect_group_child_committed_final_lost"
+            }
             Self::RuntimeEffectGroupDrainDeferred => "runtime_effect_group_drain_deferred",
             Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
             Self::AggregateAwaitUnsettled => "aggregate_await_unsettled",
@@ -992,6 +1001,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectGroupChildCancelled,
         Self::RuntimeEffectGroupChildCancelDecided,
         Self::RuntimeEffectGroupChildAttachExpired,
+        Self::RuntimeEffectGroupChildCommittedFinalLost,
         Self::RuntimeEffectGroupDrainDeferred,
         Self::RuntimeEffectGroupShape,
         Self::AggregateAwaitUnsettled,
@@ -1206,6 +1216,9 @@ impl RuntimeErrorCode {
             }
             "runtime_effect_group_child_attach_expired" => {
                 Self::RuntimeEffectGroupChildAttachExpired
+            }
+            "runtime_effect_group_child_committed_final_lost" => {
+                Self::RuntimeEffectGroupChildCommittedFinalLost
             }
             "runtime_effect_group_drain_deferred" => Self::RuntimeEffectGroupDrainDeferred,
             "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,

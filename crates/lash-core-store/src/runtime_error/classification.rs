@@ -330,6 +330,8 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectGroupChildCancelDecided => Terminal,
             // the retained invocation expired and is never re-run.
             Self::RuntimeEffectGroupChildAttachExpired => Terminal,
+            // the committed final's invocation is gone and nothing can realize it.
+            Self::RuntimeEffectGroupChildCommittedFinalLost => Terminal,
             // this host still works the group; a later drain succeeds.
             Self::RuntimeEffectGroupDrainDeferred => Retryable,
             // the group was assembled inconsistently.

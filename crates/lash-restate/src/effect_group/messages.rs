@@ -125,14 +125,40 @@ pub enum EffectGroupRecordSettlementResponse {
 
 /// One child's final record reaching the §4 point: the index-side decision
 /// the durable tiers' `commit_group_child` mirrors.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectGroupCommitChildRequest {
     /// The child's declared replay key; the index resolves its position from
     /// the retained shape rather than trusting a caller-supplied position.
     pub replay_key: String,
+    /// The final this invocation offers the point. The index retains it with
+    /// a winning commit, and answers it to every later commit of the child.
+    pub committed: EffectGroupCommittedFinal,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// What a child's final committed at the §4 point, as the index retains it
+/// for any later invocation of the child (ADR 0099 §5).
+///
+/// The committed final wins: an invocation whose commit finds the point taken
+/// seats the committed final, never its own. The invocation that committed it
+/// may have ended before its seat, so the index keeps what any successor needs
+/// to seat it — or, where no successor can, what it must report lost.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EffectGroupCommittedFinal {
+    /// A tool child's terminal: its sealed drain input — its record, its
+    /// declared intents and the attempt facts its settlement carries. A
+    /// successor drains it and seats that final; the attempt never runs again.
+    Tool { drain_input: String },
+    /// An atomic body's or a wait's outcome, or a tool child's failure before
+    /// its boundary: the committing invocation alone holds it, and publishes
+    /// it at its seat.
+    Held,
+    /// The typed refusal of an invocation that could not run the child: its
+    /// session's state generation was refused, or its attach expired.
+    Refusal { error: RuntimeEffectControllerError },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EffectGroupCommitChildResponse {
     /// This child's final won the §4 point, and `rank` is the settlement
@@ -141,11 +167,12 @@ pub enum EffectGroupCommitChildResponse {
     Committed {
         rank: u64,
     },
-    /// The commit already landed, in this invocation or an earlier one:
-    /// the reserved rank. A seat that cannot know what the winning commit
-    /// declared waits at the §5 barrier for that rank before it publishes.
+    /// The point already holds a final of this child, committed by an earlier
+    /// invocation: the rank it reserved and the final the index retained,
+    /// which wins over the one this commit offered.
     AlreadyCommitted {
         rank: u64,
+        committed: EffectGroupCommittedFinal,
     },
     /// The cancel disposition won first; the child's final journals nothing.
     CancelDecided {

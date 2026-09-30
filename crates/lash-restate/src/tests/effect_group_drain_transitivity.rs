@@ -316,6 +316,7 @@ async fn commit(
             "commit_child",
             &EffectGroupCommitChildRequest {
                 replay_key: shape.replay_keys[position].clone(),
+                committed: crate::effect_group::EffectGroupCommittedFinal::Held,
             },
         )
         .await

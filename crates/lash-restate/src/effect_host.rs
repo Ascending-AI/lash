@@ -1467,9 +1467,8 @@ impl RuntimeEffectController for RestateEffectHostController {
     /// The §4 boundary over ingress — the same route the ctx-based
     /// controller takes, with the durable membership record resolving which
     /// group's index owns this replay key. The serialized index handler is
-    /// the linearization point; `drain_input` is deliberately not retained
-    /// on this tier because the committed-but-unseated index state plus the
-    /// dispatch workflow's redrive is the resumable publication obligation.
+    /// the linearization point, and it retains `drain_input` as the child's
+    /// committed final, which `AlreadyCommitted` answers (ADR 0099 §5).
     async fn commit_group_child_final(
         &self,
         commit: lash_core::facade_support::GroupChildFinalCommit,
@@ -1513,6 +1512,9 @@ impl RuntimeEffectController for RestateEffectHostController {
                 "commit_child",
                 &crate::effect_group::EffectGroupCommitChildRequest {
                     replay_key: commit.replay_key.clone(),
+                    committed: crate::effect_group::EffectGroupCommittedFinal::Tool {
+                        drain_input: commit.drain_input,
+                    },
                 },
             )
             .await
@@ -1521,12 +1523,24 @@ impl RuntimeEffectController for RestateEffectHostController {
             crate::effect_group::EffectGroupCommitChildResponse::Committed { rank } => {
                 Outcome::Committed { group_key, rank }
             }
-            crate::effect_group::EffectGroupCommitChildResponse::AlreadyCommitted { rank } => {
-                Outcome::AlreadyCommitted {
-                    group_key,
+            crate::effect_group::EffectGroupCommitChildResponse::AlreadyCommitted {
+                rank,
+                committed: crate::effect_group::EffectGroupCommittedFinal::Tool { drain_input },
+            } => Outcome::AlreadyCommitted {
+                group_key,
+                rank,
+                drain_input,
+            },
+            crate::effect_group::EffectGroupCommitChildResponse::AlreadyCommitted {
+                rank,
+                committed,
+            } => {
+                return Err(crate::controller::committed_final_is_not_a_tool_terminal(
+                    &group_key,
+                    &commit.replay_key,
                     rank,
-                    drain_input: None,
-                }
+                    &committed,
+                ));
             }
             crate::effect_group::EffectGroupCommitChildResponse::CancelDecided { rank } => {
                 Outcome::CancelDecided { group_key, rank }

@@ -811,6 +811,64 @@ impl LiveConformanceHarness {
         }
     }
 
+    /// The retention sweep over one group child, on the server double (ADR
+    /// 0099 §8): the child's open invocation is killed, as an operator kills
+    /// it, before its seat; it is purged, as its retention's expiry purges it;
+    /// and its successor is dispatched with the child's own request under a
+    /// fresh invocation id, which is what the idempotency-keyed dispatch
+    /// mints once the retained invocation is gone.
+    pub(super) fn child_invocation_expiry(&self) -> lash_conformance::ChildInvocationExpiry {
+        let server = self
+            .server_double()
+            .expect("a child's retention expires on the server double");
+        let ingress = self.ingress();
+        Arc::new(move |group_key: String, position: usize| {
+            let server = server.clone();
+            let ingress = ingress.clone();
+            Box::pin(async move {
+                let (id, service, request) = server
+                    .invocations()
+                    .into_iter()
+                    .filter(|view| view.status != "completed")
+                    .find_map(|view| {
+                        let (service, rest) = view.target.split_once('/')?;
+                        let (key, handler) = rest.rsplit_once('/')?;
+                        if key != group_key || handler != "child" {
+                            return None;
+                        }
+                        let input = server.journal(&view.id)?.first()?.input()?;
+                        let request: serde_json::Value = serde_json::from_slice(&input).ok()?;
+                        (request["body"]["position"].as_u64() == Some(position as u64))
+                            .then(|| (view.id.clone(), service.to_owned(), request))
+                    })
+                    .unwrap_or_else(|| {
+                        panic!("an open invocation of group {group_key}'s child {position}")
+                    });
+                assert_eq!(
+                    server.kill_and_await(&id).await,
+                    Some(true),
+                    "kill the open invocation of group {group_key}'s child {position}"
+                );
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+                loop {
+                    match server.purge(&id) {
+                        Some(true) => break,
+                        Some(false) if tokio::time::Instant::now() < deadline => {
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                        other => panic!("purge `{id}`: {other:?}"),
+                    }
+                }
+                ingress
+                    .send_workflow_json(&service, &group_key, "child", &request)
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("dispatch the successor of group {group_key}'s child {position}: {error}")
+                    });
+            })
+        })
+    }
+
     /// The endpoint's own host, for a law that builds a runtime on it: the
     /// runtime installs its `ToolChildHost` here, which is the resolver the
     /// endpoint's dispatch invocations route tool children through.
@@ -1362,6 +1420,7 @@ impl LiveConformanceHarness {
                     "commit_child",
                     &EffectGroupCommitChildRequest {
                         replay_key: replay_key.clone(),
+                        committed: crate::effect_group::EffectGroupCommittedFinal::Held,
                     },
                 )
                 .await;
@@ -2259,6 +2318,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
                 "commit_child",
                 &EffectGroupCommitChildRequest {
                     replay_key: child.invocation.effect_replay_key().to_owned(),
+                    committed: crate::effect_group::EffectGroupCommittedFinal::Held,
                 },
             )
             .await

@@ -685,7 +685,9 @@ impl RuntimeEffectLocalRunner for BoundToolChildRunner {
             &self.host,
             &ChildOpenerContext::Live(self.context.clone()),
             &request,
-            envelope.invocation.address.clone(),
+            ChildTerminal::Drive {
+                child: envelope.invocation.address.clone(),
+            },
             self.host
                 .child_controller(&request.scope.admitted_scope, binding)?,
         ))
@@ -775,7 +777,9 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
             &self.host,
             &self.opener,
             &request,
-            envelope.invocation.address.clone(),
+            ChildTerminal::Drive {
+                child: envelope.invocation.address.clone(),
+            },
             self.host
                 .child_controller(&request.scope.admitted_scope, binding)?,
         ))
@@ -815,6 +819,21 @@ pub trait ToolChildDriver: Send {
         child: crate::EffectAddress,
         controller: ScopedEffectController<'run>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
+
+    /// Finishes a child whose final an earlier invocation committed at the §4
+    /// point and never seated — the invocation that committed it is gone, and
+    /// this one cannot run the child (ADR 0099 §5): drains the committed
+    /// final's declared intents from the drain input the point retained, at
+    /// the §5 barrier of the rank its commit reserved, and returns the
+    /// settlement outcome of that final. The tool's attempts never run again
+    /// (W15), and the child's context is resolved exactly as
+    /// [`drive`](Self::drive) resolves it.
+    async fn drain_committed<'run>(
+        &self,
+        request: &ToolChildRequest,
+        committed: super::CommittedGroupChildFinal,
+        controller: ScopedEffectController<'run>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
 }
 
 #[async_trait::async_trait]
@@ -829,11 +848,38 @@ impl ToolChildDriver for ToolChildRunner {
             &self.host,
             &self.opener,
             request,
-            child,
+            ChildTerminal::Drive { child },
             controller,
         ))
         .await
     }
+
+    async fn drain_committed<'run>(
+        &self,
+        request: &ToolChildRequest,
+        committed: super::CommittedGroupChildFinal,
+        controller: ScopedEffectController<'run>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        Box::pin(run_tool_child(
+            &self.host,
+            &self.opener,
+            request,
+            ChildTerminal::DrainCommitted { committed },
+            controller,
+        ))
+        .await
+    }
+}
+
+/// How a tool child reaches its terminal in this invocation.
+enum ChildTerminal {
+    /// Runs its attempts, retry sleeps and deferred await, and commits its
+    /// final against its own replay row (`child`).
+    Drive { child: crate::EffectAddress },
+    /// Drains the final an earlier invocation committed.
+    DrainCommitted {
+        committed: super::CommittedGroupChildFinal,
+    },
 }
 
 /// The one place a lent opener context becomes a child's context.
@@ -1044,14 +1090,16 @@ fn admitted_tool_drift(
 /// The ordering this provides, stated rather than assumed (§4/§5, FIG-3409):
 /// a child takes no in-process slot because the durable group owns the order —
 /// its final commits at the child's terminal — its final attempt's boundary
-/// or its resolved completion — against its own replay row (`child`), and
-/// a drain with intents is admitted by the barrier on its reserved rank
-/// before the first declared intent runs.
+/// or its resolved completion — against its own replay row, and a drain with
+/// intents is admitted by the barrier on its reserved rank before the first
+/// declared intent runs. A child whose final an earlier invocation committed
+/// takes the same context and the same barrier, and drains that final instead
+/// of driving (`terminal`).
 async fn run_tool_child<'run>(
     host: &ToolChildHost,
     opener: &ChildOpenerContext,
     request: &ToolChildRequest,
-    child: crate::EffectAddress,
+    terminal: ChildTerminal,
     controller: ScopedEffectController<'run>,
 ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
     // Refused here as well as at decode: a request this build cannot
@@ -1119,7 +1167,25 @@ async fn run_tool_child<'run>(
     let run_started = dispatch.clock.now();
     // Boxed for the same reason the runner's call is: `drive` holds the
     // coordinator and its attempt machinery live across every await.
-    let driven = Box::pin(drive(&dispatch, request, child, turn_cancel_wait));
+    let driven: std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<ToolDispatchOutcome, RuntimeEffectControllerError>,
+                > + Send
+                + '_,
+        >,
+    > = match terminal {
+        ChildTerminal::Drive { child } => {
+            Box::pin(drive(&dispatch, request, child, turn_cancel_wait))
+        }
+        ChildTerminal::DrainCommitted { committed } => {
+            let dispatch = Arc::clone(&dispatch);
+            Box::pin(async move {
+                crate::tool_dispatch::drain_committed_group_child(dispatch.as_ref(), &committed)
+                    .await
+            })
+        }
+    };
     // On a built context, a session service call the child made abandons the
     // drive where it stands, as a crash would: nothing the refused call led
     // to is recorded (see `SessionServicesRefusal`).
@@ -1340,18 +1406,14 @@ async fn drive(
         // (FIG-3609). A parked attempt declares no intents, so there is no
         // drain to admit behind the barrier: the discharge seats the rank.
         ToolCallLaunch::Pending(pending) => {
-            let mut outcome =
+            let outcome =
                 await_child_completion(dispatch, request, *pending, &turn_cancel_wait).await?;
-            let mut recorded_call_id = outcome.record.call_id.clone();
-            crate::tool_dispatch::commit_group_child_boundary(
+            crate::tool_dispatch::commit_deferred_group_child(
                 dispatch.as_ref(),
-                Some(&group_child),
-                &mut outcome.record,
-                &mut outcome.intents,
-                &mut recorded_call_id,
+                &group_child,
+                outcome,
             )
-            .await?;
-            Ok(outcome)
+            .await
         }
         // A refusal, not a settlement: a fabricated terminal here would journal
         // an outcome no effect ever produced.

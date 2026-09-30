@@ -68,6 +68,7 @@ async fn a_seat_completes_its_rank_drained_and_cancel_subscribers_in_its_own_jou
                 "commit_child",
                 &EffectGroupCommitChildRequest {
                     replay_key: shape.replay_keys[position].clone(),
+                    committed: crate::effect_group::EffectGroupCommittedFinal::Held,
                 },
             )
             .await

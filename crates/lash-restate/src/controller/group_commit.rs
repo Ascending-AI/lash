@@ -11,9 +11,9 @@
 //! its replay key, and that group's index takes the commit. The serialized
 //! object handler — not any state the controller holds — is the linearization
 //! point, so a cancel decision racing the commit is fenced inside the index.
-//! The Restate index does not retain `drain_input`: the durable publication
-//! obligation is the committed-but-unseated child plus the dispatch workflow's
-//! own redrive, so `AlreadyCommitted` reports it `None`.
+//! The index retains the commit's `drain_input` as the child's committed
+//! final, and `AlreadyCommitted` answers the one the winner sealed: a later
+//! invocation of the child drains exactly that final (ADR 0099 §5, W7).
 //!
 //! The controller keeps, per child, the rank its own commit was answered
 //! (FIG-4308): the child's dispatch handler publishes that rank at the seat
@@ -30,8 +30,8 @@ use lash_core::facade_support::{EffectGroupChildCommitOutcome, GroupChildFinalCo
 use lash_core::{ExecutionScope, RuntimeEffectControllerError};
 
 use crate::effect_group::{
-    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupNotice,
-    EffectGroupNotification, group_shape_error,
+    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupCommittedFinal,
+    EffectGroupNotice, EffectGroupNotification, group_shape_error,
 };
 
 use super::{RestateControllerContext, effect_group_engine_error};
@@ -68,6 +68,9 @@ where
             group_key.clone(),
             EffectGroupCommitChildRequest {
                 replay_key: commit.replay_key.clone(),
+                committed: EffectGroupCommittedFinal::Tool {
+                    drain_input: commit.drain_input,
+                },
             },
         )
         .await
@@ -76,11 +79,22 @@ where
         EffectGroupCommitChildResponse::Committed { rank } => {
             Outcome::Committed { group_key, rank }
         }
-        EffectGroupCommitChildResponse::AlreadyCommitted { rank } => Outcome::AlreadyCommitted {
+        EffectGroupCommitChildResponse::AlreadyCommitted {
+            rank,
+            committed: EffectGroupCommittedFinal::Tool { drain_input },
+        } => Outcome::AlreadyCommitted {
             group_key,
             rank,
-            drain_input: None,
+            drain_input,
         },
+        EffectGroupCommitChildResponse::AlreadyCommitted { rank, committed } => {
+            return Err(committed_final_is_not_a_tool_terminal(
+                &group_key,
+                &commit.replay_key,
+                rank,
+                &committed,
+            ));
+        }
         EffectGroupCommitChildResponse::CancelDecided { rank } => {
             Outcome::CancelDecided { group_key, rank }
         }
@@ -99,6 +113,23 @@ where
             )));
         }
     })
+}
+
+/// A tool child's commit that found the point holding a final that is not a
+/// tool terminal: one only an invocation that never drove the child commits,
+/// which exists only once the driving invocation is gone. The committed final
+/// wins, so this drive's own final is refused rather than drained over it.
+pub(crate) fn committed_final_is_not_a_tool_terminal(
+    group_key: &str,
+    replay_key: &str,
+    rank: u64,
+    committed: &EffectGroupCommittedFinal,
+) -> RuntimeEffectControllerError {
+    group_shape_error(format!(
+        "effect group {group_key} child `{replay_key}` drove to a tool terminal, but \
+         the §4 point already holds its final at rank {rank} ({committed:?}), \
+         committed by an invocation that did not drive it"
+    ))
 }
 
 /// The §5 barrier on the group index's own notice (FIG-4344): one

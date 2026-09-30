@@ -622,6 +622,19 @@ impl JournalEntryView {
         }
     }
 
+    /// The input an `InputCommand` entry carried — the invocation's request
+    /// body; `None` on every other entry.
+    pub fn input(&self) -> Option<bytes::Bytes> {
+        use prost::Message as _;
+        if self.ty != MessageType::InputCommand {
+            return None;
+        }
+        crate::protocol::generated::InputCommandMessage::decode(self.payload.clone())
+            .ok()?
+            .value
+            .map(|value| value.content)
+    }
+
     /// The call a `CallCommand` entry issued — its target service, handler,
     /// key and headers; `None` on every other entry.
     pub fn call_command(&self) -> Option<crate::protocol::generated::CallCommandMessage> {

@@ -69,7 +69,7 @@ pub use executor::{
     TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
     TurnControlBindingIdError, turn_control_binding_id_for_scope,
 };
-pub use group::{EffectGroupChildCommitOutcome, GroupChildFinalCommit};
+pub use group::{CommittedGroupChildFinal, EffectGroupChildCommitOutcome, GroupChildFinalCommit};
 pub use group::{
     EffectGroupHandle, EffectGroupMembership, GroupChildBinding, GroupReopen, GroupSettlement,
     GroupWakePolicy, IncorporatedGroupRank, LoserPolicy, RankedGroupSettlement, RuntimeEffectGroup,
