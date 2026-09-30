@@ -11,6 +11,8 @@
 // with a hundred throwaway bindings.
 #![allow(unused_imports)]
 
+use lash::runtime::{ProcessCommand, ProcessListSelection};
+
 use lash::process::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, CausalRef,
     DeclaredProcessIdentity, HandleId, HostArtifactPin, HostArtifacts, Lifetime, LifetimeDecision,

@@ -23,8 +23,10 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
         ),
         (
             RuntimeEffectCommand::process(ProcessCommand::List {
-                session_scope: lash_core::SessionScope::new("session"),
-                mode: lash_core::ProcessListMode::Live,
+                selection: lash_core::ProcessListSelection::Observed {
+                    session_scope: lash_core::SessionScope::new("session"),
+                    mode: lash_core::ProcessListMode::Live,
+                },
             }),
             "direct_process",
         ),

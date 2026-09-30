@@ -690,16 +690,23 @@ impl Processes {
         &self,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
-        let running = self
-            .list(&lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Running]),
-                ..lash_core::ProcessListFilter::default()
-            })
+        let outcome = self
+            .run_command(
+                lash_core::ProcessCommand::List {
+                    selection: lash_core::ProcessListSelection::HostRunning,
+                },
+                scoped_effect_controller.clone(),
+            )
             .await?;
+        let lash_core::ProcessEffectOutcome::List { entries: running } = outcome else {
+            return Err(EmbedError::Plugin(lash_core::PluginError::Session(
+                "process listing returned the wrong outcome".to_string(),
+            )));
+        };
         let mut summaries = Vec::with_capacity(running.len());
         for process in running {
             summaries.push(
-                self.cancel(&process.process_id, scoped_effect_controller.clone())
+                self.cancel(&process.id, scoped_effect_controller.clone())
                     .await?,
             );
         }

@@ -370,6 +370,41 @@ where
         .await
         .map(|recorded| recorded.outcome);
     }
+    let recorded_local_operation = match &command {
+        ProcessCommand::List { .. } => Some("process-list"),
+        ProcessCommand::CompleteExternal { .. } => Some("process-complete-external"),
+        ProcessCommand::ValidateVisible { .. } => Some("process-validate-visible"),
+        _ => None,
+    };
+    if let Some(operation) = recorded_local_operation {
+        let execution = local_executor.into_process()?;
+        let receiver = &invocation.address().execution_scope;
+        let recorded = recorded_process_step(context, invocation, operation, async move {
+            let outcome = Box::pin(execution.execute(receiver, command))
+                .await
+                .map_err(PluginError::from)?;
+            let realization = match &outcome {
+                ProcessEffectOutcome::CompleteExternal { completion } => {
+                    match completion.as_ref() {
+                        lash_core::ProcessCompletionOutcome::Committed(_) => {
+                            lash_core::StoreRealization::Realized
+                        }
+                        _ => lash_core::StoreRealization::Coalesced,
+                    }
+                }
+                _ => lash_core::StoreRealization::Realized,
+            };
+            Ok(JournaledProcessOutcome {
+                outcome,
+                realization,
+            })
+        })
+        .await?;
+        if let Some(observer) = outcome_observer {
+            observer(&recorded.outcome, recorded.realization);
+        }
+        return Ok(recorded.outcome);
+    }
     // Read before the executor is taken apart: a start answers its served-only
     // mark at its frontier marker (FIG-3779).
     let served_only = local_executor.served_only();
@@ -543,37 +578,6 @@ where
         // A listing, a transfer and a session delete each record their outcome
         // (FIG-3827): a replay answers what the first execution saw and did,
         // never a re-read or a re-write of the registry as it is now.
-        ProcessCommand::List {
-            session_scope,
-            mode,
-        } => {
-            let step_registry = Arc::clone(&registry);
-            recorded_process_step(context, invocation, "process-list", async move {
-                let entries = match mode {
-                    lash_core::ProcessListMode::Live => {
-                        step_registry
-                            .list_live_observed_by(&session_scope.session_id)
-                            .await?
-                    }
-                    lash_core::ProcessListMode::All => {
-                        step_registry
-                            .list_observed_by(
-                                &session_scope.session_id,
-                                &lash_core::ProcessListFilter {
-                                    status: lash_core::ProcessStatusFilter::Any,
-                                    ..Default::default()
-                                },
-                            )
-                            .await?
-                    }
-                };
-                Ok(JournaledProcessOutcome::realized(
-                    ProcessEffectOutcome::List { entries },
-                ))
-            })
-            .await
-            .map(|recorded| (recorded.outcome, recorded.realization))
-        }
         ProcessCommand::Transfer {
             from_scope,
             to_scope,
@@ -1058,15 +1062,15 @@ where
             .await
             .map(|recorded| (recorded.outcome, recorded.realization))
         }
-        // Served by the early arm above against the definition executor;
-        // it never reaches the process executor.
-        ProcessCommand::PublishDefinition { .. } | ProcessCommand::GetDefinition { .. } => {
-            Err(RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "publish/get-definition is served by the definition executor, \
-                 which the early arm requires before the process executor runs",
-            ))
-        }
+        // These admissions are recorded by the early arms above.
+        ProcessCommand::List { .. }
+        | ProcessCommand::CompleteExternal { .. }
+        | ProcessCommand::ValidateVisible { .. }
+        | ProcessCommand::PublishDefinition { .. }
+        | ProcessCommand::GetDefinition { .. } => Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+            "the command must run through its recorded admission",
+        )),
     };
     if let (Ok((outcome, realization)), Some(observer)) = (&outcome, outcome_observer) {
         observer(outcome, *realization);

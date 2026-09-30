@@ -223,8 +223,6 @@ timeout_seconds = 120
 label = "//crates/lash:replay_after_advance__test"
 cwd = "crates/lash"
 filters = ["live_sqlite_memory::"]
-# Held for its ticket like its double legs; FIG-4351 removes the skip.
-skips = ["live_sqlite_memory::session_signal_replay_after_compaction_returns_recorded_event"]
 endpoints = ["RAA_RESTATE_ENDPOINT"]
 shards = 1
 timeout_seconds = 180

@@ -72,7 +72,7 @@ macro_rules! backend_laws {
             }
 
             #[tokio::test]
-            #[ignore = "FIG-4351: the session admin's visibility check reads a compacted handle live"]
+            $(#[ignore = $service])?
             async fn session_signal_replay_after_compaction_returns_recorded_event() {
                 families::signal(
                     StorageKind::$kind,
@@ -81,6 +81,24 @@ macro_rules! backend_laws {
                     Advance::PruneAndCompact,
                 )
                 .await;
+            }
+
+            #[tokio::test]
+            $(#[ignore = $service])?
+            async fn facade_cancel_all_replay_after_compaction_returns_recorded_receipts() {
+                families::cancel_all(StorageKind::$kind, $live).await;
+            }
+
+            #[tokio::test]
+            $(#[ignore = $service])?
+            async fn external_completion_replay_after_compaction_returns_recorded_outcome() {
+                families::external_completion(StorageKind::$kind, $live, false).await;
+            }
+
+            #[tokio::test]
+            $(#[ignore = $service])?
+            async fn external_completion_replay_after_observer_transfer_returns_recorded_outcome() {
+                families::external_completion(StorageKind::$kind, $live, true).await;
             }
 
             #[tokio::test]

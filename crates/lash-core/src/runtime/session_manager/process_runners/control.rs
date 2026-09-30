@@ -32,10 +32,6 @@ impl<'scope> ProcessCommandRunner<'scope> {
         })
     }
 
-    fn registry(&self) -> &Arc<dyn crate::ProcessRegistry> {
-        &self.registry
-    }
-
     async fn start(
         &self,
         registration: crate::ProcessRegistration,
@@ -90,8 +86,10 @@ impl<'scope> ProcessCommandRunner<'scope> {
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::List {
-                session_scope,
-                mode,
+                selection: crate::ProcessListSelection::Observed {
+                    session_scope,
+                    mode,
+                },
             })
             .await?
         {
@@ -621,46 +619,19 @@ impl ProcessCapability {
         await_output: crate::ProcessAwaitOutput,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
-        let runner = self.command_runner(current, &scope)?;
-        let session_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
-        // Session-visibility authorization: the caller must observe the row.
-        if !runner
-            .registry()
-            .is_observer(&session_scope.session_id, process_id)
-            .await?
-        {
-            return Err(crate::PluginError::Session(format!(
-                "process handle `{process_id}` is not visible in this session"
-            )));
-        }
-        // The disposition check (only ExternallyOwned rows may be completed out
-        // of band) now lives inside the registry's completion operation, keyed on
-        // this explicit authority, so it is enforced uniformly across backends
-        // rather than only here (ADR 0027).
         self.mark_current_process_sync_needed(current, session_id);
-        // The record holds what the output delivers before the registry
-        // records it; an output whose source was swept is refused with
-        // nothing recorded (ADR 0124 §4).
-        crate::runtime::attachment_delivery::acquire_completion_output(
-            current
-                .host
-                .core
-                .durability
-                .attachment_store
-                .referrers()
-                .as_ref(),
-            process_id,
-            &await_output,
-        )
-        .await?;
-        runner
-            .registry()
-            .complete_process(
-                process_id,
-                await_output,
-                crate::ProcessCompletionAuthority::ExternalOwner,
-            )
-            .await
+        match Box::pin(self.command_runner(current, &scope)?.run(
+            crate::ProcessCommand::CompleteExternal {
+                session_scope: self.process_scope_for_op(session_id, scope.agent_frame_id()),
+                process_id: process_id.clone(),
+                output: await_output,
+            },
+        ))
+        .await?
+        {
+            crate::ProcessEffectOutcome::CompleteExternal { completion } => Ok(*completion),
+            _ => Err(wrong_process_outcome("complete-external")),
+        }
     }
 
     /// Record the caller departure of an Externally-Owned row this session
@@ -847,6 +818,7 @@ impl ProcessCapability {
             current,
             &crate::RuntimeOwner::Session(session_id.clone()),
             std::slice::from_ref(process_id),
+            scope.clone(),
         )
         .await?;
         let request =
@@ -921,9 +893,23 @@ impl ProcessCapability {
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
-        let _ = scope;
-        self.validate_process_handles_observed_inner(current, owner, handle_ids)
-            .await
+        if handle_ids.is_empty() {
+            return Ok(());
+        }
+        match Box::pin(self.command_runner(current, &scope)?.run(
+            crate::ProcessCommand::ValidateVisible {
+                owner: owner.clone(),
+                process_ids: handle_ids.to_vec(),
+            },
+        ))
+        .await?
+        {
+            crate::ProcessEffectOutcome::ValidateVisible { not_visible: None } => Ok(()),
+            crate::ProcessEffectOutcome::ValidateVisible {
+                not_visible: Some(process_id),
+            } => Err(process_visibility_miss(&process_id)),
+            _ => Err(wrong_process_outcome("validate-visible")),
+        }
     }
 
     pub(in crate::runtime::session_manager) async fn validate_model_tool_process_handles(
@@ -931,8 +917,9 @@ impl ProcessCapability {
         current: &CurrentOwnerCapability,
         owner: &crate::RuntimeOwner,
         handle_ids: &[ProcessId],
+        scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
-        self.validate_process_handles_observed_inner(current, owner, handle_ids)
+        self.validate_process_handles_observed(current, owner, handle_ids, scope)
             .await?;
         match owner {
             crate::RuntimeOwner::Session(session_id) => {
@@ -1037,42 +1024,6 @@ impl ProcessCapability {
             .into_iter()
             .filter(|record| returned.contains(&record.id))
             .collect()
-    }
-
-    /// FIG-653: this gate enforces observer subscription relationships, not
-    /// authorization. A session sees what it observes; a process sees the
-    /// children whose recorded ancestry names it as their starter.
-    async fn validate_process_handles_observed_inner(
-        &self,
-        current: &CurrentOwnerCapability,
-        owner: &crate::RuntimeOwner,
-        process_ids: &[ProcessId],
-    ) -> Result<(), crate::PluginError> {
-        if process_ids.is_empty() {
-            return Ok(());
-        }
-        let registry = current.host.process_registry().ok_or_else(|| {
-            crate::PluginError::Session("process registry is unavailable in this runtime".into())
-        })?;
-        for process_id in process_ids {
-            let visible = match owner {
-                crate::RuntimeOwner::Session(session_id) => {
-                    registry.is_observer(session_id, process_id).await
-                }
-                crate::RuntimeOwner::Process(starter) => {
-                    let starter = crate::ScopeId::process(starter.clone());
-                    registry.get_process(process_id).await.map(|record| {
-                        record.is_some_and(|record| record.ancestry.starter() == Some(&starter))
-                    })
-                }
-            };
-            match visible {
-                Ok(true) | Err(crate::PluginError::ProcessNoLongerRetained { .. }) => {}
-                Ok(false) => return Err(process_visibility_miss(process_id)),
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(())
     }
 
     async fn validate_tool_filter(

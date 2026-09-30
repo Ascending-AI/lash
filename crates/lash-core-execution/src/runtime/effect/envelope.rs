@@ -639,6 +639,17 @@ impl RuntimeEffectCommand {
     }
 }
 
+/// The scope and status selection recorded by a process listing.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "scope", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProcessListSelection {
+    Observed {
+        session_scope: SessionScope,
+        mode: ProcessListMode,
+    },
+    HostRunning,
+}
+
 /// Serializable operation against the process admin plane.
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -656,9 +667,16 @@ pub enum ProcessCommand {
         execution_context: Box<ProcessExecutionContext>,
     },
     List {
+        selection: ProcessListSelection,
+    },
+    CompleteExternal {
         session_scope: SessionScope,
-        #[serde(default)]
-        mode: ProcessListMode,
+        process_id: ProcessId,
+        output: ProcessAwaitOutput,
+    },
+    ValidateVisible {
+        owner: crate::RuntimeOwner,
+        process_ids: Vec<ProcessId>,
     },
     Transfer {
         from_scope: SessionScope,
@@ -731,9 +749,16 @@ enum ProcessCommandDecode {
         execution_context: Box<ProcessExecutionContext>,
     },
     List {
+        selection: ProcessListSelection,
+    },
+    CompleteExternal {
         session_scope: SessionScope,
-        #[serde(default)]
-        mode: ProcessListMode,
+        process_id: ProcessId,
+        output: ProcessAwaitOutput,
+    },
+    ValidateVisible {
+        owner: crate::RuntimeOwner,
+        process_ids: Vec<ProcessId>,
     },
     Transfer {
         from_scope: SessionScope,
@@ -798,13 +823,19 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 observers,
                 execution_context,
             },
-            ProcessCommandDecode::List {
+            ProcessCommandDecode::List { selection } => Self::List { selection },
+            ProcessCommandDecode::CompleteExternal {
                 session_scope,
-                mode,
-            } => Self::List {
+                process_id,
+                output,
+            } => Self::CompleteExternal {
                 session_scope,
-                mode,
+                process_id,
+                output,
             },
+            ProcessCommandDecode::ValidateVisible { owner, process_ids } => {
+                Self::ValidateVisible { owner, process_ids }
+            }
             ProcessCommandDecode::Transfer {
                 from_scope,
                 to_scope,
@@ -911,11 +942,24 @@ impl ProcessCommand {
             Self::Start { registration, .. } => {
                 Self::start_effect_id(registration.start_key.as_ref())
             }
-            Self::List {
+            Self::List { selection } => match selection {
+                ProcessListSelection::Observed {
+                    session_scope,
+                    mode,
+                } => format!("process:list:{}:{}", session_scope.id(), mode.as_str()),
+                ProcessListSelection::HostRunning => "process:list:host:running".to_string(),
+            },
+            Self::CompleteExternal {
                 session_scope,
-                mode,
-            } => {
-                format!("process:list:{}:{}", session_scope.id(), mode.as_str())
+                process_id,
+                ..
+            } => format!(
+                "process:complete-external:{}:{process_id}",
+                session_scope.id()
+            ),
+            Self::ValidateVisible { owner, process_ids } => {
+                let digest = process_transfer_set_identity(process_ids);
+                format!("process:validate-visible:{owner}:{digest}")
             }
             Self::Transfer {
                 from_scope,
@@ -980,6 +1024,12 @@ pub enum ProcessEffectOutcome {
     },
     List {
         entries: Vec<ProcessRecord>,
+    },
+    CompleteExternal {
+        completion: Box<crate::ProcessCompletionOutcome>,
+    },
+    ValidateVisible {
+        not_visible: Option<ProcessId>,
     },
     Transfer,
     DeleteSession {

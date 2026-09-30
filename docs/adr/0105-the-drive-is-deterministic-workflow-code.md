@@ -67,7 +67,15 @@ So the process commands (start, signal, cancel, await, attach) carry their
 target and session checks inside their recorded admissions. A cancel, signal or
 await of a pruned process refuses or answers `NoLongerRetained` from the
 recorded guard or admission, and a replay after a prune returns what the first
-run recorded. A host start `Until` a session checks the session inside its
+run recorded. A host-wide cancel-all records its running-process selection as a
+`ProcessCommand::List` before issuing cancels from those recorded rows.
+`CompleteExternal` records the observer verdict, attachment acquisition and
+external-owner terminal write together, and returns that completion outcome
+on replay. `ValidateVisible` records the session-observer or process-starter
+verdict before a handle command runs. Compaction and observer transfer cannot
+change any of these recorded decisions.
+
+A host start `Until` a session checks the session inside its
 recorded start admission (`HostSessionNotLive`), so a replay after the session
 is deleted returns the recorded start. A tool-intent redelivery claims its
 submission-ledger row before it realizes anything, and a row that already

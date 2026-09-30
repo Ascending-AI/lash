@@ -49,10 +49,11 @@ mod validation;
 pub use envelope::tool_cancel_work_replay_suffix;
 pub use envelope::{
     AdmittedHeadVerdict, AssistantResponseHookEvents, CheckpointAdmittedSet, CompactionBase,
-    LlmRequestSpec, ProcessCommand, ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectOutcome, RuntimeInvocation, ServedExecutionEnvironmentSync, SleepSpec,
-    ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolInvocationEffectOutcome,
+    LlmRequestSpec, ProcessCommand, ProcessEffectOutcome, ProcessListSelection,
+    RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
+    ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch,
+    ToolInvocationEffectOutcome,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
