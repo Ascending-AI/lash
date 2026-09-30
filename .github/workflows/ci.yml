@@ -2275,7 +2275,14 @@ jobs:
           LASH_EFFECT_GROUP_ARTIFACT_DIR: target/functional-e2e-artifacts/effect-group-conformance
           AGENT_WORKBENCH_E2E_ARTIFACT_DIR: target/functional-e2e-artifacts/agent-workbench
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
-        run: just ${{ matrix.recipe }}
+        run: |
+          set -euo pipefail
+          # The crash-window attachment laws require PostgreSQL in both legs.
+          if [ "${{ matrix.name }}" = "server-double" ]; then
+            bash scripts/ci/with-service.sh pg16 -- just ${{ matrix.recipe }}
+          else
+            just ${{ matrix.recipe }}
+          fi
 
       - name: Remove client credentials
         if: always() && env.RUN_FUNCTIONAL_E2E == 'true' && matrix.bazel
