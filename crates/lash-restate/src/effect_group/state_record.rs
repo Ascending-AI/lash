@@ -6,7 +6,6 @@ pub struct EffectGroupCleanupFacts {
     pub dispatcher: EffectGroupDispatchState,
     #[serde(with = "btree_map_as_pairs")]
     pub dispatched: BTreeMap<usize, String>,
-    pub wait_scope: ExecutionScope,
 }
 
 impl EffectGroupCleanupFacts {
@@ -14,21 +13,6 @@ impl EffectGroupCleanupFacts {
     /// answer [`EffectGroupShape::children`] gives on the live shape.
     pub(crate) fn children(&self) -> usize {
         self.replay_keys.len()
-    }
-
-    /// The replay key of a child position, as a terminal error when the
-    /// retirement facts do not have one. Same pairing, same independent public
-    /// fields, and the same refusal as [`EffectGroupShape::member_replay_key`].
-    pub(crate) fn member_replay_key(&self, position: usize) -> Result<&str, TerminalError> {
-        self.replay_keys
-            .get(position)
-            .map(String::as_str)
-            .ok_or_else(|| {
-                TerminalError::new(format!(
-                    "effect-group retirement facts have no replay key for child {position} of {}",
-                    self.replay_keys.len()
-                ))
-            })
     }
 }
 
@@ -332,7 +316,6 @@ mod admission_tests {
                 wake: lash_core::GroupWakePolicy::All,
                 loser_disposition: LoserPolicy::RunToCompletion,
                 replay_keys: vec!["child-0".to_owned()],
-                wait_scope: ExecutionScope::runtime_operation("group"),
                 opener: lash_core::AdmittedScope::turn("session", "turn"),
             },
             next_rank: 1,

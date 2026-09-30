@@ -365,43 +365,22 @@ grep -F '"type":"retired"' "$run_root/index-probe.json"
 grep -Fx '{"type":"retired"}' "$run_root/index-rank-1.json"
 ```
 
-The saga journals retained fences in protocol order: READY, then ranks 1 through N. Query
-only its first two `retain_resolution` inputs. Recover their exact signed key preimages and
-submit fresh `await_resolution` calls; state reads alone do not prove late registration.
-
-The two addresses are derived differently and must not be confused.
-`crates/lash-restate/src/durable_wait.rs` is the live rule: the `LashDurableWaitIndex`
-object key is the scope key, rendered `scope:{"version":2,"kind":"op",...}` for an
-effect group's runtime-operation scope (`:242`), while the `LashDurableWaitWorkflow` key
-is `sha256hex(key.key_id)` (`:195`) — a bare 64-hex digest, not the index key with a
-prefix stripped.
+The group index answers its own notices (READY, RANK, the drain barrier, a child's cancel
+fact), and a retired index answers every one of them `Retired` from its tombstone. A late
+subscriber proves it: subscribe to READY and to rank 1 directly at the index. A retired
+index records nothing and answers at once, so the stand-in awakeable id is never
+completed. State reads alone do not prove late registration.
 
 ```sh
-restate sql --json \
-  "select i.target, j.entry_json from sys_invocation i join sys_journal j on i.id = j.id where i.invoked_by_id = '$retirement_id' and i.target_service_name = 'LashDurableWaitIndex' and i.target_handler_name = 'retain_resolution' and j.index = 0 order by i.created_at asc limit 2" \
-  >"$run_root/ready-rank-retains.json"
-
-python3 - "$run_root/ready-rank-retains.json" "$RESTATE_INGRESS_URL" <<'PY' | tee "$run_root/late-ready-rank.txt"
-import hashlib, json, sys, urllib.request
-rows = json.load(open(sys.argv[1], encoding="utf-8"))
-assert len(rows) == 2, rows
-for label, suffix, row in zip(("READY", "RANK-1"), (":ready", ":rank:1"), rows):
-    entry = json.loads(row["entry_json"])
-    request = json.loads(bytes(entry["Command"]["Input"]["payload"]))
-    request.pop("resolution")
-    assert request["key"]["wait"]["key"].endswith(suffix), request
-    object_key = row["target"].split("/", 2)[1]
-    assert object_key.startswith("scope:"), object_key
-    workflow_key = hashlib.sha256(request["key"]["key_id"].encode()).hexdigest()
-    call = urllib.request.Request(
-        f"{sys.argv[2]}/LashDurableWaitWorkflow/{workflow_key}/await_resolution",
-        data=json.dumps(request, separators=(",", ":")).encode(),
-        headers={"content-type": "application/json"}, method="POST")
-    with urllib.request.urlopen(call, timeout=10) as response:
-        result = json.load(response)
-    assert result == {"status": "ok", "payload": {"type": "retired"}}, result
-    print(f"late {label}: {json.dumps(result, separators=(',', ':'))}")
-PY
+for notice in '{"type":"ready"}' '{"type":"rank","rank":1}'; do
+  curl -sS -X POST \
+    "http://127.0.0.1:$ingress_port/EffectGroupIndex/$group_path/subscribe" \
+    -H 'content-type: application/json' \
+    --data "{\"notice\":$notice,\"awakeable_id\":\"runbook-late-subscriber\"}"
+  echo
+done | tee "$run_root/late-ready-rank.txt"
+test "$(grep -cFx '{"type":"notified","notification":{"type":"retired"}}' \
+  "$run_root/late-ready-rank.txt")" = 2
 ```
 
 Finally derive the payload object's exact address and attempt a late write:
@@ -437,7 +416,7 @@ IDs; review it before sharing.
 | Post-kill tombstone | retired index recorded the same dispatcher ID the kill targeted | `retired-index.json`, `retirement-pending.txt` |
 | Exact kill | exactly one recorded invocation killed | `dispatcher-kill.txt` |
 | Saga completion | retirement HTTP 200 and final retired index | `retirement-response.txt`, `index-probe.json` |
-| Late READY/RANK | both late registrations resolved `Retired` | `late-ready-rank.txt` |
+| Late READY/RANK | both late subscriptions answered `Retired` | `late-ready-rank.txt` |
 | Late payload put | payload object returned `Retired` | `late-payload-put.json` |
 | Exact teardown | replacement PID stopped and owned container absent | final inventory |
 

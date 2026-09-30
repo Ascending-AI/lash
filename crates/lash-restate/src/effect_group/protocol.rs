@@ -110,7 +110,6 @@ mod tests {
                         wake: lash_core::GroupWakePolicy::All,
                         loser_disposition: LoserPolicy::RunToCompletion,
                         replay_keys: vec!["child-0".to_owned()],
-                        wait_scope: ExecutionScope::runtime_operation("group"),
                         opener: lash_core::AdmittedScope::turn("session", "turn"),
                     },
                     next_rank: 0,

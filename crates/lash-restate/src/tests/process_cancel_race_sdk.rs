@@ -7,12 +7,15 @@
 //! attempt records both commands and suspends, then a redrive completes both
 //! in each notification order and must take the branch the first completion
 //! names. The losing side is disposed of: a lost event wait is released
-//! `Cancelled`. A direct process await is an event wait (ADR 0124), so the
-//! event law covers it.
+//! `Cancelled`, and a lost rank notice's subscription is dropped. A rank wait
+//! is the group index's `Rank` notice (FIG-4344): its subscription's call
+//! comes first, and the race is between the subscription's awakeable and the
+//! promise. A direct process await is an event wait (ADR 0124), so the event
+//! law covers it.
 
 use super::endpoint_protocol::{
     encode_call_completion, encode_get_promise_completion, encode_input_command,
-    encode_start_message,
+    encode_signal_value, encode_start_message,
 };
 use super::*;
 use crate::controller::context::{ProcessCancelRace, RestateControllerContext};
@@ -24,6 +27,9 @@ use bytes::BytesMut;
 const PROBE: &str = "P16RaceProbe";
 const CALL_COMMAND: u16 = 0x040D;
 const GET_PROMISE_COMMAND: u16 = 0x0409;
+const ONE_WAY_CALL_COMMAND: u16 = 0x040E;
+/// The signal the handler's first awakeable completes on.
+const FIRST_AWAKEABLE_SIGNAL: u32 = 17;
 
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct RaceProbeInput {
@@ -81,11 +87,11 @@ impl P16RaceProbe for P16RaceProbeImpl {
                 .await?,
             ),
             "rank" => race_label(
-                RestateControllerContext::await_effect_group_wait(
+                RestateControllerContext::await_effect_group_notice(
                     &ctx,
                     &crate::services::DEFAULT_NAMESPACE,
-                    probe_wait_request()?,
-                    "probe".to_string(),
+                    "probe-group".to_string(),
+                    crate::effect_group::EffectGroupNotice::Rank { rank: 1 },
                     None,
                     ProcessCancelRace::Raced,
                 )
@@ -225,7 +231,133 @@ pub(super) async fn a_process_event_wait_race_takes_the_first_recorded_completio
     assert_both_orders("event").await;
 }
 
+/// A process drive's rank wait is the group index's `Rank` notice
+/// (FIG-4344): the subscription's call, answered `Subscribed`, then the cancel
+/// promise, raced against the subscription's awakeable. The first attempt
+/// records the subscription and suspends on its answer; the second records
+/// the promise and suspends on the race; the third completes both, `first`
+/// first.
+async fn rank_race_with(first: FirstCompletion) -> (String, Bytes) {
+    let endpoint = Endpoint::builder().bind(P16RaceProbeImpl.serve()).build();
+    let key = "p16-race-rank".to_string();
+    let input = RaceProbeInput {
+        wait: "rank".to_string(),
+    };
+    let encoded_input = serde_json::to_vec(&input).expect("encode the probe input");
+    let recorded = invoke_endpoint(&endpoint, PROBE, "run", &key, &input)
+        .await
+        .expect("the first attempt records its subscription and suspends");
+    let subscribe = restate_recorded_commands(&recorded).expect("decode the subscription");
+    assert_eq!(
+        subscribe
+            .iter()
+            .map(|command| (command.message_type, command.call.clone()))
+            .collect::<Vec<_>>(),
+        vec![(
+            CALL_COMMAND,
+            Some(("EffectGroupIndex".to_string(), "subscribe".to_string()))
+        )],
+        "the rank wait subscribes at the group index, and calls nothing else"
+    );
+    let subscribe = &subscribe[0];
+    let subscribed = encode_call_completion(
+        subscribe
+            .completion_id
+            .expect("the subscription's completion id"),
+        crate::wire::reply_json(&crate::effect_group::EffectGroupSubscribeResponse::Subscribed)
+            .as_bytes(),
+    );
+    let mut second = BytesMut::new();
+    second.extend_from_slice(&encode_start_message(&key, 2));
+    second.extend_from_slice(&encode_input_command(&encoded_input));
+    second.extend_from_slice(&subscribe.frame);
+    second.extend_from_slice(&subscribed);
+    let raced = invoke_endpoint_body(&endpoint, PROBE, "run", second.freeze())
+        .await
+        .expect("the second attempt records its race and suspends");
+    let promise = restate_recorded_commands(&raced).expect("decode the race");
+    assert_eq!(
+        promise
+            .iter()
+            .map(|command| command.message_type)
+            .collect::<Vec<_>>(),
+        vec![GET_PROMISE_COMMAND],
+        "the subscription's awakeable journals nothing; the promise does"
+    );
+    let promise = &promise[0];
+    // The input, the subscription, its answer and the promise are replayed.
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(&key, 4));
+    body.extend_from_slice(&encode_input_command(&encoded_input));
+    body.extend_from_slice(&subscribe.frame);
+    body.extend_from_slice(&subscribed);
+    body.extend_from_slice(&promise.frame);
+    let notified = encode_signal_value(
+        FIRST_AWAKEABLE_SIGNAL,
+        &serde_json::to_vec(&crate::effect_group::EffectGroupNotification::Rank)
+            .expect("encode the notification"),
+    );
+    let cancelled = encode_get_promise_completion(
+        promise.completion_id.expect("the promise's completion id"),
+        &cancel_promise_value(),
+    );
+    match first {
+        FirstCompletion::Guarded => {
+            body.extend_from_slice(&notified);
+            body.extend_from_slice(&cancelled);
+        }
+        FirstCompletion::Promise => {
+            body.extend_from_slice(&cancelled);
+            body.extend_from_slice(&notified);
+        }
+    }
+    let output = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        PROBE,
+        "run",
+        body.freeze(),
+        vec![],
+    )
+    .await
+    .expect("the redrive settles its race");
+    let label = restate_output_json::<String>(&output).unwrap_or_else(|| {
+        panic!(
+            "the probe returns its winner: {:?}",
+            restate_error_message(&output)
+        )
+    });
+    (label, output)
+}
+
+/// The calls and one-way sends a redrive's output records, by message type.
+fn issued_calls(output: &[u8]) -> Vec<u16> {
+    restate_recorded_commands(output)
+        .expect("decode the redrive's commands")
+        .into_iter()
+        .map(|command| command.message_type)
+        .filter(|ty| matches!(*ty, CALL_COMMAND | ONE_WAY_CALL_COMMAND))
+        .collect()
+}
+
 #[tokio::test]
 pub(super) async fn a_process_rank_wait_race_takes_the_first_recorded_completion() {
-    assert_both_orders("rank").await;
+    let (notified_first, notified_output) = rank_race_with(FirstCompletion::Guarded).await;
+    assert_eq!(
+        notified_first, "completed",
+        "the notification completed first, so it wins"
+    );
+    assert!(
+        issued_calls(&notified_output).is_empty(),
+        "a won notification calls and sends nothing"
+    );
+    let (promise_first, promise_output) = rank_race_with(FirstCompletion::Promise).await;
+    assert_eq!(
+        promise_first, "process_cancelled",
+        "the cancel promise completed first, so it wins"
+    );
+    assert_eq!(
+        issued_calls(&promise_output),
+        vec![ONE_WAY_CALL_COMMAND],
+        "the lost subscription is dropped with one one-way unsubscribe"
+    );
 }

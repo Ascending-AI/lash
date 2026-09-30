@@ -710,11 +710,6 @@ pub trait LashDurableWaitRegistry {
     async fn fence_cancel_decided(
         call: Call<RestateDurableWaitCancelDecidedRequest>,
     ) -> HandlerResult<Reply<()>>;
-    /// Wake any current waiter and retain this resolution for every later
-    /// registration, even when the wait workflow had an earlier notification.
-    async fn retain_resolution(
-        call: Call<RestateDurableWaitResolveRequest>,
-    ) -> HandlerResult<Reply<()>>;
     async fn cancel_all(call: Call<()>) -> HandlerResult<Reply<()>>;
     async fn revoke_all(call: Call<()>) -> HandlerResult<Reply<()>>;
     /// [`revoke_all`](Self::revoke_all) only when no durable wait or awakeable
@@ -1298,40 +1293,6 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             ctx.clear(&durable_wait_index_resolution_key(&address));
             return Ok(Reply::at(wire, ()));
         }
-        retain_turn_wait_preimage(&ctx, object.writer, &request.key, &address);
-        object_state::set_stamped(
-            &ctx,
-            &durable_wait_index_resolution_key(&address),
-            object.writer,
-            request.resolution,
-        );
-        if !matches!(request.key.scope, ExecutionScope::Turn { .. }) {
-            ctx.clear(&durable_wait_index_state_key(&address));
-        }
-        Ok(Reply::at(wire, ()))
-    }
-
-    async fn retain_resolution(
-        &self,
-        ctx: ObjectContext<'_>,
-        call: Call<RestateDurableWaitResolveRequest>,
-    ) -> HandlerResult<Reply<()>> {
-        let (wire, request) = call.open()?;
-        let object = self.admit(&ctx).await?;
-        let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
-        let _metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
-        let workflow_key = address.workflow_key.clone();
-        let replay_key = request.key.key_id.clone();
-        self.namespace
-            .durable_wait_workflow(&ctx, workflow_key)
-            .resolve(request.clone())
-            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
-            .call()
-            .await?;
-        // Retirement is a fence, not another first-write notification. Keep
-        // it in the index even when the workflow promise already held READY,
-        // RANK, CANCEL, or ADMIT so a later registration cannot park or revive
-        // the pre-retirement terminal.
         retain_turn_wait_preimage(&ctx, object.writer, &request.key, &address);
         object_state::set_stamped(
             &ctx,

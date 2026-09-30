@@ -4,8 +4,9 @@
 
 Accepted and implemented. Restate is the only effect engine
 ([ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)):
-the group authority this ADR names is the Restate `EffectGroupIndex` object and
-its durable waits, and the SQL stores hold storage only. A process opener is
+the group authority this ADR names is the Restate `EffectGroupIndex` object,
+which also answers the group's own notifications (§2), and the SQL stores hold
+storage only. A process opener is
 its minted `ProcessId`
 ([ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md)).
 Queued-work admission and recovery are
@@ -205,12 +206,38 @@ covers tracked `call` children, and it is never the sole close protocol (§4).
 
 **The dispatch registers its children in one index step.** It issues every child
 call, then records the full position-to-invocation map and moves the group to
-ready in one exclusive index handler, which resolves every ADMIT wake and READY
-together; nothing is awaited before that step. ADMIT is notification only: a
-child is admitted by a fresh read that finds its own recorded id. The adopted
-dispatcher's id is kept, so a retirement before registration cancels the
-dispatch and the child calls it tracks, and a retired group is never made
-ready.
+ready in one exclusive index handler, which answers every READY subscriber —
+the opener's and each waiting child's — together; nothing is awaited before
+that step. READY is notification only for a child: a child is admitted by a
+fresh read that finds its own recorded id. The adopted dispatcher's id is kept,
+so a retirement before registration cancels the dispatch and the child calls it
+tracks, and a retired group is never made ready.
+
+**The group index answers the group's own notices.** READY (the group left
+preparing, or was refused), RANK (a rank is inside the seated prefix, §5), the
+§5 barrier (`Drained`: every committed sibling ranked below a rank has seated)
+and a child's cancel fact (its cancel was decided, or it seated) are facts of
+the index record, so the index owns their delivery; none of them goes through
+the generic durable-wait services. A waiter creates an awakeable in its own
+journal and subscribes it under its notice with the index's exclusive
+`subscribe`. The index answers from its record at once when the notice already
+holds, and otherwise records the subscriber before any later transition can
+run. Every handler whose state change can make a notice true — the
+registration, a refusal, a seat, a close, a retirement — stores its record,
+then the subscribers it keeps, then completes the rest from its own journal: a
+completion is a command of that invocation, never a call to another service,
+so a seat invokes nothing. A crash between the stored record and the
+completions replays the same stored list and completes the same subscribers.
+Every answer is monotonic under the index's transitions, and retirement answers
+every outstanding subscriber `Retired` and every later one from the tombstone.
+A subscription is idempotent by awakeable; a waiter whose other race arm won —
+the turn-cancel gate or the process cancel promise — withdraws it with a
+one-way `unsubscribe`, and a group holds a bounded number of subscribers, past
+which it refuses a subscription typed. A notification is a hint to re-read the
+authority, never a permission of its own. A child's step-boundary cancel read
+is the index's shared `child_cancel` read; the turn's cancel gate and the
+waits the group does not own — a tool's completion key, a wait child's event —
+stay on the durable-wait services.
 
 ---
 
@@ -463,8 +490,9 @@ have seated, or retirement releases the wait; a child never waits on a sibling
 that has not committed. That is the order in which the group's children may emit
 nested semantic commands, and therefore the order a replay must reproduce. The
 barrier names every unseated committed sibling ranked below the child, and the
-waits on their drained wakes are issued together, one round trip whatever the
-barrier's size; the `drain_barrier_is_transitive` law pins it. A child that
+child waits at it with one `Drained` subscription at the index, whatever the
+barrier's size, which the seat that lifts the barrier answers (§2); the
+`drain_barrier_is_transitive` law pins it. A child that
 declared no intent and won its own commit neither reads the barrier nor waits at
 its seat. A child whose commit answer is `AlreadyCommitted` — the point was won by
 an earlier invocation, whose declarations this one cannot know — waits at the

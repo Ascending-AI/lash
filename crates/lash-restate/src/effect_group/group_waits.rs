@@ -1,65 +1,18 @@
-//! The durable-wait writes the effect-group index issues: resolving a group's
-//! own wake waits, closing a cancel-decided child's completion key, and
-//! releasing a cancel-decided wait child's wait.
+//! The external durable-wait writes a cancel decision seals: closing a
+//! cancel-decided child's completion key and releasing a cancel-decided wait
+//! child's own wait. Both are waits the group does not own — a tool's
+//! completion key and a wait child's event — so they stay on the durable-wait
+//! services; the group's own notifications do not (FIG-4344).
 //!
 //! Split from the index handlers so the handler file keeps its line budget;
 //! both are calls from an index handler into `LashDurableWaitRegistry`.
 
 use super::*;
-use crate::durable_wait::RestateDurableWaitCancelDecidedRequest;
-
-pub(super) fn wait_resolution(
-    value: EffectGroupWaitResolution,
-) -> Result<Resolution, TerminalError> {
-    serde_json::to_value(value)
-        .map(Resolution::Ok)
-        .map_err(|error| TerminalError::new(format!("serialize effect-group wake: {error}")))
-}
-
-pub(super) async fn resolve_group_wait(
-    ctx: &ObjectContext<'_>,
-    namespace: &crate::RestateNamespace,
-    scope: &ExecutionScope,
-    group_key: &str,
-    kind: EffectGroupWaitKind<'_>,
-    value: EffectGroupWaitResolution,
-) -> Result<(), TerminalError> {
-    resolve_group_waits(ctx, namespace, scope, group_key, [(kind, value)]).await
-}
-
-/// Resolves each wait with its own resolution, every call issued before any
-/// is awaited: one round trip and one suspension cover the lot rather than
-/// one per wait, whatever the group's width (FIG-4088) or the number of
-/// wakes one handler owes (FIG-4269). The calls are issued and awaited in
-/// `waits`' order, so the journal is the same on every replay.
-pub(super) async fn resolve_group_waits<'k>(
-    ctx: &ObjectContext<'_>,
-    namespace: &crate::RestateNamespace,
-    scope: &ExecutionScope,
-    group_key: &str,
-    waits: impl IntoIterator<Item = (EffectGroupWaitKind<'k>, EffectGroupWaitResolution)>,
-) -> Result<(), TerminalError> {
-    let mut calls = Vec::new();
-    for (kind, value) in waits {
-        let key = group_wait_key(scope, group_key, kind)?;
-        let replay_key = key.key_id.clone();
-        let address = RestateDurableWaitAddress::for_key(&key);
-        calls.push(
-            namespace
-                .durable_wait_registry(ctx, durable_wait_index_object_key(&address))
-                .resolve(RestateDurableWaitResolveRequest {
-                    key,
-                    resolution: wait_resolution(value)?,
-                })
-                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
-                .call(),
-        );
-    }
-    for call in calls {
-        call.await?;
-    }
-    Ok(())
-}
+use crate::durable_wait::{
+    RestateDurableWaitAddress, RestateDurableWaitCancelDecidedRequest,
+    RestateDurableWaitResolveRequest, durable_wait_index_object_key,
+};
+use lash_core::Resolution;
 
 /// Closes the completion key of every child in `positions` that is a
 /// deferrable tool child, because its cancel decision is about to be recorded

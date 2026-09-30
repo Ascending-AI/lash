@@ -228,16 +228,20 @@ pub(super) struct RecordingContext {
     revoked_sessions: Mutex<HashSet<SessionId>>,
     pub(super) session_revocation_checks: AtomicUsize,
     pub(super) turn_cancel_gate: TestTurnCancelGate,
-    /// What the index's `drain_blockers` answers; `Admitted` when unset.
-    pub(super) drain_blockers:
-        Mutex<Option<Result<crate::effect_group::EffectGroupDrainBlockersResponse, TerminalError>>>,
-    /// Every effect-group wake awaited, in order, and what each resolves to.
-    pub(super) group_waits: Mutex<Vec<RestateDurableWaitAwaitRequest>>,
-    /// The turn-cancel gate each effect-group wake raced, when it raced one.
-    pub(super) group_wait_turn_cancels: Mutex<Vec<RestateDurableWaitAwaitRequest>>,
+    /// Every effect-group notice awaited, in order, by group.
+    pub(super) group_notices: Mutex<Vec<(String, crate::effect_group::EffectGroupNotice)>>,
+    /// The turn-cancel gate each effect-group notice raced, when it raced one.
+    pub(super) group_notice_turn_cancels: Mutex<Vec<RestateDurableWaitAwaitRequest>>,
     /// What the index's `read_rank` answers; unregistered when unset.
     pub(super) group_rank_read: Mutex<Option<crate::effect_group::EffectGroupReadRankResponse>>,
-    pub(super) group_wait_resolution: Mutex<Option<Resolution>>,
+    /// What every awaited notice answers; the raced turn gate wins when unset,
+    /// and an unraced notice is then answered `Drained`.
+    pub(super) group_notice_answer:
+        Mutex<Option<Result<crate::effect_group::EffectGroupNotification, TerminalError>>>,
+    /// Each group child's cancel fact as its index records it, by group and
+    /// position; a child absent from it has none.
+    pub(super) group_child_cancel_facts:
+        Mutex<HashMap<(String, usize), crate::effect_group::EffectGroupNotification>>,
 }
 
 #[derive(Default)]
@@ -544,31 +548,6 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         Box::pin(async { Ok(None) })
     }
 
-    fn effect_group_drain_blockers<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        _group_key: String,
-        _rank: u64,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        crate::effect_group::EffectGroupDrainBlockersResponse,
-                        TerminalError,
-                    >,
-                > + Send
-                + 'run,
-        >,
-    >
-    where
-        'ctx: 'run,
-    {
-        let answer = self.drain_blockers.lock_recover().clone().unwrap_or(Ok(
-            crate::effect_group::EffectGroupDrainBlockersResponse::Admitted,
-        ));
-        Box::pin(async move { answer })
-    }
-
     fn effect_group_read_rank<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
@@ -594,28 +573,59 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         })
     }
 
-    fn await_effect_group_wait<'run>(
+    fn effect_group_child_cancel<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
-        request: RestateDurableWaitAwaitRequest,
-        _replay_key: String,
-        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        _process_cancel: ProcessCancelRace,
-    ) -> TestTurnCancelRaceFuture<'run, Resolution>
+        group_key: String,
+        position: usize,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        Option<crate::effect_group::EffectGroupNotification>,
+                        TerminalError,
+                    >,
+                > + Send
+                + 'run,
+        >,
+    >
     where
         'ctx: 'run,
     {
-        self.group_waits.lock_recover().push(request);
+        let fact = self
+            .group_child_cancel_facts
+            .lock_recover()
+            .get(&(group_key, position))
+            .cloned();
+        Box::pin(async move { Ok(fact) })
+    }
+
+    fn await_effect_group_notice<'run>(
+        &'run self,
+        _namespace: &'run crate::RestateNamespace,
+        group_key: String,
+        notice: crate::effect_group::EffectGroupNotice,
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        _process_cancel: ProcessCancelRace,
+    ) -> TestTurnCancelRaceFuture<'run, crate::effect_group::EffectGroupNotification>
+    where
+        'ctx: 'run,
+    {
+        self.group_notices.lock_recover().push((group_key, notice));
+        let raced = turn_cancel.is_some();
         if let Some(turn_cancel) = turn_cancel {
-            self.group_wait_turn_cancels
+            self.group_notice_turn_cancels
                 .lock_recover()
                 .push(turn_cancel);
         }
-        let resolution = self.group_wait_resolution.lock_recover().clone();
+        let answer = self.group_notice_answer.lock_recover().clone();
         Box::pin(async move {
-            Ok(match resolution {
-                Some(resolution) => RestateTurnCancelRaceOutcome::Completed(resolution),
-                None => RestateTurnCancelRaceOutcome::TurnCancelled,
+            Ok(match answer {
+                Some(answer) => RestateTurnCancelRaceOutcome::Completed(answer?),
+                None if raced => RestateTurnCancelRaceOutcome::TurnCancelled,
+                None => RestateTurnCancelRaceOutcome::Completed(
+                    crate::effect_group::EffectGroupNotification::Drained,
+                ),
             })
         })
     }
@@ -1028,6 +1038,10 @@ pub(super) struct ReplayableRecordingContext {
     pub(super) append_missing_on_replay: AtomicBool,
     pub(super) peek_records: Mutex<Vec<Option<Resolution>>>,
     pub(super) peek_cursor: AtomicUsize,
+    /// What each journaled read of a group child's cancel fact answered.
+    pub(super) child_cancel_records:
+        Mutex<Vec<Option<crate::effect_group::EffectGroupNotification>>>,
+    pub(super) child_cancel_cursor: AtomicUsize,
     /// Live process cancellation state, standing in for the resolved
     /// `process_cancel_requested` workflow promise (FIG-3149).
     pub(super) process_cancel_committed: AtomicBool,
@@ -1819,6 +1833,7 @@ impl ReplayableRecordingContext {
         self.replaying.store(true, Ordering::SeqCst);
         self.append_missing_on_replay.store(false, Ordering::SeqCst);
         self.peek_cursor.store(0, Ordering::SeqCst);
+        self.child_cancel_cursor.store(0, Ordering::SeqCst);
         self.process_cancel_peek_cursor.store(0, Ordering::SeqCst);
         self.process_cancel_race_cursor.store(0, Ordering::SeqCst);
     }
@@ -1827,6 +1842,7 @@ impl ReplayableRecordingContext {
         self.replaying.store(true, Ordering::SeqCst);
         self.append_missing_on_replay.store(true, Ordering::SeqCst);
         self.peek_cursor.store(0, Ordering::SeqCst);
+        self.child_cancel_cursor.store(0, Ordering::SeqCst);
         self.process_cancel_peek_cursor.store(0, Ordering::SeqCst);
         self.process_cancel_race_cursor.store(0, Ordering::SeqCst);
     }
@@ -2410,6 +2426,49 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             self.record_process_cancel_race(process_cancel, &outcome);
             outcome
         })
+    }
+
+    fn effect_group_child_cancel<'run>(
+        &'run self,
+        _namespace: &'run crate::RestateNamespace,
+        group_key: String,
+        position: usize,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        Option<crate::effect_group::EffectGroupNotification>,
+                        TerminalError,
+                    >,
+                > + Send
+                + 'run,
+        >,
+    >
+    where
+        'ctx: 'run,
+    {
+        let fact = if self.replaying.load(Ordering::SeqCst) {
+            let position = self.child_cancel_cursor.fetch_add(1, Ordering::SeqCst);
+            self.child_cancel_records
+                .lock_recover()
+                .get(position)
+                .cloned()
+                .ok_or_else(|| {
+                    TerminalError::new(format!(
+                        "missing recorded group-child cancel read at position {position}"
+                    ))
+                })
+        } else {
+            let fact = self
+                .events
+                .group_child_cancel_facts
+                .lock_recover()
+                .get(&(group_key, position))
+                .cloned();
+            self.child_cancel_records.lock_recover().push(fact.clone());
+            Ok(fact)
+        };
+        Box::pin(async move { fact })
     }
 
     fn peek_event<'run>(

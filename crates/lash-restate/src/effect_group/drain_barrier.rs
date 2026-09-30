@@ -1,41 +1,9 @@
-//! The §5 barrier on the engine's own wake: which lower-ranked committed
-//! siblings still owe their seats, the drained wake each resolves when it
-//! seats, and what that wake's resolution means to the drain parked on it. A
-//! held drain parks on those siblings' wakes instead of polling the index.
+//! The §5 barrier as the index sees it: which lower-ranked committed siblings
+//! still owe their seats. A held drain subscribes to the barrier's
+//! `Drained` notice, which the index answers once none is left (FIG-4344).
 //! Split from the index handlers so the handler file keeps its line budget.
 
 use super::*;
-
-/// The durable wake the child at `position` resolves when it seats its
-/// settlement: what a §5 barrier parks on while that lower-commit sibling
-/// finishes its drain.
-pub(crate) fn drained_wait_request(
-    scope: &ExecutionScope,
-    group_key: &str,
-    position: usize,
-) -> Result<RestateDurableWaitAwaitRequest, RuntimeEffectControllerError> {
-    group_wait_key(scope, group_key, EffectGroupWaitKind::Drained(position))
-        .map(|key| RestateDurableWaitAwaitRequest {
-            key,
-            deadline: None,
-        })
-        .map_err(|error| group_shape_error(error.to_string()))
-}
-
-/// Check what a §5 barrier's drained wake resolved to: the blocking sibling
-/// seated its settlement, or the group retired, which lifts every barrier.
-pub(crate) fn drained_wait_lifted(
-    group_key: &str,
-    position: usize,
-    resolution: Resolution,
-) -> Result<(), RuntimeEffectControllerError> {
-    match decode_wait_resolution(resolution)? {
-        EffectGroupWaitResolution::Drained | EffectGroupWaitResolution::Retired => Ok(()),
-        other => Err(group_shape_error(format!(
-            "effect group {group_key} drained wake for child {position} resolved as {other:?}"
-        ))),
-    }
-}
 
 /// Every committed sibling ranked below `below` that still owes its seat —
 /// the §5 barrier as the index sees it (FIG-4308).
@@ -43,10 +11,12 @@ pub(crate) fn drained_wait_lifted(
 /// Every one is named, not only the last: a child that declared no intent and
 /// won its own commit seats without waiting on anyone, so its seat covers no
 /// lower sibling, and a barrier that named only the last blocker would lift
-/// while a lower one was still unseated. The waiter issues these waits
-/// together, so the barrier costs one round trip whatever its size. The
-/// barrier lifts once all of them have seated, or retirement releases the
-/// wait. A cancel-decided sibling never blocks: its decision seats it.
+/// while a lower one was still unseated. The barrier lifts once all of them
+/// have seated, or retirement releases the wait. Once empty it stays empty: a
+/// child's barrier is asked at its own reserved rank, and a later commit
+/// reserves a higher one; the closing barrier past the last rank is asked
+/// after the close decided every undecided child. A cancel-decided sibling
+/// never blocks: its decision seats it.
 pub(super) fn blocking_positions(live: &EffectGroupStateLiveRecord, below: u64) -> Vec<usize> {
     let mut blockers = live
         .commit_states
@@ -74,7 +44,6 @@ mod tests {
                 wake: lash_core::GroupWakePolicy::All,
                 loser_disposition: LoserPolicy::RunToCompletion,
                 replay_keys: (0..6).map(|position| format!("child-{position}")).collect(),
-                wait_scope: ExecutionScope::runtime_operation("group"),
                 opener: lash_core::AdmittedScope::turn("session", "turn"),
             },
             next_rank: 1,

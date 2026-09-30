@@ -540,8 +540,6 @@ lash_clients! {
             -> crate::durable_wait::RestateDurableWaitResolveResponse;
         fence_cancel_decided(crate::durable_wait::RestateDurableWaitCancelDecidedRequest)
             -> ();
-        retain_resolution(crate::durable_wait::RestateDurableWaitResolveRequest)
-            -> ();
         cancel_all() -> ();
         revoke_all() -> ();
         begin_effect(crate::durable_wait::RestateDurableWaitEffectRequest) -> bool;
@@ -595,8 +593,6 @@ lash_clients! {
             -> crate::effect_group::EffectGroupCommitChildResponse;
         admit_semantic(crate::effect_group::EffectGroupAdmitSemanticRequest)
             -> crate::effect_group::EffectGroupAdmitSemanticResponse;
-        drain_blockers(crate::effect_group::EffectGroupDrainBlockersRequest)
-            -> crate::effect_group::EffectGroupDrainBlockersResponse;
         record_settlement(crate::effect_group::EffectGroupRecordSettlementRequest)
             -> crate::effect_group::EffectGroupRecordSettlementResponse;
         read_rank(crate::effect_group::EffectGroupReadRankRequest)
@@ -606,6 +602,11 @@ lash_clients! {
         retire() -> crate::effect_group::EffectGroupRetireResponse;
         finish_retirement() -> crate::effect_group::EffectGroupFinishRetirementResponse;
         retirement_cancel() -> crate::effect_group::EffectGroupRetirementCancelResponse;
+        subscribe(crate::effect_group::EffectGroupSubscribeRequest)
+            -> crate::effect_group::EffectGroupSubscribeResponse;
+        unsubscribe(crate::effect_group::EffectGroupUnsubscribeRequest) -> ();
+        child_cancel(crate::effect_group::EffectGroupChildCancelRequest)
+            -> Option<crate::effect_group::EffectGroupNotification>;
     }
 
     /// Calls to one `EffectGroupPayload` object.

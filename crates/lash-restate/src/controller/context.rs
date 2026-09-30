@@ -40,11 +40,13 @@ use crate::durable_wait::{
     retire_turn_cancel_gate,
 };
 use crate::effect_group::{
-    EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupCloseRequest,
-    EffectGroupCloseResponse, EffectGroupCommitChildRequest, EffectGroupCommitChildResponse,
-    EffectGroupDispatchRequest, EffectGroupDrainBlockersRequest, EffectGroupDrainBlockersResponse,
-    EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadGetResponse,
-    EffectGroupProbeResponse, EffectGroupReadRankRequest, EffectGroupReadRankResponse,
+    EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse,
+    EffectGroupChildCancelRequest, EffectGroupCloseRequest, EffectGroupCloseResponse,
+    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupDispatchRequest,
+    EffectGroupNotice, EffectGroupNotification, EffectGroupOpenRequest, EffectGroupOpenResponse,
+    EffectGroupPayloadGetResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
+    EffectGroupReadRankResponse, EffectGroupSubscribeRequest, EffectGroupSubscribeResponse,
+    EffectGroupUnsubscribeRequest,
 };
 use crate::process::{
     RestateProcessCancelRequest, RestateProcessWorkflowInput, RestateProcessWorkflowOutput,
@@ -60,8 +62,8 @@ mod index_calls;
 mod segment_wait;
 mod wake;
 pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
-pub(crate) use child_cancel::GroupChildCancelRace;
 use child_cancel::race_group_child_cancel;
+pub(crate) use child_cancel::{GroupChildCancelArm, GroupChildCancelRace};
 use segment_wait::race_signal_wait;
 pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome};
 #[cfg(test)]
@@ -776,39 +778,43 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
         unregistered_group_index("EffectGroupIndex/admit_semantic")
     }
 
-    /// The lower-commit siblings that still owe their settlement seats — the
-    /// durable §5 barrier read.
-    fn effect_group_drain_blockers<'run>(
+    /// A child's cancel fact as its group index records it: the
+    /// step-boundary read of a group child (FIG-4344).
+    fn effect_group_child_cancel<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
         _group_key: String,
-        _rank: u64,
-    ) -> crate::JournaledFuture<'run, EffectGroupDrainBlockersResponse>
+        _position: usize,
+    ) -> crate::JournaledFuture<'run, Option<EffectGroupNotification>>
     where
         'ctx: 'run,
     {
-        unregistered_group_index("EffectGroupIndex/drain_blockers")
+        unregistered_group_index("EffectGroupIndex/child_cancel")
     }
 
-    /// Await an effect group's wait (its readiness or one of its ranks),
-    /// raced against the turn's cancellation gate when `turn_cancel` names
-    /// one, exactly as a durable wait is (FIG-3672 P9). A wait that observes
-    /// no turn (a process body's rank wait) races the process segment's
-    /// durable cancel promise when `process_cancel` says so (FIG-3673).
-    fn await_effect_group_wait<'run>(
+    /// Await one of an effect group's own notices (FIG-4344): an awakeable of
+    /// this journal, subscribed at the group index, which answers an
+    /// already-true notice at once and otherwise completes the awakeable
+    /// itself. A wait on a turn races the turn's cancellation gate when
+    /// `turn_cancel` names one, exactly as a durable wait does (FIG-3672 P9);
+    /// a wait that observes no turn (a process body's rank wait) races the
+    /// process segment's durable cancel promise when `process_cancel` says
+    /// so (FIG-3673). A subscriber whose race the other arm won is dropped
+    /// with a one-way unsubscribe.
+    fn await_effect_group_notice<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
-        _request: RestateDurableWaitAwaitRequest,
-        _replay_key: String,
+        _group_key: String,
+        _notice: EffectGroupNotice,
         _turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         _process_cancel: ProcessCancelRace,
-    ) -> TurnCancelRaceFuture<'run, Resolution>
+    ) -> TurnCancelRaceFuture<'run, EffectGroupNotification>
     where
         'ctx: 'run,
     {
         Box::pin(async {
             Err(TerminalError::new(
-                "LashDurableWaitWorkflow/await_resolution is not registered",
+                "EffectGroupIndex/subscribe is not registered",
             ))
         })
     }
@@ -1503,72 +1509,103 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move { call.await.map(Reply::into_body) })
                 }
 
-                fn effect_group_drain_blockers<'run>(
+                fn effect_group_child_cancel<'run>(
                     &'run self,
                     namespace: &'run crate::RestateNamespace,
                     group_key: String,
-                    rank: u64,
-                ) -> crate::JournaledFuture<'run, EffectGroupDrainBlockersResponse>
+                    position: usize,
+                ) -> crate::JournaledFuture<'run, Option<EffectGroupNotification>>
                 where
                     'ctx: 'run,
                 {
                     let call = namespace.effect_group_state(self, group_key)
-                        .drain_blockers(EffectGroupDrainBlockersRequest { rank })
+                        .child_cancel(EffectGroupChildCancelRequest { position })
                         .call();
                     Box::pin(async move { call.await.map(Reply::into_body) })
                 }
 
-                fn await_effect_group_wait<'run>(
+                fn await_effect_group_notice<'run>(
                     &'run self,
                     namespace: &'run crate::RestateNamespace,
-                    request: RestateDurableWaitAwaitRequest,
-                    replay_key: String,
+                    group_key: String,
+                    notice: EffectGroupNotice,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
                     process_cancel: ProcessCancelRace,
-                ) -> TurnCancelRaceFuture<'run, Resolution>
+                ) -> TurnCancelRaceFuture<'run, EffectGroupNotification>
                 where
                     'ctx: 'run,
                 {
                     Box::pin(async move {
-                        let address = RestateDurableWaitAddress::for_key(&request.key);
-                        let call = namespace.durable_wait_workflow(self, address.workflow_key)
-                            .await_resolution(request.into())
-                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                        let Some(turn_cancel) = turn_cancel else {
-                            // The rank wait's CallCommand, then the promise's.
-                            let wait = erase_gate_wait(call.call());
-                            let promise = match process_cancel {
-                                ProcessCancelRace::Raced => {
-                                    process_cancel_promise!($promises, $context, 'run, self)
+                        // The awakeable first, then its subscription: the
+                        // index completes it only after it recorded it.
+                        let (awakeable_id, awakeable) =
+                            self.awakeable::<Json<EffectGroupNotification>>();
+                        let subscribed = namespace
+                            .effect_group_state(self, group_key.clone())
+                            .subscribe(EffectGroupSubscribeRequest {
+                                notice,
+                                awakeable_id: awakeable_id.clone(),
+                            })
+                            .call()
+                            .await?
+                            .into_body();
+                        match subscribed {
+                            EffectGroupSubscribeResponse::Notified { notification } => {
+                                return Ok(RestateTurnCancelRaceOutcome::Completed(notification));
+                            }
+                            EffectGroupSubscribeResponse::Refused { outstanding } => {
+                                return Err(crate::effect_group::subscription_refused(
+                                    &group_key,
+                                    outstanding,
+                                ));
+                            }
+                            EffectGroupSubscribeResponse::Subscribed => {}
+                        }
+                        let wait = erase_gate_wait(awakeable);
+                        let outcome = match turn_cancel {
+                            None => {
+                                let promise = match process_cancel {
+                                    ProcessCancelRace::Raced => {
+                                        process_cancel_promise!($promises, $context, 'run, self)
+                                    }
+                                    ProcessCancelRace::NotRaced => None,
+                                };
+                                match promise {
+                                    Some(promise) => race_process_cancel(promise, wait).await?,
+                                    None => RestateTurnCancelRaceOutcome::Completed(wait.await?),
                                 }
-                                ProcessCancelRace::NotRaced => None,
-                            };
-                            let outcome = match promise {
-                                Some(promise) => race_process_cancel(promise, wait).await?,
-                                None => RestateTurnCancelRaceOutcome::Completed(wait.await?),
-                            };
-                            return Ok(outcome.map(Reply::into_body));
+                            }
+                            Some(turn_cancel) => {
+                                let Some(session_id) =
+                                    turn_cancel.key.scope.session_id().cloned()
+                                else {
+                                    return Err(TerminalError::new(
+                                        "turn cancellation gate is missing its session id",
+                                    ));
+                                };
+                                // The subscription's awakeable, then the
+                                // gate's awakeable, then its registration: the
+                                // geometry every guarded durable wait has.
+                                race_turn_cancel_gate(
+                                    self,
+                                    namespace,
+                                    &SessionId::from(session_id),
+                                    turn_cancel,
+                                    || gate_awakeable(self),
+                                    move || wait,
+                                )
+                                .await?
+                            }
                         };
-                        let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
-                        else {
-                            return Err(TerminalError::new(
-                                "turn cancellation gate is missing its session id",
-                            ));
-                        };
-                        // The rank wait's CallCommand, then the gate's
-                        // awakeable, then its registration: the geometry every
-                        // guarded durable wait already has.
-                        let wait = erase_gate_wait(call.call());
-                        Ok(race_turn_cancel_gate(
-                            self,
-                            namespace,
-                            &SessionId::from(session_id),
-                            turn_cancel,
-                            || gate_awakeable(self),
-                            move || wait,
-                        )
-                        .await?
-                        .map(Reply::into_body))
+                        if !matches!(outcome, RestateTurnCancelRaceOutcome::Completed(_)) {
+                            // The other arm won: drop the subscriber, off the
+                            // critical path.
+                            let _unsubscribe = namespace
+                                .effect_group_state(self, group_key)
+                                .unsubscribe(EffectGroupUnsubscribeRequest { awakeable_id })
+                                .send();
+                        }
+                        Ok(outcome.map(Json::into_inner))
                     })
                 }
 

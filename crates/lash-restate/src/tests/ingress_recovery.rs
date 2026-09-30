@@ -207,11 +207,8 @@ fn child_watch(ingress: &Arc<ScriptedIngress>) -> Arc<dyn lash_core::GroupChildC
     crate::effect_group::GroupChildCancel::new(
         RestateIngressClient::new(ingress.connection()),
         crate::RestateNamespace::default(),
-        test_restate_await_event_key(
-            &ExecutionScope::process(ProcessId::fixture("faulting-child-cancel")),
-            AwaitEventWaitIdentity::TurnTerminal,
-        )
-        .expect("valid cancel wait key"),
+        "faulting-child-cancel".to_string(),
+        0,
     )
     .watch()
 }
@@ -269,7 +266,7 @@ async fn child_cancel_watch_succeeds_on_the_eighth_attempt() {
     let ingress = ScriptedIngress::new(
         (0..7)
             .map(|_| response(503, "ingress unavailable"))
-            .chain([reply(Resolution::Cancelled)])
+            .chain([reply(crate::effect_group::EffectGroupNotification::Cancel)])
             .collect(),
     );
     let watch = child_watch(&ingress);
@@ -287,7 +284,7 @@ async fn child_cancel_watch_reattaches_only_for_attach_timeouts() {
                 Err(LlmTransportError::new("attach ceiling elapsed")
                     .with_kind(lash_core::ProviderFailureKind::Timeout))
             })
-            .chain([reply(Resolution::Cancelled)])
+            .chain([reply(crate::effect_group::EffectGroupNotification::Cancel)])
             .collect(),
     );
     let watch = child_watch(&ingress);
@@ -304,10 +301,9 @@ async fn child_cancel_watch_reattaches_only_for_attach_timeouts() {
 
 #[tokio::test(start_paused = true)]
 async fn child_cancel_watch_settled_never_cancels_or_reattaches() {
-    let ingress = ScriptedIngress::new(vec![reply(Resolution::Ok(
-        serde_json::to_value(crate::effect_group::EffectGroupWaitResolution::Settled)
-            .expect("encode settled"),
-    ))]);
+    let ingress = ScriptedIngress::new(vec![reply(
+        crate::effect_group::EffectGroupNotification::Settled,
+    )]);
     let watch = child_watch(&ingress);
     assert!(
         tokio::time::timeout(Duration::from_secs(60), watch.cancelled())
@@ -382,15 +378,11 @@ async fn start_tool_child(
         runs: runs.clone(),
         dropped: dropped.clone(),
     });
-    let key = test_restate_await_event_key(
-        &ExecutionScope::process(ProcessId::fixture("recorded-tool-child")),
-        AwaitEventWaitIdentity::TurnTerminal,
-    )
-    .expect("child cancel key");
     let child = crate::effect_group::GroupChildCancel::new(
         RestateIngressClient::new(ingress.connection()),
         crate::RestateNamespace::default(),
-        key,
+        "recorded-tool-child".to_string(),
+        0,
     );
     let journal = Arc::new(ReplayableRecordingContext::default());
     let controller = Arc::new(
@@ -510,13 +502,8 @@ async fn child_cancel_watch_unregistered_target_is_typed_and_terminal() {
     let child = crate::effect_group::GroupChildCancel::new(
         RestateIngressClient::new(ingress.connection()),
         crate::RestateNamespace::default(),
-        test_restate_await_event_key(
-            &ExecutionScope::process(ProcessId::fixture("unregistered-child-cancel")),
-            AwaitEventWaitIdentity::Custom {
-                key: "cancel".to_string(),
-            },
-        )
-        .expect("valid cancel wait key"),
+        "unregistered-child-cancel".to_string(),
+        0,
     );
 
     let error = child

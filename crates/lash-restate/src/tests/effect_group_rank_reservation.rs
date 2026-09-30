@@ -21,8 +21,8 @@ use crate::RestateIngressClient;
 use crate::effect_group::{
     EffectGroupAdmissionRequest, EffectGroupAdmissionResponse, EffectGroupAdoptRequest,
     EffectGroupChildRequest, EffectGroupCloseRequest, EffectGroupCloseResponse,
-    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupDrainBlockersRequest,
-    EffectGroupDrainBlockersResponse, EffectGroupOpenRequest, EffectGroupOpenResponse,
+    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupNotice,
+    EffectGroupNotification, EffectGroupOpenRequest, EffectGroupOpenResponse,
     EffectGroupProbeAdoptResponse, EffectGroupReadRankRequest, EffectGroupReadRankResponse,
     EffectGroupRecordSettlementRequest, EffectGroupRecordSettlementResponse,
     EffectGroupRegisterDispatchRequest, EffectGroupRegisterDispatchResponse,
@@ -35,15 +35,15 @@ use super::effect_group_conformance::{
 };
 
 /// One group of witness children and the index calls the laws make on it.
-struct Group {
-    ingress: RestateIngressClient,
-    key: String,
+pub(super) struct Group {
+    pub(super) ingress: RestateIngressClient,
+    pub(super) key: String,
     children: Vec<RuntimeEffectEnvelope>,
     shape: EffectGroupShape,
 }
 
 impl Group {
-    async fn open(ingress: RestateIngressClient, label: &str, width: usize) -> Self {
+    pub(super) async fn open(ingress: RestateIngressClient, label: &str, width: usize) -> Self {
         let key = witness_key(label);
         let children = (0..width)
             .map(|position| witness_child(&key, position))
@@ -75,7 +75,19 @@ impl Group {
         }
     }
 
-    async fn reopen(&self) {
+    /// A group the index holds no record of.
+    pub(super) fn unopened(ingress: RestateIngressClient, label: &str) -> Self {
+        let key = witness_key(label);
+        let shape = witness_shape(&key, &[]);
+        Self {
+            ingress,
+            key,
+            children: Vec::new(),
+            shape,
+        }
+    }
+
+    pub(super) async fn reopen(&self) {
         let reopened: EffectGroupOpenResponse = self
             .ingress
             .call_lash_object(
@@ -97,7 +109,7 @@ impl Group {
         );
     }
 
-    async fn commit(&self, position: usize) -> EffectGroupCommitChildResponse {
+    pub(super) async fn commit(&self, position: usize) -> EffectGroupCommitChildResponse {
         self.ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -111,7 +123,7 @@ impl Group {
             .expect("a child of the law commits")
     }
 
-    async fn seat(&self, position: usize) -> EffectGroupRecordSettlementResponse {
+    pub(super) async fn seat(&self, position: usize) -> EffectGroupRecordSettlementResponse {
         self.ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -126,7 +138,12 @@ impl Group {
             .expect("a child of the law seats")
     }
 
-    async fn read(&self, rank: u64, for_caller: bool, run: bool) -> EffectGroupReadRankResponse {
+    pub(super) async fn read(
+        &self,
+        rank: u64,
+        for_caller: bool,
+        run: bool,
+    ) -> EffectGroupReadRankResponse {
         self.ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -144,7 +161,7 @@ impl Group {
 
     /// The (rank, position) pairs a run read from `rank` serves, or `None`
     /// when the read is not served.
-    async fn run_from(&self, rank: u64) -> Option<Vec<(u64, usize)>> {
+    pub(super) async fn run_from(&self, rank: u64) -> Option<Vec<(u64, usize)>> {
         match self.read(rank, false, true).await {
             EffectGroupReadRankResponse::SettledRun { ranks } => Some(
                 ranks
@@ -157,24 +174,27 @@ impl Group {
         }
     }
 
-    async fn blockers(&self, rank: u64) -> Vec<usize> {
-        let answer: EffectGroupDrainBlockersResponse = self
-            .ingress
-            .call_lash_object(
-                "EffectGroupIndex",
+    /// The §5 barrier at `rank`, as the index's `Drained` notice answers it
+    /// within `within`: `None` while some committed sibling below it still
+    /// owes its seat.
+    pub(super) async fn barrier(
+        &self,
+        rank: u64,
+        within: Duration,
+    ) -> Option<EffectGroupNotification> {
+        tokio::time::timeout(
+            within,
+            super::effect_group_conformance::await_group_wait(
+                &self.ingress,
                 &self.key,
-                "drain_blockers",
-                &EffectGroupDrainBlockersRequest { rank },
-            )
-            .await
-            .expect("the law reads the barrier");
-        match answer {
-            EffectGroupDrainBlockersResponse::Admitted => Vec::new(),
-            EffectGroupDrainBlockersResponse::Blocked { positions, .. } => positions,
-        }
+                EffectGroupNotice::Drained { rank },
+            ),
+        )
+        .await
+        .ok()
     }
 
-    async fn close_cancel(&self) {
+    pub(super) async fn close_cancel(&self) {
         let closed: EffectGroupCloseResponse = self
             .ingress
             .call_lash_object(
@@ -190,7 +210,7 @@ impl Group {
         assert_eq!(closed, EffectGroupCloseResponse::Closed);
     }
 
-    async fn adopt(&self, dispatcher: &str) -> EffectGroupProbeAdoptResponse {
+    pub(super) async fn adopt(&self, dispatcher: &str) -> EffectGroupProbeAdoptResponse {
         self.ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -204,7 +224,7 @@ impl Group {
             .expect("the law's dispatcher adopts")
     }
 
-    async fn register(
+    pub(super) async fn register(
         &self,
         addresses: BTreeMap<usize, String>,
     ) -> EffectGroupRegisterDispatchResponse {
@@ -219,7 +239,11 @@ impl Group {
             .expect("the law's dispatch registers")
     }
 
-    async fn admit(&self, position: usize, invocation_id: &str) -> EffectGroupAdmissionResponse {
+    pub(super) async fn admit(
+        &self,
+        position: usize,
+        invocation_id: &str,
+    ) -> EffectGroupAdmissionResponse {
         self.ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -237,7 +261,7 @@ impl Group {
     /// A real, finished invocation that stands in for a dispatcher or a
     /// dispatched child: the index records its id, and a close or retirement
     /// may cancel it harmlessly.
-    async fn stand_in(&self, label: &str) -> String {
+    pub(super) async fn stand_in(&self, label: &str) -> String {
         self.ingress
             .send_lash_workflow(
                 "EffectGroupDispatch",
@@ -251,7 +275,7 @@ impl Group {
             .to_owned()
     }
 
-    async fn stand_in_ids(&self) -> BTreeMap<usize, String> {
+    pub(super) async fn stand_in_ids(&self) -> BTreeMap<usize, String> {
         let mut ids = BTreeMap::new();
         for position in 0..self.children.len() {
             ids.insert(position, self.stand_in(&position.to_string()).await);
@@ -259,7 +283,7 @@ impl Group {
         ids
     }
 
-    async fn adopt_stand_in(&self) {
+    pub(super) async fn adopt_stand_in(&self) {
         let dispatcher = self.stand_in("dispatcher").await;
         assert!(
             matches!(
@@ -272,7 +296,7 @@ impl Group {
 
     /// Adopts and registers stand-in children: a ready group whose recorded
     /// ids no real child invocation carries.
-    async fn make_ready(&self) -> BTreeMap<usize, String> {
+    pub(super) async fn make_ready(&self) -> BTreeMap<usize, String> {
         self.adopt_stand_in().await;
         let ids = self.stand_in_ids().await;
         assert_eq!(
@@ -282,7 +306,7 @@ impl Group {
         ids
     }
 
-    async fn retire(&self) {
+    pub(super) async fn retire(&self) {
         self.ingress
             .call_lash_workflow::<_, ()>("EffectGroupDispatch", &self.key, "retire", &self.key)
             .await
@@ -290,7 +314,7 @@ impl Group {
     }
 }
 
-fn rank_of(response: &EffectGroupCommitChildResponse) -> u64 {
+pub(super) fn rank_of(response: &EffectGroupCommitChildResponse) -> u64 {
     match response {
         EffectGroupCommitChildResponse::Committed { rank }
         | EffectGroupCommitChildResponse::AlreadyCommitted { rank, .. } => *rank,
@@ -530,8 +554,8 @@ async fn completed(server: &lash_restate_test::RestateTestServer, invocation: &s
 /// B (rank 2) committed with intents; C (rank 3) committed. B's invocation is
 /// gone and its successor is an expired attach: it takes the fallback seat,
 /// whose commit answer is `AlreadyCommitted`, so it waits at the §5 barrier
-/// for A before it publishes — main's behaviour, kept. C's barrier names A
-/// and B both, the closing barrier names every unseated child, and B's
+/// for A before it publishes — main's behaviour, kept. C's barrier holds for
+/// A and B both, the closing barrier holds for every unseated child, and B's
 /// refusal lands at its reserved rank.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_fallback_seat_over_an_earlier_commit_waits_for_every_lower_sibling() {
@@ -545,14 +569,14 @@ async fn a_fallback_seat_over_an_earlier_commit_waits_for_every_lower_sibling() 
         assert_eq!(rank_of(&group.commit(position).await), position as u64 + 1);
     }
     assert_eq!(
-        group.blockers(3).await,
-        vec![0, 1],
-        "C's barrier names every unseated lower commit, A and B"
+        group.barrier(3, Duration::from_millis(300)).await,
+        None,
+        "C's barrier holds while A and B owe their seats"
     );
     assert_eq!(
-        group.blockers(4).await,
-        vec![0, 1, 2],
-        "the closing barrier names every unseated commit"
+        group.barrier(4, Duration::from_millis(300)).await,
+        None,
+        "the closing barrier holds while any commit owes its seat"
     );
     let successor = send_attach_expired_child(&group, 1).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -586,9 +610,23 @@ async fn a_fallback_seat_over_an_earlier_commit_waits_for_every_lower_sibling() 
         other => panic!("B's fallback seat is its refusal, got {other:?}"),
     }
     assert_eq!(
-        group.blockers(4).await,
-        vec![2],
-        "only C still owes its seat"
+        group.barrier(3, Duration::from_secs(30)).await,
+        Some(EffectGroupNotification::Drained),
+        "A and B seated, so C's barrier lifted"
+    );
+    assert_eq!(
+        group.barrier(4, Duration::from_millis(300)).await,
+        None,
+        "C still owes its seat"
+    );
+    assert!(matches!(
+        group.seat(2).await,
+        EffectGroupRecordSettlementResponse::Recorded { rank: 3 }
+    ));
+    assert_eq!(
+        group.barrier(4, Duration::from_secs(30)).await,
+        Some(EffectGroupNotification::Drained),
+        "the closing barrier lifts once every commit seated"
     );
     group.retire().await;
     harness.finish().await;

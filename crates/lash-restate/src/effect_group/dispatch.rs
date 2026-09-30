@@ -268,28 +268,16 @@ impl EffectGroupDispatchImpl {
                 return Ok(());
             }
             EffectGroupAdmissionResponse::NotYetRecorded => {
-                let key = group_wait_key(
-                    &request.shape.wait_scope,
+                // The group's readiness is the child's admission notice
+                // (FIG-4344), answered by the index that records it.
+                await_group_notice!(
+                    &ctx,
+                    self.route.namespace(),
                     &request.group_key,
-                    EffectGroupWaitKind::Admit(request.position),
+                    EffectGroupNotice::Ready
                 )?;
-                let replay_key = key.key_id.clone();
-                let address = RestateDurableWaitAddress::for_key(&key);
-                self.route
-                    .namespace()
-                    .durable_wait_workflow(&ctx, address.workflow_key)
-                    .await_resolution(
-                        RestateDurableWaitAwaitRequest {
-                            key,
-                            deadline: None,
-                        }
-                        .into(),
-                    )
-                    .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
-                    .call()
-                    .await?;
-                // ADMIT is notification only. Authorization always comes from
-                // this one fresh, mapping-exact call after the wake.
+                // The notice is notification only. Authorization always comes
+                // from this one fresh, mapping-exact call after the wake.
                 self.route
                     .namespace()
                     .effect_group_state(&ctx, request.group_key.clone())
@@ -364,20 +352,16 @@ impl EffectGroupDispatchImpl {
             return Ok(());
         }
 
-        let cancel_key = group_wait_key(
-            &request.shape.wait_scope,
-            &request.group_key,
-            EffectGroupWaitKind::Cancel(request.shape.member_replay_key(request.position)?),
-        )?;
-        // The child's durable cancel fact (ADR 0105 §4, FIG-3904). No child
-        // races it at handler level: a wait child races it as a journaled
-        // arm, a tool child peeks it at its step boundaries and watches it
-        // inside each attempt, and an atomic child watches it inside its
-        // recorded body.
+        // The child's durable cancel fact (ADR 0105 §4, FIG-3904), which the
+        // group index holds (FIG-4344). No child races it at handler level: a
+        // wait child races it as a journaled arm, a tool child reads it at
+        // its step boundaries and watches it inside each attempt, and an
+        // atomic child watches it inside its recorded body.
         let child_cancel = GroupChildCancel::new(
             self.ingress.clone(),
             self.route.namespace().clone(),
-            cancel_key,
+            request.group_key.clone(),
+            request.position,
         );
 
         if let RuntimeEffectCommand::ToolInvocation { request: child } = &request.envelope.command {
@@ -920,55 +904,9 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
                 .call()
                 .await?;
         }
-        // Wait retirement is retained in the durable-wait index. This shared
-        // handler cannot mutate the index object directly without journaling
-        // the calls, so resolve every one before deleting payload bytes.
-        for (kind, resolution) in std::iter::once((
-            EffectGroupWaitKind::Ready,
-            EffectGroupWaitResolution::Retired,
-        ))
-        .chain((1..=cleanup.children() as u64).map(|rank| {
-            (
-                EffectGroupWaitKind::Rank(rank),
-                EffectGroupWaitResolution::Retired,
-            )
-        }))
-        .chain(cleanup.replay_keys.iter().map(|replay_key| {
-            (
-                EffectGroupWaitKind::Cancel(replay_key),
-                EffectGroupWaitResolution::Retired,
-            )
-        }))
-        .chain((0..cleanup.children()).map(|position| {
-            (
-                EffectGroupWaitKind::Admit(position),
-                EffectGroupWaitResolution::Retired,
-            )
-        }))
-        // A committed child that retirement cancelled before it seated never
-        // resolves its own drained wake; every sibling parked behind it at
-        // the §5 barrier — a dispatch workflow's settlement or a tool child's
-        // intent drain — is released here instead of stranding.
-        .chain((0..cleanup.children()).map(|position| {
-            (
-                EffectGroupWaitKind::Drained(position),
-                EffectGroupWaitResolution::Retired,
-            )
-        })) {
-            let key = group_wait_key(&cleanup.wait_scope, &group_key, kind)?;
-            let replay_key = key.key_id.clone();
-            let address = RestateDurableWaitAddress::for_key(&key);
-            self.route
-                .namespace()
-                .durable_wait_registry(&ctx, durable_wait_index_object_key(&address))
-                .retain_resolution(RestateDurableWaitResolveRequest {
-                    key,
-                    resolution: wait_resolution(resolution)?,
-                })
-                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
-                .call()
-                .await?;
-        }
+        // Every notice was answered `Retired` by the index's own `retire`,
+        // and a later subscriber is answered from the retired record, so
+        // nothing waits on the payload bytes this deletes (FIG-4344).
         for position in 0..cleanup.children() {
             self.route
                 .namespace()
@@ -1221,9 +1159,9 @@ async fn record_child_settlement(
 /// earlier invocation won the point, and this one cannot know what that commit
 /// declared, so it waits at the §5 barrier — every committed sibling below the
 /// reserved rank seats first, or retirement releases the wait — before it
-/// seats. The waits are issued together, and the last blocker's wake is
-/// durable, so a redrive of this handler re-reads the index's answer rather
-/// than racing it.
+/// seats. The barrier is one subscription the index answers (FIG-4344), and
+/// its awakeable is this invocation's, so a redrive of this handler waits on
+/// the same subscription rather than racing it.
 async fn commit_child_final(
     ctx: &SharedWorkflowContext<'_>,
     namespace: &crate::RestateNamespace,
@@ -1237,11 +1175,9 @@ async fn commit_child_final(
         .call()
         .await?
         .into_body();
-    let blocking_positions = match committed {
+    let rank = match committed {
         EffectGroupCommitChildResponse::Committed { .. } => return Ok(()),
-        EffectGroupCommitChildResponse::AlreadyCommitted {
-            blocking_positions, ..
-        } => blocking_positions,
+        EffectGroupCommitChildResponse::AlreadyCommitted { rank } => rank,
         // A child that settles without admission (a generation refusal, an
         // expired attach) can meet a group retired meanwhile; retirement
         // already settled it, as the payload and settlement writes treat the
@@ -1271,33 +1207,23 @@ async fn commit_child_final(
             .into());
         }
     };
-    let mut waits = Vec::with_capacity(blocking_positions.len());
-    for position in blocking_positions {
-        let key = group_wait_key(
-            &request.shape.wait_scope,
-            &request.group_key,
-            EffectGroupWaitKind::Drained(position),
-        )?;
-        let replay_key = key.key_id.clone();
-        let address = RestateDurableWaitAddress::for_key(&key);
-        waits.push(
-            namespace
-                .durable_wait_workflow(ctx, address.workflow_key)
-                .await_resolution(
-                    RestateDurableWaitAwaitRequest {
-                        key,
-                        deadline: None,
-                    }
-                    .into(),
-                )
-                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
-                .call(),
-        );
+    match await_group_notice!(
+        ctx,
+        namespace,
+        &request.group_key,
+        EffectGroupNotice::Drained { rank }
+    )? {
+        // Seated below, or released by retirement: the semantic-admission
+        // fence still refuses any intent under a retired group.
+        EffectGroupNotification::Drained
+        | EffectGroupNotification::Retired
+        | EffectGroupNotification::Absent => Ok(()),
+        other => Err(TerminalError::new(format!(
+            "effect group {} barrier for child {} at rank {rank} answered {other:?}",
+            request.group_key, request.position
+        ))
+        .into()),
     }
-    for wait in waits {
-        wait.await?;
-    }
-    Ok(())
 }
 
 /// A wait child whose admission the index refused for a reason other than a
@@ -1343,14 +1269,13 @@ mod tests {
                 wake: lash_core::GroupWakePolicy::All,
                 loser_disposition: LoserPolicy::RunToCompletion,
                 replay_keys: vec!["child-0".to_owned()],
-                wait_scope: ExecutionScope::runtime_operation("group"),
                 opener: lash_core::AdmittedScope::turn("session", "turn"),
             },
             position: 0,
             envelope: RuntimeEffectEnvelope::new(
                 lash_core::RuntimeEffectInvocation::new(
                     lash_core::EffectAddress::new(
-                        ExecutionScope::runtime_operation("group"),
+                        lash_core::ExecutionScope::runtime_operation("group"),
                         "group-1:child:0",
                     )
                     .expect("valid child address"),

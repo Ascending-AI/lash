@@ -141,13 +141,11 @@ pub enum EffectGroupCommitChildResponse {
     Committed {
         rank: u64,
     },
-    /// The commit already landed, in this invocation or an earlier one: the
-    /// reserved rank, and every committed sibling below it that still owes
-    /// its seat — the §5 barrier a seat that cannot know what the winning
-    /// commit declared waits behind before it publishes.
+    /// The commit already landed, in this invocation or an earlier one:
+    /// the reserved rank. A seat that cannot know what the winning commit
+    /// declared waits at the §5 barrier for that rank before it publishes.
     AlreadyCommitted {
         rank: u64,
-        blocking_positions: Vec<usize>,
     },
     /// The cancel disposition won first; the child's final journals nothing.
     CancelDecided {
@@ -156,31 +154,6 @@ pub enum EffectGroupCommitChildResponse {
     UnknownChild,
     UnknownGroup,
     Retired,
-}
-
-/// The §5 barrier read: which siblings committed at a rank below `rank` still
-/// owe their settlement seats.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupDrainBlockersRequest {
-    pub rank: u64,
-}
-
-/// The §5 barrier as the index sees it for one committed child.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupDrainBlockersResponse {
-    /// No sibling below the caller still owes its seat. An absent or retired
-    /// group holds no committed children, so it answers this too.
-    Admitted,
-    /// These lower-ranked committed siblings — every one of them — still owe
-    /// their seats. Each resolves its
-    /// drained wake under the group's retained `wait_scope` when it seats, so
-    /// the caller builds the wake keys from the scope the index resolves them
-    /// under rather than re-deriving it.
-    Blocked {
-        wait_scope: ExecutionScope,
-        positions: Vec<usize>,
-    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -326,24 +299,4 @@ pub struct EffectGroupServedRank {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectGroupCloseRequest {
     pub disposition: LoserPolicy,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupWaitResolution {
-    Ready,
-    Rank,
-    Cancel,
-    Admit,
-    /// The child at this position seated its settlement: the wake a §5
-    /// barrier parks on while a lower-commit sibling finishes its drain.
-    Drained,
-    /// The child at this position seated its settlement, so no cancel can
-    /// reach it: its cancel wait ends without cancelling it, and the watch
-    /// its dispatch invocation held on the wait ends with it (FIG-3709).
-    Settled,
-    Refused {
-        reason: EffectGroupRefusal,
-    },
-    Retired,
 }

@@ -56,9 +56,8 @@ use crate::durable_wait::{
 };
 use crate::effect_group::{
     EffectGroupCloseOutcome, EffectGroupCloseRequest, EffectGroupCloseResponse,
-    EffectGroupDispatchRequest, EffectGroupOpenRequest, EffectGroupOpenResponse,
-    EffectGroupProbeResponse, EffectGroupShape, EffectGroupWaitResolution, decode_wait_resolution,
-    group_shape_error, ready_wait_request,
+    EffectGroupDispatchRequest, EffectGroupNotice, EffectGroupNotification, EffectGroupOpenRequest,
+    EffectGroupOpenResponse, EffectGroupProbeResponse, EffectGroupShape, group_shape_error,
 };
 use crate::ingress::RestateAuthorityId;
 use crate::process::RestateProcessCancelRequest;
@@ -860,24 +859,21 @@ where
                     )
                     .await
                     .map_err(|error| effect_group_engine_error("EffectGroupDispatch/run", error))?;
-                let request = ready_wait_request(&shape.wait_scope, &group_key)?;
-                let resolution = match self
+                // The group index's own readiness notice (FIG-4344).
+                let notification = match self
                     .context
-                    .await_effect_group_wait(
+                    .await_effect_group_notice(
                         &self.namespace,
-                        request,
                         group_key.clone(),
+                        EffectGroupNotice::Ready,
                         None,
                         context::ProcessCancelRace::NotRaced,
                     )
                     .await
                     .map_err(|error| {
-                        effect_group_engine_error(
-                            "LashDurableWaitWorkflow/await_resolution(READY)",
-                            error,
-                        )
+                        effect_group_engine_error("EffectGroupIndex/subscribe(Ready)", error)
                     })? {
-                    RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
+                    RestateTurnCancelRaceOutcome::Completed(notification) => notification,
                     RestateTurnCancelRaceOutcome::TurnCancelled
                     | RestateTurnCancelRaceOutcome::ProcessCancelled
                     | RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
@@ -886,12 +882,12 @@ where
                         )));
                     }
                 };
-                match decode_wait_resolution(resolution)? {
-                    EffectGroupWaitResolution::Ready => Ok(handle),
-                    EffectGroupWaitResolution::Refused { reason } => Err(group_shape_error(
-                        format!("effect group {group_key} routing was refused: {reason:?}"),
-                    )),
-                    EffectGroupWaitResolution::Retired => Err(group_shape_error(format!(
+                match notification {
+                    EffectGroupNotification::Ready => Ok(handle),
+                    EffectGroupNotification::Refused { reason } => Err(group_shape_error(format!(
+                        "effect group {group_key} routing was refused: {reason:?}"
+                    ))),
+                    EffectGroupNotification::Retired => Err(group_shape_error(format!(
                         "effect group {group_key} was retired before it became ready"
                     ))),
                     other => Err(group_shape_error(format!(

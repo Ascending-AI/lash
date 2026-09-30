@@ -1,10 +1,11 @@
 //! The cancel fact of the effect-group child a controller drives (ADR 0105
 //! §4, FIG-3904).
 //!
-//! Group dispatch binds a child's controller to the child's cancel fact. A
-//! wait of the child that observes no turn races the fact as a journaled arm,
-//! the child's step boundaries peek it as a journaled call, and a recorded
-//! step body watches it live. The engine's own cancellation of the child's
+//! Group dispatch binds a child's controller to the child's cancel fact, which
+//! the child's group index holds (FIG-4344). A wait of the child that observes
+//! no turn races the fact as a journaled arm, the child's step boundaries read
+//! it as one journaled shared read of the index, and a recorded step body
+//! watches it live. The engine's own cancellation of the child's
 //! invocation, which the index requests right after it decides the child's
 //! cancel, is that same decided cancel wherever it surfaces.
 
@@ -35,14 +36,17 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
     pub(super) fn group_child_wait_race(
         &self,
         turn_cancel: Option<&RestateDurableWaitAwaitRequest>,
-    ) -> Option<RestateDurableWaitAwaitRequest> {
+    ) -> Option<context::GroupChildCancelArm> {
         match (
             turn_cancel,
             self.options.process_cancel,
             &self.options.group_child_cancel,
         ) {
             (None, context::ProcessCancelRace::NotRaced, Some(child_cancel)) => {
-                Some(child_cancel.await_request())
+                Some(context::GroupChildCancelArm {
+                    group_key: child_cancel.group_key().to_string(),
+                    position: child_cancel.position(),
+                })
             }
             _ => None,
         }
@@ -62,21 +66,24 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx>,
 {
-    /// A journaled peek of the bound child's cancel fact; `false` for a
-    /// controller that drives no group child.
+    /// A journaled read of the bound child's cancel fact from its group
+    /// index; `false` for a controller that drives no group child.
     pub(super) async fn peek_group_child_cancel(
         &self,
     ) -> Result<bool, RuntimeEffectControllerError> {
         let Some(child_cancel) = &self.options.group_child_cancel else {
             return Ok(false);
         };
-        let (address, replay_key) = child_cancel.peek_target();
         match self
             .context
-            .peek_event(&self.namespace, address, replay_key)
+            .effect_group_child_cancel(
+                &self.namespace,
+                child_cancel.group_key().to_string(),
+                child_cancel.position(),
+            )
             .await
         {
-            Ok(peeked) => Ok(peeked.is_some_and(crate::effect_group::group_child_cancel_verdict)),
+            Ok(read) => Ok(read.is_some_and(|notification| notification.is_child_cancel())),
             Err(err) if self.is_group_child_engine_cancel(&err) => Ok(true),
             Err(err) => Err(RuntimeEffectControllerError::new(
                 RuntimeErrorCode::EngineAwaitEventPeek,
@@ -160,7 +167,7 @@ where
         invocation: &RuntimeEffectInvocation,
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
-        cancel: RestateDurableWaitAwaitRequest,
+        cancel: context::GroupChildCancelArm,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let raced = self
             .context

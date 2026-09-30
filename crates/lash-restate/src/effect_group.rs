@@ -7,9 +7,12 @@
 //!
 //! The index owns group lifecycle and settlement rank, the payload object owns
 //! successful result bytes and its object-local retirement fence, and the
-//! dispatch workflow owns every child send. READY, RANK, CANCEL, and ADMIT use
-//! the existing durable-wait services so resolution-before-registration and
-//! retained terminal resolutions have one implementation.
+//! dispatch workflow owns every child send. The index also owns the group's
+//! own notifications — readiness, a seated rank, a lifted §5 barrier, a
+//! child's cancel fact (FIG-4344): a waiter subscribes an awakeable of its own
+//! journal, and the index handler whose transition makes the notice true
+//! completes it from its own journal, so no group-internal notification goes
+//! through the generic durable-wait services.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -18,13 +21,13 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, GroupExecutors, GroupSettlement,
-    LoserPolicy, Resolution, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectOutcome, RuntimeErrorCode,
+    GroupExecutors, GroupSettlement, LoserPolicy, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectOutcome, RuntimeErrorCode,
 };
 use restate_sdk::context::{
-    CallFuture, ContextClient, ContextSideEffects, ContextWriteState, ObjectContext, RunFuture,
-    RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
+    CallFuture, ContextAwakeables, ContextClient, ContextSideEffects, ContextWriteState,
+    ObjectContext, RunFuture, RunRetryPolicy, SharedObjectContext, SharedWorkflowContext,
+    WorkflowContext,
 };
 use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
@@ -34,9 +37,7 @@ use sha2::{Digest, Sha256};
 use crate::RestateIngressClient;
 use crate::compat::{Call, Reply};
 use crate::durable_wait::{
-    LASH_REPLAY_KEY_HEADER, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
-    RestateDurableWaitGroupChildRequest, RestateDurableWaitResolveRequest,
-    durable_wait_index_key_for_scope, durable_wait_index_object_key, restate_await_event_key,
+    LASH_REPLAY_KEY_HEADER, RestateDurableWaitGroupChildRequest, durable_wait_index_key_for_scope,
 };
 use crate::object_state::{
     self, FleetView, ObjectFamily, ObjectUpgradeResponse, StoredValueFormats,
@@ -50,14 +51,21 @@ const MEMBERSHIP_STATE_KEY: &str = "effect-group/v1/membership";
 
 mod drain_barrier;
 mod group_waits;
+mod notifications;
 mod protocol;
 mod rank_run;
 mod reopen;
 mod wire;
 use drain_barrier::blocking_positions;
-pub(crate) use drain_barrier::{drained_wait_lifted, drained_wait_request};
-use group_waits::{
-    resolve_group_wait, resolve_group_waits, seal_cancel_decisions, wait_resolution,
+use group_waits::seal_cancel_decisions;
+#[cfg(test)]
+pub(crate) use notifications::subscription_ceiling;
+pub use notifications::{
+    EffectGroupChildCancelRequest, EffectGroupNotice, EffectGroupNotification,
+    EffectGroupSubscribeRequest, EffectGroupSubscribeResponse, EffectGroupUnsubscribeRequest,
+};
+pub(crate) use notifications::{
+    await_group_notice, await_group_notice_via_ingress, subscription_refused,
 };
 pub(crate) use protocol::EFFECT_GROUP_STATE_FAMILY;
 #[cfg(test)]
@@ -91,89 +99,6 @@ pub use state_record::*;
 
 mod messages;
 pub use messages::*;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EffectGroupWaitKind<'a> {
-    Ready,
-    Rank(u64),
-    Cancel(&'a str),
-    Admit(usize),
-    Drained(usize),
-}
-
-fn group_wait_key(
-    scope: &ExecutionScope,
-    group_key: &str,
-    kind: EffectGroupWaitKind<'_>,
-) -> Result<AwaitEventKey, TerminalError> {
-    let suffix = match kind {
-        EffectGroupWaitKind::Ready => "ready".to_string(),
-        EffectGroupWaitKind::Rank(rank) => format!("rank:{rank}"),
-        EffectGroupWaitKind::Cancel(replay_key) => format!("cancel:{replay_key}"),
-        EffectGroupWaitKind::Admit(position) => format!("admit:{position}"),
-        EffectGroupWaitKind::Drained(position) => format!("drained:{position}"),
-    };
-    restate_await_event_key(
-        scope,
-        AwaitEventWaitIdentity::Custom {
-            key: format!("effect-group:{group_key}:{suffix}"),
-        },
-    )
-    .map_err(|error| TerminalError::new(error.to_string()))
-}
-
-pub(crate) fn ready_wait_request(
-    scope: &ExecutionScope,
-    group_key: &str,
-) -> Result<RestateDurableWaitAwaitRequest, RuntimeEffectControllerError> {
-    group_wait_key(scope, group_key, EffectGroupWaitKind::Ready)
-        .map(|key| RestateDurableWaitAwaitRequest {
-            key,
-            deadline: None,
-        })
-        .map_err(|error| group_shape_error(error.to_string()))
-}
-
-pub(crate) fn rank_wait_request(
-    scope: &ExecutionScope,
-    group_key: &str,
-    rank: u64,
-) -> Result<RestateDurableWaitAwaitRequest, RuntimeEffectControllerError> {
-    group_wait_key(scope, group_key, EffectGroupWaitKind::Rank(rank))
-        .map(|key| RestateDurableWaitAwaitRequest {
-            key,
-            deadline: None,
-        })
-        .map_err(|error| group_shape_error(error.to_string()))
-}
-
-#[cfg(test)]
-pub(crate) fn admit_wait_request(
-    scope: &ExecutionScope,
-    group_key: &str,
-    position: usize,
-) -> Result<RestateDurableWaitAwaitRequest, RuntimeEffectControllerError> {
-    group_wait_key(scope, group_key, EffectGroupWaitKind::Admit(position))
-        .map(|key| RestateDurableWaitAwaitRequest {
-            key,
-            deadline: None,
-        })
-        .map_err(|error| group_shape_error(error.to_string()))
-}
-
-#[cfg(test)]
-pub(crate) fn cancel_wait_request(
-    scope: &ExecutionScope,
-    group_key: &str,
-    replay_key: &str,
-) -> Result<RestateDurableWaitAwaitRequest, TerminalError> {
-    group_wait_key(scope, group_key, EffectGroupWaitKind::Cancel(replay_key)).map(|key| {
-        RestateDurableWaitAwaitRequest {
-            key,
-            deadline: None,
-        }
-    })
-}
 
 #[cfg(test)]
 mod admission_witness {
@@ -265,10 +190,6 @@ pub(crate) trait EffectGroupState {
     async fn admit_semantic(
         call: Call<EffectGroupAdmitSemanticRequest>,
     ) -> HandlerResult<Reply<EffectGroupAdmitSemanticResponse>>;
-    #[shared]
-    async fn drain_blockers(
-        call: Call<EffectGroupDrainBlockersRequest>,
-    ) -> HandlerResult<Reply<EffectGroupDrainBlockersResponse>>;
     async fn record_settlement(
         call: Call<EffectGroupRecordSettlementRequest>,
     ) -> HandlerResult<Reply<EffectGroupRecordSettlementResponse>>;
@@ -286,6 +207,24 @@ pub(crate) trait EffectGroupState {
     async fn retirement_cancel(
         call: Call<()>,
     ) -> HandlerResult<Reply<EffectGroupRetirementCancelResponse>>;
+    /// Answer a notice from the record, or record the caller's awakeable to
+    /// be completed once the notice is true (FIG-4344).
+    async fn subscribe(
+        call: Call<EffectGroupSubscribeRequest>,
+    ) -> HandlerResult<Reply<EffectGroupSubscribeResponse>>;
+    /// Drop a subscriber whose race its other arm won.
+    async fn unsubscribe(call: Call<EffectGroupUnsubscribeRequest>) -> HandlerResult<Reply<()>>;
+    /// A child's cancel fact as the record holds it: the step-boundary read.
+    #[shared]
+    async fn child_cancel(
+        call: Call<EffectGroupChildCancelRequest>,
+    ) -> HandlerResult<Reply<Option<EffectGroupNotification>>>;
+    /// A notice awaited from outside any handler: this shared handler holds
+    /// the awakeable, so the waiter never holds the group's exclusive lock.
+    #[shared]
+    async fn await_notice(
+        call: Call<EffectGroupNotice>,
+    ) -> HandlerResult<Reply<EffectGroupNotification>>;
     /// Rewrite the group at the newest family format once finalize
     /// has moved the fleet to it, and raise its `_compat` (ADR 0115
     /// §3.2, FIG-4041): the object sweep's step.
@@ -530,9 +469,10 @@ impl EffectGroupState for EffectGroupStateImpl {
     /// every id before it registers, so nothing is awaited before this point
     /// (ADR 0099 §2). The live record moves over as it stands — a child that
     /// settled while the group was preparing (a generation refusal, which
-    /// precedes admission) keeps its seat. Every ADMIT wake and READY resolve
-    /// in one round trip; a redriven registration of the same map re-resolves
-    /// them, which is idempotent. A retired group is never made ready again.
+    /// precedes admission) keeps its seat. The opener and every child waiting
+    /// for readiness are notified from this handler's own journal; a redriven
+    /// registration of the same map notifies whoever still waits, which is
+    /// idempotent. A retired group is never made ready again.
     async fn register_dispatch(
         &self,
         ctx: ObjectContext<'_>,
@@ -540,7 +480,6 @@ impl EffectGroupState for EffectGroupStateImpl {
     ) -> HandlerResult<Reply<EffectGroupRegisterDispatchResponse>> {
         let (wire, request) = call.open()?;
         let object = self.admit(&ctx).await?;
-        let group_key = ctx.key().to_string();
         let Some(mut record) = load_index(&ctx).await? else {
             return Ok(Reply::at(
                 wire,
@@ -570,7 +509,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                     addresses: request.addresses,
                     live: live.clone(),
                 };
-                store_index(&ctx, object.writer, record);
+                store_index(&ctx, object.writer, record.clone());
                 EffectGroupRegisterDispatchResponse::Registered
             }
             EffectGroupLifecycle::Preparing {
@@ -593,25 +532,7 @@ impl EffectGroupState for EffectGroupStateImpl {
             EffectGroupRegisterDispatchResponse::Registered
                 | EffectGroupRegisterDispatchResponse::AlreadyRegistered
         ) {
-            resolve_group_waits(
-                &ctx,
-                &self.namespace,
-                &shape.wait_scope,
-                &group_key,
-                expected_positions
-                    .iter()
-                    .map(|&position| {
-                        (
-                            EffectGroupWaitKind::Admit(position),
-                            EffectGroupWaitResolution::Admit,
-                        )
-                    })
-                    .chain(std::iter::once((
-                        EffectGroupWaitKind::Ready,
-                        EffectGroupWaitResolution::Ready,
-                    ))),
-            )
-            .await?;
+            notifications::notify_satisfied(&ctx, object.writer, &record).await?;
         }
         Ok(Reply::at(wire, response))
     }
@@ -623,7 +544,6 @@ impl EffectGroupState for EffectGroupStateImpl {
     ) -> HandlerResult<Reply<EffectGroupRegisterRefusalResponse>> {
         let (wire, request) = call.open()?;
         let object = self.admit(&ctx).await?;
-        let group_key = ctx.key().to_string();
         let Some(mut record) = load_index(&ctx).await? else {
             return Ok(Reply::at(
                 wire,
@@ -633,7 +553,6 @@ impl EffectGroupState for EffectGroupStateImpl {
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
             return Ok(Reply::at(wire, EffectGroupRegisterRefusalResponse::Retired));
         }
-        let shape = record.live()?.shape.clone();
         let response = match &record.lifecycle {
             EffectGroupLifecycle::Preparing { live, .. } => {
                 record.lifecycle = EffectGroupLifecycle::Closed {
@@ -645,21 +564,9 @@ impl EffectGroupState for EffectGroupStateImpl {
                     live: live.clone(),
                 };
                 store_index(&ctx, object.writer, record.clone());
-                let refused = EffectGroupWaitResolution::Refused {
-                    reason: request.reason.clone(),
-                };
-                resolve_group_waits(
-                    &ctx,
-                    &self.namespace,
-                    &shape.wait_scope,
-                    &group_key,
-                    std::iter::once((EffectGroupWaitKind::Ready, refused.clone())).chain(
-                        (0..shape.children()).map(|position| {
-                            (EffectGroupWaitKind::Admit(position), refused.clone())
-                        }),
-                    ),
-                )
-                .await?;
+                // The opener and every child waiting for readiness learn of
+                // the refusal from this handler's own journal.
+                notifications::notify_satisfied(&ctx, object.writer, &record).await?;
                 EffectGroupRegisterRefusalResponse::Refused
             }
             EffectGroupLifecycle::Ready { .. } => {
@@ -705,10 +612,7 @@ impl EffectGroupState for EffectGroupStateImpl {
     /// The decision and the rank commit here, before the child's payload and
     /// settlement writes, so a completion reaching the index after a cancel
     /// decision is refused by name and a redrive reads its own commit back
-    /// instead of re-deciding: a repeated commit allocates nothing. A repeat
-    /// also answers the §5 barrier as the index sees it — every committed
-    /// sibling below the reserved rank still owed a seat — for a seat that did
-    /// not win the commit and so cannot know what it declared.
+    /// instead of re-deciding: a repeated commit allocates nothing.
     async fn commit_child(
         &self,
         ctx: ObjectContext<'_>,
@@ -758,10 +662,7 @@ impl EffectGroupState for EffectGroupStateImpl {
             Some(EffectGroupChildCommitState::Committed { rank }) => {
                 return Ok(Reply::at(
                     wire,
-                    EffectGroupCommitChildResponse::AlreadyCommitted {
-                        rank,
-                        blocking_positions: blocking_positions(live, rank),
-                    },
+                    EffectGroupCommitChildResponse::AlreadyCommitted { rank },
                 ));
             }
             None => {}
@@ -824,36 +725,6 @@ impl EffectGroupState for EffectGroupStateImpl {
                 _ => EffectGroupAdmitSemanticResponse::Admitted,
             },
         ))
-    }
-
-    /// Every committed sibling ranked below `rank` that has not seated yet.
-    /// An absent or retired group holds no committed children, so nothing
-    /// blocks: retirement releases every barrier.
-    async fn drain_blockers(
-        &self,
-        ctx: SharedObjectContext<'_>,
-        call: Call<EffectGroupDrainBlockersRequest>,
-    ) -> HandlerResult<Reply<EffectGroupDrainBlockersResponse>> {
-        let (wire, request) = call.open()?;
-        object_state::admit_shared(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
-        let response = match load_index_shared(&ctx).await? {
-            Some(record) => match record.live() {
-                Ok(live) => {
-                    let positions = blocking_positions(live, request.rank);
-                    if positions.is_empty() {
-                        EffectGroupDrainBlockersResponse::Admitted
-                    } else {
-                        EffectGroupDrainBlockersResponse::Blocked {
-                            wait_scope: live.shape.wait_scope.clone(),
-                            positions,
-                        }
-                    }
-                }
-                Err(_) => EffectGroupDrainBlockersResponse::Admitted,
-            },
-            None => EffectGroupDrainBlockersResponse::Admitted,
-        };
-        Ok(Reply::at(wire, response))
     }
 
     async fn record_settlement(
@@ -930,15 +801,8 @@ impl EffectGroupState for EffectGroupStateImpl {
                     ))
                     .into());
                 }
-                resolve_group_wait(
-                    &ctx,
-                    &self.namespace,
-                    &live.shape.wait_scope,
-                    &group_key,
-                    EffectGroupWaitKind::Rank(rank),
-                    EffectGroupWaitResolution::Rank,
-                )
-                .await?;
+                // A redriven seat completes whoever still waits on it.
+                notifications::notify_satisfied(&ctx, object.writer, &record).await?;
                 return Ok(Reply::at(
                     wire,
                     EffectGroupRecordSettlementResponse::Duplicate { rank },
@@ -962,38 +826,12 @@ impl EffectGroupState for EffectGroupStateImpl {
         };
         live.settlements.insert(rank, settlement);
         live.settled_positions.insert(request.position, rank);
-        let wait_scope = live.shape.wait_scope.clone();
-        let replay_key = live.shape.member_replay_key(request.position)?.to_string();
         store_index(&ctx, object.writer, record.clone());
-        // The seat's three wakes are independent, so they resolve in one
-        // round trip while this exclusive handler holds the group (FIG-4269).
-        // The rank wake is the opener's. The drained wake is what a §5
-        // barrier parks on: siblings that committed above this child resume
-        // their drains off it. A seated child is past every cancel: its
-        // cancel wait ends here, so the dispatch invocation's watch on it
-        // does not stay open on the deployment until the group closes or
-        // retires.
-        resolve_group_waits(
-            &ctx,
-            &self.namespace,
-            &wait_scope,
-            &group_key,
-            [
-                (
-                    EffectGroupWaitKind::Rank(rank),
-                    EffectGroupWaitResolution::Rank,
-                ),
-                (
-                    EffectGroupWaitKind::Drained(request.position),
-                    EffectGroupWaitResolution::Drained,
-                ),
-                (
-                    EffectGroupWaitKind::Cancel(&replay_key),
-                    EffectGroupWaitResolution::Settled,
-                ),
-            ],
-        )
-        .await?;
+        // The seat notifies from its own journal and calls no other service
+        // (FIG-4344): the opener parked on a rank this seat completes the
+        // prefix to, every §5 barrier this seat lifts, and every watch of
+        // this child's cancel fact, which a seated child is past.
+        notifications::notify_satisfied(&ctx, object.writer, &record).await?;
         Ok(Reply::at(
             wire,
             EffectGroupRecordSettlementResponse::Recorded { rank },
@@ -1150,15 +988,20 @@ impl EffectGroupState for EffectGroupStateImpl {
             live,
         };
         store_index(&ctx, object.writer, record.clone());
+        // The decisions are sealed and stored before anyone hears of them:
+        // the opener parked on a rank a cancel seat completes, and every
+        // watch of a decided child's cancel fact, are notified from this
+        // handler's own journal, and only then are the decided children's
+        // invocations interrupted.
+        notifications::notify_satisfied(&ctx, object.writer, &record).await?;
         if effective == LoserPolicy::Cancel {
             let live = record.live()?;
             for position in 0..shape.children() {
                 // A committed-but-undrained child is a pending protected drain
                 // (ADR 0099 §4): the cancel decision refused it, so the close
-                // seats no rank for it, does not resolve its cancel wait, and
-                // does not interrupt its invocation — its `record_settlement`
-                // seats the rank and resolves the rank wait when the drain
-                // finishes.
+                // seats no rank for it and does not interrupt its invocation —
+                // its `record_settlement` seats the rank and notifies its
+                // waiters when the drain finishes.
                 if matches!(
                     live.commit_states.get(&position),
                     Some(EffectGroupChildCommitState::Committed { .. })
@@ -1166,36 +1009,6 @@ impl EffectGroupState for EffectGroupStateImpl {
                 {
                     continue;
                 }
-                let rank = live
-                    .settled_positions
-                    .get(&position)
-                    .copied()
-                    .ok_or_else(|| {
-                        TerminalError::new(format!(
-                            "effect group {group_key} has no settlement rank for child {position}"
-                        ))
-                    })?;
-                resolve_group_waits(
-                    &ctx,
-                    &self.namespace,
-                    &shape.wait_scope,
-                    &group_key,
-                    [
-                        (
-                            EffectGroupWaitKind::Rank(rank),
-                            EffectGroupWaitResolution::Rank,
-                        ),
-                        (
-                            EffectGroupWaitKind::Cancel(shape.member_replay_key(position)?),
-                            EffectGroupWaitResolution::Cancel,
-                        ),
-                        (
-                            EffectGroupWaitKind::Admit(position),
-                            EffectGroupWaitResolution::Cancel,
-                        ),
-                    ],
-                )
-                .await?;
                 if let Some(invocation_id) = addresses.get(&position) {
                     ctx.invocation_handle(invocation_id.clone()).cancel();
                 }
@@ -1282,7 +1095,6 @@ impl EffectGroupState for EffectGroupStateImpl {
             replay_keys: shape.replay_keys,
             dispatcher,
             dispatched,
-            wait_scope: shape.wait_scope,
         };
         record.lifecycle = EffectGroupLifecycle::Retired {
             cleanup: EffectGroupCleanup::Pending {
@@ -1291,6 +1103,10 @@ impl EffectGroupState for EffectGroupStateImpl {
             },
         };
         store_index(&ctx, object.writer, record);
+        // Retirement answers every notice: each waiter is completed `Retired`
+        // from this handler's journal, and a later one is answered from the
+        // retired record.
+        notifications::notify_retired(&ctx, object.writer).await?;
         Ok(Reply::at(
             wire,
             EffectGroupRetireResponse::Retired { cleanup },
@@ -1345,7 +1161,7 @@ impl EffectGroupState for EffectGroupStateImpl {
             ));
         };
         let mut decided = Vec::new();
-        let (facts, ranks, changed) = {
+        let changed = {
             let (facts, live) = match &mut record.lifecycle {
                 EffectGroupLifecycle::Retired {
                     cleanup: EffectGroupCleanup::Pending { facts, live },
@@ -1388,44 +1204,13 @@ impl EffectGroupState for EffectGroupStateImpl {
                 changed = true;
             }
             // A committed-but-undrained child is a pending protected drain
-            // (ADR 0099 §4): it holds no rank yet, and the retirement wait
-            // pass resolves every remaining wait as Retired — only children
-            // with a seated rank get their Rank/Cancel/Admit resolutions here.
-            let ranks = (0..facts.children())
-                .filter_map(|position| {
-                    live.settled_positions
-                        .get(&position)
-                        .copied()
-                        .map(|rank| (position, rank))
-                })
-                .collect::<Vec<_>>();
-            (facts.clone(), ranks, changed)
+            // (ADR 0099 §4): it holds no rank yet. Nobody waits to hear of
+            // these decisions: `retire` already answered every subscriber
+            // `Retired`, and a later one is answered from the retired record.
+            changed
         };
         seal_cancel_decisions(&ctx, &self.namespace, &group_key, &decided).await?;
-        store_index(&ctx, object.writer, record.clone());
-        for (position, rank) in ranks.iter().copied() {
-            resolve_group_waits(
-                &ctx,
-                &self.namespace,
-                &facts.wait_scope,
-                &group_key,
-                [
-                    (
-                        EffectGroupWaitKind::Rank(rank),
-                        EffectGroupWaitResolution::Rank,
-                    ),
-                    (
-                        EffectGroupWaitKind::Cancel(facts.member_replay_key(position)?),
-                        EffectGroupWaitResolution::Cancel,
-                    ),
-                    (
-                        EffectGroupWaitKind::Admit(position),
-                        EffectGroupWaitResolution::Cancel,
-                    ),
-                ],
-            )
-            .await?;
-        }
+        store_index(&ctx, object.writer, record);
         Ok(Reply::at(
             wire,
             if changed {
@@ -1435,12 +1220,62 @@ impl EffectGroupState for EffectGroupStateImpl {
             },
         ))
     }
+
+    async fn subscribe(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<EffectGroupSubscribeRequest>,
+    ) -> HandlerResult<Reply<EffectGroupSubscribeResponse>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        let response = notifications::subscribe(&ctx, object.writer, request).await?;
+        Ok(Reply::at(wire, response))
+    }
+
+    async fn unsubscribe(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<EffectGroupUnsubscribeRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        notifications::unsubscribe(&ctx, object.writer, request).await?;
+        Ok(Reply::at(wire, ()))
+    }
+
+    async fn child_cancel(
+        &self,
+        ctx: SharedObjectContext<'_>,
+        call: Call<EffectGroupChildCancelRequest>,
+    ) -> HandlerResult<Reply<Option<EffectGroupNotification>>> {
+        let (wire, request) = call.open()?;
+        object_state::admit_shared(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
+        let record = load_index_shared(&ctx).await?;
+        let answer = notifications::notice_answer(
+            record.as_ref(),
+            &EffectGroupNotice::ChildCancel {
+                position: request.position,
+            },
+        );
+        Ok(Reply::at(wire, answer))
+    }
+
+    async fn await_notice(
+        &self,
+        ctx: SharedObjectContext<'_>,
+        call: Call<EffectGroupNotice>,
+    ) -> HandlerResult<Reply<EffectGroupNotification>> {
+        let (wire, notice) = call.open()?;
+        let group_key = ctx.key().to_string();
+        let notification = await_group_notice!(&ctx, &self.namespace, &group_key, notice)?;
+        Ok(Reply::at(wire, notification))
+    }
 }
 
 mod child_cancel;
 mod dispatch;
 mod payload;
-pub(crate) use child_cancel::{GroupChildCancel, group_child_cancel_verdict};
+pub(crate) use child_cancel::GroupChildCancel;
 #[cfg(test)]
 pub(crate) use dispatch::EffectGroupChildRequest;
 pub use dispatch::EffectGroupDispatchRequest;
@@ -1478,23 +1313,6 @@ pub(crate) fn ingress_group_error(
             RuntimeEffectControllerError::new(RuntimeErrorCode::EngineServiceUnregistered, message)
         }
         crate::RestateHttpErrorClass::Terminal => group_shape_error(message),
-    }
-}
-
-pub(crate) fn decode_wait_resolution(
-    resolution: Resolution,
-) -> Result<EffectGroupWaitResolution, RuntimeEffectControllerError> {
-    match resolution {
-        Resolution::Ok(value) => serde_json::from_value(value).map_err(|error| {
-            group_shape_error(format!("decode Restate effect-group wake: {error}"))
-        }),
-        Resolution::Err(lash_core::runtime::ExternalCompletionError { code, message, .. }) => {
-            Err(group_shape_error(format!(
-                "effect-group durable wait failed with {code}: {message}"
-            )))
-        }
-        Resolution::Timeout => Err(group_shape_error("effect-group durable wait timed out")),
-        Resolution::Cancelled => Err(group_shape_error("effect-group durable wait was cancelled")),
     }
 }
 

@@ -1196,7 +1196,17 @@ async fn created_session(
     core.session(session_id)
 }
 
-// ADR 0099 W9-W11: the deployment dies at the group close and at each
+/// The index handlers the matrix crashes while the turn runs; every other cut
+/// lands in the retirement saga after it.
+const TURN_CUTS: [&str; 4] = [
+    "subscribe",
+    "register_dispatch",
+    "record_settlement",
+    "close",
+];
+
+// ADR 0099 W2-W4 and W9-W11: the deployment dies where the group index
+// answers its own notices (FIG-4344), at the group close, and at each
 // boundary of the retirement saga. The workload uses the same counted tool
 // and retained presentation fixture as the presentation crash law above.
 async fn group_close_and_retirement_crash_matrix(engine: Engine) {
@@ -1209,6 +1219,20 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
         Engine::Live { backend, .. } => backend.service_name("EffectGroupIndex"),
     };
     for (service, handler, ty) in [
+        // The group's own notifications (FIG-4344): a subscription whose
+        // answer was lost, a registration and a seat that stored their
+        // decision and died before answering, each redriven.
+        ("EffectGroupIndex", "subscribe", MessageType::OutputCommand),
+        (
+            "EffectGroupIndex",
+            "register_dispatch",
+            MessageType::OutputCommand,
+        ),
+        (
+            "EffectGroupIndex",
+            "record_settlement",
+            MessageType::OutputCommand,
+        ),
         ("EffectGroupIndex", "close", MessageType::SetStateCommand),
         ("EffectGroupIndex", "close", MessageType::OutputCommand),
         ("EffectGroupIndex", "retire", MessageType::SetStateCommand),
@@ -1245,11 +1269,6 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
             "delete_bytes",
             MessageType::OutputCommand,
         ),
-        (
-            "LashDurableWaitIndex",
-            "retain_resolution",
-            MessageType::OutputCommand,
-        ),
     ] {
         let witness = Arc::new(StepWitness::default());
         let executions = Arc::new(AtomicUsize::new(0));
@@ -1269,7 +1288,8 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
             .into_iter()
             .map(|invocation| invocation.id)
             .collect::<std::collections::HashSet<_>>();
-        if handler == "close" {
+        let turn_cut = TURN_CUTS.contains(&handler);
+        if turn_cut {
             engine.crash_on(
                 CrashRule::new(CrashPoint::BeforeFrame { ty })
                     .service(&index)
@@ -1297,7 +1317,7 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
             .expect("the production turn dispatched its tool group");
         let (route, tail) = dispatch.target.split_once('/').expect("dispatch target");
         let group_key = tail.strip_suffix("/run").expect("dispatch workflow key");
-        if handler != "close" {
+        if !turn_cut {
             engine.crash_on(
                 CrashRule::new(CrashPoint::BeforeFrame { ty })
                     .service(if service == "EffectGroupIndex" {

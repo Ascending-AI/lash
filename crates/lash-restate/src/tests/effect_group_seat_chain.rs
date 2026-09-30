@@ -31,7 +31,7 @@ use lash_restate_test::protocol::generated::CallCommandMessage;
 use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 
 /// The batch width the ticket's root runs.
-const WIDTH: usize = 4;
+pub(super) const WIDTH: usize = 4;
 
 /// The most calls a child issues strictly after its §4 commit, through its
 /// seat: its presentation's admission, its payload and the seat.
@@ -41,39 +41,32 @@ const SEAT_CHAIN_BOUND: usize = 3;
 /// registering its children.
 const DISPATCH_INDEX_CALLS: usize = 2;
 
-/// One call a journal issued, by its target.
+/// One call a journal issued, by its target and its JSON parameter.
 #[derive(Clone, Debug)]
-struct IssuedCall {
-    service: String,
-    handler: String,
-    replay_key: Option<String>,
+pub(super) struct IssuedCall {
+    pub(super) service: String,
+    pub(super) handler: String,
+    pub(super) parameter: serde_json::Value,
 }
 
 impl IssuedCall {
     fn from_command(call: CallCommandMessage) -> Self {
-        let replay_key = call
-            .headers
-            .iter()
-            .find(|header| header.key == crate::durable_wait::LASH_REPLAY_KEY_HEADER)
-            .map(|header| header.value.clone());
         Self {
+            parameter: serde_json::from_slice(&call.parameter).unwrap_or(serde_json::Value::Null),
             service: call.service_name,
             handler: call.handler_name,
-            replay_key,
         }
     }
 
-    fn is_index(&self, handler: &str) -> bool {
+    pub(super) fn is_index(&self, handler: &str) -> bool {
         self.service.starts_with("EffectGroupIndex") && self.handler == handler
     }
 
-    /// A park on a sibling's drained wake: the §5 barrier's wait.
-    fn is_drained_await(&self) -> bool {
-        self.handler == "await_resolution"
-            && self
-                .replay_key
-                .as_deref()
-                .is_some_and(|key| key.contains(":drained:"))
+    /// A subscription to the §5 barrier: the wait a seat whose commit
+    /// declared an intent parks on before it publishes.
+    fn is_drained_subscription(&self) -> bool {
+        (self.is_index("subscribe") || self.is_index("await_notice"))
+            && self.parameter.to_string().contains(r#""type":"drained""#)
     }
 }
 
@@ -84,7 +77,7 @@ impl std::fmt::Display for IssuedCall {
 }
 
 /// The calls `invocation`'s journal issued, in journal order.
-fn issued_calls(
+pub(super) fn issued_calls(
     server: &lash_restate_test::RestateTestServer,
     invocation: &str,
 ) -> Vec<IssuedCall> {
@@ -98,7 +91,7 @@ fn issued_calls(
         .collect()
 }
 
-fn names(calls: &[IssuedCall]) -> Vec<String> {
+pub(super) fn names(calls: &[IssuedCall]) -> Vec<String> {
     calls.iter().map(ToString::to_string).collect()
 }
 
@@ -106,7 +99,7 @@ fn names(calls: &[IssuedCall]) -> Vec<String> {
 /// endpoint's own turn runner on a fresh double: the group every law below
 /// reads. The gated schedule holds every member until all four started, so
 /// the members settle together — the case a serial seat chain costs most.
-async fn run_width_four_batch(always_replay: bool) -> LiveConformanceHarness {
+pub(super) async fn run_width_four_batch(always_replay: bool) -> LiveConformanceHarness {
     let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
         unreachable!("in_process names the server double");
     };
@@ -121,7 +114,9 @@ async fn run_width_four_batch(always_replay: bool) -> LiveConformanceHarness {
 
 /// The harness's turn runner, except that a finished scenario keeps its
 /// completed journals: the laws read them after the batch.
-struct JournalKeepingRunner(std::sync::Arc<dyn lash_conformance::ConformanceTurnRunner>);
+pub(super) struct JournalKeepingRunner(
+    pub(super) std::sync::Arc<dyn lash_conformance::ConformanceTurnRunner>,
+);
 
 #[async_trait::async_trait]
 impl lash_conformance::ConformanceTurnRunner for JournalKeepingRunner {
@@ -143,13 +138,27 @@ impl lash_conformance::ConformanceTurnRunner for JournalKeepingRunner {
             .run_crashed_then_redriven_turn(admitted, crashing, redrive)
             .await;
     }
+
+    async fn await_group_quiescence(&self, group_keys: &[String]) {
+        self.0.await_group_quiescence(group_keys).await;
+    }
 }
 
-async fn run_batch_on(harness: &LiveConformanceHarness) {
+pub(super) async fn run_batch_on(harness: &LiveConformanceHarness) {
+    run_batch_over(harness, "seat-chain", harness.law_stores()).await;
+}
+
+/// The law's width-4 gated batch, its sessions named from `label`, over
+/// `stores`.
+pub(super) async fn run_batch_over(
+    harness: &LiveConformanceHarness,
+    label: &str,
+    stores: std::sync::Arc<dyn lash_core::StoreSet>,
+) {
     let measured = lash_conformance::measure_gated_tool_batch(
-        "seat-chain",
+        label,
         harness.endpoint_host(),
-        harness.law_stores(),
+        stores,
         std::sync::Arc::new(JournalKeepingRunner(harness.turn_runner())),
         &lash_conformance::parallel_model_tool_calls_producer(
             super::tool_batch_parallelism_on_the_double::standard_factories(),
@@ -166,7 +175,7 @@ async fn run_batch_on(harness: &LiveConformanceHarness) {
 
 /// The batch's group-child invocations and its dispatch, once every one of
 /// them has completed.
-async fn group_invocations(
+pub(super) async fn group_invocations(
     server: &lash_restate_test::RestateTestServer,
 ) -> (
     lash_restate_test::InvocationView,
@@ -214,10 +223,10 @@ async fn group_invocations(
     }
 }
 
-/// Every child of the batch seats without waiting on a sibling: it reads no
-/// §5 barrier, parks on no drained wake, commits once, and issues at most
+/// Every child of the batch seats without waiting on a sibling: it subscribes
+/// to no §5 barrier, commits once, and issues at most
 /// [`SEAT_CHAIN_BOUND`] calls after its commit through its seat.
-fn assert_seat_chains(
+pub(super) fn assert_seat_chains(
     server: &lash_restate_test::RestateTestServer,
     children: &[lash_restate_test::InvocationView],
 ) {
@@ -225,14 +234,8 @@ fn assert_seat_chains(
         let calls = issued_calls(server, &child.id);
         let journaled = names(&calls);
         assert!(
-            !calls.iter().any(|call| call.is_index("drain_blockers")),
-            "child {} declared no intent, so it reads no §5 barrier: {journaled:?}",
-            child.target
-        );
-        assert!(
-            !calls.iter().any(IssuedCall::is_drained_await),
-            "child {} declared no intent, so it parks on no sibling's drained wake: \
-             {journaled:?}",
+            !calls.iter().any(IssuedCall::is_drained_subscription),
+            "child {} declared no intent, so it subscribes to no §5 barrier: {journaled:?}",
             child.target
         );
         let commits = calls
@@ -264,7 +267,7 @@ fn assert_seat_chains(
 
 /// The batch's dispatch adopts its group and registers its children in one
 /// index call each.
-fn assert_admission_chain(
+pub(super) fn assert_admission_chain(
     server: &lash_restate_test::RestateTestServer,
     dispatch: &lash_restate_test::InvocationView,
 ) {
@@ -324,7 +327,7 @@ async fn the_seat_and_admission_chains_hold_under_forced_replay() {
 /// Every dispatch lane the double serves: the stable lane and the build's
 /// own. A crash rule names a service exactly, so a law scripts its crash on
 /// each lane and the lane the group runs on fires it.
-fn dispatch_services(server: &lash_restate_test::RestateTestServer) -> Vec<String> {
+pub(super) fn dispatch_services(server: &lash_restate_test::RestateTestServer) -> Vec<String> {
     let lanes = server
         .service_names()
         .into_iter()
@@ -427,7 +430,8 @@ async fn a_dispatch_killed_before_it_registers_redrives_to_one_registration() {
 /// Scripts one crash of the first attempt at each cut point a seat crosses:
 /// the index's §4 commit before its answer is recorded, the child after its
 /// commit's answer and before its seat, the payload after it is stored, and
-/// the seat after its state is written and before its wakes resolve.
+/// the seat after its state is written and before it completes its
+/// subscribers (or, with none left, before its answer).
 fn crash_every_seat_cut(server: &lash_restate_test::RestateTestServer) {
     use lash_restate_test::{CrashPoint, CrashRule};
     for lane in dispatch_services(server) {
@@ -452,7 +456,12 @@ fn crash_every_seat_cut(server: &lash_restate_test::RestateTestServer) {
         .service("EffectGroupPayload")
         .handler("put"),
         CrashRule::new(CrashPoint::BeforeFrame {
-            ty: MessageType::CallCommand,
+            ty: MessageType::CompleteAwakeableCommand,
+        })
+        .service("EffectGroupIndex")
+        .handler("record_settlement"),
+        CrashRule::new(CrashPoint::BeforeFrame {
+            ty: MessageType::OutputCommand,
         })
         .service("EffectGroupIndex")
         .handler("record_settlement"),
@@ -508,10 +517,11 @@ async fn a_batch_crashed_at_every_seat_cut_seats_each_rank_once_under_forced_rep
 }
 
 /// L6, the registration's own cut: `register_dispatch` crashed after it wrote
-/// the ready state and before it resolved its ADMIT and READY wakes. Its
-/// retry resolves every wake; the opener and every child proceed.
+/// the ready state and before it completed its READY subscribers (or, with
+/// none, before its answer). Its retry completes every subscriber; the opener
+/// and every child proceed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_registration_crashed_before_its_wakes_resolves_every_one_on_retry() {
+async fn a_registration_crashed_before_its_notifications_completes_every_subscriber_on_retry() {
     let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
         unreachable!("in_process names the server double");
     };
@@ -523,14 +533,17 @@ async fn a_registration_crashed_before_its_wakes_resolves_every_one_on_retry() {
     let server = harness
         .server_double()
         .expect("the law crashes the registration on the server double");
-    server.crash_on(
-        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeFrame {
-            ty: MessageType::CallCommand,
-        })
-        .service("EffectGroupIndex")
-        .handler("register_dispatch")
-        .within_attempts(1),
-    );
+    for ty in [
+        MessageType::CompleteAwakeableCommand,
+        MessageType::OutputCommand,
+    ] {
+        server.crash_on(
+            lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeFrame { ty })
+                .service("EffectGroupIndex")
+                .handler("register_dispatch")
+                .within_attempts(1),
+        );
+    }
     run_batch_on(&harness).await;
     let (dispatch, children) = group_invocations(&server).await;
     assert!(

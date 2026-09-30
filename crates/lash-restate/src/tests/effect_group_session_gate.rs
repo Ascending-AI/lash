@@ -136,7 +136,6 @@ fn tool_child() -> EffectGroupChildRequest {
             wake: GroupWakePolicy::All,
             loser_disposition: LoserPolicy::RunToCompletion,
             replay_keys: vec![envelope.invocation.effect_replay_key().to_string()],
-            wait_scope: scope,
             opener: lash_core::AdmittedScope::turn("session", "turn"),
         },
         position: 0,

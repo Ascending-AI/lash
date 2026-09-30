@@ -91,7 +91,7 @@ impl ConformanceTurnRunner for MutatingRunner {
     }
 }
 
-fn factories() -> lash_conformance::BatchSugarFactories {
+pub(super) fn factories() -> lash_conformance::BatchSugarFactories {
     lash_conformance::BatchSugarFactories {
         enabled: vec![Arc::new(
             lash_protocol_standard::StandardProtocolPluginFactory::new(),
@@ -317,16 +317,23 @@ async fn live_recorded_batch_boundaries_on_current_stores() {
     clippy::disallowed_methods,
     reason = "service fixture host reads the isolated PostgreSQL gate configuration"
 )]
-async fn postgres_fixture() -> lash_postgres_store::PostgresStorage {
+pub(super) async fn postgres_fixture() -> lash_postgres_store::PostgresStorage {
+    // The schema is provisioned once per test process: laws that run at once
+    // share the database, and concurrent DDL over it deadlocks.
+    static PROVISIONED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
     let url = std::env::var("LASH_POSTGRES_DATABASE_URL").expect("the gate provides PostgreSQL");
-    let pool = sqlx::PgPool::connect(&url)
-        .await
-        .expect("connect PostgreSQL provisioner");
-    sqlx::raw_sql(lash_postgres_store::PostgresStorage::schema_ddl())
-        .execute(&pool)
-        .await
-        .expect("provision the isolated PostgreSQL fixture");
-    pool.close().await;
+    PROVISIONED
+        .get_or_init(|| async {
+            let pool = sqlx::PgPool::connect(&url)
+                .await
+                .expect("connect PostgreSQL provisioner");
+            sqlx::raw_sql(lash_postgres_store::PostgresStorage::schema_ddl())
+                .execute(&pool)
+                .await
+                .expect("provision the isolated PostgreSQL fixture");
+            pool.close().await;
+        })
+        .await;
     lash_postgres_store::PostgresStorage::connect(&url)
         .await
         .expect("PostgreSQL fixture")
