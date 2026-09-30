@@ -31,17 +31,26 @@ spec:
       annotations: {lash-loadtest/generation: {{ $generation | quote }}}
     spec:
       nodeSelector: {{ toJson $.Values.workers.nodeSelector }}
+      # The fault controller kills the worker process from inside the pod;
+      # a shared namespace keeps it from being the unkillable PID 1.
+      shareProcessNamespace: true
       {{- include "loadtest.network" (dict "Values" $.Values "tag" $tag) | nindent 6 }}
       containers:
         - name: worker
           image: "{{ $.Values.image.repository }}:{{ $tag }}"
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
-          command: [lash-e2e-worker]
+          command: [bash, -ec]
+          args:
+            - |
+              {{- include "loadtest.restartHold" $ | nindent 14 }}
+              exec lash-e2e-worker
           resources: {{ toJson $.Values.workers.resources }}
           {{- include "loadtest.env" $ | nindent 10 }}
             - {name: POSTGRES_CONNECTIONS_PER_WORKER, value: {{ $.Values.workers.pgConnections | quote }}}
-            - {name: WORKER_INSTANCE_ID, value: "worker-{{ $index }}"}
+            - {name: WORKER_INSTANCE_ID, value: "worker-{{ $index }}-{{ $generation }}"}
           readinessProbe: {httpGet: {path: /health, port: 18101}, periodSeconds: 2}
+          volumeMounts: [{name: fault, mountPath: /fault}]
+      volumes: [{name: fault, emptyDir: {}}]
 {{- end }}
 ---
 apiVersion: v1
@@ -85,4 +94,16 @@ spec:
           resources: {{ toJson $.Values.proxy.resources }}
           volumeMounts: [{name: config, mountPath: /etc/caddy}]
       volumes: [{name: config, configMap: {name: {{ $name }}-proxy-{{ $generation }}}}]
+{{- end }}
+{{- range $index := until (int .Values.workers.count) }}
+---
+# Worker {{ $index }}'s control port in whichever generations serve: the load
+# driver reads attachments back through it across worker restarts and the
+# rolling deploy.
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $name }}-worker-{{ $index }}-control}
+spec:
+  selector: {app: {{ $name }}-worker-{{ $index }}}
+  ports: [{name: control, port: 18101}]
 {{- end }}

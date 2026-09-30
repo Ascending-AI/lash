@@ -149,5 +149,28 @@ CREATE INDEX witness_load_events_by_run ON witness_load_events (run_id, operatio
 GRANT INSERT (run_id, subject, operation, phase, observer, detail_json, content_bytes)
     ON witness_load_events TO lash_witness;
 
+-- The FIG-3790 fault controller's ledger (FIG-4169). The controller appends
+-- its intent before each fault, the injection with the busy work it hit,
+-- and the recovery it observed, all on this database's clock, so the load
+-- verifier can place every load event before, during or after each fault.
+-- `campaign` rows start and end the fault phase the driver runs under.
+CREATE TABLE witness_load_faults (
+    fault_event_id BIGSERIAL PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    fault_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (
+        kind IN ('campaign', 'worker-kill', 'restate-restart', 'rolling-deploy')
+    ),
+    phase TEXT NOT NULL CHECK (
+        phase IN ('started', 'intent', 'injected', 'recovered', 'failed', 'complete')
+    ),
+    target TEXT NOT NULL,
+    detail_json TEXT NOT NULL,
+    recorded_at_us BIGINT NOT NULL DEFAULT witness_clock_us()
+);
+CREATE INDEX witness_load_faults_by_run ON witness_load_faults (run_id, fault_event_id);
+GRANT INSERT (run_id, fault_id, kind, phase, target, detail_json)
+    ON witness_load_faults TO lash_witness;
+
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO lash_witness;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO lash_witness;

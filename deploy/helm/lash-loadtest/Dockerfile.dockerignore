@@ -3,6 +3,8 @@
 !target/loadtest-image/
 !target/loadtest-image/bin/
 !target/loadtest-image/bin/**
+!target/loadtest-image/bin-next/
+!target/loadtest-image/bin-next/**
 !target/loadtest-image/witness.sql
 !crates/
 !crates/lash-postgres-store/

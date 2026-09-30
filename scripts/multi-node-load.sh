@@ -51,13 +51,14 @@ path = pathlib.Path(directory)
     'secret': values['credentialsSecret'], 'workers': values['workers']['count'],
     'generation': values['workers']['generation'],
     'loadDeadline': values['load']['activeDeadlineSeconds'],
+    'workload': values['load']['workload'],
 }))
 PYVALUES
 values=(-f "$run/run-values.yaml")
 readarray -t settings < <(python3 - "$run/build-settings.json" <<'PYSETTINGS'
 import json, sys
 settings = json.load(open(sys.argv[1]))
-for key in ['name', 'secret', 'workers', 'generation', 'loadDeadline']:
+for key in ['name', 'secret', 'workers', 'generation', 'loadDeadline', 'workload']:
     print(settings[key])
 PYSETTINGS
 )
@@ -66,10 +67,12 @@ secret="${settings[1]}"
 workers="${settings[2]}"
 generation="${settings[3]}"
 load_deadline="${settings[4]}"
+workload="${settings[5]}"
 export KUBECONFIG="$run/kubeconfig"
 k=(kubectl --kubeconfig "$KUBECONFIG" --namespace "$namespace")
 created=0
 image_id=""
+next_image_id=""
 cleanup() {
   status=$?
   if ((created)); then
@@ -87,6 +90,9 @@ cleanup() {
   if [[ -n "$image_id" ]] && [[ "$(docker image inspect "$image" --format '{{.Id}}' 2>/dev/null || true)" == "$image_id" ]]; then
     docker image rm "$image" > "$run/image-cleanup.log" 2>&1 || status=1
   fi
+  if [[ -n "$next_image_id" ]] && [[ "$(docker image inspect "$next_image" --format '{{.Id}}' 2>/dev/null || true)" == "$next_image_id" ]]; then
+    docker image rm "$next_image" >> "$run/image-cleanup.log" 2>&1 || status=1
+  fi
   printf 'topology_exit=%s evidence=%s\n' "$status" "$run"
   exit "$status"
 }
@@ -96,17 +102,46 @@ trap 'exit 143' TERM
 binaries=(lash-e2e-worker lash-e2e-mock-provider lash-loadtest-smoke lash-loadtest-driver)
 labels=()
 for binary in "${binaries[@]}"; do labels+=("//runbooks/restate-postgres-workers:${binary}__bin"); done
+# The rolling deploy's replacement generation (FIG-4169): the same worker and
+# its operator binary built as the synthetic N+1, resolved from the generated
+# feature variants so a feature-set change moves no recipe.
+synthetic_next() {
+  awk -v target="$2" '
+    /^lash_rust_feature_binary\(/ { block = 1; name = ""; next_build = 0 }
+    block && name == "" && /^    name = "/ { split($0, part, "\""); name = part[2] }
+    block && /^    crate_features = \[$/ { getline; if ($0 ~ /^        "synthetic-next",$/) next_build = 1 }
+    block && /^\)/ { if (index(name, target "__fv_") == 1 && next_build) print name; block = 0 }
+  ' "$1/BUILD.bazel"
+}
+next_worker="$(synthetic_next runbooks/restate-postgres-workers lash-e2e-worker__bin)"
+next_lashctl="$(synthetic_next crates/lashctl lashctl)"
+for resolved in "$next_worker" "$next_lashctl"; do
+  if [[ -z "$resolved" ]] || [[ "$(printf '%s\n' "$resolved" | wc -l)" -ne 1 ]]; then
+    echo "cannot resolve the synthetic N+1 variants: '$next_worker' '$next_lashctl'" >&2
+    exit 1
+  fi
+done
+labels+=("//runbooks/restate-postgres-workers:$next_worker" "//crates/lashctl:$next_lashctl")
 kiln build --remote_download_outputs=toplevel "${labels[@]}"
+rm -rf target/loadtest-image/bin-next
+mkdir -p target/loadtest-image/bin-next
 for binary in "${binaries[@]}"; do
   install -m 755 "bazel-bin/runbooks/restate-postgres-workers/${binary}__bin" "target/loadtest-image/bin/$binary"
+  install -m 755 "bazel-bin/runbooks/restate-postgres-workers/${binary}__bin" "target/loadtest-image/bin-next/$binary"
 done
+install -m 755 "bazel-bin/runbooks/restate-postgres-workers/$next_worker" target/loadtest-image/bin-next/lash-e2e-worker
+install -m 755 "bazel-bin/crates/lashctl/$next_lashctl" target/loadtest-image/bin-next/lashctl
 # The chart's schema Job creates the witness role/database using secret values.
 sed '/^CREATE ROLE lash_witness /d; /^CREATE DATABASE lash_witness /d' runbooks/restate-postgres-workers/witness.sql > target/loadtest-image/witness.sql
 image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["repository"])' "$run/build-settings.json"):$name"
 runtime_base="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["runtime"])' "$run/build-settings.json")"
 node_image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["nodeImage"])' "$run/build-settings.json")"
+next_image="$image-next"
 docker build --build-arg "RUNTIME_BASE=$runtime_base" -t "$image" -f deploy/helm/lash-loadtest/Dockerfile . > "$run/image-build.log" 2>&1
 image_id="$(docker image inspect "$image" --format '{{.Id}}')"
+docker build --build-arg "RUNTIME_BASE=$runtime_base" --build-arg BIN_DIR=target/loadtest-image/bin-next \
+  -t "$next_image" -f deploy/helm/lash-loadtest/Dockerfile . >> "$run/image-build.log" 2>&1
+next_image_id="$(docker image inspect "$next_image" --format '{{.Id}}')"
 created=1
 env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy kind create cluster --name "$name" --image "$node_image" --config "$run/kind.yaml" --kubeconfig "$KUBECONFIG" --wait 120s > "$run/kind.log" 2>&1
 load_image() {
@@ -121,6 +156,7 @@ load_image() {
   rm "$run/image.tar"
 }
 load_image "$image" > "$run/image-load.log" 2>&1
+load_image "$next_image" >> "$run/image-load.log" 2>&1
 kubectl --kubeconfig "$KUBECONFIG" create namespace "$namespace"
 # Ephemeral synthetic credentials are kept only in the run's cluster.
 pg_password="$(openssl rand -hex 24)"
@@ -210,11 +246,21 @@ for attempt in $(seq 1 60); do
 done
 python3 scripts/check_loadtest_cluster.py metrics "$run/metrics-targets.json"
 printf 'topology gates passed: restate_nodes=3 metadata_members=3 replication=2 public_turns=1 peer_reads=1 quorum_nodes_unavailable=1\n' | tee "$run/result.txt"
-# The durable workload (FIG-4168): every public durable operation class,
-# reconciled against the witness ledgers by the driver itself.
-printf 'load:\n  enabled: true\n' > "$run/load-values.yaml"
+# The durable workload (FIG-4168) under the fault campaign (FIG-4169): every
+# public durable operation class keeps running while the controller kills a
+# busy worker, restarts a Restate leader and rolls the workers to the
+# synthetic N+1 with a generation drain. The driver reconciles the witness
+# ledgers, fault classes included, once the campaign ends.
+load_run="$workload-fault-$(date -u +%Y%m%d%H%M%S)"
+printf 'load:\n  enabled: true\n  faultCampaign: true\n  run: %s\n' "$load_run" > "$run/load-values.yaml"
 helm template topology "$chart" --namespace "$namespace" "${values[@]}" -f "$run/load-values.yaml" \
   --show-only templates/jobs.yaml | python3 scripts/check_loadtest_cluster.py job load | "${k[@]}" apply -f -
+"${k[@]}" rollout status "deployment/${resource}-fault-probe" --timeout=120s
+campaign_status=0
+python3 scripts/loadtest_faults.py --kubeconfig "$KUBECONFIG" --namespace "$namespace" --name "$resource" \
+  --run "$load_run" --workload "crates/lash-perf/workloads/$workload.json" --workload-name "$workload" \
+  --run-dir "$run" --chart "$chart" --values "$run/run-values.yaml" \
+  --initial-tag "$name" --next-tag "$name-next" 2>&1 | tee "$run/faults.log" || campaign_status=$?
 load_state=""
 for attempt in $(seq 1 "$load_deadline"); do
   load_state="$("${k[@]}" get "job/${resource}-load" -o jsonpath='{.status.succeeded}/{.status.failed}')"
@@ -223,9 +269,10 @@ for attempt in $(seq 1 "$load_deadline"); do
 done
 "${k[@]}" logs "job/${resource}-load" -c load > "$run/load.log"
 grep '^load \|^load witness' "$run/load.log" > "$run/load-witness.txt" || true
+((campaign_status == 0))
 grep -F 'load witness verdict=passed' "$run/load.log"
 [[ "$load_state" == 1/* ]]
-printf 'durable workload passed: %s\n' "$(grep -F 'load witness verdict=passed' "$run/load.log")" | tee -a "$run/result.txt"
+printf 'durable workload and fault campaign passed: %s\n' "$(grep -F 'load witness verdict=passed' "$run/load.log")" | tee -a "$run/result.txt"
 }
 
 main "$@"; exit "$?"

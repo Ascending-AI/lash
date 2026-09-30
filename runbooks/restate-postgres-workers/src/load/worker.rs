@@ -2,10 +2,10 @@
 //! runs one [`LoadRequest`] through lash's public API.
 
 use super::{
-    CRON_SETUP_MARKER, CRON_SOURCE_TYPE, CancelOutcome, CronSetupReport, CronTickReport,
-    DeleteReport, DeletionOutcome, HostProcessReport, InputOutcome, LoadContext, LoadRequest,
-    LoadResponse, QUEUED_MARKER, QueuedReport, TURN_MARKER, TurnReport, WORKLOAD_MARKER,
-    turn_id_for,
+    ActiveOperations, CRON_SETUP_MARKER, CRON_SOURCE_TYPE, CancelOutcome, CronSetupReport,
+    CronTickReport, DeleteReport, DeletionOutcome, HostProcessReport, InputOutcome, LoadContext,
+    LoadRequest, LoadResponse, QUEUED_MARKER, QueuedReport, TURN_MARKER, TurnReport,
+    WORKLOAD_MARKER, turn_id_for,
 };
 use crate::{create_or_open_session, turn_handler_error};
 use anyhow::{Context, Result};
@@ -62,6 +62,7 @@ pub struct LoadWorker {
     restate_ingress_url: String,
     restate_authority_id: lash_restate::RestateAuthorityId,
     model: lash::ModelSpec,
+    active: ActiveOperations,
     administration: Arc<tokio::sync::OnceCell<lash_restate::RestateSessionAdministration>>,
 }
 
@@ -73,6 +74,8 @@ pub struct LoadWorkerConfig {
     pub restate_ingress_url: String,
     pub restate_authority_id: lash_restate::RestateAuthorityId,
     pub model: lash::ModelSpec,
+    /// Where each handler counts itself while it runs.
+    pub active: ActiveOperations,
 }
 
 impl LoadWorker {
@@ -85,6 +88,7 @@ impl LoadWorker {
             restate_ingress_url: config.restate_ingress_url,
             restate_authority_id: config.restate_authority_id,
             model: config.model,
+            active: config.active,
             administration: Arc::new(tokio::sync::OnceCell::new()),
         }
     }
@@ -96,6 +100,7 @@ impl E2eLoadWorkflow for LoadWorker {
         ctx: WorkflowContext<'_>,
         Json(request): Json<LoadRequest>,
     ) -> HandlerResult<Json<LoadResponse>> {
+        let _running = self.active.enter(request.workflow_key());
         let response = match request {
             LoadRequest::Turn {
                 workload_sha256,

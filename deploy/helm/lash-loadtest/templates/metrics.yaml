@@ -1,10 +1,4 @@
 {{- $name := include "loadtest.name" . -}}
-{{- if ge (int .Values.faults.workerKill.index) (int .Values.workers.count) -}}
-{{- fail "faults.workerKill.index must select an existing worker" -}}
-{{- end -}}
-{{- if ge (int .Values.faults.restateRestart.index) (int .Values.restate.replicas) -}}
-{{- fail "faults.restateRestart.index must select an existing Restate node" -}}
-{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata: {name: {{ $name }}-metrics}
@@ -43,10 +37,42 @@ spec:
   selector: {app: {{ $name }}-metrics}
   ports: [{name: http, port: 9090}]
 ---
+# The fault controller's targets (FIG-4169): every worker and Restate node it
+# may pick from, and both generations' deployment URLs.
 apiVersion: v1
 kind: ConfigMap
 metadata: {name: {{ $name }}-faults}
 data:
-  hooks.json: {{ toJson .Values.faults | quote }}
   targets.json: |
-    {"namespace": {{ .Release.Namespace | quote }}, "workerDeployment": "{{ $name }}-worker-{{ .Values.faults.workerKill.index }}-{{ .Values.workers.generation }}", "restatePod": "{{ $name }}-restate-{{ .Values.faults.restateRestart.index }}", "generation": {{ .Values.workers.generation | quote }}, "deploymentUrl": "http://{{ $name }}-workers-{{ .Values.workers.generation }}:18100"}
+    {{- $targets := dict
+      "namespace" .Release.Namespace
+      "name" $name
+      "generation" .Values.workers.generation
+      "rollingGeneration" .Values.faults.rollingGeneration
+      "workerCount" (int .Values.workers.count)
+      "restatePods" (list)
+      "partitions" (int .Values.restate.partitions)
+      "probe" (printf "%s-fault-probe" $name)
+      "restateAdminUrl" (printf "http://%s-restate:9070" $name)
+    }}
+    {{- range $index := until (int .Values.restate.replicas) }}
+    {{- $_ := set $targets "restatePods" (append $targets.restatePods (printf "%s-restate-%d" $name $index)) }}
+    {{- end }}
+    {{ toJson $targets }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ $name }}-fault-probe}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: {{ $name }}-fault-probe}}
+  template:
+    metadata: {labels: {app: {{ $name }}-fault-probe}}
+    spec:
+      containers:
+        - name: probe
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [sleep, infinity]
+          {{- include "loadtest.env" . | nindent 10 }}
+          resources: {{ toJson .Values.probe.resources }}

@@ -89,7 +89,10 @@ ordinals of every session cover every durable operation class: parallel and
 serial tools, parked children, signalled and cancelled host starts, attachments
 shared by an actor pair, active and idle queued inputs and their cancels, turn
 cancels, deletes, rotations and retryable first attempts. The fixture test
-checks that coverage.
+checks that coverage. Its fault phase is also shortened for the fault
+controller's smoke (FIG-4169): after a 60 s warm-up, a worker kill at 20 s, a
+Restate node restart at 60 s and a rolling deploy at 100 s of a 150 s window,
+each restarted after 5 s, with a 10 s recovery hold.
 
 `fixtures/sizes-v1.json` covers every text/JSON byte bucket and all six attachment
 aggregate/count combinations. `fixtures/mix-v1.json` sets a 25,000-plan sample

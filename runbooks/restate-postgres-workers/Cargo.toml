@@ -46,6 +46,19 @@ test = false
 [lib]
 doctest = false
 
+[features]
+# The synthetic N+1 worker (ADR 0115 §6) the FIG-4169 rolling deploy starts
+# beside the running generation: it moves the constants whose
+# `synthetic-next` blocks sit beside them, so it has its own drain
+# generation. `just multi-node-load` builds the worker both ways. No
+# production build enables it.
+synthetic-next = [
+    "lash/synthetic-next",
+    "lash-restate/synthetic-next",
+    "lash-postgres-store/synthetic-next",
+    "lashlang/synthetic-next",
+]
+
 [lints]
 workspace = true
 

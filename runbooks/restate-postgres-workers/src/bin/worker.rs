@@ -26,11 +26,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use lash_restate_postgres_workers_e2e::load::control::FaultControl;
 use lash_restate_postgres_workers_e2e::load::worker::{
     E2eLoadWorkflow as _, LoadWorker, LoadWorkerConfig,
 };
 use lash_restate_postgres_workers_e2e::load::{
-    LoadContext, LoadEvent, WitnessedOperation, WitnessedPhase, record_load_event,
+    ActiveOperations, LoadContext, LoadEvent, WitnessedOperation, WitnessedPhase, record_load_event,
 };
 use lash_restate_postgres_workers_e2e::{
     BUTTON_SOURCE_TYPE, DEFAULT_SESSION_ID, DirectDurableWaitAwaitRequest,
@@ -1277,6 +1278,7 @@ async fn async_main() -> Result<()> {
     let control_listener = tokio::net::TcpListener::bind(control_addr)
         .await
         .context("bind worker control endpoint")?;
+    let active = ActiveOperations::default();
     let control_router = Router::new()
         .route("/health", get(direct_health))
         .route(
@@ -1289,7 +1291,15 @@ async fn async_main() -> Result<()> {
         )
         .route("/await-durable-wait", post(direct_await_durable_wait))
         .route("/resolve-durable-wait", post(direct_resolve_durable_wait))
-        .with_state(state.clone());
+        .with_state(state.clone())
+        .merge(lash_restate_postgres_workers_e2e::load::control::router(
+            FaultControl {
+                worker_id: state.worker_id.clone(),
+                core: core.clone(),
+                engine: Arc::clone(&backend),
+                active: active.clone(),
+            },
+        ));
     tokio::spawn(async move {
         if let Err(err) = axum::serve(control_listener, control_router).await {
             tracing::error!(error = %err, "worker control endpoint exited");
@@ -1331,6 +1341,7 @@ async fn async_main() -> Result<()> {
                 restate_ingress_url: state.restate_ingress_url.clone(),
                 restate_authority_id: state.restate_authority_id.clone(),
                 model: lash_restate_postgres_workers_e2e::e2e_model_spec()?,
+                active,
             })
             .serve(),
         );

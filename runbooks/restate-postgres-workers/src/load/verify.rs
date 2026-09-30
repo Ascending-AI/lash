@@ -2,7 +2,9 @@
 //! regenerates. Nothing here reads lash's store: the evidence is what the
 //! driver sent and read back, what the provider served, what the synthetic
 //! tools committed, and the blob bytes the attachment tool put and the
-//! workers read.
+//! workers read. Under a fault campaign (FIG-4169) the fault controller's
+//! ledger places each fault on the same database clock, and every fault must
+//! have hit operations in flight that then reached their durable terminals.
 
 use super::{
     CancelOutcome, DeleteReport, InputOutcome, LoadContext, LoadRequest, LoadResponse,
@@ -39,6 +41,15 @@ pub const CLASSES: [&str; 19] = [
     "cron-closed-after-delete",
 ];
 
+/// The classes a run under a fault campaign must also witness: the campaign
+/// itself, and each fault kind the controller injects.
+pub const FAULT_CLASSES: [&str; 4] = [
+    "fault-campaign",
+    "worker-kill",
+    "restate-restart",
+    "rolling-deploy",
+];
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadEventRow {
     pub subject: String,
@@ -47,11 +58,26 @@ pub struct LoadEventRow {
     pub observer: String,
     pub detail: Value,
     pub content_digest: Option<String>,
+    /// The witness database's clock when the row was appended.
+    pub recorded_at_us: i64,
+}
+
+/// One `witness_load_faults` row.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FaultRow {
+    pub fault_id: String,
+    pub kind: String,
+    pub phase: String,
+    pub target: String,
+    pub detail: Value,
+    pub recorded_at_us: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WitnessSnapshot {
     pub events: Vec<LoadEventRow>,
+    /// The fault controller's rows, in order; empty without a campaign.
+    pub faults: Vec<FaultRow>,
     /// `(workflow_id, scenario)` of every provider receipt under the run.
     pub receipts: Vec<(String, String)>,
     /// `(logical_key, response_digest)` of every committed effect under the run.
@@ -62,8 +88,9 @@ pub struct WitnessSnapshot {
 
 /// Read the run's rows from the witness ledgers.
 pub async fn load_snapshot(pool: &PgPool, run: &str) -> Result<WitnessSnapshot> {
-    let events = sqlx::query_as::<_, (String, String, String, String, String, Option<String>)>(
-        "SELECT subject, operation, phase, observer, detail_json, content_digest
+    type EventColumns = (String, String, String, String, String, Option<String>, i64);
+    let events = sqlx::query_as::<_, EventColumns>(
+        "SELECT subject, operation, phase, observer, detail_json, content_digest, recorded_at_us
          FROM witness_load_events WHERE run_id = $1 ORDER BY event_id",
     )
     .bind(run)
@@ -72,7 +99,7 @@ pub async fn load_snapshot(pool: &PgPool, run: &str) -> Result<WitnessSnapshot> 
     .context("read the load events")?
     .into_iter()
     .map(
-        |(subject, operation, phase, observer, detail, content_digest)| {
+        |(subject, operation, phase, observer, detail, content_digest, recorded_at_us)| {
             Ok(LoadEventRow {
                 subject,
                 operation,
@@ -80,9 +107,30 @@ pub async fn load_snapshot(pool: &PgPool, run: &str) -> Result<WitnessSnapshot> 
                 observer,
                 detail: serde_json::from_str(&detail).context("decode a load event's detail")?,
                 content_digest,
+                recorded_at_us,
             })
         },
     )
+    .collect::<Result<Vec<_>>>()?;
+    let faults = sqlx::query_as::<_, (String, String, String, String, String, i64)>(
+        "SELECT fault_id, kind, phase, target, detail_json, recorded_at_us
+         FROM witness_load_faults WHERE run_id = $1 ORDER BY fault_event_id",
+    )
+    .bind(run)
+    .fetch_all(pool)
+    .await
+    .context("read the fault ledger")?
+    .into_iter()
+    .map(|(fault_id, kind, phase, target, detail, recorded_at_us)| {
+        Ok(FaultRow {
+            fault_id,
+            kind,
+            phase,
+            target,
+            detail: serde_json::from_str(&detail).context("decode a fault row's detail")?,
+            recorded_at_us,
+        })
+    })
     .collect::<Result<Vec<_>>>()?;
     // Keys under the run start with `run/`; `left` avoids LIKE wildcards in
     // run IDs.
@@ -112,6 +160,7 @@ pub async fn load_snapshot(pool: &PgPool, run: &str) -> Result<WitnessSnapshot> 
     .context("read the effect attempts")?;
     Ok(WitnessSnapshot {
         events,
+        faults,
         receipts,
         commits,
         attempts,
@@ -292,8 +341,10 @@ fn mentions(value: &Value, needle: &str) -> bool {
 pub fn verify(load: &LoadContext, run: &str, snapshot: &WitnessSnapshot) -> Result<Verdict> {
     let generator = load.generator(run)?;
     let evidence = Evidence::index(snapshot);
+    let campaign = !snapshot.faults.is_empty();
     let mut classes: BTreeMap<&'static str, Tally> = CLASSES
         .iter()
+        .chain(FAULT_CLASSES.iter().filter(|_| campaign))
         .map(|class| (*class, Tally::default()))
         .collect();
     let mut note = |class: &'static str, result: Result<(), String>| {
@@ -466,6 +517,10 @@ pub fn verify(load: &LoadContext, run: &str, snapshot: &WitnessSnapshot) -> Resu
                 Err(violation) => Err(violation),
             },
         );
+    }
+
+    if campaign {
+        super::fault_verify::verify_faults(snapshot, &mut note);
     }
 
     let committed = snapshot.commits.len() as u64;
@@ -859,7 +914,7 @@ pub fn sent_request(detail: &Value) -> Option<LoadRequest> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::load::{
         CronSetupReport, CronTickReport, DeletionOutcome, HostProcessReport, InputOutcome,
@@ -884,6 +939,7 @@ mod tests {
             observer: observer.to_owned(),
             detail,
             content_digest,
+            recorded_at_us: 0,
         }
     }
 
@@ -923,7 +979,7 @@ mod tests {
     }
 
     /// The evidence a correct smoke run of the first turns would leave.
-    fn ideal(load: &LoadContext, turns: u64) -> WitnessSnapshot {
+    pub(crate) fn ideal(load: &LoadContext, turns: u64) -> WitnessSnapshot {
         let generator = load.generator(RUN).expect("generator");
         let spec = load.workload.spec();
         let mut snapshot = WitnessSnapshot::default();
@@ -1126,15 +1182,15 @@ mod tests {
         snapshot
     }
 
-    fn smoke() -> LoadContext {
+    pub(crate) fn smoke() -> LoadContext {
         LoadContext::named("smoke-v1").expect("smoke workload")
     }
 
-    fn verdict(snapshot: &WitnessSnapshot) -> Verdict {
+    pub(crate) fn verdict(snapshot: &WitnessSnapshot) -> Verdict {
         verify(&smoke(), RUN, snapshot).expect("verify")
     }
 
-    fn violated(verdict: &Verdict, class: &str) -> bool {
+    pub(crate) fn violated(verdict: &Verdict, class: &str) -> bool {
         !verdict.classes[class].violations.is_empty()
     }
 

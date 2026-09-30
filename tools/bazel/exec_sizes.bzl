@@ -648,8 +648,14 @@ TEST_RUN_REQUESTS = {
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
     "//examples/workflow-graph-roundtrip:workflow_graph__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
+    "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test__fv_c3ba64b6": {"cpu_count": 1, "memory_kb": 1048576},
+    "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test__fv_fa541d90": {"cpu_count": 1, "memory_kb": 1048576},
     "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
+    "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test__fv_c3ba64b6": {"cpu_count": 1, "memory_kb": 1048576},
+    "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test__fv_fa541d90": {"cpu_count": 1, "memory_kb": 1048576},
     "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
+    "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test__fv_c3ba64b6": {"cpu_count": 1, "memory_kb": 1048576},
+    "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test__fv_fa541d90": {"cpu_count": 1, "memory_kb": 1048576},
     "//runbooks/rlm-smoke:rlm-smoke__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
 }
 

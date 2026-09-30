@@ -67,11 +67,17 @@ spec:
                 labelSelector: {matchLabels: {app: {{ $name }}-restate}}
                 topologyKey: kubernetes.io/hostname
           {{ end }}
+      # The fault controller restarts the server process from inside the pod.
+      shareProcessNamespace: true
       {{- include "loadtest.network" . | nindent 6 }}
       containers:
         - name: restate
           image: {{ .Values.restate.image }}
-          args: [--config-file, /config/restate.toml]
+          command: [sh, -ec]
+          args:
+            - |
+              {{- include "loadtest.restartHold" . | nindent 14 }}
+              exec restate-server --config-file /config/restate.toml
           env:
             - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
             - {name: RESTATE_NODE_NAME, value: "$(POD_NAME)"}
@@ -81,8 +87,8 @@ spec:
             - {name: RESTATE_WORKER__SNAPSHOTS__AWS_SECRET_ACCESS_KEY, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecret }}, key: s3-secret-key}}}
           resources: {{ toJson .Values.restate.resources }}
           readinessProbe: {tcpSocket: {port: 5122}, periodSeconds: 2}
-          volumeMounts: [{name: data, mountPath: /data}, {name: config, mountPath: /config}]
-      volumes: [{name: config, configMap: {name: {{ $name }}-restate}}]
+          volumeMounts: [{name: data, mountPath: /data}, {name: config, mountPath: /config}, {name: fault, mountPath: /fault}]
+      volumes: [{name: config, configMap: {name: {{ $name }}-restate}}, {name: fault, emptyDir: {}}]
   volumeClaimTemplates:
     - metadata: {name: data}
       spec:

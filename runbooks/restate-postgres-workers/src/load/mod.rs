@@ -15,6 +15,8 @@
 //! read endpoint witness the exact blob bytes they put and read. [`verify`]
 //! reconciles all of it against the plan the workload regenerates.
 
+pub mod control;
+mod fault_verify;
 pub mod tools;
 pub mod verify;
 pub mod worker;
@@ -24,11 +26,16 @@ use lash_perf::workload::{Generator, Workload};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// The Restate workflow every load operation runs as.
 pub const LOAD_WORKFLOW: &str = "E2eLoadWorkflow";
 /// Names the checked-in workload every process of a run generates from.
 pub const LOAD_WORKLOAD_ENV: &str = "LASH_LOAD_WORKLOAD";
+/// Set to `1` when the driver runs under the fault controller (FIG-4169):
+/// sessions keep sending until the controller ends its campaign.
+pub const FAULT_CAMPAIGN_ENV: &str = "LASH_LOAD_FAULT_CAMPAIGN";
 /// The trigger source a cron emission publishes on.
 pub const CRON_SOURCE_TYPE: &str = "load.cron.tick";
 /// The typed event a cron emission carries.
@@ -83,6 +90,59 @@ impl LoadContext {
 
     pub fn generator(&self, run: &str) -> Result<Generator<'_>> {
         Generator::new(&self.workload, run)
+    }
+}
+
+/// The load operations a worker's handlers are running right now, by
+/// workflow key. The fault controller reads them through the worker's control
+/// endpoint to kill a worker only while it holds work (FIG-4169).
+#[derive(Clone, Debug, Default)]
+pub struct ActiveOperations {
+    running: Arc<Mutex<BTreeMap<String, u32>>>,
+}
+
+impl ActiveOperations {
+    /// Count `key` as running until the returned guard drops. A replayed
+    /// attempt of the same key on this worker counts again.
+    pub fn enter(&self, key: String) -> ActiveOperation {
+        *self
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(key.clone())
+            .or_default() += 1;
+        ActiveOperation {
+            running: Arc::clone(&self.running),
+            key,
+        }
+    }
+
+    /// The keys running now, in order.
+    pub fn keys(&self) -> Vec<String> {
+        self.running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+            .cloned()
+            .collect()
+    }
+}
+
+/// One running handler of [`ActiveOperations`].
+pub struct ActiveOperation {
+    running: Arc<Mutex<BTreeMap<String, u32>>>,
+    key: String,
+}
+
+impl Drop for ActiveOperation {
+    fn drop(&mut self) {
+        let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = running.get_mut(&self.key) {
+            *count -= 1;
+            if *count == 0 {
+                running.remove(&self.key);
+            }
+        }
     }
 }
 
@@ -499,6 +559,20 @@ mod tests {
             let decoded: LoadRequest = serde_json::from_str(&encoded).expect("decode request");
             assert_eq!(decoded, request);
         }
+    }
+
+    #[test]
+    fn active_operations_count_until_every_guard_drops() {
+        let active = ActiveOperations::default();
+        let first = active.enter("b".into());
+        let replay = active.enter("b".into());
+        let other = active.enter("a".into());
+        assert_eq!(active.keys(), ["a", "b"]);
+        drop(first);
+        assert_eq!(active.keys(), ["a", "b"]);
+        drop(replay);
+        drop(other);
+        assert!(active.keys().is_empty());
     }
 
     #[test]

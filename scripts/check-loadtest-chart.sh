@@ -16,4 +16,6 @@ done
   --set workers.generationImages.initial=old --set workers.generationImages.next=new > target/loadtest-tools/retained-generations.yaml
 "$helm_bin" template topology "$chart" -f "$chart/values-local.yaml" \
   --set load.enabled=true > target/loadtest-tools/load-enabled.yaml
-printf 'chart profiles passed: lint=2 template=5\n'
+"$helm_bin" template topology "$chart" -f "$chart/values-local.yaml" \
+  --set load.enabled=true --set load.faultCampaign=true --set load.run=smoke-v1-fault > target/loadtest-tools/load-campaign.yaml
+printf 'chart profiles passed: lint=2 template=6\n'

@@ -35,3 +35,15 @@ env:
   - {name: MOCK_PROVIDER_BASE_URL, value: "http://{{ include "loadtest.name" . }}-provider:18001"}
   - {name: LASH_LOAD_WORKLOAD, value: {{ .Values.load.workload | quote }}}
 {{- end -}}
+{{- define "loadtest.restartHold" -}}
+# The fault controller's restart hold (FIG-4169): before it stops this
+# container it leaves `<fault id> <seconds>` in the pod's fault volume, and
+# the restarted container waits that long, once per fault, before serving.
+if [ -f /fault/restart-hold ]; then
+  read -r fault delay < /fault/restart-hold
+  if [ ! -e "/fault/held-$fault" ]; then
+    : > "/fault/held-$fault"
+    sleep "$delay"
+  fi
+fi
+{{- end -}}

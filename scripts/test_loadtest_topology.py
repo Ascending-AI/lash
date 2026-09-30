@@ -171,6 +171,47 @@ class ChartTests(unittest.TestCase):
         services = {item['metadata']['name'] for item in documents if item['kind'] == 'Service'}
         self.assertIn('lash-loadtest-workers-initial', services)
         self.assertIn('lash-loadtest-workers-next', services)
+        # The replacement build expands the store with its own operator
+        # binary before its workers start.
+        migrate = proof.job(documents, 'migrate-next')
+        self.assertEqual(migrate['metadata']['annotations']['helm.sh/hook'], 'pre-upgrade')
+        container = migrate['spec']['template']['spec']['containers'][0]
+        self.assertTrue(container['image'].endswith(':new'))
+        self.assertEqual(container['command'], ['lashctl', 'migrate', '--json'])
+        self.assertIn('secretKeyRef', container['env'][0]['valueFrom'])
+        # Control ports span both generations under one name per index.
+        control = next(item for item in documents if item['kind'] == 'Service'
+                       and item['metadata']['name'] == 'lash-loadtest-worker-0-control')
+        self.assertEqual(control['spec']['selector'], {'app': 'lash-loadtest-worker-0'})
+        ids = {entry['value'] for worker in workers
+               for entry in worker['spec']['template']['spec']['containers'][0]['env']
+               if entry['name'] == 'WORKER_INSTANCE_ID'}
+        self.assertEqual(ids, {'worker-0-initial', 'worker-1-initial', 'worker-0-next', 'worker-1-next'})
+
+    def test_fault_targets_restart_in_place_after_a_hold(self):
+        documents = self.documents('values-local.yaml.rendered.yaml')
+        self.assertFalse(any(item['kind'] == 'Job' and '-migrate-' in item['metadata']['name'] for item in documents))
+        pods = [item for item in documents if item['kind'] in {'Deployment', 'StatefulSet'}
+                and ('-worker-' in item['metadata']['name'] or item['metadata']['name'].endswith('-restate'))]
+        self.assertEqual(len(pods), 3)
+        for item in pods:
+            spec = item['spec']['template']['spec']
+            self.assertTrue(spec['shareProcessNamespace'])
+            container = spec['containers'][0]
+            script = container['args'][0]
+            self.assertIn('/fault/restart-hold', script)
+            self.assertIn('/fault/held-$fault', script)
+            self.assertRegex(script.strip().splitlines()[-1], r'^exec (lash-e2e-worker|restate-server --config-file /config/restate.toml)$')
+            self.assertIn({'name': 'fault', 'mountPath': '/fault'}, container['volumeMounts'])
+            self.assertIn({'name': 'fault', 'emptyDir': {}}, spec['volumes'])
+        targets = json.loads(next(item['data']['targets.json'] for item in documents
+                                  if item['kind'] == 'ConfigMap' and item['metadata']['name'].endswith('-faults')))
+        self.assertEqual(targets['restatePods'], [f'lash-loadtest-restate-{index}' for index in range(3)])
+        self.assertEqual((targets['generation'], targets['rollingGeneration']), ('initial', 'next'))
+        self.assertEqual((targets['workerCount'], targets['partitions']), (2, 24))
+        probe = next(item for item in documents if item['kind'] == 'Deployment'
+                     and item['metadata']['name'] == targets['probe'])
+        self.assertEqual(probe['spec']['template']['spec']['containers'][0]['command'], ['sleep', 'infinity'])
 
     def test_invalid_topologies_fail_at_render(self):
         for overrides in [
@@ -178,8 +219,8 @@ class ChartTests(unittest.TestCase):
             ['--set', 'restate.replication=4'],
             ['--set', 's3.snapshotPrefix=attachments'],
             ['--set', 'workers.retainedGenerations[0]=initial'],
-            ['--set', 'faults.workerKill.index=2'],
-            ['--set', 'faults.restateRestart.index=3'],
+            ['--set', 'faults.rollingGeneration=Next'],
+            ['--set', 'load.run=Not_A_Run'],
             ['--set', 'nameOverride=' + 'a' * 40, '--set', 'workers.generation=' + 'b' * 32],
             ['--set', 'load.workload=figments-v2'],
             ['--set', 'load.turnsPerSession=0'],
@@ -204,7 +245,13 @@ class ChartTests(unittest.TestCase):
         self.assertEqual(env['LASH_LOAD_WORKLOAD'], 'smoke-v1')
         self.assertEqual(env['LASH_LOAD_SESSIONS'], '4')
         self.assertEqual(env['LASH_LOAD_TURNS_PER_SESSION'], '6')
-        self.assertEqual(len(env['WORKER_CONTROL_URLS'].split(',')), 2)
+        self.assertEqual(env['WORKER_CONTROL_URLS'].split(','), [
+            'http://lash-loadtest-worker-0-control:18101', 'http://lash-loadtest-worker-1-control:18101'])
+        self.assertEqual(env['LASH_LOAD_FAULT_CAMPAIGN'], '0')
+        self.assertNotIn('LASH_LOAD_RUN', env)
+        campaign = proof.job(self.documents('load-campaign.yaml'), 'load')
+        env = {entry['name']: entry.get('value') for entry in campaign['spec']['template']['spec']['containers'][0]['env']}
+        self.assertEqual((env['LASH_LOAD_FAULT_CAMPAIGN'], env['LASH_LOAD_RUN']), ('1', 'smoke-v1-fault'))
         for item in documents:
             if item['kind'] == 'Deployment' and ('-worker-' in item['metadata']['name'] or item['metadata']['name'].endswith('-provider')):
                 names = {entry['name']: entry.get('value') for entry in item['spec']['template']['spec']['containers'][0]['env']}

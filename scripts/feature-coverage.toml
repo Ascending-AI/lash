@@ -454,6 +454,19 @@ commands = [
   ["cargo", "check", "-p", "lash-upgrade-harness", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
 ]
 
+# The FIG-4169 rolling deploy replaces the load-test workers with the same
+# worker built as the synthetic N+1; `just multi-node-load` builds it both ways.
+[[lane]]
+name = "loadtest-worker-synthetic-next"
+features = [
+  "lash-restate-postgres-workers-e2e/synthetic-next:on",
+  "lash-restate-postgres-workers-e2e/synthetic-next:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-restate-postgres-workers-e2e", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-restate-postgres-workers-e2e", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+]
+
 # The operator binary used by Phase A must carry the same N+1 Restate epoch.
 [[lane]]
 name = "lashctl-synthetic-next"

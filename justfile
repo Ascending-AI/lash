@@ -730,3 +730,4 @@ multi-node-load:
 loadtest-chart-check:
   bash "{{repo}}/scripts/check-loadtest-chart.sh"
   python3 "{{repo}}/scripts/test_loadtest_topology.py"
+  python3 "{{repo}}/scripts/test_loadtest_faults.py"

@@ -14,8 +14,9 @@ Run the local proof in a build-enabled Kiln fork:
 kiln gate lash fig-4167 -- just multi-node-load
 ```
 
-The foreground recipe builds three binaries on the shared pool, creates their
-runtime image, boots a three-node kind cluster, and installs this chart. It
+The foreground recipe builds the harness binaries on the shared pool, plus the
+synthetic N+1 worker and operator binary. It creates both generations'
+runtime images, boots a three-node kind cluster, and installs this chart. It
 installs pinned Helm and kind binaries under the fork's `target/` when missing.
 Docker, kubectl, Python with PyYAML, curl and openssl must be available. The
 runtime image builds from repository source and the downloaded pool outputs.
@@ -80,13 +81,15 @@ it for L4 campaigns that supply their own sustained driver. The driver is the L2
 
 `load.enabled` renders the `<name>-load` Job, which runs `lash-loadtest-driver`
 against the running topology (FIG-4168). It is off at install; `just
-multi-node-load` applies it after the topology gates, waits for it, archives
-its log as `load.log` and `load-witness.txt`, and fails unless the driver
-printed `load witness verdict=passed`. `load.workload` names the checked-in
+multi-node-load` applies it after the topology gates under the fault campaign
+below, waits for it, archives its log as `load.log` and `load-witness.txt`,
+and fails unless the controller completed its campaign and the driver printed
+`load witness verdict=passed`. `load.workload` names the checked-in
 workload every worker, the provider and the driver generate from (`smoke-v1`
 or `figments-v1`); `load.sessions` and `load.turnsPerSession` bound the run.
-The default is the pipeline smoke: four sessions of six turns, a minute or two.
-It is not a baseline and derives no budgets.
+The default is the pipeline smoke: four sessions of at least six turns, running
+until the fault campaign ends, a few minutes. It is not a baseline and derives
+no budgets.
 
 Every session is an open-loop Poisson clock of primary turns sent through
 Restate ingress to the workers' `E2eLoadWorkflow`, which runs each through
@@ -107,23 +110,81 @@ workload regenerates and prints one `load witness class=...` line per class.
 Any violation, and any class with no evidence, fails the run. The final result
 archive and measurements belong to later lanes.
 
-The `<name>-faults` ConfigMap exports `hooks.json` from values and `targets.json`
-with the namespace, selected worker Deployment, selected Restate pod, generation
-and deployment URL. L4 uses these to target a busy worker, restart a Restate node
-without deleting its PVC, and consume `faults.rollingDeploy.trigger`. L4 owns the
-actual fault timestamps, busy-work check, restart delay and recovery witnesses.
-Changing this trigger signals that controller; it does not replace a worker at
-an existing Restate deployment URL.
+# Fault campaign
+
+`just multi-node-load` runs the durable workload under the fault controller
+(FIG-4169, `scripts/loadtest_faults.py`). The load Job gets
+`load.faultCampaign: true` and a shared `load.run`, so its sessions keep their
+open-loop clocks running until the controller ends its campaign. The driver
+never takes a lost answer as a terminal: it resubmits under the same workflow
+key and attaches to the invocation Restate already accepted, and re-reads a
+blob from a worker the fault took down once it serves again.
+
+Fault times, restart delays, the warm-up and the recovery hold come from the
+workload's `faults`, `warmup_s` and `collection.recovery_stable_s`. The fault
+phase starts after the warm-up that follows the driver's first send:
+
+1. **Worker kill.** The controller reads every worker's running load
+   operations (`GET /load/active` on its control port), leaves a restart hold
+   in the busiest worker's `/fault` volume and SIGKILLs its process. The pod
+   shares its process namespace, so the worker is not PID 1. The kubelet
+   restarts the container in the same pod, which waits out the hold once
+   before serving at the identical endpoint.
+2. **Restate node restart.** From `restatectl sql` it picks the node leading
+   the most partitions whose applied log advanced between two samples, then
+   restarts `restate-server` in place with SIGTERM after the same hold. The
+   node must rejoin with its original ID and a new generation, every
+   partition must have a leader, and every partition it led must be
+   re-elected.
+3. **Rolling deploy.** A Helm upgrade starts the `faults.rollingGeneration`
+   workers from the synthetic N+1 image beside the running generation. Their
+   pre-upgrade `lashctl migrate` hook expands the store with the replacement's
+   own operator binary first. The replacement registers its immutable proxy
+   URL through lash's registration, which moves new admission. After
+   `rolling_worker_pause_s`, the controller calls `drain_generation(old)` from
+   the replacing build (`POST /generations/{G}/drain`). It retires the old
+   Deployments only once `generation_drain_status(old)` is drained, no
+   stalled obligation remains, and no unfinished Restate invocation is pinned
+   to the old deployment.
+
+Before each fault the controller waits for busy work, and it fails the
+campaign if none appears. After each fault it waits for recovery:
+
+- every operation in flight at the injection answered;
+- after the fault, a turn, a queued input and a cron emission all answered;
+- the backlog returned to its pre-fault range, the maximum sampled in
+  healthy windows;
+- the target recovered.
+
+A 300 s drain watchdog (the workload's `drain_timeout_s`) bounds each wait;
+it is a test timeout, not a budget. The controller then holds the stable
+window and records completed throughput and latency around the fault,
+without gating them until the baseline sets budgets.
+
+Every step is a `witness_load_faults` row on the witness clock: intent,
+injection with the busy work it hit, recovery evidence, failure and campaign
+end. The driver's verifier adds the `fault-campaign`, `worker-kill`,
+`restate-restart` and `rolling-deploy` classes, derived from the witness:
+
+- each fault hit operations in flight;
+- every one of them reached a durable answer;
+- service progressed afterwards;
+- turns after the rolling deploy were answered by the replacement's workers;
+- the controller's recovery evidence holds.
+
+`faults.jsonl`, `faults.log` and the kubectl transcript are archived with the
+run. The `<name>-faults` ConfigMap's `targets.json` names the controller's
+choices: the Restate pods, the worker count, both generations, the partition
+count and the fault probe Deployment. The probe is the controller's in-cluster
+hand for the witness, Restate's admin API and the worker control endpoints.
 
 For a replacement generation, set `workers.generation`, retain the old name in
 `workers.retainedGenerations`, and record both immutable tags in
-`workers.generationImages`. Keep `image.tag` at the original bootstrap image:
-choose worker builds through `workers.generationImages` so a worker replacement
-does not roll the Restate, PostgreSQL or Garage link-shaping init containers. Every generation gets independent worker Deployments
-and a proxy Service named `<name>-workers-<generation>`. A retained generation
-must have an explicit tag. Register the new endpoint, move admission and verify
-generation drain plus the Restate pinned-invocation checks before removing the
-old generation from values. Helm alone does not perform that protocol.
+`workers.generationImages`. Keep `image.tag` at the original bootstrap image.
+Every generation gets independent worker Deployments and a proxy Service
+named `<name>-workers-<generation>`. A generation with its own image in
+`workers.generationImages` also renders its migrate hook. Worker `i`'s
+control port stays reachable across generations as `<name>-worker-<i>-control`.
 
 # Scaleway profile
 
