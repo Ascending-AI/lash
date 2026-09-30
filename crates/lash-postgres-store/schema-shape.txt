@@ -46,11 +46,6 @@ table lash_artifact_referrer_edges
   column referrer_kind text not-null
   primary-key (namespace, artifact_ref, referrer_kind, referrer_id)
   foreign-key (namespace, artifact_ref) references lash_lashlang_artifacts (namespace, artifact_ref) on delete cascade
-table lash_referrer_fences
-  column ended_at_ms bigint not-null
-  column referrer_id text not-null
-  column referrer_kind text not-null
-  primary-key (referrer_kind, referrer_id)
 table lash_attachment_condemnations
   column attachment_id text not-null
   column delete_attempts integer not-null default
@@ -59,24 +54,29 @@ table lash_attachment_condemnations
   column phase text not-null
   column stall_reason text nullable
   column sweep_generation bigint not-null
-  column write_session_id text nullable
   column write_token text nullable
   primary-key (attachment_id)
-table lash_attachment_manifest
+  foreign-key (write_token) references lash_attachment_pending_writes (write_id) on delete set null
+table lash_attachment_pending_writes
   column attachment_id text not-null
-  column canonical_uri text not-null
-  column committed_at_ms bigint nullable
-  column intent_at_ms bigint not-null
-  column owner_id text nullable
-  column owner_kind text nullable
-  column session_id text not-null
-  column write_id text nullable
-  column written_at_ms bigint nullable
-  primary-key (session_id, attachment_id)
+  column begun_at_ms bigint not-null
+  column referrer_id text not-null
+  column referrer_kind text not-null
+  column write_id text not-null
+  primary-key (write_id)
+table lash_attachment_referrer_edges
+  column attachment_id text not-null
+  column referrer_id text not-null
+  column referrer_kind text not-null
+  primary-key (attachment_id, referrer_kind, referrer_id)
 table lash_attachment_sweep_clock
   column generation bigint not-null
   column singleton boolean not-null default
   primary-key (singleton)
+table lash_attachment_uploads
+  column attachment_id text not-null
+  column written_at_ms bigint not-null
+  primary-key (attachment_id)
 table lash_blobs
   column content bytea not-null
   column hash text not-null
@@ -371,6 +371,11 @@ table lash_recovery_leader
   column name text not-null
   column term bigint not-null
   primary-key (name)
+table lash_referrer_fences
+  column ended_at_ms bigint not-null
+  column referrer_id text not-null
+  column referrer_kind text not-null
+  primary-key (referrer_kind, referrer_id)
 table lash_release_stamp
   column release_version text not-null
   column schema_versions text not-null
