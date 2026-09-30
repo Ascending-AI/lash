@@ -69,7 +69,7 @@ async fn ingress_core_over(
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
             &lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::PluginOptions::default(),
+                lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: mock_model_spec(),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
@@ -142,7 +142,7 @@ async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
             &lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::PluginOptions::default(),
+                lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: mock_model_spec(),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
@@ -166,7 +166,7 @@ async fn register_ingress_trigger_subscription(
         env_store,
         &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ),
     )
@@ -227,7 +227,7 @@ async fn ingress_core_with_trigger_store(
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
             &lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::PluginOptions::default(),
+                lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: mock_model_spec(),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
@@ -257,7 +257,7 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
         backend.process_env_store().as_ref(),
         &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ),
     )
@@ -497,7 +497,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
         backend.process_env_store().as_ref(),
         &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ),
     )
@@ -518,7 +518,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
             &lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::PluginOptions::default(),
+                lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: mock_model_spec(),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
@@ -1176,7 +1176,7 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
         )
         .with_env_ref(
             (lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::PluginOptions::default(),
+                lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: mock_model_spec(),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
@@ -2059,7 +2059,7 @@ async fn ingress_engine_core(
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
             &lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::PluginOptions::default(),
+                lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: mock_model_spec(),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
@@ -2084,7 +2084,7 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
         )
         .with_env_ref(
             (lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::PluginOptions::default(),
+                lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: mock_model_spec(),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
@@ -2098,7 +2098,7 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
 
 fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
+        lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             model: mock_model_spec(),
             ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)

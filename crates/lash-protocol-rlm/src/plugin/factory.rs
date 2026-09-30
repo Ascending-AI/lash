@@ -246,11 +246,8 @@ impl RlmProtocolPluginFactory {
             .map_err(|err| PluginError::Registration(err.to_string()))?;
         let plugins = plugin_host.build_session(PluginSessionRequest::creation(
             &request.session_id,
-            lash_core::plugin::SessionCreationConfig {
-                authority: SessionAuthorityContext {
-                    plugin_options: request.execution_env_spec.plugin_options,
-                    ..Default::default()
-                },
+            SessionAuthorityContext {
+                plugin_config: request.execution_env_spec.plugin_config,
                 ..Default::default()
             },
         ))?;
@@ -322,6 +319,21 @@ impl PluginFactory for RlmProtocolPluginFactory {
         RLM_PROTOCOL_PLUGIN_ID
     }
 
+    /// The session's RLM namespace and its one command (FIG-4379): the
+    /// channel and dialect this host selected are recorded at creation.
+    fn register_config(
+        &self,
+        registrar: &mut lash_core::plugin::ConfigRegistrar,
+    ) -> Result<(), lash_core::plugin::ConfigRegistrationError> {
+        super::config_owner::register(
+            registrar,
+            super::config_owner::RlmConfigOwner {
+                channel: self.config.channel,
+                dialect: self.dialect.language_id(),
+            },
+        )
+    }
+
     /// The backend this factory's Lashlang artifacts live in: a runtime over
     /// another backend would resume sessions whose modules it cannot find and
     /// sweep an artifact store nobody wrote.
@@ -371,13 +383,10 @@ impl PluginFactory for RlmProtocolPluginFactory {
 
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         let config = rlm_protocol_config(self.config.clone(), self.process_lifecycle()?);
-        super::channel::validate_channel(
-            &ctx.protocol_turn_options,
-            self.config.channel,
-            ctx.materialization,
-        )?;
+        let recorded = ctx.plugin_config.config.protocol_turn_options();
+        super::channel::validate_channel(&recorded, self.config.channel, ctx.materialization)?;
         super::channel::validate_dialect(
-            &ctx.protocol_turn_options,
+            &recorded,
             self.dialect.language_id(),
             ctx.materialization,
         )?;

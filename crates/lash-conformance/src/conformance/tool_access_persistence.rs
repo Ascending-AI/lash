@@ -42,11 +42,8 @@ fn assert_restricted_empty_catalog(access: crate::SessionToolAccess, session_id:
     let session = lash_core::facade_support::PluginHost::new(factories)
         .build_session(PluginSessionRequest::creation(
             session_id,
-            lash_core::plugin::SessionCreationConfig {
-                authority: lash_core::plugin::SessionAuthorityContext {
-                    tool_access: access,
-                    ..Default::default()
-                },
+            lash_core::plugin::SessionAuthorityContext {
+                tool_access: access,
                 ..Default::default()
             },
         ))

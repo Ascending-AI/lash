@@ -150,6 +150,7 @@ async fn fork(
             node_id: node_id.to_string().into(),
             relation: SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            plugin_config: Default::default(),
         })
         .await
         .expect("create lineage conformance fork");

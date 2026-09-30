@@ -36,13 +36,10 @@ pub struct PendingFollowOn {
     pub frame_id: FrameNodeId,
     /// The task the switching turn handed to the frame; the follow-on's input.
     pub task: String,
-    /// The protocol turn options the follow-on runs under. Boxed: the fact
-    /// rides in every resident session state.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub options: Option<Box<crate::ProtocolTurnOptions>>,
     /// The shape the logical run's root resolved under, recorded at the
-    /// switch so a recovered follow-on runs under it rather than resolving
-    /// the session's current defaults fresh (FIG-3877). `None` on facts
+    /// switch so a recovered follow-on runs under it — its protocol turn
+    /// options included — rather than resolving the session's current
+    /// defaults fresh (FIG-3877). `None` on facts
     /// written before the field existed, or whose root resolved no record.
     /// Not part of the fact's JSON schema: the column is self-describing and
     /// a crash back to an older worker leaves the record ignorable.
@@ -68,16 +65,11 @@ impl PendingFollowOn {
     /// `max_recoveries` is the logical run's frozen recovery bound; `resolved`
     /// is the shape the logical run's root resolved under, recorded so a
     /// recovered follow-on inherits it (FIG-3877).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "every argument is one recorded fact of the switch"
-    )]
     pub fn after_switch(
         root: &TurnId,
         physical_ordinal: u64,
         frame_id: FrameNodeId,
         task: impl Into<String>,
-        options: Option<crate::ProtocolTurnOptions>,
         chain_depth: u32,
         max_recoveries: u32,
         resolved: Option<crate::run_spec::ResolvedRun>,
@@ -88,7 +80,6 @@ impl PendingFollowOn {
             follow_on_turn_id: PhysicalTurn::derive_turn_id(root, next),
             frame_id,
             task: task.into(),
-            options: options.map(Box::new),
             resolved_run: resolved.map(Box::new),
             chain_depth,
             attempts: 0,
@@ -358,7 +349,6 @@ mod tests {
             follow_on_turn_id: TurnId::from(turn),
             frame_id: FrameNodeId::new(frame).expect("frame"),
             task: "task".into(),
-            options: None,
             resolved_run: None,
             chain_depth: 1,
             attempts: 0,
@@ -401,7 +391,6 @@ mod tests {
             0,
             FrameNodeId::new("f").expect("frame"),
             "t",
-            None,
             1,
             DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
             None,
@@ -413,7 +402,6 @@ mod tests {
             1,
             FrameNodeId::new("g").expect("frame"),
             "t",
-            None,
             2,
             DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
             None,
@@ -438,7 +426,6 @@ mod tests {
                 0,
                 FrameNodeId::new("f").expect("frame"),
                 "t",
-                None,
                 1,
                 DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
                 None,

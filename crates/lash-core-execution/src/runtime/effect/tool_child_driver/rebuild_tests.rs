@@ -61,11 +61,8 @@ fn plugins_under(
                 .map(|subagent| subagent.parent_session_id.clone()),
             ..PluginSessionRequest::creation(
                 "opener-session",
-                crate::plugin::SessionCreationConfig {
-                    authority: crate::plugin::SessionAuthorityContext {
-                        subagent,
-                        ..Default::default()
-                    },
+                crate::plugin::SessionAuthorityContext {
+                    subagent,
                     ..Default::default()
                 },
             )

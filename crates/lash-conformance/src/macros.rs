@@ -126,7 +126,7 @@ macro_rules! runtime_persistence_tests {
             (checkpoint_rejects_unknown_component_ref, "checkpoint-unknown-ref"),
             (session_read_loads_persisted_history, "branchy"),
             (session_prompt_layer_round_trips_through_the_committed_head, "session-prompt-layer"),
-            (session_protocol_turn_options_round_trip_through_the_committed_head, "session-protocol-turn-options"),
+            (session_plugin_config_round_trips_through_the_committed_head, "session-plugin-config"),
             (session_metadata_round_trips, "root"),
             (head_and_window_reads_agree_for_each_named_session, "read-agreement"),
             (session_metadata_relation_is_write_once, "root"),
@@ -1445,7 +1445,7 @@ macro_rules! session_store_factory_tests {
         $crate::session_store_factory_tests!(@turn_cancel $fixture; [
             (session_meta_records_the_process_that_owns_it, "session-meta-owning-process"),
             (concurrent_session_admissions_preserve_one_relation, "concurrent-session-relation"),
-            (ingress_follow_on_fork_and_command_coalescing_matrix, "ingress-follow-on-fork-commands"),
+            (ingress_follow_on_fork_and_command_run_matrix, "ingress-follow-on-fork-commands"),
             (turn_cancel_exact_replay_preserves_different_pending_authorization, "turn-cancel-exact-replay"),
             (turn_cancel_closure_settlement_is_fenced_and_non_overwritable, "turn-cancel-closure-settlement"),
             (turn_cancel_scope_retirement_serializes_with_authorization, "turn-cancel-scope-retirement"),

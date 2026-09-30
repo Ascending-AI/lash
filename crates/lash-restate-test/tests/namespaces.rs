@@ -281,7 +281,7 @@ async fn start_request(core: &lash::LashCore, label: &str) -> lash_core::Process
             .publish_process_env(
                 &lash_core::HostArtifactPin::mint(),
                 &lash_core::ProcessExecutionEnvSpec::new(
-                    lash_core::PluginOptions::default(),
+                    lash_core::AdmittedPluginConfig::default(),
                     lash_core::SessionPolicy {
                         model: model_spec(),
                         ..lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded)

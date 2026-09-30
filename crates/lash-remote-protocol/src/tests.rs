@@ -1929,7 +1929,7 @@ fn process_execution_policy_carries_session_generation_options() {
     // the boundary instead of reaching a provider.
     let mut env_spec = RemoteProcessExecutionEnvSpec {
         render: None,
-        plugin_options: RemoteProcessPluginOptions::default(),
+        plugin_config: RemoteProcessPluginConfig::default(),
         policy,
     };
     env_spec

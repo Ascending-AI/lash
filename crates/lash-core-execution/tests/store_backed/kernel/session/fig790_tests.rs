@@ -495,7 +495,7 @@ async fn fig790_process_await_context(
         parent_invocation: None,
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         owner: crate::ExecutionOwner::SessionFrame {

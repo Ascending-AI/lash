@@ -11,6 +11,7 @@ pub use lash_sansio::{
 };
 
 mod actions;
+pub mod config;
 mod error;
 pub(crate) mod history;
 mod hooks;
@@ -43,6 +44,13 @@ pub use actions::{
     PluginOperationReceipt, PluginQuery, PluginQueryContext, PluginRuntimeDirective, PluginTask,
     PluginTaskContext, ProcessReadService, SessionParam, SessionReadService,
 };
+pub use config::{
+    AdmittedPluginConfig, CORE_CONFIG_IMPLEMENTATION, CandidateFacts, ConfigCommand,
+    ConfigCommandCatalog, ConfigCommandDescriptor, ConfigImplementationMismatch, ConfigOwner,
+    ConfigRegistrar, ConfigRegistrationError, ConfigRegistry, ConfigSubmitError, ConfigTransaction,
+    ConfigWire, CoreConfigOwner, CoreConfigRefusal, CreationFacts, OwnerChange, PluginConfig,
+    UnknownPluginConfigOwner,
+};
 pub use error::{PluginError, durable_identity_conflict, is_durable_identity_conflict};
 pub use history::{
     CompactionContext, CompactionSystemPrompt, ContextCompaction, ContextCompactor, ContextError,
@@ -68,8 +76,8 @@ pub use protocol::{
     AssistantProseProjectorPlugin, CodeExecutionOutcome, CodeExecutorPlugin,
     EXECUTION_STATE_LEAF_MIN_BODY_BYTES, ExecutionStateComponentSnapshot, ExecutionStateSnapshot,
     HydratedExecutionState, PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
-    ProtocolLlmCallAction, ProtocolRuntimeContext, ProtocolSessionContext,
-    ProtocolSessionMaterialization, ProtocolSessionPlugin, ProtocolSessionRestoreView,
+    ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
+    ProtocolSessionRestoreView,
 };
 pub use registrar::{
     ContextRegistrations, ExecutionRegistrations, OutputRegistrations,
@@ -89,8 +97,7 @@ pub use runtime_host::{
 };
 pub use runtime_impl::{
     PluginHost, PluginSessionMaterializationRequest, PluginSessionRequest,
-    ProcessEngineContributionTarget, RecordedSessionConfig, SessionAuthorityContext,
-    SessionCreationConfig,
+    ProcessEngineContributionTarget, SessionAuthorityContext,
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use services::NoopSessionManager;
@@ -505,6 +512,7 @@ mod tests {
                 )),
                 protocol_turn_options: ProtocolTurnOptions::default(),
                 turn_context: crate::TurnContext::default(),
+                plugin_config: Default::default(),
             })
             .await
             .expect("prompt contributions");
@@ -840,7 +848,7 @@ mod tests {
             .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("root");
         let child = root
-            .fork_for_session("child", SessionCreationConfig::default())
+            .fork_for_session("child", SessionAuthorityContext::default())
             .expect("child");
 
         let (_plugin_id, result) = child
@@ -894,7 +902,7 @@ mod tests {
             .build_session(PluginSessionRequest::rematerialization(
                 "child",
                 &snapshot,
-                RecordedSessionConfig::new(ProtocolTurnOptions::default()),
+                SessionAuthorityContext::default(),
             ))
             .expect("restored");
         let restored_snapshot = restored.export_state();

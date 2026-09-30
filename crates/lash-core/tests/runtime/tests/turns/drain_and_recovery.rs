@@ -828,14 +828,14 @@ pub(super) async fn turn_driver_sends_an_exact_effort_unchanged() {
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     serve_runtime_providers(&mut runtime, [provider.clone()]);
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider_id: Some(provider.kind().to_string()),
-            model: Some(model),
-            ..Default::default()
+    crate::runtime_support::configure_storeless(
+        &mut runtime,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
+            provider_id: provider.kind().to_string(),
         })
-        .await
-        .expect("update session config");
+        .then(lash_core::plugin::config::core::SetModel { model }),
+    )
+    .await;
 
     let handler = open_turn(&double, sid("root"), tid("alias-normalize-turn")).await;
     let turn = runtime
@@ -912,14 +912,14 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     serve_runtime_providers(&mut runtime, [provider.clone()]);
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider_id: Some(provider.kind().to_string()),
-            model: Some(model),
-            ..Default::default()
+    crate::runtime_support::configure_storeless(
+        &mut runtime,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
+            provider_id: provider.kind().to_string(),
         })
-        .await
-        .expect("update session config");
+        .then(lash_core::plugin::config::core::SetModel { model }),
+    )
+    .await;
 
     let handler = open_turn(&double, sid("root"), tid("unsupported-effort-turn")).await;
     let turn = runtime
@@ -989,13 +989,13 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     serve_runtime_providers(&mut runtime, [provider.clone()]);
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider_id: Some(provider.kind().to_string()),
-            ..Default::default()
-        })
-        .await
-        .expect("update session config");
+    crate::runtime_support::configure_storeless(
+        &mut runtime,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
+            provider_id: provider.kind().to_string(),
+        }),
+    )
+    .await;
 
     let run_turn = async |runtime: &mut LashRuntime, turn_id: &TurnId| {
         let handler = open_turn(&double, sid("root"), turn_id.clone()).await;
@@ -1027,15 +1027,13 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
         stop_sequences: Vec::new(),
         ..Default::default()
     };
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            generation: Some(lash_core::facade_support::GenerationOverlay::Replace(
-                requested.clone(),
-            )),
-            ..Default::default()
-        })
-        .await
-        .expect("update session config");
+    crate::runtime_support::configure_storeless(
+        &mut runtime,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetGeneration {
+            generation: lash_core::facade_support::GenerationOverlay::Replace(requested.clone()),
+        }),
+    )
+    .await;
     run_turn(&mut runtime, &tid("generation-requested-turn")).await;
 
     let seen = captured.lock_recover().clone();
@@ -1090,10 +1088,13 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     serve_runtime_providers(&mut runtime, [provider.clone()]);
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider_id: Some(provider.kind().to_string()),
-            generation: Some(lash_core::facade_support::GenerationOverlay::Replace(
+    crate::runtime_support::configure_storeless(
+        &mut runtime,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
+            provider_id: provider.kind().to_string(),
+        })
+        .then(lash_core::plugin::config::core::SetGeneration {
+            generation: lash_core::facade_support::GenerationOverlay::Replace(
                 lash_core::GenerationOptions {
                     output_token_cap: NonZeroUsize::new(128),
                     temperature: Some(
@@ -1103,11 +1104,10 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
                     stop_sequences: Vec::new(),
                     ..Default::default()
                 },
-            )),
-            ..Default::default()
-        })
-        .await
-        .expect("update session config");
+            ),
+        }),
+    )
+    .await;
 
     let handler = open_turn(&double, sid("root"), tid("generation-disposition-turn")).await;
     let turn = runtime
@@ -1185,17 +1185,20 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     serve_runtime_providers(&mut runtime, [provider.clone()]);
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider_id: Some(provider.kind().to_string()),
-            model: Some(
-                lash_core::ModelSpec::builder("small-output-model")
-                    .context_window_tokens(200_000)
-                    .output_token_capacity(2_048)
-                    .build()
-                    .expect("valid test model"),
-            ),
-            generation: Some(lash_core::facade_support::GenerationOverlay::Replace(
+    crate::runtime_support::configure_storeless(
+        &mut runtime,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
+            provider_id: provider.kind().to_string(),
+        })
+        .then(lash_core::plugin::config::core::SetModel {
+            model: lash_core::ModelSpec::builder("small-output-model")
+                .context_window_tokens(200_000)
+                .output_token_capacity(2_048)
+                .build()
+                .expect("valid test model"),
+        })
+        .then(lash_core::plugin::config::core::SetGeneration {
+            generation: lash_core::facade_support::GenerationOverlay::Replace(
                 lash_core::GenerationOptions {
                     output_token_cap: NonZeroUsize::new(32_000),
                     temperature: Some(
@@ -1205,11 +1208,10 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                     stop_sequences: Vec::new(),
                     ..Default::default()
                 },
-            )),
-            ..Default::default()
-        })
-        .await
-        .expect("update session config");
+            ),
+        }),
+    )
+    .await;
 
     let handler = open_turn(&double, sid("root"), tid("clamped-cap-turn")).await;
     let turn = runtime
@@ -1280,28 +1282,26 @@ pub(super) async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does
         stop_sequences: Vec::new(),
         ..Default::default()
     };
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            generation: Some(lash_core::facade_support::GenerationOverlay::Replace(
-                pinned.clone(),
-            )),
-            ..Default::default()
-        })
-        .await
-        .expect("update session config");
+    crate::runtime_support::configure_storeless(
+        &mut runtime,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetGeneration {
+            generation: lash_core::facade_support::GenerationOverlay::Replace(pinned.clone()),
+        }),
+    )
+    .await;
 
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            generation: Some(lash_core::facade_support::GenerationOverlay::Merge(
+    crate::runtime_support::configure_storeless(
+        &mut runtime,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetGeneration {
+            generation: lash_core::facade_support::GenerationOverlay::Merge(
                 lash_core::GenerationOptions {
                     output_token_cap: NonZeroUsize::new(4_096),
                     ..Default::default()
                 },
-            )),
-            ..Default::default()
-        })
-        .await
-        .expect("update session config");
+            ),
+        }),
+    )
+    .await;
     assert_eq!(
         runtime.session_policy().generation,
         lash_core::GenerationOptions {
@@ -1314,15 +1314,15 @@ pub(super) async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does
         "a patch that names only a cap keeps the sampling the session pinned"
     );
 
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            generation: Some(lash_core::facade_support::GenerationOverlay::Replace(
+    crate::runtime_support::configure_storeless(
+        &mut runtime,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetGeneration {
+            generation: lash_core::facade_support::GenerationOverlay::Replace(
                 lash_core::GenerationOptions::default(),
-            )),
-            ..Default::default()
-        })
-        .await
-        .expect("update session config");
+            ),
+        }),
+    )
+    .await;
     assert_eq!(
         runtime.session_policy().generation,
         lash_core::GenerationOptions::default(),

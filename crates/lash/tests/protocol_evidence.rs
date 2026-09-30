@@ -406,10 +406,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::persistence::PersistedSessionConfig| {
         let _ = &value.model;
     });
-    // W0119: lash::persistence::PersistedTurnState::protocol_turn_options [field]
-    field_witness(|value: &lash::persistence::PersistedTurnState| {
-        let _ = &value.protocol_turn_options;
-    });
     // W0120: lash::persistence::ProtocolEvent [struct]
     type_witness::<lash::persistence::ProtocolEvent>();
     // W0121: lash::persistence::ProtocolEvent::decode [function]
@@ -422,10 +418,6 @@ fn drain_area_witnesses() {
     let _ = lash::persistence::ProtocolEvent::typed::<()>(String::new(), ());
     // W0125: lash::persistence::RuntimeSessionState::effective_protocol_turn_options [function]
     let _ = lash::persistence::RuntimeSessionState::effective_protocol_turn_options;
-    // W0126: lash::persistence::RuntimeSessionState::protocol_turn_options [field]
-    field_witness(|value: &lash::persistence::RuntimeSessionState| {
-        let _ = &value.protocol_turn_options;
-    });
     // W0127: lash::persistence::SessionCheckpoint::schema_version [field]
     field_witness(|value: &lash::persistence::SessionCheckpoint| {
         let _ = &value.schema_version;
@@ -868,14 +860,8 @@ fn drain_area_witnesses() {
     let _ = lash::runtime::SessionPolicy::model_id;
     // W0228: lash::runtime::SessionPolicy::model_variant [function]
     let _ = lash::runtime::SessionPolicy::model_variant;
-    // W0229: lash::runtime::SessionSnapshot::protocol_turn_options [field]
-    field_witness(|value: &lash::runtime::SessionSnapshot| {
-        let _ = &value.protocol_turn_options;
-    });
-    // W0230: lash::plugins::AgentFrameRecord::protocol_turn_options [field]
-    field_witness(|value: &lash::plugins::AgentFrameRecord| {
-        let _ = &value.protocol_turn_options;
-    });
+    // W0230: lash::plugins::AgentFrameRecord::protocol_turn_options [function]
+    let _ = lash::plugins::AgentFrameRecord::protocol_turn_options;
     // W0231: lash_core::AttemptRecord::generation_disposition [field]
     field_witness(|value: &lash_core::AttemptRecord| {
         let _ = &value.generation_disposition;
@@ -1023,68 +1009,6 @@ fn drain_area_witnesses() {
             let _ = f0;
         }
     });
-    // W0279: lash::plugins::ProtocolTurnOptionsError::InvalidSchemaVersion [variant]
-    variant_witness(|value: &lash::plugins::ProtocolTurnOptionsError| {
-        matches!(
-            value,
-            lash::plugins::ProtocolTurnOptionsError::InvalidSchemaVersion { .. }
-        )
-    });
-    // W0280: lash::plugins::ProtocolTurnOptionsError::InvalidSchemaVersion::actual [field]
-    field_witness(|value: &lash::plugins::ProtocolTurnOptionsError| {
-        if let lash::plugins::ProtocolTurnOptionsError::InvalidSchemaVersion { actual, .. } = value
-        {
-            let _ = actual;
-        }
-    });
-    // W0281: lash::plugins::ProtocolTurnOptionsError::InvalidSchemaVersion::expected [field]
-    field_witness(|value: &lash::plugins::ProtocolTurnOptionsError| {
-        if let lash::plugins::ProtocolTurnOptionsError::InvalidSchemaVersion { expected, .. } =
-            value
-        {
-            let _ = expected;
-        }
-    });
-    // W0282: lash::plugins::ProtocolTurnOptionsError::MissingSchemaVersion [variant]
-    variant_witness(|value: &lash::plugins::ProtocolTurnOptionsError| {
-        matches!(
-            value,
-            lash::plugins::ProtocolTurnOptionsError::MissingSchemaVersion { .. }
-        )
-    });
-    // W0283: lash::plugins::ProtocolTurnOptionsError::MissingSchemaVersion::expected [field]
-    field_witness(|value: &lash::plugins::ProtocolTurnOptionsError| {
-        if let lash::plugins::ProtocolTurnOptionsError::MissingSchemaVersion { expected, .. } =
-            value
-        {
-            let _ = expected;
-        }
-    });
-    // W0284: lash::plugins::ProtocolTurnOptionsError::UnsupportedSchemaVersion [variant]
-    variant_witness(|value: &lash::plugins::ProtocolTurnOptionsError| {
-        matches!(
-            value,
-            lash::plugins::ProtocolTurnOptionsError::UnsupportedSchemaVersion { .. }
-        )
-    });
-    // W0285: lash::plugins::ProtocolTurnOptionsError::UnsupportedSchemaVersion::actual [field]
-    field_witness(|value: &lash::plugins::ProtocolTurnOptionsError| {
-        if let lash::plugins::ProtocolTurnOptionsError::UnsupportedSchemaVersion {
-            actual, ..
-        } = value
-        {
-            let _ = actual;
-        }
-    });
-    // W0286: lash::plugins::ProtocolTurnOptionsError::UnsupportedSchemaVersion::expected [field]
-    field_witness(|value: &lash::plugins::ProtocolTurnOptionsError| {
-        if let lash::plugins::ProtocolTurnOptionsError::UnsupportedSchemaVersion {
-            expected, ..
-        } = value
-        {
-            let _ = expected;
-        }
-    });
     // W0287: lash::plugins::RuntimeExecutionContext::journaled_language_runtime_value [function]
     let _ = lash::plugins::RuntimeExecutionContext::journaled_language_runtime_value;
     // W0288: lash_core::SchemaContract [struct]
@@ -1121,16 +1045,6 @@ fn drain_area_witnesses() {
     // W0298: lash_core::SchemaProjectionPolicy::overrides [field]
     field_witness(|value: &lash_core::SchemaProjectionPolicy| {
         let _ = &value.overrides;
-    });
-    // W0299: lash::persistence::SessionNodePayload::FrameOpen::protocol_turn_options [field]
-    field_witness(|value: &lash::persistence::SessionNodePayload| {
-        if let lash::persistence::SessionNodePayload::FrameOpen {
-            protocol_turn_options,
-            ..
-        } = value
-        {
-            let _ = protocol_turn_options;
-        }
     });
     // W0300: lash::plugins::ChatContextProjector [struct]
     type_witness::<lash::plugins::ChatContextProjector>();
@@ -1275,26 +1189,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::plugins::HydratedExecutionState| {
         let _ = &value.root;
     });
-    // W0348: lash::runtime::ApplyConfigPatch::generation [field]
-    field_witness(|value: &lash::runtime::ApplyConfigPatch| {
-        let _ = &value.generation;
-    });
-    // W0349: lash::runtime::ApplyConfigPatch::model [field]
-    field_witness(|value: &lash::runtime::ApplyConfigPatch| {
-        let _ = &value.model;
-    });
-    // W0350: lash::runtime::ApplyConfigPatch::prompt [field]
-    field_witness(|value: &lash::runtime::ApplyConfigPatch| {
-        let _ = &value.prompt;
-    });
-    // W0351: lash::runtime::ApplyConfigPatch::schema_version [field]
-    field_witness(|value: &lash::runtime::ApplyConfigPatch| {
-        let _ = &value.schema_version;
-    });
-    // W0352: lash::runtime::ApplyConfigPatch::turn_budget [field]
-    field_witness(|value: &lash::runtime::ApplyConfigPatch| {
-        let _ = &value.turn_budget;
-    });
     // W0353: lash::remote::usage::RemoteTurnEvent::ToolIntentOutcome [variant]
     variant_witness(|value: &lash::remote::usage::RemoteTurnEvent| {
         matches!(
@@ -1328,45 +1222,6 @@ fn drain_area_witnesses() {
         });
         // W0359: lash::rlm::RlmSessionConfig::final_answer_format [function]
         let _ = lash::rlm::RlmSessionConfig::final_answer_format;
-        // W0362: lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat [variant]
-        variant_witness(|value: &lash::rlm::RlmSessionConfigConflict| {
-            matches!(
-                value,
-                lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat { .. }
-            )
-        });
-        // W0363: lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat::recorded [field]
-        field_witness(|value: &lash::rlm::RlmSessionConfigConflict| {
-            if let lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat { recorded, .. } = value {
-                let _ = recorded;
-            }
-        });
-        // W0364: lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat::requested [field]
-        field_witness(|value: &lash::rlm::RlmSessionConfigConflict| {
-            if let lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat { requested, .. } = value
-            {
-                let _ = requested;
-            }
-        });
-        // W0365: lash::rlm::RlmSessionConfigConflict::Termination [variant]
-        variant_witness(|value: &lash::rlm::RlmSessionConfigConflict| {
-            matches!(
-                value,
-                lash::rlm::RlmSessionConfigConflict::Termination { .. }
-            )
-        });
-        // W0366: lash::rlm::RlmSessionConfigConflict::Termination::recorded [field]
-        field_witness(|value: &lash::rlm::RlmSessionConfigConflict| {
-            if let lash::rlm::RlmSessionConfigConflict::Termination { recorded, .. } = value {
-                let _ = recorded;
-            }
-        });
-        // W0367: lash::rlm::RlmSessionConfigConflict::Termination::requested [field]
-        field_witness(|value: &lash::rlm::RlmSessionConfigConflict| {
-            if let lash::rlm::RlmSessionConfigConflict::Termination { requested, .. } = value {
-                let _ = requested;
-            }
-        });
         // W0368: lash::rlm::RlmTermination::Natural [variant]
         variant_witness(|value: &lash::rlm::RlmTermination| {
             matches!(value, lash::rlm::RlmTermination::Natural)
@@ -1472,28 +1327,10 @@ fn drain_area_witnesses() {
     fn meth_0395<T: lash::plugins::ProtocolDriverPlugin>(_: &T) {
         let _ = T::build_preamble;
     }
-    // W0396: lash::plugins::ProtocolRuntimeContext [struct]
-    type_witness::<lash::plugins::ProtocolRuntimeContext>();
-    // W0397: lash::plugins::ProtocolRuntimeContext::protocol_turn_options [function]
-    let _ = lash::plugins::ProtocolRuntimeContext::protocol_turn_options;
-    // W0398: lash::plugins::ProtocolRuntimeContext::set_protocol_turn_options [function]
-    let _ = lash::plugins::ProtocolRuntimeContext::set_protocol_turn_options;
-    // W0399: lash::plugins::ProtocolRuntimeContext::set_protocol_turn_options_all_frames [function]
-    let _ = lash::plugins::ProtocolRuntimeContext::set_protocol_turn_options_all_frames;
     // W0400: lash::plugins::ProtocolSessionContext [struct]
     type_witness::<lash::plugins::ProtocolSessionContext>();
     // W0401: lash::plugins::ProtocolSessionContext::session_id [function]
     let _ = lash::plugins::ProtocolSessionContext::session_id;
-    // W0402: lash::plugins::ProtocolSessionMaterialization [struct]
-    type_witness::<lash::plugins::ProtocolSessionMaterialization>();
-    // W0403: lash::plugins::ProtocolSessionMaterialization::plugin_options [field]
-    field_witness(|value: &lash::plugins::ProtocolSessionMaterialization| {
-        let _ = &value.plugin_options;
-    });
-    // W0404: lash::plugins::ProtocolSessionMaterialization::is_root_session [field]
-    field_witness(|value: &lash::plugins::ProtocolSessionMaterialization| {
-        let _ = &value.is_root_session;
-    });
     // W0405: lash::plugins::ProtocolSessionPlugin [trait]
     fn trait_witness_0405<T: lash::plugins::ProtocolSessionPlugin>() {}
     // W0406: lash::plugins::ProtocolSessionPlugin::initialize_session [function]
@@ -1511,10 +1348,6 @@ fn drain_area_witnesses() {
     // W0409: lash::plugins::ProtocolSessionPlugin::apply_session_extension [function]
     fn meth_0409<T: lash::plugins::ProtocolSessionPlugin>(_: &T) {
         let _ = T::apply_session_extension;
-    }
-    // W0411: lash::plugins::ProtocolSessionPlugin::configure_runtime_on_materialize [function]
-    fn meth_0411<T: lash::plugins::ProtocolSessionPlugin>(_: &T) {
-        let _ = T::configure_runtime_on_materialize;
     }
     // W0412: lash::plugins::ProtocolSessionPlugin::before_llm_call [function]
     fn meth_0412<T: lash::plugins::ProtocolSessionPlugin>(_: &T) {

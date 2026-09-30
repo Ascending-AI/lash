@@ -32,11 +32,11 @@ impl LashRuntime {
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
         let (start, owed) = match recovery {
             crate::store::FollowOnRecovery::Run(owed) => {
-                let (input, options) = crate::runtime::logical_turn::follow_on_input(
+                let input = crate::runtime::logical_turn::follow_on_input(
                     &owed,
                     crate::TurnContext::default(),
                 );
-                (LogicalTurnStart::Input(input, options), owed)
+                (LogicalTurnStart::Input(input), owed)
             }
             crate::store::FollowOnRecovery::Exhausted(owed) => {
                 (LogicalTurnStart::ExhaustedFollowOn(owed.clone()), owed)

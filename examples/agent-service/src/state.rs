@@ -77,7 +77,7 @@ impl AppStateData {
         // with what the session recorded (FIG-4099). Only `create` creates
         // (FIG-4112), so the create-or-use arm is written out: an existing
         // session keeps its recorded model, and a chat whose model changed
-        // since moves its session with the one durable config command.
+        // since moves its session with a config transaction.
         match self
             .core
             .session(chat_id)
@@ -99,14 +99,28 @@ impl AppStateData {
             .open()
             .await?;
         if session.policy_snapshot().model != model {
-            session
-                .admin()
-                .config()
-                .update(lash::SessionConfigPatch {
-                    model: Some(model),
-                    ..lash::SessionConfigPatch::default()
-                })
+            // Written against the revision this open read, under an id that
+            // names the change: a resubmission of the same change is the
+            // same transaction.
+            let config = session.admin().config();
+            let revision = config.revision().await?;
+            let outcome = config
+                .apply(
+                    lash::config::ConfigWrite::new(
+                        format!("chat-model:{}:{revision}", model.id),
+                        revision,
+                    ),
+                    lash::config::ConfigTransaction::of(lash::config::SetModel { model }),
+                )
                 .await?;
+            if !matches!(
+                outcome,
+                lash::config::ConfigTransactionOutcome::Applied { .. }
+            ) {
+                return Err(AppError::internal(format!(
+                    "the chat's model change did not apply: {outcome:?}"
+                )));
+            }
         }
         self.record_tool_loss_notice(chat_id, &session).await?;
         Ok(session)

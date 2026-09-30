@@ -93,11 +93,13 @@ macro_rules! turn_config_tests {
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (an_input_sent_after_a_config_command_runs_on_the_new_model, "turn-config-after-command"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_config_transaction_waits_while_a_root_owns_the_head, "turn-config-pending-while-root"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (one_config_resolution_per_root, "turn-config-one-resolution"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (an_unbindable_route_retries_and_never_fails_the_turn, "turn-config-unbindable-retries"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (a_bad_route_is_refused_at_send_with_nothing_enqueued, "turn-config-bad-route-send"));
+            (a_bad_route_is_refused_typed_and_publishes_nothing, "turn-config-bad-route"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_route_refused_at_apply_leaves_the_route_unchanged, "turn-config-refused-at-apply"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;

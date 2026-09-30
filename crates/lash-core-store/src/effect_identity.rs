@@ -87,6 +87,10 @@ pub enum RuntimeEffectKind {
     /// replays the recorded base, never the head the compaction's own commit
     /// moved.
     RecordCompactionBase,
+    /// A config transaction's resolution, recorded before its commit
+    /// publishes it (FIG-4379): a redrive publishes the recorded replacements
+    /// and never runs a reducer again.
+    ResolveConfigTransaction,
     /// The command run a command root read from the session's command lane
     /// (FIG-4201): every replay of the root applies the recorded run, never
     /// the lane its own commits settled.
@@ -136,6 +140,7 @@ impl RuntimeEffectKind {
             Self::SealDriveAdmission => "seal_drive_admission",
             Self::ResolveTurnConfig => "resolve_turn_config",
             Self::RecordCompactionBase => "record_compaction_base",
+            Self::ResolveConfigTransaction => "resolve_config_transaction",
             Self::ReadSessionCommandRun => "read_session_command_run",
             Self::CloseRootScope => "close_root_scope",
             Self::BeginSessionClose => "begin_session_close",

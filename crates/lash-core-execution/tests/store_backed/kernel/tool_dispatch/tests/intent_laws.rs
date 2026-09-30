@@ -1419,7 +1419,7 @@ async fn an_attempt_holds_its_large_captured_environment_before_realizing_a_star
         "instructions",
         "x".repeat(128 * 1024),
     ));
-    let spec = crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy);
+    let spec = crate::ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy);
     let env_ref = spec.stable_ref().expect("captured digest");
     let intent = crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
         owner: crate::RuntimeOwner::Session(SessionId::from("session")),

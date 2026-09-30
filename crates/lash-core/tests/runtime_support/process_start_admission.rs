@@ -36,7 +36,7 @@ async fn payload_gated_engine_runtime(
         backend.process_env_store().as_ref(),
         &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             standard_test_policy(),
         ),
     )
@@ -93,7 +93,7 @@ fn payload_gated_request(
     )
     .with_env_ref(
         (lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             standard_test_policy(),
         ))
         .stable_ref()

@@ -84,10 +84,10 @@ use lash_core::{
     ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
     ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
     ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
-    ProtocolTurnOptions, ReferrerClaim, RuntimeCommit, RuntimeSessionState, SegmentHandover,
-    SessionAppendNode, SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation,
-    SessionScope, SessionStoreCreateRequest, StoreError, TokenUsage, TriggerCommand,
-    TriggerCommandOutcome, TriggerDeliveryReservation, TriggerInputBinding, TriggerMutationOutcome,
+    ReferrerClaim, RuntimeCommit, RuntimeSessionState, SegmentHandover, SessionAppendNode,
+    SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
+    SessionStoreCreateRequest, StoreError, TokenUsage, TriggerCommand, TriggerCommandOutcome,
+    TriggerDeliveryReservation, TriggerInputBinding, TriggerMutationOutcome,
     TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
     TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
     WaitState,
@@ -1277,7 +1277,6 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
             frame_key,
             reason,
             assignment,
-            protocol_turn_options,
         } => {
             assert_eq!(
                 frame_key,
@@ -1295,15 +1294,9 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
                 lash_core::TurnBudget::Unbounded
             );
             assert_eq!(
-                serde_json::to_value(&assignment.plugin_options)
-                    .expect("encode frame plugin options"),
+                serde_json::to_value(&assignment.plugin_config)
+                    .expect("encode frame plugin config"),
                 serde_json::json!({})
-            );
-            // The options' content; their stamp is the version the writing
-            // store's `F` assigned, which the fixture does not pin.
-            assert_eq!(
-                protocol_turn_options.payload,
-                ProtocolTurnOptions::default().payload
             );
         }
         other => {

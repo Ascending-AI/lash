@@ -17,10 +17,12 @@ use lash_sansio::TurnId;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use lash_core::facade_support::JsonSchema;
 use lash_core::llm::types::{ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta};
 use lash_core::plugin::{
-    PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, ProtocolDriverPlugin,
-    ProtocolSessionContext, ProtocolSessionPlugin, SessionPlugin,
+    CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar, ConfigRegistrationError,
+    CreationFacts, OwnerChange, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
+    ProtocolDriverPlugin, ProtocolSessionContext, ProtocolSessionPlugin, SessionPlugin,
 };
 use lash_core::sansio::{
     CheckpointResumeAction, CompletedToolCall, PendingToolCall, PendingWork, ProtocolDriverHandle,
@@ -119,10 +121,108 @@ impl StandardProtocolConfig {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// The standard protocol's session namespace (FIG-4379) and its turn
+/// options: the render options its tool results render with, over the host's
+/// configured render. A stated `null` in a run's options resets a key, so a
+/// value is read with its nulls dropped.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(try_from = "serde_json::Value")]
 pub struct StandardTurnOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
     pub render: Option<StandardRenderConfig>,
+}
+
+/// The wire form a [`StandardTurnOptions`] decodes through once its nulls
+/// are dropped.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StandardTurnOptionsWire {
+    #[serde(default)]
+    render: Option<StandardRenderConfig>,
+}
+
+impl TryFrom<serde_json::Value> for StandardTurnOptions {
+    type Error = serde_json::Error;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        let wire: StandardTurnOptionsWire = serde_json::from_value(render::without_nulls(value))?;
+        Ok(Self {
+            render: wire.render,
+        })
+    }
+}
+
+/// The identity of the standard owner's reducers.
+pub const STANDARD_CONFIG_IMPLEMENTATION: &str = "lash-standard-config:1";
+
+/// The standard protocol's config owner: it records the creator's render
+/// options, or none, and admits [`SetStandardRender`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct StandardConfigOwner;
+
+/// Why the standard owner refused a candidate. It refuses nothing a
+/// decodable namespace states.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+pub enum StandardConfigRefusal {}
+
+impl std::fmt::Display for StandardConfigRefusal {
+    fn fmt(&self, _formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {}
+    }
+}
+
+impl ConfigOwner for StandardConfigOwner {
+    type Create = StandardTurnOptions;
+    type Recorded = StandardTurnOptions;
+    type Refusal = StandardConfigRefusal;
+
+    fn implementation(&self) -> &str {
+        STANDARD_CONFIG_IMPLEMENTATION
+    }
+
+    /// Every session records its namespace: the creator's render options,
+    /// or none, under which the host's configured render applies. A child
+    /// inherits nothing from its parent's namespace.
+    fn create(
+        &self,
+        input: Option<StandardTurnOptions>,
+        _facts: CreationFacts<'_, StandardTurnOptions>,
+    ) -> Result<Option<StandardTurnOptions>, StandardConfigRefusal> {
+        Ok(Some(input.unwrap_or_default()))
+    }
+
+    fn validate(
+        &self,
+        _value: &StandardTurnOptions,
+        _base: Option<&StandardTurnOptions>,
+        _facts: &CandidateFacts<'_>,
+    ) -> Result<(), StandardConfigRefusal> {
+        Ok(())
+    }
+}
+
+/// Replace the session's render options, whole; `None` clears them, and the
+/// host's configured render applies.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+pub struct SetStandardRender {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
+    pub render: Option<StandardRenderConfig>,
+}
+
+impl ConfigCommand for SetStandardRender {
+    type Owner = StandardConfigOwner;
+    type Output = ();
+    const NAME: &'static str = "set_render";
 }
 
 impl StandardProtocolPluginFactory {
@@ -138,6 +238,23 @@ impl StandardProtocolPluginFactory {
 impl PluginFactory for StandardProtocolPluginFactory {
     fn id(&self) -> &'static str {
         STANDARD_PROTOCOL_PLUGIN_ID
+    }
+
+    /// The session's standard-protocol namespace and its one command
+    /// (FIG-4379).
+    fn register_config(
+        &self,
+        registrar: &mut ConfigRegistrar,
+    ) -> Result<(), ConfigRegistrationError> {
+        registrar.owner(StandardConfigOwner)?;
+        registrar.command::<SetStandardRender>(|_, command| {
+            Ok(OwnerChange {
+                recorded: StandardTurnOptions {
+                    render: command.render,
+                },
+                output: (),
+            })
+        })
     }
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
@@ -241,9 +358,7 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
         &self,
         options: &lash_core::ProtocolTurnOptions,
     ) -> Result<Option<lash_core::RecordedRender>, String> {
-        let payload: serde_json::Value = options.decode().map_err(|error| error.to_string())?;
-        let patch: StandardTurnOptions = serde_json::from_value(render::without_nulls(payload))
-            .map_err(|error| error.to_string())?;
+        let patch: StandardTurnOptions = options.decode().map_err(|error| error.to_string())?;
         let resolved = render::resolve(
             &StandardRenderConfig::builtin(),
             &self.config.render,

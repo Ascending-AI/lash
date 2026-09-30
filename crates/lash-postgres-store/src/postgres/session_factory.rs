@@ -777,7 +777,8 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         edge_path.reverse();
         let fork_plan =
             lash_core_execution::store::ForkPlan::derive(&request.session_id, edge_path)?;
-        let config = lash_core_execution::PersistedSessionConfig::from(&request.policy);
+        let mut config = lash_core_execution::PersistedSessionConfig::from(&request.policy);
+        config.plugin_config = request.plugin_config.clone();
         let head = lash_core_execution::store::SessionHeadMeta::assemble(
             &request.session_id,
             lash_core_execution::store::SessionHeadPayload {

@@ -137,7 +137,7 @@ async fn process_context<'h>(
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             session_policy,
         ),
     )

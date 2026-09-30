@@ -210,10 +210,9 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         session
             .admin()
             .config()
-            .update(lash::SessionConfigPatch {
-                model: Some(model),
-                ..Default::default()
-            })
+            .configure(lash::config::ConfigTransaction::of(
+                lash::config::SetModel { model },
+            ))
             .await
             .expect("configure provider-specific model");
 

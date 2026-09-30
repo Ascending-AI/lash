@@ -70,8 +70,24 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
             let factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(
                 RlmProtocolPluginFactory::new(config, std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect), &backend).with_process_lifecycle(false),
             )];
-            let plugins = PluginHost::new(factories)
-                .build_session(PluginSessionRequest::creation(&session_id, Default::default()))
+            let plugin_host = PluginHost::new(factories);
+            let mut state = RuntimeSessionState {
+                session_id: session_id.clone(),
+                ..RuntimeSessionState::new(policy.clone())
+            };
+            lash_core::testing::runtime_helpers::record_creation_plugin_config(
+                &plugin_host,
+                lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                &mut state,
+            );
+            let plugins = plugin_host
+                .build_session(PluginSessionRequest::creation(
+                    &session_id,
+                    lash_core::plugin::SessionAuthorityContext {
+                        plugin_config: state.admitted_plugin_config(),
+                        ..Default::default()
+                    },
+                ))
                 .expect("build RLM plugin");
 
             let requests = Arc::new(Mutex::new(Vec::<LlmRequest>::new()));
@@ -127,17 +143,11 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                 policy.clone(),
                 host,
                 services,
-                RuntimeSessionState {
-                    session_id: session_id.clone(),
-                    ..RuntimeSessionState::new(policy)
-                },
+                state,
                 lash_core::testing::runtime_lease_owner(),
             )
             .await
             .expect("open runtime");
-            runtime
-                .configure_protocol_on_materialize(&lash_core::PluginOptions::empty(), true)
-                .expect("materialize protocol");
             let events = RecordingSink::default();
             let pressure_handler = double
                 .open_handler(lash_core::AdmittedScope::turn(

@@ -761,10 +761,9 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeSt
             payload: crate::SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: AgentFrameReason::initial(),
-                assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                 )),
-                protocol_turn_options: ProtocolTurnOptions::default(),
             },
         }],
     };
@@ -878,10 +877,9 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
         payload: crate::SessionNodePayload::FrameOpen {
             frame_key: frame_key.clone(),
             reason: AgentFrameReason::new("original"),
-            assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+            assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             )),
-            protocol_turn_options: ProtocolTurnOptions::default(),
         },
     };
     state.session_graph = crate::SessionGraph::from_nodes(
@@ -898,10 +896,9 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
         payload: crate::SessionNodePayload::FrameOpen {
             frame_key,
             reason: AgentFrameReason::new("replacement"),
-            assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+            assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             )),
-            protocol_turn_options: ProtocolTurnOptions::default(),
         },
         ..original
     };
@@ -929,7 +926,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
     )
     .await
     .expect("original node remains");
-    let (reason, _, _) = stored.frame_open().expect("stored frame");
+    let (reason, _) = stored.frame_open().expect("stored frame");
     assert_eq!(reason.as_str(), "original");
 }
 

@@ -202,7 +202,7 @@ where
     let artifacts = handles.artifacts;
     let artifact = sample_module_artifact("delta");
     let env_spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
+        lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     );
     let env_ref = env_spec.stable_ref().expect("stable env ref");

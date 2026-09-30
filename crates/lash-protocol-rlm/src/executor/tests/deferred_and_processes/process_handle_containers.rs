@@ -76,7 +76,7 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             session_policy,
         ),
     );

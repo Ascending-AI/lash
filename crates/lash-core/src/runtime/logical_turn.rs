@@ -216,7 +216,6 @@ pub(super) fn follow_on_after_turn(
         physical_ordinal,
         crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str()),
         task.clone(),
-        Some(state.effective_protocol_turn_options().clone()),
         chain_depth,
         max_recoveries,
         state.authority.resolved_run.as_deref().cloned(),
@@ -228,7 +227,6 @@ pub(super) fn follow_on_after_turn(
 pub(super) struct PreparedLogicalTurn {
     pub(super) messages: crate::MessageSequence,
     pub(super) previous_prompt_usage: Option<TokenUsage>,
-    pub(super) protocol_turn_options: Option<crate::ProtocolTurnOptions>,
     pub(super) turn_context: crate::TurnContext,
     pub(super) initial_turn_causes: Vec<crate::TurnCause>,
     pub(super) trace_turn_id: TurnId,
@@ -238,7 +236,7 @@ pub(super) struct PreparedLogicalTurn {
 pub(super) enum LogicalTurnStart {
     /// An input, with the protocol turn options a follow-on turn recorded
     /// beyond its root's view (`None` for a root's own first turn).
-    Input(TurnInput, Option<crate::ProtocolTurnOptions>),
+    Input(TurnInput),
     /// A recovered follow-on whose recovery bound is spent (ADR 0101 §3): it
     /// never runs, and commits as the failed turn carrying
     /// `FollowOnRecoveryExhausted` with its task as the delivered input.
@@ -246,16 +244,9 @@ pub(super) enum LogicalTurnStart {
 }
 
 impl LogicalTurnStart {
-    fn continuation_state(
-        &self,
-    ) -> (
-        Option<crate::ProtocolTurnOptions>,
-        crate::TurnContext,
-        TurnId,
-    ) {
+    fn continuation_state(&self) -> (crate::TurnContext, TurnId) {
         match self {
-            Self::Input(input, options) => (
-                options.clone(),
+            Self::Input(input) => (
                 input.turn_context.clone(),
                 input
                     .trace_turn_id
@@ -263,7 +254,6 @@ impl LogicalTurnStart {
                     .unwrap_or_else(|| TurnId::from("")),
             ),
             Self::ExhaustedFollowOn(owed) => (
-                owed.options.as_deref().cloned(),
                 crate::TurnContext::default(),
                 owed.follow_on_turn_id.clone(),
             ),
@@ -463,8 +453,7 @@ impl LashRuntime {
         // FIG-3353: the shared funnel for every logical turn — an open that
         // declared it would not run one is refused before any effect.
         self.refuse_turn_execution_on_preserved_tool_surface()?;
-        let (follow_protocol_turn_options, follow_turn_context, supplied_trace_turn_id) =
-            start.continuation_state();
+        let (follow_turn_context, supplied_trace_turn_id) = start.continuation_state();
         if !supplied_trace_turn_id.is_empty()
             && scoped_effect_controller
                 .execution_scope()
@@ -632,12 +621,11 @@ impl LashRuntime {
                 });
             }
             let execution_result = match start {
-                LogicalTurnStart::Input(mut input, protocol_turn_options) => {
+                LogicalTurnStart::Input(mut input) => {
                     input.trace_turn_id = Some(turn_trace_turn_id.clone());
                     Box::pin(self.stream_turn_with_scoped_effect_controller_inner(
                         TurnPrepareContext {
                             input,
-                            protocol_turn_options,
                             sinks: TurnSinks { observer },
                             scoped_effect_controller: turn_effect_controller,
                             local_stop: local_stop.clone(),
@@ -765,8 +753,8 @@ impl LashRuntime {
                             )
                         })?);
                 }
-                let (input, options) = follow_on_input(&owed, follow_turn_context.clone());
-                start = LogicalTurnStart::Input(input, options);
+                start =
+                    LogicalTurnStart::Input(follow_on_input(&owed, follow_turn_context.clone()));
                 // Work an earlier turn withheld at its terminal checkpoint
                 // still waits for its FIG-3157 follow-on, which runs after
                 // the frame's. The frame's turn carries it: its commit owes
@@ -797,21 +785,21 @@ impl LashRuntime {
             admissions = LogicalTurnAdmissions::new(withheld.queued, withheld.turn_inputs)
                 .with_follow_on_allowed(follow_on_turns < MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS);
             announce_queued_work = false;
-            start = LogicalTurnStart::Input(input, follow_protocol_turn_options.clone());
+            start = LogicalTurnStart::Input(input);
         }
     }
 }
 
-/// The input of the follow-on `owed`: its task, and the protocol turn
-/// options the switch recorded (ADR 0101 §3).
+/// The input of the follow-on `owed`: its task (ADR 0101 §3). It runs under
+/// the recorded run its root resolved, which the fact carries.
 pub(super) fn follow_on_input(
     owed: &crate::store::PendingFollowOn,
     turn_context: crate::TurnContext,
-) -> (TurnInput, Option<crate::ProtocolTurnOptions>) {
+) -> TurnInput {
     let mut input = TurnInput::text(owed.task.clone());
     input.turn_context = turn_context;
     input.trace_turn_id = Some(owed.follow_on_turn_id.clone());
-    (input, owed.options.as_deref().cloned())
+    input
 }
 
 /// The physical turn after `physical_ordinal` within the known logical `root`.

@@ -6,8 +6,9 @@ use async_trait::async_trait;
 
 use super::*;
 use crate::plugin::{
+    CandidateFacts, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, CreationFacts,
     PluginFactory, PluginRegistrar, PluginSessionContext, ProtocolDriverPlugin,
-    ProtocolRuntimeContext, ProtocolSessionContext, ProtocolSessionPlugin, SessionPlugin,
+    ProtocolSessionContext, ProtocolSessionPlugin, SessionPlugin,
 };
 use crate::sansio::{CompletedToolCall, PendingWork, ProtocolDriverHandle};
 use crate::{
@@ -71,10 +72,18 @@ impl PluginFactory for TestProtocolFactory {
         self.id
     }
 
+    /// The code protocol records the create extras a creator states; the
+    /// standard fake registers no config.
+    fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
+        if self.decode_code_create_options {
+            reg.owner(TestCodeConfigOwner)?;
+        }
+        Ok(())
+    }
+
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(TestProtocolPlugin {
             id: self.id,
-            decode_code_create_options: self.decode_code_create_options,
             session_override: self.session_override.clone(),
             code_executor: self.code_executor.clone(),
         }))
@@ -83,7 +92,6 @@ impl PluginFactory for TestProtocolFactory {
 
 struct TestProtocolPlugin {
     id: &'static str,
-    decode_code_create_options: bool,
     session_override: Option<Arc<dyn ProtocolSessionPlugin>>,
     code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
 }
@@ -94,12 +102,11 @@ impl SessionPlugin for TestProtocolPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        reg.protocol()
-            .session(self.session_override.clone().unwrap_or_else(|| {
-                Arc::new(TestProtocolSession {
-                    decode_code_create_options: self.decode_code_create_options,
-                })
-            }))?;
+        reg.protocol().session(
+            self.session_override
+                .clone()
+                .unwrap_or_else(|| Arc::new(TestProtocolSession)),
+        )?;
         if let Some(code_executor) = self.code_executor.as_ref() {
             reg.execution().code_executor(code_executor.clone())?;
         }
@@ -109,9 +116,7 @@ impl SessionPlugin for TestProtocolPlugin {
     }
 }
 
-struct TestProtocolSession {
-    decode_code_create_options: bool,
-}
+struct TestProtocolSession;
 
 #[async_trait]
 impl ProtocolSessionPlugin for TestProtocolSession {
@@ -121,34 +126,58 @@ impl ProtocolSessionPlugin for TestProtocolSession {
     ) -> Result<(), crate::SessionError> {
         Ok(())
     }
+}
 
-    fn configure_runtime_on_materialize(
+/// The code protocol fake's config owner: it records the stated create
+/// extras, and nothing when nothing is stated.
+struct TestCodeConfigOwner;
+
+/// The code protocol fake refuses nothing it can decode.
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+struct TestCodeConfigRefusal {
+    message: String,
+}
+
+impl std::fmt::Display for TestCodeConfigRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl ConfigOwner for TestCodeConfigOwner {
+    type Create = TestCodeCreateExtras;
+    type Recorded = TestCodeCreateExtras;
+    type Refusal = TestCodeConfigRefusal;
+
+    fn implementation(&self) -> &str {
+        "test-code-protocol:1"
+    }
+
+    fn create(
         &self,
-        mut ctx: ProtocolRuntimeContext<'_>,
-        materialization: crate::plugin::ProtocolSessionMaterialization<'_>,
-    ) -> Result<(), crate::SessionError> {
-        if !self.decode_code_create_options {
-            return Ok(());
-        }
-        if let Some(extras) = materialization
-            .plugin_options
-            .decode::<TestCodeCreateExtras>("code_protocol")
-            .map_err(|err| {
-                crate::SessionError::Protocol(format!("invalid test code create options: {err}"))
-            })?
-        {
-            let options = crate::ProtocolTurnOptions::typed(extras)?;
-            ctx.set_protocol_turn_options(options);
-        }
+        input: Option<TestCodeCreateExtras>,
+        _facts: CreationFacts<'_, TestCodeCreateExtras>,
+    ) -> Result<Option<TestCodeCreateExtras>, TestCodeConfigRefusal> {
+        Ok(input)
+    }
+
+    fn validate(
+        &self,
+        _value: &TestCodeCreateExtras,
+        _base: Option<&TestCodeCreateExtras>,
+        _facts: &CandidateFacts<'_>,
+    ) -> Result<(), TestCodeConfigRefusal> {
         Ok(())
     }
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 struct TestCodeCreateExtras {
+    #[schemars(with = "serde_json::Value")]
     termination: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
     final_answer_format: Option<serde_json::Value>,
 }
 

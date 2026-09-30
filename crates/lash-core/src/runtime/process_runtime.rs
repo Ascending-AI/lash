@@ -88,21 +88,24 @@ impl ProcessRuntimeContext {
                 )));
             }
         };
-        let (environment, policy, plugin_options) = match body {
+        let (environment, policy, plugin_config) = match body {
             ProcessRuntimeBody::Captured { environment } => {
                 let policy = environment.policy.clone();
-                let plugin_options = environment.plugin_options.clone();
-                (Some(environment), policy, plugin_options)
+                let plugin_config = environment.plugin_config.clone();
+                (Some(environment), policy, plugin_config)
             }
+            // A session-turn process captures no environment: its runtime
+            // only creates or reopens its session, which records and runs
+            // its own configuration (FIG-4379).
             ProcessRuntimeBody::SessionTurn { default_policy } => {
-                (None, default_policy, crate::PluginOptions::default())
+                (None, default_policy, crate::AdmittedPluginConfig::default())
             }
         };
         Self::build(ProcessRuntimeBuild {
             process_id,
             environment,
             policy,
-            plugin_options,
+            plugin_config,
             host: ports.host,
             work: super::host::RuntimeWork::processes(ports.process_work, ports.queued_work),
             plugin_host: ports.plugin_host,
@@ -122,12 +125,12 @@ impl ProcessRuntimeContext {
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, crate::PluginError> {
         let policy = environment.policy.clone();
-        let plugin_options = environment.plugin_options.clone();
+        let plugin_config = environment.plugin_config.clone();
         Self::build(ProcessRuntimeBuild {
             process_id,
             environment: Some(environment),
             policy,
-            plugin_options,
+            plugin_config,
             host: runtime_env.core.clone(),
             work: runtime_env.work.clone(),
             plugin_host,
@@ -141,7 +144,7 @@ impl ProcessRuntimeContext {
             process_id,
             environment,
             policy,
-            plugin_options,
+            plugin_config,
             host,
             work,
             plugin_host,
@@ -151,12 +154,9 @@ impl ProcessRuntimeContext {
         let plugins = plugin_host.isolated_registry().build_session(
             crate::plugin::PluginSessionRequest::process_creation(
                 process_id.clone(),
-                crate::plugin::SessionCreationConfig {
-                    authority: crate::plugin::SessionAuthorityContext {
-                        plugin_options,
-                        ..Default::default()
-                    },
-                    protocol_turn_options: Default::default(),
+                crate::plugin::SessionAuthorityContext {
+                    plugin_config,
+                    ..Default::default()
                 },
             ),
         )?;
@@ -208,7 +208,7 @@ struct ProcessRuntimeBuild {
     process_id: crate::ProcessId,
     environment: Option<crate::ProcessExecutionEnvSpec>,
     policy: crate::SessionPolicy,
-    plugin_options: crate::PluginOptions,
+    plugin_config: crate::AdmittedPluginConfig,
     host: crate::RuntimeHostConfig,
     work: super::host::RuntimeWork,
     plugin_host: Arc<crate::PluginHost>,

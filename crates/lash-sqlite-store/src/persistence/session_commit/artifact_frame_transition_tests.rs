@@ -17,12 +17,11 @@ fn first_commit_may_end_its_own_appended_frame_open() {
                 frame_key: lash_core_execution::FrameKey::from_caller_material("first-frame")
                     .expect("frame key"),
                 reason: lash_core_execution::AgentFrameReason::initial(),
-                assignment: lash_core_execution::AgentFrameAssignment::from_policy(
+                assignment: lash_core_execution::AgentFrameAssignment::unconfigured(
                     lash_core_execution::SessionPolicy::new(
                         lash_core_execution::TurnBudget::Unbounded,
                     ),
                 ),
-                protocol_turn_options: lash_core_execution::ProtocolTurnOptions::default(),
             },
         }],
     };

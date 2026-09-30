@@ -9,12 +9,6 @@ use crate::{ProcessId, ProcessWakeDelivery, QueuedWorkClass, SessionId, TurnCaus
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionCommand {
-    /// Apply durable session-policy intent at the command drain. Consecutive
-    /// config patches may share one head commit, but every enclosing queued
-    /// batch remains present in the atomic completion.
-    ApplyConfigPatch {
-        patch: Box<super::ApplyConfigPatch>,
-    },
     // No generation guard: the command drains asynchronously, so any
     // generation observed at enqueue time may legitimately have advanced by
     // drain time, and the refresh recomputes the surface from live sources
@@ -61,6 +55,13 @@ pub enum SessionCommand {
         #[schemars(with = "serde_json::Value")]
         args: serde_json::Value,
     },
+    /// A typed config transaction (FIG-4379): its commands resolve once, at
+    /// a turn boundary, into a recorded resolution, and the commit that
+    /// settles the command publishes it with one config revision step. It
+    /// settles as a [`SessionCommandOutcome::ConfigTransaction`].
+    ApplyConfigTransaction {
+        transaction: Box<crate::ConfigTransactionRecord>,
+    },
     /// A host's durable frame open (FIG-4202): the drive opens the frame at
     /// a turn boundary, in the commit that settles the command, and restarts
     /// its live interpreter from the frame's seed. It settles as a
@@ -73,28 +74,29 @@ pub enum SessionCommand {
 impl SessionCommand {
     pub fn kind(&self) -> &'static str {
         match self {
-            Self::ApplyConfigPatch { .. } => "apply_config_patch",
             Self::RefreshToolCatalog { .. } => "refresh_tool_catalog",
             Self::CompactContext { .. } => "compact_context",
             Self::AppendSessionNodes { .. } => "append_session_nodes",
             Self::RunPluginCommand { .. } => "run_plugin_command",
             Self::RunPluginTask { .. } => "run_plugin_task",
             Self::OpenAgentFrame { .. } => "open_agent_frame",
+            Self::ApplyConfigTransaction { .. } => "apply_config_transaction",
         }
     }
 
     /// Whether the command applies alone, under its own scope, and settles
     /// with a typed [`SessionCommandOutcome`] in the commit that applies it
-    /// (FIG-4201, FIG-4202). Config patches and catalog refreshes settle
-    /// without one.
+    /// (FIG-4201, FIG-4202, FIG-4379). A catalog refresh settles without
+    /// one.
     pub fn settles_with_outcome(&self) -> bool {
         match self {
-            Self::ApplyConfigPatch { .. } | Self::RefreshToolCatalog { .. } => false,
+            Self::RefreshToolCatalog { .. } => false,
             Self::CompactContext { .. }
             | Self::AppendSessionNodes { .. }
             | Self::RunPluginCommand { .. }
             | Self::RunPluginTask { .. }
-            | Self::OpenAgentFrame { .. } => true,
+            | Self::OpenAgentFrame { .. }
+            | Self::ApplyConfigTransaction { .. } => true,
         }
     }
 
@@ -130,16 +132,6 @@ pub enum SessionCommandSettlement {
     Durable(SessionCommandReceipt),
     Pending(SessionCommandReceipt),
     Cancelled(SessionCommandReceipt),
-    /// The patch was written against `base` and the running revision was
-    /// already `head` at the drain: the submitter re-reads and recomputes.
-    Stale {
-        base: u64,
-        head: u64,
-    },
-    /// Route validation refused the patch at apply time.
-    Refused {
-        code: lash_core_llm::provider::ConfigRefusalCode,
-    },
     /// A command that settles with a typed outcome was applied: its commit
     /// completed the command, and `outcome` is what it settled as, a typed
     /// refusal included (FIG-4201, FIG-4202).
@@ -170,6 +162,11 @@ pub enum SessionCommandOutcome {
     /// A host frame open's outcome.
     OpenAgentFrame {
         outcome: OpenAgentFrameCommandOutcome,
+    },
+    /// A config transaction's outcome: applied with each command's output,
+    /// stale, or refused by an owner (FIG-4379).
+    ConfigTransaction {
+        outcome: crate::ConfigTransactionOutcome,
     },
     /// The command could not apply, for a reason its own outcome does not
     /// name: nothing of it committed, and the command is settled, so it is

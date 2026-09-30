@@ -314,14 +314,15 @@ pub enum SessionError {
         /// The full restore report, including the classes that did not refuse.
         report: Box<crate::ToolRestoreReport>,
     },
-    /// A [`SessionConfigPatch`](crate::runtime) change the session refused
-    /// before anything was written (FIG-4099). The refusal is the typed error
-    /// the refusing party raised: the session's protocol for plugin-keyed
-    /// options (the RLM protocol refuses a conflicting durable fact with its
-    /// `RlmSessionConfigConflict`), or [`PluginOptionsUnaccepted`] when no
-    /// plugin reads a stated key. Match it with
-    /// [`SessionConfigRefusal::downcast_ref`], never on its message.
-    #[error("session config change refused: {0}")]
+    /// Session config a creation stated that its owner refused, before
+    /// anything was written (FIG-4099, FIG-4379). The refusal is the typed
+    /// error the refusing [`ConfigOwner`](crate::plugin::ConfigOwner) raised
+    /// for its namespace, or
+    /// [`UnknownPluginConfigOwner`](crate::plugin::UnknownPluginConfigOwner)
+    /// when no installed plugin owns a stated key. Match it with
+    /// [`SessionConfigRefusal::downcast_ref`], never on its message. A later
+    /// change is a config transaction, whose refusal is its settled outcome.
+    #[error("session config refused: {0}")]
     SessionConfigRefused(SessionConfigRefusal),
     #[error(transparent)]
     Plugin(#[from] crate::PluginError),
@@ -355,14 +356,6 @@ impl std::error::Error for SessionConfigRefusal {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(self.0.as_ref())
     }
-}
-
-/// A session config change stated plugin-keyed options that no plugin of the
-/// session reads, so applying it would silently drop them (FIG-4099).
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("no plugin of this session accepts session config for {}", plugin_ids.join(", "))]
-pub struct PluginOptionsUnaccepted {
-    pub plugin_ids: Vec<String>,
 }
 
 impl From<lash_core_store::session_policy::ProviderPinMismatch> for SessionError {
@@ -971,11 +964,8 @@ mod tool_catalog_cache_tests {
         crate::PluginHost::new(factories)
             .build_session(PluginSessionRequest::creation(
                 "admission-probe",
-                crate::plugin::SessionCreationConfig {
-                    authority: crate::plugin::SessionAuthorityContext {
-                        tool_access,
-                        ..Default::default()
-                    },
+                crate::plugin::SessionAuthorityContext {
+                    tool_access,
                     ..Default::default()
                 },
             ))

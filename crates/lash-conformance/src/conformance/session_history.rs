@@ -15,8 +15,8 @@ use crate::store::{
 };
 use crate::{
     AgentFrameAssignment, AgentFrameReason, ForkSessionRequest, FrameKey, FrameNodeId, NodeId,
-    OperationId, ProtocolTurnOptions, RuntimeCommit, RuntimeSessionState, SessionId, SessionPolicy,
-    SessionRelation, StoreError, TurnBudget,
+    OperationId, RuntimeCommit, RuntimeSessionState, SessionId, SessionPolicy, SessionRelation,
+    StoreError, TurnBudget,
 };
 
 fn budget(nodes: u32, bytes: u64) -> HistoryBudget {
@@ -74,8 +74,7 @@ fn open_frame(state: &mut RuntimeSessionState, name: &str) -> FrameNodeId {
         frame.clone(),
         key,
         AgentFrameReason::new("history-conformance"),
-        AgentFrameAssignment::from_policy(state.policy.clone()),
-        ProtocolTurnOptions::default(),
+        AgentFrameAssignment::unconfigured(state.policy.clone()),
         "2026-09-29T00:00:00Z".to_string(),
     );
     assert!(opened, "fixture frame must have a fresh identity");
@@ -446,6 +445,7 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             policy: SessionPolicy::new(TurnBudget::Unbounded),
+            plugin_config: Default::default(),
         })
         .await
         .expect("fork at retained node");
@@ -478,6 +478,7 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             policy: SessionPolicy::new(TurnBudget::Unbounded),
+            plugin_config: Default::default(),
         })
         .await
         .expect("fork an inherited node through the child lineage");
@@ -513,6 +514,7 @@ async fn fork_at(store: &dyn ConformanceDeployment, child: &SessionId, node_id: 
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             policy: SessionPolicy::new(TurnBudget::Unbounded),
+            plugin_config: Default::default(),
         })
         .await
         .expect("fork at a retained node");

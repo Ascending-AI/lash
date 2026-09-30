@@ -619,6 +619,9 @@ impl LashCore {
         let mut fork_policy = self.policy.clone();
         fork_policy.provider_id = point.config.provider_id;
         fork_policy.model = point.config.model;
+        // The fork records the plugin configuration its fork point's frame
+        // captured, as it does the provider and model (FIG-4379).
+        let plugin_config = point.config.plugin_config;
         let mut selected = std::collections::HashSet::new();
         let mut pending_observer_intents = Vec::new();
         for process_id in observed_processes {
@@ -635,6 +638,7 @@ impl LashCore {
             relation,
             pending_observer_intents,
             policy: fork_policy,
+            plugin_config,
         };
         let mut fork = store_factory.fork_session(&request).await?;
         match store_factory.lookup_session(&request.session_id).await? {

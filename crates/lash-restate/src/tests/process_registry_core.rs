@@ -956,7 +956,7 @@ pub(super) async fn restate_workflow_submission_failure_cancels_the_row_it_regis
     let env_store = Arc::clone(&stores.env_store);
     let start_key = "restate-start-failed-cancels";
     let spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::empty(),
+        lash_core::AdmittedPluginConfig::default(),
         recovery_session_policy(),
     );
     let expected_ref = spec.stable_ref().expect("stable environment ref");
@@ -1027,7 +1027,7 @@ pub(super) async fn restate_failed_start_compensation_returns_the_registered_rec
     let env_store = Arc::clone(&stores.env_store);
     let start_key = "restate-start-failed-compensation-fails";
     let spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::empty(),
+        lash_core::AdmittedPluginConfig::default(),
         recovery_session_policy(),
     );
 
@@ -1073,7 +1073,7 @@ pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exac
     let env_store = Arc::clone(&stores.env_store);
     let start_key = "restate-start-recovery-external-ref";
     let spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::empty(),
+        lash_core::AdmittedPluginConfig::default(),
         recovery_session_policy(),
     );
     let expected_ref = spec.stable_ref().expect("stable environment ref");
@@ -1136,7 +1136,7 @@ pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_reco
     let env_store = Arc::clone(&stores.env_store);
     let start_key = "restate-start-ambiguous";
     let spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::empty(),
+        lash_core::AdmittedPluginConfig::default(),
         recovery_session_policy(),
     );
 
@@ -1184,7 +1184,7 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
     let env_store = Arc::clone(&stores.env_store);
     let start_key = "restate-exact-retry-start-failure";
     let spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::empty(),
+        lash_core::AdmittedPluginConfig::default(),
         recovery_session_policy(),
     );
     let executor =

@@ -884,6 +884,7 @@ async fn assert_fork_carries_no_usage(tier: &UsageAccountingTier, world: &World,
             relation: crate::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            plugin_config: Default::default(),
         })
         .await
         .unwrap_or_else(|error| panic!("{law}: fork the parent at its leaf: {error}"));

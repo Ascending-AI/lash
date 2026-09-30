@@ -27,7 +27,7 @@ pub async fn prune_and_late_transfer_fences(
     )
     .expect("start claim");
     let spec = crate::ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
+        crate::AdmittedPluginConfig::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     );
     let env_ref = spec.stable_ref().expect("stable env ref");
@@ -214,7 +214,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
     let (stores_a, stores_b) = (stores(&starter_a), stores(&starter_b));
     let spec = |budget| {
         crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(budget),
         )
     };
@@ -423,7 +423,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
     };
     let spec = |budget| {
         crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(budget),
         )
     };
@@ -808,7 +808,7 @@ pub async fn two_starts_share_one_captured_environment(
         "instructions",
         "x".repeat(128 * 1024),
     ));
-    let spec = crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy);
+    let spec = crate::ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy);
     let stores = crate::ProcessStartStores {
         registry: registry.as_ref(),
         env_store: Some(&env_store),

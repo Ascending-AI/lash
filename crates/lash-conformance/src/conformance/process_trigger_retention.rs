@@ -1048,7 +1048,7 @@ async fn a_reserved_delivery_recovers_through_its_obligation_into_one_bound_proc
     // The environment the subscription names is durable before any delivery
     // starts, the way a registration publishes it.
     let spec = crate::ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
+        crate::AdmittedPluginConfig::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     );
     let env_ref = spec.stable_ref().expect("stable env ref");
@@ -1287,7 +1287,7 @@ async fn a_completed_child_whose_bind_was_lost_is_bound_not_started_again(
     const SOURCE: &str = "delivery-pin-source";
     let session_id = SessionId::from(SESSION);
     let spec = crate::ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
+        crate::AdmittedPluginConfig::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     );
     let env_ref = spec.stable_ref().expect("stable env ref");
@@ -1969,7 +1969,7 @@ impl crate::TriggerRouteRestorer for CapturedRouteProbe {
 async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
     let session = SessionId::from("captured-route-matrix");
     let spec = crate::ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
+        crate::AdmittedPluginConfig::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     );
     let env_ref = spec.stable_ref().expect("environment identity");

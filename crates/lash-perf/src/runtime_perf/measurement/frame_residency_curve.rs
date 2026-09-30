@@ -116,8 +116,7 @@ fn open_next_frame(
         frame_node_id.clone(),
         key,
         lash_core::AgentFrameReason::compaction(),
-        lash_core::AgentFrameAssignment::from_policy(state.policy.clone()),
-        state.protocol_turn_options.clone(),
+        lash_core::AgentFrameAssignment::unconfigured(state.policy.clone()),
         chrono::Utc::now().to_rfc3339(),
     );
     if !opened {

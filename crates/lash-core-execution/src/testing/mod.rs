@@ -70,7 +70,7 @@ pub fn process_work_wiring_for_registry(
 #[cfg(any(test, feature = "testing"))]
 fn process_execution_env_fixture_spec() -> crate::ProcessExecutionEnvSpec {
     crate::ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
+        crate::AdmittedPluginConfig::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     )
 }

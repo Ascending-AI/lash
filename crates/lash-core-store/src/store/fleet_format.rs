@@ -382,11 +382,6 @@ pub const GUARDED_SURFACES: &[GuardedSurface] = &[
         reads: SurfaceReads::Mutable,
     },
     GuardedSurface {
-        constant: "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
-        owner: "lash-core-store",
-        reads: SurfaceReads::Mutable,
-    },
-    GuardedSurface {
         constant: "PROCESS_WAKE_DELIVERY_FORMAT_VERSION",
         owner: "lash-core-execution",
         reads: SurfaceReads::Mutable,

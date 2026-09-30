@@ -41,7 +41,7 @@ use lash_core_execution::runtime::{
     QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, TurnLaneAdmissionPolicy,
 };
 use lash_core_execution::store::queued_work::{
-    MAX_SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,
+    SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,
     select_leading_session_command, select_turn_work_prefix,
 };
 use lash_core_execution::store::{

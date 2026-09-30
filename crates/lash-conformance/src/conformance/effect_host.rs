@@ -41,8 +41,9 @@ impl crate::AwaitEventResolver for RecordingEffectHostController {
 #[async_trait::async_trait]
 impl RuntimeEffectController for RecordingEffectHostController {
     /// The host records every envelope it is handed and synthesizes only
-    /// `Sleep`. Process, session-close and command-lane read commands carry
-    /// local executors backed by the real registry and store. Run those
+    /// `Sleep`. Process, session-close, command-lane read and config
+    /// resolution commands carry local executors backed by the real
+    /// registry, store and installed config owners. Run those
     /// executors so the recorded outcomes reflect the backend under test.
     async fn execute_effect(
         &self,
@@ -63,6 +64,7 @@ impl RuntimeEffectController for RecordingEffectHostController {
             RuntimeEffectCommand::Process { .. }
                 | RuntimeEffectCommand::BeginSessionClose { .. }
                 | RuntimeEffectCommand::ReadSessionCommandRun { .. }
+                | RuntimeEffectCommand::ResolveConfigTransaction { .. }
         ) {
             return crate::testing::execute_effect_locally(envelope, local_executor).await;
         }

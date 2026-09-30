@@ -152,21 +152,19 @@ impl ToolChildContextSource for CoreToolChildContextSource {
         // subagent depth, as its opener's plugins did (FIG-3712).
         state.authority.tool_access = request.session.tool_access.clone();
         state.authority.subagent = request.session.subagent.clone();
-        let runtime = LashRuntime::from_environment_with_plugin_options(
-            &env,
-            policy,
-            state,
-            None,
-            execution_env.plugin_options.clone(),
-            self.drive_owner.clone(),
-        )
-        .await
-        .map_err(|error| {
-            PluginError::Session(format!(
-                "build the context of tool child `{}` in session `{session_id}`: {error}",
-                request.call.call_id
-            ))
-        })?;
+        // ...and the plugin configuration the child was admitted under, at
+        // its revision (FIG-4379).
+        state.authority.plugin_config = execution_env.plugin_config.config.as_ref().clone();
+        state.config_revision = execution_env.plugin_config.revision;
+        let runtime =
+            LashRuntime::from_environment(&env, policy, state, None, self.drive_owner.clone())
+                .await
+                .map_err(|error| {
+                    PluginError::Session(format!(
+                        "build the context of tool child `{}` in session `{session_id}`: {error}",
+                        request.call.call_id
+                    ))
+                })?;
         let mut dispatch = runtime.tool_child_dispatch(lent_controller)?;
         dispatch.process_lineage = enclosing_lineage(&env, request).await?;
         Ok(DeploymentToolChildContext::new(

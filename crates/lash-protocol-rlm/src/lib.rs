@@ -43,10 +43,11 @@ pub use lashlang::{NamedDataType, TypeExpr, TypeField, format_type_expr};
 pub use plugin::{
     ExecutionBounds, InstructionBound, LashlangCompileSurface, LashlangCompileSurfaceRequest,
     LashlangModuleCompileError, LashlangModuleCompileRequest, MemoryBound, ModuleCompileOutput,
-    RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmLanguageFeatures, RlmProtocolPluginConfig,
-    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,
-    UnsetBound, UnsetChannel, apply_rlm_session_config_if_unset, rlm_lashlang_surface,
-    rlm_protocol_config, rlm_session_config, rlm_session_config_options,
+    RLM_CONFIG_IMPLEMENTATION, RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmConfigOwner,
+    RlmConfigRefusal, RlmCreateConfig, RlmLanguageFeatures, RlmProtocolPluginConfig,
+    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedConfig,
+    RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel, rlm_lashlang_surface,
+    rlm_protocol_config, rlm_session_config,
 };
 pub use projection::{
     RlmHistoryProjection, RlmSeed, decode_rlm_protocol_event, rlm_history_projection,

@@ -114,7 +114,7 @@ impl LinkedTestProcess {
 
 fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
+        lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             model: mock_model_spec(),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)

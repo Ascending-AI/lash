@@ -139,8 +139,7 @@ fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
         payload: lash_core::SessionNodePayload::FrameOpen {
             frame_key,
             reason: lash_core::AgentFrameReason::continue_as(),
-            assignment: lash_core::AgentFrameAssignment::from_policy(current_policy),
-            protocol_turn_options: Default::default(),
+            assignment: lash_core::AgentFrameAssignment::unconfigured(current_policy),
         },
     }));
     state.session_graph =
@@ -192,7 +191,7 @@ impl lash_core::facade_support::PluginFactory for CompileSurfaceToolFactory {
         lash_core::PluginError,
     > {
         let config = ctx
-            .plugin_options
+            .plugin_config
             .decode::<CompileSurfaceToolConfig>(self.id)
             .map_err(|err| lash_core::PluginError::Registration(err.to_string()))?;
         let tool_name = config
@@ -357,19 +356,30 @@ async fn prompt_layers_apply_across_core_session_and_mutation_scopes() -> Result
     let session = core.session("prompt-api").open().await?;
 
     session.send(TurnInput::text("first")).output().await?;
-    Box::pin(session.admin().config().replace_prompt_slot(
-        PromptSlot::Guidance,
-        [PromptContribution::guidance(
-            "Replacement",
-            "replacement guidance",
-        )],
-    ))
+    Box::pin(
+        session
+            .admin()
+            .config()
+            .configure(crate::config::ConfigTransaction::of(
+                crate::config::ReplacePromptSlot {
+                    slot: PromptSlot::Guidance,
+                    contributions: vec![PromptContribution::guidance(
+                        "Replacement",
+                        "replacement guidance",
+                    )],
+                },
+            )),
+    )
     .await?;
     session.send(TurnInput::text("second")).output().await?;
     session
         .admin()
         .config()
-        .clear_prompt_slot(PromptSlot::Guidance)
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::ClearPromptSlot {
+                slot: PromptSlot::Guidance,
+            },
+        ))
         .await?;
     session.send(TurnInput::text("third")).output().await?;
 
@@ -458,21 +468,28 @@ async fn provider_overrides_apply_at_core_and_session_scopes_and_a_config_route_
     assert_eq!(assistant_prose(&session_result.activities), "session");
 
     // A config route is a provider id the host must already serve
-    // (FIG-3600 S6): an unserved one is refused when it is sent, and the
-    // session keeps its provider.
-    let refused = session
-        .admin()
-        .config()
-        .update(SessionConfigPatch {
-            provider_id: Some("updated-provider".to_string()),
-            model: Some(model_spec("updated-model", None, 200_000)),
-            ..SessionConfigPatch::default()
-        })
-        .await
-        .expect_err("a route no provider serves is refused at send");
+    // (FIG-3600 S6): an unserved one is refused typed by the core owner when
+    // the transaction resolves, and the session keeps its provider.
+    let config = session.admin().config();
+    let revision = config.revision().await?;
+    let refused = config
+        .apply(
+            crate::config::ConfigWrite::new("unserved-route", revision),
+            crate::config::ConfigTransaction::of(crate::config::SetProvider {
+                provider_id: "updated-provider".to_string(),
+            })
+            .then(crate::config::SetModel {
+                model: model_spec("updated-model", None, 200_000),
+            }),
+        )
+        .await?;
+    let crate::config::ConfigTransactionOutcome::Refused { refusal } = refused else {
+        panic!("a route no provider serves is refused: {refused:?}");
+    };
+    assert_eq!(refusal.owner, crate::config::CORE_CONFIG_OWNER);
     assert!(
-        refused.to_string().contains("no provider serves the route"),
-        "the refusal names the unserved route: {refused}"
+        refusal.message.contains("no provider serves the route"),
+        "the refusal names the unserved route: {refusal:?}"
     );
 
     let after_refusal = session.send(TurnInput::text("hello")).output().await?;
@@ -800,19 +817,21 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     // Process lifecycle available for the compile surface (parity with the old
     // core that wired a process registry).
     let process_lifecycle_available = true;
-    let plugin_options = || {
-        lash_core::PluginOptions::typed(
+    let plugin_config = || {
+        let mut config = lash_core::PluginConfig::default();
+        config.insert(
             "compile-extra-tool",
-            CompileSurfaceToolConfig {
+            serde_json::to_value(CompileSurfaceToolConfig {
                 tool_name: "lookup".to_string(),
-            },
-        )
-        .expect("compile plugin options serialize")
+            })
+            .expect("compile plugin config serializes"),
+        );
+        lash_core::AdmittedPluginConfig::new(config, 0)
     };
     let request = crate::rlm::LashlangCompileSurfaceRequest::new(
         "compile-surface",
         lash_core::ProcessExecutionEnvSpec::new(
-            plugin_options(),
+            plugin_config(),
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ),
     );
@@ -850,7 +869,7 @@ const value = await tools.lookup({});
 finish(value);
 "#,
                 lash_core::ProcessExecutionEnvSpec::new(
-                    plugin_options(),
+                    plugin_config(),
                     lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                 ),
             ),
@@ -1002,7 +1021,18 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
         Err(error) => error,
     };
 
-    assert!(err.to_string().contains("invalid RLM create options"));
+    let crate::EmbedError::Session(lash_core::SessionError::SessionConfigRefused(refusal)) = &err
+    else {
+        panic!("expected a typed session config refusal, got: {err:?}");
+    };
+    let refusal = refusal
+        .downcast_ref::<lash_core::ConfigRefusal>()
+        .expect("the RLM owner's creation refusal");
+    assert_eq!(refusal.owner, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
+    assert!(
+        refusal.message.contains("invalid creation config"),
+        "{refusal:?}"
+    );
     Ok(())
 }
 
@@ -1835,10 +1865,11 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
     session
         .admin()
         .config()
-        .update(crate::SessionConfigPatch {
-            model: Some(builder_model.clone()),
-            ..crate::SessionConfigPatch::default()
-        })
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::SetModel {
+                model: builder_model.clone(),
+            },
+        ))
         .await?;
 
     let policy = session.policy_snapshot();

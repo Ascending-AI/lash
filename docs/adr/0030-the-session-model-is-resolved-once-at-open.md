@@ -25,9 +25,10 @@ provider is refused with `ProviderMismatch`.
 
 `effective_policy()` reads session policy directly. `FrameOpen` assignments
 are immutable history and retain the model recorded when the frame opens.
-Later configuration changes use the durable `update(SessionConfigPatch)`
-command. The patch covers provider, model, prompt, generation, attachment
-acceptance and plugin session configuration. Live execution controls, such as
+Later configuration changes are typed config commands in a durable,
+revision-checked transaction (ADR 0126). The core owner's commands cover
+provider, model, prompt, generation, attachment acceptance, turn budget and
+tool access; each plugin's commands cover its own namespace. Live execution controls, such as
 turn and no-progress budgets, autonomy and charge safety, follow the open
 without replacing recorded configuration.
 

@@ -34,11 +34,8 @@ fn standard_session_with_access(
     ])
     .build_session(PluginSessionRequest::creation(
         session_id,
-        lash_core::plugin::SessionCreationConfig {
-            authority: lash_core::plugin::SessionAuthorityContext {
-                tool_access,
-                ..Default::default()
-            },
+        lash_core::plugin::SessionAuthorityContext {
+            tool_access,
             ..Default::default()
         },
     ))

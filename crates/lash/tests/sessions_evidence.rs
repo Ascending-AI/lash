@@ -58,10 +58,10 @@ fn drain_area_witnesses() {
     type_witness::<lash::PendingTurnInputCancelReceipt>();
     // W0018: lash::SessionCommand [enum]
     type_witness::<lash::SessionCommand>();
-    // W0019: lash::SessionCommand::ApplyConfigPatch::patch [field]
+    // W0019: lash::SessionCommand::ApplyConfigTransaction::transaction [field]
     field_witness(|value: &lash::SessionCommand| {
-        if let lash::SessionCommand::ApplyConfigPatch { patch, .. } = value {
-            let _ = patch;
+        if let lash::SessionCommand::ApplyConfigTransaction { transaction } = value {
+            let _ = transaction;
         }
     });
     // W0020: lash::SessionCommand::kind [function]
@@ -791,8 +791,8 @@ fn drain_area_witnesses() {
     });
     // W0234: lash::plugins::AgentFrameAssignment [struct]
     type_witness::<lash::plugins::AgentFrameAssignment>();
-    // W0235: lash::plugins::AgentFrameAssignment::from_policy [function]
-    let _ = lash::plugins::AgentFrameAssignment::from_policy;
+    // W0235: lash::plugins::AgentFrameAssignment::unconfigured [function]
+    let _ = lash::plugins::AgentFrameAssignment::unconfigured;
     // W0236: lash::plugins::AgentFrameAssignment::policy [field]
     field_witness(|value: &lash::plugins::AgentFrameAssignment| {
         let _ = &value.policy;
@@ -1493,14 +1493,10 @@ fn drain_area_witnesses() {
     fn meth_0479<T: lash::sync::MutexExt<()>>(_: &T) {
         let _ = T::try_lock_recover;
     }
-    // W0480: lash::runtime::ApplyConfigPatch [struct]
-    type_witness::<lash::runtime::ApplyConfigPatch>();
     // W0481: lash::durability::ProcessLocalExecution::effect_controller [field]
     field_witness(|value: &lash::durability::ProcessLocalExecution| {
         let _ = &value.effect_controller;
     });
-    // W0482: lash::runtime::LashRuntime::from_environment_with_plugin_options [function]
-    let _ = lash::runtime::LashRuntime::from_environment_with_plugin_options;
     // W0484: lash::runtime::RuntimeErrorCode::RuntimeEffectGroupDrainDeferred [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(

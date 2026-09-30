@@ -1,4 +1,3 @@
-use lash_core::plugin::PluginSessionRequest;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::pin::Pin;
@@ -33,8 +32,8 @@ use lash_remote_protocol::{
 /// process-local plugin factories, the tool-source policy and
 /// [`enqueue_only`](Self::enqueue_only). A session's config is not among
 /// them: it is stated once, in the [`SessionCreation`] passed to
-/// [`create`](Self::create), and changed afterwards only through
-/// [`update`](crate::admin::SessionConfigAdmin::update).
+/// [`create`](Self::create), and changed afterwards only through a config
+/// transaction ([`SessionConfigAdmin::apply`](crate::admin::SessionConfigAdmin::apply)).
 pub struct SessionBuilder {
     pub(crate) core: LashCore,
     pub(crate) session_id: SessionId,
@@ -66,10 +65,14 @@ pub struct SessionCreation {
     /// ledger — rolling related sessions together is host policy, not a
     /// facade service. `None` creates a root session.
     pub parent: Option<SessionId>,
-    /// Plugin-keyed, serializable creation options. The session's protocol
-    /// resolves them at creation — as its first materialization would — and
-    /// the result, the RLM and plugin session config, is recorded with the
-    /// session's initial config head.
+    /// Plugin-keyed, serializable creation options (FIG-4379). Every plugin
+    /// the core installs — the protocol among them — creates its own
+    /// namespace from its key, defaults included, and the result is recorded
+    /// with the session's initial config head: every open delivers it
+    /// unchanged, and only its owner's typed config commands change it
+    /// ([`crate::config`]). A key no installed plugin owns, or a
+    /// value its owner refuses, fails the creation typed as
+    /// [`SessionConfigRefused`](lash_core::SessionError::SessionConfigRefused).
     pub plugin_options: PluginOptions,
 }
 
@@ -160,7 +163,7 @@ impl SessionBuilder {
     ///
     /// The session runs with the config it recorded at creation, as recorded,
     /// and the open writes nothing (FIG-4099). Change a session's config with
-    /// [`update`](crate::admin::SessionConfigAdmin::update).
+    /// a config transaction ([`SessionConfigAdmin::apply`](crate::admin::SessionConfigAdmin::apply)).
     pub async fn open(self) -> Result<LashSession> {
         let resolved = self.existing_store().await?;
         self.reconcile_process_observer_intents(Some(&resolved.store))
@@ -227,8 +230,8 @@ impl SessionBuilder {
     ///
     /// The only verb that creates a session, and the only one that takes
     /// session config (FIG-4112). It writes the session's catalog row and its
-    /// initial config head — `creation`'s spec, relation and resolved plugin
-    /// options — in one store transaction, and stops there: no runtime, no
+    /// initial config head — `creation`'s spec, relation and the plugin
+    /// configuration its owners resolved — in one store transaction, and stops there: no runtime, no
     /// Session Execution Lease, no plugin session, no lifecycle event. Run the
     /// session with [`open`](Self::open), or admit durable input for its first
     /// turn with `create(creation).await?.send(input)`. The builder's open
@@ -261,13 +264,25 @@ impl SessionBuilder {
         let mut policy = spec.resolve_against(&self.core.policy);
         policy.session_id = Some(self.session_id.clone());
         let mut config = lash_core::PersistedSessionConfig::from(&policy);
-        config.protocol_turn_options = creation_protocol_turn_options(
+        // Every plugin the core installs resolves its recorded namespace —
+        // the protocol's among them — from what the creator stated (FIG-4379).
+        // A per-open plugin takes no part in creation.
+        let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),
-            &self.session_id,
-            parent.clone(),
-            &plugin_options,
-            self.core.store_factory.fleet_format(),
+            self.core.plugin_factories.as_ref(),
+            Vec::new(),
         )?;
+        config.plugin_config = plugin_host
+            .resolve_creation_plugin_config(
+                self.core
+                    .protocol_factory
+                    .as_ref()
+                    .map(|protocol_factory| protocol_factory.id()),
+                &plugin_options,
+                None,
+                parent.is_none(),
+            )
+            .map_err(lash_core::SessionError::SessionConfigRefused)?;
         let request = SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
@@ -466,24 +481,17 @@ impl SessionBuilder {
         env = binding.apply_owner(env);
         let recorded_parent_session_id =
             crate::session::recorded_parent_session_id(&binding.store()).await?;
-        // Plugin options are creation config (FIG-4112): creation resolved
-        // them into the recorded protocol options, so an open states none.
-        let mut runtime = LashRuntime::from_environment_with_plugin_options(
+        // Plugin configuration is creation config (FIG-4112, FIG-4379): the
+        // session runs what it recorded, delivered unchanged; an open states
+        // none.
+        let runtime = LashRuntime::from_environment(
             &env,
             policy,
             state,
             Some(binding.store()),
-            PluginOptions::default(),
             self.core.drive_owner.clone(),
         )
         .await?;
-        // Fire the protocol materialization hook: a session that recorded its
-        // protocol options keeps them as recorded; one that recorded none
-        // takes the protocol's defaults.
-        runtime.configure_protocol_on_materialize(
-            &PluginOptions::default(),
-            recorded_parent_session_id.is_none(),
-        )?;
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::clone(&self.core.live_replay_store),
@@ -577,51 +585,6 @@ pub(crate) async fn load_state_from_store(
     }
     adopt_live_policy(&mut state, policy);
     Ok(state)
-}
-
-/// The protocol turn options a session is created with (FIG-4099): what the
-/// session's protocol plugin resolves `plugin_options` to at the session's
-/// first materialization — the stated facts and the protocol's defaults —
-/// computed before the catalog write so they are baked into the creation
-/// head. `None` when the core runs no protocol plugin.
-pub(crate) fn creation_protocol_turn_options(
-    protocol_factory: Option<&Arc<dyn PluginFactory>>,
-    session_id: &SessionId,
-    parent_session_id: Option<SessionId>,
-    plugin_options: &PluginOptions,
-    fleet_format: lash_core::FleetFormat,
-) -> Result<Option<lash_core::ProtocolTurnOptions>> {
-    let Some(protocol_factory) = protocol_factory else {
-        return Ok(None);
-    };
-    let is_root_session = parent_session_id.is_none();
-    let plugin_host = build_plugin_host(Some(protocol_factory), &[], Vec::new())?;
-    let plugins = plugin_host
-        .build_session(PluginSessionRequest {
-            parent_session_id,
-            ..PluginSessionRequest::creation(
-                session_id.clone(),
-                lash_core::plugin::SessionCreationConfig {
-                    authority: lash_core::plugin::SessionAuthorityContext {
-                        plugin_options: plugin_options.clone(),
-                        ..Default::default()
-                    },
-                    protocol_turn_options: lash_core::ProtocolTurnOptions::default(),
-                },
-            )
-        })
-        .map_err(EmbedError::Plugin)?;
-    let mut options = lash_core::ProtocolTurnOptions::default();
-    plugins
-        .protocol_session()
-        .configure_runtime_on_materialize(
-            lash_core::plugin::ProtocolRuntimeContext::new(&mut options, fleet_format),
-            lash_core::plugin::ProtocolSessionMaterialization {
-                plugin_options,
-                is_root_session,
-            },
-        )?;
-    Ok(Some(options))
 }
 
 /// Carry an open's live policy onto recorded state (FIG-4099).

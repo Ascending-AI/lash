@@ -37,10 +37,10 @@ use std::sync::Arc;
 use lash_core::testing::{MockSessionManager, TestExecutionContextBuilder};
 use lash_core::tool_dispatch::ToolDispatchOutcome;
 use lash_core::{
-    Ancestry, EffectOpener, Lifetime, LifetimeDecision, PluginOptions, ProcessExecutionEnvSpec,
-    ProcessId, ProcessInput, ProcessListFilter, ProcessOriginator, ProcessProvenance,
-    ProcessRegistration, ProcessStartRequest, RuntimeExecutionContext, ScopeGrant, ScopeId,
-    SessionId, SessionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    AdmittedPluginConfig, Ancestry, EffectOpener, Lifetime, LifetimeDecision,
+    ProcessExecutionEnvSpec, ProcessId, ProcessInput, ProcessListFilter, ProcessOriginator,
+    ProcessProvenance, ProcessRegistration, ProcessStartRequest, RuntimeExecutionContext,
+    ScopeGrant, ScopeId, SessionId, SessionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
     ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason,
     ToolIntents, TurnBudget, TurnId,
 };
@@ -477,7 +477,7 @@ impl PossessionWorld {
         let session = &self.openers[opener_name].session;
         // Engine rows must name the captured environment they run under.
         let env_ref = ProcessExecutionEnvSpec::new(
-            PluginOptions::default(),
+            AdmittedPluginConfig::default(),
             SessionPolicy::new(TurnBudget::Unbounded),
         )
         .stable_ref()

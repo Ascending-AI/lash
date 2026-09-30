@@ -32,16 +32,16 @@ impl crate::store::RuntimeStoreDecorator for PausedConfigSettlementStore {
         self.inner.as_ref()
     }
 
-    async fn enqueue_queued_work(
+    async fn enqueue_queued_work_with_outcome(
         &self,
         draft: crate::QueuedWorkBatchDraft,
-    ) -> Result<crate::QueuedWorkBatch, crate::StoreError> {
-        let batch = self.inner.enqueue_queued_work(draft).await?;
-        if batch.is_session_command_work() {
+    ) -> Result<crate::QueuedWorkEnqueueOutcome, crate::StoreError> {
+        let enqueued = self.inner.enqueue_queued_work_with_outcome(draft).await?;
+        if enqueued.batch().is_session_command_work() {
             self.pause_after_enqueue
                 .store(true, std::sync::atomic::Ordering::SeqCst);
         }
-        Ok(batch)
+        Ok(enqueued)
     }
 
     async fn list_queued_work(
@@ -63,7 +63,7 @@ impl crate::store::RuntimeStoreDecorator for PausedConfigSettlementStore {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
+pub async fn ingress_follow_on_fork_and_command_run_matrix(
     factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
@@ -87,7 +87,6 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
             .clone()
             .expect("initialized frame"),
         task: "follow-on matrix task".to_string(),
-        options: None,
         resolved_run: None,
         chain_depth: 3,
         attempts: 2,
@@ -118,25 +117,18 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
         ))
         .await
         .expect("input behind follow-on");
+    let mut transactions = Vec::new();
     for model in ["config-a", "config-b", "config-c"] {
-        store
-            .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
-                &request.session_id,
-                crate::DeliveryPolicy::AfterCurrentTurnCommit,
-                crate::SessionCommand::ApplyConfigPatch {
-                    patch: Box::new(crate::runtime::ApplyConfigPatch {
-                        model: Some(
-                            crate::ModelSpec::builder(model)
-                                .context_window_tokens(32_000)
-                                .build()
-                                .expect("model"),
-                        ),
-                        ..crate::runtime::ApplyConfigPatch::default()
-                    }),
-                },
-            ))
-            .await
-            .expect("enqueue config command");
+        transactions.push(
+            store
+                .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+                    &request.session_id,
+                    crate::DeliveryPolicy::AfterCurrentTurnCommit,
+                    config_transaction_command(model),
+                ))
+                .await
+                .expect("enqueue config command"),
+        );
     }
     let separator = store
         .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
@@ -152,12 +144,10 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
         .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
             &request.session_id,
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
-            crate::SessionCommand::ApplyConfigPatch {
-                patch: Box::new(crate::runtime::ApplyConfigPatch::default()),
-            },
+            config_transaction_command("config-later"),
         ))
         .await
-        .expect("enqueue later patch");
+        .expect("enqueue later transaction");
     let node = store
         .load_session_head_meta()
         .await
@@ -173,6 +163,7 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
             pending_observer_intents: Vec::new(),
             relation: crate::SessionRelation::Root,
             policy: request.config.session_policy(),
+            plugin_config: Default::default(),
         })
         .await
         .expect("fork switched head");
@@ -286,36 +277,31 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
         .expect("head")
         .expect("head")
         .head_revision;
-    let run = store
-        .open_session_command_run(&lease)
-        .await
-        .expect("open leading config commands");
-
-    assert_eq!(run.len(), 3);
-    assert_eq!(
-        crate::AdmittedQueuedWork {
-            session_id: request.session_id.clone(),
-            batches: run.clone(),
-        }
-        .session_commands()
-        .expect("the run contains only config commands")
-        .len(),
-        3,
-        "all adjacent config commands must share one command run"
-    );
-    let completed_batch_ids = run
-        .iter()
-        .map(|batch| batch.batch_id.clone())
-        .collect::<Vec<_>>();
-    commit_session_command_run(store.store(), &request, &lease, run).await;
+    // Every session command is a run of one: each config transaction
+    // applies alone, in its own settling commit (FIG-4379).
+    let mut completed_batch_ids = Vec::new();
+    for (ordinal, transaction) in transactions.iter().enumerate() {
+        let run = store
+            .open_session_command_run(&lease)
+            .await
+            .expect("open the leading config command");
+        assert_eq!(
+            run.iter().map(|batch| &batch.batch_id).collect::<Vec<_>>(),
+            vec![&transaction.batch_id],
+            "config command {ordinal} is a run of its own"
+        );
+        completed_batch_ids.push(transaction.batch_id.clone());
+        commit_session_command_run(store.store(), &request, &lease, run).await;
+    }
     assert_eq!(
         store
             .load_session_head_meta()
             .await
-            .expect("coalesced head")
+            .expect("settled head")
             .expect("head")
             .head_revision,
-        before_revision + 1
+        before_revision + 3,
+        "each config command settles in its own commit"
     );
     let next = store
         .open_session_command_run(&lease)
@@ -329,7 +315,7 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
     let next = store
         .open_session_command_run(&lease)
         .await
-        .expect("later patch run");
+        .expect("later transaction run");
     assert_eq!(
         next.iter().map(|batch| &batch.batch_id).collect::<Vec<_>>(),
         vec![&last.batch_id]
@@ -358,7 +344,7 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
                 .await
                 .expect("read config-command completion marker")
                 .is_some(),
-            "every batch in a coalesced command commit must leave completion evidence"
+            "every settled config command must leave completion evidence"
         );
     }
 }
@@ -367,80 +353,96 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn session_store_factory_bounds_config_command_runs(
+pub(super) async fn session_store_factory_runs_every_config_command_alone(
     factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
-        &SessionId::from("config-command-run-bound"),
+        &SessionId::from("config-command-run-alone"),
         "config-command-base-model",
         crate::SessionRelation::Root,
     );
     let store = factory
         .admit_view(&request)
         .await
-        .expect("create bounded config-command store");
-    let total = crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_RUN + 3;
-    for index in 0..total {
-        store
-            .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
-                &request.session_id,
-                crate::DeliveryPolicy::AfterCurrentTurnCommit,
-                crate::SessionCommand::ApplyConfigPatch {
-                    patch: Box::new(crate::runtime::ApplyConfigPatch {
-                        model: Some(
-                            crate::ModelSpec::builder(format!("bounded-config-{index}"))
-                                .context_window_tokens(32_000)
-                                .build()
-                                .expect("model"),
-                        ),
-                        ..crate::runtime::ApplyConfigPatch::default()
-                    }),
-                },
-            ))
-            .await
-            .expect("enqueue bounded config command");
+        .expect("create config-command store");
+    let mut enqueued = Vec::new();
+    for index in 0..3 {
+        enqueued.push(
+            store
+                .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+                    &request.session_id,
+                    crate::DeliveryPolicy::AfterCurrentTurnCommit,
+                    config_transaction_command(&format!("alone-config-{index}")),
+                ))
+                .await
+                .expect("enqueue config command"),
+        );
     }
     let owner = crate::LeaseOwnerIdentity::opaque(
-        "config-command-run-bound",
-        "config-command-run-bound:incarnation",
+        "config-command-run-alone",
+        "config-command-run-alone:incarnation",
     );
     let lease = store
         .store()
         .seal_drive_epoch_for_test(
             &request.session_id,
             &owner,
-            "config-command-run-bound-executor",
+            "config-command-run-alone-executor",
             60_000,
         )
         .await
-        .expect("claim bounded config-command session lease")
+        .expect("claim config-command session lease")
         .acquired()
-        .expect("bounded config-command session lease");
-    let first = store
-        .open_session_command_run(&lease)
-        .await
-        .expect("open first bounded command prefix");
-    assert_eq!(
-        first.len(),
-        crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_RUN
-    );
-    commit_session_command_run(store.store(), &request, &lease, first).await;
-
-    let second = store
-        .open_session_command_run(&lease)
-        .await
-        .expect("open remaining bounded command prefix");
-    assert_eq!(second.len(), 3);
-    commit_session_command_run(store.store(), &request, &lease, second).await;
-
+        .expect("config-command session lease");
+    for batch in &enqueued {
+        let run = store
+            .open_session_command_run(&lease)
+            .await
+            .expect("open the leading config command");
+        assert_eq!(
+            run.iter().map(|open| &open.batch_id).collect::<Vec<_>>(),
+            vec![&batch.batch_id],
+            "a config command is a run of one"
+        );
+        commit_session_command_run(store.store(), &request, &lease, run).await;
+    }
     assert!(
         store
             .open_session_command_run(&lease)
             .await
-            .expect("check bounded command queue exhaustion")
+            .expect("check the command lane")
             .is_empty(),
-        "a longer config-command run must drain completely over multiple commits"
+        "every config command drained, one commit each"
     );
+}
+
+/// A config transaction setting `model` through the core owner, as ingress
+/// records it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the model spec is well-formed"
+)]
+fn config_transaction_command(model: &str) -> crate::SessionCommand {
+    crate::SessionCommand::ApplyConfigTransaction {
+        transaction: Box::new(crate::ConfigTransactionRecord {
+            id: format!("config-command:{model}"),
+            expected_revision: 0,
+            entries: vec![crate::ConfigCommandEntry {
+                owner: crate::CORE_CONFIG_OWNER.to_string(),
+                command: "set_model".to_string(),
+                args: serde_json::json!({
+                    "model": crate::ModelSpec::builder(model)
+                        .context_window_tokens(32_000)
+                        .build()
+                        .expect("model"),
+                }),
+            }],
+            implementations: std::collections::BTreeMap::from([(
+                crate::CORE_CONFIG_OWNER.to_string(),
+                crate::CORE_CONFIG_IMPLEMENTATION.to_string(),
+            )]),
+        }),
+    }
 }
 
 async fn commit_session_command_run(
@@ -665,7 +667,10 @@ async fn runtime_for_config_settlement(
         Some(snapshot) => host.build_session(PluginSessionRequest::rematerialization(
             request.session_id.clone(),
             snapshot,
-            crate::plugin::RecordedSessionConfig::new(state.protocol_turn_options.clone()),
+            crate::plugin::SessionAuthorityContext {
+                plugin_config: state.admitted_plugin_config(),
+                ..Default::default()
+            },
         )),
         None => host.build_session(PluginSessionRequest::creation(
             request.session_id.clone(),
@@ -720,26 +725,36 @@ async fn hold_config_settlement_lease(store: &dyn crate::RuntimeStore, session_i
         .expect("competing writer lease");
 }
 
+/// Submit a config transaction setting `model_id` and read how it settled,
+/// once: a transaction no drive applied yet answers `Pending`.
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
+    reason = "conformance-law fixture: the model spec is well-formed and the store accepts the transaction"
 )]
-fn config_settlement_patch(model_id: &str) -> crate::SessionConfigPatch {
-    crate::SessionConfigPatch {
-        model: Some(
-            crate::ModelSpec::builder(model_id)
-                .context_window_tokens(32_000)
-                .build()
-                .expect("config-settlement model"),
-        ),
-        ..crate::SessionConfigPatch::default()
-    }
+async fn submit_config_settlement(
+    runtime: &mut crate::LashRuntime,
+    model_id: &str,
+) -> crate::runtime::SessionCommandSettlement {
+    let revision = runtime.config_revision();
+    let receipt = runtime
+        .submit_config_transaction(
+            format!("config-settlement:{model_id}"),
+            revision,
+            &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
+                model: crate::ModelSpec::builder(model_id)
+                    .context_window_tokens(32_000)
+                    .build()
+                    .expect("config-settlement model"),
+            }),
+        )
+        .await
+        .expect("the config transaction is accepted");
+    runtime
+        .settle_session_command(receipt)
+        .await
+        .expect("read the config transaction's settlement")
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn session_config_settlement_pending_returns_without_wait<M, Fut>(make: M)
 where
     M: Fn() -> Fut,
@@ -762,19 +777,22 @@ where
     .await;
     let original_model = runtime.export_persistence_state().policy.model.clone();
     let started = clock.now();
-    let error = ConfigSettlementClock::driving(
-        runtime.update_session_config(config_settlement_patch("must-remain-pending")),
-    )
-    .await
-    .expect_err("blocked config setter must return a typed pending error");
+    let settlement = ConfigSettlementClock::driving(Box::pin(submit_config_settlement(
+        &mut runtime,
+        "must-remain-pending",
+    )))
+    .await;
     assert!(
-        matches!(error, crate::SessionError::SessionCommandPending(_)),
-        "blocked config setter returned {error:?}"
+        matches!(
+            settlement,
+            crate::runtime::SessionCommandSettlement::Pending(_)
+        ),
+        "a blocked config transaction answers pending: {settlement:?}"
     );
     assert_eq!(
         clock.now().saturating_duration_since(started),
         std::time::Duration::ZERO,
-        "the setter returns the pending receipt without driving the command"
+        "the submission returns the pending receipt without driving the command"
     );
     assert_eq!(
         runtime.export_persistence_state().policy.model,
@@ -810,9 +828,7 @@ where
     let original_model = runtime.export_persistence_state().policy.model.clone();
     let setter = crate::task::spawn(ConfigSettlementClock::driving(async move {
         let mut runtime = runtime;
-        let result = runtime
-            .update_session_config(config_settlement_patch("must-be-cancelled"))
-            .await;
+        let result = submit_config_settlement(&mut runtime, "must-be-cancelled").await;
         (result, runtime)
     }));
 
@@ -843,15 +859,14 @@ where
 
     paused_store.release_settlement_read.notify_one();
 
-    let (result, runtime) = setter.await.expect("cancelled setter task");
-    let error = result.expect_err("cancelled config setter must be typed");
+    let (settlement, runtime) = setter.await.expect("cancelled setter task");
     assert!(
         matches!(
-            &error,
-            crate::SessionError::SessionCommandCancelled(receipt)
+            &settlement,
+            crate::runtime::SessionCommandSettlement::Cancelled(receipt)
                 if receipt.batch_id == command_batch.batch_id
         ),
-        "cancelled config setter returned {error:?}"
+        "a cancelled config transaction settles cancelled: {settlement:?}"
     );
     assert_eq!(
         runtime.export_persistence_state().policy.model,
@@ -901,9 +916,7 @@ where
 
     let setter = crate::task::spawn(ConfigSettlementClock::driving(async move {
         let mut runtime = runtime;
-        let result = runtime
-            .update_session_config(config_settlement_patch("first-settled"))
-            .await;
+        let result = submit_config_settlement(&mut runtime, "first-settled").await;
         (result, runtime)
     }));
 
@@ -944,19 +957,23 @@ where
     })
     .await;
 
-    let (result, mut runtime) = setter.await.expect("superseded setter task");
-    match result {
-        Ok(()) => {}
-        Err(crate::SessionError::SessionCommandPending(receipt)) => {
-            assert!(matches!(
-                runtime
-                    .settle_session_command(receipt)
-                    .await
-                    .expect("read superseded command settlement"),
+    let (settlement, mut runtime) = setter.await.expect("superseded setter task");
+    if let crate::runtime::SessionCommandSettlement::Pending(receipt) = settlement {
+        assert!(matches!(
+            runtime
+                .settle_session_command(receipt)
+                .await
+                .expect("read superseded command settlement"),
+            crate::runtime::SessionCommandSettlement::Durable(_)
+        ));
+    } else {
+        assert!(
+            matches!(
+                settlement,
                 crate::runtime::SessionCommandSettlement::Durable(_)
-            ));
-        }
-        Err(error) => panic!("superseded config setter: {error}"),
+            ),
+            "the superseding writer settled the transaction: {settlement:?}"
+        );
     }
     assert_eq!(
         runtime.export_persistence_state().policy.model,

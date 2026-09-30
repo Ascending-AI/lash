@@ -15,10 +15,11 @@ async fn observation_get_preserves_config(path: &str) {
     session
         .admin()
         .config()
-        .update(lash::SessionConfigPatch {
-            model: Some(peer_model.clone()),
-            ..Default::default()
-        })
+        .configure(lash::config::ConfigTransaction::of(
+            lash::config::SetModel {
+                model: peer_model.clone(),
+            },
+        ))
         .await
         .unwrap();
     drop(session);

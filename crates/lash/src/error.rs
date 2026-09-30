@@ -116,6 +116,11 @@ pub enum EmbedError {
     Session(#[source] SessionError),
     #[error("runtime turn error: {0}")]
     Runtime(#[from] lash_core::RuntimeError),
+    /// A config transaction was not admitted (FIG-4379): it names an owner or
+    /// command no installed plugin registers, its arguments do not decode, or
+    /// its id was already submitted with other content. Nothing was enqueued.
+    #[error("config transaction not admitted: {0}")]
+    ConfigSubmit(lash_core::ConfigSubmitError),
     #[error("runtime plugin/control error: {0}")]
     Plugin(#[from] lash_core::PluginError),
     #[error("remote protocol error: {0}")]
@@ -289,6 +294,7 @@ impl EmbedError {
                 ..
             }) => true,
             Self::MissingProtocolPlugin
+            | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
             | Self::ObligationRelayUnavailable(_)
             | Self::UnknownSession { .. }
@@ -354,7 +360,8 @@ impl EmbedError {
             | Self::StoreSessionMismatch { .. }
             | Self::DrainOwnGeneration { .. }
             | Self::UnknownSession { .. }
-            | Self::SessionAlreadyExists { .. } => true,
+            | Self::SessionAlreadyExists { .. }
+            | Self::ConfigSubmit(_) => true,
             Self::Send(_) => false,
             Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),

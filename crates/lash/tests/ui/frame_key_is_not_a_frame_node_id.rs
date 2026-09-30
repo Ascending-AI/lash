@@ -10,7 +10,6 @@ fn open_frame(graph: &mut SessionGraph, assignment: AgentFrameAssignment) {
         FrameKey::from_caller_material("caller-provided-frame-key").unwrap(),
         AgentFrameReason::initial(),
         assignment,
-        Default::default(),
         String::new(),
     );
 }

@@ -494,6 +494,7 @@ async fn replacement_during_bounded_reinspection_is_a_typed_composition_error() 
     let error = plugins
         .before_tool_call(crate::plugin::ToolCallHookContext::new(
             crate::RuntimeOwner::Session(SessionId::from("session")),
+            Default::default(),
             "beta".to_string(),
             json!({ "value": "original" }),
             beta_tool().manifest().argument_projection,
@@ -652,6 +653,7 @@ async fn two_unconditional_replacers_are_a_typed_composition_error() {
     let error = plugins
         .before_tool_call(crate::plugin::ToolCallHookContext::new(
             crate::RuntimeOwner::Session(SessionId::from("session")),
+            Default::default(),
             "beta".to_string(),
             json!({ "value": "original" }),
             beta_tool().manifest().argument_projection,
@@ -922,6 +924,7 @@ async fn after_tool_replacement_during_reinspection_is_a_typed_composition_error
     let error = plugins
         .after_tool_call(crate::plugin::ToolResultHookContext::new(
             crate::RuntimeOwner::Session(SessionId::from("session")),
+            Default::default(),
             lash_core_execution::ToolCallId::fixture("call"),
             "beta".to_string(),
             json!({ "value": "original" }),
@@ -1049,6 +1052,7 @@ async fn after_tool_two_unconditional_replacers_fail_closed() {
     let error = plugins
         .after_tool_call(crate::plugin::ToolResultHookContext::new(
             crate::RuntimeOwner::Session(SessionId::from("session")),
+            Default::default(),
             lash_core_execution::ToolCallId::fixture("call"),
             "beta".to_string(),
             json!({ "value": "original" }),

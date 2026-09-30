@@ -6,7 +6,7 @@
 
 use crate::facade_support::SessionGraphFacadeOps;
 use crate::{
-    PluginOptions, ProtocolTurnOptions, SessionAppendNode, SessionId, SessionPolicy, ToolDefinition,
+    PluginConfig, ProtocolTurnOptions, SessionAppendNode, SessionId, SessionPolicy, ToolDefinition,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -188,29 +188,22 @@ impl std::fmt::Display for AgentFrameReason {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentFrameAssignment {
     pub policy: SessionPolicy,
-    #[serde(default)]
-    pub plugin_options: PluginOptions,
+    /// The session's plugin configuration when this frame opened, the
+    /// protocol's namespace included: the protocol turn options the frame
+    /// runs under, and what a fork at this frame's history records
+    /// (FIG-4379).
+    pub plugin_config: PluginConfig,
 }
 impl AgentFrameAssignment {
-    /// Builds the assignment from a create request's durable fields.
-    ///
-    /// `SessionCreateRequest` itself is plugin-host surface and stays in
-    /// `lash-core`, so the two durable facts are passed explicitly.
-    pub fn from_session_request_facts(
-        plugin_options: PluginOptions,
-        policy: SessionPolicy,
-    ) -> Self {
+    pub fn new(policy: SessionPolicy, plugin_config: PluginConfig) -> Self {
         Self {
             policy,
-            plugin_options,
+            plugin_config,
         }
     }
-
-    pub fn from_policy(policy: SessionPolicy) -> Self {
-        Self {
-            policy,
-            plugin_options: PluginOptions::default(),
-        }
+    /// A frame of a session that records no plugin configuration.
+    pub fn unconfigured(policy: SessionPolicy) -> Self {
+        Self::new(policy, PluginConfig::default())
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -223,8 +216,6 @@ pub struct AgentFrameRecord {
     pub reason: AgentFrameReason,
     pub created_at: String,
     pub assignment: AgentFrameAssignment,
-    #[serde(default)]
-    pub protocol_turn_options: ProtocolTurnOptions,
 }
 impl AgentFrameRecord {
     #[allow(clippy::too_many_arguments)]
@@ -234,7 +225,6 @@ impl AgentFrameRecord {
         previous_frame_node_id: Option<FrameNodeId>,
         reason: AgentFrameReason,
         assignment: AgentFrameAssignment,
-        protocol_turn_options: ProtocolTurnOptions,
         created_at: impl Into<String>,
     ) -> Self {
         Self {
@@ -244,8 +234,13 @@ impl AgentFrameRecord {
             reason,
             created_at: created_at.into(),
             assignment,
-            protocol_turn_options,
         }
+    }
+
+    /// The protocol turn options this frame runs under: a view of the
+    /// protocol namespace its assignment captured.
+    pub fn protocol_turn_options(&self) -> ProtocolTurnOptions {
+        self.assignment.plugin_config.protocol_turn_options()
     }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -588,8 +583,11 @@ pub struct SessionSnapshot {
     pub token_usage: crate::TokenUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_prompt_usage: Option<crate::TokenUsage>,
-    #[serde(default)]
-    pub protocol_turn_options: ProtocolTurnOptions,
+    /// Read-only projection of the session's recorded plugin configuration
+    /// (FIG-4379). Applying a snapshot does not write this field: config
+    /// changes only through a config patch.
+    #[serde(default, skip_serializing_if = "PluginConfig::is_empty")]
+    pub plugin_config: PluginConfig,
     /// Read-only projection of the hydrated tool-state reference. Applying a
     /// snapshot does not write this field; the resident component set wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -622,7 +620,7 @@ impl SessionSnapshot {
             turn_index: 0,
             token_usage: crate::TokenUsage::default(),
             last_prompt_usage: None,
-            protocol_turn_options: ProtocolTurnOptions::default(),
+            plugin_config: PluginConfig::default(),
             tool_state_ref: None,
             tool_state_generation: None,
             plugin_state_ref: None,
@@ -716,7 +714,7 @@ pub struct SessionStoreCreateRequest {
 ///
 /// A request that finds the session already created writes neither: the
 /// recorded config is authoritative, and later changes go through the
-/// commanded `ApplyConfigPatch`.
+/// commanded config transaction (FIG-4379).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionCreationHead {
     /// Creation bakes the request's config in: the store writes it as the

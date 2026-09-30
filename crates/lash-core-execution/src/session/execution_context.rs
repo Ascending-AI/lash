@@ -515,7 +515,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             // durable store must (the session's and the process runner's).
             fleet_format: crate::FleetFormat::current(),
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::PluginOptions::default(),
+                crate::AdmittedPluginConfig::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             process_execution: None,

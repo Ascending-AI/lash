@@ -356,3 +356,25 @@ where
         .join()
         .expect("stack-budget multi-thread test thread")
 }
+
+/// Apply one config transaction against the session's current revision and
+/// require it to apply.
+pub(crate) trait ConfigureExt {
+    async fn configure(&self, transaction: lash::config::ConfigTransaction) -> lash::Result<()>;
+}
+
+impl ConfigureExt for lash::config::SessionConfigAdmin {
+    async fn configure(&self, transaction: lash::config::ConfigTransaction) -> lash::Result<()> {
+        let revision = self.revision().await?;
+        let write = lash::config::ConfigWrite::new(
+            format!("workbench-test-config:{}", uuid::Uuid::new_v4()),
+            revision,
+        );
+        match self.apply(write, transaction).await? {
+            lash::config::ConfigTransactionOutcome::Applied { .. } => Ok(()),
+            outcome => Err(lash::EmbedError::Session(lash::SessionError::Protocol(
+                format!("the config transaction did not apply: {outcome:?}"),
+            ))),
+        }
+    }
+}

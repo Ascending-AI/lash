@@ -805,7 +805,10 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
         .build_session(PluginSessionRequest::rematerialization(
             "root",
             durable.plugin_state().expect("durable plugin state"),
-            lash_core::plugin::RecordedSessionConfig::new(durable.protocol_turn_options.clone()),
+            lash_core::plugin::SessionAuthorityContext {
+                plugin_config: durable.admitted_plugin_config(),
+                ..Default::default()
+            },
         ))
         .expect("reopen plugins");
     let runtime_host = test_host_config(&backend);
@@ -965,7 +968,10 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
         .build_session(PluginSessionRequest::rematerialization(
             "root",
             durable.plugin_state().expect("durable plugin state"),
-            lash_core::plugin::RecordedSessionConfig::new(durable.protocol_turn_options.clone()),
+            lash_core::plugin::SessionAuthorityContext {
+                plugin_config: durable.admitted_plugin_config(),
+                ..Default::default()
+            },
         ))
         .expect("cold-reopen plugins");
     let runtime_host = test_host_config(&backend);
@@ -1437,14 +1443,11 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
             parent_session_id: Some(SessionId::from("parent")),
             ..PluginSessionRequest::creation(
                 "root",
-                lash_core::plugin::SessionCreationConfig {
-                    authority: lash_core::plugin::SessionAuthorityContext {
-                        tool_access: lash_core::SessionToolAccess::ambient()
-                            .with_hidden_tools(["hidden_after_rotation"])
-                            .expect("valid hidden name"),
-                        ..lash_core::plugin::SessionAuthorityContext::default()
-                    },
-                    ..Default::default()
+                lash_core::plugin::SessionAuthorityContext {
+                    tool_access: lash_core::SessionToolAccess::ambient()
+                        .with_hidden_tools(["hidden_after_rotation"])
+                        .expect("valid hidden name"),
+                    ..lash_core::plugin::SessionAuthorityContext::default()
                 },
             )
         })
@@ -1932,21 +1935,32 @@ pub(super) async fn enqueue_session_command(
     .expect("enqueue session command")
 }
 
-pub(super) async fn enqueue_config_patch_command(
+/// Enqueue `transaction` on `store`'s command lane as `runtime`'s session
+/// would admit it, written against the runtime's config revision.
+pub(super) async fn enqueue_config_transaction(
     store: &RecordingStore,
-    session_id: &SessionId,
-    patch: lash_core::runtime::ApplyConfigPatch,
+    runtime: &lash_core::runtime::LashRuntime,
+    id: &str,
+    transaction: lash_core::ConfigTransaction,
 ) -> lash_core::testing::runtime_internals::QueuedWorkBatch {
+    let registry = runtime.config_registry().expect("config registry");
+    let record = registry
+        .admit(
+            id,
+            runtime.config_revision(),
+            registry.entries(&transaction).expect("entries"),
+        )
+        .expect("admitted");
     lash_core::store::QueuedWorkStore::enqueue_queued_work(
         store,
         lash_core::testing::runtime_internals::QueuedWorkBatchDraft::new(
-            session_id.to_string(),
+            runtime.session_id().to_string(),
             lash_core::DeliveryPolicy::AfterCurrentTurnCommit,
-            lash_core::facade_support::SessionCommand::ApplyConfigPatch {
-                patch: Box::new(patch),
+            lash_core::facade_support::SessionCommand::ApplyConfigTransaction {
+                transaction: Box::new(record),
             },
         ),
     )
     .await
-    .expect("enqueue config patch command")
+    .expect("enqueue config transaction")
 }

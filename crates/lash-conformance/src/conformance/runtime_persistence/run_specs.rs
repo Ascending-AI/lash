@@ -311,7 +311,6 @@ async fn commit_switch_owing(
             .clone()
             .expect("the initial frame is current"),
         task: "run in the switched frame".to_string(),
-        options: None,
         resolved_run,
         chain_depth: 1,
         attempts: 0,

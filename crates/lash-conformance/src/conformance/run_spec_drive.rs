@@ -296,15 +296,14 @@ pub async fn the_default_spec_is_the_snapshot_after_the_command_drain(
     let first: DriveOutcome = on_tier(&runner, &parts, move |mut runtime, scope| {
         let request = request.clone();
         Box::pin(async move {
+            let revision = runtime.config_revision();
             runtime
-                .submit_session_command(
-                    crate::SessionCommand::ApplyConfigPatch {
-                        patch: Box::new(crate::ApplyConfigPatch {
-                            model: Some(model(COMMANDED_MODEL)),
-                            ..crate::ApplyConfigPatch::default()
-                        }),
-                    },
+                .submit_config_transaction(
                     "run-spec-default-command",
+                    revision,
+                    &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
+                        model: model(COMMANDED_MODEL),
+                    }),
                 )
                 .await
                 .expect("the config command is accepted");
@@ -729,15 +728,14 @@ pub async fn a_batch_keeps_its_turn_lane_place_behind_the_command_lane(
         let store = Arc::clone(&store);
         let session_id = session_id.clone();
         Box::pin(async move {
+            let revision = runtime.config_revision();
             runtime
-                .submit_session_command(
-                    crate::SessionCommand::ApplyConfigPatch {
-                        patch: Box::new(crate::ApplyConfigPatch {
-                            model: Some(model(COMMANDED_MODEL)),
-                            ..crate::ApplyConfigPatch::default()
-                        }),
-                    },
+                .submit_config_transaction(
                     "run-spec-batch-order-command",
+                    revision,
+                    &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
+                        model: model(COMMANDED_MODEL),
+                    }),
                 )
                 .await
                 .expect("the config command is accepted");

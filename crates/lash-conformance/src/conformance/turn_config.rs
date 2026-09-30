@@ -72,60 +72,91 @@ fn second_model() -> crate::ModelSpec {
 }
 
 /// Move the session to [`SECOND_MODEL`] through the command lane.
+async fn command_second_model(runner: &Arc<dyn crate::ConformanceTurnRunner>, parts: &ConfigParts) {
+    let receipt = submit_second_model(parts, "turn-config-command").await;
+    let outcome = drive_config_command(runner, parts, receipt, "turn-config-command").await;
+    assert!(
+        matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }),
+        "the model change applies: {outcome:?}"
+    );
+}
+
+/// Submit a config transaction moving the session to [`SECOND_MODEL`] under
+/// `id`, from a runtime of its own, and return once it is durable.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the transaction is admitted on a live store"
+)]
+async fn submit_second_model(parts: &ConfigParts, id: &str) -> crate::SessionCommandReceipt {
+    let mut runtime = build_runtime(parts.clone()).await;
+    let revision = runtime.config_revision();
+    runtime
+        .submit_config_transaction(
+            id,
+            revision,
+            &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
+                model: second_model(),
+            }),
+        )
+        .await
+        .expect("the model change enters the command lane")
+}
+
+/// Drive the command root that applies the config transaction `receipt`
+/// names, as the tier's runner runs it, and answer how it settled.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the config command settles on a live store"
 )]
-async fn command_second_model(runner: &Arc<dyn crate::ConformanceTurnRunner>, parts: &ConfigParts) {
+async fn drive_config_command(
+    runner: &Arc<dyn crate::ConformanceTurnRunner>,
+    parts: &ConfigParts,
+    receipt: crate::SessionCommandReceipt,
+    request: &'static str,
+) -> crate::ConfigTransactionOutcome {
     let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
-    let parts = parts.clone();
-    let scope = crate::ExecutionScope::queue_drain(&parts.session_id, "turn-config-command");
+    let attempt_parts = parts.clone();
+    let scope = crate::ExecutionScope::queue_drain(&parts.session_id, request);
     runner
         .run_turn(
             admit(scope),
             Arc::new(move |controller| {
-                let parts = parts.clone();
+                let parts = attempt_parts.clone();
                 let settled_tx = settled_tx.clone();
+                let receipt = receipt.clone();
                 Box::pin(async move {
                     let mut runtime = build_runtime(parts).await;
-                    let command = runtime
-                        .update_session_config(crate::SessionConfigPatch {
-                            model: Some(second_model()),
-                            ..crate::SessionConfigPatch::default()
-                        })
-                        .await;
-                    let receipt = match command {
-                        Ok(()) => {
-                            let _ = settled_tx.send(());
-                            return crate::ConformanceTurnEnd::Settled;
-                        }
-                        Err(crate::SessionError::SessionCommandPending(receipt)) => receipt,
-                        Err(error) => panic!("the model change enters the command lane: {error}"),
-                    };
                     runtime
                         .drive_next_root(
-                            "turn-config-command",
+                            request,
                             crate::TurnOptions::new(
                                 tokio_util::sync::CancellationToken::new(),
                                 controller,
                             ),
                         )
                         .await
-                        .expect("engine drives the model change");
-                    assert!(matches!(
-                        runtime
-                            .settle_session_command(receipt)
-                            .await
-                            .expect("read the model change settlement"),
-                        crate::runtime::SessionCommandSettlement::Durable(_)
-                    ));
-                    let _ = settled_tx.send(());
+                        .expect("engine drives the config transaction");
+                    let settled = runtime
+                        .settle_session_command(receipt)
+                        .await
+                        .expect("read the config transaction's settlement");
+                    let _ = settled_tx.send(settled);
                     crate::ConformanceTurnEnd::Settled
                 })
             }),
         )
         .await;
-    settled_rx.recv().await.expect("the model change settled");
+    match settled_rx
+        .recv()
+        .await
+        .expect("the tier's runner drove the config transaction")
+    {
+        crate::SessionCommandSettlement::Applied {
+            outcome: crate::runtime::SessionCommandOutcome::ConfigTransaction { outcome },
+            ..
+        } => outcome,
+        settlement => panic!("the config transaction settles with its outcome: {settlement:?}"),
+    }
 }
 
 fn text_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
@@ -151,6 +182,46 @@ fn recording_model(
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(request.model.clone());
             async move {
+                Ok(crate::LlmResponse {
+                    parts: vec![crate::LlmOutputPart::Text {
+                        text: format!("answer {}", index + 1),
+                        response_meta: None,
+                    }],
+                    ..crate::LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle()
+}
+
+/// [`recording_model`] whose first call signals `entered` and waits for
+/// `release`: the root that makes it owns the session head until released.
+fn gated_recording_model(
+    calls: &Arc<AtomicUsize>,
+    models: &Arc<std::sync::Mutex<Vec<String>>>,
+    entered: &Arc<tokio::sync::Notify>,
+    release: &Arc<tokio::sync::Notify>,
+) -> crate::ProviderHandle {
+    let calls = Arc::clone(calls);
+    let models = Arc::clone(models);
+    let entered = Arc::clone(entered);
+    let release = Arc::clone(release);
+    crate::testing::TestProvider::builder()
+        .kind("stub")
+        .complete(move |request| {
+            let index = calls.fetch_add(1, Ordering::SeqCst);
+            models
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(request.model.clone());
+            let entered = Arc::clone(&entered);
+            let release = Arc::clone(&release);
+            async move {
+                if index == 0 {
+                    entered.notify_one();
+                    release.notified().await;
+                }
                 Ok(crate::LlmResponse {
                     parts: vec![crate::LlmOutputPart::Text {
                         text: format!("answer {}", index + 1),
@@ -516,6 +587,124 @@ pub async fn an_input_sent_after_a_config_command_runs_on_the_new_model(
     assert_eq!(head.config.model.id, SECOND_MODEL);
 }
 
+/// A config transaction submitted while a root owns the session head waits
+/// for that root (FIG-4379): its submission completes, the root finishes
+/// under the config it was admitted with, and nothing of the transaction is
+/// published while the root runs or by the root's commit. Once the root
+/// releases the head the command lane applies it with one revision step,
+/// and the next root runs under it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_config_transaction_waits_while_a_root_owns_the_head(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let models = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let parts = law_session(
+        prefix,
+        "pending-while-root",
+        &effect_host,
+        &stores,
+        Arc::new(crate::SingleProviderResolver::new(gated_recording_model(
+            &calls, &models, &entered, &release,
+        ))),
+    )
+    .await;
+    let root = TurnId::from(format!("{prefix}-turn-config-pending-while-root"));
+    let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
+    let submitting = async {
+        entered.notified().await;
+        let receipt = submit_second_model(&parts, "pending-while-root").await;
+        // The session's first root commits its head, so while it runs the
+        // head is either still unwritten or the creation config.
+        let head = parts
+            .store
+            .load_session_head_meta(&parts.session_id)
+            .await
+            .expect("read the head while the root runs");
+        if let Some(head) = head {
+            assert_eq!(
+                (head.config.model.id.as_str(), head.config.config_revision),
+                (FIRST_MODEL, 0),
+                "nothing is published while the root owns the head"
+            );
+        }
+        assert!(
+            parts
+                .store
+                .list_queued_work(&parts.session_id)
+                .await
+                .expect("read the command lane")
+                .iter()
+                .any(|batch| batch.batch_id == receipt.batch_id),
+            "the submitted transaction is pending"
+        );
+        release.notify_one();
+        receipt
+    };
+    let ((), receipt) = tokio::join!(
+        runner.run_turn(
+            admit(crate::ExecutionScope::turn(&parts.session_id, &root)),
+            text_attempt(&parts, &root, "first", turn_tx),
+        ),
+        submitting,
+    );
+    let turn = turn_rx
+        .recv()
+        .await
+        .expect("the tier's runner ran the root")
+        .unwrap_or_else(|error| panic!("the root runs: {error:?}"));
+    assert!(
+        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
+        "the root finishes: {:?}",
+        turn.outcome
+    );
+    let head = parts
+        .store
+        .load_session_head_meta(&parts.session_id)
+        .await
+        .expect("read the head after the root")
+        .expect("the root committed");
+    assert_eq!(
+        (head.config.model.id.as_str(), head.config.config_revision),
+        (FIRST_MODEL, 0),
+        "the root's commit does not publish the pending transaction"
+    );
+
+    let outcome = drive_config_command(&runner, &parts, receipt, "pending-while-root-drain").await;
+    assert_eq!(
+        outcome,
+        crate::ConfigTransactionOutcome::Applied {
+            base_revision: 0,
+            revision: 1,
+            outputs: vec![serde_json::Value::Null],
+        },
+        "the lane applies the transaction once the root released the head"
+    );
+
+    let next = TurnId::from(format!("{prefix}-turn-config-pending-while-root-next"));
+    let turn = run_text_turn(&runner, &parts, &next, "second", BeforeSend::Nothing)
+        .await
+        .unwrap_or_else(|error| panic!("the next root runs: {error:?}"));
+    assert!(
+        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
+        "the next root finishes: {:?}",
+        turn.outcome
+    );
+    assert_eq!(
+        recorded_models(&models),
+        vec![FIRST_MODEL.to_string(), SECOND_MODEL.to_string()],
+        "the root that owned the head ran on its admitted model, the next root on the new one"
+    );
+}
+
 /// The tool whose call closes the first frame with a switch, so the root
 /// runs a second physical turn.
 const SWITCH_TOOL: &str = "turn_config_switch_probe";
@@ -740,13 +929,15 @@ pub async fn an_unbindable_route_retries_and_never_fails_the_turn(
     );
 }
 
-/// A config command whose route no provider of this host serves is refused
-/// typed at send, and nothing is enqueued (D3 §3.1).
+/// A config transaction whose route no provider of this host serves is
+/// refused typed by the core owner when it resolves, and publishes nothing
+/// (D3 §3.3, FIG-4379): its command settles with the refusal, and the
+/// session keeps its route and its config revision.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_bad_route_is_refused_at_send_with_nothing_enqueued(
+pub async fn a_bad_route_is_refused_typed_and_publishes_nothing(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -764,63 +955,85 @@ pub async fn a_bad_route_is_refused_at_send_with_nothing_enqueued(
         ))),
     )
     .await;
-    let scope = TurnId::from(format!("{prefix}-turn-config-bad-route-send"));
-    let (refusal_tx, mut refusal_rx) = tokio::sync::mpsc::unbounded_channel();
+    let store = Arc::clone(&parts.store);
+    let session_id = parts.session_id.clone();
+    let scope = format!("{prefix}-turn-config-bad-route");
+    let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
     runner
         .run_turn(
-            admit(crate::ExecutionScope::turn(&parts.session_id, &scope)),
-            {
+            admit(crate::ExecutionScope::queue_drain(&session_id, &scope)),
+            Arc::new(move |controller| {
                 let parts = parts.clone();
-                Arc::new(move |_scope| {
-                    let parts = parts.clone();
-                    let refusal_tx = refusal_tx.clone();
-                    Box::pin(async move {
-                        let mut runtime = build_runtime(parts).await;
-                        let sent = runtime
-                            .submit_session_command(
-                                crate::SessionCommand::ApplyConfigPatch {
-                                    patch: Box::new(crate::ApplyConfigPatch {
-                                        provider_id: Some(
-                                            "turn-config-unknown-provider".to_string(),
-                                        ),
-                                        ..crate::ApplyConfigPatch::default()
-                                    }),
+                let settled_tx = settled_tx.clone();
+                Box::pin(async move {
+                    let mut runtime = build_runtime(parts).await;
+                    let revision = runtime.config_revision();
+                    let receipt = runtime
+                        .submit_config_transaction(
+                            "turn-config-bad-route",
+                            revision,
+                            &crate::ConfigTransaction::of(
+                                crate::plugin::config::core::SetProvider {
+                                    provider_id: "turn-config-unknown-provider".to_string(),
                                 },
-                                "turn-config-bad-route",
-                            )
-                            .await;
-                        let _ = refusal_tx.send(sent);
-                        crate::ConformanceTurnEnd::Settled
-                    })
+                            ),
+                        )
+                        .await
+                        .expect("a transaction naming a registered command is admitted");
+                    runtime
+                        .drive_next_root(
+                            "turn-config-bad-route",
+                            crate::TurnOptions::new(
+                                tokio_util::sync::CancellationToken::new(),
+                                controller,
+                            ),
+                        )
+                        .await
+                        .expect("engine drives the refused transaction");
+                    let settled = runtime.settle_session_command(receipt).await;
+                    let _ = settled_tx.send(settled);
+                    crate::ConformanceTurnEnd::Settled
                 })
-            },
+            }),
         )
         .await;
-    let refusal = refusal_rx
+    let settled = settled_rx
         .recv()
         .await
-        .expect("the tier's runner ran the send")
-        .expect_err("a route no provider serves is refused at send");
+        .expect("the tier's runner ran the send and the apply")
+        .expect("the transaction settles");
+    let crate::SessionCommandSettlement::Applied {
+        outcome:
+            crate::runtime::SessionCommandOutcome::ConfigTransaction {
+                outcome: crate::ConfigTransactionOutcome::Refused { refusal },
+            },
+        ..
+    } = settled
+    else {
+        panic!("a route no provider serves settles refused: {settled:?}");
+    };
+    assert_eq!(refusal.owner, crate::CORE_CONFIG_OWNER);
     assert_eq!(
-        refusal.code,
-        crate::RuntimeErrorCode::ProviderRouteUnknown,
-        "the refusal is typed: {refusal:?}"
+        serde_json::from_value::<crate::CoreConfigRefusal>(refusal.refusal)
+            .expect("the core owner's typed refusal"),
+        crate::CoreConfigRefusal::UnservableRoute {
+            code: crate::provider::ConfigRefusalCode::ProviderRouteUnknown,
+            provider_id: "turn-config-unknown-provider".to_string(),
+            model: FIRST_MODEL.to_string(),
+        }
     );
-    assert!(
-        parts
-            .store
-            .list_queued_work(&parts.session_id)
-            .await
-            .expect("read the session's queued work")
-            .is_empty(),
-        "nothing was enqueued"
-    );
+    let head = store
+        .load_session_head_meta(&session_id)
+        .await
+        .expect("read the head")
+        .expect("the drain committed the session's head");
+    assert_eq!(head.config.provider_id, "stub", "nothing was published");
+    assert_eq!(head.config.config_revision, 0, "the revision did not move");
 }
 
-/// A route valid when its command was sent but unserved when the command is
-/// applied is refused at apply (D3 §3.3): the command settles and changes
-/// nothing, and the session keeps its provider. (The typed `Refused`
-/// settlement and its refused window are the ingress drain's, FIG-3541/S8.)
+/// A route the sending worker serves but the applying worker does not is
+/// refused where the transaction resolves (D3 §3.3): its command settles
+/// refused and changes nothing, and the session keeps its provider.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -870,18 +1083,19 @@ pub async fn a_route_refused_at_apply_leaves_the_route_unchanged(
                 let settled_tx = settled_tx.clone();
                 Box::pin(async move {
                     let mut sending = build_runtime(sender).await;
+                    let revision = sending.config_revision();
                     let receipt = sending
-                        .submit_session_command(
-                            crate::SessionCommand::ApplyConfigPatch {
-                                patch: Box::new(crate::ApplyConfigPatch {
-                                    provider_id: Some("turn-config-alternate".to_string()),
-                                    ..crate::ApplyConfigPatch::default()
-                                }),
-                            },
+                        .submit_config_transaction(
                             "turn-config-refused-at-apply",
+                            revision,
+                            &crate::ConfigTransaction::of(
+                                crate::plugin::config::core::SetProvider {
+                                    provider_id: "turn-config-alternate".to_string(),
+                                },
+                            ),
                         )
                         .await
-                        .expect("a served route is accepted at send");
+                        .expect("the transaction is accepted at send");
                     let mut applying = build_runtime(applier).await;
                     applying
                         .drive_next_root(
@@ -906,8 +1120,16 @@ pub async fn a_route_refused_at_apply_leaves_the_route_unchanged(
         .expect("the tier's runner ran the send and the apply")
         .expect("the command settles");
     assert!(
-        matches!(settled, crate::SessionCommandSettlement::Durable(_)),
-        "the refused command settles and is not retried: {settled:?}"
+        matches!(
+            settled,
+            crate::SessionCommandSettlement::Applied {
+                outcome: crate::runtime::SessionCommandOutcome::ConfigTransaction {
+                    outcome: crate::ConfigTransactionOutcome::Refused { .. },
+                },
+                ..
+            }
+        ),
+        "the refused transaction settles refused and is not retried: {settled:?}"
     );
     let head = store
         .load_session_head_meta(&session_id)

@@ -8,6 +8,7 @@
 //! cross-cutting protocol envelope ([`Envelope`],
 //! [`REMOTE_PROTOCOL_VERSION`]) lives at the root itself.
 
+pub mod config;
 pub mod llm;
 pub mod negotiation;
 pub mod observations;
@@ -22,6 +23,7 @@ pub mod turn_input;
 pub mod turn_result;
 pub mod usage_activity;
 
+pub use config::*;
 pub use lash_sansio::json_decode::{JsonDecodeError, JsonDecodeLimits, JsonDecodeUsage};
 pub use llm::*;
 pub use negotiation::{Negotiated, Negotiation, REMOTE_PROTOCOL, VersionRange, answer};

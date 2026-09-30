@@ -377,13 +377,6 @@ description = "persisted JSON graph-node body in lash_graph_nodes.node_json"
 manifest = "SessionNodeBody"
 
 [[surface]]
-constant = "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION"
-constant_path = "crates/lash-core-store/src/protocol_turn_options.rs"
-upgrade = "migrate"
-description = "persisted protocol-specific turn options envelope"
-manifest = "ProtocolTurnOptions"
-
-[[surface]]
 constant = "RLM_SNAPSHOT_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/executor/snapshot.rs"
 upgrade = "migrate"

@@ -325,6 +325,7 @@ async fn fork_session_rejects_a_malformed_target_session_id() {
         relation: lash_core_execution::SessionRelation::Root,
         pending_observer_intents: Vec::new(),
         policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        plugin_config: Default::default(),
     };
     assert!(matches!(
         store.fork_session(&request).await,

@@ -279,8 +279,8 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
         before.agent_frames[0].assignment.policy.provider_id
     );
     assert_eq!(
-        current.protocol_turn_options.payload,
-        before.agent_frames[0].protocol_turn_options.payload
+        current.protocol_turn_options().payload,
+        before.agent_frames[0].protocol_turn_options().payload
     );
     // The prior frame is no longer resident; it stays durable, and the
     // history reader pages it from the head's ancestry.
@@ -1336,11 +1336,13 @@ async fn config_and_tool_mutations_publish_observation_immediately() -> Result<(
     session
         .admin()
         .config()
-        .set_prompt_template(PromptTemplate::new(vec![
-            lash_core::PromptTemplateSection::untitled(vec![lash_core::PromptTemplateEntry::text(
-                "updated",
-            )]),
-        ]))
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::SetPromptTemplate {
+                template: PromptTemplate::new(vec![lash_core::PromptTemplateSection::untitled(
+                    vec![lash_core::PromptTemplateEntry::text("updated")],
+                )]),
+            },
+        ))
         .await?;
     assert!(session.policy_snapshot().prompt.template.is_some());
 
@@ -1385,7 +1387,17 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
         .with_hidden_tools(["app_lookup"])
         .expect("valid hidden tool");
 
-    Box::pin(session.admin().config().set_tool_access(access.clone())).await?;
+    Box::pin(
+        session
+            .admin()
+            .config()
+            .configure(crate::config::ConfigTransaction::of(
+                crate::config::SetToolAccess {
+                    access: access.clone(),
+                },
+            )),
+    )
+    .await?;
 
     let store = lash_core::runtime::live_session_view(
         &store_factory,

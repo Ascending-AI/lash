@@ -237,7 +237,7 @@ async fn start_request(
     .into_process_input()
     .map_err(|error| anyhow!("encode the process input: {error}"))?;
     let env = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
+        lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             model: model.clone(),
             ..lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded)

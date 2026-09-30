@@ -25,6 +25,7 @@ pub mod await_event_identity;
 pub mod build_generation;
 pub mod chronological;
 pub mod compat;
+pub mod config_transaction;
 pub mod effect_identity;
 pub mod effect_opener;
 pub mod executable_generation;
@@ -117,8 +118,10 @@ pub(crate) use store::{
 };
 pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlement};
 
+pub(crate) use config_transaction::{ConfigTransactionOutcome, ConfigTransactionRecord};
 pub(crate) use execution_state::{
-    ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState, PluginOptions,
+    AdmittedPluginConfig, ExecutionStateComponentSnapshot, ExecutionStateSnapshot,
+    HydratedExecutionState, PluginConfig,
 };
 pub(crate) use lash_sansio::{
     TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnCause,
@@ -130,9 +133,8 @@ pub(crate) use process_identity::{ProcessExecutionEnvSpec, ProcessStatus};
 pub(crate) use protocol_turn_options::ProtocolTurnOptions;
 pub(crate) use queued_work_vocabulary::{
     AdmissionBoundary, AdmittedQueuedWork, DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem,
-    QueuedWorkKind, QueuedWorkPayload, SessionCommand, SessionCommandOutcome,
-    TurnLaneAdmissionPolicy,
+    QueuedWorkBatchDraft, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkKind,
+    QueuedWorkPayload, SessionCommandOutcome, TurnLaneAdmissionPolicy,
 };
 pub(crate) use runtime_error::{RuntimeError, RuntimeErrorCode};
 pub(crate) use session_identity::{
@@ -210,13 +212,6 @@ pub(crate) use lash_sansio::session_model::prompt::{PromptSlot, PromptTemplate};
 pub(crate) use process_identity::process_wake_turn_cause;
 pub(crate) use runtime_error::RuntimeEffectReplayMismatchReport;
 
-pub(crate) use session_identity::{
-    OpenAgentFrameOutcome, OpenAgentFrameRequest, SessionStoreCreateRequest,
-};
-pub(crate) use session_policy::ApplyConfigPatch;
-#[allow(unused_imports)]
-pub(crate) use session_policy::StaleConfigRevision;
-
 #[allow(unused_imports)]
 pub(crate) use attachments::AttachmentGcFence;
 #[allow(unused_imports)]
@@ -248,6 +243,9 @@ pub(crate) use session_graph::{
 };
 #[allow(unused_imports)]
 pub(crate) use session_graph_integrity::graph_node_indices;
+pub(crate) use session_identity::{
+    OpenAgentFrameOutcome, OpenAgentFrameRequest, SessionStoreCreateRequest,
+};
 #[allow(unused_imports)]
 pub(crate) use store::attachment_referrers::{
     AttachmentCondemnation, AttachmentDeleteArming, AttachmentReferrers, AttachmentWrite,
@@ -276,8 +274,6 @@ pub(crate) use attachments::AttachmentProducer;
 pub(crate) use lash_sansio::attachment::AttachmentCreateMeta;
 
 pub(crate) use runtime_error::RuntimeErrorCause;
-pub(crate) use session_policy::GenerationOverlay;
-
 pub mod usage_accounting;
 pub use store::usage_accounting::UsageAccountingStore;
 pub use usage_accounting::*;

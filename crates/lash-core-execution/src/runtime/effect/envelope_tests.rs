@@ -13,7 +13,10 @@ fn a_recorded_turn_config_round_trips_whole() {
         .build()
         .expect("a literal model spec builds");
     config.prompt = Some(crate::PromptLayer::default());
-    config.protocol_turn_options = Some(crate::ProtocolTurnOptions::default());
+    config.plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
+    config
+        .plugin_config
+        .insert("protocol", serde_json::json!({ "dialect": "recorded" }));
     config.config_revision = 3;
     let resolved = crate::ResolvedRun::snapshot(config);
     let recorded = RuntimeEffectOutcome::ResolveTurnConfig {

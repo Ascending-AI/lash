@@ -211,7 +211,8 @@ mod captured_environment_row_tests {
                 "instructions",
                 "x".repeat(128 * 1024),
             ));
-        let spec = crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy);
+        let spec =
+            crate::ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy);
         let outcome = crate::RuntimeEffectOutcome::LoadExecutionEnv {
             env: spec.stable_ref().expect("environment digest"),
         };

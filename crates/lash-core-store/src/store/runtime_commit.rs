@@ -705,38 +705,6 @@ impl RuntimeTurnCommitStamp {
 }
 
 impl RuntimeCommit {
-    /// Stamps every protocol turn-options value this commit writes — its
-    /// configs', its checkpoint's and each opened frame's — at the version
-    /// `fleet_format` assigns the surface (FIG-3796, FIG-4262).
-    ///
-    /// [`RuntimeCommitPlanner::prepare`](super::RuntimeCommitPlanner::prepare)
-    /// calls it under the `F` the commit is encoded under, and again when a
-    /// fence finds `F` moved, so the value a runtime minted, whatever its
-    /// stamp, is written at the fleet's version. The stamps are write
-    /// metadata outside every identity preimage, so stamping moves no
-    /// request identity or intent hash.
-    pub(crate) fn stamp_turn_options_for_fleet(&mut self, fleet_format: super::FleetFormat) {
-        let restamp = |options: &mut crate::ProtocolTurnOptions| {
-            *options = options.restamped_for_fleet(fleet_format);
-        };
-        for config in std::iter::once(&mut self.config).chain(self.execution_config.as_deref_mut())
-        {
-            if let Some(options) = config.protocol_turn_options.as_mut() {
-                restamp(options);
-            }
-        }
-        restamp(&mut self.checkpoint.turn_state.protocol_turn_options);
-        for node in self.graph.nodes_mut() {
-            if let crate::SessionNodePayload::FrameOpen {
-                protocol_turn_options,
-                ..
-            } = &mut node.payload
-            {
-                restamp(protocol_turn_options);
-            }
-        }
-    }
-
     /// The root whose park this commit clears: [`Self::park_root`], else the
     /// root whose end it records, else the physical turn it commits (a turn
     /// that runs under no root parks under its own id).

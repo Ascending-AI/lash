@@ -1,7 +1,7 @@
 //! ADR 0078 laws: the same plugin and runtime checkpoint path on every backend.
 use super::*;
 use crate::plugin::{
-    PluginFactory, PluginRegistrar, PluginSessionContext, RecordedSessionConfig, SessionPlugin,
+    PluginFactory, PluginRegistrar, PluginSessionContext, SessionAuthorityContext, SessionPlugin,
     SessionReadyContext,
 };
 use lash_core::plugin::PluginSessionRequest;
@@ -213,7 +213,7 @@ pub async fn plugin_state_boundary_trace(
         .build_session(PluginSessionRequest::rematerialization(
             parent_id,
             crash_state.plugin_state().unwrap(),
-            RecordedSessionConfig::new(Default::default()),
+            SessionAuthorityContext::default(),
         ))
         .unwrap();
     assert_eq!(
@@ -251,7 +251,7 @@ pub async fn plugin_state_boundary_trace(
         .build_session(PluginSessionRequest::rematerialization(
             parent_id,
             durable.plugin_state().unwrap(),
-            RecordedSessionConfig::new(Default::default()),
+            SessionAuthorityContext::default(),
         ))
         .unwrap();
     assert_eq!(
@@ -355,6 +355,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
             state: runtime.read_view(),
             sessions: runtime.session_state_service().unwrap(),
             turn_context: crate::TurnContext::default(),
+            plugin_config: Default::default(),
         })
         .await
         .expect_err("hook deliberately fails after its accepted write");
@@ -392,7 +393,10 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
         .build_session(PluginSessionRequest::rematerialization(
             id,
             durable,
-            RecordedSessionConfig::new(state.protocol_turn_options.clone()),
+            SessionAuthorityContext {
+                plugin_config: state.admitted_plugin_config(),
+                ..Default::default()
+            },
         ))
         .unwrap();
     assert_eq!(rebuilt.state(id).generation(), generation + 1);
@@ -478,7 +482,7 @@ async fn registration_state_law(
         .build_session(PluginSessionRequest::rematerialization(
             id,
             durable.plugin_state().unwrap(),
-            RecordedSessionConfig::new(Default::default()),
+            SessionAuthorityContext::default(),
         ))
         .unwrap();
     assert_eq!(rebuilt.state(id).generation(), 6);

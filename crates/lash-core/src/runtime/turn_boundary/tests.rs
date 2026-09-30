@@ -455,16 +455,14 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         .find(|node| node.node_id == previous_frame_node_id_value)
         .expect("current frame node");
     let previous = std::sync::Arc::make_mut(previous);
-    let crate::SessionNodePayload::FrameOpen {
-        protocol_turn_options,
-        ..
-    } = &mut previous.payload
-    else {
+    let crate::SessionNodePayload::FrameOpen { assignment, .. } = &mut previous.payload else {
         panic!("current frame id must identify FrameOpen");
     };
-    *protocol_turn_options =
-        crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "mode": "test" }));
-    state.protocol_turn_options = protocol_turn_options.clone();
+    assignment.plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
+    assignment
+        .plugin_config
+        .insert("protocol", serde_json::json!({ "mode": "test" }));
+    state.authority.plugin_config = assignment.plugin_config.clone();
     state.session_graph = SessionGraph::from_shared_nodes(nodes, leaf_node_id)
         .expect("frame-compaction fixture graph is valid");
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
@@ -495,7 +493,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         previous_frame_node_id.as_deref()
     );
     assert_eq!(
-        current.protocol_turn_options.payload,
+        current.protocol_turn_options().payload,
         serde_json::json!({ "mode": "test" })
     );
 
@@ -608,10 +606,12 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
     )
     .expect("open frame b");
     assert!(frame_b.opened);
-    state.protocol_turn_options =
-        crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "mode": "frame-b" }));
+    state
+        .authority
+        .plugin_config
+        .insert("protocol", serde_json::json!({ "mode": "frame-b" }));
     let expected_policy = state.policy.clone();
-    let expected_protocol_turn_options = state.protocol_turn_options.clone();
+    let expected_plugin_config = state.authority.plugin_config.clone();
     let expected_leaf = state.session_graph.leaf_node_id.clone();
     let expected_head_revision = state.head_revision;
     let expected_frames =
@@ -677,7 +677,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
         Some(frame_b.frame_node_id.as_str())
     );
     assert_eq!(state.policy, expected_policy);
-    assert_eq!(state.protocol_turn_options, expected_protocol_turn_options);
+    assert_eq!(state.authority.plugin_config, expected_plugin_config);
     assert_eq!(state.session_graph.leaf_node_id, expected_leaf);
     assert_eq!(state.head_revision, expected_head_revision);
     assert_eq!(

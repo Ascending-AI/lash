@@ -369,6 +369,7 @@ where
                 node_id: source.leaf_node_id.clone().into(),
                 relation: crate::SessionRelation::Root,
                 policy: source.request.config.session_policy(),
+                plugin_config: Default::default(),
             })
             .await
             .expect("fork the admission's base");
@@ -591,6 +592,7 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
         node_id: committed.leaf_node_id.into(),
         relation: crate::SessionRelation::Root,
         policy: committed.request.config.session_policy(),
+        plugin_config: Default::default(),
     };
     handles
         .factory
@@ -834,6 +836,7 @@ async fn attachment_prefix_retention(
         node_id: leaf_node_id.clone(),
         relation: crate::SessionRelation::Root,
         policy: request.config.session_policy(),
+        plugin_config: Default::default(),
     };
     handles
         .factory

@@ -167,6 +167,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::DrawRootStart { .. }
         | RuntimeEffectCommand::RecordCompactionBase { .. }
+        | RuntimeEffectCommand::ResolveConfigTransaction { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::IncorporateGroupSettlements { .. }) => {
             RestateEffectExecution::JournaledRun {

@@ -31,7 +31,6 @@ mod head_ownership;
 pub mod history;
 #[cfg(test)]
 mod history_gate_tests;
-mod identity_projection;
 pub mod ingress_obligation;
 mod lease_timings;
 mod maintenance;
@@ -232,8 +231,6 @@ mod prompt_persistence_compat_tests;
 
 #[cfg(test)]
 mod guarded_surface_tests;
-#[cfg(test)]
-mod identity_roll_tests;
 #[cfg(test)]
 mod persisted_state_tests;
 
@@ -522,7 +519,6 @@ fn build_persisted_turn_state(state: &crate::RuntimeSessionState) -> crate::Pers
         turn_index: state.turn_index,
         token_usage: state.token_usage.clone(),
         last_prompt_usage: state.last_prompt_usage.clone(),
-        protocol_turn_options: state.protocol_turn_options.clone(),
     }
 }
 
@@ -1496,10 +1492,9 @@ pub trait QueuedWorkStore: Send + Sync {
     /// to apply (ADR 0101 §4, design §2.7). Takes no admission.
     ///
     /// The run is returned only when the earliest open batch is classified
-    /// as [`QueuedWorkClass::SessionCommand`]. A non-config command is a run
-    /// of one; an adjacent `ApplyConfigPatch` prefix is returned together (up
-    /// to [`MAX_SESSION_COMMAND_BATCHES_PER_RUN`](crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_RUN))
-    /// so the lane applies it in one commit. In one transaction fenced by
+    /// as [`QueuedWorkClass::SessionCommand`]. Every command is a run of one
+    /// ([`SESSION_COMMAND_BATCHES_PER_RUN`](crate::store::queued_work::SESSION_COMMAND_BATCHES_PER_RUN)),
+    /// applied alone in the commit that settles it. In one transaction fenced by
     /// `fence`, the run's ingress obligations are acknowledged delivered
     /// (ADR 0109 §3). The applying commit settles the rows
     /// ([`RuntimeCommit::applied_commands`]). The read admits the run: a

@@ -1078,3 +1078,170 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
     assert_eq!(child_totals.cache_read_input_tokens, 9);
     assert_eq!(child_totals.reasoning_output_tokens, 0);
 }
+
+const CAP_OWNER: &str = "cap_owner";
+
+/// An owner whose namespace a child inherits from its parent unless the
+/// creator states its own (FIG-4379).
+struct InheritingCapOwner;
+
+impl lash_core::plugin::PluginFactory for InheritingCapOwner {
+    fn id(&self) -> &'static str {
+        CAP_OWNER
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::plugin::PluginSessionContext,
+    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
+        Ok(Arc::new(InheritingCapPlugin))
+    }
+
+    fn register_config(
+        &self,
+        registrar: &mut lash_core::ConfigRegistrar,
+    ) -> Result<(), lash_core::ConfigRegistrationError> {
+        registrar.owner(InheritingCapConfigOwner)
+    }
+}
+
+/// The `cap_owner` namespace.
+#[derive(
+    Clone, Debug, serde::Serialize, serde::Deserialize, lash_core::facade_support::JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+struct CapConfig {
+    cap: u32,
+}
+
+/// The `cap_owner` owner refuses nothing.
+#[derive(serde::Serialize, serde::Deserialize, lash_core::facade_support::JsonSchema)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+enum CapRefusal {}
+
+impl std::fmt::Display for CapRefusal {
+    fn fmt(&self, _formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {}
+    }
+}
+
+struct InheritingCapConfigOwner;
+
+impl lash_core::ConfigOwner for InheritingCapConfigOwner {
+    type Create = CapConfig;
+    type Recorded = CapConfig;
+    type Refusal = CapRefusal;
+
+    fn implementation(&self) -> &str {
+        "inheriting-cap:1"
+    }
+
+    /// The stated cap, else the parent's, else 1.
+    fn create(
+        &self,
+        input: Option<CapConfig>,
+        facts: lash_core::CreationFacts<'_, CapConfig>,
+    ) -> Result<Option<CapConfig>, CapRefusal> {
+        Ok(Some(
+            input
+                .or_else(|| facts.parent.cloned())
+                .unwrap_or(CapConfig { cap: 1 }),
+        ))
+    }
+
+    fn validate(
+        &self,
+        _value: &CapConfig,
+        _base: Option<&CapConfig>,
+        _facts: &lash_core::CandidateFacts<'_>,
+    ) -> Result<(), CapRefusal> {
+        Ok(())
+    }
+}
+
+struct InheritingCapPlugin;
+
+impl lash_core::plugin::SessionPlugin for InheritingCapPlugin {
+    fn id(&self) -> &'static str {
+        CAP_OWNER
+    }
+
+    fn register(
+        &self,
+        _reg: &mut lash_core::plugin::PluginRegistrar,
+    ) -> Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+}
+
+/// FIG-4379: a child created through session initialisation records the
+/// configuration its owners chose at creation — here the parent's recorded
+/// namespace when the creator states none, the stated one otherwise — and
+/// its reopen delivers exactly that.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_child_records_the_config_its_owners_chose_from_the_parent() {
+    let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let plugin_host = lash_core::testing::test_plugin_host(vec![Arc::new(InheritingCapOwner)]);
+    let plugin_session = plugin_host
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .expect("plugins");
+    let runtime_host = test_host_config(&backend);
+    let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
+        plugin_session,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
+    let mut parent_state = RuntimeSessionState::new(lash_core::SessionPolicy::new(
+        lash_core::TurnBudget::Unbounded,
+    ));
+    parent_state
+        .authority
+        .plugin_config
+        .insert(CAP_OWNER, serde_json::json!({ "cap": 7 }));
+    let mut runtime = LashRuntime::from_embedded_state(
+        standard_test_policy(),
+        runtime_host,
+        runtime_services,
+        parent_state,
+        lash_core::testing::runtime_lease_owner(),
+    )
+    .await
+    .expect("runtime");
+    set_runtime_provider(&mut runtime, mock_provider(Vec::new()).into_handle());
+    let lifecycle = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle");
+
+    for (child_id, stated, expected) in [
+        ("inheriting-child", None, serde_json::json!({ "cap": 7 })),
+        (
+            "stating-child",
+            Some(serde_json::json!({ "cap": 3 })),
+            serde_json::json!({ "cap": 3 }),
+        ),
+    ] {
+        let plugin_options = match stated {
+            Some(value) => lash_core::PluginOptions::typed(CAP_OWNER, value).expect("options"),
+            None => lash_core::PluginOptions::default(),
+        };
+        let handle = lifecycle
+            .create_session(
+                lash_core::SessionCreateRequest::child_session(
+                    "root",
+                    lash_core::SessionStartPoint::Empty,
+                    plugin_options,
+                )
+                .with_session_id(child_id),
+            )
+            .await
+            .expect("child session");
+        let child = reopen_session_runtime(&runtime, &handle.session_id).await;
+        assert_eq!(
+            child.state().authority.plugin_config.get(CAP_OWNER),
+            Some(&expected),
+            "{child_id} records what its owner chose at creation"
+        );
+    }
+}

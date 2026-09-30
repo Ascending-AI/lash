@@ -482,25 +482,33 @@ mod tests {
             },
         )));
         let manager = Arc::new(BatonManager {
-            snapshot: RuntimeSessionState {
-                policy: SessionPolicy {
-                    model: model_spec("model"),
-                    ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-                },
-                protocol_turn_options: lash_core::ProtocolTurnOptions::typed(
-                    RlmTermination::FinishRequired {
+            snapshot: {
+                let mut snapshot = RuntimeSessionState {
+                    policy: SessionPolicy {
+                        model: model_spec("model"),
+                        ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    },
+                    session_graph,
+                    ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                    ))
+                };
+                snapshot.authority.plugin_config = lash_core::PluginConfig::for_protocol(Some(
+                    crate::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+                ));
+                snapshot.authority.plugin_config.insert(
+                    crate::RLM_PROTOCOL_PLUGIN_ID,
+                    lash_core::ProtocolTurnOptions::typed(RlmTermination::FinishRequired {
                         schema: Some(json!({
                             "type": "object",
                             "properties": { "answer": { "type": "string" } },
                             "required": ["answer"]
                         })),
-                    },
-                )
-                .expect("valid rlm turn options"),
-                session_graph,
-                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                    lash_core::TurnBudget::Unbounded,
-                ))
+                    })
+                    .expect("valid rlm turn options")
+                    .payload,
+                );
+                snapshot
             },
             created: Mutex::new(Vec::new()),
         });

@@ -149,6 +149,7 @@ impl BackendRunner {
                         node_id: format!("{}:missing-fork-node", self.session_id).into(),
                         relation: SessionRelation::Root,
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        plugin_config: Default::default(),
                     })
                     .await
                     .expect_err("existing fork target must be rejected");
@@ -178,6 +179,7 @@ impl BackendRunner {
                             source_node_id: format!("{}:foreign-node", self.session_id).into(),
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        plugin_config: Default::default(),
                     })
                     .await
                     .expect("foreign lineage must not gate a retained fork point");
@@ -210,6 +212,7 @@ impl BackendRunner {
                             source_node_id: node_id.clone().into(),
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        plugin_config: Default::default(),
                     })
                     .await
                     .expect("rewind must create its first branch");
@@ -242,6 +245,7 @@ impl BackendRunner {
                                 .into(),
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        plugin_config: Default::default(),
                     })
                     .await
                     .expect("rewind must re-fork after deleting the superseded source");
@@ -404,6 +408,7 @@ pub(super) async fn selected_observer_intents(
                 relation: request.relation.clone(),
                 pending_observer_intents: request.pending_observer_intents.clone(),
                 policy: request.config.session_policy(),
+                plugin_config: Default::default(),
             })
             .await
             .expect("fork deleted-writer history with exact intent");

@@ -827,11 +827,24 @@ impl TestRuntime {
             crate::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
         )));
         let plugin_host = crate::testing::test_plugin_host(factories);
-        let plugin_session = plugin_host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-            .expect("plugins");
         let mut initial_state =
             RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+        // The fixture session records what a creator records: each installed
+        // owner's namespace from its defaults (FIG-4379).
+        initial_state.authority.plugin_config = plugin_host
+            .resolve_creation_plugin_config(None, &crate::PluginOptions::default(), None, true)
+            .unwrap_or_else(|refusal| {
+                panic!("the installed owners refuse their defaults: {refusal}")
+            });
+        let plugin_session = plugin_host
+            .build_session(PluginSessionRequest::creation(
+                "root",
+                crate::plugin::SessionAuthorityContext {
+                    plugin_config: initial_state.admitted_plugin_config(),
+                    ..Default::default()
+                },
+            ))
+            .expect("plugins");
         if let Some(session_id) = self.session_id {
             initial_state.session_id = session_id.clone();
             initial_state.policy.session_id = Some(session_id);
@@ -1237,7 +1250,6 @@ pub fn reopen_session_runtime<'a>(
                 .expect("persisted child session state")
                 .state;
         let policy = state.effective_policy().clone();
-        let is_root = state.authority.subagent.is_none();
         let plugin_host = parent
             .session
             .as_ref()
@@ -1249,7 +1261,7 @@ pub fn reopen_session_runtime<'a>(
             .with_plugin_host(Arc::new(plugin_host))
             .build();
         env.work = parent.host.work.clone();
-        let mut child = LashRuntime::from_environment(
+        LashRuntime::from_environment(
             &env,
             policy,
             state,
@@ -1257,10 +1269,31 @@ pub fn reopen_session_runtime<'a>(
             parent.runtime_lease_owner.clone(),
         )
         .await
-        .expect("reopen child session runtime");
-        child
-            .configure_protocol_on_materialize(&crate::PluginOptions::default(), is_root)
-            .expect("materialize reopened child protocol configuration");
-        child
+        .expect("reopen child session runtime")
     })
+}
+
+/// Record on a fresh `state` the plugin configuration a creator records
+/// (FIG-4379): every owner installed on `host` resolves its namespace from
+/// what `state` states, and `protocol_plugin_id` names the protocol owner. A
+/// test that builds a session's state by hand calls this where a creator
+/// would, before the session's first open.
+pub fn record_creation_plugin_config(
+    host: &crate::plugin::PluginHost,
+    protocol_plugin_id: &str,
+    state: &mut RuntimeSessionState,
+) {
+    let requested = crate::PluginOptions {
+        plugins: state
+            .authority
+            .plugin_config
+            .iter()
+            .map(|(plugin_id, value)| (plugin_id.clone(), value.clone()))
+            .collect(),
+    };
+    state.authority.plugin_config = host
+        .resolve_creation_plugin_config(Some(protocol_plugin_id), &requested, None, true)
+        .unwrap_or_else(|refusal| {
+            panic!("the installed owners refuse the stated config: {refusal}")
+        });
 }

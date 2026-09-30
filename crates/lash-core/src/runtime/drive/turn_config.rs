@@ -22,9 +22,9 @@
 //! after the step, on every execution: a handle is this worker's capability,
 //! not a decision. A route that cannot be bound here was validated when it
 //! was set, so the failure is the worker's deployment: the root retries, and
-//! its engine's retry budget parks it (D3 Q3). A config command that changes
-//! the route is validated when it is sent and when it is applied, and is
-//! refused typed if no provider serves it.
+//! its engine's retry budget parks it (D3 Q3). A config transaction that
+//! changes the route is validated when it resolves, and is refused typed if
+//! no provider serves it (FIG-4379).
 //!
 //! Resolution faults that a redeploy repairs stay out of the record (P3): a
 //! spec read the store did not answer, or a definition revision this worker
@@ -100,6 +100,10 @@ impl LashRuntime {
                 .session
                 .as_ref()
                 .map(|session| session.plugins().protocol_driver()),
+            config_registry: self
+                .session
+                .as_ref()
+                .and_then(|session| session.plugins().host().config_registry().ok()),
         };
         let resolved = controller
             .execute_effect(
@@ -125,69 +129,6 @@ impl LashRuntime {
             "a root's resident config revision moved inside the root"
         );
     }
-
-    /// Refuse a config command whose route no provider of this host serves
-    /// (D3 §3.1), before anything is enqueued. A command that leaves the
-    /// route alone is not judged.
-    pub(in crate::runtime) fn refuse_unservable_route(
-        &self,
-        command: &crate::SessionCommand,
-    ) -> Result<(), RuntimeError> {
-        let crate::SessionCommand::ApplyConfigPatch { patch } = command else {
-            return Ok(());
-        };
-        match self.patch_route_refusal(patch, self.state.effective_policy()) {
-            Some(refusal) => Err(refusal),
-            None => Ok(()),
-        }
-    }
-
-    /// Whether the drain refuses `patch` at apply (D3 §3.3): its route,
-    /// judged over the running `policy`, is one no provider of this host
-    /// serves any more. A refused patch changes nothing. The typed `Refused`
-    /// settlement and its refused window arrive with the ingress drain
-    /// (FIG-3541, S8); the command lane before it settles the command
-    /// completed.
-    pub(in crate::runtime) fn refuses_route_at_apply(
-        &self,
-        patch: &crate::runtime::ApplyConfigPatch,
-        policy: &crate::SessionPolicy,
-    ) -> bool {
-        let Some(refusal) = self.patch_route_refusal(patch, policy) else {
-            return false;
-        };
-        tracing::warn!(
-            session_id = %self.state.session_id,
-            code = %refusal.code.as_str(),
-            error = %refusal.message,
-            "config command refused at apply"
-        );
-        true
-    }
-
-    /// The refusal of `patch`'s route over `policy`, when it changes the
-    /// route and no provider of this host serves the result.
-    fn patch_route_refusal(
-        &self,
-        patch: &crate::runtime::ApplyConfigPatch,
-        policy: &crate::SessionPolicy,
-    ) -> Option<RuntimeError> {
-        if patch.provider_id.is_none() && patch.model.is_none() {
-            return None;
-        }
-        let provider_id = patch
-            .provider_id
-            .as_deref()
-            .unwrap_or_else(|| policy.recorded_provider_id());
-        let model = patch.model.as_ref().unwrap_or(&policy.model);
-        validate_route(
-            self.host.core.providers.provider_resolver.as_ref(),
-            provider_id,
-            model,
-        )
-        .err()
-        .map(|code| route_refusal(code, provider_id, model))
-    }
 }
 
 /// Whether `resolver` serves the route `provider_id` + `model` (D3 §3.3).
@@ -205,27 +146,6 @@ pub fn validate_route_with(
     resolver: &dyn RuntimeProviderResolver,
 ) -> impl Fn(&str, &ModelSpec) -> Result<(), ConfigRefusalCode> + '_ {
     move |provider_id, model| validate_route(resolver, provider_id, model)
-}
-
-/// The typed refusal of a config command whose route `code` refused.
-pub(crate) fn route_refusal(
-    code: ConfigRefusalCode,
-    provider_id: &str,
-    model: &ModelSpec,
-) -> RuntimeError {
-    let runtime_code = match code {
-        ConfigRefusalCode::ProviderRouteUnknown => RuntimeErrorCode::ProviderRouteUnknown,
-        ConfigRefusalCode::ProviderCredentialsMissing => {
-            RuntimeErrorCode::ProviderCredentialsMissing
-        }
-    };
-    RuntimeError::new(
-        runtime_code,
-        format!(
-            "config command refused: {code} (provider `{provider_id}`, model `{}`)",
-            model.id
-        ),
-    )
 }
 
 /// A turn's recorded route that this worker cannot bind: retried, never the
@@ -248,6 +168,9 @@ struct ResolveTurnConfigRunner {
     /// (FIG-3877); present only on the follow-on's own admission.
     inherited: Option<crate::ResolvedRun>,
     protocol_driver: Option<std::sync::Arc<dyn crate::plugin::ProtocolDriverPlugin>>,
+    /// The session's config owners, which judge every namespace a spec's
+    /// overrides changed (FIG-4379).
+    config_registry: Option<std::sync::Arc<crate::ConfigRegistry>>,
 }
 
 /// A root's non-default spec, read and resolved only on the step's first
@@ -354,13 +277,24 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
             (None, None) => crate::ResolvedRun::snapshot(self.snapshot),
             (None, Some(spec)) => spec.resolve(&self.snapshot).await?,
         };
+        // An override is judged by the owner of every namespace it changed,
+        // as a config command's candidate is: an overlay cannot set what the
+        // owner does not admit. The refusal is the root's recorded shape.
+        if !inherited
+            && resolved.resolved.is_some()
+            && let Some(registry) = self.config_registry.as_ref()
+        {
+            registry
+                .validate_derived(&resolved.base, resolved.config())
+                .map_err(|refusal| {
+                    RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::RunShapeRefused,
+                        format!("the run's overrides were refused: {refusal}"),
+                    )
+                })?;
+        }
         if !inherited && let Some(driver) = self.protocol_driver {
-            let options = resolved
-                .config()
-                .protocol_turn_options
-                .as_ref()
-                .cloned()
-                .unwrap_or_default();
+            let options = resolved.config().plugin_config.protocol_turn_options();
             resolved.render = driver.resolve_render(&options).map_err(|message| {
                 RuntimeEffectControllerError::new(RuntimeErrorCode::RunShapeRefused, message)
             })?;

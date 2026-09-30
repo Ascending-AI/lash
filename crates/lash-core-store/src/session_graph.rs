@@ -440,7 +440,6 @@ pub enum SessionNodePayload {
         frame_key: crate::FrameKey,
         reason: crate::AgentFrameReason,
         assignment: crate::AgentFrameAssignment,
-        protocol_turn_options: crate::ProtocolTurnOptions,
     },
 }
 
@@ -468,18 +467,17 @@ pub struct PersistedSessionConfig {
     /// ambient worker state.
     #[serde(default)]
     pub subagent: Option<crate::SubagentSessionContext>,
-    /// Commanded durable protocol turn options (SESSION_HEAD_META v6).
-    ///
-    /// `None` is reserved for heads written before this field existed and for
-    /// creation rows written before the first state commit; restore then falls
-    /// back to the checkpoint copy. `Some` is authoritative on cold load.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
+    /// Every plugin's recorded configuration namespace, the protocol's
+    /// included (FIG-4379): created by its owner at creation, changed only by
+    /// an owner-validated config transaction, and delivered unchanged on every
+    /// open.
+    /// The protocol turn options are a view of it. Required on the wire.
+    pub plugin_config: crate::PluginConfig,
     /// The config's own compare-and-set revision (ADR 0101 §12): `0` at
-    /// creation, `+1` per applied `ApplyConfigPatch`, and otherwise unchanged
+    /// creation, `+1` per applied config transaction, and otherwise unchanged
     /// — in particular it does not move with `head_revision` on every commit.
-    /// It is the value an `ApplyConfigPatch`'s `base_config_revision` is
-    /// checked against, and it is required on the wire: a head written before
+    /// It is the value a config transaction's `expected_revision` is checked
+    /// against, and it is required on the wire: a head written before
     /// the contract existed is refused at load, not defaulted.
     pub config_revision: u64,
 }
@@ -515,7 +513,7 @@ impl PersistedSessionConfig {
             generation: crate::GenerationOptions::default(),
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
-            protocol_turn_options: None,
+            plugin_config: crate::PluginConfig::default(),
             config_revision: 0,
         }
     }
@@ -537,7 +535,9 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             generation: policy.generation.clone(),
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
-            protocol_turn_options: None,
+            // A `SessionPolicy` carries no plugin configuration; its creator
+            // records what the owners resolved.
+            plugin_config: crate::PluginConfig::default(),
             // A `SessionPolicy` does not carry the revision; the caller that
             // knows the durable value assigns it
             // (`persisted_session_config_from_state`).
@@ -553,8 +553,6 @@ pub struct PersistedTurnState {
     pub token_usage: TokenUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_prompt_usage: Option<TokenUsage>,
-    #[serde(default)]
-    pub protocol_turn_options: crate::ProtocolTurnOptions,
 }
 
 #[derive(Clone, Debug)]
@@ -839,29 +837,21 @@ impl SessionNodeRecord {
 
     /// Borrows frame-boundary state for store and protocol implementors, returning `None` for event
     /// and plugin nodes.
-    pub fn frame_open(
-        &self,
-    ) -> Option<(
-        &crate::AgentFrameReason,
-        &crate::AgentFrameAssignment,
-        &crate::ProtocolTurnOptions,
-    )> {
+    pub fn frame_open(&self) -> Option<(&crate::AgentFrameReason, &crate::AgentFrameAssignment)> {
         match &self.payload {
             SessionNodePayload::FrameOpen {
-                reason,
-                assignment,
-                protocol_turn_options,
-                ..
-            } => Some((reason, assignment, protocol_turn_options)),
+                reason, assignment, ..
+            } => Some((reason, assignment)),
             SessionNodePayload::Event { .. } | SessionNodePayload::Plugin { .. } => None,
         }
     }
 
-    /// Provider and model captured by this frame boundary.
+    /// Provider, model and plugin configuration (the protocol's namespace
+    /// included) captured by this frame boundary.
     pub fn frame_config(&self) -> Option<PersistedSessionConfig> {
-        let (_, assignment, protocol_turn_options) = self.frame_open()?;
+        let (_, assignment) = self.frame_open()?;
         let mut config = PersistedSessionConfig::from(&assignment.policy);
-        config.protocol_turn_options = Some(protocol_turn_options.clone());
+        config.plugin_config = assignment.plugin_config.clone();
         Some(config)
     }
 
@@ -1325,7 +1315,6 @@ impl SessionGraph {
         frame_key: crate::FrameKey,
         reason: crate::AgentFrameReason,
         assignment: crate::AgentFrameAssignment,
-        protocol_turn_options: crate::ProtocolTurnOptions,
         timestamp: String,
     ) -> bool {
         if self.find_node(frame_node_id.as_str()).is_some() {
@@ -1339,7 +1328,6 @@ impl SessionGraph {
                 frame_key,
                 reason,
                 assignment,
-                protocol_turn_options,
             },
         }]);
         true
@@ -1360,7 +1348,7 @@ impl SessionGraph {
         let mut frames = Vec::new();
         for index in self.try_cache()?.active_frame_indices.iter() {
             let node = &self.nodes[*index];
-            let Some((reason, assignment, protocol_turn_options)) = node.frame_open() else {
+            let Some((reason, assignment)) = node.frame_open() else {
                 continue;
             };
             let frame_node_id = crate::FrameNodeId::new(node.node_id.clone())
@@ -1371,7 +1359,6 @@ impl SessionGraph {
                 previous_frame_node_id.clone(),
                 reason.clone(),
                 assignment.clone(),
-                protocol_turn_options.clone(),
                 node.timestamp.clone(),
             ));
             previous_frame_node_id = Some(frame_node_id);

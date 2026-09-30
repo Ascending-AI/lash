@@ -11,7 +11,7 @@ use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, RuntimeHostConfig,
     SingleProviderResolver,
 };
-use lash_core::plugin::{PluginFactory, RecordedSessionConfig};
+use lash_core::plugin::{PluginFactory, SessionAuthorityContext};
 use lash_core::testing::TestTurnDrive as _;
 use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
@@ -198,6 +198,25 @@ fn provider(script: Arc<Script>) -> lash_core::facade_support::ProviderHandle {
         .into_handle()
 }
 
+/// A fresh session state whose recorded standard-protocol namespace is
+/// `options` (FIG-4379).
+fn state_under_render_options(
+    session_id: lash_core::SessionId,
+    options: lash_core::ProtocolTurnOptions,
+) -> RuntimeSessionState {
+    let mut state = RuntimeSessionState {
+        session_id,
+        ..RuntimeSessionState::new(policy())
+    };
+    state.authority.plugin_config =
+        lash_core::PluginConfig::for_protocol(Some("standard_protocol".to_string()));
+    state
+        .authority
+        .plugin_config
+        .insert("standard_protocol", options.payload);
+    state
+}
+
 fn render_options(max_chars: usize) -> lash_core::ProtocolTurnOptions {
     lash_core::ProtocolTurnOptions::typed(StandardTurnOptions {
         render: Some(StandardRenderConfig {
@@ -218,7 +237,7 @@ async fn open_runtime(
     backend: &lash_core::Backend,
     store: lash_core::store::SessionStore,
     script: Arc<Script>,
-    state: RuntimeSessionState,
+    mut state: RuntimeSessionState,
     renderer: Arc<SwitchingRenderer>,
     attachments: Arc<CountingAttachments>,
     tool: Arc<FixtureTool>,
@@ -238,13 +257,24 @@ async fn open_runtime(
         host.build_session(PluginSessionRequest::rematerialization(
             &state.session_id,
             snapshot,
-            RecordedSessionConfig::new(state.protocol_turn_options.clone()),
+            SessionAuthorityContext {
+                plugin_config: state.admitted_plugin_config(),
+                ..Default::default()
+            },
         ))
         .expect("rematerialize standard plugin")
     } else {
+        lash_core::testing::runtime_helpers::record_creation_plugin_config(
+            &host,
+            "standard_protocol",
+            &mut state,
+        );
         host.build_session(PluginSessionRequest::creation(
             &state.session_id,
-            Default::default(),
+            SessionAuthorityContext {
+                plugin_config: state.admitted_plugin_config(),
+                ..Default::default()
+            },
         ))
         .expect("build standard plugin")
     };
@@ -272,7 +302,7 @@ async fn open_runtime(
         Arc::clone(&runtime_host.core.durability.attachment_store),
         Arc::clone(&runtime_host.core.durability.process_env_store),
     );
-    let mut runtime = LashRuntime::from_persistent_embedded_state(
+    LashRuntime::from_persistent_embedded_state(
         policy(),
         runtime_host,
         services,
@@ -280,11 +310,7 @@ async fn open_runtime(
         lash_core::testing::runtime_lease_owner(),
     )
     .await
-    .expect("open runtime");
-    runtime
-        .configure_protocol_on_materialize(&lash_core::PluginOptions::empty(), true)
-        .expect("materialize protocol");
-    runtime
+    .expect("open runtime")
 }
 
 async fn drive(
@@ -518,7 +544,7 @@ fn journaled_standard_presentation_replays_without_render_or_retention_io() {
                                 .attachment_store(facade)
                                 .execution_env_spec({
                                     let mut spec = lash_core::ProcessExecutionEnvSpec::new(
-                                        lash_core::PluginOptions::default(),
+                                        lash_core::AdmittedPluginConfig::default(),
                                         policy(),
                                     );
                                     spec.render = Some(recorded);
@@ -627,11 +653,7 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                 &backend,
                 store.clone(),
                 Arc::clone(&script),
-                RuntimeSessionState {
-                    session_id: session_id.clone(),
-                    protocol_turn_options: render_options(140),
-                    ..RuntimeSessionState::new(policy())
-                },
+                state_under_render_options(session_id.clone(), render_options(140)),
                 Arc::clone(&renderer),
                 Arc::clone(&attachments),
                 Arc::clone(&tool),
@@ -654,39 +676,51 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                 assert!(String::from_utf8_lossy(&bytes).contains("short uncut"));
                 bytes
             };
-            let command = runtime.set_protocol_turn_options(render_options(120)).await;
-            let receipt = match command {
-                Ok(()) => None,
-                Err(lash_core::SessionError::SessionCommandPending(receipt)) => Some(receipt),
-                Err(error) => panic!("options command: {error}"),
-            };
-            if let Some(receipt) = receipt {
-                let handler = double
-                    .open_handler(lash_core::AdmittedScope::queue_drain(
-                        &session_id,
-                        "render-options-command",
-                    ))
-                    .await
-                    .expect("open command drive handler");
+            let revision = runtime.config_revision();
+            let receipt = runtime
+                .submit_config_transaction(
+                    "render-options-command",
+                    revision,
+                    &lash_core::ConfigTransaction::of(lash_protocol_standard::SetStandardRender {
+                        render: render_options(120)
+                            .decode::<StandardTurnOptions>()
+                            .expect("render options")
+                            .render,
+                    }),
+                )
+                .await
+                .expect("options command");
+            let handler = double
+                .open_handler(lash_core::AdmittedScope::queue_drain(
+                    &session_id,
+                    "render-options-command",
+                ))
+                .await
+                .expect("open command drive handler");
+            runtime
+                .drive_next_root(
+                    "render-options-command",
+                    lash_core::facade_support::TurnOptions::new(
+                        tokio_util::sync::CancellationToken::new(),
+                        handler.scoped(),
+                    ),
+                )
+                .await
+                .expect("drive render options command");
+            handler.close().await.expect("close command drive handler");
+            assert!(matches!(
                 runtime
-                    .drive_next_root(
-                        "render-options-command",
-                        lash_core::facade_support::TurnOptions::new(
-                            tokio_util::sync::CancellationToken::new(),
-                            handler.scoped(),
-                        ),
-                    )
+                    .settle_session_command(receipt)
                     .await
-                    .expect("drive render options command");
-                handler.close().await.expect("close command drive handler");
-                assert!(matches!(
-                    runtime
-                        .settle_session_command(receipt)
-                        .await
-                        .expect("read settled render options command"),
-                    lash_core::runtime::SessionCommandSettlement::Durable(_)
-                ));
-            }
+                    .expect("read settled render options command"),
+                lash_core::runtime::SessionCommandSettlement::Applied {
+                    outcome: lash_core::runtime::SessionCommandOutcome::ConfigTransaction {
+                        outcome: lash_core::ConfigTransactionOutcome::Applied { .. },
+                    },
+                    ..
+                }
+            ));
+
             renderer.mode.store(1, Ordering::SeqCst);
             drive(&mut runtime, &double, &session_id, "second").await;
             assert_eq!(renderer.first.load(Ordering::SeqCst), 2);

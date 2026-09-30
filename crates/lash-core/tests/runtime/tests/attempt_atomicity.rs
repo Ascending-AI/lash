@@ -461,7 +461,7 @@ fn tool_context_with_provider<'run>(
         parent_invocation: Some(attempt_parent.clone()),
         observation_call_key: None,
         execution_env_spec: lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ),
         owner: lash_core::ExecutionOwner::SessionFrame {

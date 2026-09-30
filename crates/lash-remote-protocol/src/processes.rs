@@ -1248,11 +1248,16 @@ impl RemoteRuntimeSubject {
     }
 }
 
+/// Wire mirror of the plugin configuration a process captured, at its
+/// session config revision (FIG-4379).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct RemoteProcessPluginOptions {
+pub struct RemoteProcessPluginConfig {
+    pub revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub plugins: BTreeMap<String, serde_json::Value>,
+    pub namespaces: BTreeMap<String, serde_json::Value>,
 }
 
 fn default_remote_context_window_tokens() -> usize {
@@ -1337,17 +1342,10 @@ pub struct RemoteRecordedRender {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessExecutionEnvSpec {
-    #[serde(default, skip_serializing_if = "RemoteProcessPluginOptions::is_empty")]
-    pub plugin_options: RemoteProcessPluginOptions,
+    pub plugin_config: RemoteProcessPluginConfig,
     pub policy: RemoteProcessExecutionPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<RemoteRecordedRender>,
-}
-
-impl RemoteProcessPluginOptions {
-    pub fn is_empty(&self) -> bool {
-        self.plugins.is_empty()
-    }
 }
 
 impl RemoteProcessExecutionPolicy {
@@ -1367,7 +1365,7 @@ impl RemoteProcessExecutionPolicy {
 impl RemoteProcessExecutionEnvSpec {
     pub fn new(turn_budget: RemoteTurnBudget) -> Self {
         Self {
-            plugin_options: RemoteProcessPluginOptions::default(),
+            plugin_config: RemoteProcessPluginConfig::default(),
             policy: RemoteProcessExecutionPolicy::new(turn_budget),
             render: None,
         }

@@ -1498,6 +1498,31 @@ impl RuntimeError {
         )
     }
 
+    /// The typed refusal of a config transaction whose resolution a build
+    /// would run with other reducers than it was admitted under (FIG-4379):
+    /// an owner's reducer implementation is part of the executable identity
+    /// an unresolved transaction binds. Its command root parks before any
+    /// reducer runs, for a build that runs the admitted reducers.
+    pub fn retired_config_reducer(owner: &str, recorded: &str, current: Option<&str>) -> Self {
+        let current_spelling = current.unwrap_or("none");
+        Self::refused_generation(
+            ExecutableGenerationRefusal {
+                found: Some(ExecutableGeneration::new(format!(
+                    "config-owner:{owner}:{recorded}"
+                ))),
+                current: current.map(|current| {
+                    ExecutableGeneration::new(format!("config-owner:{owner}:{current}"))
+                }),
+            },
+            format!(
+                "the config transaction was admitted under config owner `{owner}`'s reducer \
+                 implementation {recorded}, and this build runs {current_spelling}: its \
+                 resolution was refused before any reducer ran; resolve it under a build that \
+                 runs {recorded}, or cancel it"
+            ),
+        )
+    }
+
     fn refused_generation(refusal: ExecutableGenerationRefusal, message: String) -> Self {
         let mut error = Self::new(RuntimeErrorCode::RetiredGeneration, message);
         error.executable_generation_refusal = Some(Box::new(refusal));
@@ -1753,7 +1778,9 @@ impl RuntimeEffectControllerError {
     /// whose recorded renderer is unavailable, and a presentation or language
     /// value whose output retention faulted (FIG-1643) — and a
     /// drive's admission and seal, a root's resolution (its spec read and its
-    /// definition lookup, FIG-3838), a root's scope close and a session's close,
+    /// definition lookup, FIG-3838), a config transaction's resolution under
+    /// reducers other than it was admitted with (FIG-4379), a root's scope
+    /// close and a session's close,
     /// whose store faults are the attempt's (FIG-3600), a trigger delivery's
     /// admission, whose binding read is the attempt's (FIG-4369), a follow-on
     /// recovery root's decision (FIG-4361), and a process command
@@ -1777,6 +1804,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::InspectAdmittedHead
                 | RuntimeEffectKind::RecoverFollowOn
                 | RuntimeEffectKind::ResolveTurnConfig
+                | RuntimeEffectKind::ResolveConfigTransaction
                 | RuntimeEffectKind::CloseRootScope
                 | RuntimeEffectKind::BeginSessionClose
                 | RuntimeEffectKind::AdmitTriggerDelivery

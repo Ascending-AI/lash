@@ -363,10 +363,9 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
             payload: lash_core_execution::SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: lash_core_execution::AgentFrameReason::initial(),
-                assignment: lash_core_execution::AgentFrameAssignment::from_policy(
+                assignment: lash_core_execution::AgentFrameAssignment::unconfigured(
                     SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
                 ),
-                protocol_turn_options: Default::default(),
             },
         };
         let mut commit = RuntimeCommit::persisted_state_for_test(state);
@@ -444,10 +443,9 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         payload: lash_core_execution::SessionNodePayload::FrameOpen {
             frame_key,
             reason: lash_core_execution::AgentFrameReason::initial(),
-            assignment: lash_core_execution::AgentFrameAssignment::from_policy(SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-            )),
-            protocol_turn_options: Default::default(),
+            assignment: lash_core_execution::AgentFrameAssignment::unconfigured(
+                SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+            ),
         },
     };
     let mut first_commit = RuntimeCommit::persisted_state_for_test(&first_state);
@@ -674,6 +672,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
             node_id: parent_leaf.clone(),
             relation: lash_core_execution::SessionRelation::Root,
             policy: policy.clone(),
+            plugin_config: Default::default(),
         })
         .await
         .expect("fork at the parent's live tip");

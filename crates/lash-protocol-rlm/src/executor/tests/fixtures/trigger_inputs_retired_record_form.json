@@ -467,7 +467,7 @@
     }
   },
   "registration_draft": {
-    "env_ref": "process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738",
+    "env_ref": "process-env:v6:blake3:103b23b28fe9d918bc3f5f2e34fa8996cb4cc49772552d35040d132cd55724e0",
     "event_types": [
       {
         "name": "process.yield",

@@ -412,10 +412,9 @@ impl NodeSpec {
                 SessionNodePayload::FrameOpen {
                     frame_key,
                     reason: lash_core::AgentFrameReason::initial(),
-                    assignment: lash_core::AgentFrameAssignment::from_policy(
+                    assignment: lash_core::AgentFrameAssignment::unconfigured(
                         lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     ),
-                    protocol_turn_options: Default::default(),
                 }
             } else {
                 SessionNodePayload::Event {
@@ -1361,7 +1360,6 @@ impl BackendRunner {
                             .clone()
                             .expect("a pending follow-on owes the head's current frame"),
                         task: "fig-2841 follow-on task".to_string(),
-                        options: None,
                         resolved_run: None,
                         chain_depth: 1,
                         attempts: 0,
@@ -1401,6 +1399,7 @@ impl BackendRunner {
                             source_node_id: node_id.into(),
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        plugin_config: Default::default(),
                     })
                     .await?;
                 Ok(None)

@@ -28,6 +28,9 @@ pub struct ForkSessionRequest {
     pub relation: SessionRelation,
     pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
     pub policy: SessionPolicy,
+    /// The plugin configuration the fork records: the fork point's frame
+    /// capture (FIG-4379).
+    pub plugin_config: crate::PluginConfig,
 }
 
 /// Durable identity returned after a zero-node fork.

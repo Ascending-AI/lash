@@ -35,11 +35,30 @@ async fn run_writer_operation(
 ) -> anyhow::Result<()> {
     match operation {
         WriterContentionOperation::Configure => {
-            session
-                .admin()
-                .config()
-                .update(lash::SessionConfigPatch::default())
+            // A config transaction takes the writer and settles through the
+            // command lane. Concurrent writers read the same revision, so a
+            // later one settles stale; either settlement is the measured
+            // operation, and only an owner refusal is a failure.
+            let config = session.admin().config();
+            let revision = config.revision().await?;
+            let outcome = config
+                .apply(
+                    lash::config::ConfigWrite::new(
+                        format!("perf-contention:{ordinal}:{revision}"),
+                        revision,
+                    ),
+                    lash::config::ConfigTransaction::of(lash::config::SetTurnBudget {
+                        turn_budget: session.policy_snapshot().turn_budget,
+                    }),
+                )
                 .await?;
+            anyhow::ensure!(
+                !matches!(
+                    outcome,
+                    lash::config::ConfigTransactionOutcome::Refused { .. }
+                ),
+                "writer contention config transaction was refused: {outcome:?}"
+            );
         }
         WriterContentionOperation::ProcessRefresh => {
             session.refresh_background_graph().await?;

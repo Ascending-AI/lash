@@ -11,10 +11,6 @@ use super::*;
 /// fields are the phase's inputs in the order the phase reads them.
 pub(in crate::runtime) struct TurnPrepareContext<'sinks, 'run> {
     pub(in crate::runtime) input: TurnInput,
-    /// Protocol turn options this physical turn runs under beyond its root's
-    /// recorded view: a follow-on's recorded options. A root's own options
-    /// come from its resolved run spec, never from here.
-    pub(in crate::runtime) protocol_turn_options: Option<crate::ProtocolTurnOptions>,
     pub(in crate::runtime) sinks: TurnSinks<'sinks>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
     pub(in crate::runtime) local_stop: LocalTurnStop,
@@ -65,7 +61,6 @@ impl LashRuntime {
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let TurnPrepareContext {
             mut input,
-            protocol_turn_options,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             local_stop,
@@ -346,6 +341,7 @@ impl LashRuntime {
         let base_render_cache = base_read_model.prompt_render_cache;
         let turn_ctx = crate::TurnTransformContext {
             session_id: self.state.session_id.clone(),
+            plugin_config: self.state.admitted_plugin_config(),
             state: prepare_read_view,
             prompt_usage: previous_prompt_usage.clone(),
             max_context_tokens: Some(LashRuntime::max_context_tokens(self)),
@@ -396,7 +392,6 @@ impl LashRuntime {
                 turn: PreparedLogicalTurn {
                     messages,
                     previous_prompt_usage,
-                    protocol_turn_options,
                     turn_context: input.turn_context.clone(),
                     initial_turn_causes,
                     trace_turn_id,

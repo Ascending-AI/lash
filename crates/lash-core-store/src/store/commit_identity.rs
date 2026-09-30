@@ -1223,7 +1223,7 @@ fn failure_evidence_is_empty(evidence: &&[crate::TurnFailureEvidence]) -> bool {
 #[derive(serde::Serialize)]
 struct RuntimeCommitIntent<'a> {
     session_id: &'a SessionId,
-    config: super::identity_projection::ConfigIntent<'a>,
+    config: &'a crate::PersistedSessionConfig,
     current_frame_node_id: Option<&'a str>,
     graph: GraphCommitIntent<'a>,
     checkpoint: CheckpointIntent<'a>,
@@ -1271,11 +1271,7 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
         };
         Self {
             session_id: &commit.session_id,
-            config: commit
-                .execution_config
-                .as_deref()
-                .unwrap_or(&commit.config)
-                .into(),
+            config: commit.execution_config.as_deref().unwrap_or(&commit.config),
             current_frame_node_id: commit.current_frame_node_id.as_deref(),
             graph,
             checkpoint: CheckpointIntent::from(&commit.checkpoint),
@@ -1326,7 +1322,7 @@ struct GraphCommitIntent<'a> {
 struct SessionNodeIntent<'a> {
     node_id: &'a str,
     parent_node_id: Option<&'a str>,
-    payload: super::identity_projection::NodePayloadIntent<'a>,
+    payload: &'a crate::SessionNodePayload,
 }
 
 impl<'a> From<&'a crate::SessionNodeRecord> for SessionNodeIntent<'a> {
@@ -1334,14 +1330,14 @@ impl<'a> From<&'a crate::SessionNodeRecord> for SessionNodeIntent<'a> {
         Self {
             node_id: &node.node_id,
             parent_node_id: node.parent_node_id.as_deref(),
-            payload: (&node.payload).into(),
+            payload: &node.payload,
         }
     }
 }
 
 #[derive(serde::Serialize)]
 struct CheckpointIntent<'a> {
-    turn_state: super::identity_projection::TurnStateIntent<'a>,
+    turn_state: &'a crate::PersistedTurnState,
     components: Vec<CheckpointComponentIntent<'a>>,
 }
 
@@ -1357,7 +1353,7 @@ struct CheckpointComponentIntent<'a> {
 impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
     fn from(checkpoint: &'a HydratedSessionCheckpoint) -> Self {
         Self {
-            turn_state: (&checkpoint.turn_state).into(),
+            turn_state: &checkpoint.turn_state,
             components: checkpoint
                 .components
                 .iter()

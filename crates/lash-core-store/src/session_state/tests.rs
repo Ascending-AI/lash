@@ -576,8 +576,7 @@ fn initial_frame_protocol_turn_options(state: &RuntimeSessionState) -> crate::Pr
     state
         .current_agent_frame()
         .expect("the initial frame is open")
-        .protocol_turn_options
-        .clone()
+        .protocol_turn_options()
 }
 
 /// The initial frame's committed payload, without its wall-clock timestamp.
@@ -591,26 +590,35 @@ fn initial_frame_payload(state: &RuntimeSessionState) -> (crate::NodeId, serde_j
     )
 }
 
-/// A fresh session opens its initial frame before materialization settles the
-/// protocol options, and a reopen of its durable head opens it after: the
-/// unpersisted frame takes the settled options, so both commit the same frame
-/// (FIG-3684).
+/// A plugin configuration whose protocol namespace is `payload`.
+fn protocol_config(payload: serde_json::Value) -> crate::PluginConfig {
+    let mut config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
+    config.insert("protocol", payload);
+    config
+}
+
+/// A fresh session's eagerly opened initial frame is re-stamped under the
+/// configuration the state installs before it persists, and a reopen of its
+/// durable head opens it under that configuration: both commit the same
+/// frame (FIG-3684, FIG-4379).
 #[test]
-fn an_unpersisted_initial_frame_opens_under_the_settled_protocol_options() {
+fn an_unpersisted_initial_frame_opens_under_the_installed_plugin_config() {
     let mut fresh = fresh_state_with_initial_frame();
     assert_eq!(
         initial_frame_protocol_turn_options(&fresh),
         crate::ProtocolTurnOptions::default()
     );
-    let settled =
-        crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "channel": "cell" }));
-    fresh.protocol_turn_options = settled.clone();
-    fresh.open_unpersisted_initial_frame_under_settled_protocol_options();
-    assert_eq!(initial_frame_protocol_turn_options(&fresh), settled);
+    let settled = protocol_config(serde_json::json!({ "channel": "cell" }));
+    fresh.authority.plugin_config = settled.clone();
+    fresh.open_unpersisted_initial_frame_under_current_assignment();
+    assert_eq!(
+        initial_frame_protocol_turn_options(&fresh),
+        settled.protocol_turn_options()
+    );
 
     let mut reopened =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
-    reopened.protocol_turn_options = settled;
+    reopened.authority.plugin_config = settled;
     reopened.ensure_agent_frame_initialized();
     assert_eq!(
         initial_frame_payload(&fresh),
@@ -619,10 +627,10 @@ fn an_unpersisted_initial_frame_opens_under_the_settled_protocol_options() {
     );
 }
 
-/// A persisted frame is a historical snapshot: settling options later never
+/// A persisted frame is a historical snapshot: a later configuration never
 /// rewrites it.
 #[test]
-fn a_persisted_initial_frame_keeps_the_options_it_opened_under() {
+fn a_persisted_initial_frame_keeps_the_config_it_opened_under() {
     let mut state = fresh_state_with_initial_frame();
     let opened_under = initial_frame_protocol_turn_options(&state);
     let persisted = state
@@ -632,77 +640,9 @@ fn a_persisted_initial_frame_keeps_the_options_it_opened_under() {
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
     state.mark_node_ids_persisted(persisted);
-    state.protocol_turn_options =
-        crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "channel": "cell" }));
-    state.open_unpersisted_initial_frame_under_settled_protocol_options();
+    state.authority.plugin_config = protocol_config(serde_json::json!({ "channel": "cell" }));
+    state.open_unpersisted_initial_frame_under_current_assignment();
     assert_eq!(initial_frame_protocol_turn_options(&state), opened_under);
-}
-
-/// ADR 0101 §12: the config patch applies only against the revision it was
-/// written for, and every applied patch advances the revision by exactly one
-/// — including one that restates the current value.
-#[test]
-fn a_config_patch_applies_and_advances_the_revision_once() {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
-    assert_eq!(state.config_revision, 0);
-
-    let patch = crate::ApplyConfigPatch {
-        base_config_revision: 0,
-        model: Some(
-            crate::ModelSpec::builder("applied-model")
-                .context_window_tokens(32_000)
-                .build()
-                .expect("model"),
-        ),
-        ..crate::ApplyConfigPatch::default()
-    };
-    patch
-        .apply_to_state(&mut state)
-        .expect("a patch written against the running revision applies");
-    assert_eq!(state.policy.model.id, "applied-model");
-    assert_eq!(state.config_revision, 1);
-
-    let restating = crate::ApplyConfigPatch {
-        base_config_revision: 1,
-        model: Some(state.policy.model.clone()),
-        ..crate::ApplyConfigPatch::default()
-    };
-    restating
-        .apply_to_state(&mut state)
-        .expect("a restating patch still applies");
-    assert_eq!(state.config_revision, 2);
-}
-
-/// A patch written against a revision the session no longer carries is
-/// refused typed and changes nothing.
-#[test]
-fn a_stale_config_patch_is_refused_and_changes_nothing() {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
-    state.config_revision = 3;
-    let model = state.policy.model.clone();
-    let prompt = state.policy.prompt.clone();
-
-    let stale = crate::ApplyConfigPatch {
-        base_config_revision: 1,
-        model: Some(
-            crate::ModelSpec::builder("must-not-apply")
-                .context_window_tokens(32_000)
-                .build()
-                .expect("model"),
-        ),
-        turn_budget: Some(crate::TurnBudget::bounded(7)),
-        ..crate::ApplyConfigPatch::default()
-    };
-    let error = stale
-        .apply_to_state(&mut state)
-        .expect_err("a mismatched base refuses the whole patch");
-    assert_eq!(error, crate::StaleConfigRevision { base: 1, head: 3 });
-    assert_eq!(state.config_revision, 3);
-    assert_eq!(state.policy.model, model);
-    assert_eq!(state.policy.prompt, prompt);
-    assert_eq!(state.policy.turn_budget, crate::TurnBudget::Unbounded);
 }
 
 /// The head config is the revision's durable home: it round-trips through
@@ -998,4 +938,69 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
         Some(&old_frame)
     );
     assert_eq!(state.read_model().messages.len(), 1);
+}
+
+fn capped_plugin_config(cap: u64) -> crate::PluginConfig {
+    let mut config = crate::PluginConfig::default();
+    config.insert("cap_owner", serde_json::json!({ "cap": cap }));
+    config
+}
+
+/// FIG-4379: a root runs under the configuration it was admitted under. A
+/// redrive installs the root's recorded `ResolvedRun` over a head a later
+/// config patch moved on, and the hook input and a process the root starts
+/// both carry the admitted configuration at its admitted revision, not the
+/// head's.
+#[test]
+fn a_redriven_root_runs_under_its_admitted_plugin_config_revision() {
+    use crate::session_state::facade_ops::RuntimeSessionStateFacadeOps as _;
+
+    let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    let mut admitted = crate::PersistedSessionConfig::from(&policy);
+    admitted.plugin_config = capped_plugin_config(12);
+    admitted.config_revision = 4;
+    let resolved = crate::run_spec::RunSpec::default()
+        .resolve(&admitted, None)
+        .expect("resolve the root");
+
+    let mut head = admitted.clone();
+    head.plugin_config = capped_plugin_config(20);
+    head.config_revision = 5;
+    let mut state = RuntimeSessionState::new(policy.clone());
+    adopt_session_config(&mut state, &head);
+    assert_eq!(
+        state.admitted_plugin_config(),
+        crate::AdmittedPluginConfig::new(capped_plugin_config(20), 5),
+        "outside a root the head's configuration is the installed one"
+    );
+
+    adopt_resolved_run(&mut state, &resolved);
+    let expected = crate::AdmittedPluginConfig::new(capped_plugin_config(12), 4);
+    assert_eq!(state.admitted_plugin_config(), expected);
+    assert_eq!(
+        state.process_execution_env_spec(&policy).plugin_config,
+        expected,
+        "a process the root starts captures the root's admitted configuration"
+    );
+}
+
+/// FIG-4379: every frame open captures the installed configuration, so a
+/// fork point carries the configuration its frame ran under.
+#[test]
+fn a_frame_captures_the_installed_plugin_config() {
+    let mut state = fresh_state_with_initial_frame();
+    state.authority.plugin_config = capped_plugin_config(9);
+    state.open_unpersisted_initial_frame_under_current_assignment();
+    let frame = state
+        .session_graph
+        .nodes
+        .first()
+        .expect("the initial frame");
+    assert_eq!(
+        frame
+            .frame_config()
+            .expect("a frame carries its config")
+            .plugin_config,
+        capped_plugin_config(9)
+    );
 }

@@ -159,6 +159,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             node_id: parent_leaf.clone().into(),
             relation: lash_core_execution::SessionRelation::Root,
             policy: policy.clone(),
+            plugin_config: Default::default(),
         })
         .await
         .expect("fork at the parent's live tip");

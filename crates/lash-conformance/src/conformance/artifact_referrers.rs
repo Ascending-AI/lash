@@ -128,7 +128,7 @@ where
     let module_ref = artifact.module_ref().as_str();
     let module_bytes = artifact.to_store_bytes().expect("module bytes");
     let env = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
+        lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     );
     let env_ref = env.stable_ref().expect("env ref");
@@ -244,7 +244,7 @@ where
     let key = artifact.module_ref().as_str();
     let bytes = artifact.to_store_bytes().expect("module bytes");
     let env = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
+        lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     );
     let env_ref = env.stable_ref().expect("env ref");
@@ -413,7 +413,7 @@ where
     let fixture = make();
     let store = &fixture.open.process_env;
     let spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
+        lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             prompt: lash_core::PromptLayer::new().with_contribution(
                 lash_core::PromptContribution::new(

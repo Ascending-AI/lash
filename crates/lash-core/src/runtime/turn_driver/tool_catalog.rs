@@ -251,6 +251,7 @@ impl RuntimeTurnDriver<'_> {
             .plugins()
             .collect_prompt_contributions(PromptHookContext {
                 session_id: self.session_id.clone(),
+                plugin_config: self.session.plugins().admitted_plugin_config(),
                 sessions: self.session_services.state_service(),
                 state: self.turn_pipeline.read_view(
                     session_policy.clone(),

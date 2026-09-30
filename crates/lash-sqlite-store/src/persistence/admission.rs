@@ -295,7 +295,7 @@ pub(crate) async fn open_session_command_run_sqlite(
                         .queued_batches_sqlite
                         .admission_candidates_idle
                         .sql(),
-                    MAX_SESSION_COMMAND_BATCHES_PER_RUN,
+                    SESSION_COMMAND_BATCHES_PER_RUN,
                 )?;
                 let run = select_leading_session_command(&candidates);
                 batches.truncate(run);

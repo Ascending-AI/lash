@@ -168,6 +168,7 @@ fn build_turn_ctx(
         traces: traces.emitter(),
         scoped_effect_controller: test_turn_controller(),
         direct_completions: unavailable_direct_completions(),
+        plugin_config: Default::default(),
     }
 }
 
@@ -187,6 +188,7 @@ fn build_pressure_ctx(
         scoped_effect_controller: test_turn_controller(),
         direct_completions,
         system_prompt: None,
+        plugin_config: Default::default(),
     }
 }
 
@@ -208,6 +210,7 @@ fn build_compaction_ctx(
         .expect("test scoped effect controller"),
         direct_completions,
         system_prompt: None,
+        plugin_config: Default::default(),
     }
 }
 
@@ -866,6 +869,7 @@ fn recovery_ctx(
         .expect("test scoped effect controller"),
         direct_completions: RecordingLlmCompletions::client(direct),
         system_prompt: None,
+        plugin_config: Default::default(),
     }
 }
 
@@ -979,6 +983,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
             lash_core::facade_support::TurnStop::ContextOverflow,
         )),
         sessions: sessions.clone(),
+        plugin_config: Default::default(),
     };
     let directives = overflow_recovery_after_turn(&overflow)
         .await
@@ -1006,6 +1011,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
             lash_core::facade_support::TurnStop::ProviderError,
         )),
         sessions,
+        plugin_config: Default::default(),
     };
     assert!(
         overflow_recovery_after_turn(&provider_error)
@@ -1025,6 +1031,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
             initial_nodes: Vec::new(),
         }),
         sessions: Arc::new(MockSessionManager::default()),
+        plugin_config: Default::default(),
     };
     assert!(
         overflow_recovery_after_turn(&guided)

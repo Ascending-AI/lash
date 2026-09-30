@@ -41,7 +41,6 @@ fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> TurnLaneCandidate {
     TurnLaneCandidate {
         batch_id: format!("qwb-{enqueue_seq}").into(),
         enqueue_seq,
-        config_patch_command: false,
         delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
         kind: QueuedWorkKind::Turn,
         authority: QueuedWorkAuthority::new("principal"),
@@ -130,7 +129,6 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = TurnLaneCandidate> {
                 TurnLaneCandidate {
                     batch_id: format!("qwb-{enqueue_seq}").into(),
                     enqueue_seq,
-                    config_patch_command: false,
                     delivery_policy,
                     kind,
                     authority,
@@ -584,19 +582,14 @@ fn leading_session_command_blocks_turn_work_admission() {
 }
 
 #[test]
-fn adjacent_config_commands_share_one_admission_but_not_other_commands() {
+fn every_session_command_is_admitted_alone() {
     let mut first = candidate(1, None);
     first.kind = QueuedWorkKind::Control;
-    first.config_patch_command = true;
     let mut second = first.clone();
     second.batch_id = "qwb-2".into();
     second.enqueue_seq = 2;
-    let mut refresh = second.clone();
-    refresh.batch_id = "qwb-3".into();
-    refresh.enqueue_seq = 3;
-    refresh.config_patch_command = false;
 
-    assert_eq!(select_leading_session_command(&[first, second, refresh]), 2);
+    assert_eq!(select_leading_session_command(&[first, second]), 1);
 }
 
 #[test]

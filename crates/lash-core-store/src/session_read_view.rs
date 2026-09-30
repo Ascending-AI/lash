@@ -206,6 +206,10 @@ pub struct SessionReadMeta {
     turn_index: usize,
     token_usage: crate::TokenUsage,
     last_prompt_usage: Option<crate::TokenUsage>,
+    /// The session's recorded plugin configuration, projected onto snapshots.
+    plugin_config: crate::PluginConfig,
+    /// The protocol turn options this view runs under: the config's
+    /// protocol namespace, with a turn's overrides when it states some.
     protocol_turn_options: crate::ProtocolTurnOptions,
 }
 impl SessionReadMeta {
@@ -217,7 +221,8 @@ impl SessionReadMeta {
             turn_index: snapshot.turn_index,
             token_usage: snapshot.token_usage.clone(),
             last_prompt_usage: snapshot.last_prompt_usage.clone(),
-            protocol_turn_options: snapshot.protocol_turn_options.clone(),
+            plugin_config: snapshot.plugin_config.clone(),
+            protocol_turn_options: snapshot.plugin_config.protocol_turn_options(),
         }
     }
 
@@ -229,7 +234,8 @@ impl SessionReadMeta {
             turn_index: state.turn_index,
             token_usage: state.token_usage.clone(),
             last_prompt_usage: state.last_prompt_usage.clone(),
-            protocol_turn_options: state.protocol_turn_options.clone(),
+            plugin_config: state.authority.plugin_config.clone(),
+            protocol_turn_options: state.effective_protocol_turn_options(),
         }
     }
 
@@ -285,7 +291,7 @@ impl SessionReadMeta {
             turn_index: self.turn_index,
             token_usage: self.token_usage.clone(),
             last_prompt_usage: self.last_prompt_usage.clone(),
-            protocol_turn_options: self.protocol_turn_options.clone(),
+            plugin_config: self.plugin_config.clone(),
             tool_state_ref: None,
             tool_state_generation: None,
             plugin_state_ref: None,

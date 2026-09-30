@@ -82,11 +82,8 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
         lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)])
             .build_session(PluginSessionRequest::creation(
                 session_id,
-                lash_core::plugin::SessionCreationConfig {
-                    authority: lash_core::plugin::SessionAuthorityContext {
-                        tool_access,
-                        ..Default::default()
-                    },
+                lash_core::plugin::SessionAuthorityContext {
+                    tool_access,
                     ..Default::default()
                 },
             ))

@@ -35,11 +35,13 @@ pub use lash_core_llm::llm;
 pub(crate) use lash_core_llm::model;
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
+pub use lash_core_store::config_transaction::{
+    CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigRefusal, ConfigResolution, ConfigResolutionResult,
+    ConfigTransactionOutcome, ConfigTransactionRecord, CoreConfig,
+};
 pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_referrers;
-pub use lash_core_store::protocol_turn_options::{
-    PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, ProtocolTurnOptions, ProtocolTurnOptionsError,
-};
+pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 pub use lash_core_store::surface_format;
 pub(crate) use model_clamp::ModelGenerationClamp;
 /// The session drive (FIG-3600): admission as recorded steps, then the
@@ -226,10 +228,8 @@ pub mod facade_support {
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PluginTraceEmitter;
     pub use crate::plugin::PromptHookContext;
-    pub use crate::plugin::RecordedSessionConfig;
     pub use crate::plugin::ReplaceToolArgsDirective;
     pub use crate::plugin::SessionConfigChangedContext;
-    pub use crate::plugin::SessionCreationConfig;
     pub use crate::plugin::SessionHandle;
     pub use crate::plugin::SessionLifecycleService;
     pub use crate::plugin::SessionObserverIntent;
@@ -316,7 +316,6 @@ pub mod facade_support {
     pub use crate::runtime::RuntimeSleepOptions;
     pub use crate::runtime::SessionCommand;
     pub use crate::runtime::SessionCommandReceipt;
-    pub use crate::runtime::SessionConfigPatch;
     pub use crate::runtime::SessionObservation;
     pub use crate::runtime::SessionObservationSubscription;
     pub use crate::runtime::SessionResume;
@@ -482,6 +481,9 @@ pub mod facade_support {
     pub use lash_trace::TraceSink;
     pub use lash_trace::TraceSinkError;
     pub use lash_trace::parse_jsonl_records;
+    /// The schemars crate first-party config owners derive their schemas
+    /// through (`#[schemars(crate = "lash_core::facade_support::schemars")]`).
+    pub use schemars;
     pub use schemars::JsonSchema;
 
     pub fn wake_delivery_driver_with_work_cadence(
@@ -634,6 +636,13 @@ pub use lash_trace::{
 pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
 pub(crate) use plugin::PluginRuntimeDirective;
+pub use plugin::{
+    AdmittedPluginConfig, CORE_CONFIG_IMPLEMENTATION, CandidateFacts, ConfigCommand,
+    ConfigCommandCatalog, ConfigCommandDescriptor, ConfigImplementationMismatch, ConfigOwner,
+    ConfigRegistrar, ConfigRegistrationError, ConfigRegistry, ConfigSubmitError, ConfigTransaction,
+    ConfigWire, CoreConfigOwner, CoreConfigRefusal, CreationFacts, OwnerChange, PluginConfig,
+    UnknownPluginConfigOwner,
+};
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
     AppendSessionNodesRequest, FrameNodeId, FrameNodeIdError, KeyRejection, PluginError,
@@ -790,9 +799,8 @@ pub(crate) use session::RuntimeExecutionProcessEventContext;
 pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
 pub use session::{
-    ExecRequest, PluginOptionsUnaccepted, RuntimeExecutionContext, SessionConfigRefusal,
-    SessionError, ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind,
-    resolve_trigger_owner_scope, tool_dispatch_surface,
+    ExecRequest, RuntimeExecutionContext, SessionConfigRefusal, SessionError, ToolDispatchSurface,
+    ToolSurfaceDrift, ToolSurfaceDriftKind, resolve_trigger_owner_scope, tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

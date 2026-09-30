@@ -248,13 +248,13 @@ pub(super) async fn run_once_process_list_stress(
                 let phase_before_alloc = allocator_stats();
                 let phase_before_memory = process_memory_sample();
                 for hash_index in 0..ENV_HASHES_PER_TURN {
-                    let mut options = lash_core::PluginOptions::default();
-                    options.plugins.insert(
-                        "stress".to_string(),
+                    let mut config = lash_core::PluginConfig::default();
+                    config.insert(
+                        "stress",
                         serde_json::json!({ "turn": turn_index, "n": hash_index }),
                     );
                     let spec = lash_core::ProcessExecutionEnvSpec::new(
-                        options,
+                        lash_core::AdmittedPluginConfig::new(config, 0),
                         lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     );
                     let env_ref = spec

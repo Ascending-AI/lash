@@ -425,6 +425,7 @@ pub async fn finalize_tool_result_with_execution_context(
         .plugins
         .after_tool_call(ToolResultHookContext::new(
             context.owner.runtime_owner(),
+            context.plugins.admitted_plugin_config(),
             call_id.clone(),
             tool_name.to_string(),
             args.clone(),

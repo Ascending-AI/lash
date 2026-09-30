@@ -737,7 +737,6 @@ fn authority_fingerprint(state: &super::RuntimeSessionState) -> Vec<u8> {
         state.turn_index,
         &state.token_usage,
         &state.last_prompt_usage,
-        &state.protocol_turn_options,
         &state.authority,
         &state.checkpoint_components,
         &state.checkpoint_ref,
@@ -766,8 +765,7 @@ mod tests {
             frame_node_id.clone(),
             frame_key,
             crate::AgentFrameReason::new("observation-test"),
-            crate::AgentFrameAssignment::from_policy(state.policy.clone()),
-            state.protocol_turn_options.clone(),
+            crate::AgentFrameAssignment::unconfigured(state.policy.clone()),
             <crate::SystemClock as crate::ClockWallTime>::timestamp_rfc3339(&crate::SystemClock,),
         ));
         state.refresh_current_frame_projection();

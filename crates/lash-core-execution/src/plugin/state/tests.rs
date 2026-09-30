@@ -41,14 +41,19 @@ fn materialization_preserves_recorded_config_and_creation_kind() {
         ))
         .unwrap();
     let snapshot = created.export_state();
-    let options = crate::ProtocolTurnOptions::from_payload(serde_json::json!({"recorded": 7}));
+    let mut recorded = crate::plugin::PluginConfig::default();
+    recorded.insert("context-probe", serde_json::json!({"recorded": 7}));
+    let recorded = crate::plugin::AdmittedPluginConfig::new(recorded, 3);
     let restored = host
         .build_session(PluginSessionRequest {
             parent_session_id: Some("parent".into()),
             ..PluginSessionRequest::rematerialization(
                 "restored",
                 &snapshot,
-                RecordedSessionConfig::new(options.clone()),
+                SessionAuthorityContext {
+                    plugin_config: recorded.clone(),
+                    ..Default::default()
+                },
             )
         })
         .unwrap();
@@ -57,13 +62,16 @@ fn materialization_preserves_recorded_config_and_creation_kind() {
         contexts[0].materialization,
         PluginSessionMaterialization::Creation
     );
-    assert!(contexts[0].protocol_turn_options.is_empty());
+    assert_eq!(
+        contexts[0].plugin_config,
+        crate::plugin::AdmittedPluginConfig::default()
+    );
     assert!(contexts[0].is_root_session());
     assert_eq!(
         contexts[1].materialization,
         PluginSessionMaterialization::Rematerialization
     );
-    assert_eq!(contexts[1].protocol_turn_options, options);
+    assert_eq!(contexts[1].plugin_config, recorded);
     assert_eq!(contexts[1].parent_session_id, Some("parent".into()));
     assert!(!restored.forked_plugins());
     restored.require_hydrated_state(&snapshot).unwrap();
@@ -90,7 +98,7 @@ fn materialization_uses_spawn_capture_after_parent_changes_and_unregisters() {
             ..PluginSessionRequest::rematerialization(
                 "parent",
                 &durable,
-                RecordedSessionConfig::new(Default::default()),
+                SessionAuthorityContext::default(),
             )
         })
         .unwrap();
@@ -111,7 +119,7 @@ fn materialization_uses_spawn_capture_after_parent_changes_and_unregisters() {
             tool_catalog_overlay: init.tool_catalog_overlay.clone(),
             tool_snapshot: Some(init.tool_state.clone()),
             materialization: PluginSessionMaterializationRequest::Creation {
-                config: SessionCreationConfig::default(),
+                config: SessionAuthorityContext::default(),
                 seed_snapshot: Some(&init.plugin_state),
             },
             owner: crate::RuntimeOwner::Session("child".into()),
@@ -306,7 +314,7 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
         .build_session(PluginSessionRequest::rematerialization(
             "parent",
             &durable,
-            crate::plugin::RecordedSessionConfig::new(Default::default()),
+            crate::plugin::SessionAuthorityContext::default(),
         ))
         .unwrap();
     let child = parent
@@ -393,7 +401,7 @@ fn readiness_runs_after_hydration_and_its_writes_survive() {
         .build_session(PluginSessionRequest::rematerialization(
             "rebuilt",
             &state,
-            crate::plugin::RecordedSessionConfig::new(Default::default()),
+            crate::plugin::SessionAuthorityContext::default(),
         ))
         .unwrap();
     assert_eq!(

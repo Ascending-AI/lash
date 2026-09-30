@@ -509,7 +509,7 @@ async fn publish_process(engine: &Engine) -> lash_core::ProcessStartRequest {
 /// The environment every process of this file runs in.
 fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
+        lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             model: model_spec(),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)

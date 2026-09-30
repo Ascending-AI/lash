@@ -290,7 +290,7 @@ pub(crate) async fn open_session_command_run_postgres(
             .queued_batches_postgres
             .admission_candidates_idle
             .sql(),
-        MAX_SESSION_COMMAND_BATCHES_PER_RUN,
+        SESSION_COMMAND_BATCHES_PER_RUN,
     )
     .await?;
     batches.truncate(select_leading_session_command(&candidates));

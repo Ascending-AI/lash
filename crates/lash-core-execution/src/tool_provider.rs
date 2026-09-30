@@ -865,7 +865,7 @@ impl<'run> ToolContext<'run> {
             completion: ToolCompletionState::default(),
             parent_invocation: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::PluginOptions::default(),
+                crate::AdmittedPluginConfig::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             child_execution_trace_hook: None,

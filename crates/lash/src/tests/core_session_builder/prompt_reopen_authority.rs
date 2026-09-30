@@ -18,7 +18,8 @@ const LEGACY_PROMPTLESS_HEAD_JSON: &str = r#"{
     },
     "turn_budget": "unbounded",
     "tool_access": { "mode": "ambient" },
-    "config_revision": 0
+    "config_revision": 0,
+    "plugin_config": {}
   }
 }"#;
 
@@ -321,7 +322,7 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_on_s
 }
 
 /// FIG-4099, FIG-4112: a reopen, which cannot state a prompt, writes
-/// nothing; the prompt changes through `update(SessionConfigPatch)`, which
+/// nothing; the prompt changes through a `SetPrompt` config transaction, which
 /// recommits it.
 #[tokio::test]
 async fn a_reopen_writes_nothing_and_update_recommits_the_prompt_on_sqlite_memory() -> Result<()> {
@@ -383,7 +384,11 @@ async fn a_reopen_writes_nothing_and_update_recommits_the_prompt_on_sqlite_memor
     session
         .admin()
         .config()
-        .update(crate::SessionConfigPatch::with_prompt(new.clone()))
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::SetPrompt {
+                prompt: new.clone(),
+            },
+        ))
         .await?;
     session
         .send(TurnInput::text("probe again"))
@@ -634,7 +639,11 @@ async fn a_reopen_writes_nothing_and_update_recommits_the_prompt_sqlite() -> Res
     session
         .admin()
         .config()
-        .update(crate::SessionConfigPatch::with_prompt(new.clone()))
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::SetPrompt {
+                prompt: new.clone(),
+            },
+        ))
         .await?;
     drop(session);
     let committed = store

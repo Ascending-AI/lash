@@ -14,20 +14,20 @@ pub(crate) use lash_core::{
 };
 pub(crate) use tokio_util::sync::CancellationToken;
 
+pub(crate) use lash_core::PromptLayer;
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
 pub(crate) use lash_core::{
     DeploymentStore, LlmCallRecord, LocalTurnStop, Message, PluginMessage, PluginOptions,
     ProcessRegistry, ProtocolTurnOptions, RuntimeErrorCode, SessionCursor, SessionError,
-    SessionReadView, SessionScope, SessionSnapshot, SessionToolAccess, ToolCallRecord,
-    ToolManifest, ToolProvider, ToolState, facade_support::PluginFactory,
-    facade_support::ProviderHandle, facade_support::SessionObservation,
-    facade_support::SessionObservationSubscription, facade_support::SessionResume,
-    facade_support::TerminationPolicy, facade_support::ToolRestoreReport,
-    facade_support::ToolSourceHandle, facade_support::TurnActivitySink,
-    facade_support::TurnExecutionMetrics, facade_support::TurnOutcome,
+    SessionReadView, SessionScope, SessionSnapshot, ToolCallRecord, ToolManifest, ToolProvider,
+    ToolState, facade_support::PluginFactory, facade_support::ProviderHandle,
+    facade_support::SessionObservation, facade_support::SessionObservationSubscription,
+    facade_support::SessionResume, facade_support::TerminationPolicy,
+    facade_support::ToolRestoreReport, facade_support::ToolSourceHandle,
+    facade_support::TurnActivitySink, facade_support::TurnExecutionMetrics,
+    facade_support::TurnOutcome,
 };
 pub(crate) use lash_core::{InputItem, TokenUsage};
-pub(crate) use lash_core::{PromptContribution, PromptLayer, PromptSlot, PromptTemplate};
 pub(crate) use lash_core::{TurnActivity, TurnInput};
 #[cfg(test)]
 pub(crate) use lash_core::{TurnActivityId, TurnEvent};

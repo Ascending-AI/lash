@@ -160,7 +160,8 @@ pub struct RunOverrides {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<GenerationOptions>,
     /// Protocol-owned turn options (RLM finish policy and schema included),
-    /// merged over the snapshot's options key by key.
+    /// merged key by key over the protocol namespace of the snapshot's plugin
+    /// configuration. A snapshot that records no protocol plugin refuses them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_turn_options: Option<ProtocolTurnOptions>,
 }
@@ -204,7 +205,7 @@ impl RunOverrides {
     }
 
     /// Apply these overrides to `config`, the root's snapshot.
-    fn apply(&self, config: &mut PersistedSessionConfig) {
+    fn apply(&self, config: &mut PersistedSessionConfig) -> Result<(), serde_json::Error> {
         if let Some(prompt) = &self.prompt {
             let mut stacked = config.prompt.clone().unwrap_or_default();
             stack_prompt_layer(&mut stacked, prompt);
@@ -220,11 +221,14 @@ impl RunOverrides {
             config.generation = generation.clone();
         }
         if let Some(options) = &self.protocol_turn_options {
-            config.protocol_turn_options = Some(match &config.protocol_turn_options {
-                Some(base) => base.merged_with(options),
-                None => options.clone(),
-            });
+            if config.plugin_config.protocol_plugin_id().is_none() {
+                return Err(<serde_json::Error as serde::de::Error>::custom(
+                    "run overrides state protocol turn options, but the session records no protocol plugin",
+                ));
+            }
+            config.plugin_config.override_protocol_turn_options(options);
         }
+        Ok(())
     }
 }
 
@@ -352,7 +356,7 @@ impl RunSpec {
         let overrides = (*self.overrides)
             .clone()
             .over(definition.unwrap_or_default());
-        overrides.apply(&mut config);
+        overrides.apply(&mut config)?;
         Ok(ResolvedRun {
             spec: self.hash()?,
             resolved: (config != *snapshot).then(|| Box::new(config)),

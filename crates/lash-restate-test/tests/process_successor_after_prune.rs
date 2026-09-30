@@ -159,7 +159,7 @@ impl lash::plugins::SessionPlugin for EngineSessionPlugin {
 
 fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
+        lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             model: lash_core::ModelSpec::builder("mock-model")
                 .context_window_tokens(200_000)

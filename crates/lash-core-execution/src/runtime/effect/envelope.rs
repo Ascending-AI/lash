@@ -481,6 +481,17 @@ pub enum RuntimeEffectCommand {
     RecordCompactionBase {
         session: crate::SessionId,
     },
+    /// Resolve a config transaction once, before anything publishes
+    /// (FIG-4379): the base revision it resolved against and either the
+    /// complete replacements with each command's output, a stale base, or a
+    /// typed refusal. Keyed by the transaction's command, so a redrive
+    /// publishes the recorded resolution and never runs a reducer again. The
+    /// envelope names only the session and the transaction id: the
+    /// resolution is the step's outcome.
+    ResolveConfigTransaction {
+        session: crate::SessionId,
+        transaction: String,
+    },
     /// Read the session's leading open command run for a command root to
     /// apply (ADR 0101 §4, FIG-4201), acknowledging its obligations
     /// delivered under the root's fence. Keyed by the read's ordinal in the
@@ -613,6 +624,7 @@ impl RuntimeEffectCommand {
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
+            Self::ResolveConfigTransaction { .. } => RuntimeEffectKind::ResolveConfigTransaction,
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
             Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
             Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,
@@ -1254,6 +1266,10 @@ pub enum RuntimeEffectOutcome {
     RecordCompactionBase {
         base: Box<CompactionBase>,
     },
+    /// A config transaction's recorded resolution.
+    ResolveConfigTransaction {
+        resolution: Box<crate::ConfigResolution>,
+    },
     /// The command run a command root read: the leading open batches, in
     /// `enqueue_seq` order, empty when the lane was.
     ReadSessionCommandRun {
@@ -1750,6 +1766,7 @@ impl RuntimeEffectOutcome {
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
+            Self::ResolveConfigTransaction { .. } => RuntimeEffectKind::ResolveConfigTransaction,
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
             Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
             Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,

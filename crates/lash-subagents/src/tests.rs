@@ -1129,7 +1129,6 @@ async fn run_seed_probe_inner(
         RuntimeSessionState {
             session_id: SessionId::from("root"),
             policy,
-            protocol_turn_options: lash_core::ProtocolTurnOptions::default(),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
             ))
@@ -1335,8 +1334,7 @@ async fn subagents_plugin_builds_without_mode_context() {
         tool_access: lash_core::SessionToolAccess::default(),
         subagent: None,
         extensions: Default::default(),
-        plugin_options: Default::default(),
-        protocol_turn_options: Default::default(),
+        plugin_config: Default::default(),
         materialization: lash_core::plugin::PluginSessionMaterialization::Creation,
         parent_session_id: None,
     };

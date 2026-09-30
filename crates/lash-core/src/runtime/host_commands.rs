@@ -51,7 +51,7 @@ pub(super) enum HostPluginOperation {
 }
 
 /// How a host command's settling commit ended.
-enum CommandCommit {
+pub(super) enum CommandCommit {
     /// The commit landed, or met the receipt of its first landing: the
     /// command is settled.
     Landed,
@@ -70,7 +70,7 @@ enum CommandCommit {
 /// The frame a command's commit opens: the frame it leaves and the scope of
 /// the command's own execution, which gates the ended frame's cleanup
 /// (ADR 0113 §3.1).
-struct CommandFrameSwitch {
+pub(super) struct CommandFrameSwitch {
     ended: Option<crate::FrameNodeId>,
     committing: crate::ExecutionScope,
 }
@@ -473,7 +473,7 @@ impl LashRuntime {
     ///
     /// A commit over the session's commit budget settles the command failed
     /// with the budget refusal instead, over the durable head.
-    async fn commit_host_command(
+    pub(super) async fn commit_host_command(
         &mut self,
         completion: &crate::QueuedWorkCompletion,
         drive_fence: &crate::store::DriveFence,

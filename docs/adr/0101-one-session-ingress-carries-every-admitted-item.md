@@ -271,18 +271,20 @@ Evidence: `crates/lash-core/src/runtime/logical_turn.rs:66`, and
 
 ### 12. Commands are replay-safe by compare-and-set
 
-`ApplyConfigPatch::base_config_revision` must equal the config's running
-revision. Each accepted patch advances `config_revision` by one; other commits
-preserve it. Coalesced patches check the running revision in sequence order.
-A stale patch changes no config and settles with the typed
-`StaleConfigRevision { base, head }` outcome for its submitter. Command
-tombstones follow ordinary vacuum; replay after vacuum meets the revision check
-and cannot reapply the patch. There is no separate session-command completion
-marker. `RefreshToolCatalog` recomputes live sources.
+A config transaction (ADR 0126) is written against the config revision its
+submitter read. Each session command is admitted alone. An applied
+transaction advances `config_revision` by one; other commits preserve it. A
+transaction whose expected revision the config has moved past publishes no
+config and settles with the typed `Stale { expected, actual }` outcome for its
+submitter. Its resolution is recorded before publication, so a redrive
+replays it. Command tombstones follow ordinary vacuum; replay after vacuum
+meets the revision check and cannot reapply the transaction. There is no
+separate session-command completion marker. `RefreshToolCatalog` recomputes
+live sources.
 
-Evidence: `crates/lash-core-store/src/session_policy.rs:125`,
-`crates/lash-core-store/src/session_state.rs:1446`, and
-`crates/lash-core-store/src/session_state/tests.rs:642`.
+Evidence: `crates/lash-core-store/src/config_transaction.rs`,
+`crates/lash-core/src/runtime/config_transaction.rs` and
+`crates/lash-core-store/src/store/queued_work.rs`.
 
 ### 13. Confirmations, stated as laws
 

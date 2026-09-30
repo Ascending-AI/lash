@@ -33,7 +33,7 @@ mod tests {
     }
     fn spec(turns: usize) -> ProcessExecutionEnvSpec {
         ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::bounded(turns)),
         )
     }

@@ -7,7 +7,7 @@ use super::turn_control::ActiveTurnControl;
 use super::*;
 use crate::SessionId;
 use crate::TurnId;
-use crate::facade_support::{ProtocolTurnOptionsFacadeOps, RuntimeSessionStateFacadeOps};
+use crate::facade_support::RuntimeSessionStateFacadeOps;
 use context_pressure::ContextPressureStep;
 use lash_sansio::core_support::*;
 

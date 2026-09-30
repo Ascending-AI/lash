@@ -37,3 +37,5 @@ mod tool_child_source;
 mod reopen_generation;
 
 mod typed_errors;
+
+mod recorded_plugin_config;

@@ -444,8 +444,9 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
     // `typescript` is two bytes longer than the retired `lashlang`. Snapshot
     // v23 (FIG-3605) adds the durable heap header, with the heap's counters,
     // to the root and writes the changed binding as a durable fragment instead
-    // of a one-binding snapshot.
-    assert_eq!(changed_bytes, 118_060);
+    // of a one-binding snapshot. FIG-4379 drops the 48 bytes of the turn
+    // state's protocol turn options: the head's plugin config is their record.
+    assert_eq!(changed_bytes, 118_012);
     assert_eq!(initial_leaves, 50);
     assert_eq!(changed_bodies, 1);
 }

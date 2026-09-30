@@ -17,7 +17,7 @@ use super::{
     PromptContributor, SessionConfigMutator, SessionToolAccess, SubagentSessionContext,
     ToolCatalogContributor, ToolPresentationStep, TurnContextTransform,
 };
-use crate::{PluginOptions, ToolProvider};
+use crate::ToolProvider;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PluginExtensionContribution {
@@ -412,11 +412,14 @@ pub struct PluginSessionContext {
     pub owner: crate::RuntimeOwner,
     pub tool_access: SessionToolAccess,
     pub subagent: Option<SubagentSessionContext>,
-    pub plugin_options: PluginOptions,
-    /// Protocol-owned options loaded from durable session state, when any.
-    pub protocol_turn_options: crate::ProtocolTurnOptions,
+    /// The session's recorded plugin configuration at this build (FIG-4379):
+    /// what it was created with or last patched to, or a process's captured
+    /// configuration. It is the value at build time only: a hook reads the
+    /// configuration its root was admitted under from its own context, so a
+    /// hook closure must not keep a copy of this.
+    pub plugin_config: super::AdmittedPluginConfig,
     /// Whether factories are constructing a new session or rebuilding one
-    /// whose plugin snapshot and protocol options were already recorded.
+    /// whose plugin snapshot and configuration were already recorded.
     pub materialization: PluginSessionMaterialization,
     pub extensions: PluginExtensions,
     /// Session id of the caller that created this one. `None` identifies
@@ -533,6 +536,23 @@ pub trait PluginFactory: Send + Sync {
 
     fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
         Vec::new()
+    }
+
+    /// Register this plugin's recorded config namespace and the typed
+    /// commands that change it (FIG-4379), before any session exists.
+    ///
+    /// The owner creates the namespace at every session's creation — from
+    /// the creator's input, its defaults and a child's parent — and
+    /// validates every candidate; each command is one change the namespace
+    /// admits, and a setting no command changes is immutable. Every open
+    /// delivers the recorded namespace unchanged, in
+    /// [`PluginSessionContext::plugin_config`] and in each scoped hook's
+    /// context. The default registers nothing: the plugin records no config.
+    fn register_config(
+        &self,
+        _reg: &mut super::ConfigRegistrar,
+    ) -> Result<(), super::ConfigRegistrationError> {
+        Ok(())
     }
 
     /// The [`Backend::binding_identity`](crate::Backend::binding_identity) of

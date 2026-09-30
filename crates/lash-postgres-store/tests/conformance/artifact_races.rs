@@ -42,8 +42,7 @@ fn append_successor_frame(
         successor.clone(),
         key,
         lash_core_execution::AgentFrameReason::initial(),
-        lash_core_execution::AgentFrameAssignment::from_policy(state.policy.clone()),
-        state.protocol_turn_options.clone(),
+        lash_core_execution::AgentFrameAssignment::unconfigured(state.policy.clone()),
         "2026-09-29T00:00:00Z".into(),
     ));
     state.current_frame_node_id = Some(successor.clone());

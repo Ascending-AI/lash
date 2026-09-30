@@ -1418,10 +1418,9 @@ pub(super) fn sample_session_node(
             SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: AgentFrameReason::initial(),
-                assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                 )),
-                protocol_turn_options: ProtocolTurnOptions::default(),
             }
         } else {
             SessionNodePayload::Event {

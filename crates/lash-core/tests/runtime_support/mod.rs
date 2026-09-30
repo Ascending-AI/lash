@@ -76,44 +76,68 @@ pub(crate) async fn kernel_double(
         .expect("build the Restate server double")
 }
 
-pub(crate) async fn settle_pending_session_command(
+/// Apply `transaction` to a store-backed `runtime`'s config as the drive does
+/// (FIG-4379): submit it under `request`, written against the runtime's
+/// current config revision, run the runtime's own next drive on `double`,
+/// which applies it once no root owns the head, and answer how it settled.
+pub(crate) async fn apply_config(
     runtime: &mut lash_core::runtime::LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
-    result: Result<(), lash_core::SessionError>,
+    transaction: lash_core::ConfigTransaction,
+    request: &str,
+) -> lash_core::ConfigTransactionOutcome {
+    let revision = runtime.config_revision();
+    let receipt = runtime
+        .submit_config_transaction(request, revision, &transaction)
+        .await
+        .expect("submit the config transaction");
+    match Box::pin(drive_submitted_command(runtime, double, receipt, request)).await {
+        lash_core::runtime::SessionCommandOutcome::ConfigTransaction { outcome } => outcome,
+        other => panic!("a config transaction settles with its own outcome: {other:?}"),
+    }
+}
+
+/// [`apply_config`], which must apply the transaction.
+pub(crate) async fn configure(
+    runtime: &mut lash_core::runtime::LashRuntime,
+    double: &lash_restate_test::RestateTestBackend,
+    transaction: lash_core::ConfigTransaction,
     request: &str,
 ) {
-    use lash_core::testing::TestTurnDrive as _;
+    let outcome = Box::pin(apply_config(runtime, double, transaction, request)).await;
+    assert!(
+        matches!(outcome, lash_core::ConfigTransactionOutcome::Applied { .. }),
+        "the config transaction must apply: {outcome:?}"
+    );
+}
 
-    let receipt = match result {
-        Ok(()) => return,
-        Err(lash_core::SessionError::SessionCommandPending(receipt)) => receipt,
-        Err(error) => panic!("session command was refused before drive: {error}"),
-    };
-    let handler = double
-        .open_handler(lash_core::AdmittedScope::queue_drain(
-            lash_core::SessionId::from(runtime.session_id()),
-            request,
-        ))
-        .await
-        .expect("open session command drive handler");
+/// Apply `transaction` to a storeless `runtime`'s config, written against
+/// its current config revision, and answer how it settled.
+pub(crate) async fn apply_storeless_config(
+    runtime: &mut lash_core::runtime::LashRuntime,
+    transaction: lash_core::ConfigTransaction,
+) -> lash_core::ConfigTransactionOutcome {
+    let revision = runtime.config_revision();
     runtime
-        .drive_next_root(
-            request,
-            lash_core::facade_support::TurnOptions::new(
-                tokio_util::sync::CancellationToken::new(),
-                handler.scoped(),
-            ),
+        .apply_storeless_config_transaction(
+            format!("config:{}", uuid::Uuid::new_v4()),
+            revision,
+            &transaction,
         )
         .await
-        .expect("engine drives accepted session command");
-    handler.close().await.expect("close session command drive");
-    assert!(matches!(
-        runtime
-            .settle_session_command(receipt)
-            .await
-            .expect("read settled session command"),
-        lash_core::runtime::SessionCommandSettlement::Durable(_)
-    ));
+        .expect("a storeless runtime applies the config transaction")
+}
+
+/// [`apply_storeless_config`], which must apply the transaction.
+pub(crate) async fn configure_storeless(
+    runtime: &mut lash_core::runtime::LashRuntime,
+    transaction: lash_core::ConfigTransaction,
+) {
+    let outcome = Box::pin(apply_storeless_config(runtime, transaction)).await;
+    assert!(
+        matches!(outcome, lash_core::ConfigTransactionOutcome::Applied { .. }),
+        "the config transaction must apply: {outcome:?}"
+    );
 }
 
 /// Apply a host head write as the session's drive does (FIG-4202): submit
@@ -132,6 +156,19 @@ pub(crate) async fn apply_host_command(
         .submit_session_command(command, request)
         .await
         .expect("submit the host command");
+    Box::pin(drive_submitted_command(runtime, double, receipt, request)).await
+}
+
+/// Run `runtime`'s own next drive on `double`, which applies the command
+/// `receipt` names at the turn boundary, and answer its typed outcome.
+async fn drive_submitted_command(
+    runtime: &mut lash_core::runtime::LashRuntime,
+    double: &lash_restate_test::RestateTestBackend,
+    receipt: lash_core::runtime::SessionCommandReceipt,
+    request: &str,
+) -> lash_core::runtime::SessionCommandOutcome {
+    use lash_core::testing::TestTurnDrive as _;
+
     let handler = double
         .open_handler(lash_core::AdmittedScope::queue_drain(
             lash_core::SessionId::from(runtime.session_id()),

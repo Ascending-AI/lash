@@ -26,7 +26,8 @@ pub mod commit_admission;
 mod commit_admission;
 pub use commit_admission::run_head_advancing_commit_attempt;
 mod config_ops;
-pub use config_ops::{ApplyConfigPatch, SessionConfigPatch};
+mod config_transaction;
+pub use config_transaction::ConfigTransactionSubmitError;
 pub use effect::await_event_identity;
 #[cfg(feature = "testing")]
 pub use lash_core_execution::runtime::effect;
@@ -505,9 +506,6 @@ pub struct LashRuntime {
     /// last commit ran under. Its reload and invalidation rules are methods on
     /// [`ResidentSessionContinuity`].
     pub resident_session: ResidentSessionContinuity,
-    /// Materialization resolved protocol facts that must be durable before queued work may
-    /// reconstruct this session in another runtime.
-    pub materialized_protocol_config_dirty: bool,
     /// The report from the most recent persisted-tool-state install on this
     /// runtime — the open that built it, or the latest host restore, persisted
     /// state install or resident re-sync. This is how the report reaches a

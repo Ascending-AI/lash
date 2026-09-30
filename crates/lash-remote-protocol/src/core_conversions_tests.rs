@@ -685,11 +685,15 @@ fn process_start_requests_round_trip_core_values() {
     )
     .with_env_ref(
         (lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::typed(
-                "snapshot-tools",
-                serde_json::json!({ "snapshot_ref": "tool-authority:sha256:abc" }),
-            )
-            .expect("plugin options"),
+            {
+                let mut config =
+                    lash_core::PluginConfig::for_protocol(Some("protocol".to_string()));
+                config.insert(
+                    "snapshot-tools",
+                    serde_json::json!({ "snapshot_ref": "tool-authority:sha256:abc" }),
+                );
+                lash_core::AdmittedPluginConfig::new(config, 3)
+            },
             lash_core::SessionPolicy {
                 provider_id: "process-provider".to_string(),
                 model: lash_core::ModelSpec::builder("process-model")

@@ -332,7 +332,6 @@ impl CurrentOwnerCapability {
             turn_index: state.turn_index,
             token_usage: state.token_usage.clone(),
             last_prompt_usage: state.last_prompt_usage.clone(),
-            protocol_turn_options: state.effective_protocol_turn_options().clone(),
             authority: state.authority.clone(),
             checkpoint_components: state.checkpoint_components.clone(),
             checkpoint_ref: state.checkpoint_ref.clone(),
