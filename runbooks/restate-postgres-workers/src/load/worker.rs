@@ -7,7 +7,7 @@ use super::{
     LoadRequest, LoadResponse, QUEUED_MARKER, QueuedReport, TURN_MARKER, TurnReport,
     WORKLOAD_MARKER, turn_id_for,
 };
-use crate::{create_or_open_session, turn_handler_error};
+use crate::{journaled_session, turn_handler_error};
 use anyhow::{Context, Result};
 use lash::restate::RestateWait;
 use lash::runtime::AwaitEventResolver as _;
@@ -256,7 +256,7 @@ impl LoadWorker {
         let ctx = controller.context();
         let id = &plan.operation;
         let operation = id.key();
-        let session = create_or_open_session(&self.core, session_id.clone()).await?;
+        let session = journaled_session(ctx, &self.core, session_id.clone()).await?;
         let input = generator
             .record(id.actor, id.ordinal, "input", plan.input_bytes)
             .map_err(terminal_chain)?;
@@ -354,7 +354,7 @@ impl LoadWorker {
     async fn send_queued(
         &self,
         ctx: &WorkflowContext<'_>,
-        session: &lash::LashSession,
+        session: &lash::DurableSession,
         input: &QueuedInputPlan,
     ) -> HandlerResult<lash::SendHandle> {
         session
@@ -519,7 +519,7 @@ impl LoadWorker {
         session_id: String,
     ) -> HandlerResult<CronSetupReport> {
         let ctx = controller.context();
-        let session = create_or_open_session(&self.core, session_id).await?;
+        let session = journaled_session(ctx, &self.core, session_id).await?;
         let outcome = session
             .send(TurnInput::text(format!(
                 "Register the synthetic cron schedules. {CRON_SETUP_MARKER}{run} {WORKLOAD_MARKER}{}",

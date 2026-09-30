@@ -201,10 +201,17 @@ impl SessionBuilder {
     /// non-creating seam, at most once per handle. The session id must already be
     /// known; see [`DurableSession`] for the typed refusals.
     pub async fn durable(self) -> Result<DurableSession> {
+        Ok(self.catalog_durable().await)
+    }
+
+    /// The Durable Session resolved through the catalog on first use: building
+    /// the handle reads nothing, so a Restate host may build it before its
+    /// journal answers.
+    pub(crate) async fn catalog_durable(self) -> DurableSession {
         let work = self.core.held_work().await;
         let ingress = self.core.ingress_relay(&work);
         let live_replay_store = Arc::clone(&self.core.live_replay_store);
-        Ok(DurableSession::from_catalog(
+        DurableSession::from_catalog(
             self.session_id,
             Arc::clone(&self.core.store_factory),
             work,
@@ -212,7 +219,7 @@ impl SessionBuilder {
             Arc::clone(&self.core.env.core.control.effect_host),
             live_replay_store,
             Arc::clone(&self.core.env.core.providers.provider_resolver),
-        ))
+        )
     }
 
     /// Create this session, then return its **Durable Session**.

@@ -7,7 +7,7 @@ mod schema;
 pub use schema::ensure_e2e_schema;
 pub mod scripted_provider;
 mod session_support;
-pub use session_support::{create_or_open_session, turn_handler_error};
+pub use session_support::{journaled_session, turn_handler_error};
 pub mod witness;
 use anyhow::{Context, Result, bail};
 use lash::persistence::{AttachmentStore, LeaseOwnerIdentity};

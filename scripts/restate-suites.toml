@@ -113,3 +113,14 @@ filters = ["live_restate_drive_continuation_crash_redrives_one_successor"]
 endpoints = ["CW"]
 shards = 1
 timeout_seconds = 240
+
+# A host that reaches its session inside its journal (FIG-4277): its session
+# deleted while it was parked and its deployment killed, the host replays the
+# journal it recorded and answers. One endpoint bind per shard.
+[suites.host-send-wait]
+label = "//crates/lash-restate-test:host_send_wait__test"
+cwd = "crates/lash-restate-test"
+filters = ["live_restate_"]
+endpoints = ["HSW"]
+shards = 1
+timeout_seconds = 420

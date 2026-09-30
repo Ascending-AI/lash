@@ -66,6 +66,10 @@ use crate::server::{CrashListener, CrashPlan, CrashRule, CrashSite};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+/// Binds a host's own services on the backend's endpoint.
+type HostServices =
+    Box<dyn FnOnce(restate_sdk::endpoint::Builder) -> restate_sdk::endpoint::Builder + Send>;
+
 /// Where the live server and this backend's endpoint are.
 #[derive(Clone, Debug)]
 pub struct LiveConfig {
@@ -257,7 +261,20 @@ impl LiveRestateBackend {
     /// Build the engine over a fresh SQLite memory store set, serve its
     /// endpoint on `config.endpoint_bind` and register it with the server.
     pub async fn start(config: LiveConfig) -> Result<Self, LiveError> {
-        Self::start_on(config, None).await
+        Self::start_on(config, None, Box::new(|builder| builder)).await
+    }
+
+    /// [`start`](Self::start), with the host's own services bound by
+    /// `services` on the same endpoint beside lash's, as a deployment that
+    /// hosts lash serves its handlers. Like the test handler jobs, they do
+    /// not survive a [`rebuild`](Self::rebuild).
+    pub async fn start_with_services(
+        config: LiveConfig,
+        services: impl FnOnce(restate_sdk::endpoint::Builder) -> restate_sdk::endpoint::Builder
+        + Send
+        + 'static,
+    ) -> Result<Self, LiveError> {
+        Self::start_on(config, None, Box::new(services)).await
     }
 
     /// [`start`](Self::start), with an endpoint that cuts every process
@@ -269,12 +286,18 @@ impl LiveRestateBackend {
         config: LiveConfig,
         segment_effect_budget: u64,
     ) -> Result<Self, LiveError> {
-        Self::start_on(config, Some(segment_effect_budget)).await
+        Self::start_on(
+            config,
+            Some(segment_effect_budget),
+            Box::new(|builder| builder),
+        )
+        .await
     }
 
     async fn start_on(
         config: LiveConfig,
         segment_effect_budget: Option<u64>,
+        services: HostServices,
     ) -> Result<Self, LiveError> {
         let clock = Arc::new(LiveClock::default());
         // Process ids are minted at random: the server keys a process's
@@ -294,6 +317,7 @@ impl LiveRestateBackend {
             clock,
             lash_core::engine::BuildGeneration::for_test("t0"),
             true,
+            services,
         )
         .await
     }
@@ -324,6 +348,7 @@ impl LiveRestateBackend {
             Arc::clone(&self.inner.clock),
             build_generation.clone(),
             build_generation == *self.lash_backend().build_generation(),
+            Box::new(|builder| builder),
         )
         .await
     }
@@ -335,6 +360,7 @@ impl LiveRestateBackend {
         clock: Arc<LiveClock>,
         build_generation: lash_core::engine::BuildGeneration,
         register: bool,
+        services: HostServices,
     ) -> Result<Self, LiveError> {
         let connection = RestateConnection::new(config.ingress_url.clone());
         let admin_connection = RestateConnection::new(config.admin_url.clone());
@@ -365,7 +391,7 @@ impl LiveRestateBackend {
             None => serving,
         };
         let endpoint = bind_handler_host(
-            restate.endpoint_builder(serving),
+            services(restate.endpoint_builder(serving)),
             HandlerHost {
                 jobs: Arc::clone(&jobs),
                 authority,

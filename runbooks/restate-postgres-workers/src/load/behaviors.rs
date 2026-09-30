@@ -52,7 +52,7 @@ impl LoadWorker {
     async fn behavior_turn(
         &self,
         controller: &Controller<'_>,
-        session: &lash::LashSession,
+        session: &lash::DurableSession,
         run: &str,
         phase: &str,
     ) -> HandlerResult<InputOutcome> {
@@ -130,9 +130,13 @@ impl LoadWorker {
         run: &str,
     ) -> HandlerResult<BehaviorReport> {
         let session_id = format!("load-{run}-behaviors");
-        let session = create_or_open_session(&self.core, session_id.clone()).await?;
+        let session =
+            journaled_session(controller.context(), &self.core, session_id.clone()).await?;
         let expected = behavior::prefill(&self.load, run).map_err(terminal_chain)?;
         let prefill = journal_read(controller, "load.prefill", async {
+            // The live session is opened only inside journaled steps: a
+            // replay reads their answers back and opens nothing.
+            let session = self.core.session(session_id.clone()).open().await?;
             if texts(&session).is_empty() {
                 let messages = expected
                     .iter()
@@ -160,7 +164,8 @@ impl LoadWorker {
         self.behavior_turn(controller, &session, run, "seed")
             .await?;
         let admin = journal_read(controller, "load.admin-compaction", async {
-            let before = frame(&self.core.session(session_id.clone()).open().await?);
+            let session = self.core.session(session_id.clone()).open().await?;
+            let before = frame(&session);
             let applied = session
                 .admin()
                 .state()
@@ -248,7 +253,12 @@ impl LoadWorker {
             .behavior_turn(controller, &session, run, "edit")
             .await?;
         let revision = edited.final_value["revision"].as_u64().unwrap_or_default();
-        let listed = session
+        let listed = self
+            .core
+            .session(session_id.clone())
+            .open()
+            .await
+            .map_err(turn_handler_error)?
             .admin()
             .triggers()
             .by_source_type(behavior::EXTERNAL_SOURCE)

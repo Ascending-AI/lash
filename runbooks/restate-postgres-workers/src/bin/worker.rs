@@ -40,10 +40,9 @@ use lash_restate_postgres_workers_e2e::{
     EXPECTED_FINAL_TEXT, EXPECTED_FRAME_SWITCH_CANCEL_TEXT, EXPECTED_FRAME_SWITCH_TEXT,
     EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT, FRAME_CRASH_SESSION_ID,
     HealthResponse, TurnRequest, TurnResponse, TurnScenario, build_e2e_core, crash_exit_taken,
-    create_or_open_session, default_session_originator_id, driven_queued_roots,
-    e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env, record_terminal_result,
-    record_turn_activity, record_worker_event, required_env, s3_store_from_env, turn_handler_error,
-    turn_session_id,
+    default_session_originator_id, driven_queued_roots, e2e_tokio_thread_stack_bytes,
+    ensure_e2e_schema, env, journaled_session, record_terminal_result, record_turn_activity,
+    record_worker_event, required_env, s3_store_from_env, turn_handler_error, turn_session_id,
 };
 
 fn terminal_error(err: impl Display) -> TerminalError {
@@ -223,7 +222,7 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = create_or_open_session(core, DEFAULT_SESSION_ID).await?;
+        let session = journaled_session(ctx, core, DEFAULT_SESSION_ID).await?;
         let pool = self.storage.pool();
         let deadline = Instant::now() + Duration::from_secs(120);
         while Instant::now() < deadline {
@@ -276,9 +275,16 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = create_or_open_session(core, turn_session_id(&request.workflow_id)).await?;
-
-        let cursor = session.observe().current_observation().cursor;
+        let session_id = turn_session_id(&request.workflow_id);
+        let session = journaled_session(ctx, core, session_id).await?;
+        // The live session only reads the replay cursor the recording sink
+        // starts from; the turn goes through the journaled durable session.
+        let live = core
+            .session(session_id)
+            .open()
+            .await
+            .map_err(turn_handler_error)?;
+        let cursor = live.observe().current_observation().cursor;
         let cursor_text = cursor.as_str().to_string();
 
         let sink = RecordingTurnSink::new(
@@ -337,7 +343,7 @@ impl AppState {
         )
         .await?;
 
-        let replay_count = match session.observe().resume_from_cursor(&cursor) {
+        let replay_count = match live.observe().resume_from_cursor(&cursor) {
             Ok(SessionResume::Replayed { events }) => events.len(),
             Ok(SessionResume::Gap { .. }) => 0,
             Err(err) => {
@@ -373,7 +379,7 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = open_e2e_session(core).await?;
+        let session = open_e2e_session(ctx, core).await?;
         let first = session
             .send(TurnInput::text(format!(
                 "Run queued frame switch. workflow_id={} frame_switch_queued_start=true",
@@ -413,7 +419,6 @@ impl AppState {
             .map_err(terminal_error)?
             .map_err(terminal_error)?;
         let pending_after_follow = session
-            .durable()
             .pending_turn_inputs()
             .await
             .map_err(turn_handler_error)?;
@@ -434,13 +439,11 @@ impl AppState {
             == Some(true)
             && second_value.get("seed_visible").is_none();
         let queue_empty = session
-            .durable()
             .queued_work()
             .await
             .map_err(turn_handler_error)?
             .is_empty();
         let inputs_empty = session
-            .durable()
             .pending_turn_inputs()
             .await
             .map_err(turn_handler_error)?
@@ -478,7 +481,7 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = create_or_open_session(core, FRAME_CRASH_SESSION_ID).await?;
+        let session = journaled_session(ctx, core, FRAME_CRASH_SESSION_ID).await?;
         let recovered = settled_output(
             session
                 .send(TurnInput::text(format!(
@@ -497,13 +500,11 @@ impl AppState {
             .cloned()
             .ok_or_else(|| terminal_error("recovered follow-on produced no final value"))?;
         let queue_empty = session
-            .durable()
             .queued_work()
             .await
             .map_err(turn_handler_error)?
             .is_empty();
         let inputs_empty = session
-            .durable()
             .pending_turn_inputs()
             .await
             .map_err(turn_handler_error)?
@@ -587,7 +588,7 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = open_e2e_session(core).await?;
+        let session = open_e2e_session(ctx, core).await?;
         let original = session
             .send(TurnInput::text(format!(
                 "Run cancellable frame switch. workflow_id={} frame_switch_cancel_start=true",
@@ -616,13 +617,11 @@ impl AppState {
         let cancelled = original.outcome_restate(ctx, RestateWait::new()).await?;
         let terminal_cancelled = matches!(cancelled.status, lash::TurnStatus::Cancelled);
         let claims_settled = session
-            .durable()
             .queued_work()
             .await
             .map_err(turn_handler_error)?
             .is_empty()
             && session
-                .durable()
                 .pending_turn_inputs()
                 .await
                 .map_err(turn_handler_error)?
@@ -1049,8 +1048,11 @@ fn prompt_for_request(request: &TurnRequest) -> String {
     }
 }
 
-async fn open_e2e_session(core: &lash::LashCore) -> HandlerResult<lash::LashSession> {
-    create_or_open_session(core, DEFAULT_SESSION_ID).await
+async fn open_e2e_session(
+    ctx: &WorkflowContext<'_>,
+    core: &lash::LashCore,
+) -> HandlerResult<lash::DurableSession> {
+    journaled_session(ctx, core, DEFAULT_SESSION_ID).await
 }
 
 async fn wait_for_cancel_gate(pool: &sqlx::PgPool, workflow_id: &str) -> Result<()> {

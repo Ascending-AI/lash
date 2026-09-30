@@ -3,6 +3,18 @@
 //! A host handler never runs a turn: the session's engine drives every root.
 //! The handler journals what it needs to wait durably:
 //!
+//! 0. **Its session, reached inside the journal.** Restate re-runs a handler
+//!    from the top on every replay, on whichever deployment the invocation
+//!    lands, so nothing before the handler's first journaled step may read
+//!    live state it could branch on. The session is such state: it can be
+//!    deleted between two attempts (ADR 0049), and a replay that opened it
+//!    before the journal answered would end the handler where the journal
+//!    recorded a step, a journal mismatch that retries forever (FIG-4277).
+//!    [`SessionBuilder::create_or_use_restate`] journals the creation, and
+//!    the handle it returns, like
+//!    [`SessionBuilder::durable`](crate::SessionBuilder::durable), resolves the
+//!    session only inside the journaled acceptance and probes, so a replay
+//!    reads their recorded answers.
 //! 1. **A stable input id.** [`SendBuilder::accept_restate`] journals the
 //!    host's id (or a fresh one) before it accepts anything, so every replay
 //!    of the handler submits under the same id, and the acceptance itself is
@@ -50,7 +62,8 @@ use lash_restate::restate_sdk::serde::Json;
 
 use super::follow::{self, Followed, Position, Subject, Tap};
 use super::{HandleShared, RootHandle, SendBuilder, SendHandle, SendOutcome, SendTarget};
-use crate::support::TurnActivitySink;
+use crate::support::{EmbedError, TurnActivitySink};
+use crate::{DurableSession, SessionBuilder, SessionCreation};
 
 mod sealed {
     pub trait WaitContext {}
@@ -136,6 +149,55 @@ where
         let Json(result) = step.await?;
         result.map_err(|message| TerminalError::new(message).into())
     })
+}
+
+impl SessionBuilder {
+    /// Reach this session from a Restate handler: create it with `creation`
+    /// unless the catalog already holds it, as one journaled step, and
+    /// return its [`DurableSession`].
+    ///
+    /// The creation is the handler's step `lash.host.session`. Its first run
+    /// creates the session, or finds it already there; a replay reads that
+    /// answer back and touches no catalog, so a session deleted since the
+    /// step recorded (ADR 0049) cannot turn the replay away from its journal.
+    /// The returned handle resolves the session only when an operation needs
+    /// it: through [`accept_restate`](SendBuilder::accept_restate) and
+    /// [`outcome_restate`](SendHandle::outcome_restate), that is inside their
+    /// journaled steps. A deleted session is then their recorded answer: a
+    /// send refused with `SessionDeleted`, or an input settled by the
+    /// deletion.
+    ///
+    /// The step's answer is create-*or-use* because a retried step cannot
+    /// tell the two apart: an attempt that dies after its creation committed
+    /// and before the journal kept the step finds the session on its retry.
+    /// A creation refused for any other reason (a deleted id) is journaled
+    /// and ends the handler terminally; a retryable refusal ends the attempt
+    /// unjournaled.
+    pub fn create_or_use_restate<'ctx: 'a, 'a, C>(
+        self,
+        ctx: &'a C,
+        creation: SessionCreation,
+    ) -> BoxFuture<'a, HandlerResult<DurableSession>>
+    where
+        C: RestateControllerContext<'ctx>,
+    {
+        let core = self.core.clone();
+        let session_id = self.session_id.clone();
+        Box::pin(async move {
+            journal_host(
+                ctx,
+                "lash.host.session",
+                Box::pin(async move {
+                    match self.create(creation).await {
+                        Ok(_) | Err(EmbedError::SessionAlreadyExists { .. }) => Ok(()),
+                        Err(error) => Err(error),
+                    }
+                }),
+            )
+            .await?;
+            Ok(core.session(session_id).catalog_durable().await)
+        })
+    }
 }
 
 /// The target a journaled step reads through: no resident runtime is needed

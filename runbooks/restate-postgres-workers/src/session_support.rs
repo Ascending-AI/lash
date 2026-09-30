@@ -14,25 +14,21 @@ pub fn turn_handler_error(err: lash::EmbedError) -> restate_sdk::errors::Handler
     }
 }
 
-/// Open `session_id`, creating it first when the catalog does not hold it.
-/// A handler reaches its session the same way on its first delivery and on a
-/// replay, so it means create-or-use; only `create` creates (FIG-4112), and
-/// an existing session is the arm where creation config does not apply.
-pub async fn create_or_open_session(
+/// Reach `session_id` from a Restate handler: created with the default
+/// creation unless the catalog already holds it, as the handler's journaled
+/// `lash.host.session` step. A replay reads the step back and touches no
+/// catalog, and the returned Durable Session resolves the session only inside
+/// the handler's journaled acceptance and probes, so a session deleted between
+/// two attempts cannot turn the replay away from its journal (FIG-4277).
+pub async fn journaled_session<'ctx, C>(
+    ctx: &C,
     core: &lash::LashCore,
     session_id: impl Into<lash::SessionId>,
-) -> restate_sdk::errors::HandlerResult<lash::LashSession> {
-    let session_id = session_id.into();
-    match core
-        .session(session_id.clone())
-        .create(lash::SessionCreation::default())
-        .await
-    {
-        Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
-        Err(error) => return Err(turn_handler_error(error)),
-    }
+) -> restate_sdk::errors::HandlerResult<lash::DurableSession>
+where
+    C: lash::restate::RestateControllerContext<'ctx>,
+{
     core.session(session_id)
-        .open()
+        .create_or_use_restate(ctx, lash::SessionCreation::default())
         .await
-        .map_err(turn_handler_error)
 }
