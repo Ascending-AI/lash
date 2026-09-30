@@ -2,6 +2,7 @@
 //! decode of the envelope never reaches the VM's semantic decoder, which
 //! validates and compiles regular expressions from guest-controlled bytes.
 
+use super::segment_trace_tests::worker_parked_continuation;
 use super::{
     LASHLANG_SEGMENT_STATE_VERSION, LashlangSegmentState, ReplayOrdinalsState,
     decode_lashlang_segment_state, segment_continuation_expectation, segment_continuation_owner,
@@ -85,7 +86,7 @@ async fn parked_regexp_continuation() -> Vec<u8> {
 #[tokio::test(flavor = "current_thread")]
 async fn parent_state_decode_never_compiles_regexp() {
     let bytes = parked_regexp_continuation().await;
-    let text = String::from_utf8(bytes).expect("the continuation wire is JSON text");
+    let text = String::from_utf8(bytes.clone()).expect("the continuation wire is JSON text");
     assert!(text.contains("\"ab+c\""), "the witness parks its RegExp");
     // An unbalanced group: `validate_typescript_regexp` refuses it.
     let poisoned = text.replacen("\"ab+c\"", "\"ab+(c\"", 1).into_bytes();
@@ -93,6 +94,17 @@ async fn parent_state_decode_never_compiles_regexp() {
     let process_id = lash_sansio::ProcessId::fixture("regexp-witness");
     let owner = segment_continuation_owner(&process_id);
     let vm_contract = lashlang::vm_contract_versions();
+    let valid = lash_vm_protocol::OpaqueVmState::seal(
+        lash_vm_protocol::VmStateKind::Continuation,
+        owner.clone(),
+        vm_contract,
+        lashlang::VM_CONTINUATION_FORMAT_VERSION,
+        worker_parked_continuation(bytes),
+    );
+    assert_eq!(
+        worker_continuation_info(&valid).expect("the worker accepts the unpoisoned RegExp"),
+        0
+    );
     let envelope = serde_json::to_vec(&LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm: lash_vm_protocol::OpaqueVmState::seal(
@@ -100,7 +112,7 @@ async fn parent_state_decode_never_compiles_regexp() {
             owner.clone(),
             vm_contract,
             lashlang::VM_CONTINUATION_FORMAT_VERSION,
-            poisoned,
+            worker_parked_continuation(poisoned),
         ),
         ordinals: ReplayOrdinalsState {
             commands: crate::LashlangRunOrdinals::start(),

@@ -702,7 +702,7 @@ fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
         owner.clone(),
         lashlang::vm_contract_versions(),
         10,
-        bytes,
+        worker_parked_continuation(bytes),
     );
 
     let reads = lashlang::vm_contract_reads();
@@ -845,7 +845,7 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
         super::segment_continuation_owner(&lash_sansio::ProcessId::fixture("fixture")),
         lashlang::vm_contract_versions(),
         lashlang::VM_CONTINUATION_FORMAT_VERSION,
-        continuation,
+        worker_parked_continuation(continuation),
     ))
     .expect("the sealed continuation encodes");
     let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
@@ -1109,6 +1109,22 @@ fn pre_fig3571_parked_segment_is_refused_at_both_fences() {
         ),
         "unexpected error: {error}"
     );
+}
+
+/// FIG-4420 wraps the VM wire in the worker's MessagePack `ParkedRun`.
+/// These witnesses park after a completed effect, so no request needs reissue.
+pub(super) fn worker_parked_continuation(vm: Vec<u8>) -> Vec<u8> {
+    #[derive(serde::Serialize)]
+    struct ParkedRun {
+        vm: lash_vm_protocol::EncodedPayload,
+        request: Option<()>,
+    }
+
+    rmp_serde::to_vec_named(&ParkedRun {
+        vm: lash_vm_protocol::EncodedPayload(vm),
+        request: None,
+    })
+    .expect("encode the worker's parked continuation")
 }
 
 fn worker_continuation_info(state: &lash_vm_protocol::OpaqueVmState) -> Result<usize, String> {
