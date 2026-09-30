@@ -70,6 +70,9 @@ pub struct SqliteStoreSetOptions {
     /// its steps.
     #[cfg(feature = "testing")]
     pub migration_hook: Option<crate::testing::SqliteMigrationHook>,
+    /// Observes finalize's commits for crash-injection laws.
+    #[cfg(feature = "testing")]
+    pub finalize_hook: Option<crate::testing::SqliteFinalizeHook>,
 }
 
 impl SqliteStoreSetOptions {
@@ -228,6 +231,9 @@ impl SqliteStoreSet {
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         crate::compat::check_set_files(&location).map_err(tokio_rusqlite::Error::Error)?;
+        crate::finalize::recover_on_open(&location, options.store.connection_policy.busy_timeout)
+            .await
+            .map_err(|error| tokio_rusqlite::Error::Error(crate::sqlite_conversion_error(error)))?;
         // A store older than this build is backed up whole and migrated
         // before any component opens it; a set an interrupted migration left
         // part way is completed or restored first.
@@ -324,8 +330,9 @@ impl SqliteStoreSet {
     /// of the three databases to this build's `F_self`, holding all three
     /// exclusively, and every writer whose writable range excludes the new
     /// `F` is fenced from its next transaction on. A crash between the three
-    /// commits leaves the set partially finalized; finalizing again completes
-    /// it forward.
+    /// commits leaves the set partially finalized; a durable intent records
+    /// the checked retirement before any commit, and a fresh open completes
+    /// that authorized transition before admitting the store.
     ///
     /// A SQLite store has no operator hold: the hold stops the fleet's
     /// automatic finalize, `lashctl finalize` over PostgreSQL, and a host
@@ -361,6 +368,9 @@ impl SqliteStoreSet {
     > {
         use lash_core_execution::StoreSet as _;
         use lash_core_execution::store::fleet_finalize::{FinalizeError, require_retired};
+        let busy_timeout = self.inner.options.store.connection_policy.busy_timeout;
+        let ownership =
+            crate::store_ownership::exclusive(&self.inner.location, busy_timeout).await?;
         let drain = lash_core_execution::store::generation_drain::GenerationDrainStatus::collect(
             self.generation_drain().as_ref(),
             self.session_delete_ledger().as_ref(),
@@ -371,12 +381,20 @@ impl SqliteStoreSet {
         .await?;
         require_retired(&drain, registry).await?;
         let location = self.inner.location.clone();
+        #[cfg(feature = "testing")]
+        let hook = self.inner.options.finalize_hook.clone();
         tokio::task::spawn_blocking(move || {
-            crate::compat::finalize(
-                &location,
-                std::time::Duration::from_millis(u64::from(crate::conn::BUSY_TIMEOUT_MS)),
-                writable,
-            )
+            let _ownership = ownership;
+            crate::finalize::finalize(&location, busy_timeout, writable, drain, |step| {
+                #[cfg(feature = "testing")]
+                if let (Some(hook), crate::compat::AdvanceStep::Committed(database)) = (&hook, step)
+                {
+                    hook.committed(database);
+                }
+                #[cfg(not(feature = "testing"))]
+                let _ = step;
+                Ok(())
+            })
             .map_err(crate::sqlite_error)
         })
         .await

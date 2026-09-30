@@ -46,6 +46,13 @@ fn count(location: &SqliteLocation, database: SqliteDatabase, table: &str) -> i6
         .expect("count rows")
 }
 
+fn root_intent_exists(location: &SqliteLocation) -> bool {
+    match location {
+        SqliteLocation::File { root } => root.join("lash-finalize.json").exists(),
+        SqliteLocation::Memory { .. } => false,
+    }
+}
+
 fn session_meta(id: &str) -> SessionMeta {
     SessionMeta {
         owning_process_id: None,
@@ -139,7 +146,7 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
 
     let writable = FleetFormat::writable();
     let next = writable.max() + 1;
-    crate::compat::finalize(
+    crate::compat::flip_epoch_for_testing(
         &location,
         Duration::from_secs(5),
         VersionRange::new(writable.min(), next).expect("writable range"),
@@ -392,7 +399,7 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
     let finalize = tokio::task::spawn_blocking({
         let location = location.clone();
         move || {
-            crate::compat::finalize(
+            crate::compat::flip_epoch_for_testing(
                 &location,
                 Duration::from_secs(10),
                 VersionRange::new(writable.min(), next).expect("writable range"),
@@ -562,6 +569,277 @@ impl DeploymentRegistry for Deployments {
     }
 }
 
+/// Exit the finalizing process after either partial-set commit, then recover
+/// with a fresh public open and no surviving SQLite handles.
+#[cfg(feature = "synthetic-next")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the crash law starts its own test executable and exits without dropping database handles"
+)]
+async fn sqlite_finalize_cold_reopen_completes_partial_epoch_flip() {
+    const TEST: &str = "fence_tests::sqlite_finalize_cold_reopen_completes_partial_epoch_flip";
+    const ROOT: &str = "LASH_SQLITE_FINALIZE_CRASH_ROOT";
+    const CUT: &str = "LASH_SQLITE_FINALIZE_CRASH_CUT";
+    if let Some(root) = std::env::var_os(ROOT) {
+        let cut = std::env::var(CUT).expect("child crash cut");
+        let options = crate::SqliteStoreSetOptions {
+            finalize_hook: Some(crate::testing::SqliteFinalizeHook::new(move |database| {
+                if database.file_name() == cut {
+                    std::process::exit(77);
+                }
+            })),
+            ..crate::SqliteStoreSetOptions::default()
+        };
+        let set = SqliteStoreSet::open_with_options_and_clock(
+            std::path::PathBuf::from(root),
+            options,
+            std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
+        )
+        .await
+        .expect("the successor opens before finalize");
+        set.finalize(
+            &BuildGeneration::for_test("cold-finalize-old"),
+            &Deployments::default(),
+            5,
+        )
+        .await
+        .expect("finalize reaches the crash cut");
+        panic!("the child did not crash");
+    }
+
+    let mut failures = Vec::new();
+    for cut in [SqliteDatabase::DurableCore, SqliteDatabase::ProcessRegistry] {
+        let (root, set) = file_set().await;
+        let location = set.location().clone();
+        set.generation_drain()
+            .mark_draining(&BuildGeneration::for_test("cold-finalize-old"), 1)
+            .await
+            .expect("drain the retired generation");
+        for database in SqliteDatabase::ALL {
+            raw(&location, database)
+                .execute(
+                    "INSERT INTO lash_synthetic_next (id, note) VALUES (7, 'keep-me')",
+                    [],
+                )
+                .expect("seed application rows");
+            let (connection, _, sql) = writer(&location, database).await;
+            let sql = if database == SqliteDatabase::ProcessRegistry {
+                "INSERT INTO draining_generations (generation, marked_at_ms) VALUES ('0123456789ab', 7)"
+            } else {
+                sql
+            };
+            insert(&connection, sql)
+                .await
+                .expect("seed production application rows");
+        }
+        let application_rows: Vec<_> = SqliteDatabase::ALL
+            .into_iter()
+            .map(|database| {
+                let table = match database {
+                    SqliteDatabase::DurableCore => "session_meta",
+                    SqliteDatabase::ProcessRegistry => "draining_generations",
+                    SqliteDatabase::Triggers => "trigger_mutation_receipts",
+                };
+                let sql = format!("SELECT * FROM {table} ORDER BY 1");
+                let rows = crate::testing::read_rows_for_testing(&set, database, &sql)
+                    .expect("snapshot production application rows");
+                (database, sql, rows)
+            })
+            .collect();
+        drop(set);
+        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([TEST, "--exact", "--nocapture", "--test-threads=1"])
+            .env(ROOT, root.path())
+            .env(CUT, cut.file_name())
+            .status()
+            .expect("run the finalizing process");
+        assert_eq!(
+            status.code(),
+            Some(77),
+            "{cut:?}: exit at the committed cut"
+        );
+        for database in SqliteDatabase::ALL {
+            let connection = raw(&location, database);
+            let (schema, fleet): (i64, i64) = connection
+                .query_row("SELECT version, fleet_format FROM lash_compat", [], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })
+                .expect("read the partial set");
+            assert_eq!(schema, 2);
+            assert_eq!(
+                fleet,
+                if database <= cut { 2 } else { 1 },
+                "{cut:?}: {database:?}"
+            );
+        }
+        let reopened = match SqliteStoreSet::open(root.path()).await {
+            Ok(set) => set,
+            Err(error) => {
+                failures.push(format!("after {cut:?}: {error}"));
+                continue;
+            }
+        };
+        for (database, sql, before) in application_rows {
+            assert_eq!(
+                crate::testing::read_rows_for_testing(&reopened, database, &sql)
+                    .expect("read recovered application rows"),
+                before,
+                "{cut:?}: {database:?} application rows stay unchanged"
+            );
+        }
+        for database in SqliteDatabase::ALL {
+            let mut connection = raw(reopened.location(), database);
+            let fleet: i64 = connection
+                .query_row("SELECT fleet_format FROM lash_compat", [], |row| row.get(0))
+                .expect("read recovered epoch");
+            assert_eq!(fleet, 2, "{cut:?}: {database:?}");
+            let note: String = connection
+                .query_row(
+                    "SELECT note FROM lash_synthetic_next WHERE id = 7",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("application row survived");
+            assert_eq!(note, "keep-me");
+            let tx = connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .expect("a fresh N writer starts its transaction");
+            let error = crate::sqlite_error(
+                crate::compat::fence(&tx, database, VersionRange::new(1, 1).expect("N range"))
+                    .expect_err("N cannot write the recovered epoch"),
+            );
+            assert!(
+                matches!(error, StoreError::WriterFenced { recorded: 2, .. }),
+                "{error}"
+            );
+        }
+        drop(reopened);
+        drop(
+            SqliteStoreSet::open(root.path())
+                .await
+                .expect("recovery is idempotent"),
+        );
+    }
+    assert!(
+        failures.is_empty(),
+        "cold recovery failed at both cuts: {failures:?}"
+    );
+}
+
+#[cfg(feature = "synthetic-next")]
+#[tokio::test]
+async fn sqlite_cold_open_refuses_partial_epoch_without_finalize_intent() {
+    let (root, set) = file_set().await;
+    raw(set.location(), SqliteDatabase::DurableCore)
+        .execute("UPDATE lash_compat SET fleet_format = 2", [])
+        .expect("make an unauthorized mixed set");
+    drop(set);
+    let error = SqliteStoreSet::open(root.path())
+        .await
+        .map(drop)
+        .expect_err("open refuses the mixed set");
+    assert!(matches!(
+        crate::sqlite_async_error(error),
+        StoreError::Incompatible {
+            refusal: CompatRefusal::PartiallyAdvanced { .. }
+        }
+    ));
+}
+
+#[cfg(feature = "synthetic-next")]
+#[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the crash law invokes its child process and corrupts the recorded stamp and intent"
+)]
+async fn sqlite_finalize_cold_reopen_refuses_changed_stamp_or_intent() {
+    let (root, set) = file_set().await;
+    let location = set.location().clone();
+    set.generation_drain()
+        .mark_draining(&BuildGeneration::for_test("cold-finalize-old"), 1)
+        .await
+        .expect("drain the retiring generation");
+    drop(set);
+    let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        .args([
+            "fence_tests::sqlite_finalize_cold_reopen_completes_partial_epoch_flip",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("LASH_SQLITE_FINALIZE_CRASH_ROOT", root.path())
+        .env(
+            "LASH_SQLITE_FINALIZE_CRASH_CUT",
+            SqliteDatabase::DurableCore.file_name(),
+        )
+        .status()
+        .expect("crash the finalizing process");
+    assert_eq!(status.code(), Some(77));
+    let intent_path = root.path().join("lash-finalize.json");
+    let original = std::fs::read(&intent_path).expect("the authorization survived the crash");
+    for fault in ["stamp", "retirement", "target", "malformed"] {
+        if fault == "stamp" {
+            raw(&location, SqliteDatabase::Triggers)
+                .execute("UPDATE lash_compat SET min_reader = 2", [])
+                .expect("change the last database's stamp");
+        } else {
+            let mut intent: serde_json::Value =
+                serde_json::from_slice(&original).expect("intent JSON");
+            let bytes = match fault {
+                "retirement" => {
+                    intent["retired"]["draining_since_ms"] = serde_json::Value::Null;
+                    serde_json::to_vec(&intent).expect("encode an undrained authorization")
+                }
+                "target" => {
+                    intent["target"] = serde_json::json!(3);
+                    serde_json::to_vec(&intent).expect("encode an unsupported target")
+                }
+                _ => b"{".to_vec(),
+            };
+            std::fs::write(&intent_path, bytes).expect("corrupt the authorization");
+        }
+        let error = SqliteStoreSet::open(root.path())
+            .await
+            .map(drop)
+            .expect_err("open refuses changed state");
+        let error = crate::sqlite_async_error(error);
+        assert!(
+            matches!(
+                error,
+                StoreError::Incompatible {
+                    refusal: CompatRefusal::MalformedStamp { .. }
+                } | StoreError::WriterFenced { recorded: 3, .. }
+            ),
+            "{fault}: {error}"
+        );
+        for database in SqliteDatabase::ALL {
+            let fleet: i64 = raw(&location, database)
+                .query_row("SELECT fleet_format FROM lash_compat", [], |row| row.get(0))
+                .expect("read the unchanged partial epoch");
+            assert_eq!(
+                fleet,
+                if database == SqliteDatabase::DurableCore {
+                    2
+                } else {
+                    1
+                },
+                "{fault}: {database:?}"
+            );
+        }
+        raw(&location, SqliteDatabase::Triggers)
+            .execute("UPDATE lash_compat SET min_reader = 1", [])
+            .expect("restore the original stamp");
+        std::fs::write(&intent_path, &original).expect("restore the original authorization");
+    }
+    drop(
+        SqliteStoreSet::open(root.path())
+            .await
+            .expect("the original authorization still recovers"),
+    );
+    assert!(!intent_path.exists(), "completion clears the intent");
+}
+
 /// The store set's finalize (FIG-3800 B): refused typed while the retired
 /// generation is undrained or still has a deployment, with `F` unchanged in
 /// every database and this build's writers still admitted. Once it moves
@@ -590,6 +868,10 @@ async fn a_stale_writer_is_fenced_after_finalize() {
         Err(FinalizeError::Refused(FinalizeRefusal::GenerationNotDrained { .. })) => {}
         other => panic!("an undrained generation must refuse finalize: {other:?}"),
     }
+    assert!(
+        !root_intent_exists(&location),
+        "an undrained generation authorizes nothing"
+    );
     set.generation_drain()
         .mark_draining(&retired, 1)
         .await
@@ -606,6 +888,10 @@ async fn a_stale_writer_is_fenced_after_finalize() {
         Err(FinalizeError::Refused(FinalizeRefusal::DeploymentsRetained { .. })) => {}
         other => panic!("a retained deployment must refuse finalize: {other:?}"),
     }
+    assert!(
+        !root_intent_exists(&location),
+        "a retained deployment authorizes nothing"
+    );
     for database in SqliteDatabase::ALL {
         assert_eq!(fleet(database), i64::from(writable.min()), "{database:?}");
     }

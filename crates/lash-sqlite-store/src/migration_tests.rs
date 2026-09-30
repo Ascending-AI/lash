@@ -5,6 +5,10 @@
     clippy::expect_used,
     reason = "test module: clippy's allow-expect-in-tests only exempts #[test] functions, and the fixture helpers here are test code too"
 )]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "migration fixtures read their owned temporary stores and backups and contend for the store ownership lock"
+)]
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -736,7 +740,7 @@ async fn sqlite_migration_respects_lock_order_across_the_three_databases() {
         .create(true)
         .truncate(false)
         .write(true)
-        .open(crate::location::canonical_path(root.path()).join(super::MIGRATOR_LOCK))
+        .open(crate::location::canonical_path(root.path()).join(crate::store_ownership::LOCK))
         .expect("open the migrator lock");
     migrator.lock().expect("hold the migrator lock");
     let mut busy = options(None);

@@ -182,8 +182,6 @@ const BESIDE_STORE_DIRECTORY: &str = "migration-backups";
 /// Every backup directory's name: this prefix and a six-digit sequence.
 const BACKUP_PREFIX: &str = "sqlite-backup-";
 const MANIFEST: &str = "manifest.json";
-/// The file in a store's root whose advisory lock serializes its migrators.
-const MIGRATOR_LOCK: &str = "lash-migration.lock";
 const MANIFEST_STAGING: &str = "manifest.json.staging";
 
 /// One observable point of an open-time migration.
@@ -492,39 +490,12 @@ impl Migration<'_> {
         {
             return Ok(());
         }
-        let _migrator = self.exclusive().await?;
+        let _migrator = crate::store_ownership::exclusive(self.location, self.busy_timeout)
+            .await
+            .map_err(Stop::Failed)?;
         // Decided again under the lock: another process's migration may have
         // finished while this one waited for it.
         self.run_exclusive(identity).await
-    }
-
-    /// Serialize the store's migrators across processes: an exclusive
-    /// advisory lock on [`MIGRATOR_LOCK`] in the store root, held until the
-    /// migration or restore ends. It is not a database file, so taking and
-    /// releasing it leaves SQLite's own locks alone. Another migrator is
-    /// waited for up to the busy timeout.
-    async fn exclusive(&self) -> Result<std::fs::File, Stop> {
-        let path = self.root.join(MIGRATOR_LOCK);
-        let file = open_lock_file(&path)?;
-        let deadline = Instant::now() + self.busy_timeout;
-        loop {
-            match file.try_lock() {
-                Ok(()) => return Ok(file),
-                Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                Err(std::fs::TryLockError::WouldBlock) => {
-                    return Err(Stop::Failed(storage(format!(
-                        "another process is migrating the store at {}; open it again once \
-                         that migration ends",
-                        self.root.display()
-                    ))));
-                }
-                Err(std::fs::TryLockError::Error(error)) => {
-                    return Err(io_failure(format!("lock {}", path.display()), error));
-                }
-            }
-        }
     }
 
     async fn run_exclusive(&self, identity: String) -> Result<(), Stop> {
@@ -1064,19 +1035,6 @@ fn copy_synced(from: &Path, to: &Path) -> Result<(u64, SystemTime), Stop> {
             error,
         )
     })
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a migration locks a file in the host's store root to serialize migrators"
-)]
-fn open_lock_file(path: &Path) -> Result<std::fs::File, Stop> {
-    std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(path)
-        .map_err(|error| io_failure(format!("open {}", path.display()), error))
 }
 
 #[expect(

@@ -107,6 +107,7 @@ fn commit_count_entropy_seed() -> u64 {
 mod backend;
 mod catalog;
 mod compat;
+mod finalize;
 mod forks;
 mod generation_drain;
 mod graph;
@@ -138,6 +139,7 @@ mod session_roots;
 mod session_sql;
 #[cfg(test)]
 mod session_sql_tests;
+mod store_ownership;
 #[cfg(any(test, feature = "testing"))]
 mod test_support;
 #[cfg(feature = "testing")]

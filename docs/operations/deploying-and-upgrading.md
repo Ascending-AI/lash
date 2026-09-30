@@ -279,9 +279,13 @@ outcome is session history and is read in place; the sweep never rewrites it.
 
 A SQLite store is not reached by `lashctl`. The host that owns it finalizes
 with `SqliteStoreSet::finalize`, which applies the same drain and retirement
-checks, moves `F` in all three databases under exclusive locks, and completes
-forward a set a crash left partially finalized. A SQLite store has no
-operator hold.
+checks and seals `lash-finalize.json` durably before committing `F` in any
+of the three databases. Finalize and migration share the store's ownership
+lock. After a crash, a fresh `SqliteStoreSet::open` completes the recorded
+transition under exclusive database locks before migration or set admission,
+then removes the intent. Recovery needs no retained store handle. A changed
+schema stamp, unexpected epoch or mixed set without an authorized intent
+still refuses. A SQLite store has no operator hold.
 
 ## Roll back before finalize
 

@@ -11,6 +11,27 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::migration::{SqliteMigrationFault, SqliteMigrationHook, SqliteMigrationStep};
 
+/// Observes each database commit of finalize, including partial-set crash cuts.
+#[derive(Clone)]
+pub struct SqliteFinalizeHook(Arc<dyn Fn(crate::SqliteDatabase) + Send + Sync>);
+
+impl SqliteFinalizeHook {
+    /// Run `committed` immediately after each database commits its epoch.
+    pub fn new(committed: impl Fn(crate::SqliteDatabase) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(committed))
+    }
+
+    pub(crate) fn committed(&self, database: crate::SqliteDatabase) {
+        (self.0)(database);
+    }
+}
+
+impl std::fmt::Debug for SqliteFinalizeHook {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SqliteFinalizeHook")
+    }
+}
+
 /// Returns the production trigger-subscription listing SQL for conformance assertions.
 ///
 /// The filter no longer builds the statement; it selects one (FIG-3385). The
@@ -136,8 +157,8 @@ pub fn read_rows_for_testing(
 }
 
 /// Finalize the store at `location` as a build whose writable range is
-/// `[1, fleet]`: the production flip of [`crate::SqliteStoreSet::finalize`],
-/// without its drain and retirement checks, for a test that races writers
+/// `[1, fleet]`, without authorizing cold recovery or checking retirement,
+/// for a test that races writers
 /// against it or stands in for a build other than the linked one.
 pub fn finalize_fleet_format(
     location: &crate::SqliteLocation,
@@ -145,7 +166,7 @@ pub fn finalize_fleet_format(
 ) -> Result<(), lash_core_execution::StoreError> {
     let writable = lash_core_execution::compat::VersionRange::new(1, fleet)
         .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
-    crate::compat::finalize(
+    crate::compat::flip_epoch_for_testing(
         location,
         std::time::Duration::from_millis(u64::from(crate::conn::BUSY_TIMEOUT_MS)),
         writable,

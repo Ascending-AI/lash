@@ -495,6 +495,19 @@ too (§3.3).
 A fenced transaction wrote nothing, because the fence is its first
 statement and the rollback takes the rest.
 
+**SQLite finalize recovery.** `SqliteStoreSet::finalize` checks generation
+drain and deployment retirement under exclusive store ownership. Before the
+first database commit it durably seals an intent naming the store, checked
+retirement, source and target epochs and all three schema stamps. A fresh
+`SqliteStoreSet::open` whose build can write the target epoch completes that
+authorized transition before migration or ordinary set admission, under the
+ownership lock shared with migration and all three exclusive database locks.
+Recovery requires no retained store handle. It checks the recorded stamps
+and accepts only the source or target epoch in each database; arbitrary
+inconsistent sets without that intent remain refused. The intent is removed
+only after every epoch commit completes. SQLite has no finalize hold because
+no fleet-wide automatic finalize reaches a SQLite store.
+
 A lint (`scripts/check-guarded-transactions.py`) keeps the entry total. It
 fails on any `.begin()`, `pool.begin()` or mutating statement run straight on
 a pool under `crates/lash-postgres-store/src/`, and on any rusqlite write

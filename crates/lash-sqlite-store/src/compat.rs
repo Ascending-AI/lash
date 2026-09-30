@@ -3,6 +3,7 @@
 use lash_core_execution::compat::{
     self, CompatAdmission, CompatRefusal, CompatStamp, StampRead, VersionRange,
 };
+#[cfg(any(test, feature = "testing"))]
 use lash_core_execution::store::fleet_finalize::FleetEpochFlip;
 use lash_core_execution::{FleetFormat, FleetFormatState, StoreError};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -198,7 +199,7 @@ pub(crate) enum AdvanceStep {
     Committed(SqliteDatabase),
 }
 
-/// Advance the whole store: a migration or a finalize (ADR 0115 §2.2).
+/// Advance the whole store: a migration or an authorized finalize (ADR 0115 §2.2).
 ///
 /// It takes `BEGIN EXCLUSIVE` on every database in [`SqliteDatabase::ALL`]
 /// order, and only once it holds all three does `rewrite` change each one
@@ -207,17 +208,8 @@ pub(crate) enum AdvanceStep {
 /// that was already past its fence finishes first under the old row. A crash
 /// between two commits leaves the databases disagreeing, and the next set
 /// open refuses that as `PartiallyAdvanced` ([`check_set`]) unless the
-/// opening build's migrations complete the set forward
-/// ([`crate::migration`]).
-pub(crate) fn advance_set(
-    location: &SqliteLocation,
-    busy_timeout: std::time::Duration,
-    rewrite: impl FnMut(SqliteDatabase, &Transaction<'_>) -> rusqlite::Result<()>,
-) -> rusqlite::Result<()> {
-    advance_set_observed(location, busy_timeout, rewrite, |_| Ok(()))
-}
-
-/// [`advance_set`], reporting each lock and commit to `observe` as it
+/// opening build's migration or durable finalize intent completes it forward.
+/// Reports each lock and commit to `observe` as it
 /// happens. An error from `observe` stops the advance there: every
 /// transaction not yet committed rolls back, as a crash at that point would.
 pub(crate) fn advance_set_observed(
@@ -253,37 +245,33 @@ pub(crate) fn advance_set_observed(
     Ok(())
 }
 
-/// Finalize: move `F` in every database of the store to `writable.max()`,
-/// the finalizing build's `F_self`, as one [`advance_set`] (ADR 0106 §2, ADR
-/// 0115 §2.2). Every writer whose writable range excludes the new `F` is
-/// fenced from its next transaction on.
-///
-/// Each database's row passes the writer fence first, under the exclusive
-/// lock: its stamp is re-admitted, and a recorded `F` outside `writable` is
-/// `WriterFenced`, so a build a newer release already fenced cannot finalize.
-/// A database already at `F_self` is left as it is, which completes forward
-/// a set a crash left partially finalized. The answer is `Finalized` from
-/// the lowest epoch any database recorded, or `AlreadyFinalized` when every
-/// database already records `F_self`.
-pub(crate) fn finalize(
+/// A bare epoch flip for writer-fence tests. Production finalize seals a
+/// retirement authorization through [`crate::finalize`] instead.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn flip_epoch_for_testing(
     location: &SqliteLocation,
     busy_timeout: std::time::Duration,
     writable: VersionRange,
 ) -> rusqlite::Result<FleetEpochFlip> {
     let target = writable.max();
     let mut lowest = target;
-    advance_set(location, busy_timeout, |database, tx| {
-        let recorded = fence(tx, database, writable)?.version();
-        lowest = lowest.min(recorded);
-        if recorded == target {
-            return Ok(());
-        }
-        tx.execute(
-            "UPDATE lash_compat SET fleet_format = ?1 WHERE singleton = 1",
-            [i64::from(target)],
-        )?;
-        Ok(())
-    })?;
+    advance_set_observed(
+        location,
+        busy_timeout,
+        |database, tx| {
+            let recorded = fence(tx, database, writable)?.version();
+            lowest = lowest.min(recorded);
+            if recorded == target {
+                return Ok(());
+            }
+            tx.execute(
+                "UPDATE lash_compat SET fleet_format = ?1 WHERE singleton = 1",
+                [i64::from(target)],
+            )?;
+            Ok(())
+        },
+        |_| Ok(()),
+    )?;
     Ok(if lowest == target {
         FleetEpochFlip::AlreadyFinalized { fleet: target }
     } else {
