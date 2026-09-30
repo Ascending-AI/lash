@@ -168,3 +168,28 @@ async fn a_waiter_follows_its_input_past_a_lost_ask() {
             .expect("stage the lost ask");
     assert!(violations.is_empty(), "{violations:#?}");
 }
+
+/// The retry-forever cell uses a settle budget below the live poll interval.
+#[tokio::test]
+#[ignore = "requires an isolated Restate server"]
+async fn live_short_settle_budget_is_bounded() {
+    use crash_matrix::engine::{Engine, EngineKind};
+    use std::time::Duration;
+
+    let kind = EngineKind::from_env().expect("the live engine is configured");
+    assert!(matches!(kind, EngineKind::Live(_)));
+    let engine = Engine::start(&kind, 4278, lash_restate_test::DeploymentHooks::default())
+        .await
+        .expect("the live engine starts");
+    let budget = Duration::from_millis(20);
+    tokio::time::pause();
+    let started = tokio::time::Instant::now();
+    engine.settle(budget).await;
+    let elapsed = started.elapsed();
+    tokio::time::resume();
+    engine.finish().await;
+    assert!(
+        elapsed <= budget + Duration::from_millis(1),
+        "settle exceeded its {budget:?} budget plus one timer tick: {elapsed:?}"
+    );
+}

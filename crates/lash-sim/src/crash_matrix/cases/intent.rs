@@ -31,7 +31,7 @@ const ATTEMPTS_TO_TRIP: usize = 6;
 /// The recovery ticks the close's cleanup may take before the delete is
 /// declared stuck.
 const TICKS_TO_DELIVERABLE: usize = 36;
-use crate::crash_matrix::deployment::{ArmEffect, HostSite};
+use crate::crash_matrix::deployment::HostSite;
 use crate::crash_matrix::invariants::{ChildOf, Expected};
 use crate::crash_matrix::world::CrashWorld;
 use crate::crash_matrix::{CrashPoint, Seam};
@@ -288,15 +288,15 @@ async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<S
             crash_and_restart(&world).await?
         }
         (Seam::ControlIntent, CrashPoint::DeliveryRetryableForever) => {
-            // The engine half fails retryably on every attempt; the host
-            // lives, and the deletion it asked for answers with the close
-            // retained for reconciliation.
-            world
-                .faults()
-                .always(HostSite::ReleaseRootBefore, ArmEffect::FailRetryable);
+            // The live server retries the failed handler without answering
+            // deletion. Arm the cut at the first failing release before
+            // awaiting that handler, then let recovery exhaust the relay.
+            world.faults().always_retryable_with_cut(
+                HostSite::ReleaseRootBefore,
+                "fault:release-root-retryable-forever",
+            );
             let at_ms = world.now_ms();
-            let _ = delete_session(&world, &session).await;
-            world.trip().fire("fault:release-root-retryable-forever");
+            delete_session(&world, &session).await?;
             // A release that fails on every attempt never ends the held
             // root's execution, and the session's scope close follows the
             // release inside the engine half: what the ceiling owes is the

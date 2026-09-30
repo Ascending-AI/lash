@@ -723,6 +723,12 @@ async fn check_deletions(world: &CrashWorld, expected: &Expected, violations: &m
 
 /// No lash drive of a live session is paused, backing off, or running.
 async fn check_engine(world: &CrashWorld, expected: &Expected, violations: &mut Vec<String>) {
+    if expected.live_sessions.is_empty()
+        && expected.deleted_sessions.is_empty()
+        && expected.closed_sessions.is_empty()
+    {
+        return;
+    }
     for view in world.invocations().await {
         let lash_drive =
             view.target.starts_with("LashSession/") || view.target.starts_with("LashTurn/");

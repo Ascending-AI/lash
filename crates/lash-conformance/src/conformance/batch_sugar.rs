@@ -1265,6 +1265,34 @@ pub async fn batch_redrive_reuses_children(
     assert!(rows(record(&turn, "w")[0]).iter().all(|(_, _, ok)| *ok));
 }
 
+/// Observes the first member's recorded settlement, after its final and drain.
+#[derive(Default)]
+struct CommittedBatchMember {
+    settled: AtomicBool,
+    changed: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl crate::testing::EffectLayer for CommittedBatchMember {
+    async fn await_next_settlement(
+        &self,
+        inner: &dyn crate::RuntimeEffectController,
+        handle: &mut crate::EffectGroupHandle,
+        cancel: crate::TurnCancelWait,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        let settlement = inner.await_next_settlement(handle, cancel).await?;
+        if settlement.position == 0 {
+            assert!(
+                settlement.outcome.is_ok(),
+                "the committed member settles successfully"
+            );
+            self.settled.store(true, Ordering::SeqCst);
+            self.changed.notify_waiters();
+        }
+        Ok(settlement)
+    }
+}
+
 /// A cancel after every member started: the member whose final committed
 /// keeps its row, the undecided members settle cancelled and their rows say
 /// so, and settlements arriving after the cancel change no row and run
@@ -1277,7 +1305,7 @@ pub async fn batch_cancel_preserves_committed_drains(
     factories: BatchSugarFactories,
 ) {
     let context = format!("{prefix}/batch-cancel");
-    let law = SugarTurn::new(
+    let mut law = SugarTurn::new(
         prefix,
         "cancel",
         &host,
@@ -1293,6 +1321,8 @@ pub async fn batch_cancel_preserves_committed_drains(
         )])],
     );
     law.witness.hold(&["undecided-a", "undecided-b"]);
+    let committed = Arc::new(CommittedBatchMember::default());
+    law.layer = Some(Arc::clone(&committed) as Arc<dyn crate::testing::EffectLayer>);
     let store = crate::conformance::law_session_store(stores.as_ref(), &law.session_id).await;
     let (turns, mut ran) = tokio::sync::mpsc::unbounded_channel();
     let running = {
@@ -1301,14 +1331,27 @@ pub async fn batch_cancel_preserves_committed_drains(
         let attempt = law.attempt(turns);
         crate::task::spawn(async move { runner.run_turn(admitted, attempt).await })
     };
-    while !(law.witness.executed("echo", "committed") == 1
-        && law.witness.started("undecided-a")
-        && law.witness.started("undecided-b"))
-    {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    // The committed member's final lands once its attempt returns.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::timeout(TURN_BUDGET, async {
+        loop {
+            let settled = committed.changed.notified();
+            let started = law.witness.notify.notified();
+            if committed.settled.load(Ordering::SeqCst)
+                && law.witness.executed("echo", "committed") == 1
+                && law.witness.started("undecided-a")
+                && law.witness.started("undecided-b")
+            {
+                break;
+            }
+            tokio::select! {
+                () = settled => {}
+                () = started => {}
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!("{context}: the committed drain and held members never settled into position")
+    });
     let driver =
         crate::TurnWorkDriver::for_session(Arc::clone(&host), law.session_id.clone(), store);
     driver
@@ -1319,7 +1362,10 @@ pub async fn batch_cancel_preserves_committed_drains(
         ))
         .await
         .unwrap_or_else(|error| panic!("{context}: request the cancel: {error}"));
-    let _ = tokio::time::timeout(TURN_BUDGET, running).await;
+    tokio::time::timeout(TURN_BUDGET, running)
+        .await
+        .unwrap_or_else(|_| panic!("{context}: the cancelled turn never finishes"))
+        .unwrap_or_else(|error| panic!("{context}: the cancelled turn task failed: {error}"));
     let mut turn = None;
     while let Ok(next) = ran.try_recv() {
         turn = next;
@@ -1329,7 +1375,6 @@ pub async fn batch_cancel_preserves_committed_drains(
         .unwrap_or_else(|error| panic!("{context}: the cancelled turn assembles: {error}"));
     // Late settlements: the undecided members may now answer.
     law.witness.release_held();
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     assert!(
         matches!(

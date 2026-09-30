@@ -459,7 +459,11 @@ impl Engine {
             Self::Double(double) => {
                 let _ = tokio::time::timeout(budget, double.backend.server().settle()).await;
             }
-            Self::Live(live) => live.settle(budget, Duration::from_millis(100)).await,
+            Self::Live(live) => {
+                let _ =
+                    tokio::time::timeout(budget, live.settle(budget, Duration::from_millis(100)))
+                        .await;
+            }
         }
     }
 

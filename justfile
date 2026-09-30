@@ -278,7 +278,7 @@ crash-matrix-restate-e2e:
       --server-env RESTATE_DEFAULT_RETRY_POLICY__MAX_INTERVAL=250ms \
       --server-env RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS=1000000 \
       --server-env RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS=pause \
-      -- bash -c 'cd "$1" && exec "$2" --test-threads=1 --nocapture' _ \
+      -- bash -c 'cd "$1" && "$2" --test-threads=1 --nocapture && exec "$2" --ignored --exact live_short_settle_budget_is_bounded --test-threads=1 --nocapture' _ \
         "{{repo}}/crates/lash-sim" "$binary" 2>&1 | tee "$log"
   status="${PIPESTATUS[0]}"
   set -e
@@ -288,7 +288,7 @@ crash-matrix-restate-e2e:
   other_cells="$(grep -E ' on the [a-z]+ engine: ' "$log" | grep -vc ' on the live engine: ' || true)"
   echo "crash matrix on live Restate: ${live_cells} cell(s) ran live, ${other_cells} elsewhere"
   grep -E ' on the [a-z]+ engine: ' "$log" || true
-  grep -E '^test result: ' "$log" | tail -n 1 || true
+  grep -E '^test result: ' "$log" || true
   if [ "$status" -ne 0 ]; then
     echo "crash matrix on live Restate failed (exit $status); log: $log" >&2
     exit "$status"
