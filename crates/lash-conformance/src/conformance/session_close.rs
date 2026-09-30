@@ -103,6 +103,7 @@ pub(super) fn administration(
             deletes: lash_core::session_delete::SessionDeleteStores::of_store_set(Arc::clone(
                 stores,
             )),
+            policy: lash_core::drive::relay::RelayPolicy::default(),
         },
     )
 }

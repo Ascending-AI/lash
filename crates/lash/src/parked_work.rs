@@ -44,6 +44,9 @@ pub struct ParkedWork {
     /// The store set's `ControlIntent` obligation ledger: a verb's engine
     /// half is delivered through it (ADR 0109).
     pub(crate) intents: Arc<dyn lash_core::store::ObligationLedger>,
+    /// The relay policy a verb's immediate `deliver_intent` runs under: the
+    /// host's configured attempt budget (FIG-4246).
+    pub(crate) relay_policy: lash_core::drive::relay::RelayPolicy,
 }
 
 impl std::fmt::Debug for ParkedWork {

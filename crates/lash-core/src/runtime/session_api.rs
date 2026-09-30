@@ -701,6 +701,7 @@ impl LashRuntime {
             Arc::clone(self.host.queued_work()),
             Arc::clone(&self.host.core.clock),
         )
+        .with_policy(self.host.core.control.relay_policy())
     }
 
     pub fn effect_host(&self) -> Arc<dyn crate::EffectHost> {

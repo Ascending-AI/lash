@@ -143,6 +143,27 @@ pub struct RuntimeControlConfig {
     /// obligation the terminal transaction armed on the root's row, through
     /// the backend's ledger of that kind (ADR 0109 §3).
     pub scope_close: Arc<dyn crate::engine::ScopeCloseSink>,
+    /// The host's bound on one obligation delivery (ADR 0109 §1.8). This is
+    /// the one source every relay reads: [`relay_policy`](Self::relay_policy)
+    /// derives the policy a reconcile tick's due pass and a producer's
+    /// immediate `deliver_now` run under alike, so a delivery honors the
+    /// host's bound however it is reached.
+    pub recovery_pass: crate::engine::RecoveryPassBudget,
+}
+
+impl RuntimeControlConfig {
+    /// The [`RelayPolicy`](crate::runtime::drive::relay::RelayPolicy) every
+    /// obligation relay of this runtime runs under: the recovery pass's
+    /// attempt budget on the kinds' shared retry shape. There is no second
+    /// default — a `deliver_now` construction that skips it builds a relay
+    /// at the 30 s kind default instead.
+    #[must_use]
+    pub fn relay_policy(&self) -> crate::runtime::drive::relay::RelayPolicy {
+        crate::runtime::drive::relay::RelayPolicy {
+            attempt_budget_ms: self.recovery_pass.attempt_ms(),
+            ..crate::runtime::drive::relay::RelayPolicy::default()
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -217,6 +238,7 @@ impl RuntimeHostConfig {
                 tool_children,
                 open_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
                 scope_close: Arc::new(crate::engine::NoScopeClose),
+                recovery_pass: crate::engine::RecoveryPassBudget::default(),
             },
             tracing: RuntimeTracingConfig {
                 trace_sink: None,

@@ -123,7 +123,8 @@ impl AdministrationSource {
                         resolved_env.core.backend(),
                         Arc::clone(&self.store_factory),
                         Arc::clone(&resolved_env.core.control.scope_close),
-                    ),
+                    )
+                    .with_policy(resolved_env.core.control.relay_policy()),
                 ),
                 intents: resolved_env
                     .core
@@ -133,6 +134,7 @@ impl AdministrationSource {
                 deletes: lash_core::session_delete::SessionDeleteStores::of(
                     resolved_env.core.backend(),
                 ),
+                policy: resolved_env.core.control.relay_policy(),
             },
         )
     }
@@ -155,6 +157,7 @@ impl LashCore {
             Arc::clone(work) as Arc<dyn SessionWorkEngine>,
             Arc::clone(&self.env.core.clock),
         )
+        .with_policy(self.env.core.control.relay_policy())
     }
 
     /// A [`LashCoreBuilder`] over `backend`, the one substrate every
@@ -341,7 +344,8 @@ impl LashCore {
                     &self.backend,
                     Arc::clone(&self.store_factory),
                     Arc::clone(&self.env.core.control.scope_close),
-                ),
+                )
+                .with_policy(self.env.core.control.relay_policy()),
             ),
             intents: self
                 .backend
@@ -349,6 +353,7 @@ impl LashCore {
             store_factory: Arc::clone(&self.store_factory),
             process_registry: Arc::clone(&self.process_registry),
             clock: Arc::clone(&self.env.core.clock),
+            relay_policy: self.env.core.control.relay_policy(),
         }
     }
 
@@ -963,10 +968,12 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Bound the recovery pass's obligation deliveries (ADR 0109 §1.8): each
+    /// Bound every obligation delivery this core runs (ADR 0109 §1.8): each
     /// delivery attempt's budget — past it the attempt is abandoned and
     /// retried — and how long a recovery tick waits on its kinds' due passes
-    /// before its leader arms run. Defaults to a 30 s attempt budget and a
+    /// before its leader arms run. The one policy source: the reconcile
+    /// tick's relays and a producer's immediate `deliver_now` attempts run
+    /// under it alike (FIG-4246). Defaults to a 30 s attempt budget and a
     /// 1 s tick wait. Keep the attempt budget below the relay's 60 s claim
     /// TTL.
     pub fn recovery_pass_budget(mut self, budget: lash_core::engine::RecoveryPassBudget) -> Self {
@@ -1106,7 +1113,6 @@ impl LashCoreBuilder {
             Arc::clone(&live_replay_store),
             process_lifecycle_available,
             self.recovery_lease.unwrap_or_default(),
-            self.recovery_pass,
         );
         // The driver's reconcile tick runs every obligation kind's relay
         // (ADR 0109 §1.4): the backend's process wiring always supplies a
@@ -1200,7 +1206,6 @@ impl LashCoreBuilder {
         live_replay_store: Arc<dyn LiveReplayStore>,
         process_lifecycle_available: bool,
         recovery_lease: lash_core::engine::RecoveryLeaseConfig,
-        recovery_pass: lash_core::engine::RecoveryPassBudget,
     ) -> (Arc<CoreSessionDriver>, Arc<dyn lash_core::SessionDriver>) {
         let owner = drive_owner.clone();
         let recovery = Arc::new(recovery::RecoverySlot::new(&env, recovery_lease));
@@ -1215,7 +1220,6 @@ impl LashCoreBuilder {
             store_factory: Arc::clone(store_factory),
             live_replay_store,
             process_lifecycle_available,
-            recovery_pass,
         })));
         let installed = install_session_driver(session_work, driver.clone(), &owner);
         (driver, installed)

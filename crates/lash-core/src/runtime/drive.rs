@@ -1167,11 +1167,14 @@ async fn emit_close_step(
                     session: session.clone(),
                     root: root.clone(),
                     sink: Arc::clone(&host.control.scope_close),
-                    relay: Arc::new(scope_close::ScopeCloseRelay::over_backend(
-                        host.backend(),
-                        host.session_store_factory(),
-                        Arc::clone(&host.control.scope_close),
-                    )),
+                    relay: Arc::new(
+                        scope_close::ScopeCloseRelay::over_backend(
+                            host.backend(),
+                            host.session_store_factory(),
+                            Arc::clone(&host.control.scope_close),
+                        )
+                        .with_policy(host.control.relay_policy()),
+                    ),
                     clock: Arc::clone(&host.clock),
                 }),
                 None,

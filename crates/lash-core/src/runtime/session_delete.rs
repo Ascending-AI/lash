@@ -351,10 +351,13 @@ pub struct SessionDeleteRelay {
 }
 
 impl SessionDeleteRelay {
-    /// The relay over `administration`'s deployment, at the default policy.
+    /// The relay over `administration`'s deployment, under the relay policy
+    /// the administration's close services carry: the host's configured
+    /// attempt budget, not the kind's default (FIG-4246).
     #[must_use]
     pub fn new(administration: SessionAdministration) -> Self {
-        Self::with_policy(administration, RelayPolicy::default())
+        let policy = administration.session_close().policy;
+        Self::with_policy(administration, policy)
     }
 
     /// The relay over `administration`'s deployment at `policy`.

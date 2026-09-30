@@ -672,11 +672,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// delivers through (ADR 0109 §1.5): the start's one production delivery
     /// path is claim + deliver through the obligation relay, and a host with
     /// the backend's ledger calls this so the start does not wait for the
-    /// reconcile tick.
+    /// reconcile tick. `policy` is the host's relay policy, so the immediate
+    /// delivery runs under the configured attempt budget.
     pub fn with_process_starts(
         mut self,
         ledger: Arc<dyn crate::store::ObligationLedger>,
         clock: Arc<dyn crate::Clock>,
+        policy: crate::runtime::drive::relay::RelayPolicy,
     ) -> Self {
         if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
             &mut self.state
@@ -687,7 +689,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     Arc::clone(&execution.registry),
                     Arc::clone(&execution.process_work),
                     clock,
-                ),
+                )
+                .with_policy(policy),
             ));
         }
         self

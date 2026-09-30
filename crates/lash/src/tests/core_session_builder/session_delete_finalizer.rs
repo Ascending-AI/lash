@@ -275,3 +275,189 @@ async fn the_reconcile_tick_finishes_a_held_delete() -> Result<()> {
     );
     Ok(())
 }
+
+/// An obligation ledger that forwards every call and records each
+/// settlement it is asked to write: a retry's error names the budget the
+/// abandoned attempt ran past, which `ObligationStanding` does not carry
+/// (FIG-4246).
+struct RecordingLedger {
+    inner: Arc<dyn lash_core::store::ObligationLedger>,
+    settlements: Arc<std::sync::Mutex<Vec<(lash_core::store::ObligationId, ObligationSettlement)>>>,
+}
+
+type Settlements =
+    Arc<std::sync::Mutex<Vec<(lash_core::store::ObligationId, ObligationSettlement)>>>;
+
+#[async_trait::async_trait]
+impl lash_core::store::ObligationLedger for RecordingLedger {
+    fn kind(&self) -> ObligationKind {
+        self.inner.kind()
+    }
+
+    async fn arm(
+        &self,
+        key: &lash_core::store::ObligationKey,
+        now_ms: u64,
+    ) -> std::result::Result<Option<lash_core::store::ObligationId>, lash_core::StoreError> {
+        self.inner.arm(key, now_ms).await
+    }
+
+    async fn claim_due(
+        &self,
+        now_ms: u64,
+        claim_ttl_ms: u64,
+        limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<Vec<lash_core::store::ClaimedObligation>, lash_core::StoreError> {
+        self.inner.claim_due(now_ms, claim_ttl_ms, limit).await
+    }
+
+    async fn claim(
+        &self,
+        id: &lash_core::store::ObligationId,
+        token: &lash_core::store::ClaimToken,
+        now_ms: u64,
+        claim_ttl_ms: u64,
+    ) -> std::result::Result<Option<lash_core::store::ClaimedObligation>, lash_core::StoreError>
+    {
+        self.inner.claim(id, token, now_ms, claim_ttl_ms).await
+    }
+
+    async fn settle(
+        &self,
+        id: &lash_core::store::ObligationId,
+        token: &lash_core::store::ClaimToken,
+        settlement: ObligationSettlement,
+        now_ms: u64,
+    ) -> std::result::Result<lash_core::store::SettleOutcome, lash_core::StoreError> {
+        self.settlements
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((id.clone(), settlement.clone()));
+        self.inner.settle(id, token, settlement, now_ms).await
+    }
+
+    async fn rearm(
+        &self,
+        id: &lash_core::store::ObligationId,
+        now_ms: u64,
+    ) -> std::result::Result<bool, lash_core::StoreError> {
+        self.inner.rearm(id, now_ms).await
+    }
+
+    async fn list_stalled(
+        &self,
+        after: Option<&lash_core::store::ObligationId>,
+        limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<Vec<lash_core::store::StalledObligation>, lash_core::StoreError> {
+        self.inner.list_stalled(after, limit).await
+    }
+
+    async fn count_stalled(&self) -> std::result::Result<u64, lash_core::StoreError> {
+        self.inner.count_stalled().await
+    }
+
+    async fn standing(
+        &self,
+        id: &lash_core::store::ObligationId,
+    ) -> std::result::Result<Option<lash_core::store::ObligationStanding>, lash_core::StoreError>
+    {
+        self.inner.standing(id).await
+    }
+}
+
+/// The host's configured attempt budget bounds an immediate `deliver_now`
+/// too (FIG-4246): a delete's `CloseSession` intent, delivered at once
+/// through the control-intent relay, is abandoned when its attempt outlives
+/// the configured budget, and the retry it settles names that budget — not
+/// the `RelayPolicy` default's 30 s.
+#[tokio::test]
+async fn an_immediate_delivery_runs_under_the_configured_attempt_budget() -> Result<()> {
+    const BUDGET_MS: u64 = 150;
+    let session_scope = lash_core::ScopeId::session(SESSION);
+    let settlements: Settlements = Arc::default();
+    let layer_settlements = Arc::clone(&settlements);
+    let backend = double_backend_over_explicit_reconcile(
+        lash_restate_test::ServerConfig {
+            start_time_ms: now_ms(),
+            time: lash_restate_test::TimeMode::auto(),
+            ..lash_restate_test::ServerConfig::default()
+        },
+        move |stores| {
+            lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                .map_process_registry(move |registry| {
+                    let faults = lash_core::testing::ProcessRegistryFaults::new(registry);
+                    faults.hold_parent_end(session_scope);
+                    Arc::new(faults)
+                })
+                .map_obligation_ledgers(move |kind, ledger| {
+                    if kind == ObligationKind::ControlIntent {
+                        Arc::new(RecordingLedger {
+                            inner: ledger,
+                            settlements: Arc::clone(&layer_settlements),
+                        })
+                    } else {
+                        ledger
+                    }
+                })
+                .into_store_set()
+        },
+    )
+    .await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+    ))
+    .recovery_pass_budget(lash_core::engine::RecoveryPassBudget {
+        attempt: std::time::Duration::from_millis(BUDGET_MS),
+        tick_wait: std::time::Duration::from_secs(1),
+    })
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(SESSION).created().await.open().await?;
+    session
+        .send(TurnInput::text("a root that ends before the delete"))
+        .id(ROOT)
+        .output()
+        .await?;
+    drop(session);
+    settle_session_drive(&core, SESSION).await;
+
+    // The close intent's engine half ends the session's scope, whose
+    // parent-end record the registry never answers: the immediate delivery
+    // runs until its attempt is abandoned at the host's configured budget.
+    // The timeout only bounds a run still waiting on the 30 s default.
+    let deletion = tokio::time::timeout(
+        std::time::Duration::from_secs(45),
+        delete_bound_session_outcome(&core, SESSION),
+    )
+    .await
+    .expect("the delete returns once the held close outlives the configured budget")?;
+    let crate::SessionDeletion::Closing(closing) = deletion else {
+        panic!("a held session scope close leaves the delete closing, got {deletion:?}");
+    };
+    assert!(
+        matches!(
+            closing.waiting,
+            crate::SessionDeleteWait::CloseIntent(lash_core::store::ControlIntentState::Pending)
+        ),
+        "{:?}",
+        closing.waiting
+    );
+    let retries: Vec<String> = settlements
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .filter_map(|(_, settlement)| match settlement {
+            ObligationSettlement::Retry { error, .. } => Some(error.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        retries
+            .iter()
+            .any(|error| error.contains(&format!("past its {BUDGET_MS} ms attempt budget"))),
+        "the immediate attempt's retry names the configured {BUDGET_MS} ms budget: {retries:?}"
+    );
+    Ok(())
+}

@@ -354,6 +354,7 @@ impl Processes {
                             .backend
                             .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
                         Arc::clone(&self.core.env.core.clock),
+                        self.core.env.core.control.relay_policy(),
                     )
                     .with_process_env_store(Arc::clone(
                         &self.core.env.core.durability.process_env_store,

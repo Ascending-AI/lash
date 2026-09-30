@@ -25,6 +25,10 @@ pub(crate) struct BoundSession {
     process_engines: lash_core::ProcessEngineRegistry,
     catalog: Arc<dyn DeploymentStore>,
     scope_close: Arc<dyn lash_core::engine::ScopeCloseSink>,
+    /// The owner core's relay policy: every immediate delivery this binding
+    /// runs — an ingress ask, a close's engine half — honors the host's
+    /// configured attempt budget (FIG-4246).
+    relay_policy: lash_core::drive::relay::RelayPolicy,
     clock: Arc<dyn lash_core::Clock>,
     provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
     /// The core's tool-child context source (FIG-3712), held for as long as
@@ -56,6 +60,7 @@ impl BoundSession {
             process_engines: env.core.process_engines.clone(),
             catalog,
             scope_close: Arc::clone(&env.core.control.scope_close),
+            relay_policy: env.core.control.relay_policy(),
             clock: Arc::clone(&env.core.clock),
             provider_resolver: Arc::clone(&env.core.providers.provider_resolver),
             tool_child_context_source: None,
@@ -104,6 +109,7 @@ impl BoundSession {
             self.queued(),
             Arc::clone(&self.clock),
         )
+        .with_policy(self.relay_policy)
     }
 
     /// The same port as [`queued`](Self::queued), with how a send waits on
@@ -154,13 +160,15 @@ impl BoundSession {
                         &self.backend,
                         self.catalog(),
                         Arc::clone(&self.scope_close),
-                    ),
+                    )
+                    .with_policy(self.relay_policy),
                 ),
                 intents: self
                     .backend
                     .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
                 clock: Arc::clone(&self.clock),
                 deletes: lash_core::session_delete::SessionDeleteStores::of(&self.backend),
+                policy: self.relay_policy,
             },
         )
     }

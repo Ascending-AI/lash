@@ -222,6 +222,7 @@ pub fn obligation_relays(
                     .with_process_starts(
                         backend.obligation_ledger(ObligationKind::ProcessStart),
                         Arc::clone(&clock),
+                        policy,
                     );
                 Arc::new(
                     TriggerDeliveryRelay::new(backend.obligation_ledger(kind), router)

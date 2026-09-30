@@ -17,9 +17,6 @@ pub(crate) struct CoreSessionDriverConfig {
     pub(super) store_factory: Arc<dyn DeploymentStore>,
     pub(super) live_replay_store: Arc<dyn LiveReplayStore>,
     pub(super) process_lifecycle_available: bool,
-    /// How the recovery pass bounds its obligation deliveries (ADR 0109
-    /// §1.8).
-    pub(super) recovery_pass: lash_core::engine::RecoveryPassBudget,
 }
 
 /// The core's session driver (FIG-3600): opens a session's runtime with the
@@ -48,7 +45,7 @@ impl CoreSessionDriver {
     pub(crate) fn new(config: Arc<CoreSessionDriverConfig>) -> Self {
         let lanes = lash_core::runtime::drive::RelayLanes::new(
             Arc::clone(&config.env.core.clock),
-            config.recovery_pass,
+            config.env.core.control.recovery_pass,
         );
         Self {
             lanes,
@@ -86,10 +83,7 @@ impl CoreSessionDriver {
             processes: Some(ports.process.clone()),
             administration,
             clock: Arc::clone(&self.config.env.core.clock),
-            policy: lash_core::runtime::drive::relay::RelayPolicy {
-                attempt_budget_ms: self.config.recovery_pass.attempt_ms(),
-                ..lash_core::runtime::drive::relay::RelayPolicy::default()
-            },
+            policy: self.config.env.core.control.relay_policy(),
         })
     }
 

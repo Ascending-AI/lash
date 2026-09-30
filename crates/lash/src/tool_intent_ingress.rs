@@ -1316,6 +1316,7 @@ impl ToolIntentIngress {
                         .backend
                         .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
                     std::sync::Arc::clone(&self.core.env.core.clock),
+                    self.core.env.core.control.relay_policy(),
                 )
                 .with_process_env_store(std::sync::Arc::clone(
                     &self.core.env.core.durability.process_env_store,

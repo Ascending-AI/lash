@@ -227,6 +227,7 @@ impl ParkedWork {
             Arc::clone(&self.scope_close_obligations),
             Arc::clone(&self.clock),
         )
+        .with_policy(self.relay_policy)
         .deliver_intent(&intent)
         .await?;
         Ok((

@@ -388,6 +388,7 @@ impl RuntimeSessionServices {
                             .backend()
                             .obligation_ledger(crate::store::ObligationKind::ProcessStart),
                         Arc::clone(&self.current.host.core.clock),
+                        self.current.host.core.control.relay_policy(),
                     )
             })
     }

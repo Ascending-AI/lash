@@ -344,6 +344,23 @@ impl LayeredStores {
         self
     }
 
+    /// Answer every obligation kind's ledger with `layer` over the inner
+    /// store set's ledger of that kind. The layer runs on each ledger read,
+    /// so a recorder it installs keeps its state outside the ledger.
+    pub fn map_obligation_ledgers(
+        mut self,
+        layer: impl Fn(
+            crate::store::ObligationKind,
+            Arc<dyn crate::store::ObligationLedger>,
+        ) -> Arc<dyn crate::store::ObligationLedger>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        self.0.obligation_ledgers = Some(Arc::new(layer));
+        self
+    }
+
     /// The decorated store set.
     pub fn into_store_set(self) -> Arc<dyn StoreSet> {
         Arc::new(self.0)

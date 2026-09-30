@@ -42,6 +42,7 @@ impl CancelledStart {
                     .with_process_starts(
                         Arc::clone(&self.stores.start_ledger),
                         Arc::clone(&self.stores.clock),
+                        lash_core::drive::relay::RelayPolicy::default(),
                     ),
             )
             .await

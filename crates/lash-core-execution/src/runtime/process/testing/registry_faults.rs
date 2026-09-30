@@ -54,6 +54,7 @@ struct ReadFaultPlan {
     non_terminal_page_pause: Option<NonTerminalPagePause>,
     registration_hold: Option<RegistrationHold>,
     registration_pause: Option<NonTerminalPagePause>,
+    parent_end_holds: Vec<crate::ScopeId>,
     consumer_release_pause: Option<NonTerminalPagePause>,
     consumer_released_pause: Option<NonTerminalPagePause>,
     start_key_read_pause: Option<NonTerminalPagePause>,
@@ -237,6 +238,14 @@ impl ProcessRegistryFaults {
         reached: Arc<dyn Fn() + Send + Sync>,
     ) {
         self.faults.lock_recover().registration_hold = Some(RegistrationHold { point, reached });
+    }
+
+    /// Every `record_parent_end` of `parent` never returns, without reaching
+    /// the wrapped registry: the scope close it ends outlives the attempt
+    /// budget of the delivery running it. Other scopes' parent ends forward
+    /// unchanged.
+    pub fn hold_parent_end(&self, parent: crate::ScopeId) {
+        self.faults.lock_recover().parent_end_holds.push(parent);
     }
 
     /// Hold the next registration before it reaches the wrapped registry
@@ -611,6 +620,9 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
     }
 
     async fn record_parent_end(&self, parent: &crate::ScopeId) -> Result<(), crate::PluginError> {
+        if self.faults.lock_recover().parent_end_holds.contains(parent) {
+            return std::future::pending().await;
+        }
         self.inner.record_parent_end(parent).await
     }
 

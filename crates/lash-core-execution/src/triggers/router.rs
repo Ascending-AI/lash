@@ -335,16 +335,23 @@ fn unstarted_delivery(subscription_id: &str, reason: &str) -> PluginError {
     ))
 }
 
+/// What a router wired for immediate `ProcessStart` attempts carries: the
+/// kind's ledger they claim through, the clock they settle against, and the
+/// host's relay policy they run under.
+#[derive(Clone)]
+struct ProcessStartWiring {
+    ledger: Arc<dyn crate::store::ObligationLedger>,
+    clock: Arc<dyn crate::Clock>,
+    policy: crate::runtime::drive::relay::RelayPolicy,
+}
+
 #[derive(Clone)]
 pub struct TriggerRouter {
     store: Arc<dyn TriggerStore>,
     process_work: crate::ProcessWorkWiring,
     process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     process_engines: Option<crate::ProcessEngineRegistry>,
-    process_starts: Option<(
-        Arc<dyn crate::store::ObligationLedger>,
-        Arc<dyn crate::Clock>,
-    )>,
+    process_starts: Option<ProcessStartWiring>,
     route_restorer: Option<Arc<dyn TriggerRouteRestorer>>,
 }
 
@@ -368,12 +375,19 @@ impl TriggerRouter {
     /// The `ProcessStart` ledger the trigger's own start attempts claim
     /// through: a router wired with one tries the armed obligation at once
     /// (ADR 0109 §1.5); one without it leaves the row to the reconcile tick.
+    /// `policy` is the host's relay policy, so the immediate delivery runs
+    /// under the configured attempt budget.
     pub fn with_process_starts(
         mut self,
         ledger: Arc<dyn crate::store::ObligationLedger>,
         clock: Arc<dyn crate::Clock>,
+        policy: crate::runtime::drive::relay::RelayPolicy,
     ) -> Self {
-        self.process_starts = Some((ledger, clock));
+        self.process_starts = Some(ProcessStartWiring {
+            ledger,
+            clock,
+            policy,
+        });
         self
     }
 
@@ -592,9 +606,12 @@ impl TriggerRouter {
                         Arc::clone(&process_registry),
                         Arc::clone(self.process_work.port()),
                     );
-                    if let Some((ledger, clock)) = self.process_starts.as_ref() {
-                        executor =
-                            executor.with_process_starts(Arc::clone(ledger), Arc::clone(clock));
+                    if let Some(starts) = self.process_starts.as_ref() {
+                        executor = executor.with_process_starts(
+                            Arc::clone(&starts.ledger),
+                            Arc::clone(&starts.clock),
+                            starts.policy,
+                        );
                     }
                     if let Some(store) = self.process_env_store.as_ref() {
                         executor = executor.with_process_env_store(Arc::clone(store));
@@ -709,13 +726,16 @@ impl TriggerRouter {
         let registry = Arc::clone(self.process_work.registry());
         let port = Arc::clone(self.process_work.port());
         let execution = crate::runtime::effect::executor::ProcessLocalExecution {
-            process_starts: self.process_starts.as_ref().map(|(ledger, clock)| {
-                Arc::new(crate::runtime::process_start::ProcessStartRelay::new(
-                    Arc::clone(ledger),
-                    Arc::clone(&registry),
-                    Arc::clone(&port),
-                    Arc::clone(clock),
-                ))
+            process_starts: self.process_starts.as_ref().map(|starts| {
+                Arc::new(
+                    crate::runtime::process_start::ProcessStartRelay::new(
+                        Arc::clone(&starts.ledger),
+                        Arc::clone(&registry),
+                        Arc::clone(&port),
+                        Arc::clone(&starts.clock),
+                    )
+                    .with_policy(starts.policy),
+                )
             }),
             registry,
             process_work: port,

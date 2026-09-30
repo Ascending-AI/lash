@@ -204,7 +204,11 @@ pub(super) async fn start_store_fault_law<S: lash_core::StoreSet + ?Sized>(
                         start_recovery_effect("start-store-fault", &spec),
                         registry_local_executor(registry)
                             .with_process_env_store(env_store)
-                            .with_process_starts(ledger, clock),
+                            .with_process_starts(
+                                ledger,
+                                clock,
+                                lash_core::drive::relay::RelayPolicy::default(),
+                            ),
                     )
                     .await;
                 returned.lock_recover().push(result.map(|_| ()));

@@ -46,6 +46,10 @@ pub struct SessionCloseServices {
     /// The session-delete obligation's stores: the close's acknowledgement
     /// arms it, and the delete's relay delivers it (ADR 0109 §4).
     pub deletes: crate::session_delete::SessionDeleteStores,
+    /// The relay policy the close's and delete's immediate deliveries run
+    /// under: the host's configured attempt budget, the same source the
+    /// reconcile tick's relays run under.
+    pub policy: crate::drive::relay::RelayPolicy,
 }
 
 /// Whether session `session_id` is already closing: its close committed,
@@ -186,7 +190,8 @@ pub async fn close_session(
         Arc::clone(&services.scopes),
         Arc::clone(&services.scope_close_obligations),
         Arc::clone(&services.clock),
-    );
+    )
+    .with_policy(services.policy);
     let applied = match relay.deliver_intent(&intent).await {
         Ok(state) => state,
         Err(error) => {

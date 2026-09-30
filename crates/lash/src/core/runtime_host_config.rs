@@ -70,6 +70,10 @@ impl LashCoreBuilder {
         if let Some(grace) = self.abort_drain_grace.take() {
             core.control.abort_drain_grace = grace;
         }
+        // The host's delivery bound is the one relay-policy source: the
+        // recovery pass's relays and every immediate `deliver_now` derive
+        // theirs from it (FIG-4246).
+        core.control.recovery_pass = self.recovery_pass;
         if let Some(provider) = self.provider.clone() {
             core.providers.provider_resolver =
                 Arc::new(facade_support::SingleProviderResolver::new(provider));

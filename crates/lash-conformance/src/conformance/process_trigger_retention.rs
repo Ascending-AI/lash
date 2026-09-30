@@ -1345,6 +1345,7 @@ async fn a_completed_child_whose_bind_was_lost_is_bound_not_started_again(
                 .with_process_starts(
                     Arc::clone(&handles.process_starts),
                     Arc::clone(&clock) as Arc<dyn crate::Clock>,
+                    crate::drive::relay::RelayPolicy::default(),
                 ),
         )
     };
