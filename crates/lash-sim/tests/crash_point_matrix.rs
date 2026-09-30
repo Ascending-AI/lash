@@ -75,6 +75,7 @@ crash_matrix! {
     session_delete_after_delivery_before_settle => (SessionDelete, AfterDeliveryBeforeSettle);
 
     process_start_after_state_commit => (ProcessStart, AfterStateCommit);
+    definition_start_during_engine_delivery => (DefinitionStart, DuringEngineDelivery);
     definition_start_mid_journal_step => (DefinitionStart, MidJournalStep);
     definition_start_after_state_commit => (DefinitionStart, AfterStateCommit);
     definition_create_mid_journal_step => (DefinitionCreate, MidJournalStep);

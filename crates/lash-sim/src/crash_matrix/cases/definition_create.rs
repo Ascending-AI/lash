@@ -8,6 +8,7 @@ use lash_core::store::{HistoryAnchor, HistoryBudget};
 use lash_restate_test::{CrashPoint as EngineCut, CrashRule};
 
 use super::{Staged, crash_and_restart, send, session_name};
+use crate::crash_matrix::catalog_audit;
 use crate::crash_matrix::invariants::{CustomCheck, Expected};
 use crate::crash_matrix::world::{CoreBuild, CrashWorld};
 use crate::crash_matrix::{CrashPoint, Seam};
@@ -152,6 +153,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         notes: vec![format!("create publication cut={point:?}")],
         expected: Expected {
             custom: vec![("definition_create", published(session))],
+            audits: vec![("catalog_names", catalog_audit::no_catalog_name())],
             ..Default::default()
         },
     })

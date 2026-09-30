@@ -62,6 +62,7 @@
 //!    scenario in [`cases`].
 
 pub mod cases;
+mod catalog_audit;
 pub mod deployment;
 pub mod engine;
 pub mod invariants;
@@ -612,6 +613,12 @@ pub const MATRIX: &[CaseSpec] = &[
     // job dies with it, and the start's own obligation starts the process.
     // A cut before the registration's result leaves that obligation due; a
     // cut after it leaves the claim the dead attempt took, which lapses.
+    today(
+        Seam::DefinitionStart,
+        CrashPoint::DuringEngineDelivery,
+        DetectionBound::LapsedClaim,
+        "a start by id cut before its registration step was stored admits at most one process, and a dead start that admitted none holds nothing once the host's pin is gone",
+    ),
     today(
         Seam::DefinitionStart,
         CrashPoint::MidJournalStep,

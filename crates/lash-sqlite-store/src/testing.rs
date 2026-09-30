@@ -156,6 +156,116 @@ pub fn read_rows_for_testing(
     Ok(read)
 }
 
+/// One stored value: where it is, its bytes, and every JSON document those
+/// bytes decode to as this store writes them.
+#[derive(Clone, Debug)]
+pub struct StoredCell {
+    /// `<database>/<table>.<column>#<row>`, or `<database>/schema/<table>`
+    /// for a table's own declaration.
+    pub location: String,
+    pub bytes: Vec<u8>,
+    /// The value as JSON text, as a msgpack record, or as a blob envelope's
+    /// (decompressed) content in either encoding; empty for a scalar.
+    pub documents: Vec<serde_json::Value>,
+}
+
+/// Every table declaration and every non-null cell of every table in
+/// `database` of `stores`, with the documents each decodes to.
+///
+/// An inspection hook for simulation checkers that audit what a finished
+/// run persisted (lash-sim's crash-matrix catalog audit, FIG-4179). It never
+/// writes, and no lash component reads through it.
+pub fn read_stored_cells_for_testing(
+    stores: &crate::SqliteStoreSet,
+    database: crate::SqliteDatabase,
+) -> Result<Vec<StoredCell>, String> {
+    let target = stores.location().target(database);
+    let connection = rusqlite::Connection::open_with_flags(
+        target.read_only_uri(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|error| format!("open {database:?} read-only: {error}"))?;
+    connection
+        .busy_timeout(crate::connection_sql::READ_ONLY_BUSY_TIMEOUT)
+        .map_err(|error| format!("set the busy timeout on {database:?}: {error}"))?;
+    let mut cells = Vec::new();
+    let tables = {
+        let mut statement = connection
+            .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table' ORDER BY name")
+            .map_err(|error| format!("list the tables of {database:?}: {error}"))?;
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                ))
+            })
+            .and_then(Iterator::collect::<Result<Vec<_>, _>>)
+            .map_err(|error| format!("list the tables of {database:?}: {error}"))?
+    };
+    for (table, declaration) in tables {
+        cells.push(StoredCell {
+            location: format!("{database:?}/schema/{table}"),
+            bytes: declaration.into_bytes(),
+            documents: Vec::new(),
+        });
+        let mut statement = connection
+            .prepare(&format!("SELECT * FROM \"{table}\""))
+            .map_err(|error| format!("read `{table}` of {database:?}: {error}"))?;
+        let columns = statement
+            .column_names()
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let mut rows = statement
+            .query([])
+            .map_err(|error| format!("read `{table}` of {database:?}: {error}"))?;
+        let mut index = 0_usize;
+        while let Some(row) = rows
+            .next()
+            .map_err(|error| format!("read `{table}` of {database:?}: {error}"))?
+        {
+            for (column_index, column) in columns.iter().enumerate() {
+                let bytes = match row
+                    .get_ref(column_index)
+                    .map_err(|error| format!("read `{table}.{column}`: {error}"))?
+                {
+                    rusqlite::types::ValueRef::Null => continue,
+                    rusqlite::types::ValueRef::Integer(value) => value.to_string().into_bytes(),
+                    rusqlite::types::ValueRef::Real(value) => value.to_string().into_bytes(),
+                    rusqlite::types::ValueRef::Text(bytes)
+                    | rusqlite::types::ValueRef::Blob(bytes) => bytes.to_vec(),
+                };
+                cells.push(StoredCell {
+                    location: format!("{database:?}/{table}.{column}#{index}"),
+                    documents: stored_documents(&bytes),
+                    bytes,
+                });
+            }
+            index += 1;
+        }
+    }
+    Ok(cells)
+}
+
+/// The JSON documents `bytes` holds in the encodings this store writes.
+fn stored_documents(bytes: &[u8]) -> Vec<serde_json::Value> {
+    let structured =
+        |value: serde_json::Value| (value.is_object() || value.is_array()).then_some(value);
+    if let Some(value) = serde_json::from_slice(bytes).ok().and_then(structured) {
+        return vec![value];
+    }
+    if let Ok(content) = crate::codec::decode_artifact_blob(bytes) {
+        return stored_documents(&content);
+    }
+    crate::codec::decode_msgpack::<serde_json::Value>(bytes)
+        .and_then(structured)
+        .into_iter()
+        .collect()
+}
+
 /// Finalize the store at `location` as a build whose writable range is
 /// `[1, fleet]`, without authorizing cold recovery or checking retirement,
 /// for a test that races writers

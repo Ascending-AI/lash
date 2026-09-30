@@ -27,6 +27,88 @@ pub fn trigger_subscription_list_sql(
     crate::trigger_store::subscription_list_sql(filter).to_string()
 }
 
+/// One stored value: where it is, its bytes, and every JSON document those
+/// bytes decode to as this store writes them. The twin of
+/// `lash_sqlite_store::testing::StoredCell`.
+#[derive(Clone, Debug)]
+pub struct StoredCell {
+    /// `<table>.<column>#<row>`, or `schema/<table>.<column>` for a column's
+    /// own declaration.
+    pub location: String,
+    pub bytes: Vec<u8>,
+    /// The value as JSON text (a `json`/`jsonb` column's included) or as a
+    /// msgpack record; empty for a scalar.
+    pub documents: Vec<serde_json::Value>,
+}
+
+/// Every column declaration and every non-null cell of every table in the
+/// storage's schema, with the documents each decodes to.
+///
+/// An inspection hook for simulation checkers that audit what a finished
+/// run persisted (lash-sim's crash-matrix catalog audit, FIG-4179). It never
+/// writes, and no lash component reads through it.
+pub async fn read_stored_cells_for_testing(
+    storage: &crate::PostgresStorage,
+) -> Result<Vec<StoredCell>, String> {
+    use sqlx::Row as _;
+    let columns = sqlx::query(
+        "SELECT table_name::text AS table_name, column_name::text AS column_name, \
+                data_type::text AS data_type \
+         FROM information_schema.columns \
+         WHERE table_schema = current_schema() \
+         ORDER BY table_name, ordinal_position",
+    )
+    .fetch_all(storage.pool())
+    .await
+    .map_err(|error| format!("list the columns: {error}"))?;
+    let mut cells = Vec::new();
+    for column in columns {
+        let table: String = column.get("table_name");
+        let name: String = column.get("column_name");
+        let data_type: String = column.get("data_type");
+        cells.push(StoredCell {
+            location: format!("schema/{table}.{name}"),
+            bytes: format!("{table}.{name}").into_bytes(),
+            documents: Vec::new(),
+        });
+        let values: Vec<Vec<u8>> = if data_type == "bytea" {
+            sqlx::query_scalar(&format!(
+                "SELECT \"{name}\" FROM \"{table}\" WHERE \"{name}\" IS NOT NULL"
+            ))
+            .fetch_all(storage.pool())
+            .await
+        } else {
+            sqlx::query_scalar::<_, String>(&format!(
+                "SELECT \"{name}\"::text FROM \"{table}\" WHERE \"{name}\" IS NOT NULL"
+            ))
+            .fetch_all(storage.pool())
+            .await
+            .map(|values| values.into_iter().map(String::into_bytes).collect())
+        }
+        .map_err(|error| format!("read `{table}.{name}`: {error}"))?;
+        for (index, bytes) in values.into_iter().enumerate() {
+            let structured =
+                |value: serde_json::Value| (value.is_object() || value.is_array()).then_some(value);
+            let documents = serde_json::from_slice(&bytes)
+                .ok()
+                .and_then(structured)
+                .or_else(|| {
+                    rmp_serde::from_slice::<serde_json::Value>(&bytes)
+                        .ok()
+                        .and_then(structured)
+                })
+                .into_iter()
+                .collect();
+            cells.push(StoredCell {
+                location: format!("{table}.{name}#{index}"),
+                bytes,
+                documents,
+            });
+        }
+    }
+    Ok(cells)
+}
+
 /// Deterministic PostgreSQL substrate fault injection, the twin of
 /// `lash_sqlite_store::testing`'s injector.
 #[cfg(feature = "testing")]

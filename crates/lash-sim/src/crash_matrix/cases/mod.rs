@@ -352,6 +352,14 @@ async fn recover_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport, sta
                 .map(|line| format!("diagnosis: {line}")),
         );
     } else {
+        for (name, audit) in &expected.audits {
+            report.violations.extend(
+                audit(&world)
+                    .await
+                    .into_iter()
+                    .map(|entry| format!("[{name}] {entry}")),
+            );
+        }
         report
             .violations
             .extend(invariants::probe_live_sessions(&world, &expected, 4).await);

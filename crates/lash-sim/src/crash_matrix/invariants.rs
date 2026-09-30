@@ -94,6 +94,10 @@ pub struct Expected {
     pub closed_sessions: Vec<SessionId>,
     pub live_sessions: Vec<SessionId>,
     pub custom: Vec<(&'static str, CustomCheck)>,
+    /// Checks of the durable state a recovered world left, run once after
+    /// every invariant held. They are not timed against the detection
+    /// bound: an audit that reads every store and journal would spend it.
+    pub audits: Vec<(&'static str, CustomCheck)>,
 }
 
 impl std::fmt::Debug for Expected {

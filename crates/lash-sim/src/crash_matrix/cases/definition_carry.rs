@@ -11,6 +11,7 @@ use lash_core::sync::MutexExt;
 use lash_core::{ArtifactReferrer, ArtifactStoreError, ArtifactStoreId, ReferrerClaim};
 
 use super::{Staged, crash_and_restart, send, session_name};
+use crate::crash_matrix::catalog_audit;
 use crate::crash_matrix::deployment::HostSite;
 use crate::crash_matrix::invariants::{CustomCheck, Expected};
 use crate::crash_matrix::world::{CoreBuild, CrashWorld};
@@ -362,6 +363,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
                 "definition_carry",
                 carried_then_reclaimed(store, id, pin, session, hold, ticks_at_restart),
             )],
+            audits: vec![("catalog_names", catalog_audit::no_catalog_name())],
             ..Default::default()
         },
     })

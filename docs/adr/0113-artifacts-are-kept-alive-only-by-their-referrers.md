@@ -639,7 +639,17 @@ its predecessor frame within the matrix bound on both engines
 
 A carried definition id holds its closure, an uncarried definition ends,
 and a host pin survives an uncarried switch
-(`crates/lash/tests/artifact_referrers_evidence.rs:619,709,769`).
+(`crates/lash/tests/artifact_referrers_evidence.rs:619,709,769`). A create,
+a carry and a start by id each survive a deployment crash at every
+boundary: before and after the create attempt commits, after publication
+and before the frame commits, before admission, after registration, and
+after the recorded start. Each boundary is proven on the server double over
+SQLite and over PostgreSQL, and on a live server. A start cut before its
+registration step was stored admits at most one process, and one that
+admitted none leaves nothing held once the host's pin is gone. Every such world's store cells, schema and
+journal entries carry no catalog field beside a definition
+(`crates/lash-sim/src/crash_matrix/cases/definition.rs`,
+`crates/lash-sim/src/crash_matrix/catalog_audit.rs`).
 
 #### 7.13 Forks
 

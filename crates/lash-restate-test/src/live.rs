@@ -736,6 +736,55 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
             .collect())
     }
 
+    /// The journal entries of `id` with their stored bytes: `index:type:name`
+    /// and the entry's raw encoding, as the server keeps it.
+    pub async fn journal_entries(&self, id: &str) -> Result<Vec<(String, Vec<u8>)>, LiveError> {
+        use base64::Engine as _;
+        #[derive(serde::Deserialize)]
+        struct Entry {
+            index: u64,
+            entry_type: String,
+            #[serde(default)]
+            name: Option<String>,
+            #[serde(default)]
+            raw: Option<String>,
+        }
+        const RAW: base64::engine::GeneralPurpose = base64::engine::GeneralPurpose::new(
+            &base64::alphabet::STANDARD,
+            base64::engine::GeneralPurposeConfig::new()
+                .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent),
+        );
+        let entries: Vec<Entry> = self
+            .inner
+            .admin
+            .query_json(&format!(
+                "SELECT index, entry_type, name, encode(raw, 'base64') AS raw \
+                 FROM sys_journal WHERE id = {} ORDER BY index",
+                sql_literal(id)
+            ))
+            .await
+            .map_err(|error| LiveError::Admin(error.to_string()))?;
+        entries
+            .into_iter()
+            .map(|entry| {
+                let bytes = RAW
+                    .decode(entry.raw.unwrap_or_default().trim())
+                    .map_err(|error| {
+                        LiveError::Admin(format!("undecodable journal entry: {error}"))
+                    })?;
+                Ok((
+                    format!(
+                        "{}:{}:{}",
+                        entry.index,
+                        entry.entry_type,
+                        entry.name.unwrap_or_default()
+                    ),
+                    bytes,
+                ))
+            })
+            .collect()
+    }
+
     /// Kill `id` as an operator does and wait until the server completed it.
     /// Answers whether it was still open.
     pub async fn kill_and_await(&self, id: &str) -> Result<bool, LiveError> {
