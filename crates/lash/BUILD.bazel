@@ -11301,9 +11301,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_26f56f02",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11312,8 +11310,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_26f56f02)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_26f56f02)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11351,9 +11348,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_3102cd39",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11362,8 +11357,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_3102cd39)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_3102cd39)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11401,9 +11395,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_42c78c40",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11412,8 +11404,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_42c78c40)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_42c78c40)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11452,9 +11443,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_49664c7c",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11463,8 +11452,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_49664c7c)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_49664c7c)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11500,9 +11488,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_5b9f21e0",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11511,8 +11497,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_5b9f21e0)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_5b9f21e0)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11550,9 +11535,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_67408e98",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11561,8 +11544,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_67408e98)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_67408e98)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11600,9 +11582,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_91df71ec",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11611,8 +11591,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_91df71ec)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_91df71ec)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11651,9 +11630,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_9258e783",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11662,8 +11639,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_9258e783)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_9258e783)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11702,9 +11678,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_a8c70673",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11713,8 +11687,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_a8c70673)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_a8c70673)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11803,9 +11776,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_c2f7d314",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11814,8 +11785,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_c2f7d314)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_c2f7d314)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11853,9 +11823,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_dc7f6027",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11864,8 +11832,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_dc7f6027)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_dc7f6027)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11904,9 +11871,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_de4f0733",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11915,8 +11880,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_de4f0733)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_de4f0733)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -11955,9 +11919,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_ffa14dec",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -11966,8 +11928,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_ffa14dec)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_ffa14dec)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -12005,9 +11966,7 @@ lash_rust_feature_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    extra_compile_data = [
-        ":lash-seam-proof-worker__bin__fv_ffd53ed5",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -12016,8 +11975,7 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_ffd53ed5)"},
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin__fv_ffd53ed5)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",

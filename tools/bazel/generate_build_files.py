@@ -2132,22 +2132,20 @@ class FeatureLaneGraph:
         rustc_env, binary_data = cargo_bin_env(
             pathlib.Path(target["src_path"]),
             {
-                candidate["name"]: label_name(
-                    candidate, library is None and len(binaries) == 1
+                candidate["name"]: (
+                    f"{label_name(candidate, library is None and len(binaries) == 1)}__fv_{suffix}"
                 )
                 for candidate in binaries
+                if set(candidate.get("required-features", [])) <= set(features)
             },
         )
-        # A binary referenced through `CARGO_BIN_EXE_*` is a runtime input of
-        # the ordinary label; a variant must reach the variant of that binary,
-        # never the default-feature one.
-        binary_data = [
-            f"{d}__fv_{suffix}" if d.startswith(":") else d for d in binary_data
-        ]
-        rustc_env = {
-            key: value.replace(")", f"__fv_{suffix})")
-            for key, value in rustc_env.items()
-        }
+        # Cargo builds enabled binaries for integration tests even when a
+        # named-test selection does not select binaries as root targets.
+        # Emit each referenced binary in this resolution, without enabling
+        # missing required features or falling back to the workspace binary.
+        for candidate in binaries:
+            if f"CARGO_BIN_EXE_{candidate['name']}" in rustc_env:
+                self.emit_target(package_name, resolution, candidate, "bin", False, [])
         tags = list(FEATURE_VARIANT_TAGS)
         policy_tags, _reason = cargo_test_policy(package_name, kind, target["name"])
         if kind in ("bin", "example", "bench"):
@@ -2726,6 +2724,39 @@ def reconcile_lane_units(metadata: dict, units: list[dict]) -> list[str]:
     return failures
 
 
+def reconcile_cargo_bin_env(outputs: dict[pathlib.Path, str]) -> list[str]:
+    """Every Cargo binary path must resolve to an emitted binary rule."""
+    binaries = set()
+    references = []
+    for path, content in outputs.items():
+        if path.name != "BUILD.bazel":
+            continue
+        directory = path.parent.relative_to(ROOT).as_posix()
+        for node in ast.parse(content).body:
+            if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)):
+                continue
+            call = node.value
+            args = {arg.arg: arg.value for arg in call.keywords}
+            if "name" not in args:
+                continue
+            label = f"//{directory}:{ast.literal_eval(args['name'])}"
+            if call.func.id in {"lash_rust_binary", "lash_rust_feature_binary"}:
+                binaries.add(label)
+            for attribute in ("rustc_env", "test_env"):
+                env = ast.literal_eval(args[attribute]) if attribute in args else {}
+                for key, value in env.items():
+                    if key.startswith("CARGO_BIN_EXE_"):
+                        binary = value.removeprefix("$(rootpath ").removesuffix(")")
+                        if binary.startswith(":"):
+                            binary = f"//{directory}{binary}"
+                        references.append((label, key, binary))
+    return [
+        f"{label}: {key} references missing binary {binary}"
+        for label, key, binary in sorted(set(references)) if binary not in binaries
+    ]
+
+
 def reconcile_vm_worker_variants(outputs: dict[pathlib.Path, str]) -> list[str]:
     """Check the emitted worker's actual client label, including default reuse."""
     libraries = {}
@@ -2782,6 +2813,7 @@ def main() -> int:
             ],
         )
         failures.extend(reconcile_vm_worker_variants(outputs))
+        failures.extend(reconcile_cargo_bin_env(outputs))
         failures.extend(vm_worker_runfiles.check(metadata, outputs, ROOT))
         if failures:
             print("feature-lane graph does not match Cargo:", file=sys.stderr)
