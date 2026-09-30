@@ -426,6 +426,200 @@ async fn sqlite_migration_crash_at_every_step_resumes_or_restores() {
     }
 }
 
+/// A failed resume restores the original complete set even though this
+/// invocation committed nothing. Every partial-commit cut is crossed with
+/// every observable failure before the resume commits and every restore cut.
+#[tokio::test]
+async fn sqlite_migration_resume_failure_restores_original_set() {
+    for committed in ALL.into_iter().take(2) {
+        let failures = ALL
+            .into_iter()
+            .filter(|database| *database > committed)
+            .map(Migrated)
+            .chain(ALL.into_iter().map(Owned))
+            .chain(ALL.into_iter().map(Locked))
+            .collect::<Vec<_>>();
+        for fail_at in &failures {
+            for restore_cut in std::iter::once(None).chain(restore_steps().into_iter().map(Some)) {
+                let fail_at = *fail_at;
+                let context =
+                    format!("after {committed:?}, fail {fail_at:?}, restore {restore_cut:?}");
+                let (root, before) = predecessor().await;
+                let (hook, _) = recording(move |step| {
+                    if step == Committed(committed) {
+                        SqliteMigrationFault::Crash
+                    } else {
+                        SqliteMigrationFault::Proceed
+                    }
+                });
+                let crashed = open(root.path(), options(Some(hook)))
+                    .await
+                    .map(drop)
+                    .expect_err("the initial migration crashed after a partial commit");
+                assert!(
+                    crashed.to_string().contains("crashed"),
+                    "{context}: {crashed}"
+                );
+                assert_eq!(
+                    stamps(root.path()),
+                    if committed == SqliteDatabase::DurableCore {
+                        vec![2, 1, 1]
+                    } else {
+                        vec![2, 2, 1]
+                    },
+                    "{context}: prior commits are durable"
+                );
+                let original = backups(root.path());
+                assert_eq!(original.len(), 1, "{context}");
+                assert_eq!(original[0].1["state"], "migrating", "{context}");
+                assert_backup_holds(&original[0].0, &original[0].1, &before);
+
+                let restoring = Arc::new(Mutex::new(false));
+                let (hook, steps) = recording(move |step| {
+                    let mut restoring = restoring.lock().expect("restore flag");
+                    *restoring |= step == RestoreStarted;
+                    if !*restoring && step == fail_at {
+                        SqliteMigrationFault::Fail
+                    } else if *restoring && Some(step) == restore_cut {
+                        SqliteMigrationFault::Crash
+                    } else {
+                        SqliteMigrationFault::Proceed
+                    }
+                });
+                let failed = open(root.path(), options(Some(hook)))
+                    .await
+                    .map(drop)
+                    .expect_err("the resumed migration fails before its first commit");
+                assert!(
+                    !steps
+                        .lock()
+                        .expect("steps")
+                        .iter()
+                        .any(|step| matches!(step, Committed(_))),
+                    "{context}: the resume committed nothing"
+                );
+                let kept = backups(root.path());
+                assert_eq!(
+                    kept.len(),
+                    1,
+                    "{context}: the original backup remains; live stamps {:?}; error {failed}",
+                    stamps(root.path())
+                );
+                if restore_cut.is_some() {
+                    assert!(
+                        failed.to_string().contains("crashed"),
+                        "{context}: {failed}"
+                    );
+                } else {
+                    assert!(
+                        failed.to_string().contains("restored from the backup"),
+                        "{context}: {failed}"
+                    );
+                }
+                assert_eq!(kept[0].0, original[0].0, "{context}: no replacement backup");
+                assert_backup_holds(&kept[0].0, &kept[0].1, &before);
+                assert!(
+                    kept[0].1["failure"]
+                        .as_str()
+                        .is_some_and(|failure| failure.contains("injected")),
+                    "{context}: the manifest records the resume failure"
+                );
+                let interrupted = restore_cut.is_some_and(|cut| cut != RestoreCompleted);
+                assert_eq!(
+                    kept[0].1["state"],
+                    if interrupted { "restoring" } else { "restored" },
+                    "{context}"
+                );
+                if interrupted {
+                    let restored = open(root.path(), options(None))
+                        .await
+                        .map(drop)
+                        .expect_err("a third cold open finishes the interrupted restore");
+                    assert!(
+                        restored.to_string().contains("restored from the backup"),
+                        "{context}: {restored}"
+                    );
+                    assert_eq!(backups(root.path())[0].1["state"], "restored", "{context}");
+                }
+                assert!(
+                    bytes(root.path()) == before,
+                    "{context}: every original byte returns"
+                );
+                for database in ALL {
+                    for suffix in ["-wal", "-shm"] {
+                        assert!(
+                            !super::sidecar(&database_path(root.path(), database), suffix).exists(),
+                            "{context}: no {suffix} for {database:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A connection that prevents a failed resume's restore leaves the recovery
+/// manifest and original backup intact until a cold open can own the store.
+#[tokio::test]
+async fn sqlite_migration_resume_failure_retains_backup_until_store_is_owned() {
+    let (root, before) = predecessor().await;
+    let (hook, _) = recording(|step| {
+        if step == Committed(SqliteDatabase::DurableCore) {
+            SqliteMigrationFault::Crash
+        } else {
+            SqliteMigrationFault::Proceed
+        }
+    });
+    open(root.path(), options(Some(hook)))
+        .await
+        .map(drop)
+        .expect_err("the first migration crashes after a commit");
+    let original = backups(root.path());
+    let holder = Arc::new(Mutex::new(None));
+    let held = Arc::clone(&holder);
+    let probe_root = root.path().to_path_buf();
+    let (hook, _) = recording(move |step| {
+        if step == RestoreStarted {
+            let connection = raw(&probe_root, SqliteDatabase::Triggers);
+            connection
+                .query_row("SELECT COUNT(*) FROM lash_compat", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("hold the trigger database open during restore");
+            *held.lock().expect("holder") = Some(connection);
+        }
+        if step == Migrated(SqliteDatabase::ProcessRegistry) {
+            SqliteMigrationFault::Fail
+        } else {
+            SqliteMigrationFault::Proceed
+        }
+    });
+    let mut busy = options(Some(hook));
+    busy.store.connection_policy.busy_timeout = Duration::from_millis(100);
+    let refused = open(root.path(), busy)
+        .await
+        .map(drop)
+        .expect_err("restore cannot own the whole store");
+    assert!(refused.to_string().contains("open elsewhere"), "{refused}");
+    let pending = backups(root.path());
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].0, original[0].0);
+    assert_eq!(pending[0].1["state"], "restoring");
+    assert_backup_holds(&pending[0].0, &pending[0].1, &before);
+    assert_eq!(stamps(root.path()), vec![2, 1, 1]);
+    drop(holder.lock().expect("holder").take());
+    let restored = open(root.path(), options(None))
+        .await
+        .map(drop)
+        .expect_err("a third cold open finishes the restore");
+    assert!(
+        restored.to_string().contains("restored from the backup"),
+        "{restored}"
+    );
+    assert!(bytes(root.path()) == before);
+    assert_eq!(backups(root.path())[0].1["state"], "restored");
+}
+
 /// A migration that fails after some databases committed restores every
 /// database from the backup: each file is byte for byte what it was before
 /// the open, with no write-ahead log beside it, and the open reports the

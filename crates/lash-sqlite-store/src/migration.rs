@@ -541,7 +541,7 @@ impl Migration<'_> {
                 BackupState::BackingUp => remove_directory(&pending.directory)?,
                 BackupState::Migrating if self.owns(&pending)? => {
                     if self.advanced(&pending, &stamps)? {
-                        return self.resume(pending).await;
+                        return self.advance(pending, None).await;
                     }
                     // Nothing committed, so the store is what it was, or
                     // newer if another build wrote it since: a fresh backup
@@ -673,14 +673,6 @@ impl Migration<'_> {
         self.advance(backup, Some(&copied)).await
     }
 
-    async fn resume(&self, backup: Backup) -> Result<(), Stop> {
-        for database in SqliteDatabase::ALL {
-            self.own(database).await?;
-            self.probe.at(SqliteMigrationStep::Owned(database))?;
-        }
-        self.advance(backup, None).await
-    }
-
     /// Copy every database into the backup, in [`SqliteDatabase::ALL`] order,
     /// answering each live file's length and modification time at its copy.
     fn copy_all(&self, backup: &mut Backup) -> Result<Vec<(u64, SystemTime)>, Stop> {
@@ -712,16 +704,20 @@ impl Migration<'_> {
         mut backup: Backup,
         copied: Option<&[(u64, SystemTime)]>,
     ) -> Result<(), Stop> {
-        let (failure, committed) = {
+        let result = async {
+            if copied.is_none() {
+                for database in SqliteDatabase::ALL {
+                    self.own(database).await?;
+                    self.probe.at(SqliteMigrationStep::Owned(database))?;
+                }
+            }
             let stopped: std::cell::RefCell<Option<Stop>> = std::cell::RefCell::new(None);
-            let committed = std::cell::Cell::new(0_usize);
-            // The advance speaks rusqlite errors; the migration's own stop rides
-            // beside it and is what the caller sees.
+            // Preserve the migration's stop across the rusqlite boundary.
             let stop = |stop: Stop| {
                 *stopped.borrow_mut() = Some(stop);
                 crate::sqlite_conversion_error(storage("the migration stopped".to_owned()))
             };
-            let result = advance_set_observed(
+            advance_set_observed(
                 self.location,
                 self.busy_timeout,
                 |database, tx| {
@@ -732,36 +728,36 @@ impl Migration<'_> {
                     let step = match step {
                         AdvanceStep::Locked(database) => SqliteMigrationStep::Locked(database),
                         AdvanceStep::Committed(database) => {
-                            committed.set(committed.get() + 1);
                             SqliteMigrationStep::Committed(database)
                         }
                     };
                     self.probe.at(step).map_err(stop)
                 },
-            );
-            let failure = match result {
-                Ok(()) => {
-                    backup.record(BackupState::Migrated)?;
-                    self.probe.at(SqliteMigrationStep::Completed)?;
-                    self.prune(&backup.manifest.store);
-                    return Ok(());
-                }
-                Err(error) => stopped.into_inner().unwrap_or_else(|| Stop::from(error)),
-            };
-            (failure, committed.get())
-        };
-        match failure {
-            #[cfg(feature = "testing")]
-            crashed @ Stop::Crashed(_) => Err(crashed),
-            Stop::Failed(error) if committed == 0 => {
-                // Every transaction rolled back, so the store is as it was
-                // backed up (or as another writer left it): no restore.
-                remove_directory(&backup.directory)?;
-                Err(Stop::Failed(error))
+            )
+            .map_err(|error| stopped.into_inner().unwrap_or_else(|| Stop::from(error)))
+        }
+        .await;
+        match result {
+            Ok(()) => {
+                backup.record(BackupState::Migrated)?;
+                self.probe.at(SqliteMigrationStep::Completed)?;
+                self.prune(&backup.manifest.store);
+                Ok(())
             }
-            Stop::Failed(error) => {
-                let identity = backup.manifest.store.clone();
-                self.restore(backup, error.to_string(), &identity).await
+            #[cfg(feature = "testing")]
+            Err(crashed @ Stop::Crashed(_)) => Err(crashed),
+            Err(Stop::Failed(error)) => {
+                // Transactions have closed. Compare their durable stamps to
+                // the original backup, including commits by earlier opens.
+                // An unreadable stamp retains the backup; a restore that
+                // cannot own the store retains its recovery manifest too.
+                if self.advanced(&backup, &self.stamps().await?)? {
+                    let identity = backup.manifest.store.clone();
+                    self.restore(backup, error.to_string(), &identity).await
+                } else {
+                    remove_directory(&backup.directory)?;
+                    Err(Stop::Failed(error))
+                }
             }
         }
     }
