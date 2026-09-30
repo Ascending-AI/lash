@@ -67,7 +67,16 @@ async fn apply_direct_llm_result(
                 &err,
                 call_record,
             );
-            Err(PluginError::Session(err.message))
+            if err.code.as_ref().and_then(crate::FailureCode::turn_code)
+                == Some(crate::TurnFailureCode::UsageOwnerRetired)
+            {
+                Err(PluginError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::UsageOwnerRetired,
+                    err.message,
+                )))
+            } else {
+                Err(PluginError::Session(err.message))
+            }
         }
     }
 }

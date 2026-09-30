@@ -31,8 +31,8 @@ use crate::{
 /// One execution of a spending effect's body.
 ///
 /// Created by the engine's controller when the body starts and cloned into
-/// every dispatch site of the body. The run is admitted to storage once, by
-/// the first provider attempt any of its calls makes.
+/// every dispatch site of the body. Each provider attempt checks the durable
+/// owner-retirement fence through the run's idempotent storage admission.
 #[derive(Clone)]
 pub struct UsageRun {
     inner: Arc<UsageRunInner>,
@@ -44,7 +44,7 @@ struct UsageRunInner {
     run: UsageRunId,
     store: Arc<dyn UsageAccountingStore>,
     clock: Arc<dyn Clock>,
-    /// Serializes the run's one admission across concurrent calls.
+    /// Serializes dispatch admission and retains a permanent refusal or fault.
     admission: tokio::sync::Mutex<RunAdmission>,
     progress: Mutex<RunProgress>,
 }
@@ -186,11 +186,10 @@ impl UsageRun {
     async fn admit(&self, call: &UsageCallInner) -> Result<(), DispatchRefused> {
         let mut admission = self.inner.admission.lock().await;
         match &*admission {
-            RunAdmission::Admitted => return Ok(()),
             RunAdmission::Refused(refused) | RunAdmission::Faulted(refused) => {
                 return Err(refused.clone());
             }
-            RunAdmission::Pending => {}
+            RunAdmission::Pending | RunAdmission::Admitted => {}
         }
         let request = UsageRunAdmission {
             owner: call.owner.clone(),
@@ -652,9 +651,9 @@ mod tests {
     }
 
     /// A billed failed attempt and the retry that succeeded are two facts,
-    /// and the run is admitted once for both.
+    /// and both attempts check the fence under the same run identity.
     #[tokio::test]
-    async fn a_billed_failure_and_its_retry_are_two_facts_under_one_admission() {
+    async fn a_billed_failure_and_its_retry_are_two_facts_under_one_run() {
         let store = Arc::new(AdmissionStore::default());
         let run = run(Arc::clone(&store));
         let call = run.call(owner(), "turn", "model").expect("a call slot");
@@ -677,7 +676,9 @@ mod tests {
             ),
         ]));
         let usage = run.finish().expect("an admitted run has usage");
-        assert_eq!(store.admissions.lock_recover().len(), 1);
+        let admissions = store.admissions.lock_recover();
+        assert_eq!(admissions.len(), 2);
+        assert_eq!(admissions[0].run, admissions[1].run);
         assert_eq!(usage.accounting, RunAccounting::Complete);
         assert_eq!(
             usage

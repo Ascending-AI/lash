@@ -110,11 +110,14 @@ recorded one. The SQL run row can: every run that may have dispatched has its
 own row before dispatch, and a row no journaled settlement ever claims becomes
 an explicit unknown liability.
 
-The dispatch gate runs before every attempt. The run admits itself once, on
-its first attempt, and records each attempt ordinal it admitted:
+The dispatch gate runs before every attempt. Each attempt re-checks the
+durable owner-retirement fence through the run's idempotent admission, and
+the run records each attempt ordinal it admitted. Only one run row is inserted:
 
 - A retired owner refuses the dispatch with `TurnFailureCode::UsageOwnerRetired`,
-  not retryable, and nothing is sent.
+  not retryable, and nothing is sent. Managed direct calls carry it as
+  `RuntimeErrorCode::UsageOwnerRetired` through the existing
+  `PluginError::Runtime` carrier.
 - A store fault is not a refusal. The attempt is refused retryably, the run
   records the fault, and the engine ends the effect retryably **without
   journaling**, for all three kinds. This is FIG-3683's `Retried` rule applied
@@ -310,5 +313,5 @@ same schema version.
   independent of how many calls the turn made.
 - A reader right after a turn may see open runs. That is the honest answer
   while delivery is in flight.
-- Each spending effect's body costs one admission write before its first
-  dispatch, and each recorded entry costs one send.
+- Each provider attempt checks admission before dispatch, and each recorded
+  spending effect entry costs one send.

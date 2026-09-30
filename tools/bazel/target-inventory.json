@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 2,
   "cargo_package_count": 55,
-  "cargo_target_count": 214,
+  "cargo_target_count": 215,
   "feature_lane_units": [
     {
       "features": [],
@@ -27008,7 +27008,7 @@
       "package": "lash-restate-postgres-workers-e2e"
     }
   ],
-  "generated_label_count": 280,
+  "generated_label_count": 281,
   "packages": [
     {
       "declared_features": [
@@ -28810,6 +28810,12 @@
           "cargo": "turn_crash_replay",
           "kind": "test",
           "label": "//crates/lash-restate-test:turn_crash_replay__test",
+          "tags": []
+        },
+        {
+          "cargo": "usage_accounting_windows",
+          "kind": "test",
+          "label": "//crates/lash-restate-test:usage_accounting_windows__test",
           "tags": []
         }
       ],

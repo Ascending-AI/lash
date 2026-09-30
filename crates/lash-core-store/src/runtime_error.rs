@@ -435,6 +435,8 @@ pub enum RuntimeErrorCode {
     /// Admitting a spending effect's usage run to storage failed. The attempt
     /// ends retryably and journals nothing; the engine runs it again.
     UsageAdmissionFault,
+    /// The accounting owner is retired; no further provider dispatch may spend under it.
+    UsageOwnerRetired,
     RuntimeEffectWrongOutcome,
     /// Process-local; repaired by restart, not by same-process retry.
     RuntimeEffectControllerTaskClosed,
@@ -805,6 +807,7 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectToolChildRequestOpener => "runtime_effect_tool_child_request_opener",
             Self::UsageRunMissing => "usage_run_missing",
             Self::UsageAdmissionFault => "usage_admission_fault",
+            Self::UsageOwnerRetired => "usage_owner_retired",
             Self::RuntimeEffectToolChildRequestVersion => {
                 "runtime_effect_tool_child_request_version"
             }
@@ -1025,6 +1028,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectToolChildRequestVersion,
         Self::UsageRunMissing,
         Self::UsageAdmissionFault,
+        Self::UsageOwnerRetired,
         Self::RuntimeEffectInvocationSubject,
         Self::RuntimeEffectScopeMismatch,
         Self::RuntimeEffectLocalExecutorMismatch,
@@ -1265,6 +1269,7 @@ impl RuntimeErrorCode {
             "runtime_effect_tool_child_request_opener" => Self::RuntimeEffectToolChildRequestOpener,
             "usage_run_missing" => Self::UsageRunMissing,
             "usage_admission_fault" => Self::UsageAdmissionFault,
+            "usage_owner_retired" => Self::UsageOwnerRetired,
             "runtime_effect_tool_child_request_version" => {
                 Self::RuntimeEffectToolChildRequestVersion
             }

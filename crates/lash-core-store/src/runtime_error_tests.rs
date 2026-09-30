@@ -93,7 +93,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
     // iteration stays complete; `ForeignCode` is the one variant outside it.
     assert_eq!(
         RuntimeErrorCode::ALL_FIRST_PARTY.len(),
-        187,
+        188,
         "a new first-party variant must be added to ALL_FIRST_PARTY"
     );
 
@@ -183,24 +183,32 @@ fn wire_constructor_canonicalizes_built_in_codes() {
     assert!(!code.is_terminal());
 }
 
-/// FIG-3435: a `lash:` spelling must mean exactly one thing. A collision
-/// across the two first-party vocabularies would let a durable
-/// `RuntimeErrorCode` decode as a turn-failure arm (or the reverse) at any
-/// bare-spelling compatibility boundary.
+/// A `lash:` spelling means one thing. Owner retirement is the same refusal
+/// in both vocabularies, so its typed code survives direct-call and host
+/// boundaries. Every other spelling belongs to exactly one vocabulary.
 #[test]
-fn runtime_and_turn_failure_spellings_never_collide() {
+fn runtime_and_turn_failure_spellings_share_only_owner_retirement() {
     use lash_sansio::session_model::TurnFailureCode;
 
-    for code in RuntimeErrorCode::ALL_FIRST_PARTY {
-        assert!(
-            !TurnFailureCode::ALL_NAMED
+    let shared: Vec<_> = RuntimeErrorCode::ALL_FIRST_PARTY
+        .iter()
+        .filter(|code| {
+            TurnFailureCode::ALL_NAMED
                 .iter()
-                .any(|named| named.as_str() == code.as_str()),
-            "runtime spelling `{}` collides with a turn-failure arm",
-            code.as_str()
-        );
-    }
+                .any(|named| named.as_str() == code.as_str())
+        })
+        .collect();
+    assert_eq!(shared, vec![&RuntimeErrorCode::UsageOwnerRetired]);
     for code in TurnFailureCode::ALL_NAMED {
+        if *code == TurnFailureCode::UsageOwnerRetired {
+            let runtime = RuntimeErrorCode::from_wire_code(code.as_str());
+            assert_eq!(runtime, RuntimeErrorCode::UsageOwnerRetired);
+            assert_eq!(
+                lash_sansio::FailureCode::from(&runtime).turn_code(),
+                Some(code.clone())
+            );
+            continue;
+        }
         assert!(
             matches!(
                 RuntimeErrorCode::from_wire_code(code.as_str()),
