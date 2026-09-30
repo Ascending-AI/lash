@@ -162,17 +162,46 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
     assert!(summarize.data.expected_arg_types.iter().any(|argument| {
         argument.slot == "arg[0][\"task\"]" && argument.expected_type == "str"
     }));
-    // `for (const email of emails)` hands the loop its iterable itself
-    // (FIG-3625), so the loop binding projects as the list's element: an
-    // object, open (`dict`) because the body passes it to a tool, which may
-    // hold on to it (the closed-shape field guard, FIG-3626). Through
-    // FIG-3033 it lowered through an opaque iterable copy and projected `any`.
-    assert!(
+    // The digest call shares the list with a tool that may replace its items.
+    // FIG-4238 therefore opens the element type, including inside the loop.
+    assert_eq!(
         summarize
             .data
             .available_vars
             .iter()
-            .any(|variable| { variable.name == "email" && variable.variable_type == "dict" })
+            .find(|variable| variable.name == "email")
+            .map(|variable| variable.variable_type.as_str()),
+        Some("any"),
+        "shared-list loop facets: {:?}",
+        summarize.data.available_vars
+    );
+    let unshared_source = emails.source.replace("summaries: emails", "summaries: []");
+    assert_ne!(
+        unshared_source, emails.source,
+        "the list escape must be removed"
+    );
+    let response = client
+        .post(format!("{base}/project"))
+        .json(&serde_json::json!({ "source": unshared_source }))
+        .send()
+        .await
+        .expect("POST workflow without a list escape");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body: Value = response.json().await.expect("unshared-list projection");
+    let unshared: WorkflowDocument =
+        serde_json::from_value(body["document"].clone()).expect("unshared-list document");
+    assert_clean_facets(&unshared);
+    let unshared_summarize = call_with_task(&unshared, "Summarize this email");
+    assert_eq!(
+        unshared_summarize
+            .data
+            .available_vars
+            .iter()
+            .find(|variable| variable.name == "email")
+            .map(|variable| variable.variable_type.as_str()),
+        Some("dict"),
+        "unshared-list loop facets: {:?}",
+        unshared_summarize.data.available_vars
     );
     assert!(summarize.data.available_vars.iter().any(|variable| {
         variable.name == "emails"
