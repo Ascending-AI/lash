@@ -543,7 +543,11 @@ fn unstamped_conversation_bodies_are_refused() {
 }
 
 #[test]
-fn stored_bodies_from_an_older_generation_are_refused() {
+fn stored_bodies_below_the_supported_generation_are_refused() {
+    let fleet = crate::store::FleetFormat::current();
+    let window = fleet.read_window(crate::surface_format!(SESSION_NODE_BODY_SCHEMA_VERSION));
+    let unsupported_generation = window.oldest() - 1;
+    assert!(!window.admits(unsupported_generation));
     let node = SessionNodeRecord {
         node_id: "node-1".into(),
         parent_node_id: None,
@@ -557,11 +561,11 @@ fn stored_bodies_from_an_older_generation_are_refused() {
         .expect("encode storage body");
     let mut stamped: serde_json::Value =
         serde_json::from_str(&encoded).expect("stored body is JSON");
-    stamped["schema_version"] = serde_json::json!(SESSION_NODE_BODY_SCHEMA_VERSION - 1);
+    stamped["schema_version"] = serde_json::json!(unsupported_generation);
 
     let error =
         SessionNodeRecord::decode_storage_body("node-1".to_string(), None, &stamped.to_string())
-            .expect_err("an older node-body generation must be refused");
+            .expect_err("a node-body generation below the reader window must be refused");
 
     assert_eq!(
         error.to_string(),
@@ -569,11 +573,44 @@ fn stored_bodies_from_an_older_generation_are_refused() {
             "graph node body is schema version {}, but this build reads generation {} and the \
              fleet's recorded {} (FIG-3796); remedy: the body is pre-cutover data, so recreate \
              the session store under this build",
-            SESSION_NODE_BODY_SCHEMA_VERSION - 1,
+            unsupported_generation,
             SESSION_NODE_BODY_SCHEMA_VERSION,
             SESSION_NODE_BODY_SCHEMA_VERSION
         ),
     );
+}
+
+#[cfg(feature = "synthetic-next")]
+#[test]
+fn supported_older_stored_bodies_remain_readable_after_finalize() {
+    let older = r#"{"schema_version":22,"timestamp":"2026-08-18T00:00:00Z","kind":"plugin","plugin_type":"older-history","body":{"value":7}}"#;
+
+    for epoch in [1, 2] {
+        let fleet = crate::store::FleetFormat::from_version(epoch);
+        let window = fleet.read_window(crate::surface_format!(SESSION_NODE_BODY_SCHEMA_VERSION));
+        assert_eq!(window.oldest(), 22);
+        assert_eq!(window.newest(), 23);
+        assert!(window.admits(22));
+        let decoded = SessionNodeRecord::decode_storage_body_for_fleet(
+            "node-1".to_string(),
+            Some("parent-1".to_string()),
+            older,
+            fleet,
+        )
+        .expect("supported older history must remain readable before and after finalize");
+
+        assert_eq!(decoded.node_id, crate::NodeId::from("node-1"));
+        assert_eq!(
+            decoded.parent_node_id,
+            Some(crate::NodeId::from("parent-1"))
+        );
+        assert_eq!(decoded.timestamp, "2026-08-18T00:00:00Z");
+        let SessionNodePayload::Plugin { plugin_type, body } = decoded.payload else {
+            panic!("the older plugin payload must be preserved");
+        };
+        assert_eq!(plugin_type, "older-history");
+        assert_eq!(body.as_ref(), &serde_json::json!({"value": 7}));
+    }
 }
 
 #[test]

@@ -521,24 +521,36 @@ mod tests {
     }
 
     #[test]
-    fn every_component_starts_at_one() {
-        let names: Vec<&str> = DESCRIPTORS.iter().map(|d| d.component.as_str()).collect();
+    fn every_component_declares_its_generation_policy() {
+        let native = VersionRange::exactly(1);
+        #[cfg(not(feature = "synthetic-next"))]
+        let (expanded_reads, database_writes) = (native, native);
+        #[cfg(feature = "synthetic-next")]
+        let (expanded_reads, database_writes) =
+            (VersionRange::between(1, 2), VersionRange::exactly(2));
+
+        let policies: Vec<_> = DESCRIPTORS
+            .iter()
+            .map(|descriptor| {
+                (
+                    descriptor.component.as_str(),
+                    descriptor.reads,
+                    descriptor.writes,
+                )
+            })
+            .collect();
         assert_eq!(
-            names,
+            policies,
             [
-                "postgres",
-                "sqlite-core",
-                "sqlite-registry",
-                "sqlite-triggers",
-                "restate-effect-group-state",
-                "restate-effect-group-payload",
-                "restate-durable-wait-registry",
+                ("postgres", expanded_reads, database_writes),
+                ("sqlite-core", expanded_reads, database_writes),
+                ("sqlite-registry", expanded_reads, database_writes),
+                ("sqlite-triggers", expanded_reads, database_writes),
+                ("restate-effect-group-state", expanded_reads, expanded_reads),
+                ("restate-effect-group-payload", native, native),
+                ("restate-durable-wait-registry", native, native),
             ]
         );
-        for descriptor in DESCRIPTORS {
-            assert_eq!(descriptor.reads, VersionRange::exactly(1));
-            assert_eq!(descriptor.writes, VersionRange::exactly(1));
-        }
     }
 
     #[test]
