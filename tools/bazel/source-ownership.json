@@ -197,5 +197,13 @@
         "workloads/fixtures/*.json"
       ]
     }
+  },
+  "crates/lash-vm-worker": {
+    "tests": {
+      "build_identity_laws": [
+        "tests/build_identity_laws.rs",
+        "build/fingerprint.rs"
+      ]
+    }
   }
 }

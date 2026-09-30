@@ -112,20 +112,23 @@ def lash_rust_build_script(
         manifest_dir,
         package_name,
         version,
-        data = []):
+        data = [],
+        extra_data = [],
+        build_script_env = {}):
     cargo_build_script(
         name = name,
         aliases = _aliases_for(all_crate_deps(build = True)),
+        build_script_env = build_script_env,
         crate_features = crate_features,
         crate_name = "build_script_build",
         crate_root = "build.rs",
-        data = data,
+        data = data + extra_data,
         deps = all_crate_deps(build = True),
         edition = "2024",
         pkg_name = package_name,
         rustc_env = _cargo_env(package_name, manifest_dir, version),
         rustc_flags = _cargo_check_cfg(declared_features),
-        srcs = ["build.rs"],
+        srcs = ["build.rs"] + native.glob(["build/**/*.rs"], allow_empty = True),
         version = version,
         visibility = ["//visibility:public"],
     )

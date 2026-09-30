@@ -43,9 +43,16 @@ thiserror = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+sha2 = { workspace = true }
+toml = "1.1.2"
+tempfile = { workspace = true }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing"] }
 lashlang = { workspace = true, features = ["testing"] }
 
 [[test]]
 name = "pool_laws"
 path = "tests/pool_laws.rs"
+
+[build-dependencies]
+sha2 = { workspace = true }
+toml = "1.1.2"

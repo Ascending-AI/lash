@@ -18,9 +18,57 @@ load("@rules_rust//rust:defs.bzl", "rust_doc")
 
 package(default_visibility = ["//visibility:public"])
 
+lash_rust_build_script(
+    name = "build_script",
+    crate_features = [
+        "testing",
+    ],
+    declared_features = [
+        "testing",
+    ],
+    data = ["build.rs"] + glob(["src/**/*.rs"]),
+    extra_data = [
+        "//:Cargo.toml",
+        "//:Cargo.lock",
+        "//:rust-toolchain.toml",
+        "//crates/lash-core-effect:Cargo.toml",
+        "//crates/lash-core-effect:rust_sources",
+        "//crates/lash-core-execution:Cargo.toml",
+        "//crates/lash-core-execution:rust_sources",
+        "//crates/lash-core-ids:Cargo.toml",
+        "//crates/lash-core-ids:rust_sources",
+        "//crates/lash-core-llm:Cargo.toml",
+        "//crates/lash-core-llm:rust_sources",
+        "//crates/lash-core-store:Cargo.toml",
+        "//crates/lash-core-store:rust_sources",
+        "//crates/lash-http-transport:Cargo.toml",
+        "//crates/lash-http-transport:rust_sources",
+        "//crates/lash-regress:Cargo.toml",
+        "//crates/lash-regress:rust_sources",
+        "//crates/lash-render:Cargo.toml",
+        "//crates/lash-render:rust_sources",
+        "//crates/lash-sansio:Cargo.toml",
+        "//crates/lash-sansio:rust_sources",
+        "//crates/lash-trace:Cargo.toml",
+        "//crates/lash-trace:rust_sources",
+        "//crates/lash-typescript:Cargo.toml",
+        "//crates/lash-typescript:rust_sources",
+        "//crates/lash-vm-protocol:Cargo.toml",
+        "//crates/lash-vm-protocol:rust_sources",
+        "//crates/lash-vm-worker:Cargo.toml",
+        "//crates/lash-vm-worker:rust_sources",
+        "//crates/lashlang:Cargo.toml",
+        "//crates/lashlang:rust_sources",
+    ],
+    build_script_env = {"LASH_VM_WORKER_SOURCE_ROOT": "$${pwd}"},
+    manifest_dir = "crates/lash-vm-worker",
+    package_name = "lash-internal-vm-worker",
+    version = "0.0.0-dev",
+)
+
 lash_rust_library(
     name = "lash-vm-worker",
-    build_script = None,
+    build_script = ":build_script",
     crate_features = [
         "testing",
     ],
@@ -44,7 +92,7 @@ rust_doc(
 
 lash_rust_unit_test(
     name = "lash-vm-worker__unit_test",
-    build_script = None,
+    build_script = ":build_script",
     crate_features = [
         "testing",
     ],
@@ -106,6 +154,62 @@ lash_rust_binary(
 )
 
 lash_rust_integration_test(
+    name = "build_identity_laws__test",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "build_identity_laws",
+    crate_root = "tests/build_identity_laws.rs",
+    declared_features = [
+        "testing",
+    ],
+    srcs_patterns = [
+        "tests/build_identity_laws.rs",
+        "build/fingerprint.rs",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-vm-worker", "build_identity_laws", "//crates/lash-vm-worker:build_identity_laws__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//:Cargo.toml",
+        "//:Cargo.lock",
+        "//:rust-toolchain.toml",
+        "//crates/lash-core-effect:Cargo.toml",
+        "//crates/lash-core-effect:rust_sources",
+        "//crates/lash-core-execution:Cargo.toml",
+        "//crates/lash-core-execution:rust_sources",
+        "//crates/lash-core-ids:Cargo.toml",
+        "//crates/lash-core-ids:rust_sources",
+        "//crates/lash-core-llm:Cargo.toml",
+        "//crates/lash-core-llm:rust_sources",
+        "//crates/lash-core-store:Cargo.toml",
+        "//crates/lash-core-store:rust_sources",
+        "//crates/lash-http-transport:Cargo.toml",
+        "//crates/lash-http-transport:rust_sources",
+        "//crates/lash-regress:Cargo.toml",
+        "//crates/lash-regress:rust_sources",
+        "//crates/lash-render:Cargo.toml",
+        "//crates/lash-render:rust_sources",
+        "//crates/lash-sansio:Cargo.toml",
+        "//crates/lash-sansio:rust_sources",
+        "//crates/lash-trace:Cargo.toml",
+        "//crates/lash-trace:rust_sources",
+        "//crates/lash-typescript:Cargo.toml",
+        "//crates/lash-typescript:rust_sources",
+        "//crates/lash-vm-protocol:Cargo.toml",
+        "//crates/lash-vm-protocol:rust_sources",
+        "//crates/lashlang:Cargo.toml",
+        "//crates/lashlang:rust_sources",
+    ],
+    library = ":lash-vm-worker",
+    library_crate_name = "lash_vm_worker",
+    manifest_dir = "crates/lash-vm-worker",
+    package_name = "lash-internal-vm-worker",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "pool_laws__test",
     crate_features = [
         "testing",
@@ -128,6 +232,18 @@ lash_rust_integration_test(
     rustc_env = {"CARGO_BIN_EXE_lash-vm-worker": "$(rootpath :lash-vm-worker__bin)", "CARGO_BIN_EXE_lash-vm-worker-fixture": "$(rootpath :lash-vm-worker-fixture__bin)"},
     tags = [],
     version = "0.0.0-dev",
+)
+
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    budget = test_batch_budget("//crates/lash-vm-worker:test_batch"),
+    jobs = 2,
+    tests = [
+        ":build_identity_laws__test",
+        ":lash-vm-worker__unit_test",
+    ],
 )
 
 filegroup(
