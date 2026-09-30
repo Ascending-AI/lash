@@ -135,6 +135,8 @@ pub use crate::turn::{
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
 /// `async-trait` dependency to keep version-aligned.
 pub use lash_core::async_trait;
+/// The immediate delivery verdict carried by a session deletion's wait.
+pub use lash_core::drive::relay::RelayVerdict;
 /// The one substrate a [`LashCore`] takes every persistence port and its
 /// effect host from: one [`EffectEngine`] over one store set (ADR 0104).
 /// [`LashCore::builder`] requires one: a `lash::restate::RestateEngine` over a

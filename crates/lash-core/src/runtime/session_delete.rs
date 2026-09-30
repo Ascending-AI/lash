@@ -164,8 +164,12 @@ pub enum SessionDeleteWait {
     Cleanup(SessionCleanup),
     /// This call's attempt failed; the relay attempts it again.
     Failed(SessionDeleteFailure),
-    /// The obligation is not due: another relay holds it (`Claimed`), or it
-    /// stalled and waits for an operator's re-arm (`Stalled`).
+    /// The relay settled without a detailed delete attempt: its budget
+    /// expired, the cleanup read failed, or the claimed key was undecodable.
+    /// A retry remains owed; a stall waits for an operator's re-arm.
+    Delivery(RelayVerdict),
+    /// The obligation could not be claimed: its retry is not due yet, another
+    /// relay holds it (`Claimed`), or it waits for a re-arm (`Stalled`).
     Obligation(ObligationState),
 }
 
@@ -265,16 +269,21 @@ pub async fn delete_session(
         Some(DeleteAttempt::Deleted(report)) => Ok(SessionDeletion::Deleted(report)),
         Some(DeleteAttempt::Waiting(cleanup)) => closing(SessionDeleteWait::Cleanup(cleanup)),
         Some(DeleteAttempt::Failed(failure)) => closing(SessionDeleteWait::Failed(failure)),
-        None => {
-            // Not attempted: another relay claimed it between the read and
-            // the claim.
-            debug_assert!(matches!(verdict, RelayVerdict::NotDue));
-            let state = obligations
-                .state(&obligation.id)
-                .await?
-                .unwrap_or(ObligationState::Claimed);
-            closing(SessionDeleteWait::Obligation(state))
-        }
+        None => match verdict {
+            // No local report proves what a competing delivery did. Read
+            // its durable state, including a physical delete that removed
+            // the obligation's row before this call could claim or settle it.
+            RelayVerdict::Delivered | RelayVerdict::ClaimLost | RelayVerdict::NotDue => {
+                match obligations.state(&obligation.id).await? {
+                    Some(state) => closing(SessionDeleteWait::Obligation(state)),
+                    None => Ok(SessionDeletion::AlreadyDeleted { session_id }),
+                }
+            }
+            RelayVerdict::Retried { .. }
+            | RelayVerdict::Stalled(_)
+            | RelayVerdict::Deferred { .. }
+            | RelayVerdict::Requested => closing(SessionDeleteWait::Delivery(verdict)),
+        },
     }
 }
 

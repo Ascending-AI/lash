@@ -283,6 +283,7 @@ async fn the_reconcile_tick_finishes_a_held_delete() -> Result<()> {
 struct RecordingLedger {
     inner: Arc<dyn lash_core::store::ObligationLedger>,
     settlements: Arc<std::sync::Mutex<Vec<(lash_core::store::ObligationId, ObligationSettlement)>>>,
+    pause: Option<Arc<DeleteDeliveryPause>>,
 }
 
 type Settlements =
@@ -319,7 +320,24 @@ impl lash_core::store::ObligationLedger for RecordingLedger {
         claim_ttl_ms: u64,
     ) -> std::result::Result<Option<lash_core::store::ClaimedObligation>, lash_core::StoreError>
     {
-        self.inner.claim(id, token, now_ms, claim_ttl_ms).await
+        let claimed = self.inner.claim(id, token, now_ms, claim_ttl_ms).await?;
+        if claimed.is_some()
+            && let Some(pause) = &self.pause
+            && pause.armed.swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            let server = pause
+                .server
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+                .expect("the double is built");
+            let hold = server.hold("LashDurableWaitIndex", SESSION).await;
+            *pause
+                .hold
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hold);
+        }
+        Ok(claimed)
     }
 
     async fn settle(
@@ -394,6 +412,7 @@ async fn an_immediate_delivery_runs_under_the_configured_attempt_budget() -> Res
                         Arc::new(RecordingLedger {
                             inner: ledger,
                             settlements: Arc::clone(&layer_settlements),
+                            pause: None,
                         })
                     } else {
                         ledger
@@ -460,4 +479,288 @@ async fn an_immediate_delivery_runs_under_the_configured_attempt_budget() -> Res
         "the immediate attempt's retry names the configured {BUDGET_MS} ms budget: {retries:?}"
     );
     Ok(())
+}
+
+#[derive(Default)]
+struct DeleteDeliveryPause {
+    server: std::sync::Mutex<Option<lash_restate_test::RestateTestServer>>,
+    armed: std::sync::atomic::AtomicBool,
+    hold: std::sync::Mutex<Option<lash_restate_test::Hold>>,
+}
+
+/// The delete claims its real SQL obligation, then Restate's session wait
+/// index stops before physical deletion's revoke_all can answer. Virtual
+/// time controls retry eligibility; the held call exhausts the attempt budget.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the test records runner load with its timing-sensitive regression"
+)]
+async fn delete_delivery_exhausts_its_budget(
+    make_stores: impl AsyncFnOnce(Arc<dyn lash_core::Clock>) -> Arc<dyn lash_core::StoreSet>,
+    stall: bool,
+) -> Result<()> {
+    const BUDGET_MS: u64 = 2_000;
+    eprintln!(
+        "runner load: {}",
+        std::fs::read_to_string("/proc/loadavg")
+            .unwrap_or_else(|error| format!("unavailable: {error}"))
+    );
+    let pause = Arc::new(DeleteDeliveryPause::default());
+    let settlements: Settlements = Arc::default();
+    let layer_pause = Arc::clone(&pause);
+    let layer_settlements = Arc::clone(&settlements);
+    let double = lash_restate_test::backend_with_store_set(
+        0x4342,
+        lash_restate_test::ServerConfig {
+            start_time_ms: now_ms(),
+            time: lash_restate_test::TimeMode::Manual,
+            ..Default::default()
+        },
+        Default::default(),
+        async move |clock| {
+            let stores = make_stores(clock).await;
+            Ok(
+                lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                    .map_obligation_ledgers(move |kind, inner| {
+                        if kind == ObligationKind::SessionDelete {
+                            Arc::new(RecordingLedger {
+                                inner,
+                                settlements: Arc::clone(&layer_settlements),
+                                pause: Some(Arc::clone(&layer_pause)),
+                            })
+                        } else {
+                            inner
+                        }
+                    })
+                    .into_store_set(),
+            )
+        },
+    )
+    .await
+    .expect("the Restate double over SQL stores");
+    *pause
+        .server
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(double.server().clone());
+    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(double.lash_backend())
+        .with_session_work(double.explicit_reconcile_session_work())
+        .into_backend();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+    ))
+    .recovery_pass_budget(lash_core::engine::RecoveryPassBudget {
+        attempt: std::time::Duration::from_millis(BUDGET_MS),
+        tick_wait: std::time::Duration::from_secs(1),
+    })
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    create_catalog_session(&core, SESSION).await?;
+    let ledger = double
+        .engine_stores()
+        .obligation_ledger(ObligationKind::SessionDelete);
+    super::super::scope_support::in_delete_handler(&double, &core, SESSION, async |context| {
+        let closed = lash_core::session_close::close_session(&context)
+            .await
+            .expect("close the session")
+            .expect("the session exists");
+        assert!(
+            matches!(
+                closed.applied,
+                lash_core::store::ControlIntentState::Acknowledged { .. }
+            ),
+            "the close must finish before the physical-delete fault: {closed:?}"
+        );
+        let obligation = double
+            .engine_stores()
+            .session_delete_ledger()
+            .delete_obligation(&SessionId::from(SESSION))
+            .await?
+            .expect("close armed the delete");
+        let now = double.server().now_ms();
+        if stall {
+            for _ in 1..RelayPolicy::default().attempt_ceiling.get() {
+                let claim = ledger
+                    .claim(
+                        &obligation.id,
+                        &lash_core::store::ClaimToken::mint(),
+                        now,
+                        60_000,
+                    )
+                    .await?
+                    .expect("the previous retry is due");
+                ledger
+                    .settle(
+                        &obligation.id,
+                        &claim.token,
+                        ObligationSettlement::Retry {
+                            due_at_ms: now,
+                            error: "earlier delivery exhausted its budget".into(),
+                        },
+                        now,
+                    )
+                    .await?;
+            }
+        }
+        pause.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+        let deletion = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            LashCore::delete_session(context),
+        )
+        .await
+        .expect("the budget ends the held delivery");
+        let crate::SessionDeletion::Closing(closing) = deletion? else {
+            panic!("a timed-out physical delete returns Closing");
+        };
+        assert_eq!(closing.obligation.as_ref(), Some(&obligation.id));
+        let expected = if stall {
+            crate::RelayVerdict::Stalled(StallReason::AttemptsExhausted)
+        } else {
+            crate::RelayVerdict::Retried {
+                due_at_ms: now + RelayPolicy::default().base_backoff_ms,
+            }
+        };
+        assert!(
+            matches!(closing.waiting, crate::SessionDeleteWait::Delivery(ref verdict)
+            if *verdict == expected),
+            "the unrecorded attempt retains its typed verdict: {closing:?}"
+        );
+        let expected_state = if stall {
+            lash_core::store::ObligationState::Stalled
+        } else {
+            lash_core::store::ObligationState::Due
+        };
+        assert_eq!(ledger.state(&obligation.id).await?, Some(expected_state));
+        assert!(matches!(
+            double
+                .engine_stores()
+                .session_store_factory()
+                .lookup_session(&SessionId::from(SESSION))
+                .await?,
+            lash_core::store::SessionLookup::Live(_)
+        ));
+        assert!(
+            settlements
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .any(|(_, settlement)| match settlement {
+                    ObligationSettlement::Retry { error, .. }
+                    | ObligationSettlement::Stall { error, .. } =>
+                        error.contains(&format!("past its {BUDGET_MS} ms attempt budget")),
+                    ObligationSettlement::Delivered | ObligationSettlement::Defer { .. } => false,
+                })
+        );
+        Ok(())
+    })
+    .await?;
+    pause
+        .hold
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
+        .expect("the delivery held the wait index")
+        .release();
+    if stall {
+        let obligation = double
+            .engine_stores()
+            .session_delete_ledger()
+            .delete_obligation(&SessionId::from(SESSION))
+            .await?
+            .expect("stalled delete retained");
+        assert!(
+            ledger
+                .rearm(&obligation.id, double.server().now_ms())
+                .await?
+        );
+    }
+    double
+        .server()
+        .advance(std::time::Duration::from_millis(2_000));
+    let relay = SessionDeleteRelay::new(core.session_administration().await);
+    let pass = relay_due(&relay, double.test_clock().as_ref(), page()).await?;
+    assert_eq!((pass.claimed, pass.claim_lost), (1, 1), "{pass:?}");
+    assert!(matches!(
+        double
+            .engine_stores()
+            .session_store_factory()
+            .lookup_session(&SessionId::from(SESSION))
+            .await?,
+        lash_core::store::SessionLookup::Deleted
+    ));
+    eprintln!(
+        "PASS delete delivery budget: stalled={stall}; recovery physically deleted the session"
+    );
+    Ok(())
+}
+
+async fn sqlite_delete_budget(file: bool, stall: bool) -> Result<()> {
+    let directory = tempfile::tempdir().expect("SQLite test directory");
+    Box::pin(delete_delivery_exhausts_its_budget(
+        async |clock| {
+            let stores = if file {
+                lash_sqlite_store::SqliteStoreSet::open_with_clock(directory.path(), clock).await
+            } else {
+                lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock).await
+            }
+            .expect("open SQLite stores");
+            Arc::new(stores) as Arc<dyn lash_core::StoreSet>
+        },
+        stall,
+    ))
+    .await
+}
+
+#[allow(
+    clippy::disallowed_methods,
+    reason = "service test reads its required PostgreSQL URL"
+)]
+async fn postgres_delete_budget(stall: bool) -> Result<()> {
+    let url =
+        std::env::var("LASH_POSTGRES_DATABASE_URL").expect("the PostgreSQL gate sets its URL");
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    Box::pin(delete_delivery_exhausts_its_budget(
+        async |clock| {
+            Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                &storage,
+                Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+                    attachments.path(),
+                )),
+                Default::default(),
+                clock,
+            )) as Arc<dyn lash_core::StoreSet>
+        },
+        stall,
+    ))
+    .await
+}
+
+#[tokio::test]
+async fn an_unrecorded_delete_retry_returns_typed_on_sqlite_memory() -> Result<()> {
+    Box::pin(sqlite_delete_budget(false, false)).await
+}
+#[tokio::test]
+async fn an_unrecorded_delete_retry_returns_typed_on_sqlite_file() -> Result<()> {
+    Box::pin(sqlite_delete_budget(true, false)).await
+}
+#[tokio::test]
+async fn an_unrecorded_delete_stall_returns_typed_on_sqlite_memory() -> Result<()> {
+    Box::pin(sqlite_delete_budget(false, true)).await
+}
+#[tokio::test]
+async fn an_unrecorded_delete_stall_returns_typed_on_sqlite_file() -> Result<()> {
+    Box::pin(sqlite_delete_budget(true, true)).await
+}
+#[tokio::test]
+#[ignore = "requires the PostgreSQL service gate"]
+async fn an_unrecorded_delete_retry_returns_typed_on_postgres() -> Result<()> {
+    Box::pin(postgres_delete_budget(false)).await
+}
+#[tokio::test]
+#[ignore = "requires the PostgreSQL service gate"]
+async fn an_unrecorded_delete_stall_returns_typed_on_postgres() -> Result<()> {
+    Box::pin(postgres_delete_budget(true)).await
 }
