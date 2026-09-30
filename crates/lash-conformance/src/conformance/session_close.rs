@@ -572,7 +572,11 @@ pub async fn a_root_commit_racing_a_close_is_refused_stale_fence(
         root: root.clone(),
         turn: root.clone(),
         commit: TurnCommitId::new(root.clone(), 0),
-        stop: None,
+        outcome: crate::store::RootCommittedOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     assert!(matches!(
         store.commit_runtime_state(commit).await,

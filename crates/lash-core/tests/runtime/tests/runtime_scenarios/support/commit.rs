@@ -20,7 +20,11 @@ impl RuntimeScenarioContext {
                 commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
                 turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
                 root,
-                stop: None,
+                outcome: lash_core::store::RootCommittedOutcome::Finished(
+                    lash_core::facade_support::TurnFinish::AssistantMessage {
+                        text: String::new(),
+                    },
+                ),
             }));
         }
         let result = self

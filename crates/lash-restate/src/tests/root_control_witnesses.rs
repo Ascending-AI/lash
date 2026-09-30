@@ -131,7 +131,11 @@ impl SessionDriver for Driver {
                     root: root.clone(),
                     commit: TurnCommitId::new(root.clone(), 0),
                     turn: root.clone(),
-                    stop: None,
+                    outcome: lash_core::store::RootCommittedOutcome::Finished(
+                        lash_core::facade_support::TurnFinish::AssistantMessage {
+                            text: String::new(),
+                        },
+                    ),
                 }));
                 self.store
                     .commit_runtime_state(commit)

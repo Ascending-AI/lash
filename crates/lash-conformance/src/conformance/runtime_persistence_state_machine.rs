@@ -1055,7 +1055,11 @@ async fn commit_operation(
             root: root.root.clone(),
             commit: crate::store::TurnCommitId::new(root.root.clone(), 0),
             turn: root.root.clone(),
-            stop: None,
+            outcome: crate::store::RootCommittedOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage {
+                    text: String::new(),
+                },
+            ),
         }));
     }
 

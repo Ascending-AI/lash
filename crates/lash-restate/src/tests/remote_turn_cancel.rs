@@ -273,7 +273,7 @@ pub(super) async fn held_step_law<Stores: lash_core::StoreSet + ?Sized + 'static
         .expect("the stopped turn is committed in the store");
     assert!(
         matches!(terminal.cause, lash_core::store::RootTerminalCause::Committed {
-        stop: Some(TurnStop::Cancelled { evidence: ref durable }), ..
+        outcome: lash_core::store::RootCommittedOutcome::Stopped(TurnStop::Cancelled { evidence: ref durable }), ..
     } if durable == &evidence),
         "the store retains the exact checkpoint evidence"
     );

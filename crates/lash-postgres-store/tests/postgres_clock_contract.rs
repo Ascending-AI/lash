@@ -459,7 +459,11 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         commit: TurnCommitId::new(root.clone(), 0),
         turn: PhysicalTurn::derive_turn_id(&root, 0),
         root: root.clone(),
-        stop: None,
+        outcome: lash_core_execution::store::RootCommittedOutcome::Finished(
+            lash_core_execution::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     store
         .commit_runtime_state(commit)

@@ -59,7 +59,14 @@ fn ends(root: &str, ordinal: u32, stop: Option<crate::TurnStop>) -> RootTerminal
         commit: TurnCommitId::new(root.clone(), ordinal),
         root,
         turn,
-        stop,
+        outcome: match stop {
+            None => lash_core::store::RootCommittedOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage {
+                    text: String::new(),
+                },
+            ),
+            Some(stop) => lash_core::store::RootCommittedOutcome::Stopped(stop),
+        },
     }
 }
 

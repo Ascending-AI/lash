@@ -214,8 +214,8 @@ pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn Run
             IngressSettlement::new(TurnId::from(root.as_str()))
         };
         let mut commit = final_commit(head_commit(&store, &session).await, &fence, settlement);
-        if let Some(terminal) = commit.root_terminal.as_mut() {
-            terminal.stop = stop.clone();
+        if let (Some(terminal), Some(stop)) = (commit.root_terminal.as_mut(), &stop) {
+            terminal.outcome = lash_core::store::RootCommittedOutcome::Stopped(stop.clone());
         }
         store
             .commit_runtime_state(commit)

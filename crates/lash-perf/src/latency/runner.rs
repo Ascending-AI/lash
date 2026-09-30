@@ -1114,7 +1114,11 @@ mod tests {
                     cause: lash::persistence::RootTerminalCause::Committed {
                         commit: lash::persistence::TurnCommitId::new(root.clone(), 0),
                         turn: root.clone(),
-                        stop: None,
+                        outcome: lash::persistence::RootCommittedOutcome::Finished(
+                            lash::TurnFinish::AssistantMessage {
+                                text: String::new(),
+                            },
+                        ),
                     },
                     head_revision: None,
                     at_ms: 1,

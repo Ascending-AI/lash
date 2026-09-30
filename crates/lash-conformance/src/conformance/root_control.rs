@@ -512,7 +512,11 @@ fn root_final_commit(
         root: root.clone(),
         commit: TurnCommitId::new(root.clone(), ordinal),
         turn: turn.clone(),
-        stop: None,
+        outcome: crate::store::RootCommittedOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     commit
 }

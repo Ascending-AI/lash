@@ -184,19 +184,19 @@ impl DriveRootRun {
         owes_follow_on: bool,
     ) -> Option<DriveCommit> {
         let commit = crate::store::TurnCommitId::of_physical_turn(&self.root, turn)?;
-        let (stop, terminal) = match outcome {
-            crate::TurnOutcome::Finished(_) => (None, true),
-            crate::TurnOutcome::Stopped(stop) => (Some(stop.clone()), true),
-            crate::TurnOutcome::AgentFrameSwitch { .. } => (None, false),
-        };
+        // A frame switch ends no root; its root goes on in the next physical
+        // turn.
+        let ended = crate::store::RootCommittedOutcome::of_turn_outcome(outcome);
         Some(DriveCommit {
             fence: self.fence.clone(),
             root: self.root.clone(),
-            terminal: (terminal && !owes_follow_on).then(|| crate::store::RootTerminalWrite {
-                root: self.root.clone(),
-                commit,
-                turn: turn.clone(),
-                stop,
+            terminal: ended.filter(|_| !owes_follow_on).map(|outcome| {
+                crate::store::RootTerminalWrite {
+                    root: self.root.clone(),
+                    commit,
+                    turn: turn.clone(),
+                    outcome,
+                }
             }),
         })
     }

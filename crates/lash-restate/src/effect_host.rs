@@ -22,8 +22,8 @@ use lash_core::{
 
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse,
-    RestateDurableWaitRootRequest, RestateTurnCancelClosureParticipantRequest,
-    durable_wait_index_key_for_scope, durable_wait_index_object_key,
+    RestateDurableWaitRootRequest, RestateTurnCancelClosureParticipantRequest, WaitObserver,
+    durable_wait_index_key_for_scope, durable_wait_index_object_key, observe_durable_wait,
     restate_await_event_key_for_authority, restate_await_event_key_is_valid,
     restate_await_event_key_is_valid_for_authority, restate_durable_wait_request,
     restate_unknown_or_revoked,
@@ -617,9 +617,14 @@ impl AwaitEventResolver for RestateEffectHostController {
     ) -> Result<Resolution, RuntimeError> {
         let ingress = &self.await_event_ingress;
         self.ensure_key_access(key).await?;
-        let attach = turn_cancel_watch_attachment(key);
-        await_restate_await_event_via_ingress(ingress, key, cancel, deadline, attach.as_deref())
-            .await
+        await_restate_await_event_via_ingress(
+            ingress,
+            key,
+            cancel,
+            deadline,
+            IngressAwait::of_key(key),
+        )
+        .await
     }
 
     async fn revoke_await_events_for_session(
@@ -1576,7 +1581,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 key,
                 cancellation,
                 deadline,
-                Some(&effect_replay_key),
+                IngressAwait::Effect(&effect_replay_key),
             )
             .await
             .map_err(RuntimeEffectControllerError::from)?;

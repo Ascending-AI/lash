@@ -1253,7 +1253,11 @@ impl BackendRunner {
             commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
             turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
             root,
-            stop: None,
+            outcome: lash_core::store::RootCommittedOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage {
+                    text: String::new(),
+                },
+            ),
         }));
         if let Some((stored, neutral)) = admission_cases::backend_neutral_commit_hash(&commit) {
             self.neutral_commit_hashes.insert(stored, neutral);

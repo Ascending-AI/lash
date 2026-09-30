@@ -142,20 +142,23 @@ pub async fn a_committed_root_answers_its_terminal_by_root(
         "a pending input has no root"
     );
     let outcome = drive(&runner, &parts, "root-answered-drive").await;
-    assert!(
-        matches!(&outcome.ran[..], [RootOutcome::Committed { root: ran, .. }] if *ran == root),
-        "{outcome:?}"
-    );
+    let committed = match &outcome.ran[..] {
+        [RootOutcome::Committed { root: ran, outcome }] if *ran == root => outcome.clone(),
+        _ => panic!("the root commits: {outcome:?}"),
+    };
     let evidence = terminal(&parts, &root)
         .await
         .expect("the root's final commit wrote its evidence");
     assert_eq!(evidence.kind, RootTerminalKind::Answered);
+    // The evidence carries the outcome the root committed, so a follower
+    // answers from this row alone (FIG-4345).
     assert_eq!(
         evidence.cause,
         RootTerminalCause::Committed {
             commit: TurnCommitId::new(root.clone(), 0),
             turn: root.clone(),
-            stop: None,
+            outcome: crate::store::RootCommittedOutcome::of_turn_outcome(&committed)
+                .expect("a committed root ended in a finish or a stop"),
         }
     );
     assert!(evidence.head_revision.is_some(), "a head commit wrote it");
@@ -202,7 +205,11 @@ pub async fn a_host_id_naming_a_terminal_root_is_answered_not_rerun(
         root: root.clone(),
         commit: TurnCommitId::new(root.clone(), 0),
         turn: root.clone(),
-        stop: None,
+        outcome: crate::store::RootCommittedOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     parts
         .store

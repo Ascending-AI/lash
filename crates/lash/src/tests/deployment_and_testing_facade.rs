@@ -594,7 +594,11 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
         turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
         root: root.clone(),
-        stop: None,
+        outcome: lash_core::store::RootCommittedOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     let mut settlement = lash_core::store::IngressSettlement::new(root);
     settlement

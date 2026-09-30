@@ -23,7 +23,18 @@
 //! * the engine's own root does too: its session deleted after the root
 //!   journaled its admission, the killed root's replay follows its journal
 //!   and ends with the typed retirement (FIG-4346, live leg of
-//!   `lash::tests::deleted_session_root_replay`).
+//!   `lash::tests::deleted_session_root_replay`);
+//! * a committed root answers its follower from the store alone: with the
+//!   session's durable-wait index held after the commit, a follower that
+//!   attaches then still answers, and no terminal key ever holds more than
+//!   one server-side `await_resolution` waiter (FIG-4345);
+//! * a dropped terminal attach leaves no second server invocation: a
+//!   re-attach joins the one waiter, and an attach after the terminal
+//!   resolved reads it without registering (FIG-4345).
+//!
+//! The FIG-4345 laws run on the double over SQLite memory, SQLite file and
+//! PostgreSQL stores, with and without always-replay, and against a live
+//! `restate-server`.
 
 #![expect(
     clippy::expect_used,
@@ -42,6 +53,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use lash::restate::RestateWait;
+use lash_core::StoreSet;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
@@ -106,12 +118,13 @@ fn core(backend: lash_core::Backend, barrier: &Arc<Barrier>) -> lash::LashCore {
         .expect("build the lash core")
 }
 
-/// What a host run answers: the outcome's status and its reply.
+/// What a host run answers: the outcome's status, its reply and its root.
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 struct Answer {
     answered: bool,
     reply: Option<String>,
     input_id: String,
+    root: Option<String>,
 }
 
 fn answer(input_id: &lash::InputId, outcome: &lash::SendOutcome) -> Answer {
@@ -122,6 +135,7 @@ fn answer(input_id: &lash::InputId, outcome: &lash::SendOutcome) -> Answer {
             .as_ref()
             .and_then(|output| output.assistant_message().map(str::to_owned)),
         input_id: input_id.to_string(),
+        root: outcome.root.as_ref().map(ToString::to_string),
     }
 }
 
@@ -160,14 +174,23 @@ trait ChatObject {
     async fn wait(input_id: String) -> HandlerResult<Json<Answer>>;
 }
 
+/// The session is set once the backend it runs over is up.
 struct Chat {
-    session: lash::LashSession,
+    session: Arc<OnceLock<lash::LashSession>>,
+}
+
+impl Chat {
+    fn session(&self) -> &lash::LashSession {
+        self.session
+            .get()
+            .expect("the session is open before the object serves")
+    }
 }
 
 impl ChatObject for Chat {
     async fn submit(&self, ctx: ObjectContext<'_>, text: String) -> HandlerResult<String> {
         let handle = self
-            .session
+            .session()
             .send(lash::TurnInput::text(text))
             .accept_restate(&ctx)
             .await?;
@@ -187,7 +210,7 @@ impl ChatObject for Chat {
     ) -> HandlerResult<Json<Answer>> {
         let input_id = lash::InputId::from(input_id);
         let outcome = self
-            .session
+            .session()
             .attach(input_id.clone())
             .outcome_restate(&ctx, RestateWait::new().probe_window(PROBE))
             .await?;
@@ -264,16 +287,141 @@ impl SessionHost for SessionHostService {
 }
 
 struct World {
-    backend: RestateTestBackend,
+    backend: RestateTestBackend<dyn StoreSet>,
     barrier: Arc<Barrier>,
     session: lash::LashSession,
     core: lash::LashCore,
+    /// What the stores live in: kept open for the world's life.
+    _storage: Storage,
+}
+
+/// The store set a world's engine and hosts run over.
+#[derive(Clone, Copy, Debug)]
+enum Stores {
+    SqliteMemory,
+    SqliteFile,
+    Postgres,
+}
+
+/// What a world's stores live in, beyond the backend's own handles.
+enum Storage {
+    Memory,
+    Files {
+        _root: tempfile::TempDir,
+    },
+    Postgres {
+        _storage: lash_postgres_store::PostgresStorage,
+        _database: lash_postgres_store::testing::IsolatedDatabase,
+        _attachments: tempfile::TempDir,
+    },
+}
+
+const SEED: u64 = 0xd5_3837;
+
+/// The PostgreSQL server a law runs over: `None` when none is configured,
+/// which `LASH_REQUIRE_POSTGRES=1` refuses.
+fn postgres_url() -> Option<String> {
+    let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
+        .ok()
+        .filter(|url| !url.trim().is_empty());
+    assert!(
+        url.is_some() || std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
+        "LASH_POSTGRES_DATABASE_URL must be set and non-empty when LASH_REQUIRE_POSTGRES=1"
+    );
+    url
+}
+
+/// A backend on the double over `stores`, or `None` for PostgreSQL when no
+/// server is configured.
+async fn backend_over(
+    config: ServerConfig,
+    stores: Stores,
+) -> Option<(RestateTestBackend<dyn StoreSet>, Storage)> {
+    match stores {
+        Stores::SqliteMemory => {
+            let backend = lash_restate_test::backend(SEED, config)
+                .await
+                .expect("build the Restate test backend");
+            Some((backend.erase_store_type(), Storage::Memory))
+        }
+        Stores::SqliteFile => {
+            let root = tempfile::tempdir().expect("the store directory");
+            let backend = lash_restate_test::backend_with_store_set(
+                SEED,
+                config,
+                lash_restate_test::DeploymentHooks::default(),
+                |clock| {
+                    let root = root.path().to_owned();
+                    async move {
+                        let stores =
+                            lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
+                                root,
+                                lash_sqlite_store::SqliteStoreSetOptions {
+                                    process_id_mint:
+                                        lash_core::ProcessIdMint::sequential_for_testing(),
+                                    ..lash_sqlite_store::SqliteStoreSetOptions::default()
+                                },
+                                clock,
+                            )
+                            .await
+                            .map_err(|error| {
+                                lash_restate_test::BackendError::Stores(error.to_string())
+                            })?;
+                        Ok(Arc::new(stores) as Arc<dyn StoreSet>)
+                    }
+                },
+            )
+            .await
+            .expect("build the Restate test backend over SQLite files");
+            Some((backend, Storage::Files { _root: root }))
+        }
+        Stores::Postgres => {
+            let url = postgres_url()?;
+            let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+            let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+                .await
+                .expect("open provisioned PostgreSQL storage");
+            let attachments = tempfile::tempdir().expect("the attachment directory");
+            let backend = lash_restate_test::backend_with_store_set(
+                SEED,
+                config,
+                lash_restate_test::DeploymentHooks::default(),
+                |clock| {
+                    let stores = lash_postgres_store::PostgresStoreSet::with_clock(
+                        &storage,
+                        Arc::new(lash::persistence::FileAttachmentStore::new(
+                            attachments.path(),
+                        )),
+                        lash_core::WakeDeliveryConfig::default(),
+                        clock,
+                    );
+                    async move { Ok(Arc::new(stores) as Arc<dyn StoreSet>) }
+                },
+            )
+            .await
+            .expect("build the Restate test backend over PostgreSQL");
+            Some((
+                backend,
+                Storage::Postgres {
+                    _storage: storage,
+                    _database: database,
+                    _attachments: attachments,
+                },
+            ))
+        }
+    }
 }
 
 async fn world(config: ServerConfig) -> World {
-    let backend = lash_restate_test::backend(0xd5_3837, config)
+    world_over(config, Stores::SqliteMemory)
         .await
-        .expect("build the Restate test backend");
+        .expect("SQLite memory stores are always available")
+}
+
+/// A world over `stores`, or `None` for PostgreSQL when no server is
+/// configured.
+async fn world_over(config: ServerConfig, stores: Stores) -> Option<World> {
+    let (backend, storage) = backend_over(config, stores).await?;
     let barrier = Arc::new(Barrier::default());
     let core = core(backend.lash_backend(), &barrier);
     let session = created_session(&core, SESSION)
@@ -293,7 +441,7 @@ async fn world(config: ServerConfig) -> World {
                 )
                 .bind(
                     Chat {
-                        session: session.clone(),
+                        session: Arc::new(OnceLock::from(session.clone())),
                     }
                     .serve(),
                 )
@@ -307,12 +455,13 @@ async fn world(config: ServerConfig) -> World {
         )
         .await
         .expect("register the host endpoint");
-    World {
+    Some(World {
         backend,
         barrier,
         session,
         core,
-    }
+        _storage: storage,
+    })
 }
 
 async fn until(what: &str, mut done: impl FnMut() -> bool) {
@@ -326,7 +475,7 @@ async fn until(what: &str, mut done: impl FnMut() -> bool) {
 }
 
 /// The names of the `ctx.run` steps journaled on `service`'s invocations.
-fn journaled_runs(backend: &RestateTestBackend, service: &str) -> Vec<String> {
+fn journaled_runs(backend: &RestateTestBackend<dyn StoreSet>, service: &str) -> Vec<String> {
     let server = backend.server();
     server
         .invocations()
@@ -340,7 +489,7 @@ fn journaled_runs(backend: &RestateTestBackend, service: &str) -> Vec<String> {
 
 /// The host's journal holds its binding steps, never the turn: no drive
 /// admission, seal, model call or commit ran on the host's handler.
-fn assert_host_never_drove(backend: &RestateTestBackend, service: &str) {
+fn assert_host_never_drove(backend: &RestateTestBackend<dyn StoreSet>, service: &str) {
     let runs = journaled_runs(backend, service);
     assert!(
         runs.iter().any(|name| name == "lash.host.accept"),
@@ -1062,6 +1211,564 @@ async fn live_restate_root_killed_after_its_session_was_deleted_ends_typed() {
     );
     drop(session);
     backend.finish().await;
+}
+
+/// Where root `root`'s first physical turn in `session` publishes its
+/// terminal: the durable wait's address, which names the wait's workflow key
+/// and its session's wait index.
+async fn terminal_wait(
+    backend: &lash_core::Backend,
+    session: &str,
+    root: &lash_core::TurnId,
+) -> lash_restate::RestateDurableWaitAddress {
+    let address = lash_core::facade_support::TurnAddress::new(
+        lash_core::SessionId::from(session),
+        lash_core::store::PhysicalTurn::derive_turn_id(root, 0),
+    );
+    let key = lash_core::AwaitEventResolver::await_event_key(
+        backend.effect_host().as_ref(),
+        &address.execution_scope(),
+        lash_core::AwaitEventWaitIdentity::TurnTerminal,
+    )
+    .await
+    .expect("the turn's terminal key");
+    lash_restate::RestateDurableWaitAddress::for_key(&key)
+}
+
+/// The `Service/key/handler` of an `await_resolution` invocation on `wait`,
+/// under `durable_wait_workflow`, the wait workflow's name in the backend's
+/// namespace.
+fn await_resolution_target(
+    durable_wait_workflow: &str,
+    wait: &lash_restate::RestateDurableWaitAddress,
+) -> String {
+    format!(
+        "{durable_wait_workflow}/{}/await_resolution",
+        wait.workflow_key
+    )
+}
+
+/// The server-side `await_resolution` invocations the double holds on
+/// `wait`, finished ones included.
+fn terminal_attaches(
+    backend: &RestateTestBackend<dyn StoreSet>,
+    wait: &lash_restate::RestateDurableWaitAddress,
+) -> usize {
+    let target = await_resolution_target(&backend.service_name("LashDurableWaitWorkflow"), wait);
+    backend
+        .server()
+        .invocations()
+        .into_iter()
+        .filter(|invocation| invocation.target == target)
+        .count()
+}
+
+/// The root `input_id` is bound to, once a drive admitted it.
+async fn root_of_input(
+    backend: &lash_core::Backend,
+    session: &str,
+    input_id: &lash::InputId,
+) -> lash_core::TurnId {
+    let store = backend.session_store_factory();
+    let session_id = lash_core::SessionId::from(session);
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if let Some(root) =
+                lash_core::store::RootStore::root_of_input(store.as_ref(), &session_id, input_id)
+                    .await
+                    .expect("read the input's root")
+            {
+                return root;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("a drive admits the input")
+}
+
+fn skipped_without_postgres() {
+    eprintln!("skipped: no PostgreSQL server is configured (LASH_POSTGRES_DATABASE_URL)");
+}
+
+/// Law A1 (FIG-4345) on the double. A committed root answers its follower
+/// from the store alone: the root commits and its first follower answers;
+/// then the session's durable-wait index is held, as a backlog of exclusive
+/// calls holds it under load. A second follower of the same input, which no
+/// run in this process can hand a report, still answers the committed
+/// outcome while the hold is in place, and the root's terminal key never
+/// holds more than one server-side `await_resolution` waiter, however many
+/// resolve passes ran.
+async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged(
+    stores: Stores,
+    config: ServerConfig,
+) {
+    let Some(world) = world_over(config, stores).await else {
+        skipped_without_postgres();
+        return;
+    };
+    let ingress = world.backend.ingress();
+    let input_id = ingress
+        .call_object_json::<_, String>(
+            "ChatObject",
+            "chat",
+            "submit",
+            &"committed, then backlogged",
+        )
+        .await
+        .expect("the exclusive handler accepts and returns");
+    let first = tokio::spawn({
+        let ingress = world.backend.ingress();
+        let input_id = input_id.clone();
+        async move {
+            ingress
+                .call_object_json::<_, Answer>("ChatObject", "chat", "wait", &input_id)
+                .await
+                .expect("the first follower answers")
+        }
+    });
+    until("the engine calls the model", || {
+        world.barrier.calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    world.barrier.release.notify_one();
+    let first = tokio::time::timeout(Duration::from_secs(30), first)
+        .await
+        .expect("the first follower finishes")
+        .expect("join");
+    assert!(first.answered, "{first:?}");
+    let root = lash_core::TurnId::from(first.root.clone().expect("a settled input names its root"));
+
+    let wait = terminal_wait(&world.backend.lash_backend(), SESSION, &root).await;
+    let hold = world
+        .backend
+        .server()
+        .hold(
+            &world.backend.service_name("LashDurableWaitIndex"),
+            &wait.index_key(),
+        )
+        .await;
+    let second = tokio::time::timeout(
+        Duration::from_secs(20),
+        ingress.call_object_json::<_, Answer>("ChatObject", "chat", "wait", &input_id),
+    )
+    .await
+    .expect("a committed root answers its follower while its session's wait index is held")
+    .expect("the second follower answers");
+    assert!(second.answered, "{second:?}");
+    assert_eq!(second.reply.as_deref(), Some("answered by the engine"));
+    assert_eq!(second.root, first.root);
+    let attaches = terminal_attaches(&world.backend, &wait);
+    assert!(
+        attaches <= 1,
+        "the root's terminal key holds at most one server-side waiter, not {attaches}"
+    );
+    drop(hold);
+    assert_eq!(world.barrier.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged_on_sqlite_memory()
+ {
+    a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged(
+        Stores::SqliteMemory,
+        ServerConfig::default(),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged_on_sqlite_memory_replaying()
+ {
+    a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged(
+        Stores::SqliteMemory,
+        ServerConfig::default().always_replay(true),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged_on_sqlite_file()
+ {
+    a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged(
+        Stores::SqliteFile,
+        ServerConfig::default(),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged_on_sqlite_file_replaying()
+ {
+    a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged(
+        Stores::SqliteFile,
+        ServerConfig::default().always_replay(true),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged_on_postgres()
+ {
+    a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged(
+        Stores::Postgres,
+        ServerConfig::default(),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged_on_postgres_replaying()
+ {
+    a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged(
+        Stores::Postgres,
+        ServerConfig::default().always_replay(true),
+    )
+    .await;
+}
+
+/// The committed outcome a terminal carries, as JSON: a terminal has no
+/// equality of its own.
+fn committed_outcome(terminal: &lash_core::facade_support::TurnTerminal) -> serde_json::Value {
+    match terminal {
+        lash_core::facade_support::TurnTerminal::Committed { outcome, .. } => {
+            serde_json::to_value(outcome).expect("encode the outcome")
+        }
+        lash_core::facade_support::TurnTerminal::Failed { error } => {
+            panic!("the turn committed, yet its terminal failed: {error:?}")
+        }
+    }
+}
+
+/// Law A2 (FIG-4345) on the double. A dropped terminal attach leaves no
+/// second server invocation: an attach to a running turn's terminal is
+/// dropped after 250 ms, as a follower's bounded read drops it; a second
+/// attach joins the one server-side waiter the first opened; once the turn
+/// commits, both that attach and a third made after the terminal resolved
+/// read the same terminal, and the terminal key holds one `await_resolution`
+/// invocation in all.
+async fn a_dropped_terminal_attach_leaves_no_second_server_invocation(
+    stores: Stores,
+    config: ServerConfig,
+) {
+    let Some(world) = world_over(config, stores).await else {
+        skipped_without_postgres();
+        return;
+    };
+    let input_id = world
+        .backend
+        .ingress()
+        .call_object_json::<_, String>("ChatObject", "chat", "submit", &"attached twice")
+        .await
+        .expect("the exclusive handler accepts and returns");
+    until("the engine calls the model", || {
+        world.barrier.calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    let backend = world.backend.lash_backend();
+    let root = root_of_input(&backend, SESSION, &lash::InputId::from(input_id)).await;
+    let wait = terminal_wait(&backend, SESSION, &root).await;
+    let attach = backend
+        .effect_host()
+        .turn_attach()
+        .expect("a Restate host attaches to turns");
+    let address = lash_core::facade_support::TurnAddress::new(
+        lash_core::SessionId::from(SESSION),
+        lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
+    );
+    let attached = |attach: Arc<dyn lash_core::facade_support::TurnAttach>| {
+        let address = address.clone();
+        tokio::spawn(async move { attach.await_terminal(&address).await })
+    };
+
+    let dropped = attached(Arc::clone(&attach));
+    until("the first attach opens its server-side waiter", || {
+        terminal_attaches(&world.backend, &wait) >= 1
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    dropped.abort();
+    assert!(
+        dropped.await.is_err_and(|error| error.is_cancelled()),
+        "the first attach was still waiting when it was dropped"
+    );
+    let reattached = attached(Arc::clone(&attach));
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    world.barrier.release.notify_one();
+    let terminal = tokio::time::timeout(Duration::from_secs(30), reattached)
+        .await
+        .expect("the re-attach answers once the turn commits")
+        .expect("join")
+        .expect("the re-attach reads the terminal");
+    let after = attach
+        .await_terminal(&address)
+        .await
+        .expect("an attach after the terminal resolved reads it");
+    assert_eq!(committed_outcome(&terminal), committed_outcome(&after));
+    assert_eq!(
+        terminal_attaches(&world.backend, &wait),
+        1,
+        "the terminal key holds one server-side waiter however often it was attached"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dropped_terminal_attach_leaves_no_second_server_invocation_on_sqlite_memory() {
+    a_dropped_terminal_attach_leaves_no_second_server_invocation(
+        Stores::SqliteMemory,
+        ServerConfig::default(),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dropped_terminal_attach_leaves_no_second_server_invocation_on_sqlite_memory_replaying() {
+    a_dropped_terminal_attach_leaves_no_second_server_invocation(
+        Stores::SqliteMemory,
+        ServerConfig::default().always_replay(true),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dropped_terminal_attach_leaves_no_second_server_invocation_on_sqlite_file() {
+    a_dropped_terminal_attach_leaves_no_second_server_invocation(
+        Stores::SqliteFile,
+        ServerConfig::default(),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dropped_terminal_attach_leaves_no_second_server_invocation_on_sqlite_file_replaying() {
+    a_dropped_terminal_attach_leaves_no_second_server_invocation(
+        Stores::SqliteFile,
+        ServerConfig::default().always_replay(true),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dropped_terminal_attach_leaves_no_second_server_invocation_on_postgres() {
+    a_dropped_terminal_attach_leaves_no_second_server_invocation(
+        Stores::Postgres,
+        ServerConfig::default(),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dropped_terminal_attach_leaves_no_second_server_invocation_on_postgres_replaying() {
+    a_dropped_terminal_attach_leaves_no_second_server_invocation(
+        Stores::Postgres,
+        ServerConfig::default().always_replay(true),
+    )
+    .await;
+}
+
+/// A live `restate-server` world for the FIG-4345 laws: the suite's server,
+/// this binary's endpoint serving `ChatObject` over a fresh session named
+/// `key`, which also keys the object.
+struct LiveWorld {
+    backend: LiveRestateBackend,
+    barrier: Arc<Barrier>,
+    key: String,
+    _session: lash::LashSession,
+    _core: lash::LashCore,
+}
+
+async fn live_world(name: &str) -> LiveWorld {
+    let env = |name: &str| {
+        std::env::var(name).unwrap_or_else(|_| panic!("the live suite's environment names {name}"))
+    };
+    let key = format!(
+        "{name}-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+    let cell = Arc::new(OnceLock::new());
+    let backend = LiveRestateBackend::start_with_services(
+        LiveConfig {
+            ingress_url: env("RESTATE_INGRESS_URL"),
+            admin_url: env("RESTATE_ADMIN_URL"),
+            endpoint_bind: env("HSW_BIND").parse().expect("endpoint bind"),
+            endpoint_url: env("HSW_URL"),
+            run_tag: key.clone(),
+            namespace: lash_restate::RestateNamespace::default(),
+        },
+        {
+            let cell = Arc::clone(&cell);
+            move |builder| builder.bind(Chat { session: cell }.serve())
+        },
+    )
+    .await
+    .expect("start the live backend");
+    let barrier = Arc::new(Barrier::default());
+    let core = core(backend.lash_backend(), &barrier);
+    let session = created_session(&core, key.as_str())
+        .await
+        .open()
+        .await
+        .expect("open the session");
+    assert!(
+        cell.set(session.clone()).is_ok(),
+        "the object's session is set once"
+    );
+    LiveWorld {
+        backend,
+        barrier,
+        key,
+        _session: session,
+        _core: core,
+    }
+}
+
+/// The server-side `await_resolution` invocations the live server holds on
+/// `wait`, finished ones included: the `sys_invocation` census.
+async fn live_terminal_attaches(
+    backend: &LiveRestateBackend,
+    wait: &lash_restate::RestateDurableWaitAddress,
+) -> usize {
+    let target = await_resolution_target(&backend.service_name("LashDurableWaitWorkflow"), wait);
+    backend
+        .invocations()
+        .await
+        .expect("read the server's invocations")
+        .into_iter()
+        .filter(|invocation| invocation.target == target)
+        .count()
+}
+
+/// Law A1 against a live `restate-server`, its session's wait index held
+/// through [`LiveRestateBackend::hold`].
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a live restate-server: the host-send-wait Restate suite runs it"]
+async fn live_restate_a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged()
+ {
+    let world = live_world("backlogged-wait-index").await;
+    let ingress = world.backend.ingress();
+    let input_id = ingress
+        .call_object_json::<_, String>(
+            "ChatObject",
+            &world.key,
+            "submit",
+            &"committed, then backlogged",
+        )
+        .await
+        .expect("the exclusive handler accepts and returns");
+    let first = tokio::spawn({
+        let ingress = world.backend.ingress();
+        let key = world.key.clone();
+        let input_id = input_id.clone();
+        async move {
+            ingress
+                .call_object_json::<_, Answer>("ChatObject", &key, "wait", &input_id)
+                .await
+                .expect("the first follower answers")
+        }
+    });
+    until("the engine calls the model", || {
+        world.barrier.calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    world.barrier.release.notify_one();
+    let first = tokio::time::timeout(Duration::from_secs(60), first)
+        .await
+        .expect("the first follower finishes")
+        .expect("join");
+    assert!(first.answered, "{first:?}");
+    let root = lash_core::TurnId::from(first.root.clone().expect("a settled input names its root"));
+
+    let wait = terminal_wait(&world.backend.lash_backend(), &world.key, &root).await;
+    let hold = world.backend.hold(
+        &world.backend.service_name("LashDurableWaitIndex"),
+        Some(&wait.index_key()),
+    );
+    let second = tokio::time::timeout(
+        Duration::from_secs(60),
+        ingress.call_object_json::<_, Answer>("ChatObject", &world.key, "wait", &input_id),
+    )
+    .await
+    .expect("a committed root answers its follower while its session's wait index is held")
+    .expect("the second follower answers");
+    assert!(second.answered, "{second:?}");
+    assert_eq!(second.reply.as_deref(), Some("answered by the engine"));
+    assert_eq!(second.root, first.root);
+    let attaches = live_terminal_attaches(&world.backend, &wait).await;
+    assert!(
+        attaches <= 1,
+        "the root's terminal key holds at most one server-side waiter, not {attaches}"
+    );
+    hold.release();
+    world.backend.finish().await;
+}
+
+/// Law A2 against a live `restate-server`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a live restate-server: the host-send-wait Restate suite runs it"]
+async fn live_restate_a_dropped_terminal_attach_leaves_no_second_server_invocation() {
+    let world = live_world("dropped-terminal-attach").await;
+    let input_id = world
+        .backend
+        .ingress()
+        .call_object_json::<_, String>("ChatObject", &world.key, "submit", &"attached twice")
+        .await
+        .expect("the exclusive handler accepts and returns");
+    until("the engine calls the model", || {
+        world.barrier.calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    let backend = world.backend.lash_backend();
+    let root = root_of_input(&backend, &world.key, &lash::InputId::from(input_id)).await;
+    let wait = terminal_wait(&backend, &world.key, &root).await;
+    let attach = backend
+        .effect_host()
+        .turn_attach()
+        .expect("a Restate host attaches to turns");
+    let address = lash_core::facade_support::TurnAddress::new(
+        lash_core::SessionId::from(world.key.as_str()),
+        lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
+    );
+    let attached = |attach: Arc<dyn lash_core::facade_support::TurnAttach>| {
+        let address = address.clone();
+        tokio::spawn(async move { attach.await_terminal(&address).await })
+    };
+
+    let dropped = attached(Arc::clone(&attach));
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while live_terminal_attaches(&world.backend, &wait).await == 0 {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the first attach opens its server-side waiter");
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    dropped.abort();
+    assert!(
+        dropped.await.is_err_and(|error| error.is_cancelled()),
+        "the first attach was still waiting when it was dropped"
+    );
+    let reattached = attached(Arc::clone(&attach));
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    world.barrier.release.notify_one();
+    let terminal = tokio::time::timeout(Duration::from_secs(60), reattached)
+        .await
+        .expect("the re-attach answers once the turn commits")
+        .expect("join")
+        .expect("the re-attach reads the terminal");
+    let after = attach
+        .await_terminal(&address)
+        .await
+        .expect("an attach after the terminal resolved reads it");
+    assert_eq!(committed_outcome(&terminal), committed_outcome(&after));
+    assert_eq!(
+        live_terminal_attaches(&world.backend, &wait).await,
+        1,
+        "the terminal key holds one server-side waiter however often it was attached"
+    );
+    world.backend.finish().await;
 }
 
 /// This test crate's one path to a session that may not exist yet

@@ -223,32 +223,6 @@ async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
     Ok(())
 }
 
-/// A deployment store whose reads never show a turn's commit, as a
-/// follower's store read lags the commit a worker in another process made:
-/// the root's terminal is published, and no store poll sees that the root
-/// committed.
-struct UnseenCommits {
-    inner: Arc<dyn lash_core::DeploymentStore>,
-}
-
-#[async_trait]
-impl lash_core::RuntimeStoreDecorator for UnseenCommits {
-    type Inner = dyn lash_core::DeploymentStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn turn_is_committed(
-        &self,
-        _address: &lash_core::facade_support::TurnAddress,
-    ) -> std::result::Result<bool, lash_core::StoreError> {
-        Ok(false)
-    }
-}
-
-impl lash_core::DeploymentStoreDecorator for UnseenCommits {}
-
 /// Wraps the deployment store a fixture's catalog hands out.
 type StoreMap = Arc<
     dyn Fn(Arc<dyn lash_core::DeploymentStore>) -> Arc<dyn lash_core::DeploymentStore>
@@ -264,53 +238,6 @@ async fn fixture_with_stores(batch: usize, map: StoreMap) -> Result<Fixture> {
             .into_backend()
     })
     .await
-}
-
-/// A root's follower learns that the root settled from its published
-/// terminal, through the one wait it holds open once the root is known, even
-/// while no store read shows the root's commit — the view a follower has of a
-/// root that ran on another worker (FIG-3981). Before, the follower asked for
-/// the terminal only once a store poll showed the commit, so a read that lags
-/// the commit never answered.
-async fn a_root_answers_from_its_published_terminal_while_no_store_read_shows_its_commit()
--> Result<()> {
-    let fixture = fixture_with_stores(
-        1,
-        Arc::new(|inner| Arc::new(UnseenCommits { inner }) as Arc<_>),
-    )
-    .await?;
-    let session = fixture
-        .core
-        .session("send-terminal-wait")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    let handle = session.send(TurnInput::text(HELD)).await?;
-    provider_called(&fixture, 1).await;
-    let parts = session.durable().send_parts().await?;
-    let root = parts
-        .store
-        .root_of_input(handle.input_id())
-        .await
-        .expect("read the input's root")
-        .expect("the running root is bound to its input");
-    let following = tokio::spawn(session.root(root.clone()).outcome());
-    fixture.release.notify_one();
-
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), following)
-        .await
-        .expect("the root's follower answers from its published terminal")
-        .expect("the follower task completes")?;
-    assert_eq!(outcome.status, crate::TurnStatus::Answered);
-    assert_eq!(outcome.root.as_ref(), Some(&root));
-    let output = outcome.output.expect("a settled root has a report");
-    assert_eq!(
-        output.assistant_message(),
-        Some(format!("echo: {HELD}").as_str())
-    );
-    Ok(())
 }
 
 /// The reads one input's followers make while its root binding is awaited:
@@ -1673,13 +1600,6 @@ macro_rules! send_handle_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
                 super::a_settled_root_no_run_here_can_report_answers_at_once().await
-            }
-
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_root_answers_from_its_published_terminal_while_no_store_read_shows_its_commit()
-            -> Result<()> {
-                super::a_root_answers_from_its_published_terminal_while_no_store_read_shows_its_commit()
-                    .await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

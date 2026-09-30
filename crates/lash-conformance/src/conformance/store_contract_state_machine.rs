@@ -2306,7 +2306,11 @@ async fn consume_wake(
                     commit: crate::store::TurnCommitId::new(root.clone(), 0),
                     turn: root.clone(),
                     root: root.clone(),
-                    stop: None,
+                    outcome: crate::store::RootCommittedOutcome::Finished(
+                        lash_core::facade_support::TurnFinish::AssistantMessage {
+                            text: String::new(),
+                        },
+                    ),
                 }));
                 commit
             })

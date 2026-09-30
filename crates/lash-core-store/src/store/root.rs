@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use super::control_intent::ControlIntentId;
 use super::{DriveFence, SessionHeadRef, StoreError};
 use crate::{BatchId, InputId, SessionId, TurnId};
-use lash_sansio::TurnStop;
+use lash_sansio::{TurnFinish, TurnOutcome, TurnStop};
 
 /// A turn commit's identity: the logical root and the physical ordinal of
 /// the attempt that commits it. Derived, never minted: the ordinal is the
@@ -104,16 +104,59 @@ impl RootTerminalKind {
     }
 }
 
+/// The outcome a root's final physical turn committed with: it finished, or
+/// it stopped. A frame switch never ends a root (its root goes on in the
+/// next physical turn), so it has no spelling here. Encoded as the matching
+/// [`TurnOutcome`] variant.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RootCommittedOutcome {
+    Finished(TurnFinish),
+    Stopped(TurnStop),
+}
+
+impl RootCommittedOutcome {
+    /// The committed outcome `outcome` ends a root with; `None` for a frame
+    /// switch, which ends none.
+    #[must_use]
+    pub fn of_turn_outcome(outcome: &TurnOutcome) -> Option<Self> {
+        match outcome {
+            TurnOutcome::Finished(finish) => Some(Self::Finished(finish.clone())),
+            TurnOutcome::Stopped(stop) => Some(Self::Stopped(stop.clone())),
+            TurnOutcome::AgentFrameSwitch { .. } => None,
+        }
+    }
+
+    /// Why the turn stopped; `None` when it finished.
+    #[must_use]
+    pub fn stop(&self) -> Option<&TurnStop> {
+        match self {
+            Self::Finished(_) => None,
+            Self::Stopped(stop) => Some(stop),
+        }
+    }
+}
+
+impl From<RootCommittedOutcome> for TurnOutcome {
+    fn from(outcome: RootCommittedOutcome) -> Self {
+        match outcome {
+            RootCommittedOutcome::Finished(finish) => Self::Finished(finish),
+            RootCommittedOutcome::Stopped(stop) => Self::Stopped(stop),
+        }
+    }
+}
+
 /// Why a root is terminal: the transaction that wrote its evidence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "cause", rename_all = "snake_case")]
 pub enum RootTerminalCause {
     /// The root's final physical turn committed (the head-commit
-    /// transaction).
+    /// transaction), with `outcome`: what the root answers every input it
+    /// took, read from this row alone (FIG-4345).
     Committed {
         commit: TurnCommitId,
         turn: TurnId,
-        stop: Option<TurnStop>,
+        outcome: RootCommittedOutcome,
     },
     /// An operator cancelled the parked root (its control intent).
     OperatorCancelled { intent: ControlIntentId },
@@ -146,7 +189,7 @@ impl RootTerminalCause {
     #[must_use]
     pub fn kind(&self) -> RootTerminalKind {
         match self {
-            Self::Committed { stop, .. } => RootTerminalKind::of_stop(stop.as_ref()),
+            Self::Committed { outcome, .. } => RootTerminalKind::of_stop(outcome.stop()),
             Self::OperatorCancelled { .. } | Self::Forked { .. } | Self::SessionDeleted { .. } => {
                 RootTerminalKind::Cancelled
             }
@@ -206,15 +249,15 @@ pub struct RootTerminalWrite {
     pub commit: TurnCommitId,
     /// The physical turn that reached the terminal.
     pub turn: TurnId,
-    /// Why the turn stopped; `None` when it completed.
-    pub stop: Option<TurnStop>,
+    /// The outcome the turn committed with.
+    pub outcome: RootCommittedOutcome,
 }
 
 impl RootTerminalWrite {
     /// The kind this write answers.
     #[must_use]
     pub fn kind(&self) -> RootTerminalKind {
-        RootTerminalKind::of_stop(self.stop.as_ref())
+        RootTerminalKind::of_stop(self.outcome.stop())
     }
 
     /// The cause this write records.
@@ -223,7 +266,7 @@ impl RootTerminalWrite {
         RootTerminalCause::Committed {
             commit: self.commit.clone(),
             turn: self.turn.clone(),
-            stop: self.stop.clone(),
+            outcome: self.outcome.clone(),
         }
     }
 
@@ -831,7 +874,12 @@ mod tests {
                 &TurnId::from(root),
                 u64::from(ordinal),
             ),
-            stop,
+            outcome: match stop {
+                None => RootCommittedOutcome::Finished(TurnFinish::AssistantMessage {
+                    text: String::new(),
+                }),
+                Some(stop) => RootCommittedOutcome::Stopped(stop),
+            },
         }
         .into_terminal(SessionId::from("s"), 3, 10)
     }

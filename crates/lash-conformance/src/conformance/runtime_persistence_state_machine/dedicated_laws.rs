@@ -109,7 +109,11 @@ fn final_commit(
         commit: crate::store::TurnCommitId::new(root.clone(), 0),
         turn: root.clone(),
         root,
-        stop: None,
+        outcome: crate::store::RootCommittedOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     commit
 }

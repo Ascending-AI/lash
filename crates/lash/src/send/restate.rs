@@ -24,8 +24,9 @@
 //! 2. **A wait made of bounded probes.** [`SendHandle::outcome_restate`]
 //!    follows the input's root one probe window at a time. Each probe is a
 //!    journaled step that answers the outcome, or where the follower stands
-//!    (its replay cursor and the gaps it met). A replayed handler reads every
-//!    finished probe back and follows on from the last position, so the wait
+//!    (its replay cursor) and the gaps that probe met, never the ones earlier
+//!    probes journaled. A replayed handler reads every finished probe back
+//!    and follows on from the last position, so the wait
 //!    survives suspension, replay, a restart after acceptance, and a turn that
 //!    outlives the invocation's inactivity and abort timers: no single probe
 //!    runs longer than its window, and nothing of the wait lives in process
@@ -256,11 +257,15 @@ impl SendBuilder {
     }
 }
 
-/// What one probe answered.
+/// What one probe answered: the outcome, or where the follower stands and
+/// the gaps this probe met.
 #[derive(serde::Serialize, serde::Deserialize)]
 enum Probe {
     Answered(Box<SendOutcome>),
-    Pending(Position),
+    Pending {
+        position: Position,
+        gaps: Vec<lash_core::facade_support::LiveReplayGap>,
+    },
 }
 
 impl SendHandle {
@@ -324,6 +329,8 @@ where
     Box::pin(async move {
         let RestateWait { sink, probe_window } = wait;
         let mut position = Position::at(cursor);
+        // The gaps earlier probes met, read back from their journal entries.
+        let mut gaps = Vec::new();
         loop {
             let target = target.clone();
             let subject = subject.clone();
@@ -349,14 +356,24 @@ where
                             }
                             Probe::Answered(outcome)
                         }
-                        Followed::Pending(position) => Probe::Pending(position),
+                        Followed::Pending { position, gaps } => Probe::Pending { position, gaps },
                     })
                 }),
             )
             .await?;
             match probe {
-                Probe::Answered(outcome) => return Ok(*outcome),
-                Probe::Pending(next) => position = next,
+                Probe::Answered(mut outcome) => {
+                    gaps.append(&mut outcome.gaps);
+                    outcome.gaps = gaps;
+                    return Ok(*outcome);
+                }
+                Probe::Pending {
+                    position: next,
+                    gaps: mut met,
+                } => {
+                    position = next;
+                    gaps.append(&mut met);
+                }
             }
         }
     })

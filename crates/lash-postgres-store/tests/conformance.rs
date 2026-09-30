@@ -59,7 +59,11 @@ fn finishing_root(
         commit: lash_core_execution::store::TurnCommitId::new(root.clone(), 0),
         turn: lash_core_execution::store::PhysicalTurn::derive_turn_id(&root, 0),
         root,
-        stop: None,
+        outcome: lash_core_execution::store::RootCommittedOutcome::Finished(
+            lash_core_execution::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     commit
 }
