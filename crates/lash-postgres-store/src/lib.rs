@@ -872,6 +872,9 @@ impl PostgresStorage {
     /// exclusively, applies the pending expand migrations this build declares
     /// — or provisions an unprovisioned database outright — and records each
     /// applied step in the `lash_migrations` ledger.
+    /// Each schema advisory-lock acquisition waits up to 30 seconds before
+    /// returning [`StoreError::Contended`]. Migration statements retain the
+    /// deployment's inherited timeouts. See ADR 0106 §5.
     /// [`MigrationPhase::Backfill`] resumes every pending backfill from its
     /// ledger cursor and runs it to completion, and is refused typed before
     /// finalize. [`MigrationPhase::Contract`] is refused typed until finalize

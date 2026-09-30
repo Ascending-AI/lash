@@ -203,6 +203,24 @@ epoch and completed backfills, then raises the reader floor. A rerun resumes
 from the ledger. A semantic column or key change uses a declared migration;
 stored identities are not recomputed as a side effect of opening a worker.
 
+`lashctl migrate` and its dry run acquire the published, database-wide schema
+advisory lock with a server-enforced 30-second lock-wait bound. Expand and
+contract take it exclusively; planning and backfill catalog reads take it
+shared. A concurrent holder queues the command in PostgreSQL. A holder that
+keeps the lock past 30 seconds produces the typed `Contended` store error;
+there is no sleep/retry loop. A slow query without lock contention does not
+produce `Contended` through this acquisition path.
+
+The runner temporarily sets `lock_timeout = '30s'` and disables
+`statement_timeout` only during advisory-lock acquisition, then restores the
+connection's inherited settings before reading or changing the catalog. The
+bound covers each advisory acquisition, not the whole migration or connection
+establishment. DDL and row locks retain the deployment's own timeouts and may
+also report contention. The lock lives on a detached connection, which closes
+on completion, error or cancellation; a cancelled waiter cannot return a
+locked connection to the pool. Worker timeouts and schema verification are
+unchanged.
+
 When migration is required, SQLite store-set open migrates all three databases
 after a complete backup under its migrator lock. Each database commits its own
 step in store-set order.
