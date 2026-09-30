@@ -918,13 +918,15 @@ impl PluginSession {
         }
     }
 
-    pub fn hydrate_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
+    /// Adopt `snapshot`, a recorded head's plugin state, as the live state:
+    /// an accepted write the head does not carry is dropped, as a cold
+    /// rebuild from that head drops it (FIG-4392).
+    pub fn hydrate_state(&self, snapshot: &PluginState) {
         let mut live = self.state.lock_recover();
-        live.hydrate_live(snapshot)?;
+        live.hydrate_live(snapshot);
         for plugin in &self.plugins {
             live.data.plugins.entry(plugin.id().into()).or_default();
         }
-        Ok(())
     }
 
     pub fn fork_for_session(

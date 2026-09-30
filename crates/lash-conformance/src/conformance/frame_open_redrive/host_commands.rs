@@ -16,9 +16,10 @@
 //! ended root's fence, never waits on a command settlement and never
 //! deadlocks its drive; a dirty park while the bound turn owns the head is
 //! refused busy, keeps its runtime and loses nothing, and lands once the
-//! boundary passed, while a clean park writes nothing; and a command
-//! withdrawn before the drive read it never applies, while one the drive
-//! already read is no longer withdrawn.
+//! boundary passed, while a clean park writes nothing; a plugin-state-dirty
+//! park re-parks from the recorded head once the bound turn moved it
+//! (FIG-4392); and a command withdrawn before the drive read it never
+//! applies, while one the drive already read is no longer withdrawn.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -173,7 +174,7 @@ fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
     let task_probe = probe.clone();
     let event_probe = probe.clone();
     Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-host-commands",
+        HOST_PLUGIN_ID,
         crate::facade_support::PluginSpec::new()
             .with_plugin_command_value::<HostNoteCommand, _, _>(move |ctx, args| {
                 let probe = command_probe.clone();
@@ -887,6 +888,189 @@ pub async fn dirty_park_while_busy_is_recoverable_and_loses_nothing(
     Box::pin((*runtime).park())
         .await
         .expect("the refused runtime parks once the boundary passed");
+
+    let path = active_path(&law.head().await.graph);
+    position_of_once(&path, "answer 2");
+    assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);
+}
+
+/// The plugin namespace of the laws' host plugin.
+const HOST_PLUGIN_ID: &str = "conformance-host-commands";
+
+/// `runtime`'s own plugin-state handle for the laws' host plugin: the one
+/// the plugin receives, so a write through it is an accepted plugin write
+/// the runtime holds uncommitted until its next boundary.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+fn host_plugin_state(runtime: &crate::LashRuntime) -> lash_core::PluginStateStore {
+    lash_core::testing::runtime_internals::plugin_state_store(
+        &runtime
+            .plugin_session()
+            .expect("a law runtime has a plugin session"),
+        HOST_PLUGIN_ID,
+    )
+}
+
+/// The laws' host plugin namespace the session's recorded head carries.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn recorded_host_plugin_namespace(law: &LawSession) -> lash_core::PluginNamespaceState {
+    crate::conformance::helpers::load_window_state(&law.store, &law.session_id)
+        .await
+        .expect("read the recorded head")
+        .expect("the session committed")
+        .plugin_state()
+        .and_then(|state| state.plugins.get(HOST_PLUGIN_ID).cloned())
+        .unwrap_or_default()
+}
+
+/// A plugin-state-dirty park never wedges (FIG-4392). A host runtime holding
+/// an accepted, uncommitted plugin write is refused busy while the bound
+/// turn owns the head, and hands its runtime back. Once the bound turn's
+/// boundary passed, the head it committed has moved past the runtime: the
+/// same runtime re-parks by rehydrating from the recorded head, whose plugin
+/// namespace does not carry the uncommitted write, as a cold rebuild would,
+/// and writes nothing. A runtime built on that head parks clean, and one
+/// whose accepted write sits on the recorded head commits it at its park.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    const TAIL_KEY: &str = "uncommitted-tail";
+    const LANDED_KEY: &str = "landed-on-the-recorded-head";
+    let probe = HostPluginProbe::default();
+    let (law, model, hold) = bound_turn_session(
+        prefix,
+        "plugin-state-dirty-park",
+        effect_host,
+        stores,
+        runner,
+        &probe,
+    )
+    .await;
+    let recorded_before = recorded_host_plugin_namespace(&law).await;
+    let refused_runtime = std::sync::OnceLock::new();
+    let while_held = hold.while_held(async {
+        let before = law.head().await.head_revision;
+        let dirty = build_runtime(&law.parts, None).await;
+        let accepted = host_plugin_state(&dirty)
+            .set(
+                TAIL_KEY,
+                serde_json::json!("accepted while the turn was bound"),
+            )
+            .expect("the plugin write is accepted");
+        assert_eq!(accepted, recorded_before.generation + 1);
+        let Err(refused) = Box::pin(dirty.park()).await else {
+            panic!("a plugin-state-dirty park while the bound turn owns the head is busy");
+        };
+        let bound = law
+            .store
+            .unfinished_root(&law.session_id)
+            .await
+            .expect("read the bound root")
+            .expect("a root is bound")
+            .root;
+        assert_eq!(
+            refused.busy_owner(),
+            Some(&crate::store::SessionHeadOwner::Root { root: bound }),
+            "the refusal names the bound root: {:?}",
+            refused.error
+        );
+        assert_eq!(
+            law.head().await.head_revision,
+            before,
+            "the refused park wrote nothing"
+        );
+        assert!(
+            refused_runtime.set(refused.runtime).is_ok(),
+            "one refused park"
+        );
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        futures_util::future::join(law.run_root("root-2"), while_held),
+    )
+    .await
+    .expect("the bound turn's drive ends");
+
+    let runtime = refused_runtime
+        .into_inner()
+        .expect("the dirty park was refused while the turn was bound");
+    let after_turn = law.head().await.head_revision;
+    let parked = tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        Box::pin((*runtime).park()),
+    )
+    .await
+    .expect("the re-park settles");
+    let parked = match parked {
+        Ok(parked) => parked,
+        Err(refused) => panic!(
+            "the refused runtime re-parks from the recorded head once the boundary passed: {:?}",
+            refused.error
+        ),
+    };
+    assert_eq!(parked.session_id(), &law.session_id);
+    assert_eq!(
+        law.head().await.head_revision,
+        after_turn,
+        "a re-park rehydrated from the recorded head writes nothing"
+    );
+    let recorded = recorded_host_plugin_namespace(&law).await;
+    assert_eq!(
+        (recorded.values.get(TAIL_KEY), recorded.generation),
+        (None, recorded_before.generation),
+        "the recorded head does not carry the uncommitted write"
+    );
+    let clean = build_runtime(&law.parts, None).await;
+    assert_eq!(
+        host_plugin_state(&clean).generation(),
+        recorded.generation,
+        "a runtime built on the recorded head holds its namespace"
+    );
+    Box::pin(clean.park())
+        .await
+        .expect("a clean park is never busy");
+    assert_eq!(
+        law.head().await.head_revision,
+        after_turn,
+        "a clean park writes nothing"
+    );
+
+    let on_the_head = build_runtime(&law.parts, None).await;
+    host_plugin_state(&on_the_head)
+        .set(
+            LANDED_KEY,
+            serde_json::json!("accepted on the recorded head"),
+        )
+        .expect("the plugin write is accepted");
+    Box::pin(on_the_head.park())
+        .await
+        .expect("a plugin-state-dirty park on the recorded head lands");
+    assert_eq!(
+        law.head().await.head_revision,
+        after_turn + 1,
+        "the park commits the accepted write once"
+    );
+    let landed = recorded_host_plugin_namespace(&law).await;
+    assert_eq!(
+        (landed.values.get(LANDED_KEY), landed.generation),
+        (
+            Some(&serde_json::json!("accepted on the recorded head")),
+            recorded.generation + 1
+        ),
+        "the park committed the write it accepted on the recorded head"
+    );
 
     let path = active_path(&law.head().await.graph);
     position_of_once(&path, "answer 2");

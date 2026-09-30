@@ -83,8 +83,12 @@ The runtime recaptures when namespaces exist and the component is absent or
 its captured generations differ. Otherwise it retains the reference.
 
 Per-key generations add no useful invalidation boundary because capture writes
-the whole component. A resident hydration that would rewind accepted writes
-or replace equal-generation values is refused.
+the whole component. A resident hydration adopts the recorded head's
+namespaces. The head is durable truth, committed by the drive that owned it
+(ADR 0105), so accepted writes it does not carry are an uncommitted tail: the
+hydration drops them, as a cold rebuild from that head does (§5), and traces
+the drop. A namespace bound live but absent from the head stays bound at its
+default.
 
 ### 7. Fork
 
@@ -117,7 +121,7 @@ at a later runtime boundary, so acceptance and commit have distinct lifetimes.
 
 ## Code references
 
-- `crates/lash-core-execution/src/plugin/state.rs:12-28,66-280,322-404` implements the handle, bounds, batches, and hydration.
+- `crates/lash-core-execution/src/plugin/state.rs:12-28,66-280,325-406` implements the handle, bounds, batches, and hydration.
 - `crates/lash-core-execution/src/plugin/runtime_impl.rs:306-316` orders initialization and readiness.
 - `crates/lash-core-execution/src/plugin/registrar.rs:511` delivers the registration handle.
 - `crates/lash-core-store/src/plugin_state.rs:7-18` defines checkpoint namespaces.

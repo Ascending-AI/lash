@@ -46,6 +46,10 @@ pub use crate::tool_dispatch::{
     CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer, execute_final_tool_intents,
     resolve_callable_manifest_by_id,
 };
+/// A state handle over a runtime's own plugin-state registry, the one a
+/// plugin receives: the park laws accept plugin writes on a host runtime
+/// through it (FIG-4392).
+pub use lash_core_execution::testing::kernel_internals::plugin_state_store;
 /// The kernel's single-call entries under the dispatch state a [`crate::testing::ToolCallFixture`]
 /// configures: the entries themselves take crate-private state.
 pub use lash_core_execution::testing::kernel_internals::{

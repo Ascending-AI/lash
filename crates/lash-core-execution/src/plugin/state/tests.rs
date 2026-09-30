@@ -109,7 +109,7 @@ fn materialization_uses_spawn_capture_after_parent_changes_and_unregisters() {
     namespace
         .values
         .insert("value".into(), serde_json::json!("after-spawn"));
-    parent.hydrate_state(&later).unwrap();
+    parent.hydrate_state(&later);
     host.unregister_session(&"parent".into()).unwrap();
     drop(parent);
     let child = host
@@ -412,19 +412,42 @@ fn readiness_runs_after_hydration_and_its_writes_survive() {
 }
 
 #[test]
-fn live_hydration_refuses_generation_rewind_and_preserves_bound_namespaces() {
+fn live_hydration_adopts_the_recorded_head_over_an_uncommitted_tail() {
     let state = store();
     state.state.lock_recover().initialize(None).unwrap();
     state.set("value", serde_json::json!(1)).unwrap();
-    let old = state.state.lock_recover().data.clone();
+    let recorded = state.state.lock_recover().data.clone();
     state.set("value", serde_json::json!(2)).unwrap();
-    assert!(state.state.lock_recover().hydrate_live(&old).is_err());
-    assert_eq!(state.generation(), 2);
-    assert_eq!(state.get("value"), Some(serde_json::json!(2)));
+    state.state.lock_recover().hydrate_live(&recorded);
+    assert_eq!(state.generation(), 1);
+    assert_eq!(state.get("value"), Some(serde_json::json!(1)));
     assert!(matches!(
-        state.apply_guarded(1, vec![]),
-        Err(PluginStateError::GenerationConflict { actual: 2, .. })
+        state.apply_guarded(2, vec![]),
+        Err(PluginStateError::GenerationConflict { actual: 1, .. })
     ));
+
+    let mut diverged = recorded.clone();
+    let namespace = diverged.plugins.get_mut("mock").unwrap();
+    namespace
+        .values
+        .insert("value".into(), serde_json::json!(3));
+    state.set("value", serde_json::json!(4)).unwrap();
+    state.state.lock_recover().hydrate_live(&diverged);
+    assert_eq!(
+        (state.generation(), state.get("value")),
+        (1, Some(serde_json::json!(3))),
+        "an equal-generation tail yields to the recorded head's values"
+    );
+
+    state
+        .state
+        .lock_recover()
+        .hydrate_live(&PluginState::default());
+    assert_eq!(
+        (state.generation(), state.keys()),
+        (0, Vec::<String>::new()),
+        "a bound namespace the head does not carry stays bound at its default"
+    );
 }
 
 #[test]

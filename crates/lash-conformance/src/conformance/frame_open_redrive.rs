@@ -1753,6 +1753,7 @@ macro_rules! frame_open_redrive_tests {
             a_refused_frame_commit_leaves_nothing_visible,
             terminal_callback_append_does_not_deadlock,
             dirty_park_while_busy_is_recoverable_and_loses_nothing,
+            plugin_state_dirty_park_reparks_from_the_recorded_head,
             command_cancellation_before_admission_withdraws_it);
         $crate::frame_open_redrive_tests!(@commanded [$(#[$attr])*] $fixture;
             (host_append_waits_for_the_bound_turn,
