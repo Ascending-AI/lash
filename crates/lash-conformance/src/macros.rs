@@ -2073,3 +2073,34 @@ macro_rules! effect_host_await_event_witness_tests {
         )*
     };
 }
+
+/// Owner-scoped usage accounting laws. The fixture returns its guard and store handles.
+#[macro_export]
+macro_rules! usage_ledger_store_tests {
+    ($fixture:block) => {
+        mod usage_ledger {
+            use super::*;
+            $crate::usage_ledger_store_tests!(@register $fixture;
+                identical_settlement_retry_is_a_no_op,
+                conflicting_payload_is_a_typed_conflict_and_appends_nothing,
+                a_correction_has_its_own_identity,
+                each_fact_counts_once_under_any_grouping_order_and_repeat,
+                admission_is_idempotent_and_retirement_fences_it,
+                settlement_resolves_superseded_runs_unknown,
+                a_late_settlement_supersedes_retirement,
+                accounting_writes_never_touch_head_fence_or_receipts,
+                retention_reclaims_only_retired_owners_before_the_horizon,
+                reads_select_by_owner_without_a_committed_turn,
+            );
+        }
+    };
+    (@register $fixture:block; $($law:ident),+ $(,)?) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_guard, fixture) = $fixture;
+                $crate::usage_ledger::$law(&fixture).await;
+            }
+        )+
+    };
+}

@@ -37,6 +37,8 @@ const SESSION_DELETE_SOURCE: &str =
 /// `generation_drain_cases`, none is excluded.
 const GENERATION_DRAIN_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/generation_drain.rs");
+const USAGE_ACCOUNTING_SOURCE: &str =
+    include_str!("../../../lash-core-store/src/store/usage_accounting.rs");
 
 /// Every source file that makes up this test binary: the root file and every
 /// `*.rs` under its module directory, read from the package at run time. A
@@ -377,6 +379,7 @@ fn store_trait_surface_is_fully_gated() {
         (RECOVERY_LEADER_SOURCE, "RecoveryLeaderStore"),
         (SESSION_DELETE_SOURCE, "SessionDeleteLedger"),
         (GENERATION_DRAIN_SOURCE, "GenerationDrainStore"),
+        (USAGE_ACCOUNTING_SOURCE, "UsageAccountingStore"),
     ] {
         for method in fallible_trait_methods(source, trait_name) {
             if harness_drives(&sources, &method) {

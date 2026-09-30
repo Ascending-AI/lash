@@ -2130,3 +2130,36 @@ async fn fenced_process_and_trigger_registration_stays_typed() {
     }
     storage.pool().close().await;
 }
+
+lash_conformance::usage_ledger_store_tests!({
+    let Some((lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let snapshot_pool = storage.pool().clone();
+    let snapshot: lash_conformance::UsageLedgerSnapshot = Arc::new(move || {
+        let pool = snapshot_pool.clone();
+        Box::pin(async move {
+            let tables: Vec<String> = sqlx::query_scalar("SELECT tablename::text FROM pg_tables WHERE schemaname = current_schema() AND tablename LIKE 'lash_%' AND tablename NOT LIKE 'lash_usage_%' ORDER BY tablename")
+                .fetch_all(&pool).await.unwrap();
+            let mut snapshot = Vec::new();
+            for table in tables {
+                let mut rows: Vec<String> =
+                    sqlx::query_scalar(&format!("SELECT to_jsonb(t)::text FROM \"{table}\" AS t"))
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap();
+                rows.sort();
+                snapshot.push((table, rows.join("\n")));
+            }
+            snapshot
+        })
+    });
+    let store = Arc::new(storage.store());
+    let fixture = lash_conformance::UsageLedgerStoreFixture {
+        accounting: store.clone(),
+        factory: store,
+        snapshot,
+    };
+    ((lock, storage), fixture)
+});

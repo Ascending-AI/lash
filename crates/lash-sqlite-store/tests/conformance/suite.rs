@@ -1136,3 +1136,42 @@ lash_conformance::attachment_stalled_retry_tests!({
     let make_bytes = crate::backend_fixture::attachment_bytes(&bytes_root);
     ((backend, bytes_root), factory, make_bytes, clock)
 });
+
+lash_conformance::usage_ledger_store_tests!({
+    use lash_core_execution::StoreSet as _;
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let snapshot_backend = backend.clone();
+    let snapshot: lash_conformance::UsageLedgerSnapshot = Arc::new(move || {
+        let backend = snapshot_backend.clone();
+        Box::pin(async move {
+            let connection = backend.raw(SqliteDatabase::DurableCore);
+            let tables = connection.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'usage_%' AND name NOT LIKE 'sqlite_%' ORDER BY name").unwrap()
+                .query_map([], |row| row.get::<_, String>(0)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+            let mut snapshot = Vec::new();
+            for table in tables {
+                let mut statement = connection
+                    .prepare(&format!("SELECT * FROM \"{table}\""))
+                    .unwrap();
+                let count = statement.column_count();
+                let mut rows = statement
+                    .query_map([], |row| {
+                        (0..count)
+                            .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .map(|row| format!("{:?}", row.unwrap()))
+                    .collect::<Vec<_>>();
+                rows.sort();
+                snapshot.push((table, rows.join("\n")));
+            }
+            snapshot
+        })
+    });
+    let fixture = lash_conformance::UsageLedgerStoreFixture {
+        accounting: backend.usage_accounting(),
+        factory: backend.session_store_factory(),
+        snapshot,
+    };
+    (backend, fixture)
+});

@@ -634,6 +634,48 @@ table lash_usage_deltas
   column source text not-null
   unique (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
   primary-key (seq)
+table lash_usage_facts
+  column cache_read_input_tokens bigint not-null
+  column cache_write_input_tokens bigint not-null
+  column call_ordinal bigint not-null
+  column disposition text not-null
+  column effect_key text not-null
+  column fact_kind text not-null
+  column generation_id text nullable
+  column input_tokens bigint not-null
+  column llm_call_id text not-null
+  column model text not-null
+  column output_tokens bigint not-null
+  column owner_id text not-null
+  column owner_kind text not-null
+  column payload_hash text not-null
+  column provider_attempt bigint not-null
+  column reasoning_output_tokens bigint not-null
+  column recorded_at_ms bigint not-null
+  column run_id text nullable
+  column seq bigint not-null default
+  column source text not-null
+  unique (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind)
+  primary-key (seq)
+table lash_usage_owner_retirements
+  column owner_id text not-null
+  column owner_kind text not-null
+  column retired_at_ms bigint not-null
+  primary-key (owner_kind, owner_id)
+table lash_usage_runs
+  column admitted_at_ms bigint not-null
+  column conflict_detail text nullable
+  column effect_key text not-null
+  column execution_scope_key text not-null
+  column model text not-null
+  column owner_id text not-null
+  column owner_kind text not-null
+  column resolved_at_ms bigint nullable
+  column run_id text not-null
+  column source text not-null
+  column state text not-null
+  column unknown_reason text nullable
+  primary-key (owner_kind, owner_id, effect_key, run_id)
 table lash_wake_allocation_floors
   column allocation_floor bigint not-null
   column process_id text not-null
