@@ -350,7 +350,7 @@ class Campaign:
             FROM sent JOIN ended USING (operation, subject)
             WHERE sent.at > :at
         """, run=self.args.run, at=at, workers=','.join(workers or []))
-        seconds = lambda value: round((int(value) - at) / 1e6, 3) if value else None
+        seconds = lambda value: (int(value) - at) / 1e6 if value else None
         return {'turn': seconds(turn), 'queued': seconds(queued), 'cron': seconds(cron),
                 'moved': seconds(moved)}
 
@@ -432,6 +432,8 @@ class Campaign:
                     'in_flight_at_injection': len(hit),
                     'hit': [f"{flight['operation']}:{flight['subject']}" for flight in hit][:32],
                     'service_progress_s': progress['turn'],
+                    'service_progress_at_us': injected_at + round(progress['turn'] * 1_000_000),
+                    'backlog_recovered_at_us': self.clock_us(),
                     'recovered_s': round((now - injected_at) / 1e6, 3)}
 
         evidence = self.poll(f'{fault_id} did not recover', self.settle_s, attempt)

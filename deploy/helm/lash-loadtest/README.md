@@ -292,7 +292,7 @@ before provisioning the pending release baseline.
 The load driver collects measurements before its first admission, periodically
 through the load, and after the drain. `just multi-node-load` reconciles its
 records and writes `results/fig-3790/<run-id>/` inside the run's evidence directory. It produces
-version 1 `operations.jsonl`, `metrics.jsonl`, `samples.jsonl`, `faults.jsonl`,
+version 1 `operations.jsonl`, `metrics.jsonl`, `samples.jsonl`, `clock_anchors.jsonl`, `recovery_inputs.jsonl`, raw `faults.jsonl`,
 `histograms.json`, `sample_errors.jsonl`, `query_retries.jsonl`,
 `witness_evidence.jsonl`, `witness.json`, `collection.json` and `summary.json`,
 then archives them with topology, build and placement evidence under
@@ -391,14 +391,13 @@ retained in `query_retries.jsonl`, and the collection interval exposes the delay
 Provider retryable receipts, client attempts and
 effect attempts/commits have independent counts.
 
-An L4 fault ledger can be supplied to the reconciler with `--faults PATH`.
-Each row has `schema_version: 1`, `id`, `actual_ns`, `service_progress_ns`,
-`backlog_recovered_ns`, `accepted_ids` and `witness_verdict`. Times use the same
-client monotonic origin as the operation records. The recovery report requires
-all named accepted inputs to have durable terminals by backlog recovery and a
-passed durability witness verdict. It reports service-progress and full-backlog
-recovery separately. The L5 smoke setting injects no L4 faults; recovery-law
-fixtures exercise the measurement calculations.
+The reconciler consumes the run's independent witness fault ledger and its
+driver-recorded clock anchors. Normalized recovery inputs retain the injection,
+service progress and backlog recovery intervals, accepted operation IDs and the
+durability verdict. The recovery report gives separate service-progress and
+full-backlog durations with error bars. The default recipe exercises this path
+under the L4 fault campaign; the L5 setting disables faults for collection-only
+smoke checks.
 
 Run the focused measurement-law tests through Kiln:
 
@@ -411,4 +410,8 @@ The pinned counter and journal meanings follow the
 [journal schema](https://github.com/restatedev/restate/blob/v1.7.12/crates/storage-query-datafusion/src/journal/schema.rs)
 and [retry snapshot schema](https://github.com/restatedev/restate/blob/v1.7.12/crates/storage-query-datafusion/src/invocation_state/schema.rs).
 
-For the small L5 collection smoke, run `LASH_LOADTEST_FAULT_CAMPAIGN=false kiln gate lash fig-4170 -- just multi-node-load local`. The default recipe preserves the L4 fault campaign. Campaigns retain the extra four fault witness classes, all six independent ledgers, and primary turns beyond the planned minimum. Raw L4 fault records use the PostgreSQL witness clock. They remain separate from driver-monotonic recovery inputs; a campaign without normalized recovery inputs is explicitly INCOMPLETE. No clock offset is guessed.
+For the small L5 collection smoke, run `LASH_LOADTEST_FAULT_CAMPAIGN=false kiln gate lash fig-4170 -- just multi-node-load local`. The default recipe preserves the L4 fault campaign. Campaigns retain the extra four fault witness classes, all six independent ledgers, and primary turns beyond the planned minimum. The driver records a `campaign-start` anchor and one anchor for each fault ledger event, including each injection. Each read pairs `witness_clock_us()` with the midpoint of the driver's monotonic request/response interval and retains the full round-trip duration. The archive reads the independent `witness_load_faults` ledger directly, preserves it as `faults.jsonl`, and writes `clock_anchors.jsonl` and normalized `recovery_inputs.jsonl`. The driver hands off recovery evidence before its final metric census. The separate `recovery.json` and `normalized_faults.jsonl` retain recovery qualification and bounded measurements even if another collection gate fails, such as an intentional restart that gaps a process counter. The final census uses ordered pages of 128 invocation IDs and journal chunks of 64 owned IDs, retaining the existing ten-second request and retry bounds. A census failure keeps the overall run failed. Overall qualification remains unchanged. The old external `--faults` recovery-input path is removed.
+
+Normalization uses only the event's recorded anchor. Its absolute timestamp error bar is half the round trip, rounded up, plus one microsecond for witness precision. Recovery durations retain the difference of both endpoint intervals. A witness offset that moves beyond the start and event anchor bounds leaves recovery inputs INCOMPLETE. Missing anchors name the fault ID, phase and event ID. Every raw row must normalize before recovery inputs qualify COMPLETE.
+
+The accepted population includes all inputs accepted through the injection interval's upper bound. Every one must reach a durable terminal by the backlog recovery interval's upper bound. The controller records absolute witness microseconds for first service progress and for the observation where its full recovery conditions hold. The existing stable hold and durability verdict remain required. These bounds qualify the collection; they establish no performance budget.

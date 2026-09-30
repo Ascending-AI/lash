@@ -19,7 +19,7 @@ FAULT_CLASSES = ('fault-campaign', 'worker-kill', 'restate-restart', 'rolling-de
 OUTCOMES = TERMINAL | {'parked', 'stalled', 'unrecognized', 'timeout', 'client_error'}
 LEDGERS = {'witness_load_events', 'witness_provider_receipts', 'witness_effect_attempts',
            'witness_effect_commits', 'witness_effect_replies', 'witness_load_faults'}
-RECORDS = {'run', 'operation', 'sample', 'witness', 'witness_evidence', 'sample_error', 'query_retry'}
+RECORDS = {'run', 'operation', 'sample', 'witness', 'witness_evidence', 'sample_error', 'query_retry', 'clock_anchor'}
 
 
 def require(condition, message):
@@ -130,12 +130,99 @@ def prometheus(text):
     return rows
 
 
+def normalize_fault_rows(rows, anchors, run):
+    """One recorded offset per row. The read interval and witness precision bound it."""
+    index = {}
+    errors = []
+    for anchor in anchors:
+        version(anchor)
+        require(anchor['run'] == run and anchor['clock'] == 'witness_postgres_us', 'mismatched anchor clock or run')
+        require(anchor['id'] not in index, 'duplicate clock anchor')
+        require(all(type(anchor[key]) is int and anchor[key] >= 0
+                    for key in ['witness_us', 'monotonic_ns', 'round_trip_ns']), 'invalid clock anchor')
+        index[anchor['id']] = anchor
+    normalized = []
+    seen = set()
+    for row in rows:
+        require(row['fault_event_id'] not in seen, 'duplicate fault event')
+        seen.add(row['fault_event_id'])
+        identity = f"{row['fault_id']}/{row['phase']}/{row['fault_event_id']}"
+        require(row['run_id'] == run, 'mixed fault run identities')
+        anchor = index.get(str(row['fault_event_id']))
+        if anchor is None:
+            errors.append(identity + ': missing clock anchor')
+            continue
+        uncertainty = (anchor['round_trip_ns'] + 1) // 2 + 1000
+        start = index.get('campaign-start')
+        if start is not None:
+            start_bound = (start['round_trip_ns'] + 1) // 2 + 1000
+            offset = anchor['monotonic_ns'] - anchor['witness_us'] * 1000
+            start_offset = start['monotonic_ns'] - start['witness_us'] * 1000
+            if abs(offset - start_offset) > uncertainty + start_bound:
+                errors.append(identity + ': witness clock offset moved beyond anchor bounds')
+                continue
+        def convert(witness_us):
+            require(type(witness_us) is int, 'invalid witness timestamp')
+            instant = anchor['monotonic_ns'] + (witness_us - anchor['witness_us']) * 1000
+            return instant, [instant - uncertainty, instant + uncertainty]
+        instant, bounds = convert(row['recorded_at_us'])
+        if bounds[0] < 0:
+            errors.append(identity + ': normalization precedes driver origin within its bound')
+            continue
+        detail = json.loads(row['detail_json'])
+        result = dict(schema_version=1, run=run, id=identity, fault_id=row['fault_id'],
+                      kind=row['kind'], phase=row['phase'], clock='driver_monotonic_ns',
+                      anchor_id=anchor['id'], monotonic_ns=instant, clock_bounds_ns=bounds,
+                      clock_uncertainty_ns=uncertainty, detail=detail)
+        if row['phase'] == 'recovered':
+            for field in ['service_progress', 'backlog_recovered']:
+                source = field + '_at_us'
+                if source not in detail:
+                    errors.append(identity + ': missing ' + source)
+                    break
+                value, interval = convert(detail[source])
+                result[field + '_ns'] = value
+                result[field + '_bounds_ns'] = interval
+            else:
+                normalized.append(result)
+            continue
+        normalized.append(result)
+    return normalized, errors
+
+
+def recovery_inputs(rows, anchors, run, operations, verdict):
+    normalized, errors = normalize_fault_rows(rows, anchors, run)
+    if rows and not any(row['id'] == 'campaign-start' for row in anchors):
+        errors.append('campaign-start: missing clock anchor')
+    by_fault = defaultdict(dict)
+    for row in normalized:
+        if row['kind'] != 'campaign':
+            by_fault[row['fault_id']][row['phase']] = row
+    faults = []
+    for key, phases in by_fault.items():
+        if not {'injected', 'recovered'} <= phases.keys():
+            errors.append(key + ': missing normalized injection or recovery')
+            continue
+        injection, recovery = phases['injected'], phases['recovered']
+        upper = injection['clock_bounds_ns'][1]
+        faults.append(dict(schema_version=1, id=key, clock='driver_monotonic_ns',
+                           actual_ns=injection['monotonic_ns'], actual_bounds_ns=injection['clock_bounds_ns'],
+                           service_progress_ns=recovery['service_progress_ns'],
+                           service_progress_bounds_ns=recovery['service_progress_bounds_ns'],
+                           backlog_recovered_ns=recovery['backlog_recovered_ns'],
+                           backlog_recovered_bounds_ns=recovery['backlog_recovered_bounds_ns'],
+                           accepted_ids=[row['id'] for row in operations if row['accepted_ns'] is not None and row['accepted_ns'] <= upper],
+                           witness_verdict=verdict, anchor_ids=[injection['anchor_id'], recovery['anchor_id']]))
+    return normalized, faults, errors
+
+
 def recoveries(faults, operations):
     operations = {row['id']: row for row in operations}
     result = []
     for fault in faults:
         version(fault)
-        expected = {key for key, row in operations.items() if row['accepted_ns'] is not None and row['accepted_ns'] <= fault['actual_ns']}
+        require(fault['clock'] == 'driver_monotonic_ns', 'recovery requires normalized driver-clock rows')
+        expected = {key for key, row in operations.items() if row['accepted_ns'] is not None and row['accepted_ns'] <= fault['actual_bounds_ns'][1]}
         require(set(fault['accepted_ids']) == expected and len(fault['accepted_ids']) == len(expected), 'pre-fault accepted population mismatch')
         require(fault['witness_verdict'] == 'passed', 'fault durability witnesses failed')
         times = [fault['actual_ns'], fault['service_progress_ns'], fault['backlog_recovered_ns']]
@@ -143,10 +230,34 @@ def recoveries(faults, operations):
         for key in fault['accepted_ids']:
             row = operations.get(key)
             require(row is not None and row['outcome'] in TERMINAL, 'lost pre-fault accepted input')
-            require(row['observed_ns'] <= times[-1], 'backlog recovered before the terminal was observed')
+            require(row['observed_ns'] <= fault['backlog_recovered_bounds_ns'][1], 'backlog recovered before the terminal was observed')
         result.append({'id': fault['id'], 'service_progress_ns': times[1] - times[0],
-                       'backlog_recovery_ns': times[2] - times[0]})
+                       'backlog_recovery_ns': times[2] - times[0],
+                       'service_progress_bounds_ns': [fault['service_progress_bounds_ns'][0] - fault['actual_bounds_ns'][1],
+                                                      fault['service_progress_bounds_ns'][1] - fault['actual_bounds_ns'][0]],
+                       'backlog_recovery_bounds_ns': [fault['backlog_recovered_bounds_ns'][0] - fault['actual_bounds_ns'][1],
+                                                     fault['backlog_recovered_bounds_ns'][1] - fault['actual_bounds_ns'][0]],
+                       'anchor_ids': fault['anchor_ids']})
     return result
+
+
+def recovery_report(run, operations, witness, rows, anchors):
+    normalized, inputs, errors = recovery_inputs(rows, anchors, run['run'], operations, 'passed')
+    if run.get('fault_campaign', False):
+        if not rows:
+            errors.append('L4 witness-clock faults require driver-clock recovery normalization')
+        classes = witness['verdict']['classes']
+        if any(name not in classes or not classes[name]['witnessed'] or classes[name]['violations']
+               for name in FAULT_CLASSES):
+            errors.append('fault durability witnesses failed')
+    measurements = []
+    if not errors:
+        try:
+            measurements = recoveries(inputs, operations)
+        except ValueError as error:
+            errors.append(str(error))
+    return {'status': 'INCOMPLETE' if errors else 'COMPLETE', 'reasons': errors,
+            'normalized_rows': normalized, 'inputs': inputs, 'measurements': measurements}
 
 
 def reconcile_witness(run, operations, witness, evidence):
@@ -210,7 +321,7 @@ def cancellation_census(samples, owned, disappeared):
             'unexplained_disappearance_ids': sorted(row['id'] for row in disappeared if row['id'] not in explained)}
 
 
-def summarize(run, operations, samples, witness, faults=(), sample_errors=(), witness_evidence=None):
+def summarize(run, operations, samples, witness, faults=(), sample_errors=(), witness_evidence=None, anchors=()):
     require(not sample_errors, 'required collection intervals are missing')
     for row in [run, witness, *samples]:
         version(row)
@@ -367,9 +478,9 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
     journal = journal_summary(journal_rows, completed)
     missing_journals = [key for key in owned_invocations if key not in cancellations['explained_inbox_ids']
                         and (key not in journal['maxima'] or journal['maxima'][key]['entries'] == 0)]
-    reasons = []
-    if campaign and not faults:
-        reasons.append('L4 witness-clock faults require driver-clock recovery normalization')
+    recovery = recovery_report(run, operations, witness, faults, anchors)
+    inputs = recovery['inputs']
+    reasons = recovery['reasons'][:]
     if unfinished:
         reasons.append('run-owned internal invocations remain unfinished')
     if unexplained:
@@ -401,7 +512,8 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
             'pool': {'status': 'PENDING', 'dependencies': ['FIG-4161', 'FIG-4162']},
             'unavailable': {'postgres_lock_wait_duration': 'PostgreSQL provides current waiters, not cumulative per-lock time',
                             'remote_clock_offsets': 'no synchronized remote clock authority'},
-            'recoveries': recoveries(faults, operations), 'faults_exercised': len(faults),
+            'recoveries': recovery['measurements'], 'faults_exercised': len(inputs),
+            'recovery_inputs': recovery,
             'fault_clock': 'L4 raw fault rows use the independent PostgreSQL witness clock; normalized recovery inputs use the driver monotonic clock',
             'saturation': 'NOT_RUN', 'baseline': None, 'budgets': None,
             'invariants': {'witness_populations': 'passed', 'resource_totals': 'passed',
@@ -460,7 +572,7 @@ def read_records(path):
     return records
 
 
-def archive(log, output, fault_path=None):
+def archive(log, output, recovery_only=False):
     records = read_records(log)
     runs = [row for row in records if row['record'] == 'run']
     witnesses = [row for row in records if row['record'] == 'witness']
@@ -468,20 +580,37 @@ def archive(log, output, fault_path=None):
     require(all(row['run'] == runs[0]['run'] for row in records), 'mixed archive run identities')
     operations = [row for row in records if row['record'] == 'operation']
     samples = [row for row in records if row['record'] == 'sample']
-    faults = [json.loads(line) for line in fault_path.read_text().splitlines()] if fault_path else []
+    anchors = [row for row in records if row['record'] == 'clock_anchor']
     sample_errors = [row for row in records if row['record'] == 'sample_error']
     query_retries = [row for row in records if row['record'] == 'query_retry']
     witness_evidence = [row for row in records if row['record'] == 'witness_evidence']
+    faults = [dict(schema_version=1, **row) for row in
+              next((row['rows'] for row in witness_evidence if row['ledger'] == 'witness_load_faults'), [])]
     output = output / 'fig-3790' / runs[0]['run']
     output.mkdir(parents=True, exist_ok=True)
     for name, rows in [('operations', operations), ('samples', samples), ('sample_errors', sample_errors),
-                       ('query_retries', query_retries), ('witness_evidence', witness_evidence), ('faults', faults)]:
+                       ('query_retries', query_retries), ('witness_evidence', witness_evidence), ('faults', faults), ('clock_anchors', anchors)]:
         (output / (name + '.jsonl')).write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in rows))
     (output / 'witness.json').write_text(json.dumps(witnesses[0], indent=2) + '\n')
     (output / 'collection.json').write_text(json.dumps({**runs[0], 'source_log_sha256': hashlib.sha256(log.read_bytes()).hexdigest(),
                                                      'scope': 'pipeline smoke; no baseline or budgets'}, indent=2) + '\n')
+    # Recovery collection has its own qualification. Preserve its evidence even
+    # when another measurement (for example restart counter gaps) is incomplete.
+    reconcile_witness(runs[0], operations, witnesses[0], witness_evidence)
+    recovery = recovery_report(runs[0], operations, witnesses[0], faults, anchors)
+    (output / 'recovery.json').write_text(json.dumps({'schema_version': 1, 'run': runs[0]['run'], **recovery}, indent=2) + '\n')
+    (output / 'recovery_inputs.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in recovery['inputs']))
+    print(f"load recovery inputs={recovery['status']} faults={len(recovery['inputs'])} normalized_rows={len(recovery['normalized_rows'])} results={output / 'recovery.json'}")
+    (output / 'normalized_faults.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in recovery['normalized_rows']))
+    if recovery_only:
+        (output / 'summary.json').write_text(json.dumps({'schema_version': 1, 'run': runs[0]['run'],
+                                                       'verdict': 'INCOMPLETE', 'error': 'final metric census pending'}) + '\n')
+        (output / 'histograms.json').write_text(json.dumps({'schema_version': 1, 'status': 'INCOMPLETE', 'histograms': []}) + '\n')
+        (output / 'metrics.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in metric_rows(samples)))
+        require(recovery['status'] == 'COMPLETE', 'recovery qualification is INCOMPLETE: ' + '; '.join(recovery['reasons']))
+        return
     try:
-        summary = summarize(runs[0], operations, samples, witnesses[0], faults, sample_errors, witness_evidence)
+        summary = summarize(runs[0], operations, samples, witnesses[0], faults, sample_errors, witness_evidence, anchors)
     except ValueError as error:
         (output / 'summary.json').write_text(json.dumps({'schema_version': 1, 'verdict': 'failed', 'error': str(error)}) + '\n')
         raise
@@ -489,7 +618,7 @@ def archive(log, output, fault_path=None):
     (output / 'histograms.json').write_text(json.dumps({'schema_version': 1, 'histograms': summary.pop('histograms')}, indent=2) + '\n')
     (output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
     qualification = summary['qualification']['status']
-    print(f"load measurements qualification={qualification} operations={len(operations)} samples={len(samples)} journals={summary['journals']['invocations']} counter_series={len(summary['counters'])} pool=PENDING results={output}")
+    print(f"load measurements qualification={qualification} operations={len(operations)} samples={len(samples)} journals={summary['journals']['invocations']} counter_series={len(summary['counters'])} recovery_inputs={summary['recovery_inputs']['status']} faults={summary['faults_exercised']} pool=PENDING results={output}")
     require(qualification == 'PASSED', f'load qualification is {qualification}: ' + '; '.join(summary['qualification']['reasons']))
 
 
@@ -497,6 +626,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('log', type=Path)
     parser.add_argument('output', type=Path)
-    parser.add_argument('--faults', type=Path)
+    parser.add_argument('--recovery-only', action='store_true')
     args = parser.parse_args()
-    archive(args.log, args.output, args.faults)
+    archive(args.log, args.output, args.recovery_only)

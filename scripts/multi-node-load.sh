@@ -312,8 +312,18 @@ python3 scripts/loadtest_faults.py --kubeconfig "$KUBECONFIG" --namespace "$name
 fi
 load_state=""
 load_collected=0
+recovery_collected=0
+results_root="${LASH_LOADTEST_RESULTS:-$run/results}"
 for attempt in $(seq 1 "$load_deadline"); do
   load_state="$("${k[@]}" get "job/${resource}-load" -o jsonpath='{.status.succeeded}/{.status.failed}')"
+  if ((recovery_collected == 0)) && "${k[@]}" exec "job/${resource}-load" -c load -- test -f /tmp/load-measurements.recovery-ready >/dev/null 2>&1; then
+    "${k[@]}" exec "job/${resource}-load" -c load -- cat /tmp/load-measurements.jsonl > "$run/recovery-measurements.log"
+    recovery_status=0
+    python3 scripts/loadtest_measurements.py "$run/recovery-measurements.log" "$results_root" --recovery-only || recovery_status=$?
+    "${k[@]}" exec "job/${resource}-load" -c load -- touch /tmp/load-measurements.recovery-collected
+    recovery_collected=1
+    if ((recovery_status != 0)); then campaign_status=$recovery_status; fi
+  fi
   if "${k[@]}" exec "job/${resource}-load" -c load -- test -f /tmp/load-measurements.complete >/dev/null 2>&1; then
     "${k[@]}" exec "job/${resource}-load" -c load -- cat /tmp/load-measurements.jsonl > "$run/measurements.log"
     "${k[@]}" exec "job/${resource}-load" -c load -- touch /tmp/load-measurements.collected
@@ -329,13 +339,20 @@ for attempt in $(seq 1 "$load_deadline"); do
   sleep 1
 done
 "${k[@]}" logs "job/${resource}-load" -c load > "$run/load.log"
-((load_collected == 1))
-# LASH_LOADTEST_RESULTS redirects the durable archive away from the run
-# directory. The manifest still runs for a failed or incomplete analysis so
-# the retained evidence stays self-describing.
-results_root="${LASH_LOADTEST_RESULTS:-$run/results}"
 measure_status=0
-python3 scripts/loadtest_measurements.py "$run/measurements.log" "$results_root" || measure_status=$?
+if ((load_collected == 1)); then
+  python3 scripts/loadtest_measurements.py "$run/measurements.log" "$results_root" || measure_status=$?
+else
+  python3 - "$results_root/fig-3790/$load_run" <<'PYFAILED'
+import json, pathlib, sys
+output = pathlib.Path(sys.argv[1])
+if output.is_dir():
+    (output / 'summary.json').write_text(json.dumps({'schema_version': 1, 'verdict': 'failed',
+        'error': 'driver exited before final metric census completed; recovery evidence is retained separately'}) + '\n')
+PYFAILED
+  measure_status=1
+fi
+# Package retained evidence even when the overall qualification fails.
 if [[ -d "$results_root/fig-3790/$load_run" ]]; then
   python3 scripts/loadtest_manifest.py --run-dir "$run" --results "$results_root" \
     --run-id "$load_run" --target "$target" --workload "crates/lash-perf/workloads/$workload.json"

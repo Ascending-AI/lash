@@ -74,6 +74,28 @@ class MeasurementsTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'missing or unknown durable evidence classes'):
                     m.summarize(run, operations, samples, missing)
 
+    def test_fault_clock_offsets_and_bounds_are_exact(self):
+        anchor = dict(schema_version=1, record='clock_anchor', run='r', id='7',
+                      clock='witness_postgres_us', witness_us=9000000000000,
+                      monotonic_ns=10000, round_trip_ns=2000)
+        row = dict(fault_event_id=7, run_id='r', fault_id='worker-kill', kind='worker-kill',
+                   phase='injected', recorded_at_us=9000000000003, detail_json='{}')
+        normalized, errors = m.normalize_fault_rows([row], [anchor], 'r')
+        self.assertEqual(errors, [])
+        self.assertEqual(normalized[0]['monotonic_ns'], 13000)
+        self.assertEqual(normalized[0]['clock_bounds_ns'], [11000, 15000])
+        self.assertEqual(normalized[0]['clock_uncertainty_ns'], 2000)
+        self.assertEqual(normalized[0]['anchor_id'], '7')
+
+    def test_fault_without_anchor_names_row_and_stays_incomplete(self):
+        run, operations, samples, witness = self.campaign_evidence()
+        row = dict(fault_event_id=7, run_id='r', fault_id='worker-kill', kind='worker-kill',
+                   phase='injected', recorded_at_us=9000000000003, detail_json='{}')
+        result = m.summarize(run, operations, samples, witness, faults=[row])
+        self.assertEqual(result['qualification']['status'], 'INCOMPLETE')
+        self.assertIn('worker-kill/injected/7: missing clock anchor', result['qualification']['reasons'])
+        self.assertEqual(result['recovery_inputs']['status'], 'INCOMPLETE')
+
     def test_cancellation_and_timeout_are_retained(self):
         result = m.populations([operation(), operation('two', 'cancelled'), operation('three', 'timeout')])
         self.assertEqual(result['offered'], 3)
@@ -168,7 +190,9 @@ class MeasurementsTests(unittest.TestCase):
 
     def test_recovery_requires_terminals_and_durability(self):
         fault = {'schema_version': 1, 'id': 'f', 'actual_ns': 50, 'service_progress_ns': 60,
-                 'backlog_recovered_ns': 100, 'witness_verdict': 'passed', 'accepted_ids': ['one']}
+                 'backlog_recovered_ns': 100, 'clock': 'driver_monotonic_ns', 'actual_bounds_ns': [48, 52],
+                 'service_progress_bounds_ns': [58, 62], 'backlog_recovered_bounds_ns': [98, 102],
+                 'anchor_ids': ['injected', 'recovered'], 'witness_verdict': 'passed', 'accepted_ids': ['one']}
         self.assertEqual(m.recoveries([fault], [operation()])[0]['backlog_recovery_ns'], 50)
         fault['accepted_ids'] = ['lost']
         with self.assertRaises(ValueError):
@@ -176,7 +200,9 @@ class MeasurementsTests(unittest.TestCase):
 
     def test_recovery_does_not_count_client_timeout_as_terminal(self):
         fault = {'schema_version': 1, 'id': 'f', 'actual_ns': 50, 'service_progress_ns': 60,
-                 'backlog_recovered_ns': 100, 'witness_verdict': 'passed', 'accepted_ids': ['one']}
+                 'backlog_recovered_ns': 100, 'clock': 'driver_monotonic_ns', 'actual_bounds_ns': [48, 52],
+                 'service_progress_bounds_ns': [58, 62], 'backlog_recovered_bounds_ns': [98, 102],
+                 'anchor_ids': ['injected', 'recovered'], 'witness_verdict': 'passed', 'accepted_ids': ['one']}
         with self.assertRaises(ValueError):
             m.recoveries([fault], [operation(outcome='timeout')])
 
@@ -271,7 +297,9 @@ class MeasurementsTests(unittest.TestCase):
 
     def test_recovery_cannot_omit_an_accepted_input(self):
         fault = {'schema_version': 1, 'id': 'f', 'actual_ns': 50, 'service_progress_ns': 60,
-                 'backlog_recovered_ns': 100, 'witness_verdict': 'passed', 'accepted_ids': []}
+                 'backlog_recovered_ns': 100, 'clock': 'driver_monotonic_ns', 'actual_bounds_ns': [48, 52],
+                 'service_progress_bounds_ns': [58, 62], 'backlog_recovered_bounds_ns': [98, 102],
+                 'anchor_ids': ['injected', 'recovered'], 'witness_verdict': 'passed', 'accepted_ids': []}
         with self.assertRaises(ValueError):
             m.recoveries([fault], [operation()])
 
@@ -311,7 +339,8 @@ class MeasurementsTests(unittest.TestCase):
             self.assertEqual({path.name for path in output.iterdir()},
                              {'operations.jsonl', 'samples.jsonl', 'sample_errors.jsonl', 'metrics.jsonl',
                               'faults.jsonl', 'summary.json', 'histograms.json', 'collection.json',
-                              'witness.json', 'witness_evidence.jsonl', 'query_retries.jsonl'})
+                              'witness.json', 'witness_evidence.jsonl', 'query_retries.jsonl',
+                              'clock_anchors.jsonl', 'recovery_inputs.jsonl', 'recovery.json', 'normalized_faults.jsonl'})
             for path in output.iterdir():
                 values = [json.loads(line) for line in path.read_text().splitlines()] if path.suffix == '.jsonl' else [json.loads(path.read_text())]
                 self.assertTrue(all(row['schema_version'] == 1 for row in values))
@@ -505,6 +534,144 @@ class MeasurementsTests(unittest.TestCase):
         self.assertEqual(result['qualification']['status'], 'INCOMPLETE')
         self.assertEqual(result['qualification']['reasons'],
                          ['L4 witness-clock faults require driver-clock recovery normalization'])
+
+    def normalized_campaign(self):
+        rows = []
+        anchors = [dict(schema_version=1, record='clock_anchor', run='r', id='campaign-start',
+                        clock='witness_postgres_us', witness_us=950, monotonic_ns=0, round_trip_ns=2000)]
+        for event, phase, at in [(1, 'injected', 50), (2, 'recovered', 110)]:
+            detail = dict(service_progress_at_us=1010, backlog_recovered_at_us=1060) if phase == 'recovered' else {}
+            rows.append(dict(fault_event_id=event, run_id='r', fault_id='worker-kill', kind='worker-kill',
+                             phase=phase, recorded_at_us=950 + at, detail_json=json.dumps(detail)))
+            anchors.append(dict(schema_version=1, record='clock_anchor', run='r', id=str(event),
+                                clock='witness_postgres_us', witness_us=950 + at, monotonic_ns=at * 1000,
+                                round_trip_ns=2000))
+        return rows, anchors
+
+    def test_campaign_recovery_is_complete_with_explicit_error_bars(self):
+        run, operations, samples, witness = self.campaign_evidence()
+        # Put the synthetic population on the same nanosecond scale as the anchors.
+        for row in operations:
+            for key in ['scheduled_ns', 'sent_ns', 'accepted_ns', 'observed_ns']:
+                row[key] *= 1000
+        for sample in samples:
+            for key in ['monotonic_ns', 'collection_finished_ns']:
+                sample[key] *= 1000
+        rows, anchors = self.normalized_campaign()
+        result = m.summarize(run, operations, samples, witness, faults=rows, anchors=anchors)
+        self.assertEqual(result['qualification']['status'], 'PASSED')
+        self.assertEqual(result['recovery_inputs']['status'], 'COMPLETE')
+        self.assertEqual(result['recoveries'][0]['service_progress_bounds_ns'], [6000, 14000])
+        self.assertEqual(result['recoveries'][0]['backlog_recovery_bounds_ns'], [56000, 64000])
+        self.assertEqual(len(result['recovery_inputs']['normalized_rows']), len(rows))
+
+    def test_foreign_or_duplicate_anchor_is_refused(self):
+        rows, anchors = self.normalized_campaign()
+        for key, value in [('run', 'other'), ('clock', 'host_wall_time')]:
+            bad = copy.deepcopy(anchors)
+            bad[1][key] = value
+            with self.assertRaisesRegex(ValueError, 'mismatched anchor clock or run'):
+                m.normalize_fault_rows(rows, bad, 'r')
+        with self.assertRaisesRegex(ValueError, 'duplicate clock anchor'):
+            m.normalize_fault_rows(rows, [*anchors, anchors[0]], 'r')
+
+    def test_missing_recovery_timestamp_is_incomplete(self):
+        rows, anchors = self.normalized_campaign()
+        rows[-1]['detail_json'] = '{}'
+        _, inputs, errors = m.recovery_inputs(rows, anchors, 'r', [], 'passed')
+        self.assertEqual(inputs, [])
+        self.assertIn('worker-kill/recovered/2: missing service_progress_at_us', errors)
+
+    def test_recovery_refuses_unnormalized_clock(self):
+        row = dict(schema_version=1, id='f', clock='witness_postgres_us')
+        with self.assertRaisesRegex(ValueError, 'requires normalized driver-clock rows'):
+            m.recoveries([row], [])
+
+    def test_negative_offset_and_odd_round_trip_preserve_bounds(self):
+        rows, anchors = self.normalized_campaign()
+        rows[0]['recorded_at_us'] = 998
+        anchors[1]['round_trip_ns'] = 2001
+        normalized, errors = m.normalize_fault_rows(rows[:1], anchors, 'r')
+        self.assertEqual(errors, [])
+        self.assertEqual(normalized[0]['monotonic_ns'], 48000)
+        self.assertEqual(normalized[0]['clock_bounds_ns'], [45999, 50001])
+        anchors[1]['round_trip_ns'] = -1
+        with self.assertRaisesRegex(ValueError, 'invalid clock anchor'):
+            m.normalize_fault_rows(rows, anchors, 'r')
+
+    def test_clock_step_outside_round_trip_bounds_stays_incomplete(self):
+        rows, anchors = self.normalized_campaign()
+        anchors[-1]['witness_us'] += 100
+        normalized, errors = m.normalize_fault_rows(rows, anchors, 'r')
+        self.assertEqual(len(normalized), 1)
+        self.assertIn('worker-kill/recovered/2: witness clock offset moved beyond anchor bounds', errors)
+
+    def test_archive_normalizes_its_independent_fault_ledger(self):
+        run, operations, samples, witness = self.campaign_evidence()
+        for row in operations:
+            for key in ['scheduled_ns', 'sent_ns', 'accepted_ns', 'observed_ns']:
+                row[key] *= 1000
+        for sample in samples:
+            for key in ['monotonic_ns', 'collection_finished_ns']:
+                sample[key] *= 1000
+        faults, anchors = self.normalized_campaign()
+        witness['fault_rows'] = len(faults)
+        ledgers = witness_evidence(operations)
+        next(row for row in ledgers if row['ledger'] == 'witness_load_faults')['rows'] = faults
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / 'measurements.log'
+            log.write_text(''.join('load measurement ' + json.dumps(row) + '\n'
+                                   for row in [run, *operations, *samples, *anchors, *ledgers, witness]))
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.archive(log, Path(tmp))
+            output = Path(tmp) / 'fig-3790' / 'r'
+            result = json.loads((output / 'summary.json').read_text())
+            self.assertEqual(result['recovery_inputs']['status'], 'COMPLETE')
+            self.assertEqual(result['faults_exercised'], 1)
+            archived_faults = [json.loads(row) for row in (output / 'faults.jsonl').read_text().splitlines()]
+            self.assertEqual(archived_faults, [dict(schema_version=1, **row) for row in faults])
+            inputs = [json.loads(row) for row in (output / 'recovery_inputs.jsonl').read_text().splitlines()]
+            self.assertEqual(inputs[0]['anchor_ids'], ['1', '2'])
+            self.assertEqual(len((output / 'clock_anchors.jsonl').read_text().splitlines()), 3)
+
+    def test_recovery_report_preserves_complete_bounds_when_other_measurements_fail(self):
+        run, operations, _, witness = self.campaign_evidence()
+        for row in operations:
+            for key in ['scheduled_ns', 'sent_ns', 'accepted_ns', 'observed_ns']:
+                row[key] *= 1000
+        faults, anchors = self.normalized_campaign()
+        witness['verdict']['classes']['turns']['violations'] = ['unrelated durability violation']
+        result = m.recovery_report(run, operations, witness, faults, anchors)
+        self.assertEqual(result['status'], 'COMPLETE')
+        self.assertEqual(result['measurements'][0]['backlog_recovery_bounds_ns'], [56000, 64000])
+        witness['verdict']['classes']['worker-kill']['violations'] = ['lost answer']
+        self.assertEqual(m.recovery_report(run, operations, witness, faults, anchors)['status'], 'INCOMPLETE')
+
+    def test_recovery_archive_precedes_and_does_not_pass_the_final_census(self):
+        run, operations, _, witness = self.campaign_evidence()
+        for row in operations:
+            for key in ['scheduled_ns', 'sent_ns', 'accepted_ns', 'observed_ns']:
+                row[key] *= 1000
+        faults, anchors = self.normalized_campaign()
+        witness['fault_rows'] = len(faults)
+        ledgers = witness_evidence(operations)
+        next(row for row in ledgers if row['ledger'] == 'witness_load_faults')['rows'] = faults
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / 'measurements.log'
+            # There is no final sample, and the recovery still has all its witnesses.
+            log.write_text(''.join('load measurement ' + json.dumps(row) + '\n'
+                                   for row in [run, *operations, *anchors, *ledgers, witness]))
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.archive(log, Path(tmp), recovery_only=True)
+            output = Path(tmp) / 'fig-3790' / 'r'
+            self.assertEqual(json.loads((output / 'recovery.json').read_text())['status'], 'COMPLETE')
+            self.assertEqual(json.loads((output / 'summary.json').read_text())['verdict'], 'INCOMPLETE')
+            self.assertEqual(len((output / 'normalized_faults.jsonl').read_text().splitlines()), 2)
+            with self.assertRaisesRegex(ValueError, 'missing initial/final metric sample'):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    m.archive(log, Path(tmp))
+            self.assertEqual(json.loads((output / 'summary.json').read_text())['verdict'], 'failed')
+            self.assertEqual(json.loads((output / 'recovery.json').read_text())['status'], 'COMPLETE')
 
     def test_campaign_requires_all_fault_witness_classes(self):
         run, operations, samples, witness = self.campaign_evidence()

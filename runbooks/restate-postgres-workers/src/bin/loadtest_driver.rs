@@ -609,21 +609,35 @@ async fn watch_campaign(
     witness: PgPool,
     run: String,
     ended: tokio::sync::watch::Sender<bool>,
+    started: Instant,
 ) -> Result<()> {
+    let mut last_event = 0_i64;
     loop {
-        let finished: Option<String> = sqlx::query_scalar(
-            "SELECT phase FROM witness_load_faults
-             WHERE run_id = $1 AND kind = 'campaign' AND phase IN ('complete', 'failed')
-             ORDER BY fault_event_id LIMIT 1",
+        let before = started.elapsed().as_nanos();
+        let row: Option<(i64, String, String, i64)> = sqlx::query_as(
+            "SELECT fault_event_id, kind, phase, witness_clock_us() FROM witness_load_faults
+             WHERE run_id = $1 AND fault_event_id > $2 ORDER BY fault_event_id LIMIT 1",
         )
         .bind(&run)
+        .bind(last_event)
         .fetch_optional(&witness)
         .await
-        .context("read the fault campaign's end")?;
-        if let Some(phase) = finished {
-            println!("load fault campaign ended run={run} phase={phase}");
-            ended.send_replace(true);
-            return Ok(());
+        .context("read the fault event and witness clock")?;
+        let after = started.elapsed().as_nanos();
+        if let Some((event, kind, phase, witness_us)) = row {
+            lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
+                "schema_version": 1, "record": "clock_anchor", "run": run,
+                "id": event.to_string(), "clock": "witness_postgres_us",
+                "witness_us": witness_us, "monotonic_ns": before + (after - before) / 2,
+                "round_trip_ns": after - before,
+            }))?;
+            last_event = event;
+            if kind == "campaign" && (phase == "complete" || phase == "failed") {
+                println!("load fault campaign ended run={run} phase={phase}");
+                ended.send_replace(true);
+                return Ok(());
+            }
+            continue;
         }
         tokio::time::sleep(RETRY_PAUSE).await;
     }
@@ -744,14 +758,25 @@ async fn main() -> Result<()> {
         .collect();
     ensure!(!workers.is_empty(), "WORKER_CONTROL_URLS names no worker");
     let witness = witness::connect_witness().await?;
-    let campaign = if campaign {
-        let (ended, watch) = tokio::sync::watch::channel(false);
-        tokio::spawn(watch_campaign(witness.clone(), run.clone(), ended));
-        Some(watch)
-    } else {
-        None
-    };
     let started = Instant::now();
+    let before = started.elapsed().as_nanos();
+    let witness_us: i64 = sqlx::query_scalar("SELECT witness_clock_us()")
+        .fetch_one(&witness)
+        .await?;
+    let after = started.elapsed().as_nanos();
+    lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
+        "schema_version": 1, "record": "clock_anchor", "run": run,
+        "id": "campaign-start", "clock": "witness_postgres_us",
+        "witness_us": witness_us, "monotonic_ns": before + (after - before) / 2,
+        "round_trip_ns": after - before,
+    }))?;
+    let (campaign, campaign_watch) = if campaign {
+        let (ended, watch) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(watch_campaign(witness.clone(), run.clone(), ended, started));
+        (Some(watch), Some(task))
+    } else {
+        (None, None)
+    };
     let collector = Arc::new(
         lash_restate_postgres_workers_e2e::load::measurements::Collector {
             run: run.clone(),
@@ -886,6 +911,49 @@ async fn main() -> Result<()> {
     }
     collection_stop.notify_one();
     collection.await??;
+    if let Some(task) = campaign_watch {
+        task.await.context("join fault clock collection")??;
+    }
+    let snapshot = verify::load_snapshot(&driver.witness, &run).await?;
+    let verdict = verify::verify(&driver.load, &run, &snapshot)?;
+    for line in verdict.lines() {
+        println!("{line}");
+    }
+    diagnose(&driver.witness, &verdict).await?;
+    lash_restate_postgres_workers_e2e::load::measurements::retain_witness(&driver.witness, &run)
+        .await?;
+    lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
+        "schema_version": 1, "record": "witness", "run": run, "verdict": verdict,
+        "fault_rows": snapshot.faults.len(),
+        "sent": snapshot.events.iter().filter(|event| event.phase == "sent").count(),
+        "terminal": snapshot.events.iter().filter(|event| event.phase == "terminal").count(),
+        "provider_calls": snapshot.receipts.len(), "effect_attempts": snapshot.attempts.len(),
+        "provider_retryable_failures": snapshot.receipts.iter().filter(|(_, scenario)| scenario == "load_retryable").count(),
+        "effect_commits": snapshot.commits.len(),
+    }))?;
+    for line in
+        lash_restate_postgres_workers_e2e::load::red_side::checks(&driver.load, &run, &snapshot)?
+    {
+        println!("{line}");
+    }
+
+    println!("load witness summary {}", serde_json::to_string(&verdict)?);
+    // Recovery requires durable operation and fault evidence, independently
+    // of the final internal invocation census. Archive it before that query.
+    std::fs::write(
+        measurement_path.with_extension("recovery-ready"),
+        b"ready\n",
+    )?;
+    let recovery_collected = measurement_path.with_extension("recovery-collected");
+    let recovery_deadline = Instant::now()
+        + Duration::from_secs(u64::from(driver.load.workload.spec().drain_timeout_s));
+    while !recovery_collected.exists() {
+        ensure!(
+            Instant::now() < recovery_deadline,
+            "controller did not collect recovery evidence"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
     // Public terminals can precede their asynchronous cleanup. Retain the
     // final census after that work settles, bounded to keep this a short smoke.
     let drain_deadline = Instant::now() + Duration::from_secs(20);
@@ -927,30 +995,6 @@ async fn main() -> Result<()> {
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    let snapshot = verify::load_snapshot(&driver.witness, &run).await?;
-    let verdict = verify::verify(&driver.load, &run, &snapshot)?;
-    for line in verdict.lines() {
-        println!("{line}");
-    }
-    diagnose(&driver.witness, &verdict).await?;
-    lash_restate_postgres_workers_e2e::load::measurements::retain_witness(&driver.witness, &run)
-        .await?;
-    lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
-        "schema_version": 1, "record": "witness", "run": run, "verdict": verdict,
-        "fault_rows": snapshot.faults.len(),
-        "sent": snapshot.events.iter().filter(|event| event.phase == "sent").count(),
-        "terminal": snapshot.events.iter().filter(|event| event.phase == "terminal").count(),
-        "provider_calls": snapshot.receipts.len(), "effect_attempts": snapshot.attempts.len(),
-        "provider_retryable_failures": snapshot.receipts.iter().filter(|(_, scenario)| scenario == "load_retryable").count(),
-        "effect_commits": snapshot.commits.len(),
-    }))?;
-    for line in
-        lash_restate_postgres_workers_e2e::load::red_side::checks(&driver.load, &run, &snapshot)?
-    {
-        println!("{line}");
-    }
-
-    println!("load witness summary {}", serde_json::to_string(&verdict)?);
     // The controller copies this file while the container is still alive.
     // Kubernetes only exposes the current rotated log, so stdout cannot be
     // the raw result archive. The acknowledgement ends this foreground Job.

@@ -120,6 +120,59 @@ impl Collector {
             .context("journal aggregate is missing")
     }
 
+    async fn invocations(&self) -> Result<Vec<Value>> {
+        let mut result = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let predicate = cursor.as_ref().map_or_else(String::new, |id| {
+                format!(" WHERE id > '{}'", id.replace('\'', "''"))
+            });
+            let rows = self.query(&format!(
+                "SELECT id, target_service_name, target_service_key, target_handler_name, invoked_by_id, status, pinned_deployment_id, idempotency_key, journal_retention, completion_retention FROM sys_invocation_status{predicate} ORDER BY id LIMIT 128"
+            )).await?;
+            for row in &rows {
+                let id = row["id"]
+                    .as_str()
+                    .context("census row has no invocation ID")?;
+                ensure!(
+                    cursor
+                        .as_ref()
+                        .is_none_or(|previous| id > previous.as_str()),
+                    "census page did not advance"
+                );
+                cursor = Some(id.to_owned());
+            }
+            let finished = rows.len() < 128;
+            result.extend(rows);
+            if finished {
+                return Ok(result);
+            }
+        }
+    }
+
+    async fn owned_journals(
+        &self,
+        owned: &std::collections::BTreeSet<String>,
+    ) -> Result<(Vec<Value>, Vec<Value>)> {
+        let owned = owned.iter().collect::<Vec<_>>();
+        let mut aggregates = Vec::new();
+        let mut commands = Vec::new();
+        for chunk in owned.chunks(64) {
+            let ids = chunk
+                .iter()
+                .map(|id| format!("'{}'", id.replace('\'', "''")))
+                .collect::<Vec<_>>()
+                .join(",");
+            aggregates.extend(self.query(&format!(
+                "SELECT id, COUNT(*) AS entries, SUM(raw_length) AS bytes FROM sys_journal WHERE id IN ({ids}) GROUP BY id"
+            )).await?);
+            commands.extend(self.query(&format!(
+                "SELECT id, index, entry_type, version, entry_json FROM sys_journal WHERE id IN ({ids}) AND (entry_type = 'Command: SendSignal' OR entry_type LIKE '%CancelInvocation%')"
+            )).await?);
+        }
+        Ok((aggregates, commands))
+    }
+
     pub async fn sample(&self) -> Result<Value> {
         let start = self.started.elapsed().as_nanos();
         let mut workers = Vec::new();
@@ -137,9 +190,7 @@ impl Collector {
         // Read the durable table directly. The sys_invocation view joins
         // ephemeral leader state, which can disappear during rebalancing.
         // Retry counts come from cumulative counters with explicit epochs.
-        let invocations = self.query(
-            "SELECT id, target_service_name, target_service_key, target_handler_name, invoked_by_id, status, pinned_deployment_id, idempotency_key, journal_retention, completion_retention FROM sys_invocation_status"
-        ).await?;
+        let invocations = self.invocations().await?;
         // Each topology has one driver and no other traffic after the L2
         // smoke drains. New invocations include HTTP-started child processes
         // whose invoked_by_id is absent. Capture the census before admission.
@@ -177,20 +228,8 @@ impl Collector {
         let mut journals = Vec::new();
         let mut cancellation_commands = Vec::new();
         if !owned.is_empty() {
-            let ids = owned
-                .iter()
-                .map(|id| format!("'{}'", id.replace('\'', "''")))
-                .collect::<Vec<_>>()
-                .join(",");
-            let aggregates = self.query(&format!(
-                "SELECT id, COUNT(*) AS entries, SUM(raw_length) AS bytes FROM sys_journal WHERE id IN ({ids}) GROUP BY id"
-            )).await?;
-            // SDK cancellation is a journaled SendSignal to the target ID.
-            // Retain the command itself; a vanished inbox row alone is not
-            // evidence that lash issued its cancellation.
-            cancellation_commands = self.query(&format!(
-                "SELECT id, index, entry_type, version, entry_json FROM sys_journal WHERE id IN ({ids}) AND (entry_type = 'Command: SendSignal' OR entry_type LIKE '%CancelInvocation%')"
-            )).await?;
+            let (aggregates, commands) = self.owned_journals(&owned).await?;
+            cancellation_commands = commands;
             for id in &owned {
                 let row = aggregates.iter().find(|row| row["id"] == *id);
                 journals.push(json!({"id": id, "journal": {
@@ -246,6 +285,8 @@ impl Collector {
             "monotonic_ns": start, "collection_finished_ns": self.started.elapsed().as_nanos(),
             "workers": workers, "postgres": postgres, "invocations": invocations,
             "journals": journals, "cancellation_commands": cancellation_commands,
+            "census": {"invocation_page_size": 128, "journal_chunk_size": 64,
+                "consistency": "ordered scan over collector interval; final drain resamples until settled"},
             "restate": nodes, "node_epochs": node_epochs, "leader_epochs": leader_epochs}),
         )
     }
@@ -320,6 +361,140 @@ pub async fn retain_witness(pool: &PgPool, run: &str) -> Result<()> {
 mod tests {
     use super::*;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+    async fn fixture_collector(
+        router: axum::Router,
+    ) -> Result<(Collector, tokio::task::JoinHandle<()>)> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let task = tokio::spawn(async move {
+            axum::serve(listener, router).await.expect("fixture server");
+        });
+        Ok((
+            Collector {
+                run: "fixture".to_owned(),
+                workers: Vec::new(),
+                nodes: Vec::new(),
+                admin: format!("http://{address}"),
+                client: reqwest::Client::new(),
+                database: sqlx::postgres::PgPoolOptions::new()
+                    .connect_lazy("postgres://fixture@localhost/fixture")?,
+                started: Instant::now(),
+                initial_invocations: tokio::sync::Mutex::new(None),
+            },
+            task,
+        ))
+    }
+
+    #[tokio::test]
+    async fn invocation_census_pages_every_id() -> Result<()> {
+        async fn query(
+            axum::Json(body): axum::Json<Value>,
+        ) -> (axum::http::StatusCode, axum::Json<Value>) {
+            let sql = body["query"].as_str().expect("query string");
+            if !sql.ends_with("ORDER BY id LIMIT 128") {
+                return (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    axum::Json(json!({"error": "unbounded census"})),
+                );
+            }
+            let after = sql
+                .split("WHERE id > '")
+                .nth(1)
+                .map(|s| s.split('\'').next().expect("cursor"));
+            let rows = (0..270)
+                .map(|i| format!("inv{i:04}"))
+                .filter(|id| after.is_none_or(|cursor| id.as_str() > cursor))
+                .take(128)
+                .map(|id| json!({"id": id, "status": "completed"}))
+                .collect::<Vec<_>>();
+            (
+                axum::http::StatusCode::OK,
+                axum::Json(json!({"rows": rows})),
+            )
+        }
+        let (collector, server) =
+            fixture_collector(axum::Router::new().route("/query", axum::routing::post(query)))
+                .await?;
+        let result = collector.invocations().await;
+        server.abort();
+        let rows = result?;
+        assert_eq!(
+            rows.iter()
+                .map(|r| r["id"].as_str().expect("id"))
+                .collect::<Vec<_>>(),
+            (0..270).map(|i| format!("inv{i:04}")).collect::<Vec<_>>()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn journal_chunks_preserve_aggregates_and_cancellation_commands() -> Result<()> {
+        async fn query(
+            axum::Json(body): axum::Json<Value>,
+        ) -> (axum::http::StatusCode, axum::Json<Value>) {
+            let sql = body["query"].as_str().expect("query string");
+            let ids = sql
+                .split("id IN (")
+                .nth(1)
+                .expect("ID filter")
+                .split(')')
+                .next()
+                .expect("end filter")
+                .split(',')
+                .map(|id| id.trim_matches('\''))
+                .collect::<Vec<_>>();
+            if ids.len() > 64 {
+                return (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    axum::Json(json!({"error": "unbounded journal read"})),
+                );
+            }
+            let rows = ids
+                .into_iter()
+                .map(|id| {
+                    if sql.contains("GROUP BY id") {
+                        json!({"id": id, "entries": 3, "bytes": 40})
+                    } else {
+                        json!({"id": id, "index": 2, "entry_type": "Command: SendSignal"})
+                    }
+                })
+                .collect::<Vec<_>>();
+            (
+                axum::http::StatusCode::OK,
+                axum::Json(json!({"rows": rows})),
+            )
+        }
+        let (collector, server) =
+            fixture_collector(axum::Router::new().route("/query", axum::routing::post(query)))
+                .await?;
+        let owned = (0..150).map(|i| format!("inv{i:04}")).collect();
+        let result = collector.owned_journals(&owned).await;
+        server.abort();
+        let (aggregates, commands) = result?;
+        assert_eq!(aggregates.len(), 150);
+        assert_eq!(commands.len(), 150);
+        assert_eq!(
+            aggregates
+                .iter()
+                .map(|r| r["id"].as_str().expect("id").to_owned())
+                .collect::<std::collections::BTreeSet<_>>(),
+            owned
+        );
+        assert_eq!(
+            commands
+                .iter()
+                .map(|r| r["id"].as_str().expect("id").to_owned())
+                .collect::<std::collections::BTreeSet<_>>(),
+            owned
+        );
+        assert!(
+            aggregates
+                .iter()
+                .all(|r| r["entries"] == 3 && r["bytes"] == 40)
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     async fn interrupted_chunked_query_body_is_retryable() -> Result<()> {
